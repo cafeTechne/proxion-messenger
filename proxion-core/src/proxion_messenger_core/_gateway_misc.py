@@ -1230,6 +1230,50 @@ class MiscHandlerMixin:
             **snapshot,
         }, default=str))
 
+    async def _handle_get_access_grants_policy_state(self, websocket, data: dict) -> None:
+        """Owner-only: return access grants policy state and violation counters."""
+        from .didkey import pub_key_to_did
+        caller_did = self._client_webids.get(websocket, "")
+        gateway_did = pub_key_to_did(self.agent.identity_pub_bytes)
+        if caller_did != gateway_did:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "code": "E_FORBIDDEN",
+                "message": "Only the gateway owner can access access grants policy state.",
+            }))
+            return
+
+        import os as _os_ag
+        import hashlib as _hl_ag
+        enabled = _os_ag.environ.get("PROXION_ENABLE_ACCESS_GRANTS") == "1"
+        issuer_allowlist_raw = _os_ag.environ.get("PROXION_ACCESS_GRANTS_ISSUER_ALLOWLIST", "")
+        scope_allowlist_raw = _os_ag.environ.get("PROXION_ACCESS_GRANTS_SCOPE_ALLOWLIST", "")
+        issuer_hash = _hl_ag.sha256(issuer_allowlist_raw.encode()).hexdigest()[:16] if issuer_allowlist_raw else ""
+        scope_hash = _hl_ag.sha256(scope_allowlist_raw.encode()).hexdigest()[:16] if scope_allowlist_raw else ""
+
+        violation_count_24h = 0
+        if self._store:
+            try:
+                import sqlite3 as _sq_ag
+                import time as _t_ag
+                conn_ag = _sq_ag.connect(self._store.db_path)
+                since = _t_ag.time() - 86400
+                violation_count_24h = conn_ag.execute(
+                    "SELECT COUNT(*) FROM security_events WHERE event_type='access_grant_scope_violation' AND created_at > ?",
+                    (since,),
+                ).fetchone()[0]
+                conn_ag.close()
+            except Exception:
+                pass
+
+        await websocket.send(json.dumps({
+            "type": "access_grants_policy_state",
+            "enabled": enabled,
+            "issuer_allowlist_hash": issuer_hash,
+            "scope_allowlist_hash": scope_hash,
+            "violation_count_24h": violation_count_24h,
+        }))
+
     async def _handle_get_security_event_stream(self, websocket, data: dict) -> None:
         """Owner-only: fetch signed security event stream with cursor pagination."""
         if not self._store:

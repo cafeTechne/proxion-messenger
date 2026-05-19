@@ -1,0 +1,37 @@
+name: Spec Drift Watch
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # daily at 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      fail_threshold:
+        description: "Drift severity that fails the workflow (none/low/medium/high/critical)"
+        required: false
+        default: "high"
+
+jobs:
+  spec-drift-watch:
+    name: Solid spec and SDK drift check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run spec drift watcher
+        env:
+          SPEC_DRIFT_FAIL_THRESHOLD: ${{ github.event.inputs.fail_threshold || 'high' }}
+        run: node scripts/spec_drift_watch.mjs
+
+      - name: Upload drift report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spec-drift-report
+          path: |
+            artifacts/spec-drift-report.json
+            artifacts/spec-drift-summary.md
+          if-no-files-found: ignore

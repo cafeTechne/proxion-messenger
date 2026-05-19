@@ -1000,6 +1000,8 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 await self._handle_get_security_event_stream(websocket, data)
             elif cmd == "get_solid_migration_errors":
                 await self._handle_get_solid_migration_errors(websocket, data)
+            elif cmd == "get_access_grants_policy_state":
+                await self._handle_get_access_grants_policy_state(websocket, data)
             else:
                 logger.warning(f"Unknown command: {cmd}")
                 await websocket.send(json.dumps({"type": "error", "message": f"Unknown command: {cmd}"}))
@@ -1493,6 +1495,15 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                         await _write_json(writer, 503, {"error": "db_integrity_failed"})
                         await writer.drain()
                         return
+                    # R14: drift protection blocks high-risk mutations
+                    try:
+                        from .security_policy import get_policy as _get_pol_http
+                        if _get_pol_http().is_drift_protection_active():
+                            await _write_json(writer, 503, {"error": "spec_drift_protection_active"})
+                            await writer.drain()
+                            return
+                    except Exception:
+                        pass
 
                 # ── POST /relay — cross-gateway message delivery ──
                 if method == "POST" and path == "/relay":
@@ -3580,6 +3591,16 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
         except Exception as _ri_exc:
             logger.error("Runtime integrity startup check failed: %s", _ri_exc)
             raise
+
+        # R14: Runtime SDK support guard
+        try:
+            from .sdk_support_guard import enforce_sdk_support_guard
+            enforce_sdk_support_guard(store=self._store)
+        except RuntimeError as _sdk_exc:
+            logger.error("SDK support guard failed: %s", _sdk_exc)
+            raise
+        except Exception as _sdk_exc:
+            logger.warning("SDK support guard error (non-fatal): %s", _sdk_exc)
 
         # Connect to Solid Pod if credentials are configured
         await self._setup_pod_connection()

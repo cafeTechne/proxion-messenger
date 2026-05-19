@@ -102,6 +102,8 @@ _OWNER_ONLY_COMMANDS: set[str] = {
     "start_compromise_recovery", "get_compromise_recovery_status",
     "resume_compromise_recovery", "abort_compromise_recovery",
     "get_security_event_stream",
+    # R14
+    "get_access_grants_policy_state",
 }
 
 _RESTRICTED_HTTP_PATHS: set[str] = {
@@ -194,6 +196,29 @@ class SecurityPolicy:
             "override_until": self._tier_override_until if self._tier_override_until > 0 else None,
             "reasons": list(self._tier_reasons),
         }
+
+    def apply_drift_escalation(self, drift_severity: str) -> int:
+        """Escalate security tier based on spec drift severity.
+
+        Reads PROXION_DRIFT_ESCALATION_MODE (off|restrictive|containment).
+        High/critical severity triggers escalation to the configured tier.
+        Returns current tier after any escalation.
+        """
+        mode = os.environ.get("PROXION_DRIFT_ESCALATION_MODE", "off")
+        if mode == "off":
+            return self.get_tier()
+
+        if drift_severity in ("high", "critical"):
+            target = TIER_CONTAINMENT if mode == "containment" else TIER_RESTRICTIVE
+            if self.get_tier() < target:
+                self.set_tier(target, reason=f"spec_drift_{drift_severity}")
+                self._drift_protection_active = True
+
+        return self.get_tier()
+
+    def is_drift_protection_active(self) -> bool:
+        """Return True when tier was escalated due to spec drift."""
+        return getattr(self, "_drift_protection_active", False) and self.get_tier() >= TIER_RESTRICTIVE
 
     def escalate_tier_from_signals(self, signals: dict) -> int:
         """Evaluate rolling abuse signals and escalate tier if thresholds exceeded.

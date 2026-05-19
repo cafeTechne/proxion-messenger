@@ -38,7 +38,7 @@ class LocalStore:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # Current schema version — increment when adding new migrations below
-    _SCHEMA_VERSION = 35
+    _SCHEMA_VERSION = 36
 
     # Set by _init_db if PRAGMA integrity_check fails — blocks mutating operations
     _integrity_ok: bool = True
@@ -684,6 +684,26 @@ class LocalStore:
                 "ALTER TABLE federation_quarantine ADD COLUMN source_ip TEXT",
                 "ALTER TABLE federation_quarantine ADD COLUMN released_at REAL",
                 "ALTER TABLE federation_quarantine ADD COLUMN dropped_at REAL",
+            ],
+            # 36: pod capability profiles + notification fallback events
+            [
+                """CREATE TABLE IF NOT EXISTS pod_capability_profiles (
+                    pod_origin TEXT PRIMARY KEY,
+                    notifications_supported INTEGER NOT NULL DEFAULT 0,
+                    channel_types_json TEXT NOT NULL DEFAULT '[]',
+                    auth_requirements_json TEXT NOT NULL DEFAULT '[]',
+                    last_verified_at REAL NOT NULL,
+                    verification_source TEXT NOT NULL DEFAULT 'runtime_probe'
+                )""",
+                """CREATE TABLE IF NOT EXISTS notification_fallback_events (
+                    id TEXT PRIMARY KEY,
+                    pod_origin TEXT NOT NULL,
+                    reason_code TEXT NOT NULL,
+                    detail TEXT,
+                    created_at REAL NOT NULL
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_notification_fallback_events_origin
+                   ON notification_fallback_events(pod_origin, created_at)""",
             ],
         ]
 
@@ -3728,6 +3748,84 @@ class LocalStore:
     # ------------------------------------------------------------------
     # Replay cache cardinality pruning (schema v35)
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Pod capability profiles + notification fallback events (R14)
+    # ------------------------------------------------------------------
+
+    def save_pod_capability_profile(
+        self,
+        pod_origin: str,
+        notifications_supported: bool,
+        channel_types: list,
+        auth_requirements: list,
+        verification_source: str = "runtime_probe",
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO pod_capability_profiles
+                   (pod_origin, notifications_supported, channel_types_json,
+                    auth_requirements_json, last_verified_at, verification_source)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    pod_origin,
+                    int(notifications_supported),
+                    json.dumps(channel_types),
+                    json.dumps(auth_requirements),
+                    time.time(),
+                    verification_source,
+                ),
+            )
+
+    def get_pod_capability_profile(self, pod_origin: str) -> Optional[dict]:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM pod_capability_profiles WHERE pod_origin = ?",
+                (pod_origin,),
+            ).fetchone()
+            if row is None:
+                return None
+            d = dict(row)
+            d["channel_types"] = json.loads(d.pop("channel_types_json", "[]"))
+            d["auth_requirements"] = json.loads(d.pop("auth_requirements_json", "[]"))
+            return d
+
+    def record_notification_fallback(
+        self,
+        pod_origin: str,
+        reason_code: str,
+        detail: Optional[str] = None,
+        event_id: Optional[str] = None,
+    ) -> str:
+        import uuid as _uuid
+        eid = event_id or str(_uuid.uuid4())
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT INTO notification_fallback_events
+                   (id, pod_origin, reason_code, detail, created_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (eid, pod_origin, reason_code, detail, time.time()),
+            )
+        return eid
+
+    def get_notification_fallback_events(
+        self, pod_origin: Optional[str] = None, limit: int = 100
+    ) -> list[dict]:
+        with self._conn() as conn:
+            if pod_origin:
+                rows = conn.execute(
+                    """SELECT * FROM notification_fallback_events
+                       WHERE pod_origin = ?
+                       ORDER BY created_at DESC LIMIT ?""",
+                    (pod_origin, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT * FROM notification_fallback_events
+                       ORDER BY created_at DESC LIMIT ?""",
+                    (limit,),
+                ).fetchall()
+            return [dict(r) for r in rows]
 
     _REPLAY_CAP_DEFAULT = 50000
 
