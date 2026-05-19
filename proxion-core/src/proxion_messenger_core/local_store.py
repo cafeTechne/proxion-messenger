@@ -38,7 +38,7 @@ class LocalStore:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # Current schema version — increment when adding new migrations below
-    _SCHEMA_VERSION = 36
+    _SCHEMA_VERSION = 38
 
     # Set by _init_db if PRAGMA integrity_check fails — blocks mutating operations
     _integrity_ok: bool = True
@@ -704,6 +704,66 @@ class LocalStore:
                 )""",
                 """CREATE INDEX IF NOT EXISTS idx_notification_fallback_events_origin
                    ON notification_fallback_events(pod_origin, created_at)""",
+            ],
+            # 37: peer attestations, scoped operation budgets, policy tier transitions,
+            #     event stream cursors
+            [
+                """CREATE TABLE IF NOT EXISTS peer_attestations (
+                    peer_did TEXT PRIMARY KEY,
+                    attestation_json TEXT NOT NULL,
+                    attestation_hash TEXT NOT NULL,
+                    verified INTEGER NOT NULL DEFAULT 0,
+                    verified_at REAL,
+                    expires_at REAL NOT NULL,
+                    created_at REAL NOT NULL
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_peer_attestations_expires
+                   ON peer_attestations(expires_at)""",
+                """CREATE TABLE IF NOT EXISTS operation_budget_scopes (
+                    op_type TEXT NOT NULL,
+                    scope_key TEXT NOT NULL,
+                    day_key TEXT NOT NULL,
+                    count INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (op_type, scope_key, day_key)
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_operation_budget_scopes_day
+                   ON operation_budget_scopes(day_key, op_type)""",
+                """CREATE TABLE IF NOT EXISTS policy_tier_transitions (
+                    id TEXT PRIMARY KEY,
+                    from_tier TEXT NOT NULL,
+                    to_tier TEXT NOT NULL,
+                    trigger_type TEXT NOT NULL,
+                    trigger_detail TEXT,
+                    actor_webid TEXT,
+                    created_at REAL NOT NULL
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_policy_tier_transitions_time
+                   ON policy_tier_transitions(created_at)""",
+                """CREATE TABLE IF NOT EXISTS event_stream_cursors (
+                    consumer_id TEXT PRIMARY KEY,
+                    last_sequence INTEGER NOT NULL,
+                    updated_at REAL NOT NULL
+                )""",
+            ],
+            # 38: security SLO snapshots + drill results
+            [
+                """CREATE TABLE IF NOT EXISTS security_slo_snapshots (
+                    id TEXT PRIMARY KEY,
+                    window_start REAL NOT NULL,
+                    window_end REAL NOT NULL,
+                    metrics_json TEXT NOT NULL,
+                    evaluated_at REAL NOT NULL
+                )""",
+                """CREATE TABLE IF NOT EXISTS security_drill_results (
+                    drill_id TEXT PRIMARY KEY,
+                    drill_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    duration_seconds INTEGER,
+                    findings_json TEXT NOT NULL,
+                    executed_at REAL NOT NULL
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_security_drill_results_time
+                   ON security_drill_results(executed_at)""",
             ],
         ]
 
@@ -3845,3 +3905,221 @@ class LocalStore:
                 (excess,),
             )
             return conn.execute("SELECT changes()").fetchone()[0]
+
+    # ------------------------------------------------------------------
+    # Peer attestations (schema v37)
+    # ------------------------------------------------------------------
+
+    def save_peer_attestation(
+        self,
+        peer_did: str,
+        attestation_json: str,
+        attestation_hash: str,
+        expires_at: float,
+        verified: bool = False,
+        verified_at: Optional[float] = None,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO peer_attestations
+                   (peer_did, attestation_json, attestation_hash, verified, verified_at, expires_at, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (peer_did, attestation_json, attestation_hash,
+                 1 if verified else 0, verified_at, expires_at, time.time()),
+            )
+
+    def get_peer_attestation(self, peer_did: str) -> Optional[dict]:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM peer_attestations WHERE peer_did = ?", (peer_did,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def prune_expired_peer_attestations(self) -> int:
+        cutoff = time.time()
+        with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM peer_attestations WHERE expires_at < ?", (cutoff,)
+            )
+            return conn.execute("SELECT changes()").fetchone()[0]
+
+    # ------------------------------------------------------------------
+    # Scoped operation budgets (schema v37)
+    # ------------------------------------------------------------------
+
+    def check_scoped_budget(self, op_type: str, scope_key: str, day_key: str, limit: int) -> bool:
+        """Return True if the scoped budget has not been exceeded."""
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT count FROM operation_budget_scopes WHERE op_type=? AND scope_key=? AND day_key=?",
+                    (op_type, scope_key, day_key),
+                ).fetchone()
+                return (row[0] if row else 0) < limit
+            except Exception:
+                return True
+
+    def increment_scoped_budget(self, op_type: str, scope_key: str, day_key: str) -> int:
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    """INSERT INTO operation_budget_scopes (op_type, scope_key, day_key, count)
+                       VALUES (?, ?, ?, 1)
+                       ON CONFLICT(op_type, scope_key, day_key)
+                       DO UPDATE SET count = count + 1""",
+                    (op_type, scope_key, day_key),
+                )
+                row = conn.execute(
+                    "SELECT count FROM operation_budget_scopes WHERE op_type=? AND scope_key=? AND day_key=?",
+                    (op_type, scope_key, day_key),
+                ).fetchone()
+                return row[0] if row else 1
+            except Exception:
+                return 1
+
+    # ------------------------------------------------------------------
+    # Policy tier transitions (schema v37)
+    # ------------------------------------------------------------------
+
+    def save_policy_tier_transition(
+        self,
+        transition_id: str,
+        from_tier: str,
+        to_tier: str,
+        trigger_type: str,
+        trigger_detail: str = "",
+        actor_webid: str = "",
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT OR IGNORE INTO policy_tier_transitions
+                   (id, from_tier, to_tier, trigger_type, trigger_detail, actor_webid, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (transition_id, from_tier, to_tier, trigger_type,
+                 trigger_detail or None, actor_webid or None, time.time()),
+            )
+
+    def get_recent_policy_tier_transitions(self, limit: int = 20) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM policy_tier_transitions ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Event stream cursors (schema v37)
+    # ------------------------------------------------------------------
+
+    def upsert_stream_cursor(self, consumer_id: str, last_sequence: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT INTO event_stream_cursors (consumer_id, last_sequence, updated_at)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(consumer_id) DO UPDATE SET last_sequence=excluded.last_sequence, updated_at=excluded.updated_at""",
+                (consumer_id, last_sequence, time.time()),
+            )
+
+    def get_stream_cursor(self, consumer_id: str) -> Optional[dict]:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM event_stream_cursors WHERE consumer_id = ?", (consumer_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    # ------------------------------------------------------------------
+    # Security SLO snapshots (schema v38)
+    # ------------------------------------------------------------------
+
+    def save_slo_snapshot(
+        self,
+        snapshot_id: str,
+        window_start: float,
+        window_end: float,
+        metrics: dict,
+        evaluated_at: Optional[float] = None,
+    ) -> None:
+        import json as _json
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO security_slo_snapshots
+                   (id, window_start, window_end, metrics_json, evaluated_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (snapshot_id, window_start, window_end,
+                 _json.dumps(metrics), evaluated_at if evaluated_at is not None else window_end),
+            )
+
+    def get_slo_snapshots_in_window(
+        self, window_start: float, window_end: float
+    ) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT * FROM security_slo_snapshots
+                   WHERE evaluated_at >= ? AND evaluated_at <= ?
+                   ORDER BY evaluated_at ASC""",
+                (window_start, window_end),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Security drill results (schema v38)
+    # ------------------------------------------------------------------
+
+    def save_drill_result(
+        self,
+        drill_id: str,
+        drill_type: str,
+        status: str,
+        findings: dict,
+        duration_seconds: Optional[int] = None,
+    ) -> None:
+        import json as _json
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO security_drill_results
+                   (drill_id, drill_type, status, duration_seconds, findings_json, executed_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (drill_id, drill_type, status, duration_seconds,
+                 _json.dumps(findings), time.time()),
+            )
+
+    def get_drill_results_in_window(
+        self, window_start: float, window_end: float
+    ) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT * FROM security_drill_results
+                   WHERE executed_at >= ? AND executed_at <= ?
+                   ORDER BY executed_at ASC""",
+                (window_start, window_end),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Exit gate helpers (schema v38)
+    # ------------------------------------------------------------------
+
+    def get_open_security_events_by_severity(
+        self, severities: list, limit: int = 10
+    ) -> list[dict]:
+        placeholders = ",".join("?" * len(severities))
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    f"SELECT * FROM security_events WHERE severity IN ({placeholders}) ORDER BY created_at DESC LIMIT ?",
+                    (*severities, limit),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+
+    def count_security_events_since(self, event_type: str, since: float) -> int:
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM security_events WHERE event_type=? AND created_at >= ?",
+                    (event_type, since),
+                ).fetchone()
+                return row[0] if row else 0
+            except Exception:
+                return 0

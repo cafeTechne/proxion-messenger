@@ -1002,6 +1002,8 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 await self._handle_get_solid_migration_errors(websocket, data)
             elif cmd == "get_access_grants_policy_state":
                 await self._handle_get_access_grants_policy_state(websocket, data)
+            elif cmd == "get_security_exit_gate_status":
+                await self._handle_get_security_exit_gate_status(websocket, data)
             else:
                 logger.warning(f"Unknown command: {cmd}")
                 await websocket.send(json.dumps({"type": "error", "message": f"Unknown command: {cmd}"}))
@@ -3448,7 +3450,7 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             await asyncio.sleep(_INTERVAL)
 
     async def _build_security_snapshot(self) -> dict:
-        """R9: Build a signed security snapshot for export or HTTP endpoint."""
+        """R9/R15: Build a signed security snapshot for export or HTTP endpoint."""
         snap: dict = {
             "generated_at": time.time(),
             "gateway_did": pub_key_to_did(self.agent.identity_pub_bytes),
@@ -3460,6 +3462,54 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             snap["trust_disputes"] = self._store.list_peer_trust_disputes(status="open", limit=50)
             snap["abuse_signals_1h"] = self._store.get_abuse_signal_rollups(hours=1)
             snap["abuse_signals_24h"] = self._store.get_abuse_signal_rollups(hours=24)
+
+            # R15: peer attestation summary
+            try:
+                snap["peer_attestation_summary"] = {
+                    "active_count": len(self._store.get_open_security_events_by_severity([], limit=0)),
+                }
+            except Exception:
+                snap["peer_attestation_summary"] = {}
+
+            # R15: provenance verification status
+            try:
+                from .provenance_verify import verify_provenance
+                _prov = verify_provenance()
+                snap["provenance_verification"] = {
+                    "ok": _prov["ok"],
+                    "error_code": _prov.get("error_code", ""),
+                }
+            except Exception:
+                snap["provenance_verification"] = {"ok": None}
+
+            # R15: policy transition history slice
+            try:
+                snap["policy_transition_slice"] = self._store.get_recent_policy_tier_transitions(limit=5)
+            except Exception:
+                snap["policy_transition_slice"] = []
+
+            # R15: scoped recovery budget usage (global scope, today)
+            try:
+                from datetime import datetime as _dt, timezone as _tz
+                _day = _dt.now(_tz.utc).strftime("%Y-%m-%d")
+                snap["scoped_recovery_budget"] = {
+                    "day": _day,
+                    "backup_global": self._store.check_scoped_budget("backup", "global", _day, 999),
+                    "restore_global": self._store.check_scoped_budget("restore", "global", _day, 999),
+                }
+            except Exception:
+                snap["scoped_recovery_budget"] = {}
+
+            # R15: event stream continuity status
+            try:
+                _cursor = self._store.get_stream_cursor("siem_primary")
+                snap["stream_continuity"] = {
+                    "consumer_id": "siem_primary",
+                    "last_sequence": _cursor["last_sequence"] if _cursor else None,
+                }
+            except Exception:
+                snap["stream_continuity"] = {}
+
         snap_bytes = json.dumps(snap, default=str, sort_keys=True).encode()
         try:
             sig = self.agent.identity_key.sign(snap_bytes)
@@ -3601,6 +3651,16 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             raise
         except Exception as _sdk_exc:
             logger.warning("SDK support guard error (non-fatal): %s", _sdk_exc)
+
+        # R15: Build provenance guard (after config/integrity checks, before network bind)
+        try:
+            from .provenance_verify import enforce_provenance_guard
+            enforce_provenance_guard()
+        except RuntimeError as _prov_exc:
+            logger.error("Build provenance guard failed: %s", _prov_exc)
+            raise
+        except Exception as _prov_exc:
+            logger.warning("Build provenance guard error (non-fatal): %s", _prov_exc)
 
         # Connect to Solid Pod if credentials are configured
         await self._setup_pod_connection()

@@ -1290,3 +1290,12 @@ class MiscHandlerMixin:
             "type": "security_event_stream",
             **result,
         }, default=str))
+
+    async def _handle_get_security_exit_gate_status(self, websocket, data: dict) -> None:
+        """Owner-only: evaluate all security exit gates and return pass/fail status."""
+        from .security_exit_gates import evaluate_all_gates as _eval_gates
+        result = _eval_gates(self._store)
+        await websocket.send(json.dumps({
+            "type": "security_exit_gate_status",
+            **result,
+        }, default=str))

@@ -104,6 +104,8 @@ _OWNER_ONLY_COMMANDS: set[str] = {
     "get_security_event_stream",
     # R14
     "get_access_grants_policy_state",
+    # R15
+    "get_security_exit_gate_status",
 }
 
 _RESTRICTED_HTTP_PATHS: set[str] = {
