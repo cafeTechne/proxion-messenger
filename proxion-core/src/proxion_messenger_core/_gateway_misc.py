@@ -1299,3 +1299,38 @@ class MiscHandlerMixin:
             "type": "security_exit_gate_status",
             **result,
         }, default=str))
+
+    async def _handle_list_recovery_drill_templates(self, websocket, data: dict) -> None:
+        """Owner-only: list available recovery drill templates."""
+        from .recovery_drill_runner import list_drill_templates
+        await websocket.send(json.dumps({
+            "type": "recovery_drill_templates",
+            "templates": list_drill_templates(),
+        }))
+
+    async def _handle_run_recovery_drill(self, websocket, data: dict) -> None:
+        """Owner-only: execute a named recovery drill scenario."""
+        template_id = data.get("template_id", "")
+        dry_run = bool(data.get("dry_run", False))
+        if not template_id:
+            await websocket.send(json.dumps({"type": "error", "message": "template_id required"}))
+            return
+        from .recovery_drill_runner import run_drill
+        result = run_drill(template_id, store=self._store, dry_run=dry_run)
+        await websocket.send(json.dumps({"type": "recovery_drill_result", **result}, default=str))
+
+    async def _handle_get_recovery_drill_report(self, websocket, data: dict) -> None:
+        """Owner-only: retrieve recent drill results from the store."""
+        import time as _t
+        window_days = min(int(data.get("window_days", 30)), 365)
+        if not self._store:
+            await websocket.send(json.dumps({"type": "recovery_drill_report", "drills": []}))
+            return
+        drills = self._store.get_drill_results_in_window(
+            _t.time() - window_days * 86400, _t.time()
+        )
+        await websocket.send(json.dumps({
+            "type": "recovery_drill_report",
+            "window_days": window_days,
+            "drills": drills,
+        }, default=str))

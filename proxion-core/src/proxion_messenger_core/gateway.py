@@ -1004,6 +1004,12 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 await self._handle_get_access_grants_policy_state(websocket, data)
             elif cmd == "get_security_exit_gate_status":
                 await self._handle_get_security_exit_gate_status(websocket, data)
+            elif cmd == "list_recovery_drill_templates":
+                await self._handle_list_recovery_drill_templates(websocket, data)
+            elif cmd == "run_recovery_drill":
+                await self._handle_run_recovery_drill(websocket, data)
+            elif cmd == "get_recovery_drill_report":
+                await self._handle_get_recovery_drill_report(websocket, data)
             else:
                 logger.warning(f"Unknown command: {cmd}")
                 await websocket.send(json.dumps({"type": "error", "message": f"Unknown command: {cmd}"}))
@@ -3393,6 +3399,39 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 except Exception as exc:
                     logger.debug("Cache eviction error: %s", exc)
 
+    async def _continuous_assurance_loop(self) -> None:
+        """R16: Run scheduled assurance evaluations."""
+        from .continuous_assurance import get_assurance_interval
+        import asyncio as _asyncio
+        interval = get_assurance_interval()
+        await _asyncio.sleep(interval)
+        while True:
+            try:
+                if self._assurance_loop_instance:
+                    result = self._assurance_loop_instance.run_once()
+                    state = result.get("assurance_state", "unknown")
+                    if state == "red":
+                        logger.warning("Continuous assurance state: RED")
+                        if self._store:
+                            self._store.save_security_event(
+                                "assurance_state_red", "critical",
+                                details=f"gates={result.get('gates', {}).get('all_pass')}",
+                            )
+                        try:
+                            from .security_policy import get_policy as _get_pol_ca, TIER_RESTRICTIVE
+                            _pol_ca = _get_pol_ca()
+                            if _pol_ca.get_tier() < TIER_RESTRICTIVE:
+                                _pol_ca.set_tier(TIER_RESTRICTIVE, reason="assurance_loop_critical")
+                        except Exception:
+                            pass
+                    elif state == "amber":
+                        logger.info("Continuous assurance state: AMBER")
+                    else:
+                        logger.debug("Continuous assurance state: green")
+            except Exception as exc:
+                logger.error("Continuous assurance loop error: %s", exc)
+            await _asyncio.sleep(interval)
+
     async def _checksum_maintenance_loop(self) -> None:
         """R9: Periodic checksum verification for critical tables."""
         if not self._store:
@@ -3662,6 +3701,16 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
         except Exception as _prov_exc:
             logger.warning("Build provenance guard error (non-fatal): %s", _prov_exc)
 
+        # R16: Continuous assurance loop (optional)
+        self._assurance_loop_instance = None
+        try:
+            from .continuous_assurance import ContinuousAssuranceLoop, is_continuous_assurance_enabled
+            if is_continuous_assurance_enabled():
+                self._assurance_loop_instance = ContinuousAssuranceLoop(store=self._store)
+                logger.info("Continuous assurance loop enabled")
+        except Exception as _ca_exc:
+            logger.warning("Continuous assurance loop init error (non-fatal): %s", _ca_exc)
+
         # Connect to Solid Pod if credentials are configured
         await self._setup_pod_connection()
 
@@ -3690,6 +3739,10 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 asyncio.create_task(self._retention_purge_loop()),
                 asyncio.create_task(self._checksum_maintenance_loop()),
             ]
+
+            # R16: Continuous assurance loop
+            if self._assurance_loop_instance is not None:
+                main_tasks.append(asyncio.create_task(self._continuous_assurance_loop()))
 
             # 1b. Optional HTTP server for serving the web UI
             if self.config.http_port and self.config.web_dir:

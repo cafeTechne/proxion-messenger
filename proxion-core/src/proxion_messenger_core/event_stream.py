@@ -105,6 +105,61 @@ def stream_integrity_state(
     return {"state": state, "gap_at_sequence": gap_at, "last_sequence": last_seq}
 
 
+def build_verification_package(
+    events: list[dict],
+    consumer_id: str = "",
+    identity_key=None,
+    pub_bytes: bytes = b"",
+) -> dict:
+    """Build an exportable verification package for external auditors.
+
+    Bundle includes sequence window, chain proofs, and a deterministic package hash.
+    """
+    if not events:
+        return {
+            "consumer_id": consumer_id,
+            "event_count": 0,
+            "sequence_window": [],
+            "chain_proofs": [],
+            "package_hash": hashlib.sha256(b"empty").hexdigest(),
+            "generated_at": time.time(),
+        }
+
+    sequences = [e.get("stream_sequence", e.get("seq_num", -1)) for e in events]
+    chain_proofs = [e.get("event_hash", "") for e in events if e.get("event_hash")]
+    has_gap = any(
+        sequences[i] + 1 != sequences[i + 1]
+        for i in range(len(sequences) - 1)
+        if sequences[i] >= 0 and sequences[i + 1] >= 0
+    )
+
+    package = {
+        "consumer_id": consumer_id,
+        "event_count": len(events),
+        "sequence_window": [min(s for s in sequences if s >= 0), max(sequences)],
+        "chain_proofs": chain_proofs,
+        "has_gap": has_gap,
+        "generated_at": time.time(),
+        "signer_key_id": pub_bytes.hex()[:16] if pub_bytes else "",
+    }
+
+    canonical = json.dumps(
+        {k: v for k, v in package.items() if k != "package_hash"},
+        sort_keys=True, default=str,
+    ).encode()
+    package["package_hash"] = hashlib.sha256(canonical).hexdigest()
+
+    if identity_key and pub_bytes:
+        try:
+            sig = identity_key.sign(canonical)
+            package["signature"] = sig.hex()
+            package["pub_key_hex"] = pub_bytes.hex()
+        except Exception:
+            pass
+
+    return package
+
+
 def _event_hash(event: dict) -> str:
     canonical = json.dumps(
         {k: v for k, v in sorted(event.items())

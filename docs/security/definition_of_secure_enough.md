@@ -39,11 +39,13 @@ Must-have controls for a ship-ready backend:
 
 ## Validation Evidence Checklist
 
-- [ ] All schema migrations applied and tested (`_SCHEMA_VERSION == 38`)
+- [ ] All schema migrations applied and tested (`_SCHEMA_VERSION == 39`)
 - [ ] `get_security_exit_gate_status` returns all gates `pass`
 - [ ] 30-day trailing SLO window in range
 - [ ] At least one incident drill `pass` in last 30 days
 - [ ] At least one recovery drill `pass` in last 30 days
+- [ ] Key lifecycle policy: no overdue rotations
+- [ ] Continuous assurance loop state: `green` or `amber`
 - [ ] Signoff recorded by security + engineering owners
 
 ## Stop Rule
@@ -55,6 +57,16 @@ New backend security rounds require one of:
 - New critical/high finding in risk register
 - Major spec drift with breaking risk
 - Material architecture change
+
+## Maintenance Mode (R16)
+
+When `evaluate_security_program_stability_gate` returns `recommendation="hold_line"` (all gates pass for 45 consecutive days, no critical events), transition to **monthly security maintenance cycle**:
+
+1. Run `run_recovery_drill` monthly for each template.
+2. Review continuous assurance snapshots — investigate any `amber` or `red` states.
+3. Rotate identity key if `key_lifecycle_policy` flags overdue.
+4. Review and archive evidence verification records quarterly.
+5. No new hardening rounds without a trigger from the stop rule above.
 
 ## Escalation Rule
 

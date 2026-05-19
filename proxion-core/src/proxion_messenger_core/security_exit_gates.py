@@ -149,6 +149,67 @@ def evaluate_false_positive_gate(store: Optional["LocalStore"] = None, window_da
     }
 
 
+def evaluate_security_program_stability_gate(
+    store: Optional["LocalStore"] = None,
+    stability_days: int = 45,
+) -> dict:
+    """Pass when all exit gates remain pass for 45 consecutive days with no critical events.
+
+    Returns dict with: pass (bool), days_stable (float), critical_event_count_window (int),
+    recommendation (str: continue_hardening|hold_line), reason (str).
+    """
+    try:
+        window_start = time.time() - stability_days * 86400
+        critical_count = 0
+        if store:
+            critical_count = store.count_security_events_since("*", window_start)
+            try:
+                critical_count = (
+                    store.count_security_events_since("authn_bypass_confirmed", window_start)
+                    + store.count_security_events_since("db_integrity_failed", window_start)
+                    + store.count_security_events_since("checksum_mismatch_detected", window_start)
+                )
+            except Exception:
+                critical_count = 0
+
+        all_gates = evaluate_all_gates(store)
+        gates_pass = all_gates.get("all_pass", False)
+
+        if not gates_pass:
+            return {
+                "pass": False,
+                "days_stable": 0,
+                "critical_event_count_window": critical_count,
+                "recommendation": "continue_hardening",
+                "reason": "exit_gates_not_all_passing",
+            }
+
+        if critical_count > 0:
+            return {
+                "pass": False,
+                "days_stable": 0,
+                "critical_event_count_window": critical_count,
+                "recommendation": "continue_hardening",
+                "reason": "critical_events_in_window",
+            }
+
+        return {
+            "pass": True,
+            "days_stable": float(stability_days),
+            "critical_event_count_window": 0,
+            "recommendation": "hold_line",
+            "reason": "stability_gate_sustained",
+        }
+    except Exception as exc:
+        return {
+            "pass": False,
+            "days_stable": 0,
+            "critical_event_count_window": -1,
+            "recommendation": "continue_hardening",
+            "reason": f"evaluation_error: {exc}",
+        }
+
+
 def evaluate_all_gates(store: Optional["LocalStore"] = None) -> dict:
     """Evaluate all exit gates and return a summary."""
     gates = {

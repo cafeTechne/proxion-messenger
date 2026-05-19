@@ -106,6 +106,10 @@ _OWNER_ONLY_COMMANDS: set[str] = {
     "get_access_grants_policy_state",
     # R15
     "get_security_exit_gate_status",
+    # R16
+    "run_recovery_drill",
+    "list_recovery_drill_templates",
+    "get_recovery_drill_report",
 }
 
 _RESTRICTED_HTTP_PATHS: set[str] = {
@@ -248,6 +252,19 @@ class SecurityPolicy:
             reasons.append(f"auth_lockouts={auth} schema_rejects={schema}")
 
         if new_tier > self._tier:
+            try:
+                from .policy_quality import get_quality_monitor
+                monitor = get_quality_monitor()
+                quality = monitor.evaluate_quality()
+                if quality["frozen"]:
+                    logger.warning(
+                        "Auto-escalation blocked by policy quality guard (churn=%d)",
+                        quality["churn_count"],
+                    )
+                    return self._tier
+                monitor.record_transition(self._tier, new_tier)
+            except Exception:
+                pass
             self._tier = new_tier
             self._tier_reasons = reasons
             logger.warning("Security tier auto-escalated to T%d: %s", new_tier, reasons)

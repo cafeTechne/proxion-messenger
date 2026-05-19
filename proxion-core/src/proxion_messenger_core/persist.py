@@ -230,6 +230,9 @@ class AgentState:
     store_key_version: int = 1
     identity_key_rotated_at: Optional[float] = None
     store_key_rotated_at: Optional[float] = None
+    # R16: key lifecycle timestamps
+    identity_key_created_at: Optional[float] = None
+    store_key_created_at: Optional[float] = None
 
     # ------------------------------------------------------------------
     # Convenience properties
@@ -267,9 +270,12 @@ class AgentState:
     @classmethod
     def generate(cls) -> "AgentState":
         """Create a brand-new agent with freshly generated keypairs."""
+        now = time.time()
         return cls(
             identity_key=Ed25519PrivateKey.generate(),
             store_key=X25519PrivateKey.generate(),
+            identity_key_created_at=now,
+            store_key_created_at=now,
         )
 
     # ------------------------------------------------------------------
@@ -649,6 +655,8 @@ class AgentState:
             "store_key_version": self.store_key_version,
             "identity_key_rotated_at": self.identity_key_rotated_at,
             "store_key_rotated_at": self.store_key_rotated_at,
+            "identity_key_created_at": self.identity_key_created_at,
+            "store_key_created_at": self.store_key_created_at,
         }
 
         try:
@@ -752,7 +760,7 @@ class AgentState:
                     for p in data.get("pending_invites", [])
                 ]
 
-                return cls(
+                state = cls(
                     identity_key=identity_key,
                     store_key=store_key,
                     revocation_list=rl,
@@ -764,7 +772,15 @@ class AgentState:
                     store_key_version=data.get("store_key_version", 1),
                     identity_key_rotated_at=data.get("identity_key_rotated_at"),
                     store_key_rotated_at=data.get("store_key_rotated_at"),
+                    identity_key_created_at=data.get("identity_key_created_at"),
+                    store_key_created_at=data.get("store_key_created_at"),
                 )
+                # R16: backfill key lifecycle timestamps for legacy state files
+                if state.identity_key_created_at is None:
+                    state.identity_key_created_at = time.time()
+                if state.store_key_created_at is None:
+                    state.store_key_created_at = time.time()
+                return state
             except Exception as exc:
                 last_exc = exc
                 continue

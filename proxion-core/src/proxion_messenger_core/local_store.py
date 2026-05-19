@@ -38,7 +38,7 @@ class LocalStore:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # Current schema version — increment when adding new migrations below
-    _SCHEMA_VERSION = 38
+    _SCHEMA_VERSION = 39
 
     # Set by _init_db if PRAGMA integrity_check fails — blocks mutating operations
     _integrity_ok: bool = True
@@ -764,6 +764,20 @@ class LocalStore:
                 )""",
                 """CREATE INDEX IF NOT EXISTS idx_security_drill_results_time
                    ON security_drill_results(executed_at)""",
+            ],
+            # 39: evidence verification records for WORM + external auditor support
+            [
+                """CREATE TABLE IF NOT EXISTS evidence_verification_records (
+                    id TEXT PRIMARY KEY,
+                    evidence_type TEXT NOT NULL,
+                    evidence_id TEXT NOT NULL,
+                    verifier TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    detail TEXT,
+                    verified_at REAL NOT NULL
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_evidence_verification_records_time
+                   ON evidence_verification_records(verified_at)""",
             ],
         ]
 
@@ -4123,3 +4137,43 @@ class LocalStore:
                 return row[0] if row else 0
             except Exception:
                 return 0
+
+    # ------------------------------------------------------------------
+    # Evidence verification records (schema v39)
+    # ------------------------------------------------------------------
+
+    def save_evidence_verification_record(
+        self,
+        record_id: str,
+        evidence_type: str,
+        evidence_id: str,
+        verifier: str,
+        status: str,
+        detail: Optional[str] = None,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO evidence_verification_records
+                   (id, evidence_type, evidence_id, verifier, status, detail, verified_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (record_id, evidence_type, evidence_id, verifier, status, detail, time.time()),
+            )
+
+    def list_evidence_verification_records(
+        self, evidence_type: Optional[str] = None, limit: int = 100
+    ) -> list[dict]:
+        with self._conn() as conn:
+            if evidence_type:
+                rows = conn.execute(
+                    """SELECT * FROM evidence_verification_records
+                       WHERE evidence_type = ?
+                       ORDER BY verified_at DESC LIMIT ?""",
+                    (evidence_type, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT * FROM evidence_verification_records
+                       ORDER BY verified_at DESC LIMIT ?""",
+                    (limit,),
+                ).fetchall()
+            return [dict(r) for r in rows]
