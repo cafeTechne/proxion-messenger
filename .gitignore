@@ -1,0 +1,44 @@
+# Secrets and runtime keys
+.env
+data/
+proxion-core/identity_private.pem
+*.pem
+*.key
+
+# Plan files (implementation scratch pads — not part of the codebase)
+PLAN_ROUND_*.md
+
+# Python build artefacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+env/
+
+# Test and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Runtime storage (pod stash mirror)
+proxion-core/storage/
+
+# Node
+node_modules/
+web/package-lock.json
+
+# Claude Code agent settings (machine-local)
+.claude/
+proxion-core/.claude/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

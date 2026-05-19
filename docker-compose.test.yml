@@ -1,0 +1,36 @@
+version: "3.9"
+# Two isolated CSS instances for integration tests.
+# Started automatically by the test fixture; can also be run manually:
+#   docker compose -f docker-compose.test.yml up -d
+services:
+  css-alice:
+    image: solidproject/community-server:latest
+    ports:
+      - "3001:3000"
+    volumes:
+      - css-alice-data:/data
+    environment:
+      CSS_CONFIG: "@css:config/file.json"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  css-bob:
+    image: solidproject/community-server:latest
+    ports:
+      - "3002:3000"
+    volumes:
+      - css-bob-data:/data
+    environment:
+      CSS_CONFIG: "@css:config/file.json"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  css-alice-data:
+  css-bob-data:

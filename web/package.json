@@ -1,0 +1,54 @@
+{
+  "name": "web",
+  "version": "1.0.0",
+  "description": "This is a minimal static web interface for the Proxion federated messaging platform. It connects to the Proxion WebSocket Gateway to provide real-time messaging, presence, and room support.",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest run",
+    "check:solid-sdk": "node --experimental-vm-modules scripts/check_solid_sdk_versions.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@inrupt/solid-client": "^2.0.0",
+    "@inrupt/solid-client-authn-browser": "^4.0.0",
+    "@inrupt/solid-client-notifications": "^3.0.0",
+    "@inrupt/vocab-solid": "^0.15.0",
+    "@inrupt/vocab-inrupt-core": "^0.15.0",
+    "esbuild": "^0.28.0"
+  },
+  "devDependencies": {
+    "@inrupt/solid-client-authn-node": "^2.0.0",
+    "@inrupt/solid-client-access-grants": "^4.0.0",
+    "vitest": "^3.0.0"
+  },
+  "overrides": {
+    "solid-auth-client": "npm:@inrupt/solid-client-authn-browser@^4.0.0",
+    "solid-auth-fetcher": "npm:@inrupt/solid-client-authn-browser@^4.0.0"
+  },
+  "proxion": {
+    "solidSdkPolicy": {
+      "required": [
+        "@inrupt/solid-client-authn-node",
+        "@inrupt/solid-client-authn-browser",
+        "@inrupt/solid-client",
+        "@inrupt/solid-client-notifications",
+        "@inrupt/vocab-solid",
+        "@inrupt/vocab-inrupt-core"
+      ],
+      "forbidden": [
+        "solid-auth-client",
+        "solid-auth-fetcher"
+      ],
+      "allowedRanges": {
+        "@inrupt/solid-client-authn-node": ">=2.0.0",
+        "@inrupt/solid-client-authn-browser": ">=4.0.0",
+        "@inrupt/solid-client": ">=2.0.0",
+        "@inrupt/solid-client-notifications": ">=3.0.0",
+        "@inrupt/vocab-solid": ">=0.15.0",
+        "@inrupt/vocab-inrupt-core": ">=0.15.0"
+      }
+    }
+  }
+}

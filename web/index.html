@@ -1,0 +1,1213 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proxion</title>
+    <meta name="theme-color" content="#e94560">
+    <meta name="description" content="Sovereign messaging on your Solid Pod">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" href="/icons/icon-192.svg">
+    <link rel="icon" type="image/svg+xml" href="/icons/icon-192.svg">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        #voice-banner {
+            display: none;
+            background: #e94560;
+            color: white;
+            padding: 10px 20px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+        }
+        #voice-banner button {
+            background: white;
+            color: #e94560;
+            margin: 0 10px;
+            padding: 5px 15px;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .attachment {
+            display: inline-block;
+            background: #1a1a2e;
+            padding: 5px 10px;
+            border-radius: 4px;
+            margin-top: 5px;
+            font-size: 0.9em;
+        }
+        #file-input { display: none; }
+        .paperclip {
+            cursor: pointer;
+            font-size: 1.2em;
+            margin-right: 10px;
+            color: #94a3b8;
+        }
+        #search-box {
+            padding: 10px;
+            border-bottom: 1px solid #1a1a2e;
+        }
+        #search-input {
+            width: 100%;
+            padding: 8px;
+            background: #1a1a2e;
+            border: 1px solid #1a1a2e;
+            color: white;
+            border-radius: 4px;
+        }
+        .search-match {
+            background: #1a2a4a;
+            border-left: 4px solid #e94560;
+        }
+        .search-match b { color: #e94560; }
+        .voice-channel { color: #4ade80; cursor: pointer; padding: 5px 0; }
+        .voice-channel:hover { text-decoration: underline; }
+        .avatar {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            vertical-align: middle;
+            margin-right: 8px;
+            display: inline-block;
+            position: relative;
+        }
+        .avatar.placeholder {
+            background: #e94560;
+            color: white;
+            text-align: center;
+            line-height: 24px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .avatar-presence {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            bottom: -1px;
+            right: -1px;
+            border: 2px solid #0f172a;
+            background: #64748b;  /* offline (grey) */
+        }
+        .avatar-presence.online {
+            background: #22c55e;  /* online (green) */
+        }
+        .avatar-presence.away {
+            background: #eab308;  /* away (yellow) */
+        }
+        .avatar-presence.busy {
+            background: #ef4444;  /* busy (red) */
+        }
+        .reactions {
+            display: flex;
+            gap: 5px;
+            margin-top: 5px;
+            flex-wrap: wrap;
+        }
+        .reaction {
+            background: rgba(255,255,255,0.1);
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 0.8em;
+            cursor: pointer;
+            border: 1px solid transparent;
+        }
+        .reaction.active {
+            border-color: #e94560;
+            background: rgba(233, 69, 96, 0.2);
+        }
+        .emoji-picker {
+            display: none;
+            position: absolute;
+            background: #16213e;
+            border: 1px solid #0f3460;
+            padding: 8px;
+            border-radius: 8px;
+            z-index: 1000;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 5px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+        .emoji-picker span {
+            cursor: pointer;
+            font-size: 1.2em;
+            padding: 4px;
+            border-radius: 4px;
+        }
+        .emoji-picker span:hover { background: rgba(255,255,255,0.1); }
+        .mention { background: rgba(88,101,242,0.3); border-radius: 3px; padding: 0 2px; }
+        .link-preview {
+            border-left: 3px solid #e94560;
+            background: rgba(0,0,0,0.1);
+            padding: 10px;
+            margin-top: 8px;
+            border-radius: 0 4px 4px 0;
+            font-size: 0.9em;
+        }
+        .preview-title { font-weight: bold; margin-bottom: 4px; }
+        .preview-desc { color: #94a3b8; margin-bottom: 4px; }
+        .preview-url { font-size: 0.8em; color: #5865f2; }
+        
+        #reply-bar {
+            display: none;
+            background: var(--bg-secondary);
+            padding: 8px 20px;
+            border-top: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.9em;
+        }
+        .reply-preview { color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .cancel-reply { cursor: pointer; color: #e94560; font-weight: bold; }
+        
+        .quoted-context {
+            font-size: 0.85em;
+            color: var(--text-secondary);
+            border-left: 2px solid var(--border);
+            padding-left: 8px;
+            margin-bottom: 4px;
+            cursor: pointer;
+        }
+        .quoted-context:hover { color: var(--text-primary); }
+        
+        /* Link Previews */
+        .link-preview {
+            margin-top: 10px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            max-width: 500px;
+            font-size: 0.9em;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .link-preview img {
+            width: 120px;
+            height: 100%;
+            min-height: 100px;
+            object-fit: cover;
+            border-right: 1px solid var(--border);
+        }
+        .preview-info {
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .preview-title { font-weight: bold; color: var(--accent); }
+        .preview-title a { color: inherit; text-decoration: none; }
+        .preview-title a:hover { text-decoration: underline; }
+        .preview-desc { color: var(--text-secondary); font-size: 0.85em; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .preview-url { font-size: 0.75em; color: var(--text-secondary); opacity: 0.7; }
+
+        /* â"€â"€ Round 31: Messaging Fundamentals â"€â"€ */
+
+        /* Message grouping */
+        .message.msg-grouped { margin-top: 2px; padding-top: 0; }
+        .message.msg-grouped .msg-meta { display: none; }
+
+        /* Date divider */
+        .date-divider {
+            text-align: center; margin: 12px 0 8px; position: relative;
+            color: var(--text-secondary, #94a3b8); font-size: 0.78em; user-select: none;
+        }
+        .date-divider::before, .date-divider::after {
+            content: ''; position: absolute; top: 50%;
+            width: 38%; height: 1px; background: #334155;
+        }
+        .date-divider::before { left: 0; }
+        .date-divider::after { right: 0; }
+
+        /* Unread divider */
+        .unread-divider {
+            text-align: center; margin: 8px 0; color: #e94560; font-size: 0.78em;
+            user-select: none; border-top: 1px solid #e94560; padding-top: 6px;
+        }
+
+        /* Markdown */
+        .code-block { background: #0f172a; border-radius: 4px; padding: 8px 12px;
+            margin: 4px 0; overflow-x: auto; font-family: monospace;
+            font-size: 0.85em; white-space: pre; display: block; }
+        .inline-code { background: #1e293b; border-radius: 3px; padding: 1px 4px;
+            font-family: monospace; font-size: 0.9em; }
+
+        /* Scroll-to-bottom button */
+        #scroll-bottom-btn {
+            display: none; position: absolute; bottom: 80px; right: 20px;
+            background: var(--accent, #e94560); color: #fff; border: none;
+            border-radius: 20px; padding: 6px 14px; cursor: pointer;
+            font-size: 0.85em; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,.4);
+        }
+
+        /* Timestamp tooltip */
+        .msg-time { cursor: default; color: var(--text-secondary, #94a3b8); font-size: 0.75em; }
+        .msg-time:hover { text-decoration: underline dotted; }
+
+        /* Loading skeleton */
+        .skeleton-msg {
+            height: 38px; background: linear-gradient(90deg,#1e293b 25%,#2d3f55 50%,#1e293b 75%);
+            background-size: 200% 100%; animation: shimmer 1.4s infinite;
+            border-radius: 6px; margin: 8px 12px;
+        }
+        .skeleton-msg.short { width: 55%; }
+        @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+        /* Empty state */
+        .empty-state { text-align: center; color: #94a3b8; padding: 48px 24px; line-height: 1.8; }
+
+        /* Connection banner */
+        #conn-banner {
+            display: none; background: #92400e; color: #fef3c7; text-align: center;
+            padding: 5px 12px; font-size: 0.82em; z-index: 5; flex-shrink: 0;
+        }
+
+        /* Profile card popover (B2) */
+        .profile-popover {
+            display: none;
+            position: fixed;
+            background: var(--bg-secondary, #1a1f35);
+            border: 1px solid var(--border, #334155);
+            border-radius: 12px;
+            padding: 16px;
+            min-width: 280px;
+            z-index: 1001;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+            animation: popoverFadeIn 0.15s ease-out;
+        }
+        @keyframes popoverFadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .profile-popover.show { display: block; }
+        .profile-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .profile-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 16px;
+            color: white;
+            position: relative;
+        }
+        .profile-info {
+            flex: 1;
+        }
+        .profile-name {
+            font-weight: bold;
+            font-size: 1em;
+            color: var(--text-primary, #f8fafc);
+            margin-bottom: 4px;
+        }
+        .profile-webid {
+            font-family: monospace;
+            font-size: 0.8em;
+            color: var(--text-secondary, #94a3b8);
+            word-break: break-all;
+        }
+        .profile-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin: 10px 0;
+            font-size: 0.85em;
+            color: var(--text-secondary, #94a3b8);
+        }
+        .profile-status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #64748b;
+        }
+        .profile-status-dot.online { background: #22c55e; }
+        .profile-status-dot.away { background: #eab308; }
+        .profile-status-dot.busy { background: #ef4444; }
+        .profile-custom-status {
+            font-size: 0.8em;
+            color: var(--text-secondary, #94a3b8);
+            font-style: italic;
+            margin: 8px 0;
+            padding: 6px 0;
+            border-top: 1px solid var(--border, #334155);
+            border-bottom: 1px solid var(--border, #334155);
+            min-height: 16px;
+        }
+        .profile-divider {
+            height: 1px;
+            background: var(--border, #334155);
+            margin: 10px 0;
+        }
+        .profile-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .profile-btn {
+            flex: 1;
+            background: var(--accent, #e94560);
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .profile-btn:hover {
+            background: #d63550;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(233, 69, 96, 0.3);
+        }
+        .profile-btn:active { transform: translateY(0); }
+
+        /* msg-meta wrapper (avatar + name on first in group) */
+        .msg-meta { display: inline; }
+
+        /* Round 60: Read Receipts */
+        .read-receipt { font-size: 0.72em; color: #64748b; margin-left: 6px; user-select: none; }
+        .read-receipt.read { color: #4ade80; }
+
+        /* Round 62: Voice Messages */
+        .voice-record-btn { background: transparent; border: none; color: #94a3b8; font-size: 1.3em; cursor: pointer; padding: 0 8px; flex-shrink: 0; }
+        .voice-record-btn.recording { color: #e94560; }
+        .voice-recording-bar { display: none; align-items: center; gap: 10px; padding: 8px 16px; background: var(--bg-secondary,#1e293b); flex: 1; color: var(--text-primary,#f1f5f9); }
+        .voice-recording-bar.active { display: flex; }
+        .recording-dot { color: #e94560; font-size: 1.1em; animation: pulse 0.8s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        .audio-message { margin-top: 4px; }
+        .audio-message audio { max-width: 280px; height: 36px; }
+        .audio-duration { font-size: 0.78em; color: #94a3b8; margin-left: 6px; }
+
+        /* Round 47: Message context menu + sidebar context menu */
+        .ctx-menu { position: fixed; background: #1e293b; border: 1px solid #334155; border-radius: 6px; z-index: 1300; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,.5); min-width: 160px; }
+        .ctx-menu button { display: block; width: 100%; background: none; border: none; color: #f1f5f9; padding: 9px 16px; cursor: pointer; text-align: left; font-size: 0.9em; white-space: nowrap; }
+        .ctx-menu button:hover { background: #334155; }
+        .ctx-menu button.danger { color: #ef4444; }
+        .ctx-menu hr { border: none; border-top: 1px solid #334155; margin: 2px 0; }
+
+        /* Round 63: Delete submenu */
+        .delete-submenu { position: fixed; background: #1e293b; border: 1px solid #334155; border-radius: 6px; z-index: 1200; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,.4); }
+        .delete-submenu button { display: block; width: 100%; background: none; border: none; color: #f1f5f9; padding: 9px 18px; cursor: pointer; text-align: left; font-size: 0.9em; }
+        .delete-submenu button:hover { background: #334155; }
+        .delete-submenu button.danger { color: #ef4444; }
+
+        /* Round 64: Role badges */
+        .role-badge { font-size: 0.65rem; font-weight: 700; border-radius: 3px; padding: 1px 5px; margin-left: 4px; letter-spacing: 0.04em; vertical-align: middle; }
+        .role-badge.role-admin { background: #7c3aed; color: white; }
+        .role-badge.role-mod { background: #0891b2; color: white; }
+        .member-context-menu { position: fixed; background: #1e293b; border: 1px solid #334155; border-radius: 6px; z-index: 1200; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,.4); }
+        .member-context-menu button { display: block; width: 100%; background: none; border: none; color: #f1f5f9; padding: 9px 18px; cursor: pointer; text-align: left; font-size: 0.9em; }
+        .member-context-menu button:hover { background: #334155; }
+        .member-context-menu hr { border: none; border-top: 1px solid #334155; margin: 2px 0; }
+        .member-context-menu button.danger { color: #ef4444; }
+
+        /* Round 65: Disappearing messages */
+        .disappear-banner { background: #1e293b; color: #94a3b8; font-size: 0.8em; text-align: center; padding: 4px 12px; border-bottom: 1px solid #334155; align-items: center; justify-content: center; gap: 6px; display: none; }
+        .disappear-banner.active { display: flex; }
+        .disappear-timer-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; font-size: 0.9em; }
+        .disappear-timer-row select { background: #0f172a; border: 1px solid #334155; color: #f1f5f9; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+
+        /* Round 66: Session management */
+        .session-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #334155; font-size: 0.85em; gap: 8px; }
+        .session-info { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+        .session-ip { font-family: monospace; font-size: 0.9em; color: #94a3b8; }
+        .session-time { font-size: 0.8em; color: #64748b; }
+        .session-current { color: #4ade80; font-size: 0.8em; font-weight: 600; }
+        .session-revoke-btn { background: #7f1d1d; border: none; color: #fca5a5; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.8em; }
+
+        /* Round 68: Forward messages */
+        .forwarded-banner { font-size: 0.8em; color: #94a3b8; margin-bottom: 3px; font-style: italic; }
+
+        /* Round 69: Schedule picker */
+        .schedule-picker { position: absolute; bottom: 64px; right: 12px; background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 14px; z-index: 200; display: flex; flex-direction: column; gap: 10px; min-width: 240px; box-shadow: 0 4px 20px rgba(0,0,0,.5); }
+        .schedule-picker input[type="datetime-local"] { background: #0f172a; border: 1px solid #334155; color: #f1f5f9; padding: 6px 8px; border-radius: 4px; font-size: 0.9em; width: 100%; box-sizing: border-box; }
+        .schedule-picker label { font-size: 0.85em; color: #94a3b8; }
+        .schedule-btn { background: transparent; border: none; color: #94a3b8; font-size: 1.2em; cursor: pointer; padding: 0 6px; flex-shrink: 0; }
+
+        /* Round 70: Bot/Webhook */
+        .bot-badge { font-size: 0.65rem; font-weight: 700; background: var(--accent,#e94560); color: white; border-radius: 3px; padding: 1px 5px; margin-left: 6px; vertical-align: middle; letter-spacing: 0.05em; }
+        .copyable-code { display: block; background: #0f172a; padding: 10px; border-radius: 6px; font-size: 0.85rem; word-break: break-all; margin: 8px 0; user-select: all; font-family: monospace; border: 1px solid #334155; }
+        .room-integrations-btn { background: transparent; border: none; color: #94a3b8; font-size: 1em; cursor: pointer; padding: 0 4px; }
+    </style>
+</head>
+<body>
+    <div id="emoji-picker" class="emoji-picker">
+        <span data-emoji="👍">👍</span> <span data-emoji="❤️">❤️</span>
+        <span data-emoji="😂">😂</span> <span data-emoji="😮">😮</span>
+        <span data-emoji="😢">😢</span> <span data-emoji="😡">😡</span>
+        <span data-emoji="🎉">🎉</span> <span data-emoji="🔥">🔥</span>
+        <span data-emoji="👀">👀</span> <span data-emoji="✅">✅</span>
+        <span data-emoji="❌">❌</span> <span data-emoji="🤔">🤔</span>
+    </div>
+
+    <!-- Profile Card Popover (B2) -->
+    <div id="profile-card" class="profile-popover">
+        <div class="profile-header">
+            <div id="profile-avatar-el" class="profile-avatar" style="background:#999;">?</div>
+            <div class="profile-info">
+                <div class="profile-name" id="profile-name"></div>
+                <div class="profile-webid" id="profile-webid"></div>
+            </div>
+        </div>
+        <div class="profile-status" id="profile-status">
+            <div class="profile-status-dot" id="profile-status-dot"></div>
+            <span id="profile-status-text">offline</span>
+        </div>
+        <div id="profile-custom-status" class="profile-custom-status"></div>
+        <div class="profile-divider"></div>
+        <div class="profile-actions">
+            <button class="profile-btn" id="profile-dm-btn">Send DM</button>
+        </div>
+    </div>
+
+    <div id="voice-banner">
+        <span id="voice-msg">Incoming call...</span>
+        <button id="voice-answer">Answer</button>
+        <button id="voice-decline">Decline</button>
+    </div>
+    <div class="mobile-overlay" id="overlay"></div>
+
+    <!-- Round 63: Delete submenu -->
+    <!-- Round 47: Message right-click context menu -->
+    <div id="ctx-menu" class="ctx-menu" style="display:none;">
+        <button id="ctx-reply">↩ Reply</button>
+        <button id="ctx-react"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M15.182 15.182a4.5 4.5 0 0 1-6.364 0M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM9.75 9.75c0 .864-.154 1.43-.38 1.764a.75.75 0 0 1-1.24-.844c.08-.118.12-.338.12-.92a.75.75 0 0 1 1.5 0Zm4.5 0c0 .864.154 1.43.38 1.764a.75.75 0 0 0 1.24-.844c-.19-.276-.38-.497-.38-1.764a.75.75 0 0 0-1.5 0Z"/></svg> React</button>
+        <button id="ctx-copy"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75"/></svg> Copy</button>
+        <button id="ctx-pin"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z"/></svg> Pin</button>
+        <button id="ctx-edit"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"/></svg> Edit</button>
+        <hr>
+        <button id="ctx-delete" class="danger"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg> Delete</button>
+    </div>
+    <!-- Round 47: Sidebar right-click context menu -->
+    <div id="sidebar-ctx-menu" class="ctx-menu" style="display:none;">
+        <button id="sctx-mute"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M9.143 17.082a24.248 24.248 0 0 0 3.844.148m-3.844-.148a23.856 23.856 0 0 1-5.455-1.31 8.964 8.964 0 0 0 2.3-5.542m3.155 6.852a3 3 0 0 0 5.667 1.97m1.965-2.277L21 21m-4.225-4.225a23.81 23.81 0 0 0 3.536-1.003 8.967 8.967 0 0 1-2.312-6.022V9A6 6 0 0 0 9.239 3.477L3 3m6.239.477A5.965 5.965 0 0 0 6 9v.75a8.966 8.966 0 0 1-2.312 6.022"/></svg> Mute</button>
+        <button id="sctx-unmute" style="display:none;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"/></svg> Unmute</button>
+        <button id="sctx-mark-read"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg> Mark as read</button>
+    </div>
+    <div id="delete-submenu" class="delete-submenu" style="display:none;">
+        <button id="delete-for-me-btn" data-msg-id="">Delete for me</button>
+        <button id="delete-for-everyone-btn" class="danger" data-msg-id="">Delete for everyone</button>
+    </div>
+    <!-- Round 64: Member context menu -->
+    <div id="member-context-menu" class="member-context-menu" style="display:none;" data-target-webid="">
+        <button data-role-action="admin">Make Admin</button>
+        <button data-role-action="mod">Make Moderator</button>
+        <button data-role-action="member">Make Member</button>
+        <hr>
+        <button data-role-action="kick" class="danger">Kick</button>
+    </div>
+    <!-- Round 68: Forward modal -->
+    <div id="forward-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1003; align-items:center; justify-content:center;">
+      <div style="background:#1e293b; border-radius:8px; padding:20px; min-width:320px; max-width:420px; color:#f1f5f9;">
+        <h3 style="margin:0 0 12px;">Forward to…</h3>
+        <div id="forward-thread-list" style="max-height:260px; overflow-y:auto;"></div>
+        <button id="forward-modal-close" style="margin-top:12px; background:#334155; border:none; color:#f1f5f9; padding:8px 16px; border-radius:4px; cursor:pointer;">Cancel</button>
+      </div>
+    </div>
+    <!-- Round 70: Webhook created modal -->
+    <div id="webhook-created-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1003; align-items:center; justify-content:center;">
+      <div style="background:#1e293b; border-radius:8px; padding:20px; min-width:340px; max-width:480px; color:#f1f5f9;">
+        <h3 style="margin:0 0 8px;">Webhook Created</h3>
+        <p style="color:#94a3b8; font-size:0.88em; margin:0 0 4px;">POST JSON to this URL to send messages to the room:</p>
+        <code id="webhook-url-display" class="copyable-code"></code>
+        <div style="display:flex; gap:8px; margin-top:10px;">
+          <button id="copy-webhook-url-btn" style="background:#334155; border:none; color:#f1f5f9; padding:8px 14px; border-radius:4px; cursor:pointer;">Copy URL</button>
+          <button id="webhook-created-close" style="background:var(--accent,#e94560); border:none; color:#fff; padding:8px 14px; border-radius:4px; cursor:pointer;">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Round 47: Toast container -->
+    <div id="toast-container" style="position:fixed;bottom:24px;right:24px;z-index:2000;display:flex;flex-direction:column;gap:8px;pointer-events:none;"></div>
+
+    <!-- Round 47: Generic confirm dialog -->
+    <div id="confirm-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1400;align-items:center;justify-content:center;">
+      <div style="background:#1e293b;border-radius:8px;padding:24px;min-width:300px;max-width:400px;color:#f1f5f9;">
+        <p id="confirm-msg" style="margin:0 0 20px;font-size:0.95em;"></p>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="confirm-cancel" style="background:#334155;border:none;color:#f1f5f9;padding:8px 16px;border-radius:4px;cursor:pointer;">Cancel</button>
+          <button id="confirm-ok" style="background:#e94560;border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Round 47: Copy-to-clipboard modal -->
+    <div id="copy-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1400;align-items:center;justify-content:center;">
+      <div style="background:#1e293b;border-radius:8px;padding:24px;min-width:320px;max-width:480px;color:#f1f5f9;">
+        <h3 style="margin:0 0 12px;">Copy</h3>
+        <textarea id="copy-modal-text" readonly style="width:100%;box-sizing:border-box;padding:8px;background:#0f172a;border:1px solid #334155;color:#94a3b8;border-radius:4px;font-size:0.85em;resize:none;min-height:80px;"></textarea>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+          <button id="copy-modal-copy-btn" style="background:#e94560;border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;">Copy</button>
+          <button id="copy-modal-close-btn" style="background:#334155;border:none;color:#f1f5f9;padding:8px 16px;border-radius:4px;cursor:pointer;">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- R10.6.1: Deep link confirmation modal -->
+    <div id="deeplink-confirm-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1010;align-items:center;justify-content:center;">
+      <div style="background:#1e293b;border-radius:8px;padding:24px;min-width:320px;max-width:440px;color:#f1f5f9;">
+        <h3 style="margin:0 0 10px;font-size:1em;">Add contact via link?</h3>
+        <p style="margin:0 0 6px;font-size:0.85em;color:#94a3b8;">Proxion received a link asking to add:</p>
+        <p id="deeplink-confirm-address" style="margin:0 0 14px;font-size:0.82em;color:#e2e8f0;word-break:break-all;background:#0f172a;padding:8px 10px;border-radius:4px;"></p>
+        <p style="margin:0 0 16px;font-size:0.8em;color:#64748b;">This link came from outside the app. Continue only if you recognise this address.</p>
+        <div style="display:flex;gap:10px;justify-content:flex-end;">
+          <button id="deeplink-confirm-cancel" style="background:#334155;border:none;color:#f1f5f9;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:0.9em;">Cancel</button>
+          <button id="deeplink-confirm-ok" style="background:#e94560;border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:0.9em;">Add contact</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Round 47: Add peer modal -->
+    <div id="add-peer-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1002;align-items:center;justify-content:center;">
+      <div style="background:#1e293b;border-radius:8px;padding:24px;min-width:340px;max-width:480px;color:#f1f5f9;">
+        <h3 style="margin:0 0 12px;">Add Peer</h3>
+        <label style="display:block;margin-bottom:4px;font-size:0.9em;">Peer DID or Proxion address</label>
+        <input id="add-peer-input" type="text" placeholder="did:key:…@https://gateway  or paste invite link"
+               style="width:100%;box-sizing:border-box;padding:8px;border-radius:4px;border:1px solid #555;background:#0f172a;color:#f1f5f9;font-size:0.9em;margin-bottom:8px;">
+        <p id="add-peer-error" style="color:#f87171;font-size:0.85em;margin:0 0 12px;min-height:1.2em;"></p>
+        <!-- R17.3: QR scan -->
+        <div style="margin-bottom:12px;">
+          <label id="scan-qr-label" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;
+                 background:#334155;padding:7px 14px;border-radius:4px;font-size:0.85em;color:#f1f5f9;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h1v1h-1zM17 14h1v1h-1zM20 14h1v1h-1zM14 17h1v1h-1zM17 17h4v4h-4z"/></svg>
+            Scan QR code
+            <input type="file" id="scan-qr-input" accept="image/*" capture="environment" style="display:none;">
+          </label>
+          <span id="scan-qr-error" style="display:none;color:#f87171;font-size:0.82em;margin-left:8px;"></span>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="add-peer-cancel-btn" style="background:#334155;border:none;color:#f1f5f9;padding:8px 16px;border-radius:4px;cursor:pointer;">Cancel</button>
+          <button id="add-peer-submit-btn" style="background:#e94560;border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;">Add</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- R17.1: QR share panel -->
+    <div id="qr-share-panel" style="display:none;position:fixed;z-index:1010;
+         background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;
+         box-shadow:0 8px 32px rgba(0,0,0,.5);min-width:260px;text-align:center;">
+      <p style="margin:0 0 12px;font-size:0.85em;color:#94a3b8;">Scan to add me on Proxion</p>
+      <div id="my-qr" style="width:200px;height:200px;border-radius:6px;background:#fff;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;overflow:hidden;"></div>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <button id="qr-download-btn"
+                style="background:#334155;border:none;color:#f1f5f9;padding:7px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;">
+          Download QR
+        </button>
+        <button id="qr-copy-invite-btn"
+                style="background:#334155;border:none;color:#f1f5f9;padding:7px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;">
+          Copy invite link
+        </button>
+        <button id="qr-copy-short-btn"
+                style="background:#334155;border:none;color:#f1f5f9;padding:7px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;">
+          Copy short link
+        </button>
+      </div>
+      <button id="qr-close-btn"
+              style="margin-top:12px;background:transparent;border:none;color:#64748b;cursor:pointer;font-size:0.82em;">
+        Close
+      </button>
+    </div>
+
+    <!-- Round 47: Join room modal -->
+    <div id="join-room-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1002;align-items:center;justify-content:center;">
+      <div style="background:#1e293b;border-radius:8px;padding:24px;min-width:340px;max-width:480px;color:#f1f5f9;">
+        <h3 style="margin:0 0 12px;">Join Room</h3>
+        <label style="display:block;margin-bottom:4px;font-size:0.9em;">Invite link or room code</label>
+        <input id="join-room-input" type="text" placeholder="Paste invite link or code"
+               style="width:100%;box-sizing:border-box;padding:8px;border-radius:4px;border:1px solid #555;background:#0f172a;color:#f1f5f9;font-size:0.9em;margin-bottom:8px;">
+        <p id="join-room-error" style="color:#f87171;font-size:0.85em;margin:0 0 12px;min-height:1.2em;"></p>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="join-room-cancel-btn" style="background:#334155;border:none;color:#f1f5f9;padding:8px 16px;border-radius:4px;cursor:pointer;">Cancel</button>
+          <button id="join-room-submit-btn" style="background:#e94560;border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;">Join</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- R13.6: backup nudge banner (shown if no backup downloaded after 24h) -->
+    <div id="backup-nudge" role="alert" style="display:none;background:#92400e;color:#fef3c7;padding:7px 16px;font-size:0.85em;display:none;align-items:center;gap:12px;flex-shrink:0;">
+      <span>Back up your identity before you lose access.</span>
+      <button id="backup-nudge-action" style="background:#fef3c7;color:#92400e;border:none;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:0.85em;flex-shrink:0;">Back up now</button>
+      <button id="backup-nudge-dismiss" aria-label="Dismiss backup reminder" style="background:transparent;border:none;color:#fef3c7;cursor:pointer;margin-left:auto;font-size:1.1em;">×</button>
+    </div>
+
+    <!-- R13.7: image lightbox -->
+    <div id="lightbox" role="dialog" aria-modal="true" aria-label="Image preview" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:2000;align-items:center;justify-content:center;">
+      <img id="lightbox-img" alt="Full-size image" style="max-width:90vw;max-height:90vh;border-radius:6px;box-shadow:0 4px 32px rgba(0,0,0,.8);">
+      <button id="lightbox-close" aria-label="Close image preview" style="position:absolute;top:16px;right:20px;background:transparent;border:none;color:#fff;font-size:2em;cursor:pointer;line-height:1;">×</button>
+    </div>
+
+    <div id="app">
+        <aside id="sidebar" role="navigation" aria-label="Sidebar">
+            <header>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h2>Proxion</h2>
+                    <div style="display: flex; gap: 5px;">
+                        <button id="sound-toggle" title="Toggle Sound" style="padding: 5px 10px; background: transparent; border: none; cursor: pointer; color: inherit; line-height: 0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"/></svg></button>
+                        <button id="settings-btn" title="Settings" style="padding: 5px 10px; background: transparent; border: none; cursor: pointer; color: inherit; line-height: 0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg></button>
+                    </div>
+                </div>
+                <div id="self-presence">
+                    <span class="dot offline"></span>
+                    <span id="username">Connecting...</span>
+                </div>
+                <div id="my-address-bar"
+                     style="display:none; padding:2px 10px 6px; font-size:0.65em; color:#475569;
+                            overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                  <span id="my-address-short" style="cursor:pointer; user-select:all;"
+                        title="Click to copy your Proxion address"></span>
+                  <button id="copy-addr-btn"
+                          style="background:transparent; border:none; color:#475569; cursor:pointer;
+                                 font-size:0.9em; padding:0 0 0 4px;">⧉</button>
+                  <button id="share-invite-btn" title="Share invite link" style="background:transparent;border:none;color:#475569;cursor:pointer;padding:2px 6px;">🔗</button>
+                </div>
+            </header>
+            <nav>
+                <div id="search-box">
+                    <input type="text" id="search-input" placeholder="Search messages..." autocomplete="off">
+                </div>
+                <section>
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <h3 style="margin:0;">Rooms</h3>
+                        <div style="display:flex;gap:2px;">
+                            <button id="join-room-btn" title="Join room with invite link or code"
+                                    style="background:transparent;border:none;color:var(--text-secondary,#94a3b8);cursor:pointer;font-size:0.95em;padding:2px 6px;">Join</button>
+                            <button id="create-room-btn" title="Create room" style="background:transparent;border:none;color:var(--text-secondary,#94a3b8);cursor:pointer;padding:2px 6px;line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
+                        </div>
+                    </div>
+                    <ul id="room-list"></ul>
+                </section>
+                <section id="voice-section" style="display:none;">
+                    <h3>Voice Channels</h3>
+                    <ul id="voice-list"></ul>
+                </section>
+                <section id="friend-requests-section" style="display:none;">
+                    <h3 style="margin:0;">Friend Requests</h3>
+                    <ul id="friend-request-list"></ul>
+                </section>
+                <section id="contacts-section" style="display:none;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <h3 style="margin:0;">Contacts</h3>
+                    </div>
+                    <ul id="contacts-list"></ul>
+                    <div id="empty-state" style="display:none;">
+                        <p style="color:#94a3b8;font-size:0.9em;text-align:center;padding:12px 0;">No contacts yet</p>
+                        <button id="empty-add-contact-btn" style="width:100%;background:#334155;border:none;color:#f1f5f9;padding:8px 12px;border-radius:4px;cursor:pointer;font-size:0.9em;">Add Contact</button>
+                    </div>
+                </section>
+                <section>
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <h3 style="margin:0;">DMs</h3>
+                        <button id="add-peer-btn" title="Add peer by DID" style="background:transparent;border:none;color:var(--text-secondary,#94a3b8);cursor:pointer;padding:2px 6px;line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
+                    </div>
+                    <ul id="dm-list"></ul>
+                </section>
+            </nav>
+            <!-- Voice widget — shown only during a call -->
+            <div id="voice-widget" style="display:none;flex-direction:column;padding:10px 12px;border-top:1px solid var(--border);background:#0d1b2e;flex-shrink:0;">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;overflow:hidden;">
+                    <span class="dot online" style="flex-shrink:0;"></span>
+                    <div style="display:flex;flex-direction:column;gap:1px;overflow:hidden;min-width:0;">
+                        <span id="vw-peer-name" style="font-size:0.82em;font-weight:600;color:#f1f5f9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+                        <span id="vw-status" style="font-size:0.72em;color:#4ade80;">In Call</span>
+                    </div>
+                </div>
+                <div class="vw-controls">
+                    <button id="mute-btn" title="Mute / Unmute"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z"/></svg></button>
+                    <button id="screenshare-btn" title="Share Screen" style="display:none;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0H3"/></svg></button>
+                    <button id="end-call" title="End Call"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 3.75 18 6m0 0 2.25 2.25M18 6l2.25-2.25M18 6l-2.25 2.25m1.5 13.5c-8.284 0-15-6.716-15-15 0-1.054.114-2.082.332-3.073.204-.922 1.044-1.677 1.987-1.677h2.25a2.25 2.25 0 0 1 2.122 1.505l.73 2.433a2.25 2.25 0 0 1-.575 2.326l-.962.962c-.27.27-.287.709-.044 1.018 1.56 2.007 3.517 3.96 5.527 5.521.307.244.748.228 1.017-.043l.962-.961a2.25 2.25 0 0 1 2.326-.576l2.433.73a2.25 2.25 0 0 1 1.505 2.123v2.25c0 .94-.754 1.78-1.676 1.985a17.892 17.892 0 0 1-3.074.332Z"/></svg></button>
+                </div>
+            </div>
+        </aside>
+
+        <main style="flex:1; display:flex; flex-direction:column; overflow:hidden; position:relative;">
+            <div id="conn-banner">Reconnecting…</div>
+            <div id="pod-connect-banner"
+                 style="display:none; background:#1e3a5f; color:#93c5fd;
+                        padding:5px 12px; font-size:0.8em; flex-shrink:0;
+                        border-bottom:1px solid #1d4ed8; display:none;
+                        align-items:center; justify-content:center; gap:12px;">
+              <span id="pod-banner-text" style="cursor:pointer;">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15a4.5 4.5 0 0 0 4.5 4.5H18a3.75 3.75 0 0 0 1.332-7.257 3 3 0 0 0-3.758-3.848 5.25 5.25 0 0 0-10.233 2.33A4.502 4.502 0 0 0 2.25 15Z"/></svg> Connect a Solid Pod to sync messages across devices
+              </span>
+              <button id="pod-banner-connect-btn"
+                      style="background:#1d4ed8;border:none;color:#fff;padding:3px 10px;
+                             border-radius:3px;cursor:pointer;font-size:0.9em;white-space:nowrap;">
+                Connect
+              </button>
+              <button id="pod-banner-dismiss-btn"
+                      style="background:transparent;border:none;color:#64748b;cursor:pointer;
+                             font-size:1em;padding:0 2px;line-height:1;" title="Dismiss">
+                ×
+              </button>
+            </div>
+            <header id="chat-header" style="display: flex; align-items: center;">
+                <button id="menu-toggle" style="background: transparent; border: none; cursor: pointer; color: inherit; padding-right: 15px; line-height: 0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="24" height="24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg></button>
+                <h2 id="chat-header-name" style="flex: 1;">Welcome</h2>
+                <span id="dm-e2e-status" style="display:none;font-size:0.7em;padding:2px 6px;border-radius:3px;background:#134e26;color:#4ade80;margin-left:6px;" title="End-to-end encrypted"></span>
+                <button id="dm-e2e-verify-btn" title="Verify contact identity" style="display:none;background:transparent;border:none;color:#4ade80;font-size:0.75em;cursor:pointer;margin-left:2px;padding:2px 6px;">Verify</button>
+                <span id="pod-sync-indicator" style="display:none;font-size:0.72em;color:#64748b;margin-left:6px;">&#x2601; syncing...</span>
+                <button id="invite-btn" title="Copy room invite link" style="display:none;background:transparent;border:none;color:#94a3b8;cursor:pointer;margin-right:4px;line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg></button>
+                <button id="pin-panel-btn" title="Pinned messages" style="background:transparent;border:none;color:#94a3b8;cursor:pointer;margin-right:4px;line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z"/></svg></button>
+                <!-- Round 65: Disappear timer picker (inline in header) -->
+                <select id="disappear-timer-select" title="Disappearing messages" style="display:none;background:#0f172a;border:1px solid #334155;color:#94a3b8;padding:3px 6px;border-radius:4px;font-size:0.78em;cursor:pointer;margin-right:4px;">
+                    <option value="0">Off</option>
+                    <option value="30000">30s</option>
+                    <option value="300000">5m</option>
+                    <option value="3600000">1h</option>
+                    <option value="86400000">1d</option>
+                    <option value="604800000">1w</option>
+                </select>
+                <!-- Round 70: Integrations button -->
+                <button id="integrations-btn" class="room-integrations-btn" title="Room Integrations" style="display:none;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg></button>
+                <!-- Round 47: Members toggle, leave, delete buttons -->
+                <button id="members-toggle" style="display:none;background:transparent;border:none;color:#94a3b8;font-size:0.9em;cursor:pointer;padding:4px 8px;" title="Room members"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></svg></button>
+                <button id="leave-room-btn" style="display:none;background:transparent;border:none;color:#94a3b8;font-size:0.9em;cursor:pointer;padding:4px 8px;" title="Leave room">↩ Leave</button>
+                <button id="delete-room-btn" style="display:none;background:transparent;border:none;color:#ef4444;font-size:0.9em;cursor:pointer;padding:4px 8px;" title="Delete room"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg> Delete</button>
+                <button id="start-call-btn" style="display:none;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.176.42l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.175l-1.106-4.423a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z"/></svg> Call</button>
+            </header>
+            <!-- R11.2.2: Safety number bar (DM only) -->
+            <div id="fingerprint-bar" style="display:none;padding:6px 16px;background:#0f172a;border-bottom:1px solid #1e293b;font-size:0.78em;color:#64748b;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <span style="color:#475569;font-size:0.9em;text-transform:uppercase;letter-spacing:0.05em;">Safety #</span>
+              <span id="fingerprint-words" style="font-family:monospace;letter-spacing:0.08em;color:#94a3b8;"></span>
+              <button id="fingerprint-verify-btn" style="background:#134e26;border:none;color:#4ade80;padding:2px 10px;border-radius:3px;cursor:pointer;font-size:0.85em;margin-left:auto;">Mark as verified</button>
+            </div>
+            <!-- Round 65: Disappear timer banner -->
+            <div id="disappear-banner" class="disappear-banner">
+                <span><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg> Messages disappear after <strong id="disappear-label"></strong></span>
+            </div>
+            <div id="message-feed">
+                <div class="system-msg">Connect to the gateway to start chatting.</div>
+            </div>
+            <button id="scroll-bottom-btn"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg> <span id="scroll-bottom-count"></span></button>
+            <div id="typing-indicator" style="padding: 5px 20px; font-size: 0.8em; color: #94a3b8; height: 1.5em;"></div>
+            <div id="reply-bar">
+                <span class="reply-preview" id="reply-text">Replying to...</span>
+                <span class="cancel-reply" id="cancel-reply-btn"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></span>
+            </div>
+            <!-- Round 62: Voice recording bar -->
+            <div id="voice-recording-bar" class="voice-recording-bar">
+                <span class="recording-dot">●</span>
+                <span id="recording-timer">0:00</span>
+                <span style="color:#94a3b8;font-size:0.85em;">Recording… tap × to cancel</span>
+                <button id="voice-record-cancel" style="margin-left:auto;background:transparent;border:none;color:#94a3b8;cursor:pointer;font-size:1.1em;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+            </div>
+            <!-- Round 69: Schedule picker -->
+            <div id="schedule-picker" class="schedule-picker" style="display:none;">
+                <label>Send at</label>
+                <input type="datetime-local" id="schedule-datetime-input">
+                <button id="schedule-confirm-btn" style="background:var(--accent,#e94560);border:none;color:#fff;padding:7px 14px;border-radius:4px;cursor:pointer;">Schedule</button>
+                <button id="schedule-cancel-btn" style="background:#334155;border:none;color:#f1f5f9;padding:7px 14px;border-radius:4px;cursor:pointer;">Cancel</button>
+                <div id="scheduled-msgs-list" style="margin-top:8px;max-height:120px;overflow-y:auto;font-size:0.85em;color:#94a3b8;"></div>
+            </div>
+            <form id="message-form">
+                <label for="file-input" class="paperclip"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13"/></svg></label>
+                <input type="file" id="file-input">
+                <label for="message-input" class="sr-only">Message</label>
+                <textarea id="message-input" placeholder="Type a message… (Shift+Enter for newline)" rows="1" autocomplete="off"></textarea>
+                <!-- Round 62: Voice record button -->
+                <button type="button" id="voice-record-btn" class="voice-record-btn" title="Hold to record voice message"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z"/></svg></button>
+                <!-- Round 69: Schedule button -->
+                <button type="button" id="schedule-btn" class="schedule-btn" title="Schedule message"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg></button>
+                <button type="submit">Send</button>
+            </form>
+        </main>
+
+        <!-- Members panel (right sidebar for room member list) -->
+        <aside id="members-panel" style="display:none;width:220px;background:#1e293b;border-left:1px solid #334155;overflow-y:auto;flex-shrink:0;">
+          <div style="padding:12px 16px;border-bottom:1px solid #334155;font-size:0.8em;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Members</div>
+          <div id="members-list" style="padding:8px 0;"></div>
+        </aside>
+    </div>
+
+    <!-- Room create modal -->
+    <div id="room-create-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1002; align-items:center; justify-content:center;">
+      <div style="background:var(--bg-secondary,#1e293b); border-radius:8px; padding:24px; min-width:360px; max-width:480px; color:var(--text-primary,#f1f5f9);">
+        <h3 style="margin:0 0 16px;">Create a Room</h3>
+        <div id="room-create-form">
+          <label style="display:block; margin-bottom:6px; font-size:0.9em;">Room name</label>
+          <input id="room-name-input" type="text" placeholder="e.g. general"
+                 style="width:100%; box-sizing:border-box; padding:8px; border-radius:4px; border:1px solid #555; background:#0f172a; color:#f1f5f9; font-size:0.95em; margin-bottom:12px;">
+          <label style="display:flex; align-items:center; gap:8px; margin-bottom:16px; cursor:pointer;">
+            <input type="checkbox" id="room-history-toggle">
+            <span style="font-size:0.9em; color:#94a3b8;">Share message history with new members</span>
+          </label>
+          <div style="display:flex; gap:8px; justify-content:flex-end;">
+            <button id="room-create-cancel-btn"
+                    style="background:#334155; border:none; color:#f1f5f9; padding:8px 16px; border-radius:4px; cursor:pointer;">Cancel</button>
+            <button id="room-create-submit"
+                    style="background:var(--accent,#e94560); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer;">Create</button>
+          </div>
+        </div>
+        <div id="room-invite-result" style="display:none;">
+          <p style="margin:0 0 8px; color:#22c55e; font-weight:600;">Room created!</p>
+          <label style="display:block; margin-bottom:4px; font-size:0.9em;">Invite link (click to copy)</label>
+          <div id="room-invite-url"
+               style="font-size:0.8em; color:#94a3b8; word-break:break-all; padding:8px; background:#0f172a; border-radius:4px; cursor:pointer; user-select:all; margin-bottom:12px;"></div>
+          <p style="font-size:0.8em; color:#94a3b8; margin:0 0 12px;">Share this link. The recipient must have the gateway running on their machine and open it in their browser.</p>
+          <button id="room-create-done-btn"
+                  style="background:var(--accent,#e94560); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer; width:100%;">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings modal -->
+    <div id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1002; align-items:center; justify-content:center;">
+      <div style="background:var(--bg-secondary,#1e293b); border-radius:8px; padding:24px; min-width:360px; max-width:480px; color:var(--text-primary,#f1f5f9);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin:0 0 16px;">
+          <h3 style="margin:0;">Settings</h3>
+          <span id="settings-pod-status-dot" style="font-size:0.78em;color:#64748b;white-space:nowrap;">● No pod</span>
+        </div>
+        <label style="display:block; margin-bottom:4px; font-size:0.9em;">Display name</label>
+        <input id="settings-display-name" type="text" placeholder="Your name"
+               style="width:100%; box-sizing:border-box; padding:8px; border-radius:4px; border:1px solid #555; background:#0f172a; color:#f1f5f9; font-size:0.95em; margin-bottom:14px;">
+        <label style="display:block; margin-bottom:4px; font-size:0.9em;">Custom Status (max 100 chars)</label>
+        <input id="settings-status-message" type="text" placeholder="What are you doing?"
+               style="width:100%; box-sizing:border-box; padding:8px; border-radius:4px; border:1px solid #555; background:#0f172a; color:#f1f5f9; font-size:0.95em; margin-bottom:14px;" maxlength="100">
+        <label style="display:block; margin-bottom:4px; font-size:0.9em;">Your DID (share this with peers)</label>
+        <div id="settings-did" style="font-size:0.75em; color:#94a3b8; word-break:break-all; margin-bottom:14px; padding:6px; background:#0f172a; border-radius:4px; min-height:1.5em; cursor:text; user-select:all;"></div>
+        <label style="display:block; margin-bottom:4px; font-size:0.9em;">
+          Your Proxion Address <span style="color:#64748b;">(share this with cross-gateway peers)</span>
+        </label>
+        <div id="settings-proxion-address"
+             style="font-size:0.72em; color:#94a3b8; word-break:break-all; margin-bottom:14px;
+                    padding:6px; background:#0f172a; border-radius:4px; min-height:1.5em;
+                    cursor:text; user-select:all;"></div>
+        <label style="display:block; margin-bottom:8px; font-size:0.9em;">Gateway WebSocket URL</label>
+        <input id="settings-gw-url" type="text" placeholder="ws://127.0.0.1:7474"
+               style="width:100%; box-sizing:border-box; padding:8px; border-radius:4px; border:1px solid #555; background:#0f172a; color:#f1f5f9; font-size:0.95em; margin-bottom:16px;">
+        <!-- Pod section -->
+        <hr style="border-color:#334155;margin:16px 0 12px;">
+        <p style="margin:0 0 8px;font-size:0.8em;color:#94a3b8;
+                   text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">
+          Solid Pod
+        </p>
+        <!-- Connected state (hidden until pod auth) -->
+        <div id="settings-pod-connected" style="display:none;">
+          <p style="margin:0 0 4px;font-size:0.85em;color:#4ade80;">● Connected</p>
+          <div id="settings-pod-webid"
+               style="font-size:0.72em;color:#94a3b8;word-break:break-all;
+                      margin-bottom:10px;padding:4px 6px;background:#0f172a;
+                      border-radius:3px;user-select:all;cursor:text;"></div>
+          <button id="settings-pod-logout-btn"
+                  style="background:#334155;border:none;color:#f87171;
+                         padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:12px;">
+            Sign out of Pod
+          </button>
+        </div>
+        <!-- Disconnected state (default) -->
+        <div id="settings-pod-disconnected" style="margin-bottom:12px;">
+          <p style="margin:0 0 8px;font-size:0.85em;color:#64748b;">Not connected</p>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
+            <button id="settings-solid-solidcommunity"
+                    style="background:#1a56db;border:none;color:#fff;padding:8px 14px;
+                           border-radius:4px;cursor:pointer;font-size:0.85em;text-align:left;">
+              Sign in with solidcommunity.net
+            </button>
+            <button id="settings-solid-inrupt"
+                    style="background:#0f766e;border:none;color:#fff;padding:8px 14px;
+                           border-radius:4px;cursor:pointer;font-size:0.85em;text-align:left;">
+              Sign in with Inrupt PodSpaces
+            </button>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <input id="settings-solid-custom-url" type="url"
+                   placeholder="https://your-pod-server.example"
+                   autocomplete="off" spellcheck="false"
+                   style="flex:1;padding:6px 8px;background:#0f172a;border:1px solid #334155;
+                          color:#f1f5f9;border-radius:4px;font-size:0.85em;" />
+            <button id="settings-solid-custom-btn"
+                    style="background:#334155;border:none;color:#f1f5f9;padding:6px 12px;
+                           border-radius:4px;cursor:pointer;font-size:0.85em;white-space:nowrap;">
+              Sign in
+            </button>
+          </div>
+        </div>
+        <!-- R14.3: Data section -->
+        <hr style="border-color:#334155;margin:16px 0 12px;">
+        <p style="margin:0 0 8px;font-size:0.8em;color:#94a3b8;
+                  text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Data</p>
+        <button id="export-data-btn" style="width:100%;background:#334155;border:none;color:#f1f5f9;padding:8px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:6px;text-align:left;">Export Data</button>
+        <label style="display:block;width:100%;margin-bottom:12px;">
+          <span style="display:block;background:#334155;border:none;color:#f1f5f9;padding:8px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;text-align:center;margin-bottom:6px;">Import Data</span>
+          <input type="file" id="import-file-input" accept=".json" style="display:none;">
+        </label>
+        <!-- R10.3: Privacy toggles -->
+        <hr style="border-color:#334155;margin:16px 0 12px;">
+        <p style="margin:0 0 8px;font-size:0.8em;color:#94a3b8;
+                  text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Privacy</p>
+        <label style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;font-size:0.9em;cursor:pointer;">
+          <span style="color:#cbd5e1;">Send read receipts</span>
+          <input type="checkbox" id="settings-receipts-toggle" checked style="width:18px;height:18px;cursor:pointer;">
+        </label>
+        <label style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;font-size:0.9em;cursor:pointer;">
+          <span style="color:#cbd5e1;">Generate link previews<br><span style="font-size:0.78em;color:#64748b;">Sends URLs to gateway for fetching</span></span>
+          <input type="checkbox" id="settings-link-previews-toggle" style="width:18px;height:18px;cursor:pointer;">
+        </label>
+        <!-- Account reset -->
+        <hr style="border-color:#334155;margin:16px 0 12px;">
+        <p style="margin:0 0 8px;font-size:0.8em;color:#94a3b8;
+                  text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Account</p>
+        <button id="settings-reset-identity-btn"
+                style="background:#1e293b;border:1px solid #475569;color:#f87171;
+                       padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;
+                       margin-bottom:12px;width:100%;text-align:left;">
+          Reset all local data (switch account)
+        </button>
+        <!-- R18.1.3 + R18.3.3: App section (shown only in Tauri desktop app) -->
+        <div id="settings-tauri-section" style="display:none;">
+          <hr style="border-color:#334155;margin:16px 0 12px;">
+          <p style="margin:0 0 8px;font-size:0.8em;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">App</p>
+          <label style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;font-size:0.9em;cursor:pointer;">
+            Start Proxion when I log in
+            <input type="checkbox" id="settings-autostart-toggle" style="width:16px;height:16px;cursor:pointer;">
+          </label>
+          <hr style="border-color:#334155;margin:16px 0 12px;">
+          <p style="margin:0 0 4px;font-size:0.8em;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">About</p>
+          <p style="margin:0 0 2px;font-size:0.9em;color:#f1f5f9;">Proxion <span id="settings-app-version" style="color:#64748b;font-size:0.9em;"></span></p>
+          <p style="margin:0 0 8px;font-size:0.82em;color:#64748b;">Sovereign messaging on your Solid Pod</p>
+          <button id="settings-about-website-btn"
+                  style="background:#334155;border:none;color:#f1f5f9;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;">
+            View project website
+          </button>
+        </div>
+
+        <!-- Round 66: Active Sessions -->
+        <hr style="border-color:#334155;margin:16px 0 12px;">
+        <p style="margin:0 0 8px;font-size:0.8em;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Identity Backup</p>
+        <button id="settings-backup-btn"
+                style="background:#1e293b;border:1px solid #475569;color:#94a3b8;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:6px;width:100%;text-align:left;">
+          Download identity backup
+        </button>
+        <button id="settings-restore-btn"
+                style="background:#1e293b;border:1px solid #475569;color:#94a3b8;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:12px;width:100%;text-align:left;">
+          Restore from backup
+        </button>
+        <input type="file" id="settings-restore-input" accept=".json" style="display:none">
+        <hr style="border-color:#334155;margin:16px 0 12px;">
+        <p style="margin:0 0 8px;font-size:0.8em;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Active Sessions</p>
+        <div id="sessions-list" style="margin-bottom:8px;color:#94a3b8;font-size:0.85em;">Loading…</div>
+        <button id="settings-logout-all-btn"
+                style="background:#1e293b;border:1px solid #475569;color:#f87171;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.82em;margin-bottom:12px;">
+          Logout all other devices
+        </button>
+        <div style="display:flex; gap:8px; justify-content:flex-end;">
+          <button id="settings-cancel-btn"
+                  style="background:#334155; border:none; color:#f1f5f9; padding:8px 16px; border-radius:4px; cursor:pointer;">Cancel</button>
+          <button id="settings-save-btn"
+                  style="background:var(--accent,#e94560); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer;">Save &amp; Reconnect</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Keyboard shortcut help modal -->
+    <div id="shortcut-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1000; align-items:center; justify-content:center;">
+      <div style="background:var(--bg-secondary,#1e293b); border-radius:8px; padding:24px; min-width:360px; max-width:500px;">
+        <h3 style="margin:0 0 16px; color:var(--text-primary,#f1f5f9)">Keyboard Shortcuts</h3>
+        <table style="width:100%; border-collapse:collapse; color:var(--text-primary,#f1f5f9)">
+          <tr><td><kbd>Ctrl+K</kbd></td><td>Focus search</td></tr>
+          <tr><td><kbd>Ctrl+/</kbd></td><td>Show this help</td></tr>
+          <tr><td><kbd>Alt+↑ / ↓</kbd></td><td>Previous / next thread</td></tr>
+          <tr><td><kbd>Shift+Enter</kbd></td><td>New line in message</td></tr>
+          <tr><td><kbd>Enter</kbd></td><td>Send message</td></tr>
+          <tr><td><kbd>Escape</kbd></td><td>Cancel reply / edit / close modal</td></tr>
+        </table>
+        <button id="shortcut-close-btn"
+                style="margin-top:16px; background:var(--accent,#e94560); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer;">Close</button>
+      </div>
+    </div>
+
+    <!-- Onboarding wizard -->
+    <div id="onboarding-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1001; align-items:center; justify-content:center;">
+      <div style="background:var(--bg-secondary,#1e293b); border-radius:10px; padding:32px; min-width:380px; max-width:480px; color:var(--text-primary,#f1f5f9);">
+        <div id="ob-step-1">
+          <h2>Welcome to Proxion</h2>
+          <p style="color:#94a3b8;font-size:0.92em;margin:0 0 12px;">
+            Sovereign messaging — your messages stay on your hardware.<br>
+            Connect a Solid Pod to sync across devices, or start locally right now.
+          </p>
+          <button id="ob-start-btn" style="background:var(--accent,#e94560);border:none;color:#fff;padding:10px 24px;border-radius:4px;cursor:pointer;font-size:1em;">Get Started</button>
+        </div>
+        <div id="ob-step-2" style="display:none">
+          <h2>What's your name?</h2>
+          <input id="ob-name" placeholder="Display name" style="width:100%;padding:8px;border-radius:4px;border:1px solid #555;background:#0f172a;color:#f1f5f9;font-size:1em;box-sizing:border-box;margin-bottom:12px;">
+          <button id="ob-step2-btn" style="background:var(--accent,#e94560);border:none;color:#fff;padding:10px 24px;border-radius:4px;cursor:pointer;font-size:1em;">Continue</button>
+        </div>
+        <div id="ob-step-3" style="display:none">
+          <h2>Set your presence</h2>
+          <label><input type="radio" name="ob-status" value="online" checked> <span style="color:#22c55e;">●</span> Online</label><br>
+          <label><input type="radio" name="ob-status" value="away"> <span style="color:#f59e0b;">●</span> Away</label><br>
+          <label><input type="radio" name="ob-status" value="busy"> <span style="color:#ef4444;">●</span> Busy</label><br><br>
+          <button id="ob-step3-btn" style="background:var(--accent,#e94560);border:none;color:#fff;padding:10px 24px;border-radius:4px;cursor:pointer;font-size:1em;">Continue</button>
+        </div>
+        <!-- Step 4: Connect Solid Pod (R16) -->
+        <div id="ob-step-4" style="display:none">
+          <h2 style="margin:0 0 6px;">Where should your data live?</h2>
+          <p style="color:#94a3b8;font-size:0.88em;margin:0 0 16px;">
+            Your messages are stored on your own Solid Pod — a personal data store you control.
+            Pick a free provider or use your own server.
+          </p>
+
+          <!-- Provider selection cards -->
+          <div id="ob-pod-providers" style="display:flex;flex-direction:column;gap:8px;margin-bottom:4px;width:100%;">
+            <button class="ob-provider-card" data-css="https://solidcommunity.net"
+                    style="background:#1a56db;border:none;color:#fff;padding:12px 16px;border-radius:6px;
+                           cursor:pointer;font-size:0.92em;text-align:left;line-height:1.4;">
+              <strong>solidcommunity.net</strong>
+              <span style="display:block;font-size:0.82em;opacity:0.85;margin-top:2px;">Free. Run by the Solid community.</span>
+            </button>
+            <button class="ob-provider-card" data-css="https://inrupt.net"
+                    style="background:#0f766e;border:none;color:#fff;padding:12px 16px;border-radius:6px;
+                           cursor:pointer;font-size:0.92em;text-align:left;line-height:1.4;">
+              <strong>Inrupt PodSpaces</strong>
+              <span style="display:block;font-size:0.82em;opacity:0.85;margin-top:2px;">Free tier. Founded by Tim Berners-Lee.</span>
+            </button>
+            <button class="ob-provider-card" data-css="custom"
+                    style="background:#334155;border:none;color:#f1f5f9;padding:12px 16px;border-radius:6px;
+                           cursor:pointer;font-size:0.92em;text-align:left;line-height:1.4;">
+              <strong>My own server</strong>
+              <span style="display:block;font-size:0.82em;opacity:0.85;margin-top:2px;">Self-hosted Community Solid Server.</span>
+            </button>
+          </div>
+
+          <!-- Credential form (hidden until provider selected) -->
+          <div id="ob-pod-cred-form" style="display:none;margin-top:14px;">
+            <div id="ob-pod-provider-label" style="font-size:0.82em;color:#94a3b8;margin-bottom:10px;"></div>
+            <input id="ob-pod-css-url" type="url" placeholder="Pod server URL (e.g. https://solidcommunity.net)"
+                   autocomplete="off" spellcheck="false"
+                   style="display:none;width:100%;box-sizing:border-box;padding:8px;border-radius:4px;
+                          border:1px solid #334155;background:#0f172a;color:#f1f5f9;font-size:0.9em;margin-bottom:8px;">
+            <input id="ob-pod-email" type="email" placeholder="Email address"
+                   autocomplete="email"
+                   style="width:100%;box-sizing:border-box;padding:8px;border-radius:4px;
+                          border:1px solid #334155;background:#0f172a;color:#f1f5f9;font-size:0.9em;margin-bottom:8px;">
+            <div style="position:relative;margin-bottom:10px;">
+              <input id="ob-pod-password" type="password" placeholder="Password"
+                     autocomplete="current-password"
+                     style="width:100%;box-sizing:border-box;padding:8px 36px 8px 8px;border-radius:4px;
+                            border:1px solid #334155;background:#0f172a;color:#f1f5f9;font-size:0.9em;">
+              <button id="ob-pod-pw-toggle" type="button" tabindex="-1"
+                      style="position:absolute;right:6px;top:50%;transform:translateY(-50%);
+                             background:none;border:none;color:#64748b;cursor:pointer;font-size:0.9em;padding:2px 4px;">
+                Show
+              </button>
+            </div>
+            <div id="ob-pod-status" style="min-height:20px;font-size:0.82em;margin-bottom:10px;"></div>
+            <div style="display:flex;gap:8px;">
+              <button id="ob-pod-test-btn"
+                      style="flex:1;padding:9px;background:#3b82f6;border:none;color:#fff;
+                             border-radius:4px;cursor:pointer;font-size:0.9em;">
+                Test connection
+              </button>
+              <button id="ob-pod-continue-btn" disabled
+                      style="flex:1;padding:9px;background:#22c55e;border:none;color:#fff;
+                             border-radius:4px;cursor:not-allowed;opacity:0.45;font-size:0.9em;">
+                Continue →
+              </button>
+            </div>
+            <button id="ob-pod-back-btn"
+                    style="margin-top:8px;background:transparent;border:none;color:#64748b;
+                           cursor:pointer;font-size:0.82em;padding:4px 0;text-decoration:underline;">
+              ← Choose a different provider
+            </button>
+          </div>
+
+          <!-- Skip link (advanced only) -->
+          <div style="margin-top:14px;text-align:center;">
+            <a id="ob-skip-pod" href="#"
+               style="color:#475569;font-size:0.78em;text-decoration:none;border-bottom:1px dashed #475569;">
+              Advanced: skip pod setup
+            </a>
+          </div>
+        </div>
+        <!-- Step 5: Join or create a room (was step 4) -->
+        <div id="ob-step-5" style="display:none">
+          <h2>Join or create a room</h2>
+          <button id="ob-step5-create" style="background:var(--accent,#e94560);border:none;color:#fff;padding:10px 20px;border-radius:4px;cursor:pointer;margin-right:10px;">Create a Room</button>
+          <br><br>
+          <p style="margin:8px 0 4px;">Or join with an invite code:</p>
+          <input id="ob-invite-code" placeholder="prx1_..." style="width:100%;padding:8px;border-radius:4px;border:1px solid #555;background:#0f172a;color:#f1f5f9;font-size:1em;box-sizing:border-box;">
+          <button id="ob-step5-join" style="margin-top:8px;background:#334155;border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;">Join with Code</button>
+        </div>
+        <!-- Step 6: Done (was step 5) -->
+        <div id="ob-step-6" style="display:none">
+          <h2>You're all set!</h2>
+          <p>Start chatting with your Proxion network.</p>
+          <div id="ob-invite-display" style="display:none; margin-bottom:12px;">
+            <p style="margin:0 0 4px; font-size:0.85em; color:#94a3b8;">
+              Share this invite link with a contact:
+            </p>
+            <div id="ob-room-invite-url"
+                 style="font-size:0.78em; color:#94a3b8; word-break:break-all; padding:8px;
+                        background:#0f172a; border-radius:4px; cursor:pointer; user-select:all;
+                        margin-bottom:8px;"></div>
+            <button id="ob-copy-invite-btn"
+                    style="background:#334155; border:none; color:#f1f5f9; padding:6px 14px;
+                           border-radius:4px; cursor:pointer; font-size:0.85em;">
+              Copy invite link
+            </button>
+          </div>
+          <button id="ob-finish-btn" style="background:var(--accent,#e94560);border:none;color:#fff;padding:10px 24px;border-radius:4px;cursor:pointer;font-size:1em;">Open Proxion</button>
+          <button id="ob-finish-skip"
+                  style="display:none;background:transparent;border:none;color:#64748b;cursor:pointer;
+                         font-size:0.9em;padding:6px 0 0;text-decoration:underline;">
+            Skip
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pin panel -->
+    <div id="pin-panel" style="display:none; position:fixed; right:0; top:0; bottom:0; width:300px; background:var(--bg-secondary,#1e293b); box-shadow:-2px 0 10px rgba(0,0,0,.5); z-index:900; overflow-y:auto; padding:16px;">
+      <h3 style="color:var(--text-primary,#f1f5f9); margin:0 0 12px;">Pinned Messages</h3>
+      <button id="pin-panel-close"
+              style="position:absolute;top:12px;right:12px;background:transparent;border:none;color:#94a3b8;font-size:1.2em;cursor:pointer;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+      <div id="pin-list"></div>
+    </div>
+    <ul id="mention-dropdown"
+        style="display:none; position:fixed; background:var(--bg-secondary,#1e293b);
+               border:1px solid var(--border,#334155); border-radius:6px;
+               list-style:none; padding:4px 0; margin:0; z-index:1100;
+               min-width:180px; max-height:200px; overflow-y:auto;
+               box-shadow:0 4px 16px rgba(0,0,0,.4);"></ul>
+
+    <script src="vendor/qrcode.min.js"></script>
+    <script src="vendor/jsQR.min.js"></script>
+    <script type="module" src="main.js"></script>
+    <script src="sw-register.js"></script>
+
+    <!-- E2E identity verification modal -->
+    <div id="e2e-verify-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:999;align-items:center;justify-content:center;">
+      <div style="background:#1a1a2e;border-radius:8px;padding:24px;max-width:420px;width:90%;color:#e0e0e0;">
+        <h3 style="margin:0 0 12px;color:#4ade80;">Verify Contact</h3>
+        <p style="font-size:.82em;color:#9ca3af;margin:0 0 14px;">Compare this safety number with your contact out-of-band (voice call, in person). If it matches, tap <strong>Mark as Verified</strong>.</p>
+        <div id="e2e-modal-safety-number" style="font-family:monospace;font-size:1.25em;letter-spacing:.12em;text-align:center;padding:14px;background:#0d0d1a;border-radius:4px;margin-bottom:14px;">— — — —</div>
+        <div style="font-size:.75em;color:#6b7280;margin-bottom:16px;">
+          <div>You: <span id="e2e-modal-my-key" style="font-family:monospace;color:#9ca3af;"></span></div>
+          <div>Them: <span id="e2e-modal-their-key" style="font-family:monospace;color:#9ca3af;"></span></div>
+        </div>
+        <input type="hidden" id="e2e-modal-current-peer" value="">
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="e2e-modal-cancel" style="padding:6px 16px;background:#374151;border:none;border-radius:4px;color:#d1d5db;cursor:pointer;">Cancel</button>
+          <button id="e2e-modal-verify" style="padding:6px 16px;background:#134e26;border:none;border-radius:4px;color:#4ade80;cursor:pointer;">Mark as Verified</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- wizard-overlay removed: onboarding-modal is the single first-run wizard -->
+
+</body>
+</html>

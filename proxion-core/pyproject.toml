@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "proxion-messenger-core"
+version = "0.1.0"
+description = "Python library and gateway server for Proxion Messenger"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "Apache-2.0"}
+dependencies = [
+    "cryptography>=41",
+]
+
+[project.optional-dependencies]
+server = ["fastapi>=0.111", "uvicorn[standard]>=0.29"]
+client = ["httpx>=0.27"]
+http   = ["fastapi>=0.111", "uvicorn[standard]>=0.29", "httpx>=0.27"]
+cli    = ["fastapi>=0.111", "uvicorn[standard]>=0.29", "httpx>=0.27", "typer>=0.12", "rich>=13"]
+gateway = ["websockets>=12.0", "pytest-asyncio"]
+test = ["pytest", "pytest-asyncio", "respx", "httpx"]
+
+[project.scripts]
+proxion = "proxion_messenger_core.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-v --tb=short"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "integration: requires running external services (CSS pod, etc.)",
+    "e2e: end-to-end tests using real WebSocket connections (run with: pytest tests/e2e/)",
+]
+# Integration tests start Docker containers automatically.
+# To skip Docker startup (e.g. if CSS is already running):
+#   CSS_ALICE_URL=http://localhost:3001 CSS_BOB_URL=http://localhost:3002 pytest
+# To run only unit tests (no Docker):
+#   pytest -m "not integration"

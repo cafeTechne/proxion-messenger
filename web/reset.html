@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Proxion — Reset</title>
+<style>
+  body { background:#0f172a; color:#e2e8f0; font-family:sans-serif;
+         display:flex; flex-direction:column; align-items:center;
+         justify-content:center; height:100vh; margin:0; }
+  h2   { color:#e94560; margin-bottom:12px; }
+  #log { font-size:.85rem; color:#94a3b8; line-height:1.8; text-align:left; }
+</style>
+</head>
+<body>
+<h2>Clearing all local data…</h2>
+<div id="log"></div>
+<script>
+(async () => {
+  const log = document.getElementById('log');
+  const say = t => { log.innerHTML += t + '<br>'; };
+
+  localStorage.clear();
+  sessionStorage.clear();
+  sessionStorage.setItem('proxion_signed_out', '1');
+  say('✓ localStorage + sessionStorage cleared');
+
+  try {
+    const dbs = await (indexedDB.databases?.() ?? Promise.resolve([]));
+    await Promise.allSettled(dbs.map(({name}) => new Promise((res, rej) => {
+      const r = indexedDB.deleteDatabase(name);
+      r.onsuccess = res; r.onerror = rej; r.onblocked = res;
+    })));
+    say('✓ IndexedDB cleared (' + dbs.length + ' databases)');
+  } catch(e) { say('⚠ IndexedDB: ' + e.message); }
+
+  if ('caches' in self) {
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+      say('✓ Service worker cache cleared (' + keys.length + ' entries)');
+    } catch(e) { say('⚠ Cache: ' + e.message); }
+  }
+
+  if ('serviceWorker' in navigator) {
+    try {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+      say('✓ Service worker unregistered');
+    } catch(e) {}
+  }
+
+  say('<br>Redirecting to app…');
+  setTimeout(() => window.location.replace('/'), 1200);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  check-solid-sdk:
+    name: Solid SDK dependency policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Check Solid SDK versions
+        working-directory: web
+        run: node ../scripts/check_solid_sdk_versions.mjs
+      - name: Upload SDK check report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: solid-sdk-check-report
+          path: artifacts/solid-sdk-check.json
+          if-no-files-found: ignore
+
+  test:
+    name: Python tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: check-solid-sdk
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        working-directory: proxion-core
+        run: pip install -e ".[gateway,test]"
+
+      - name: Run unit tests
+        working-directory: proxion-core
+        run: pytest tests/ -q --tb=short -m "not integration"
+
+  build-sidecar:
+    name: Build sidecar (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install pyinstaller && pip install -e "./proxion-core[gateway]"
+
+      - name: Build sidecar
+        run: python build_sidecar.py
+
+      - name: Verify binary exists (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: ls tauri-app/src-tauri/sidecar/proxion-gateway-*
+
+      - name: Verify binary exists (Windows)
+        if: runner.os == 'Windows'
+        run: Get-ChildItem tauri-app\src-tauri\sidecar\proxion-gateway-*.exe
+        shell: pwsh
+
+      - name: Upload sidecar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxion-gateway-${{ matrix.os }}
+          path: tauri-app/src-tauri/sidecar/proxion-gateway-*
+          if-no-files-found: error

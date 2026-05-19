@@ -1,0 +1,1248 @@
+"""MiscHandlerMixin — presence, identity, session, pod-mgmt, and utility command handlers.
+
+Mixin class: add to ProxionGateway's MRO so all methods share `self`.
+Requires on self: _client_webids, _user_presence, _display_names, _store,
+                  _webid_sockets, _session_meta, _voice_sessions, _pod_webid,
+                  _pod_url, dm_clients, room_memberships, agent, config, stash,
+                  read_state, blocklist, broadcast(), _any_socket(),
+                  _ws_public_url(), _proxion_address(), _make_turn_creds(),
+                  _connect_css_sync(), _reconnect_stored_pod_sync(),
+                  _ensure_pod_room_containers().
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from datetime import datetime, timezone
+
+logger = logging.getLogger("proxion_messenger_core.gateway")
+
+
+class MiscHandlerMixin:
+
+    async def _handle_set_presence(self, websocket, data: dict) -> None:
+        status = data.get("status", "online")
+        status_message = data.get("status_message", "").strip()
+        if len(status_message) > 100:
+            status_message = status_message[:100]
+
+        webid = self._client_webids.get(websocket)
+
+        if webid and status in ("online", "away", "busy", "offline"):
+            now = datetime.now(timezone.utc).isoformat()
+            old_presence = self._user_presence.get(webid, {})
+            last_active = old_presence.get("last_active_at", now) if status != "offline" else now
+
+            self._user_presence[webid] = {
+                "status": status,
+                "status_message": status_message,
+                "updated_at": now,
+                "last_active_at": last_active
+            }
+            await self.broadcast({
+                "type": "presence_update",
+                "webid": webid,
+                "status": status,
+                "status_message": status_message,
+                "updated_at": now,
+                "last_active_at": last_active
+            })
+
+        from .presence import set_presence
+        if self.dm_clients:
+            _, client = next(iter(self.dm_clients.values()))
+            try:
+                set_presence(client, status, webid if webid else "unknown")
+                logger.info(f"Presence set to: {status}")
+            except Exception as e:
+                logger.debug(f"Failed to set presence on pod: {e}")
+
+        await websocket.send(json.dumps({"type": "presence_set", "status": status, "status_message": status_message}))
+
+    async def _handle_resolve_did(self, websocket, data: dict) -> None:
+        did = data.get("did", "").strip()
+        try:
+            from .didkey import did_to_pub_key
+            did_to_pub_key(did)
+            await websocket.send(json.dumps({
+                "type": "did_resolved",
+                "did": did,
+                "webid": did,
+            }))
+        except Exception as exc:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "message": f"Cannot resolve DID: {exc}",
+            }))
+
+    async def _handle_get_presence(self, websocket, data: dict) -> None:
+        webid = data.get("webid")
+        if webid and webid in self._user_presence:
+            presence = self._user_presence[webid]
+            await websocket.send(json.dumps({
+                "type": "presence",
+                "webid": webid,
+                "status": presence["status"],
+                "status_message": presence.get("status_message", ""),
+                "updated_at": presence["updated_at"],
+                "last_active_at": presence.get("last_active_at", presence["updated_at"])
+            }))
+        else:
+            now = datetime.now(timezone.utc).isoformat()
+            await websocket.send(json.dumps({
+                "type": "presence",
+                "webid": webid,
+                "status": "offline",
+                "status_message": "",
+                "updated_at": now,
+                "last_active_at": now
+            }))
+
+    async def _handle_get_all_presence(self, websocket, data: dict) -> None:
+        caller_webid = self._client_webids.get(websocket, "")
+        # Collect the caller's known contacts from the relationship store.
+        allowed: set = {caller_webid}
+        if self._store and caller_webid:
+            try:
+                for rel in (self._store.list_relationships(caller_webid) or []):
+                    # LocalStore.list_relationships returns dicts with 'peer_did'
+                    peer = rel.get("peer_did") or ""
+                    if peer:
+                        allowed.add(peer)
+            except Exception as exc:
+                logger.debug("Failed to fetch relationships for presence filter: %s", exc)
+                pass
+        filtered = {wid: data for wid, data in self._user_presence.items() if wid in allowed}
+        await websocket.send(json.dumps({
+            "type": "all_presence",
+            "presence": filtered
+        }, default=str))
+
+    async def _handle_join_voice_channel(self, websocket, data: dict) -> None:
+        room_id = data.get("room_id")
+        logger.info(f"Client joined voice channel: {room_id}")
+        await self.broadcast({
+            "type": "presence",
+            "room_id": room_id,
+            "status": "voice_active",
+            "from_webid": self.agent.identity_pub_bytes.hex()
+        })
+
+    async def _handle_get_identity(self, websocket, data: dict) -> None:
+        client_did = self._client_webids.get(websocket, "")
+        resp = {
+            "type": "identity",
+            "webid": self.agent.identity_pub_bytes.hex(),
+            "pub_hex": self.agent.identity_pub_bytes.hex(),
+            "did": client_did,
+            "turn_url": self.config.turn_url,
+        }
+        # Send time-limited TURN credentials instead of the raw shared secret
+        turn_creds = self._make_turn_creds(client_did or "anon")
+        if turn_creds:
+            resp["turn"] = turn_creds
+        await websocket.send(json.dumps(resp))
+
+    async def _handle_block(self, websocket, data: dict) -> None:
+        webid = data.get("webid")
+        self.blocklist.block(webid)
+        logger.info(f"Blocked WebID: {webid}")
+
+    async def _handle_unblock(self, websocket, data: dict) -> None:
+        webid = data.get("webid")
+        self.blocklist.unblock(webid)
+        logger.info(f"Unblocked WebID: {webid}")
+
+    async def _handle_get_message(self, websocket, data: dict) -> None:
+        message_id = data.get("message_id", "")
+        if self._store and message_id:
+            rows = self._store.get_messages_by_ids([message_id])
+            if rows:
+                msg = rows[0]
+                thread_id = msg.get("thread_id")
+                # Verify the caller is authorized to read this message
+                if thread_id:
+                    caller_webid = self._client_webids.get(websocket, "")
+                    # Check room membership first
+                    is_room = self._strip_thread_prefix(thread_id)
+                    if self._check_room_permission(websocket, is_room):
+                        pass  # Authorized: room member
+                    elif msg.get("from_webid") == caller_webid:
+                        pass  # Authorized: message sender
+                    elif caller_webid and self._store and any(
+                        t["thread_id"] == thread_id
+                        for t in self._store.get_dm_threads(owner_webid=caller_webid)
+                    ):
+                        pass  # Authorized: DM thread participant
+                    else:
+                        logger.warning("Rejecting unauthorized get_message for %s from %s", message_id, websocket)
+                        await websocket.send(json.dumps({"type": "error", "message": "Unauthorized"}))
+                        return
+
+                # R7: Single-message integrity check against stored thread checkpoint
+                _msg_integrity_warning = None
+                if self._store and thread_id:
+                    _checkpoint = self._store.get_thread_integrity_state(thread_id)
+                    if _checkpoint:
+                        _msg_seq = msg.get("seq_num") or 0
+                        _msg_prev = msg.get("prev_hash") or ""
+                        _ckpt_seq = _checkpoint.get("last_seq_num", 0)
+                        _ckpt_hash = _checkpoint.get("last_prev_hash", "")
+                        if _msg_seq and _ckpt_seq and _msg_seq < _ckpt_seq:
+                            _msg_integrity_warning = {
+                                "type": "seq_num",
+                                "first_offending_message_id": message_id,
+                            }
+                            self._store.save_security_event(
+                                "thread_integrity_break", "warning",
+                                webid=caller_webid or None,
+                                ip=None,
+                                details=f"get_message: seq_num={_msg_seq} < checkpoint={_ckpt_seq} thread={thread_id}",
+                            )
+
+                _fetched_payload = {
+                    "type": "message_fetched",
+                    "message": msg,
+                }
+                if _msg_integrity_warning:
+                    _fetched_payload["integrity_warning"] = _msg_integrity_warning
+                await websocket.send(json.dumps(_fetched_payload))
+            else:
+                await websocket.send(json.dumps({
+                    "type": "message_fetched",
+                    "message": None,
+                    "message_id": message_id,
+                }))
+
+    async def _handle_get_receipts(self, websocket, data: dict) -> None:
+        thread_id = data.get("thread_id")
+        message_id = data.get("message_id")
+
+        try:
+            from . import receipts
+            receipt_list = await receipts.get_read_receipts(
+                self.read_state.pod_client,
+                thread_id,
+                message_id
+            )
+            await websocket.send(json.dumps({
+                "type": "receipts",
+                "thread_id": thread_id,
+                "message_id": message_id,
+                "receipts": [
+                    {
+                        "message_id": r.message_id,
+                        "reader_webid": r.reader_webid,
+                        "read_at": r.read_at
+                    }
+                    for r in receipt_list
+                ]
+            }))
+        except Exception as exc:
+            logger.warning(f"Failed to get receipts: {exc}")
+            await websocket.send(json.dumps({
+                "type": "error",
+                "message": f"Failed to get receipts: {exc}"
+            }))
+
+    async def _handle_create_invite(self, websocket, data: dict) -> None:
+        room_id = data.get("room_id")
+        if not room_id or room_id not in self.room_memberships:
+            await websocket.send(json.dumps({"type": "error", "message": "Unknown room"}))
+        else:
+            try:
+                from .invites import create_invite as _create_invite
+                rec = await _create_invite(
+                    self.stash,
+                    room_id,
+                    str(self.agent.webid),
+                    expires_hours=max(1, min(int(data.get("expires_hours") or 24), 720)),
+                    max_uses=max(0, int(data.get("max_uses") or 0)),
+                )
+                await websocket.send(json.dumps({
+                    "type": "invite_created",
+                    "code": rec.code,
+                    "expires_iso": rec.expires_iso,
+                    "room_id": rec.room_id,
+                }))
+            except (TypeError, ValueError):
+                await websocket.send(json.dumps({"type": "error", "message": "Invalid invite parameters"}))
+
+    async def _handle_join_by_invite(self, websocket, data: dict) -> None:
+        code = data.get("code", "")
+        from .invites import use_invite as _use_invite
+        rec = await _use_invite(self.stash, code)
+        if rec is None:
+            await websocket.send(json.dumps({"type": "error", "message": "Invalid or expired invite"}))
+        else:
+            await websocket.send(json.dumps({"type": "invite_accepted", "room_id": rec.room_id}))
+
+    async def _handle_get_notifications(self, websocket, data: dict) -> None:
+        if not self._client_webids.get(websocket):
+            await websocket.send(json.dumps({"type": "notifications", "notifications": []}))
+            return
+        from .notifications import get_notifications as _get_notifs
+        unread_only = bool(data.get("unread_only", False))
+        try:
+            limit = min(int(data.get("limit", 50)), 200)
+        except (TypeError, ValueError):
+            limit = 50
+        notifs = await _get_notifs(self.stash, unread_only=unread_only, limit=limit)
+        await websocket.send(json.dumps({
+            "type": "notifications",
+            "notifications": [
+                {"id": n.id, "event_type": n.event_type, "title": n.title,
+                 "body": n.body, "created_iso": n.created_iso, "read": n.read}
+                for n in notifs
+            ],
+        }))
+
+    async def _handle_mark_notification_read(self, websocket, data: dict) -> None:
+        if not self._client_webids.get(websocket):
+            return
+        from .notifications import mark_notification_read as _mark_notif
+        nid = data.get("notification_id", "")
+        found = await _mark_notif(self.stash, nid)
+        if found:
+            await websocket.send(json.dumps({"type": "notification_read", "id": nid}))
+        else:
+            await websocket.send(json.dumps({"type": "error", "message": "Notification not found"}))
+
+    async def _handle_set_identity(self, websocket, data: dict) -> None:
+        display_name = data.get("display_name", "").strip()[:100]
+        if display_name:
+            self._display_names[websocket] = display_name
+            webid = self._client_webids.get(websocket)
+            if webid and self._store:
+                self._store.save_display_name(webid, display_name)
+
+    async def _handle_connect_css(self, websocket, data: dict) -> None:
+        # Only the gateway owner (whose identity matches self.agent) may reconfigure pod connectivity.
+        caller_did = self._client_webids.get(websocket, "")
+        from .didkey import pub_key_to_did
+        gateway_did = pub_key_to_did(self.agent.identity_pub_bytes)
+        if caller_did != gateway_did:
+            await websocket.send(json.dumps({
+                "type": "css_error",
+                "message": "Only the gateway owner can configure pod connectivity.",
+            }))
+            return
+        css_url  = data.get("css_url", "").rstrip("/")
+        email    = data.get("email", "")
+        password = data.get("password", "")
+        if not (css_url and email and password):
+            await websocket.send(json.dumps({
+                "type": "css_error",
+                "message": "css_url, email, and password are required",
+            }))
+            return
+        from .relay import _validate_relay_target
+        if not _validate_relay_target(css_url):
+            await websocket.send(json.dumps({
+                "type": "css_error",
+                "message": (
+                    "css_url resolves to a private or disallowed address. "
+                    "Set PROXION_ALLOW_PRIVATE_RELAY=1 to connect to a local pod."
+                ),
+            }))
+            return
+        else:
+            try:
+                creds, pod_url, webid = await asyncio.get_event_loop().run_in_executor(
+                    None, self._connect_css_sync, css_url, email, password
+                )
+                await websocket.send(json.dumps({
+                    "type": "css_connected",
+                    "pod_url": pod_url,
+                    "webid": webid,
+                    "proxion_address": self._proxion_address(),
+                }))
+                asyncio.create_task(self._ensure_pod_room_containers())
+            except Exception as exc:
+                logger.warning(f"connect_css failed: {exc}")
+                await websocket.send(json.dumps({
+                    "type": "css_error",
+                    "message": str(exc),
+                }))
+
+    async def _handle_disconnect_pod(self, websocket, data: dict) -> None:
+        self._pod_url = None
+        self._pod_webid = None
+        self.dm_clients.clear()
+        # pod_creds.json is intentionally kept — CSS credentials are long-lived
+        # server-side tokens independent of the browser OIDC session. The gateway
+        # can reconnect with them after the browser re-authenticates.
+        await websocket.send(json.dumps({"type": "pod_disconnected"}))
+
+    async def _handle_reconnect_pod(self, websocket, data: dict) -> None:
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(
+                None, self._reconnect_stored_pod_sync
+            )
+            if result:
+                creds, pod_url, webid = result
+                await websocket.send(json.dumps({
+                    "type": "css_connected",
+                    "pod_url": pod_url,
+                    "webid": webid,
+                    "proxion_address": self._proxion_address(),
+                }))
+            else:
+                await websocket.send(json.dumps({
+                    "type": "css_error",
+                    "message": "No stored pod credentials found.",
+                }))
+        except Exception as exc:
+            logger.warning(f"reconnect_pod failed: {exc}")
+            await websocket.send(json.dumps({"type": "css_error", "message": str(exc)}))
+
+    async def _handle_get_my_address(self, websocket, data: dict) -> None:
+        from .didkey import pub_key_to_did
+        gateway_did = pub_key_to_did(self.agent.identity_pub_bytes)
+        proxion_addr = self._proxion_address()
+        http_url = self._gateway_http_url()
+        import urllib.parse
+        invite_link = f"{http_url}/invite?from={urllib.parse.quote(proxion_addr)}" if http_url else ""
+        short_token = getattr(self, "_short_invite_token", "")
+        short_invite_url = f"{http_url}/i/{short_token}" if (http_url and short_token) else ""
+        await websocket.send(json.dumps({
+            "type": "my_address",
+            "did": gateway_did,
+            "gateway_url": self._ws_public_url(),
+            "gateway_http_url": http_url,
+            "proxion_address": proxion_addr,
+            "invite_link": invite_link,
+            "short_invite_url": short_invite_url,
+        }))
+
+    async def _handle_get_relationships(self, websocket, data: dict) -> None:
+        rels = []
+        caller_webid = self._client_webids.get(websocket, "")
+        if self._store:
+            for cert_dict in self._store.list_relationships(owner_webid=caller_webid):
+                cert_id = cert_dict.get("certificate_id") or cert_dict.get("id")
+                peer_did = cert_dict.get("peer_did") or ""
+                rels.append({
+                    "certificate_id": cert_id,
+                    "peer_did": peer_did,
+                    "expires_at": cert_dict.get("expires_at"),
+                    "display_name": self._store.get_display_name(peer_did) if peer_did else None,
+                    "x25519_pub": self._store.get_x25519_pub(peer_did) if peer_did else None,
+                })
+        await websocket.send(json.dumps({"type": "relationships", "contacts": rels}))
+
+    async def _handle_pod_status(self, websocket, data: dict) -> None:
+        connected = bool(self._pod_webid and self._pod_url)
+        try:
+            from .solid_migration import migration_store
+            snap = migration_store.snapshot()
+            auth_mode_active = snap.get("auth_mode_active", "legacy")
+            auth_mode_fallback_count = snap.get("auth_mode_fallback_count", 0)
+            auth_mode_last_failure_code = snap.get("auth_mode_last_failure_code")
+        except Exception:
+            auth_mode_active = "legacy"
+            auth_mode_fallback_count = 0
+            auth_mode_last_failure_code = None
+        await websocket.send(json.dumps({
+            "type": "pod_status",
+            "connected": connected,
+            "pod_url": self._pod_url or "",
+            "webid": self._pod_webid or "",
+            "auth_mode_active": auth_mode_active,
+            "auth_mode_fallback_count": auth_mode_fallback_count,
+            "auth_mode_last_failure_code": auth_mode_last_failure_code,
+        }))
+
+    async def _handle_screenshare_started(self, websocket, data: dict) -> None:
+        session_id = data.get("session_id", "")
+        sess = self._voice_sessions.get(session_id)
+        if not sess:
+            return
+        other = sess.get("callee_ws") if sess.get("caller_ws") is websocket else sess.get("caller_ws")
+        if other:
+            try:
+                await other.send(json.dumps({
+                    "type": "screenshare_started",
+                    "session_id": session_id,
+                    "from_webid": self._client_webids.get(websocket, ""),
+                }))
+            except Exception:
+                pass
+
+    async def _handle_screenshare_stopped(self, websocket, data: dict) -> None:
+        session_id = data.get("session_id", "")
+        sess = self._voice_sessions.get(session_id)
+        if not sess:
+            return
+        other = sess.get("callee_ws") if sess.get("caller_ws") is websocket else sess.get("caller_ws")
+        if other:
+            try:
+                await other.send(json.dumps({
+                    "type": "screenshare_stopped",
+                    "session_id": session_id,
+                }))
+            except Exception:
+                pass
+
+    async def _handle_list_sessions(self, websocket, data: dict) -> None:
+        webid = self._client_webids.get(websocket)
+        if not webid:
+            return
+        sessions = []
+        for ws in list(self._webid_sockets.get(webid, set())):
+            meta = self._session_meta.get(ws, {})
+            sessions.append({
+                "session_id": meta.get("session_id", ""),
+                "connected_at": meta.get("connected_at", ""),
+                "ip_addr": meta.get("ip_addr", ""),
+                "user_agent_hash": meta.get("user_agent_hash", ""),
+                "first_seen_ip": meta.get("first_seen_ip", meta.get("ip_addr", "")),
+                "last_seen_at": meta.get("last_seen_at", meta.get("connected_at", "")),
+                "is_current": ws is websocket,
+            })
+        await websocket.send(json.dumps({"type": "session_list", "sessions": sessions}))
+
+    async def _revoke_websockets(self, sockets, reason: str) -> None:
+        """Add sockets to the revoked set and close them. Prevents race-condition commands."""
+        for ws in sockets:
+            self._revoked_sessions.add(ws)
+            try:
+                await ws.send(json.dumps({"type": "session_revoked", "reason": reason}))
+                await ws.close()
+            except Exception:
+                pass
+
+    async def _handle_revoke_session(self, websocket, data: dict) -> None:
+        webid = self._client_webids.get(websocket)
+        target_session_id = data.get("session_id", "")
+        if not webid or not target_session_id:
+            return
+        target_ws = next(
+            (ws for ws in list(self._webid_sockets.get(webid, set()))
+             if self._session_meta.get(ws, {}).get("session_id") == target_session_id),
+            None
+        )
+        if not target_ws:
+            return
+        await self._revoke_websockets([target_ws], "revoked_by_other_session")
+
+    async def _handle_logout_all_devices(self, websocket, data: dict) -> None:
+        """Close all other sessions for the calling identity. R11.3.1."""
+        webid = self._client_webids.get(websocket)
+        if not webid:
+            return
+        other_sockets = [ws for ws in list(self._webid_sockets.get(webid, set()))
+                         if ws is not websocket]
+        await self._revoke_websockets(other_sockets, "logout_all")
+        await websocket.send(json.dumps({
+            "type": "logout_all_complete",
+            "revoked_count": len(other_sockets),
+        }))
+
+    async def _handle_get_audit_logs(self, websocket, data: dict) -> None:
+        """Return recent audit log entries. Restricted to the gateway owner."""
+        from .didkey import pub_key_to_did
+        caller_did = self._client_webids.get(websocket, "")
+        gateway_did = pub_key_to_did(self.agent.identity_pub_bytes)
+        if caller_did != gateway_did:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "message": "Only the gateway owner can access audit logs.",
+            }))
+            return
+        if not self._store:
+            await websocket.send(json.dumps({"type": "audit_logs", "logs": []}))
+            return
+        event_type = data.get("event_type") or None
+        try:
+            limit = min(int(data.get("limit", 100)), 500)
+        except (TypeError, ValueError):
+            limit = 100
+        logs = self._store.get_audit_logs(event_type=event_type, limit=limit)
+        result = {"type": "audit_logs", "logs": logs}
+        if data.get("verify_chain"):
+            chain_result = self._store.verify_audit_chain(limit=5000)
+            result["chain_ok"] = chain_result["ok"]
+            result["chain_break_at"] = chain_result["break_at"]
+            result["chain_error"] = chain_result["error"]
+        await websocket.send(json.dumps(result, default=str))
+
+    async def _handle_get_security_events(self, websocket, data: dict) -> None:
+        """Return recent security events. Restricted to the gateway owner."""
+        from .didkey import pub_key_to_did
+        caller_did = self._client_webids.get(websocket, "")
+        gateway_did = pub_key_to_did(self.agent.identity_pub_bytes)
+        if caller_did != gateway_did:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "code": "E_FORBIDDEN",
+                "message": "Only the gateway owner can access security events.",
+            }))
+            return
+        if not self._store:
+            await websocket.send(json.dumps({"type": "security_events", "events": []}))
+            return
+        event_type = data.get("event_type") or None
+        try:
+            limit = min(int(data.get("limit", 100)), 500)
+        except (TypeError, ValueError):
+            limit = 100
+        events = self._store.get_security_events(event_type=event_type, limit=limit)
+        await websocket.send(json.dumps({"type": "security_events", "events": events}, default=str))
+
+    async def _handle_get_security_summary(self, websocket, data: dict) -> None:
+        """Owner-only: return security event rollups for the past N hours (Round 6)."""
+        from .didkey import pub_key_to_did
+        caller_did = self._client_webids.get(websocket, "")
+        gateway_did = pub_key_to_did(self.agent.identity_pub_bytes)
+        if caller_did != gateway_did:
+            await websocket.send(json.dumps({"type": "error", "code": "E_FORBIDDEN", "message": "Owner only"}))
+            return
+        if not self._store:
+            await websocket.send(json.dumps({"type": "security_summary", "hours": 24,
+                                              "rate_limits_triggered": 0, "schema_rejects": 0,
+                                              "relay_replay_rejects": 0, "auth_lockouts": 0, "webhook_failures": 0}))
+            return
+        try:
+            hours = max(1, min(int(data.get("hours", 24)), 168))
+        except (TypeError, ValueError):
+            hours = 24
+        summary = self._store.get_security_summary(hours=hours)
+        await websocket.send(json.dumps({"type": "security_summary", **summary}))
+
+    async def _handle_get_runtime_security_state(self, websocket, data: dict) -> None:
+        """Owner-only: return runtime security state for operator diagnostics."""
+        from .didkey import pub_key_to_did
+        caller_did = self._client_webids.get(websocket, "")
+        gateway_did = pub_key_to_did(self.agent.identity_pub_bytes)
+        if caller_did != gateway_did:
+            await websocket.send(json.dumps({"type": "error", "code": "E_FORBIDDEN", "message": "Owner only"}))
+            return
+        import os as _os
+        safe_mode = _os.environ.get("PROXION_SAFE_MODE", "0") == "1"
+        schema_version = self._store._SCHEMA_VERSION if self._store else None
+        relay_nonce_count = 0
+        relay_id_count = 0
+        if self._store:
+            try:
+                import sqlite3 as _sq
+                conn = _sq.connect(self._store.db_path)
+                relay_nonce_count = conn.execute("SELECT COUNT(*) FROM relay_seen_nonces").fetchone()[0]
+                relay_id_count = conn.execute("SELECT COUNT(*) FROM relay_seen_ids").fetchone()[0]
+                conn.close()
+            except Exception:
+                pass
+        last_purge = getattr(self, "_last_retention_purge_at", None)
+        auth_lockout_count = sum(
+            1 for v in getattr(self, "_auth_fail_counts", {}).values()
+            if v.get("count", 0) >= 5
+        )
+        await websocket.send(json.dumps({
+            "type": "runtime_security_state",
+            "safe_mode": safe_mode,
+            "schema_version": schema_version,
+            "relay_nonce_cache_size": relay_nonce_count,
+            "relay_id_cache_size": relay_id_count,
+            "last_retention_purge_at": last_purge,
+            "auth_lockout_active_count": auth_lockout_count,
+        }, default=str))
+
+    async def _handle_get_degraded_mode_state(self, websocket, data: dict) -> None:
+        """Owner-only: return degraded mode state for operator diagnostics (Round 7)."""
+        from .didkey import pub_key_to_did
+        caller_did = self._client_webids.get(websocket, "")
+        gateway_did = pub_key_to_did(self.agent.identity_pub_bytes)
+        if caller_did != gateway_did:
+            await websocket.send(json.dumps({"type": "error", "code": "E_FORBIDDEN", "message": "Owner only"}))
+            return
+        _breakers = getattr(self, "_webhook_breakers", {})
+        _open_breakers = {wh_id: b for wh_id, b in _breakers.items() if b.get("opened_at") is not None}
+        import time as _t_dg
+        await websocket.send(json.dumps({
+            "type": "degraded_mode_state",
+            "degraded": bool(_open_breakers),
+            "open_webhook_breakers": list(_open_breakers.keys()),
+            "breaker_details": {
+                wh_id: {
+                    "failures": b.get("failures", 0),
+                    "opened_at": b.get("opened_at"),
+                    "open_seconds": round(_t_dg.time() - b["opened_at"], 1) if b.get("opened_at") else None,
+                }
+                for wh_id, b in _open_breakers.items()
+            },
+        }, default=str))
+
+    async def _handle_get_realtime_abuse_signals(self, websocket, data: dict) -> None:
+        """Owner-only: return 1h and 24h abuse signal rollups with severity score."""
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        rollup_1h = self._store.get_abuse_signal_rollups(hours=1)
+        rollup_24h = self._store.get_abuse_signal_rollups(hours=24)
+
+        def _severity(r: dict) -> str:
+            auth = r.get("auth_lockouts", 0)
+            integrity = r.get("db_integrity_events", 0)
+            replay = r.get("replay_rejects", 0)
+            if integrity > 0 or auth >= 10:
+                return "critical"
+            if auth >= 5 or replay >= 20:
+                return "high"
+            if auth >= 2 or replay >= 5 or r.get("relay_failed", 0) >= 50:
+                return "medium"
+            return "low"
+
+        await websocket.send(json.dumps({
+            "type": "realtime_abuse_signals",
+            "1h": rollup_1h,
+            "24h": rollup_24h,
+            "severity_1h": _severity(rollup_1h),
+            "severity_24h": _severity(rollup_24h),
+        }, default=str))
+
+    async def _handle_approve_peer_gateway_change(self, websocket, data: dict) -> None:
+        """Owner-only: approve a pending peer gateway URL change."""
+        peer_did = data.get("peer_did", "")
+        if not peer_did:
+            await websocket.send(json.dumps({"type": "error", "message": "peer_did required"}))
+            return
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        approved = self._store.approve_peer_gateway_change(peer_did)
+        if approved:
+            # Update the in-memory cache to reflect the newly approved URL
+            pin = self._store.get_peer_gateway_pin(peer_did)
+            if pin:
+                self._peer_gateway_urls[peer_did] = pin["pinned_gateway_url"]
+        await websocket.send(json.dumps({
+            "type": "peer_gateway_change_approved",
+            "peer_did": peer_did,
+            "approved": approved,
+        }))
+
+    async def _handle_prepare_recovery_operation(self, websocket, data: dict) -> None:
+        """Owner-only: create a short-lived recovery operation ID for two-person control."""
+        import time as _t_ro, uuid as _uuid_ro, hashlib as _hl_ro
+        op_type = data.get("op_type", "")
+        if op_type not in ("restore", "import"):
+            await websocket.send(json.dumps({"type": "error", "message": "op_type must be restore or import"}))
+            return
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        from .didkey import pub_key_to_did as _ptd_ro
+        op_id = str(_uuid_ro.uuid4())
+        now = _t_ro.time()
+        requested_by = _ptd_ro(self.agent.identity_pub_bytes)
+        # R9: compute fingerprint binding this op to the requester's source IP
+        _ip_ro = (self._session_meta.get(websocket) or {}).get("ip_addr", "")
+        _fp_ro = _hl_ro.sha256(f"{_ip_ro}|{op_type}".encode()).hexdigest()
+        self._store.create_recovery_operation(
+            op_id=op_id,
+            op_type=op_type,
+            requested_by=requested_by,
+            requested_at=now,
+            expires_at=now + 300,  # 5-minute window
+            requester_fingerprint=_fp_ro,
+        )
+        self._store.prune_recovery_operations(now)
+        await websocket.send(json.dumps({
+            "type": "recovery_operation_prepared",
+            "op_id": op_id,
+            "op_type": op_type,
+            "expires_at": now + 300,
+        }))
+
+    async def _handle_confirm_recovery_operation(self, websocket, data: dict) -> None:
+        """Owner-only: confirm a previously prepared recovery operation (second factor)."""
+        import time as _t_cro
+        op_id = data.get("op_id", "")
+        if not op_id:
+            await websocket.send(json.dumps({"type": "error", "message": "op_id required"}))
+            return
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        now = _t_cro.time()
+        confirmed = self._store.confirm_recovery_operation(op_id, now)
+        await websocket.send(json.dumps({
+            "type": "recovery_operation_confirmed",
+            "op_id": op_id,
+            "confirmed": confirmed,
+        }))
+
+    # ------------------------------------------------------------------
+    # R9 handlers
+    # ------------------------------------------------------------------
+
+    async def _handle_export_security_snapshot(self, websocket, data: dict) -> None:
+        """Owner-only: build and return a signed security snapshot."""
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        try:
+            snap = await self._build_security_snapshot()
+            await websocket.send(json.dumps({"type": "security_snapshot", "snapshot": snap}, default=str))
+        except Exception as exc:
+            await websocket.send(json.dumps({"type": "error", "message": str(exc)}))
+
+    async def _handle_resolve_peer_trust_dispute(self, websocket, data: dict) -> None:
+        """Owner-only: resolve a peer trust dispute with accept/keep/revoke."""
+        import time as _t_rtd
+        dispute_id = data.get("dispute_id", "")
+        resolution = data.get("resolution", "")
+        if not dispute_id or resolution not in ("accept_new_value", "keep_old_value", "revoke_peer_temporarily"):
+            await websocket.send(json.dumps({
+                "type": "error",
+                "message": "dispute_id and valid resolution (accept_new_value|keep_old_value|revoke_peer_temporarily) required",
+            }))
+            return
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        dispute = self._store.get_peer_trust_dispute(dispute_id)
+        if not dispute:
+            await websocket.send(json.dumps({"type": "error", "message": "dispute not found"}))
+            return
+        peer_did = dispute.get("peer_did", "")
+        self._store.resolve_peer_trust_dispute(dispute_id, _t_rtd.time())
+        if resolution == "accept_new_value":
+            pin = self._store.get_peer_gateway_pin(peer_did)
+            if pin:
+                self._peer_gateway_urls[peer_did] = pin["pinned_gateway_url"]
+        elif resolution == "revoke_peer_temporarily":
+            self._peer_gateway_urls.pop(peer_did, None)
+        await websocket.send(json.dumps({
+            "type": "peer_trust_dispute_resolved",
+            "dispute_id": dispute_id,
+            "resolution": resolution,
+            "peer_did": peer_did,
+        }))
+
+    async def _handle_list_quarantine_items(self, websocket, data: dict) -> None:
+        """Owner-only: list pending federation quarantine items."""
+        if not self._store:
+            await websocket.send(json.dumps({"type": "quarantine_items", "items": []}))
+            return
+        try:
+            limit = min(int(data.get("limit", 50)), 200)
+        except (TypeError, ValueError):
+            limit = 50
+        items = self._store.list_quarantine_items(limit=limit)
+        await websocket.send(json.dumps({"type": "quarantine_items", "items": items}, default=str))
+
+    async def _handle_release_quarantine_item(self, websocket, data: dict) -> None:
+        """Owner-only: release a quarantined federation item for delivery."""
+        item_id = data.get("item_id", "")
+        if not item_id:
+            await websocket.send(json.dumps({"type": "error", "message": "item_id required"}))
+            return
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        released = self._store.release_quarantine_item(item_id)
+        await websocket.send(json.dumps({
+            "type": "quarantine_item_released",
+            "item_id": item_id,
+            "released": released,
+        }))
+
+    async def _handle_drop_quarantine_item(self, websocket, data: dict) -> None:
+        """Owner-only: permanently drop a quarantined federation item."""
+        item_id = data.get("item_id", "")
+        if not item_id:
+            await websocket.send(json.dumps({"type": "error", "message": "item_id required"}))
+            return
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        dropped = self._store.drop_quarantine_item(item_id)
+        await websocket.send(json.dumps({
+            "type": "quarantine_item_dropped",
+            "item_id": item_id,
+            "dropped": dropped,
+        }))
+
+    async def _handle_ack_checksum_mismatch(self, websocket, data: dict) -> None:
+        """Owner-only: acknowledge a checksum mismatch and take a new baseline snapshot."""
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        self._checksum_mismatch = False
+        self._checksum_mismatch_tables = []
+        _CRITICAL_TABLES = ["relationships", "peer_gateway_pins", "audit_logs", "security_events"]
+        try:
+            self._store.snapshot_security_checksums(_CRITICAL_TABLES)
+        except Exception:
+            pass
+        await websocket.send(json.dumps({"type": "checksum_mismatch_acked"}))
+
+    # ------------------------------------------------------------------
+    # R10 handlers
+    # ------------------------------------------------------------------
+
+    async def _handle_set_security_tier(self, websocket, data: dict) -> None:
+        """Owner-only: manually set the adaptive security tier with optional TTL."""
+        import time as _t_st
+        try:
+            tier = int(data.get("tier", 0))
+        except (TypeError, ValueError):
+            await websocket.send(json.dumps({"type": "error", "message": "tier must be integer 0-3"}))
+            return
+        if tier not in (0, 1, 2, 3):
+            await websocket.send(json.dumps({"type": "error", "message": "tier must be 0-3"}))
+            return
+        ttl_s = None
+        try:
+            _ttl_raw = data.get("ttl_seconds")
+            if _ttl_raw is not None:
+                ttl_s = float(_ttl_raw)
+        except (TypeError, ValueError):
+            pass
+        reason = str(data.get("reason", "manual_override"))[:200]
+        from .security_policy import get_policy as _get_pol_st
+        _get_pol_st().set_tier(tier, override_ttl_s=ttl_s, reason=reason)
+        await websocket.send(json.dumps({
+            "type": "security_tier_set",
+            "tier": tier,
+            "ttl_seconds": ttl_s,
+            "reason": reason,
+        }))
+
+    async def _handle_get_security_tier_state(self, websocket, data: dict) -> None:
+        """Owner-only: return current adaptive security tier state."""
+        from .security_policy import get_policy as _get_pol_gts
+        state = _get_pol_gts().get_tier_state()
+        await websocket.send(json.dumps({"type": "security_tier_state", **state}, default=str))
+
+    async def _handle_set_retention_lock(self, websocket, data: dict) -> None:
+        """Owner-only: set a retention lock for audit/security data."""
+        import time as _t_rl
+        lock_name = data.get("lock_name", "").strip()
+        if not lock_name:
+            await websocket.send(json.dumps({"type": "error", "message": "lock_name required"}))
+            return
+        try:
+            hours = max(1, min(int(data.get("hours", 24)), 8760))  # max 1 year
+        except (TypeError, ValueError):
+            hours = 24
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        locked_until = _t_rl.time() + hours * 3600
+        self._store.set_retention_lock(lock_name, locked_until)
+        await websocket.send(json.dumps({
+            "type": "retention_lock_set",
+            "lock_name": lock_name,
+            "locked_until": locked_until,
+            "hours": hours,
+        }))
+
+    async def _handle_list_retention_locks(self, websocket, data: dict) -> None:
+        """Owner-only: list active retention locks."""
+        if not self._store:
+            await websocket.send(json.dumps({"type": "retention_locks", "locks": []}))
+            return
+        locks = self._store.list_retention_locks()
+        await websocket.send(json.dumps({"type": "retention_locks", "locks": locks}, default=str))
+
+    async def _handle_clear_retention_lock(self, websocket, data: dict) -> None:
+        """Owner-only: clear a retention lock (requires confirmation token)."""
+        import hashlib as _hl_rl
+        lock_name = data.get("lock_name", "").strip()
+        confirmation_token = data.get("confirmation_token", "").strip()
+        if not lock_name:
+            await websocket.send(json.dumps({"type": "error", "message": "lock_name required"}))
+            return
+        # Require confirmation token = sha256("clear:" + lock_name) first 16 chars
+        expected = _hl_rl.sha256(f"clear:{lock_name}".encode()).hexdigest()[:16]
+        if confirmation_token != expected:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "message": "confirmation_token required",
+                "hint": f"confirmation_token must be sha256('clear:{lock_name}')[:16]",
+            }))
+            return
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        cleared = self._store.clear_retention_lock(lock_name)
+        await websocket.send(json.dumps({
+            "type": "retention_lock_cleared",
+            "lock_name": lock_name,
+            "cleared": cleared,
+        }))
+
+    async def _handle_run_security_self_test(self, websocket, data: dict) -> None:
+        """Owner-only: run security self-test and return signed report."""
+        try:
+            report = await self._build_security_self_test_report()
+            await websocket.send(json.dumps({"type": "security_self_test_report", "report": report}, default=str))
+        except Exception as exc:
+            await websocket.send(json.dumps({"type": "error", "message": str(exc)}))
+
+    # ------------------------------------------------------------------
+    # R11 handlers
+    # ------------------------------------------------------------------
+
+    async def _handle_request_admin_action(self, websocket, data: dict) -> None:
+        """Owner-only: create a pending dual-control admin action."""
+        import time as _t_ra
+        import uuid as _uuid_ra
+        import json as _json_ra
+        action_type = str(data.get("action_type", "")).strip()
+        payload = data.get("payload", {})
+        if not action_type:
+            await websocket.send(json.dumps({"type": "error", "message": "action_type required"}))
+            return
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        caller = (self._session_meta.get(websocket) or {}).get("webid", "")
+        action_id = str(_uuid_ra.uuid4())
+        expires_at = _t_ra.time() + 600  # 10-minute window
+        self._store.create_pending_admin_action(
+            action_id=action_id,
+            action_type=action_type,
+            payload_json=_json_ra.dumps(payload),
+            requested_by=caller,
+            expires_at=expires_at,
+        )
+        await websocket.send(json.dumps({
+            "type": "admin_action_requested",
+            "action_id": action_id,
+            "action_type": action_type,
+            "expires_at": expires_at,
+        }))
+
+    async def _handle_confirm_admin_action(self, websocket, data: dict) -> None:
+        """Owner-only: confirm a pending dual-control admin action."""
+        import time as _t_ca
+        import hashlib as _hl_ca
+        action_id = str(data.get("action_id", "")).strip()
+        challenge_signature = str(data.get("challenge_signature", "")).strip()
+        if not action_id:
+            await websocket.send(json.dumps({"type": "error", "message": "action_id required"}))
+            return
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        action = self._store.get_pending_admin_action(action_id)
+        if action is None:
+            await websocket.send(json.dumps({"type": "error", "message": "action not found"}))
+            return
+        if action.get("consumed"):
+            await websocket.send(json.dumps({"type": "error", "message": "action already consumed"}))
+            return
+        if action.get("expires_at", 0) < _t_ca.time():
+            await websocket.send(json.dumps({"type": "error", "message": "action expired"}))
+            return
+        # Validate challenge_signature = sha256("confirm:{action_id}")[:16]
+        expected = _hl_ca.sha256(f"confirm:{action_id}".encode()).hexdigest()[:16]
+        if challenge_signature != expected:
+            await websocket.send(json.dumps({"type": "error", "message": "invalid challenge_signature"}))
+            return
+        caller = (self._session_meta.get(websocket) or {}).get("webid", "")
+        confirmed = self._store.confirm_admin_action(action_id, confirmed_by=caller)
+        await websocket.send(json.dumps({
+            "type": "admin_action_confirmed",
+            "action_id": action_id,
+            "confirmed": confirmed,
+        }))
+
+    async def _handle_simulate_incident_policy(self, websocket, data: dict) -> None:
+        """Owner-only: simulate incident policy replay on recent security events."""
+        try:
+            hours = int(data.get("hours", 24))
+        except (TypeError, ValueError):
+            hours = 24
+        tier_profile = data.get("tier_profile") or {}
+        if not isinstance(tier_profile, dict):
+            tier_profile = {}
+        try:
+            from .incident_sim import simulate_incident_policy
+            report = simulate_incident_policy(
+                store=self._store,
+                hours=hours,
+                tier_profile=tier_profile,
+            )
+            await websocket.send(json.dumps({"type": "incident_simulation_report", "report": report}, default=str))
+        except Exception as exc:
+            await websocket.send(json.dumps({"type": "error", "message": str(exc)}))
+
+    async def _handle_create_trust_revocation(self, websocket, data: dict) -> None:
+        """Owner-only: create a trust revocation entry."""
+        import time as _t_tr
+        import uuid as _uuid_tr
+        subject_type = str(data.get("subject_type", "")).strip()
+        subject_id = str(data.get("subject_id", "")).strip()
+        reason = str(data.get("reason", "")).strip()
+        expires_at = data.get("expires_at")
+        if not subject_type or not subject_id or not reason:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "message": "subject_type, subject_id, and reason are required",
+            }))
+            return
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        caller = (self._session_meta.get(websocket) or {}).get("webid", "")
+        rev_id = str(_uuid_tr.uuid4())
+        now = _t_tr.time()
+        self._store.create_trust_revocation(
+            id=rev_id,
+            subject_type=subject_type,
+            subject_id=subject_id,
+            reason=reason,
+            revoked_by=caller or "gateway_owner",
+            revoked_at=now,
+            expires_at=float(expires_at) if expires_at is not None else None,
+        )
+        if self._store:
+            self._store.save_security_event(
+                "trust_revocation_created", "warning",
+                details=f"type={subject_type} id={subject_id} reason={reason}",
+            )
+        await websocket.send(json.dumps({
+            "type": "trust_revocation_created",
+            "revocation_id": rev_id,
+            "subject_type": subject_type,
+            "subject_id": subject_id,
+        }))
+
+    async def _handle_list_trust_revocations(self, websocket, data: dict) -> None:
+        """Owner-only: list active trust revocations."""
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        revocations = self._store.list_active_trust_revocations(limit=500)
+        await websocket.send(json.dumps({
+            "type": "trust_revocations",
+            "revocations": revocations,
+        }, default=str))
+
+    # ------------------------------------------------------------------
+    # R12: Compromise recovery handlers
+    # ------------------------------------------------------------------
+
+    async def _handle_start_compromise_recovery(self, websocket, data: dict) -> None:
+        """Owner-only: start a new key compromise recovery session."""
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        reason = data.get("reason", "unspecified")
+        initiated_by = getattr(self, "_owner_did", "") or data.get("initiated_by", "")
+        from .compromise_recovery import start_compromise_recovery as _scr
+        session_id = _scr(self._store, reason=reason, initiated_by=initiated_by)
+        if self._store:
+            self._store.save_security_event(
+                "compromise_recovery_started", "critical",
+                details=f"session_id={session_id} reason={reason}",
+            )
+        await websocket.send(json.dumps({
+            "type": "compromise_recovery_started",
+            "session_id": session_id,
+            "reason": reason,
+        }))
+
+    async def _handle_get_compromise_recovery_status(self, websocket, data: dict) -> None:
+        """Owner-only: get status of a recovery session."""
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        session_id = data.get("session_id", "")
+        if not session_id:
+            await websocket.send(json.dumps({"type": "error", "message": "session_id required"}))
+            return
+        session = self._store.get_compromise_recovery_session(session_id)
+        if not session:
+            await websocket.send(json.dumps({"type": "error", "code": "not_found"}))
+            return
+        await websocket.send(json.dumps({
+            "type": "compromise_recovery_status",
+            "session": session,
+        }, default=str))
+
+    async def _handle_resume_compromise_recovery(self, websocket, data: dict) -> None:
+        """Owner-only: resume a paused recovery session."""
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        session_id = data.get("session_id", "")
+        if not session_id:
+            await websocket.send(json.dumps({"type": "error", "message": "session_id required"}))
+            return
+        from .compromise_recovery import resume_compromise_recovery as _rcr
+        result = _rcr(self._store, session_id)
+        await websocket.send(json.dumps({
+            "type": "compromise_recovery_resumed",
+            **result,
+        }, default=str))
+
+    async def _handle_abort_compromise_recovery(self, websocket, data: dict) -> None:
+        """Owner-only: abort a recovery session."""
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        session_id = data.get("session_id", "")
+        if not session_id:
+            await websocket.send(json.dumps({"type": "error", "message": "session_id required"}))
+            return
+        from .compromise_recovery import abort_compromise_recovery as _acr
+        ok = _acr(self._store, session_id)
+        if ok and self._store:
+            self._store.save_security_event(
+                "compromise_recovery_aborted", "warning",
+                details=f"session_id={session_id}",
+            )
+        await websocket.send(json.dumps({
+            "type": "compromise_recovery_aborted",
+            "session_id": session_id,
+            "success": ok,
+        }))
+
+    # ------------------------------------------------------------------
+    # R12: Signed event stream handler
+    # ------------------------------------------------------------------
+
+    async def _handle_get_solid_migration_errors(self, websocket, data: dict) -> None:
+        """Owner-only: return Solid SDK migration error metrics grouped by normalised code and mode."""
+        from .didkey import pub_key_to_did
+        caller_did = self._client_webids.get(websocket, "")
+        gateway_did = pub_key_to_did(self.agent.identity_pub_bytes)
+        if caller_did != gateway_did:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "code": "E_FORBIDDEN",
+                "message": "Only the gateway owner can access migration error metrics.",
+            }))
+            return
+        try:
+            from .solid_migration import migration_store
+            snapshot = migration_store.snapshot()
+        except Exception as _exc:
+            snapshot = {"error": str(_exc)}
+        await websocket.send(json.dumps({
+            "type": "solid_migration_errors",
+            **snapshot,
+        }, default=str))
+
+    async def _handle_get_security_event_stream(self, websocket, data: dict) -> None:
+        """Owner-only: fetch signed security event stream with cursor pagination."""
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        cursor = data.get("cursor", "")
+        limit = min(int(data.get("limit", 100)), 1000)
+        from .event_stream import get_events_after as _gea
+        result = _gea(
+            self._store, cursor, limit,
+            self.agent.identity_key, self.agent.identity_pub_bytes,
+        )
+        await websocket.send(json.dumps({
+            "type": "security_event_stream",
+            **result,
+        }, default=str))
