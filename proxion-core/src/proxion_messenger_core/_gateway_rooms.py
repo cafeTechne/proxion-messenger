@@ -1979,3 +1979,66 @@ class RoomHandlerMixin:
             "id": wh_id,
             "token": new_token,
         }))
+
+    # ------------------------------------------------------------------
+    # Group E2E via Sender Keys (R18, schema v44)
+    # ------------------------------------------------------------------
+
+    async def _handle_upload_sender_key(self, websocket, data: dict) -> None:
+        """Store caller's sender key state for a room."""
+        sender_webid = self._client_webids.get(websocket, "")
+        room_id = data.get("room_id", "")
+        chain_key_b64 = data.get("chain_key_b64", "")
+        iteration = int(data.get("iteration", 0))
+        if not sender_webid or not room_id or not chain_key_b64 or not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "missing_fields"}))
+            return
+        self._store.save_sender_key(room_id, sender_webid, chain_key_b64, iteration)
+        await websocket.send(json.dumps({
+            "type": "sender_key_uploaded",
+            "room_id": room_id,
+            "sender_webid": sender_webid,
+        }))
+
+    async def _handle_get_sender_key(self, websocket, data: dict) -> None:
+        """Return the stored sender key for a specific room + sender."""
+        room_id = data.get("room_id", "")
+        sender_webid = data.get("sender_webid", "")
+        if not self._store or not room_id or not sender_webid:
+            await websocket.send(json.dumps({"type": "sender_key", "key": None}))
+            return
+        key = self._store.get_sender_key(room_id, sender_webid)
+        await websocket.send(json.dumps({"type": "sender_key", "room_id": room_id, "key": key}))
+
+    async def _handle_distribute_sender_key(self, websocket, data: dict) -> None:
+        """Distribute sealed sender keys to a list of room members.
+
+        The client computes the sealed packets locally (via sender_keys.distribute_sender_key)
+        and sends them in a dict {webid: sealed_b64}.  The gateway relays each sealed
+        packet to the appropriate recipient sockets.
+        """
+        sender_webid = self._client_webids.get(websocket, "")
+        room_id = data.get("room_id", "")
+        distribution = data.get("distribution", {})
+        if not sender_webid or not room_id or not distribution:
+            await websocket.send(json.dumps({"type": "error", "message": "missing_fields"}))
+            return
+        delivered: list[str] = []
+        for target_webid, sealed_b64 in distribution.items():
+            event = json.dumps({
+                "type": "sender_key_received",
+                "room_id": room_id,
+                "from_webid": sender_webid,
+                "sealed_b64": sealed_b64,
+            })
+            for ws in self._sockets_for(target_webid):
+                try:
+                    await ws.send(event)
+                    delivered.append(target_webid)
+                except Exception:
+                    pass
+        await websocket.send(json.dumps({
+            "type": "sender_key_distributed",
+            "room_id": room_id,
+            "delivered_to": delivered,
+        }))

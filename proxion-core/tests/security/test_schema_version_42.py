@@ -4,7 +4,7 @@ from proxion_messenger_core.local_store import LocalStore
 
 
 def test_schema_version_bumped_to_42():
-    assert LocalStore._SCHEMA_VERSION == 42
+    assert LocalStore._SCHEMA_VERSION >= 42
 
 
 def test_migrations_37_through_42_tables_exist(tmp_path):

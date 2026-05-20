@@ -202,6 +202,19 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             self._hydrate_from_store()
             self._peer_gateway_urls.update(self._store.get_all_peer_gateways())
 
+        # VAPID keypair for WebPush (R18)
+        import os as _os_vapid
+        self._vapid_private_pem: str = _os_vapid.environ.get("PROXION_VAPID_PRIVATE_KEY", "")
+        self._vapid_public_b64: str = _os_vapid.environ.get("PROXION_VAPID_PUBLIC_KEY", "")
+        self._vapid_subject: str = _os_vapid.environ.get("PROXION_VAPID_SUBJECT", "")
+        if not self._vapid_private_pem:
+            try:
+                from .webpush import generate_vapid_keypair
+                self._vapid_private_pem, self._vapid_public_b64 = generate_vapid_keypair()
+                logger.debug("Generated ephemeral VAPID keypair (set PROXION_VAPID_* env vars to persist)")
+            except Exception as _ve:
+                logger.debug("VAPID keypair generation skipped: %s", _ve)
+
     def _make_turn_creds(self, identity: str) -> Optional[dict]:
         """Return coturn-compatible time-limited TURN credentials, or None if not configured."""
         secret = self.config.turn_secret
@@ -842,6 +855,28 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 await self._handle_upload_prekeys(websocket, data)
             elif cmd == "get_prekey_bundle":
                 await self._handle_get_prekey_bundle(websocket, data)
+            elif cmd == "sealed_dm":
+                await self._handle_sealed_dm(websocket, data)
+            elif cmd == "verify_contact":
+                await self._handle_verify_contact(websocket, data)
+            elif cmd == "get_contact_verification":
+                await self._handle_get_contact_verification(websocket, data)
+            elif cmd == "list_verified_contacts":
+                await self._handle_list_verified_contacts(websocket, data)
+            elif cmd == "subscribe_push":
+                await self._handle_subscribe_push(websocket, data)
+            elif cmd == "unsubscribe_push":
+                await self._handle_unsubscribe_push(websocket, data)
+            elif cmd == "list_dm_sessions":
+                await self._handle_list_dm_sessions(websocket, data)
+            elif cmd == "expire_dm_session":
+                await self._handle_expire_dm_session(websocket, data)
+            elif cmd == "upload_sender_key":
+                await self._handle_upload_sender_key(websocket, data)
+            elif cmd == "get_sender_key":
+                await self._handle_get_sender_key(websocket, data)
+            elif cmd == "distribute_sender_key":
+                await self._handle_distribute_sender_key(websocket, data)
             elif cmd == "join_voice_channel":
                 await self._handle_join_voice_channel(websocket, data)
             elif cmd == "get_identity":
@@ -2605,6 +2640,23 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                     await writer.drain()
                     return
 
+                # ── GET /vapid-public-key — VAPID public key for WebPush registration ──
+                if method == "GET" and path == "/vapid-public-key":
+                    _vpub = getattr(self, "_vapid_public_b64", "")
+                    if not _vpub:
+                        writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+                    else:
+                        import json as _jvap
+                        _vbody = _jvap.dumps({"publicKey": _vpub}).encode()
+                        writer.write(
+                            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                            + b"Access-Control-Allow-Origin: *\r\n"
+                            + b"Content-Length: " + str(len(_vbody)).encode() + b"\r\n\r\n"
+                            + _vbody
+                        )
+                    await writer.drain()
+                    return
+
                 # ── GET /message-edits — edit history (R13.11) ──
                 if method == "GET" and path == "/message-edits":
                     if not self._is_trusted_origin(origin_header, http_port, peer_ip):
@@ -3361,7 +3413,7 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
         return "200 OK", '{"status":"ok"}'
 
     async def _retention_purge_loop(self) -> None:
-        """Purge old audit logs and security events every 24 hours."""
+        """Purge old audit logs, security events, and expired DM sessions every 24 hours."""
         import os as _os_rp
         while True:
             await asyncio.sleep(86400)
@@ -3370,17 +3422,48 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             try:
                 audit_days = int(_os_rp.environ.get("PROXION_AUDIT_RETENTION_DAYS", "90"))
                 sec_days = int(_os_rp.environ.get("PROXION_SECURITY_EVENT_RETENTION_DAYS", "90"))
+                dm_session_days = int(_os_rp.environ.get("PROXION_DM_SESSION_RETENTION_DAYS", "90"))
                 audit_cutoff = time.time() - audit_days * 86400
                 sec_cutoff = time.time() - sec_days * 86400
                 audit_purged = self._store.purge_old_audit_logs(audit_cutoff)
                 sec_purged = self._store.purge_old_security_events(sec_cutoff)
+                sessions_purged = self._store.prune_expired_dm_sessions(
+                    max_age_seconds=dm_session_days * 86400
+                )
                 if audit_purged or sec_purged:
                     logger.info("Retention purge: %d audit logs, %d security events removed",
                                 audit_purged, sec_purged)
+                if sessions_purged:
+                    logger.info("Retention purge: %d expired DM sessions removed", sessions_purged)
                 self._metrics["audit_logs_purged"] = self._metrics.get("audit_logs_purged", 0) + audit_purged
                 self._metrics["security_events_purged"] = self._metrics.get("security_events_purged", 0) + sec_purged
             except Exception as exc:
                 logger.warning("Retention purge failed: %s", exc)
+
+    async def _prekey_replenishment_loop(self) -> None:
+        """Check prekey pool depth for connected users every 15 minutes."""
+        _THRESHOLD = int(__import__("os").environ.get("PROXION_PREKEY_LOW_THRESHOLD", "5"))
+        while True:
+            await asyncio.sleep(900)  # 15 minutes
+            if not self._store:
+                continue
+            try:
+                for webid in list(self._webid_sockets.keys()):
+                    if not webid:
+                        continue
+                    count = self._store.count_unused_one_time_prekeys(webid)
+                    if count < _THRESHOLD:
+                        for ws in self._sockets_for(webid):
+                            try:
+                                await ws.send(__import__("json").dumps({
+                                    "type": "prekey_replenishment_needed",
+                                    "current_count": count,
+                                    "threshold": _THRESHOLD,
+                                }))
+                            except Exception:
+                                pass
+            except Exception as exc:
+                logger.warning("Prekey replenishment check failed: %s", exc)
 
     async def _presence_loop(self):
         """Periodically broadcast presence heartbeats and mark idle users as away."""
@@ -3767,6 +3850,7 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 asyncio.create_task(self._expire_messages_loop()),
                 asyncio.create_task(self._retention_purge_loop()),
                 asyncio.create_task(self._checksum_maintenance_loop()),
+                asyncio.create_task(self._prekey_replenishment_loop()),
             ]
 
             # R16: Continuous assurance loop

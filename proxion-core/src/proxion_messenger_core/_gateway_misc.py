@@ -1389,3 +1389,107 @@ class MiscHandlerMixin:
                 except Exception:
                     pass
         await websocket.send(json.dumps({"type": "ack_read_ok", "message_id": message_id}))
+
+    # ------------------------------------------------------------------
+    # Safety numbers / contact verification (R18)
+    # ------------------------------------------------------------------
+
+    async def _handle_verify_contact(self, websocket, data: dict) -> None:
+        """Client provides safety numbers for a peer; gateway confirms and persists."""
+        caller_webid = self._client_webids.get(websocket, "")
+        peer_webid = data.get("peer_webid", "")
+        provided_numbers = data.get("safety_numbers", "")
+        if not caller_webid or not peer_webid or not provided_numbers:
+            await websocket.send(json.dumps({"type": "error", "message": "missing_fields"}))
+            return
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no_store"}))
+            return
+        # Persist the provided safety numbers (trust-on-first-use or explicit comparison)
+        self._store.save_contact_verification(peer_webid, provided_numbers, verified_by=caller_webid)
+        await websocket.send(json.dumps({
+            "type": "contact_verified",
+            "peer_webid": peer_webid,
+            "safety_numbers": provided_numbers,
+        }))
+
+    async def _handle_get_contact_verification(self, websocket, data: dict) -> None:
+        """Return the stored contact verification record for a peer."""
+        peer_webid = data.get("peer_webid", "")
+        if not self._store or not peer_webid:
+            await websocket.send(json.dumps({"type": "contact_verification", "record": None}))
+            return
+        record = self._store.get_contact_verification(peer_webid)
+        await websocket.send(json.dumps({"type": "contact_verification", "record": record}))
+
+    async def _handle_list_verified_contacts(self, websocket, data: dict) -> None:
+        """Return all verified contact records."""
+        records = self._store.list_verified_contacts() if self._store else []
+        await websocket.send(json.dumps({"type": "verified_contacts", "contacts": records}))
+
+    # ------------------------------------------------------------------
+    # WebPush subscription management (R18)
+    # ------------------------------------------------------------------
+
+    async def _handle_subscribe_push(self, websocket, data: dict) -> None:
+        """Store a browser push subscription for offline notifications."""
+        owner_webid = self._client_webids.get(websocket, "")
+        if not owner_webid or not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "not_registered"}))
+            return
+        import secrets as _sec
+        subscription_id = data.get("subscription_id") or _sec.token_hex(12)
+        endpoint = data.get("endpoint", "")
+        p256dh_b64 = data.get("p256dh_b64", "")
+        auth_b64 = data.get("auth_b64", "")
+        if not endpoint or not p256dh_b64 or not auth_b64:
+            await websocket.send(json.dumps({"type": "error", "message": "missing_subscription_fields"}))
+            return
+        self._store.save_push_subscription(subscription_id, owner_webid, endpoint, p256dh_b64, auth_b64)
+        await websocket.send(json.dumps({
+            "type": "push_subscribed",
+            "subscription_id": subscription_id,
+        }))
+
+    async def _handle_unsubscribe_push(self, websocket, data: dict) -> None:
+        """Remove a push subscription."""
+        subscription_id = data.get("subscription_id", "")
+        if self._store and subscription_id:
+            self._store.delete_push_subscription(subscription_id)
+        await websocket.send(json.dumps({"type": "push_unsubscribed", "subscription_id": subscription_id}))
+
+    # ------------------------------------------------------------------
+    # DM session lifecycle (R18)
+    # ------------------------------------------------------------------
+
+    async def _handle_list_dm_sessions(self, websocket, data: dict) -> None:
+        """Return active DM sessions for the caller."""
+        owner_webid = self._client_webids.get(websocket, "")
+        if not owner_webid or not self._store:
+            await websocket.send(json.dumps({"type": "dm_sessions", "sessions": []}))
+            return
+        sessions = self._store.list_dm_sessions(owner_webid)
+        await websocket.send(json.dumps({"type": "dm_sessions", "sessions": sessions}))
+
+    async def _handle_expire_dm_session(self, websocket, data: dict) -> None:
+        """Force-expire a specific DM session (e.g. 'forget this device')."""
+        owner_webid = self._client_webids.get(websocket, "")
+        session_id = data.get("session_id", "")
+        if not session_id or not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "session_id required"}))
+            return
+        session = self._store.get_dm_session_by_id(session_id)
+        if not session or session.get("owner_webid") != owner_webid:
+            await websocket.send(json.dumps({"type": "error", "message": "not_found"}))
+            return
+        self._store.delete_dm_session(session_id)
+        # Notify any open sockets for this owner
+        for ws in self._sockets_for(owner_webid):
+            try:
+                await ws.send(json.dumps({
+                    "type": "session_expired",
+                    "session_id": session_id,
+                    "peer_webid": session.get("peer_webid"),
+                }))
+            except Exception:
+                pass

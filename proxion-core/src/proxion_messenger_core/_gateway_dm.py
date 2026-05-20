@@ -504,6 +504,32 @@ class DmHandlerMixin:
                 except Exception as exc:
                     logger.warning(f"local_dm relay failed: {exc}")
         else:
+            # Attempt WebPush for offline recipients
+            if self._store and target_webid:
+                _subs = self._store.get_push_subscriptions(target_webid)
+                if _subs:
+                    _vpk = getattr(self, "_vapid_private_pem", None)
+                    _vsub = getattr(self, "_vapid_subject", None)
+                    if _vpk and _vsub:
+                        from .webpush import send_web_push
+                        _sender_name = self._name_for(websocket, sender_webid)
+                        for _sub in _subs:
+                            send_web_push(
+                                subscription={
+                                    "endpoint": _sub["endpoint"],
+                                    "keys": {
+                                        "p256dh": _sub["p256dh_b64"],
+                                        "auth": _sub["auth_b64"],
+                                    },
+                                },
+                                payload={
+                                    "type": "message",
+                                    "thread_id": thread_id,
+                                    "display_name": _sender_name,
+                                },
+                                vapid_private_pem=_vpk,
+                                vapid_subject=_vsub,
+                            )
             # Try cross-gateway relay
             peer_gw = self._resolve_peer_gateway(target_webid)
             if peer_gw:
@@ -595,3 +621,59 @@ class DmHandlerMixin:
             "peer_webid": peer_webid,
             "bundle": bundle,
         }))
+
+    async def _handle_sealed_dm(self, websocket, data: dict) -> None:
+        """Relay a sealed-sender (e2e_v=3) DM. Gateway sees only recipient WebID."""
+        sender_webid = self._client_webids.get(websocket, "unknown")
+        if sender_webid == "unknown":
+            await websocket.send(json.dumps({"type": "error", "message": "Not registered"}))
+            return
+        target_webid = data.get("target_webid", "")
+        sealed_b64 = data.get("sealed_b64", "")
+        if not target_webid or not sealed_b64:
+            await websocket.send(json.dumps({"type": "error", "message": "missing_fields"}))
+            return
+        if target_webid and target_webid in getattr(self, "_revoked_dids", set()):
+            await websocket.send(json.dumps({"type": "error", "message": "contact_revoked"}))
+            return
+
+        event = {
+            "type": "sealed_message",
+            "e2e_v": 3,
+            "sealed_b64": sealed_b64,
+        }
+
+        # Echo a minimal ack to sender
+        await websocket.send(json.dumps({"type": "sealed_dm_sent", "target_webid": target_webid}))
+
+        # Deliver to recipient sockets
+        target_sockets = self._sockets_for(target_webid)
+        if target_sockets:
+            payload = json.dumps(event)
+            for ws in target_sockets:
+                try:
+                    await ws.send(payload)
+                except Exception as exc:
+                    logger.warning("sealed_dm relay failed: %s", exc)
+        else:
+            # Attempt WebPush if recipient is offline and we have subscriptions
+            if self._store:
+                subs = self._store.get_push_subscriptions(target_webid)
+                if subs:
+                    _vapid_priv = getattr(self, "_vapid_private_pem", None)
+                    _vapid_sub = getattr(self, "_vapid_subject", None)
+                    if _vapid_priv and _vapid_sub:
+                        from .webpush import send_web_push
+                        for sub in subs:
+                            send_web_push(
+                                subscription={
+                                    "endpoint": sub["endpoint"],
+                                    "keys": {
+                                        "p256dh": sub["p256dh_b64"],
+                                        "auth": sub["auth_b64"],
+                                    },
+                                },
+                                payload={"type": "sealed_message"},
+                                vapid_private_pem=_vapid_priv,
+                                vapid_subject=_vapid_sub,
+                            )

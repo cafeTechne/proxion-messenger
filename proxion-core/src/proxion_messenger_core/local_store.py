@@ -38,7 +38,7 @@ class LocalStore:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # Current schema version — increment when adding new migrations below
-    _SCHEMA_VERSION = 42
+    _SCHEMA_VERSION = 44
 
     # Set by _init_db if PRAGMA integrity_check fails — blocks mutating operations
     _integrity_ok: bool = True
@@ -829,6 +829,39 @@ class LocalStore:
                 )""",
                 """CREATE INDEX IF NOT EXISTS idx_message_receipts_read_at
                    ON message_receipts(read_at)""",
+            ],
+            # 43: contact verification (safety numbers)
+            [
+                """CREATE TABLE IF NOT EXISTS contact_verifications (
+                    peer_webid TEXT PRIMARY KEY,
+                    safety_numbers TEXT NOT NULL,
+                    verified_at REAL NOT NULL,
+                    verified_by TEXT NOT NULL
+                )""",
+            ],
+            # 44: sender keys (group E2E) + WebPush subscriptions
+            [
+                """CREATE TABLE IF NOT EXISTS sender_keys (
+                    room_id TEXT NOT NULL,
+                    sender_webid TEXT NOT NULL,
+                    chain_key_b64 TEXT NOT NULL,
+                    iteration INTEGER NOT NULL DEFAULT 0,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY (room_id, sender_webid)
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_sender_keys_room
+                   ON sender_keys(room_id)""",
+                """CREATE TABLE IF NOT EXISTS push_subscriptions (
+                    subscription_id TEXT PRIMARY KEY,
+                    owner_webid TEXT NOT NULL,
+                    endpoint TEXT NOT NULL,
+                    p256dh_b64 TEXT NOT NULL,
+                    auth_b64 TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_push_subscriptions_owner
+                   ON push_subscriptions(owner_webid)""",
             ],
         ]
 
@@ -4465,3 +4498,201 @@ class LocalStore:
                 )
             except Exception as exc:
                 logger.warning("rebuild_messages_fts failed: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Prekey helpers (schema v40) — extended for replenishment
+    # ------------------------------------------------------------------
+
+    def count_unused_one_time_prekeys(self, owner_webid: str) -> int:
+        """Return the number of unused one-time prekeys available for owner_webid."""
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM dm_prekeys "
+                    "WHERE owner_webid=? AND one_time=1 AND used=0",
+                    (owner_webid,),
+                ).fetchone()
+                return row[0] if row else 0
+            except Exception:
+                return 0
+
+    # ------------------------------------------------------------------
+    # DM session lifecycle (schema v40) — extended
+    # ------------------------------------------------------------------
+
+    def delete_dm_session(self, session_id: str) -> None:
+        """Delete a DM session by its session_id."""
+        with self._conn() as conn:
+            try:
+                conn.execute("DELETE FROM dm_sessions WHERE session_id=?", (session_id,))
+            except Exception:
+                pass
+
+    def get_dm_session_by_id(self, session_id: str) -> dict | None:
+        """Return a DM session state dict for the given session_id."""
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT * FROM dm_sessions WHERE session_id=?", (session_id,)
+                ).fetchone()
+                if row is None:
+                    return None
+                d = dict(row)
+                return {
+                    "session_id": d["session_id"],
+                    "peer_webid": d["peer_webid"],
+                    "owner_webid": d["owner_webid"],
+                    "root_key": d["root_key_b64"],
+                    "send_chain_key": d["send_chain_key_b64"],
+                    "recv_chain_key": d["recv_chain_key_b64"],
+                    "send_count": d["send_count"],
+                    "recv_count": d["recv_count"],
+                    "updated_at": d["updated_at"],
+                }
+            except Exception:
+                return None
+
+    def list_dm_sessions(self, owner_webid: str) -> list[dict]:
+        """Return all DM sessions owned by owner_webid, newest first."""
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    """SELECT session_id, peer_webid, owner_webid,
+                              send_count, recv_count, created_at, updated_at
+                       FROM dm_sessions WHERE owner_webid=?
+                       ORDER BY updated_at DESC""",
+                    (owner_webid,),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+
+    def prune_expired_dm_sessions(self, max_age_seconds: float = 7_776_000.0) -> int:
+        """Delete dm_sessions not updated within max_age_seconds. Returns count deleted."""
+        cutoff = time.time() - max_age_seconds
+        with self._conn() as conn:
+            try:
+                conn.execute("DELETE FROM dm_sessions WHERE updated_at < ?", (cutoff,))
+                return conn.execute("SELECT changes()").fetchone()[0]
+            except Exception:
+                return 0
+
+    # ------------------------------------------------------------------
+    # Contact verification / safety numbers (schema v43)
+    # ------------------------------------------------------------------
+
+    def save_contact_verification(
+        self,
+        peer_webid: str,
+        safety_numbers: str,
+        verified_by: str,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO contact_verifications
+                   (peer_webid, safety_numbers, verified_at, verified_by)
+                   VALUES (?, ?, ?, ?)""",
+                (peer_webid, safety_numbers, time.time(), verified_by),
+            )
+
+    def get_contact_verification(self, peer_webid: str) -> dict | None:
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT * FROM contact_verifications WHERE peer_webid=?",
+                    (peer_webid,),
+                ).fetchone()
+                return dict(row) if row else None
+            except Exception:
+                return None
+
+    def list_verified_contacts(self) -> list[dict]:
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM contact_verifications ORDER BY verified_at DESC"
+                ).fetchall()
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+
+    # ------------------------------------------------------------------
+    # Sender keys for group E2E (schema v44)
+    # ------------------------------------------------------------------
+
+    def save_sender_key(
+        self,
+        room_id: str,
+        sender_webid: str,
+        chain_key_b64: str,
+        iteration: int,
+    ) -> None:
+        now = time.time()
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO sender_keys
+                   (room_id, sender_webid, chain_key_b64, iteration, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, COALESCE(
+                       (SELECT created_at FROM sender_keys WHERE room_id=? AND sender_webid=?), ?
+                   ), ?)""",
+                (room_id, sender_webid, chain_key_b64, iteration, room_id, sender_webid, now, now),
+            )
+
+    def get_sender_key(self, room_id: str, sender_webid: str) -> dict | None:
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT * FROM sender_keys WHERE room_id=? AND sender_webid=?",
+                    (room_id, sender_webid),
+                ).fetchone()
+                return dict(row) if row else None
+            except Exception:
+                return None
+
+    def delete_sender_keys_for_room(self, room_id: str) -> None:
+        with self._conn() as conn:
+            try:
+                conn.execute("DELETE FROM sender_keys WHERE room_id=?", (room_id,))
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------
+    # WebPush subscriptions (schema v44)
+    # ------------------------------------------------------------------
+
+    def save_push_subscription(
+        self,
+        subscription_id: str,
+        owner_webid: str,
+        endpoint: str,
+        p256dh_b64: str,
+        auth_b64: str,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO push_subscriptions
+                   (subscription_id, owner_webid, endpoint, p256dh_b64, auth_b64, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (subscription_id, owner_webid, endpoint, p256dh_b64, auth_b64, time.time()),
+            )
+
+    def get_push_subscriptions(self, owner_webid: str) -> list[dict]:
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM push_subscriptions WHERE owner_webid=?",
+                    (owner_webid,),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+
+    def delete_push_subscription(self, subscription_id: str) -> None:
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    "DELETE FROM push_subscriptions WHERE subscription_id=?",
+                    (subscription_id,),
+                )
+            except Exception:
+                pass

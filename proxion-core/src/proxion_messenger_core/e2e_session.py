@@ -1,4 +1,4 @@
-"""X3DH-style initial key agreement + double-ratchet sending/receiving chain for DM forward secrecy.
+"""X3DH-style initial key agreement + full double ratchet for DM forward secrecy.
 
 Protocol overview
 -----------------
@@ -20,6 +20,20 @@ Alice (initiator) performs X3DH against Bob's published prekey bundle:
 Bob derives the same values with the inverse roles:
     send_chain_key = master_secret[32:]   # Bob's recv chain becomes his send chain
     recv_chain_key = root_key
+
+Double ratchet
+--------------
+On top of the symmetric chain ratchet, a DH ratchet provides break-in recovery:
+
+    KDF_RK(root_key, dh_out) → HKDF-SHA256(dh_out, salt=root_key,
+                                             info=b"ProxionDHRatchetV1", length=64)
+    → split into (new_root_key 32B, new_chain_key 32B)
+
+When a party (say Bob) receives a message with a new ratchet_pub_b64 in the header:
+    1. (new_RK, CKr) = KDF_RK(RK, DH(our_send_ratchet_key, peer_ratchet_pub))
+    2. Generate fresh send_ratchet_key
+    3. (new_RK2, CKs) = KDF_RK(new_RK, DH(fresh_send_ratchet_key, peer_ratchet_pub))
+    4. reset send_count = 0
 
 Each message advances the sender's chain with:
     msg_key        = HKDF(chain_key, salt=b"\\x01", info=b"ProxionMsgKey",   length=32)
@@ -113,12 +127,64 @@ def advance_chain(chain_key: bytes) -> tuple[bytes, bytes]:
 
 
 # ---------------------------------------------------------------------------
+# DH ratchet
+# ---------------------------------------------------------------------------
+
+def _kdf_rk(root_key: bytes, dh_output: bytes) -> tuple[bytes, bytes]:
+    """Derive a new (root_key, chain_key) pair from a DH output and current root key."""
+    out = _hkdf(dh_output, length=64, salt=root_key, info=b"ProxionDHRatchetV1")
+    return out[:32], out[32:]
+
+
+def dh_ratchet_advance(state: "SessionState", new_recv_ratchet_pub_bytes: bytes) -> "SessionState":
+    """Perform a full DH ratchet step on receiving a new peer ratchet public key.
+
+    Should be called before decrypting the incoming message when
+    ``payload["ratchet_pub_b64"]`` differs from ``state.recv_ratchet_pub_b64``.
+
+    Advances both the receive chain (with old send ratchet key × peer's new key)
+    and then the send chain (with a freshly generated ratchet key × peer's new key),
+    providing break-in recovery.
+    """
+    if not state.send_ratchet_key_priv_b64:
+        raise ValueError("DH ratchet not initialised: send_ratchet_key_priv_b64 is empty")
+
+    our_priv = X25519PrivateKey.from_private_bytes(_b64dec(state.send_ratchet_key_priv_b64))
+    peer_pub = X25519PublicKey.from_public_bytes(new_recv_ratchet_pub_bytes)
+
+    # Step 1: advance the receive ratchet
+    dh1 = our_priv.exchange(peer_pub)
+    rk1, new_recv_chain_key = _kdf_rk(state.root_key, dh1)
+
+    # Step 2: generate a fresh send ratchet key and advance the send ratchet
+    new_send_key = X25519PrivateKey.generate()
+    new_send_priv = new_send_key.private_bytes(
+        serialization.Encoding.Raw,
+        serialization.PrivateFormat.Raw,
+        serialization.NoEncryption(),
+    )
+    dh2 = new_send_key.exchange(peer_pub)
+    rk2, new_send_chain_key = _kdf_rk(rk1, dh2)
+
+    # Commit state changes
+    state.prev_send_count = state.send_count
+    state.send_count = 0
+    state.recv_count = 0
+    state.root_key = rk2
+    state.recv_chain_key = new_recv_chain_key
+    state.send_chain_key = new_send_chain_key
+    state.recv_ratchet_pub_b64 = _b64enc(new_recv_ratchet_pub_bytes)
+    state.send_ratchet_key_priv_b64 = _b64enc(new_send_priv)
+    return state
+
+
+# ---------------------------------------------------------------------------
 # Session state
 # ---------------------------------------------------------------------------
 
 @dataclass
 class SessionState:
-    """Mutable state for one X3DH-bootstrapped DM session."""
+    """Mutable state for one X3DH-bootstrapped DM session (with DH ratchet)."""
 
     session_id: str
     peer_webid: str
@@ -128,6 +194,13 @@ class SessionState:
     recv_chain_key: bytes   # 32 bytes
     send_count: int = 0
     recv_count: int = 0
+    # DH ratchet fields (empty string = ratchet not yet active)
+    send_ratchet_key_priv_b64: str = ""   # our current X25519 ratchet private key
+    recv_ratchet_pub_b64: str = ""        # peer's last-seen X25519 ratchet public key
+    prev_send_count: int = 0             # how many messages sent in previous chain
+    # True when we have recv_ratchet_pub but haven't yet done a send-side DH ratchet step.
+    # Set on init_inbound (Bob knows Alice's ratchet pub from the X3DH header immediately).
+    needs_ratchet_on_send: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +339,16 @@ def init_outbound_session(
     recv_chain_key = root_key  # Alice receives on the symmetric recv chain
 
     session_id = secrets.token_hex(16)
+
+    # Generate Alice's initial DH ratchet key (published in the header for Bob)
+    alice_ratchet_key = X25519PrivateKey.generate()
+    alice_ratchet_priv = alice_ratchet_key.private_bytes(
+        serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption()
+    )
+    alice_ratchet_pub = alice_ratchet_key.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw
+    )
+
     state = SessionState(
         session_id=session_id,
         peer_webid=bob_webid,
@@ -273,12 +356,16 @@ def init_outbound_session(
         root_key=root_key,
         send_chain_key=send_chain_key,
         recv_chain_key=recv_chain_key,
+        send_ratchet_key_priv_b64=_b64enc(alice_ratchet_priv),
+        recv_ratchet_pub_b64="",
+        prev_send_count=0,
     )
 
     header = {
         "session_id": session_id,
         "ek_pub_b64": _b64enc(ek_a_pub_bytes),
         "one_time_prekey_id": bob_one_time_prekey_id,
+        "ratchet_pub_b64": _b64enc(alice_ratchet_pub),
     }
     return state, header
 
@@ -338,6 +425,12 @@ def init_inbound_session(
     recv_chain_key = master[32:]   # Bob receives on Alice's send chain
     send_chain_key = root_key      # Bob sends on the recv chain Alice uses
 
+    # Generate Bob's initial DH ratchet key
+    bob_ratchet_key = X25519PrivateKey.generate()
+    bob_ratchet_priv = bob_ratchet_key.private_bytes(
+        serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption()
+    )
+
     return SessionState(
         session_id=header["session_id"],
         peer_webid=alice_webid,
@@ -345,6 +438,10 @@ def init_inbound_session(
         root_key=root_key,
         send_chain_key=send_chain_key,
         recv_chain_key=recv_chain_key,
+        send_ratchet_key_priv_b64=_b64enc(bob_ratchet_priv),
+        recv_ratchet_pub_b64=header.get("ratchet_pub_b64", ""),
+        prev_send_count=0,
+        needs_ratchet_on_send=bool(header.get("ratchet_pub_b64", "")),
     )
 
 
@@ -368,6 +465,18 @@ def encrypt_session_message(
     (updated_state, payload_dict)
         payload_dict keys: ciphertext_b64, nonce_b64, msg_num, session_id.
     """
+    # Send-side DH ratchet: Bob's first reply must ratchet before encrypting so
+    # Alice's recv ratchet (triggered by seeing Bob's ratchet pub) produces the
+    # same chain.  send_ratchet_key_priv_b64 is kept intact so the peer can
+    # identify which DH output to use for their recv ratchet (step d).
+    if state.needs_ratchet_on_send and state.recv_ratchet_pub_b64 and state.send_ratchet_key_priv_b64:
+        _rk_priv = X25519PrivateKey.from_private_bytes(_b64dec(state.send_ratchet_key_priv_b64))
+        _recv_pub = X25519PublicKey.from_public_bytes(_b64dec(state.recv_ratchet_pub_b64))
+        _dh_out = _rk_priv.exchange(_recv_pub)
+        state.root_key, state.send_chain_key = _kdf_rk(state.root_key, _dh_out)
+        state.send_count = 0
+        state.needs_ratchet_on_send = False
+
     next_chain_key, msg_key = advance_chain(state.send_chain_key)
     msg_num = state.send_count
 
@@ -383,6 +492,16 @@ def encrypt_session_message(
         "nonce_b64": _b64enc(nonce),
         "ciphertext_b64": _b64enc(ciphertext),
     }
+
+    # Include our current DH ratchet public key so the peer can advance
+    if state.send_ratchet_key_priv_b64:
+        rk_priv = X25519PrivateKey.from_private_bytes(_b64dec(state.send_ratchet_key_priv_b64))
+        rk_pub = rk_priv.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw
+        )
+        payload["ratchet_pub_b64"] = _b64enc(rk_pub)
+        payload["prev_send_count"] = state.prev_send_count
+
     return state, payload
 
 
@@ -404,6 +523,13 @@ def decrypt_session_message(
     ValueError
         If the payload is malformed.
     """
+    # DH ratchet step: if peer included a new ratchet key, advance before decrypting
+    incoming_ratchet_pub = payload.get("ratchet_pub_b64")
+    if (incoming_ratchet_pub
+            and state.send_ratchet_key_priv_b64
+            and incoming_ratchet_pub != state.recv_ratchet_pub_b64):
+        state = dh_ratchet_advance(state, _b64dec(incoming_ratchet_pub))
+
     next_chain_key, msg_key = advance_chain(state.recv_chain_key)
     msg_num = payload["msg_num"]
 
@@ -432,6 +558,10 @@ def session_to_dict(state: SessionState) -> dict:
         "recv_chain_key": _b64enc(state.recv_chain_key),
         "send_count": state.send_count,
         "recv_count": state.recv_count,
+        "send_ratchet_key_priv_b64": state.send_ratchet_key_priv_b64,
+        "recv_ratchet_pub_b64": state.recv_ratchet_pub_b64,
+        "prev_send_count": state.prev_send_count,
+        "needs_ratchet_on_send": state.needs_ratchet_on_send,
     }
 
 
@@ -446,4 +576,8 @@ def session_from_dict(d: dict) -> SessionState:
         recv_chain_key=_b64dec(d["recv_chain_key"]),
         send_count=d.get("send_count", 0),
         recv_count=d.get("recv_count", 0),
+        send_ratchet_key_priv_b64=d.get("send_ratchet_key_priv_b64", ""),
+        recv_ratchet_pub_b64=d.get("recv_ratchet_pub_b64", ""),
+        prev_send_count=d.get("prev_send_count", 0),
+        needs_ratchet_on_send=d.get("needs_ratchet_on_send", False),
     )
