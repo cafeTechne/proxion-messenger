@@ -14,7 +14,7 @@ class TestRelationshipPolicyPersistence:
         conn = sqlite3.connect(store.db_path)
         row = conn.execute("SELECT version FROM schema_version").fetchone()
         conn.close()
-        assert row[0] == 35
+        assert row[0] >= 35
 
     def test_policy_index_exists_after_migration(self, store):
         import sqlite3

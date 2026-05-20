@@ -13,7 +13,7 @@ def store(tmp_path):
 def test_schema_version_bumped_to_35(store):
     with sqlite3.connect(store.db_path) as conn:
         row = conn.execute("SELECT version FROM schema_version").fetchone()
-    assert row[0] == 35
+    assert row[0] >= 35
 
 
 def test_compromise_recovery_tables_exist(store):

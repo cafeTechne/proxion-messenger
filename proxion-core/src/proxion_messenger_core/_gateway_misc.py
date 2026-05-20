@@ -1334,3 +1334,58 @@ class MiscHandlerMixin:
             "window_days": window_days,
             "drills": drills,
         }, default=str))
+
+    # ------------------------------------------------------------------
+    # R17: Delivery and read receipts
+    # ------------------------------------------------------------------
+
+    async def _handle_ack_delivered(self, websocket, data: dict) -> None:
+        """Client signals that a message was delivered. Persists and notifies sender."""
+        from datetime import datetime, timezone
+        message_id = data.get("message_id", "")
+        sender_webid = data.get("sender_webid", "")
+        receiver_webid = self._client_webids.get(websocket, "")
+        if not message_id or not receiver_webid:
+            await websocket.send(json.dumps({"type": "error", "message": "message_id required"}))
+            return
+        delivered_at = datetime.now(timezone.utc).isoformat()
+        if self._store:
+            self._store.save_receipt(message_id, receiver_webid, delivered_at=delivered_at)
+        # Notify original sender if online
+        if sender_webid:
+            for ws in self._sockets_for(sender_webid):
+                try:
+                    await ws.send(json.dumps({
+                        "type": "msg_delivered",
+                        "message_id": message_id,
+                        "receiver_webid": receiver_webid,
+                        "delivered_at": delivered_at,
+                    }))
+                except Exception:
+                    pass
+        await websocket.send(json.dumps({"type": "ack_delivered_ok", "message_id": message_id}))
+
+    async def _handle_ack_read(self, websocket, data: dict) -> None:
+        """Client signals that a message was read. Persists and notifies sender."""
+        from datetime import datetime, timezone
+        message_id = data.get("message_id", "")
+        sender_webid = data.get("sender_webid", "")
+        receiver_webid = self._client_webids.get(websocket, "")
+        if not message_id or not receiver_webid:
+            await websocket.send(json.dumps({"type": "error", "message": "message_id required"}))
+            return
+        read_at = datetime.now(timezone.utc).isoformat()
+        if self._store:
+            self._store.save_receipt(message_id, receiver_webid, read_at=read_at)
+        if sender_webid:
+            for ws in self._sockets_for(sender_webid):
+                try:
+                    await ws.send(json.dumps({
+                        "type": "msg_read",
+                        "message_id": message_id,
+                        "receiver_webid": receiver_webid,
+                        "read_at": read_at,
+                    }))
+                except Exception:
+                    pass
+        await websocket.send(json.dumps({"type": "ack_read_ok", "message_id": message_id}))

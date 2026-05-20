@@ -591,7 +591,14 @@ class AgentState:
     # Persistence
     # ------------------------------------------------------------------
 
-    def save(self, path: Union[str, Path], passphrase: bytes) -> None:
+    def save(
+        self,
+        path: Union[str, Path],
+        passphrase: Optional[bytes] = None,
+        *,
+        unlock_mode: str = "passphrase",
+        identity_id: Optional[str] = None,
+    ) -> None:
         """Serialise and write agent state to *path*.
 
         The file is written atomically: a ``.tmp`` sibling is written first,
@@ -603,8 +610,15 @@ class AgentState:
         path:
             Destination file path.  Parent directory must exist.
         passphrase:
-            Byte string used to encrypt both private keys.  Must be the same
-            value passed to :meth:`load` to recover the state.
+            Byte string used to encrypt both private keys.  Required when
+            ``unlock_mode='passphrase'`` (the default).
+        unlock_mode:
+            ``'passphrase'`` (default) or ``'keychain'``.  Keychain mode
+            generates a random wrap key and stores it in the OS credential
+            store; no passphrase is needed on subsequent loads.
+        identity_id:
+            Unique identifier for the keychain entry (keychain mode only).
+            Defaults to the path stem when not provided.
 
         Raises
         ------
@@ -615,10 +629,36 @@ class AgentState:
         tmp = path.with_suffix(path.suffix + ".tmp")
         bak = path.with_suffix(path.suffix + ".bak")
 
-        # Passphrase strength policy: minimum 12 bytes unless overridden
-        import os as _os_pp
-        if len(passphrase) < 12 and _os_pp.environ.get("PROXION_ALLOW_WEAK_PASSPHRASE") != "1":
-            raise PersistError("passphrase too weak: must be at least 12 characters")
+        from .key_envelope import encrypt_key_bundle
+
+        if unlock_mode == "keychain":
+            from .keychain_store import generate_and_store_wrap_key, is_keychain_available
+            if identity_id is None:
+                identity_id = path.stem
+            if not is_keychain_available():
+                raise PersistError("keychain is not available on this system")
+            wrap_key = generate_and_store_wrap_key(identity_id)
+            state_kdf_base: dict = {
+                "scheme": "keychain-aes256gcm-v1",
+                "unlock_mode": "keychain",
+                "identity_id": identity_id,
+            }
+        elif unlock_mode == "passphrase":
+            if passphrase is None:
+                raise PersistError("passphrase is required when unlock_mode='passphrase'")
+            import os as _os_pp
+            if len(passphrase) < 12 and _os_pp.environ.get("PROXION_ALLOW_WEAK_PASSPHRASE") != "1":
+                raise PersistError("passphrase too weak: must be at least 12 characters")
+            from .key_envelope import derive_wrap_key_scrypt
+            salt = os.urandom(16)
+            wrap_key = derive_wrap_key_scrypt(passphrase, salt)
+            state_kdf_base = {
+                "scheme": "scrypt-aes256gcm-v1",
+                "salt_b64": base64.b64encode(salt).decode("ascii"),
+                "n": 32768, "r": 8, "p": 1, "dklen": 32,
+            }
+        else:
+            raise PersistError(f"unknown unlock_mode: {unlock_mode!r}")
 
         # Serialize private keys to PKCS8 DER (unencrypted)
         identity_der = self.identity_key.private_bytes(Encoding.DER, PrivateFormat.PKCS8, NoEncryption())
@@ -628,16 +668,9 @@ class AgentState:
             "store_key_der": base64.b64encode(store_der).decode("ascii"),
         }
 
-        # Derive wrap key and encrypt
-        from .key_envelope import derive_wrap_key_scrypt, encrypt_key_bundle
-        salt = os.urandom(16)
-        wrap_key = derive_wrap_key_scrypt(passphrase, salt)
         envelope = encrypt_key_bundle(key_bundle, wrap_key)
-
         state_kdf = {
-            "scheme": "scrypt-aes256gcm-v1",
-            "salt_b64": base64.b64encode(salt).decode("ascii"),
-            "n": 32768, "r": 8, "p": 1, "dklen": 32,
+            **state_kdf_base,
             "nonce_b64": envelope["nonce_b64"],
             "ciphertext_b64": envelope["ciphertext_b64"],
         }
@@ -677,7 +710,7 @@ class AgentState:
             raise PersistError(f"failed to write agent state to {path}: {exc}") from exc
 
     @classmethod
-    def load(cls, path: Union[str, Path], passphrase: bytes) -> "AgentState":
+    def load(cls, path: Union[str, Path], passphrase: Optional[bytes] = None) -> "AgentState":
         """Load and decrypt agent state from *path*.
 
         Parameters
@@ -722,12 +755,22 @@ class AgentState:
                 if data.get("version", 0) != 1:
                     raise PersistError(f"unsupported state version: {data.get('version')}")
 
-                # New format: scrypt-aes256gcm-v1 key envelope
+                # New format: scrypt-aes256gcm-v1 or keychain-aes256gcm-v1 key envelope
                 if "state_kdf" in data:
                     kdf = data["state_kdf"]
-                    from .key_envelope import derive_wrap_key_scrypt, decrypt_key_bundle
-                    salt = base64.b64decode(kdf["salt_b64"])
-                    wrap_key = derive_wrap_key_scrypt(passphrase, salt)
+                    from .key_envelope import decrypt_key_bundle
+                    if kdf.get("unlock_mode") == "keychain":
+                        from .keychain_store import load_wrap_key
+                        _kid = kdf.get("identity_id", Path(p).stem)
+                        wrap_key = load_wrap_key(_kid)
+                        if wrap_key is None:
+                            raise PersistError(f"keychain wrap key not found for identity '{_kid}'")
+                    else:
+                        if passphrase is None:
+                            raise PersistError("passphrase required to load this state file")
+                        from .key_envelope import derive_wrap_key_scrypt
+                        salt = base64.b64decode(kdf["salt_b64"])
+                        wrap_key = derive_wrap_key_scrypt(passphrase, salt)
                     bundle = decrypt_key_bundle(kdf, wrap_key)
                     from cryptography.hazmat.primitives.serialization import load_der_private_key
                     try:
@@ -747,6 +790,8 @@ class AgentState:
                         raise PersistError("invalid passphrase or corrupted state") from exc
                 else:
                     # Legacy PEM format — load as before; next save will upgrade
+                    if passphrase is None:
+                        raise PersistError("passphrase required to load legacy PEM state file")
                     identity_key = _ed25519_from_pem(data["identity_key_pem"], passphrase)
                     store_key = _x25519_from_pem(data["store_key_pem"], passphrase)
 

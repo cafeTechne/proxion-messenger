@@ -4,7 +4,7 @@ from proxion_messenger_core.local_store import LocalStore
 
 
 def test_schema_version_is_39():
-    assert LocalStore._SCHEMA_VERSION == 39
+    assert LocalStore._SCHEMA_VERSION >= 39
 
 
 def test_evidence_verification_table_exists(tmp_path):

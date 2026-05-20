@@ -38,7 +38,7 @@ class LocalStore:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # Current schema version — increment when adding new migrations below
-    _SCHEMA_VERSION = 39
+    _SCHEMA_VERSION = 42
 
     # Set by _init_db if PRAGMA integrity_check fails — blocks mutating operations
     _integrity_ok: bool = True
@@ -778,6 +778,57 @@ class LocalStore:
                 )""",
                 """CREATE INDEX IF NOT EXISTS idx_evidence_verification_records_time
                    ON evidence_verification_records(verified_at)""",
+            ],
+            # 40: DM forward-secret session tables (X3DH + chain ratchet)
+            [
+                """CREATE TABLE IF NOT EXISTS dm_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    peer_webid TEXT NOT NULL,
+                    owner_webid TEXT NOT NULL,
+                    root_key_b64 TEXT NOT NULL,
+                    send_chain_key_b64 TEXT NOT NULL,
+                    recv_chain_key_b64 TEXT NOT NULL,
+                    send_count INTEGER NOT NULL DEFAULT 0,
+                    recv_count INTEGER NOT NULL DEFAULT 0,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_dm_sessions_peer_owner
+                   ON dm_sessions(peer_webid, owner_webid)""",
+                """CREATE TABLE IF NOT EXISTS dm_prekeys (
+                    prekey_id INTEGER PRIMARY KEY,
+                    owner_webid TEXT NOT NULL,
+                    pub_b64 TEXT NOT NULL,
+                    priv_wrapped_b64 TEXT NOT NULL,
+                    one_time INTEGER NOT NULL DEFAULT 1,
+                    used INTEGER NOT NULL DEFAULT 0,
+                    created_at REAL NOT NULL
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_dm_prekeys_owner_used
+                   ON dm_prekeys(owner_webid, used)""",
+            ],
+            # 41: persistent rate-limit buckets (survive process restart)
+            [
+                """CREATE TABLE IF NOT EXISTS rate_limit_buckets (
+                    bucket_key TEXT PRIMARY KEY,
+                    count INTEGER NOT NULL,
+                    window_start REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_rate_limit_buckets_updated
+                   ON rate_limit_buckets(updated_at)""",
+            ],
+            # 42: delivery and read receipts
+            [
+                """CREATE TABLE IF NOT EXISTS message_receipts (
+                    message_id TEXT NOT NULL,
+                    receiver_webid TEXT NOT NULL,
+                    delivered_at TEXT,
+                    read_at TEXT,
+                    PRIMARY KEY (message_id, receiver_webid)
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_message_receipts_read_at
+                   ON message_receipts(read_at)""",
             ],
         ]
 
@@ -3204,57 +3255,86 @@ class LocalStore:
                     pass
         return counts
 
-    def search_messages(self, query: str, member_thread_ids: list[str] | None = None, limit: int = 50, *, thread_id: str | None = None) -> list[dict]:
+    def search_messages(
+        self,
+        query: str,
+        member_thread_ids: list[str] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        thread_id: str | None = None,
+        from_webid: str | None = None,
+        before: str | None = None,
+        after: str | None = None,
+    ) -> list[dict]:
+        """FTS search with optional filters and pagination.
+
+        Parameters
+        ----------
+        query:       FTS5 match expression.
+        member_thread_ids: restrict to these thread IDs (ignored if thread_id given).
+        limit:       max results (capped at 100).
+        offset:      skip first N results (for cursor pagination).
+        thread_id:   restrict to a single thread.
+        from_webid:  restrict to messages from this sender.
+        before:      ISO-8601 timestamp upper bound (exclusive).
+        after:       ISO-8601 timestamp lower bound (inclusive).
+
+        Returns
+        -------
+        list of message dicts, each with a ``next_offset`` key equal to
+        ``offset + len(results)`` so callers can build a pagination cursor.
+        """
         limit = min(limit, 100)
         if not query.strip():
             return []
+
+        conditions = ["messages_fts MATCH ?"]
+        params: list = [query]
+
+        if thread_id:
+            conditions.append("m.thread_id = ?")
+            params.append(thread_id)
+        elif member_thread_ids:
+            placeholders = ",".join("?" * len(member_thread_ids))
+            conditions.append(f"m.thread_id IN ({placeholders})")
+            params.extend(member_thread_ids)
+
+        if from_webid:
+            conditions.append("m.from_webid = ?")
+            params.append(from_webid)
+        if after:
+            conditions.append("m.timestamp >= ?")
+            params.append(after)
+        if before:
+            conditions.append("m.timestamp < ?")
+            params.append(before)
+
+        where = " AND ".join(conditions)
+        params.extend([limit, offset])
+
         with self._conn() as conn:
             try:
-                if thread_id:
-                    rows = conn.execute(
-                        """
-                        SELECT m.message_id, m.thread_id, m.content, m.from_webid,
-                               m.from_display_name, m.timestamp, m.seq_num, m.prev_hash
-                        FROM messages_fts f
-                        JOIN messages m ON m.rowid = f.rowid
-                        WHERE messages_fts MATCH ?
-                          AND m.thread_id = ?
-                        ORDER BY rank
-                        LIMIT ?
-                        """,
-                        [query, thread_id, limit]
-                    ).fetchall()
-                elif member_thread_ids:
-                    placeholders = ','.join('?' * len(member_thread_ids))
-                    rows = conn.execute(
-                        f"""
-                        SELECT m.message_id, m.thread_id, m.content, m.from_webid,
-                               m.from_display_name, m.timestamp, m.seq_num, m.prev_hash
-                        FROM messages_fts f
-                        JOIN messages m ON m.rowid = f.rowid
-                        WHERE messages_fts MATCH ?
-                          AND m.thread_id IN ({placeholders})
-                        ORDER BY rank
-                        LIMIT ?
-                        """,
-                        [query] + member_thread_ids + [limit]
-                    ).fetchall()
-                else:
-                    rows = conn.execute(
-                        """
-                        SELECT m.message_id, m.thread_id, m.content, m.from_webid,
-                               m.from_display_name, m.timestamp, m.seq_num, m.prev_hash
-                        FROM messages_fts f
-                        JOIN messages m ON m.rowid = f.rowid
-                        WHERE messages_fts MATCH ?
-                        ORDER BY rank
-                        LIMIT ?
-                        """,
-                        [query, limit]
-                    ).fetchall()
+                rows = conn.execute(
+                    f"""
+                    SELECT m.message_id, m.thread_id, m.content, m.from_webid,
+                           m.from_display_name, m.timestamp, m.seq_num, m.prev_hash
+                    FROM messages_fts f
+                    JOIN messages m ON m.rowid = f.rowid
+                    WHERE {where}
+                    ORDER BY rank
+                    LIMIT ? OFFSET ?
+                    """,
+                    params,
+                ).fetchall()
             except Exception:
                 return []
-        return [dict(r) for r in rows]
+
+        results = [dict(r) for r in rows]
+        next_off = offset + len(results)
+        for r in results:
+            r["next_offset"] = next_off
+        return results
 
     # ------------------------------------------------------------------
     # Credential anomalies (schema v33)
@@ -4177,3 +4257,211 @@ class LocalStore:
                     (limit,),
                 ).fetchall()
             return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # DM session helpers (schema v40)
+    # ------------------------------------------------------------------
+
+    def save_dm_session(self, session: dict) -> None:
+        """Persist a DM session state dict (from e2e_session.session_to_dict)."""
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO dm_sessions
+                   (session_id, peer_webid, owner_webid, root_key_b64,
+                    send_chain_key_b64, recv_chain_key_b64,
+                    send_count, recv_count, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    session["session_id"],
+                    session["peer_webid"],
+                    session["owner_webid"],
+                    session["root_key"],
+                    session["send_chain_key"],
+                    session["recv_chain_key"],
+                    session.get("send_count", 0),
+                    session.get("recv_count", 0),
+                    time.time(),
+                    time.time(),
+                ),
+            )
+
+    def get_dm_session(self, owner_webid: str, peer_webid: str) -> dict | None:
+        """Return the most recent session state for an owner/peer pair."""
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    """SELECT * FROM dm_sessions
+                       WHERE owner_webid = ? AND peer_webid = ?
+                       ORDER BY updated_at DESC LIMIT 1""",
+                    (owner_webid, peer_webid),
+                ).fetchone()
+                if row is None:
+                    return None
+                d = dict(row)
+                return {
+                    "session_id": d["session_id"],
+                    "peer_webid": d["peer_webid"],
+                    "owner_webid": d["owner_webid"],
+                    "root_key": d["root_key_b64"],
+                    "send_chain_key": d["send_chain_key_b64"],
+                    "recv_chain_key": d["recv_chain_key_b64"],
+                    "send_count": d["send_count"],
+                    "recv_count": d["recv_count"],
+                }
+            except Exception:
+                return None
+
+    def save_prekey(
+        self,
+        prekey_id: int,
+        owner_webid: str,
+        pub_b64: str,
+        priv_wrapped_b64: str,
+        one_time: bool = True,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO dm_prekeys
+                   (prekey_id, owner_webid, pub_b64, priv_wrapped_b64, one_time, used, created_at)
+                   VALUES (?, ?, ?, ?, ?, 0, ?)""",
+                (prekey_id, owner_webid, pub_b64, priv_wrapped_b64, 1 if one_time else 0, time.time()),
+            )
+
+    def get_signed_prekey(self, owner_webid: str) -> dict | None:
+        """Return the stored signed prekey (one_time=0) for an owner."""
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT * FROM dm_prekeys WHERE owner_webid=? AND one_time=0 ORDER BY created_at DESC LIMIT 1",
+                    (owner_webid,),
+                ).fetchone()
+                return dict(row) if row else None
+            except Exception:
+                return None
+
+    def claim_one_time_prekey(self, owner_webid: str) -> dict | None:
+        """Return and mark-used one unused one-time prekey for owner_webid."""
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT * FROM dm_prekeys WHERE owner_webid=? AND one_time=1 AND used=0 ORDER BY created_at ASC LIMIT 1",
+                    (owner_webid,),
+                ).fetchone()
+                if row is None:
+                    return None
+                conn.execute(
+                    "UPDATE dm_prekeys SET used=1 WHERE prekey_id=?",
+                    (row["prekey_id"],),
+                )
+                return dict(row)
+            except Exception:
+                return None
+
+    def get_prekey_bundle(self, owner_webid: str) -> dict | None:
+        """Return public prekey bundle (no private halves) for session initiation."""
+        spk = self.get_signed_prekey(owner_webid)
+        if not spk:
+            return None
+        opk = self.claim_one_time_prekey(owner_webid)
+        bundle: dict = {
+            "owner_webid": owner_webid,
+            "signed_prekey_id": spk["prekey_id"],
+            "signed_prekey_pub_b64": spk["pub_b64"],
+        }
+        if opk:
+            bundle["one_time_prekey_id"] = opk["prekey_id"]
+            bundle["one_time_prekey_pub_b64"] = opk["pub_b64"]
+        return bundle
+
+    # ------------------------------------------------------------------
+    # Persistent rate-limit buckets (schema v41)
+    # ------------------------------------------------------------------
+
+    def rate_limit_check_and_increment(
+        self, bucket_key: str, limit: int, window_seconds: float
+    ) -> bool:
+        """Return True if the request is allowed; False if rate-limited.
+
+        Uses a sliding window reset: if the stored window has expired, reset count to 1.
+        """
+        now = time.time()
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT count, window_start FROM rate_limit_buckets WHERE bucket_key=?",
+                    (bucket_key,),
+                ).fetchone()
+                if row is None or now - row["window_start"] >= window_seconds:
+                    conn.execute(
+                        """INSERT OR REPLACE INTO rate_limit_buckets
+                           (bucket_key, count, window_start, updated_at) VALUES (?, 1, ?, ?)""",
+                        (bucket_key, now, now),
+                    )
+                    return True
+                if row["count"] >= limit:
+                    return False
+                conn.execute(
+                    "UPDATE rate_limit_buckets SET count=count+1, updated_at=? WHERE bucket_key=?",
+                    (now, bucket_key),
+                )
+                return True
+            except Exception:
+                return True  # fail open on DB error
+
+    def prune_rate_limit_buckets(self, cutoff_ts: float) -> int:
+        """Delete expired rate-limit buckets. Returns number deleted."""
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    "DELETE FROM rate_limit_buckets WHERE updated_at < ?", (cutoff_ts,)
+                )
+                return conn.execute("SELECT changes()").fetchone()[0]
+            except Exception:
+                return 0
+
+    # ------------------------------------------------------------------
+    # Delivery / read receipts (schema v42)
+    # ------------------------------------------------------------------
+
+    def save_receipt(
+        self,
+        message_id: str,
+        receiver_webid: str,
+        delivered_at: str | None = None,
+        read_at: str | None = None,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT INTO message_receipts (message_id, receiver_webid, delivered_at, read_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(message_id, receiver_webid) DO UPDATE SET
+                     delivered_at = COALESCE(excluded.delivered_at, message_receipts.delivered_at),
+                     read_at = COALESCE(excluded.read_at, message_receipts.read_at)""",
+                (message_id, receiver_webid, delivered_at, read_at),
+            )
+
+    def get_receipts(self, message_id: str) -> list[dict]:
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM message_receipts WHERE message_id=?",
+                    (message_id,),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+
+    def rebuild_messages_fts(self) -> None:
+        """Rebuild the FTS5 index from scratch (repair stale/partial index)."""
+        with self._conn() as conn:
+            try:
+                conn.execute("DELETE FROM messages_fts")
+                conn.execute(
+                    """INSERT INTO messages_fts(rowid, message_id, thread_id, content,
+                       from_webid, from_display_name, timestamp)
+                       SELECT rowid, message_id, thread_id, content,
+                              from_webid, from_display_name, timestamp
+                       FROM messages"""
+                )
+            except Exception as exc:
+                logger.warning("rebuild_messages_fts failed: %s", exc)

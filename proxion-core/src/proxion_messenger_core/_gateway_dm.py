@@ -411,10 +411,30 @@ class DmHandlerMixin:
             "reply_to_id": data.get("reply_to_id"),
             "local": True,
         }
-        # Forward E2E fields if present (additive — no migration needed)
-        for _k in ("e2e", "nonce", "msg_num", "key_header", "ratchet_pub", "pn", "x25519_pub"):
-            if _k in data:
-                event[_k] = data[_k]
+        # E2E v2: X3DH session-encrypted DM
+        if data.get("e2e_v") == 2 and self._store:
+            _session_id = data.get("session_id")
+            if _session_id and data.get("ciphertext_b64"):
+                # Client already encrypted — relay as-is, annotate event
+                event["e2e_v"] = 2
+                event["session_id"] = _session_id
+                for _ek in ("ciphertext_b64", "nonce_b64", "msg_num", "header"):
+                    if _ek in data:
+                        event[_ek] = data[_ek]
+            else:
+                # No active session — send peer's prekey bundle to client
+                _bundle = self._store.get_prekey_bundle(target_webid) if target_webid else None
+                await websocket.send(json.dumps({
+                    "type": "dm_session_init_required",
+                    "peer_webid": target_webid,
+                    "prekey_bundle": _bundle,
+                }))
+                return
+        else:
+            # Forward legacy E2E fields if present (additive — no migration needed)
+            for _k in ("e2e", "nonce", "msg_num", "key_header", "ratchet_pub", "pn", "x25519_pub"):
+                if _k in data:
+                    event[_k] = data[_k]
 
         # Persist to store
         if self._store:
@@ -542,3 +562,36 @@ class DmHandlerMixin:
                     "message": f"Target {target_webid!r} not connected and no gateway URL known. "
                                "Share your Proxion address (DID@gateway-url) so peers can reach you.",
                 }))
+
+    async def _handle_upload_prekeys(self, websocket, data: dict) -> None:
+        """Store caller's prekey bundle (signed prekey + one-time prekeys) in local DB."""
+        owner_webid = self._client_webids.get(websocket, "")
+        if not owner_webid or not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "not_registered"}))
+            return
+        bundle = data.get("bundle", {})
+        spk_id = bundle.get("signed_prekey_id")
+        spk_pub = bundle.get("signed_prekey_pub_b64")
+        spk_priv = bundle.get("signed_prekey_priv_b64", "")
+        if spk_id and spk_pub:
+            self._store.save_prekey(spk_id, owner_webid, spk_pub, spk_priv, one_time=False)
+        for opk in bundle.get("one_time_prekeys", []):
+            opk_id = opk.get("id")
+            opk_pub = opk.get("pub_b64")
+            opk_priv = opk.get("priv_b64", "")
+            if opk_id and opk_pub:
+                self._store.save_prekey(opk_id, owner_webid, opk_pub, opk_priv, one_time=True)
+        await websocket.send(json.dumps({"type": "prekeys_uploaded", "owner_webid": owner_webid}))
+
+    async def _handle_get_prekey_bundle(self, websocket, data: dict) -> None:
+        """Return the public prekey bundle for a peer (one-time prekey is claimed and consumed)."""
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no_store"}))
+            return
+        peer_webid = data.get("peer_webid", "")
+        bundle = self._store.get_prekey_bundle(peer_webid) if peer_webid else None
+        await websocket.send(json.dumps({
+            "type": "prekey_bundle",
+            "peer_webid": peer_webid,
+            "bundle": bundle,
+        }))

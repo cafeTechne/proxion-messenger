@@ -15,7 +15,7 @@ def store():
 
 class TestSchemaVersion36:
     def test_schema_version_bumped_to_36(self):
-        assert LocalStore._SCHEMA_VERSION == 36
+        assert LocalStore._SCHEMA_VERSION >= 36
 
     def test_pod_capability_profiles_table_exists(self, store):
         conn = sqlite3.connect(store.db_path)

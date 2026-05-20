@@ -592,6 +592,52 @@ def compose_unreaction(
     )
 
 
+def compose_delivered_receipt(
+    identity_key: Ed25519PrivateKey,
+    cert: RelationshipCertificate,
+    message_id: str,
+    delivered_at: Optional[datetime.datetime] = None,
+) -> Message:
+    """Compose a delivery receipt (message_type='delivered_receipt').
+
+    reply_to_id is set to the original message_id.
+    content is the ISO-8601 delivery timestamp.
+    """
+    if delivered_at is None:
+        delivered_at = datetime.datetime.now(datetime.timezone.utc)
+    return compose(
+        identity_key=identity_key,
+        cert=cert,
+        content=delivered_at.isoformat(),
+        now=delivered_at,
+        reply_to_id=message_id,
+        message_type="delivered_receipt",
+    )
+
+
+def compose_read_receipt(
+    identity_key: Ed25519PrivateKey,
+    cert: RelationshipCertificate,
+    message_id: str,
+    read_at: Optional[datetime.datetime] = None,
+) -> Message:
+    """Compose a read receipt (message_type='read_receipt').
+
+    reply_to_id is set to the original message_id.
+    content is the ISO-8601 read timestamp.
+    """
+    if read_at is None:
+        read_at = datetime.datetime.now(datetime.timezone.utc)
+    return compose(
+        identity_key=identity_key,
+        cert=cert,
+        content=read_at.isoformat(),
+        now=read_at,
+        reply_to_id=message_id,
+        message_type="read_receipt",
+    )
+
+
 def apply_unreactions(messages: list[Message]) -> list[Message]:
     """Remove reaction messages that have been authoritatively un-reacted.
 

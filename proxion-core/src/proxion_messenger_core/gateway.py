@@ -575,7 +575,8 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
     def _check_ws_rate_limit(self, websocket) -> bool:
         """Return True if command is allowed; False if global rate limit exceeded.
 
-        Global limit: 30 commands per 10-second sliding window (burst cap 60).
+        Global limit: 60 commands per 10-second sliding window.
+        Uses in-memory counters (per-socket) — SQLite is too slow for per-command writes.
         """
         import time as _time
         now = _time.monotonic()
@@ -587,13 +588,17 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
         if now - window_start >= 10.0:
             self._rate_counters[websocket] = [1, now]
             return True
-        if count >= 60:  # hard burst ceiling
+        if count >= 60:
             return False
         entry[0] += 1
         return True
 
     def _check_auth_rate_limit(self, websocket) -> bool:
         """Return True if auth command is allowed (5 per minute per socket)."""
+        webid = self._client_webids.get(websocket, "")
+        if self._store and webid:
+            bucket_key = f"auth:{webid}"
+            return self._store.rate_limit_check_and_increment(bucket_key, limit=5, window_seconds=60.0)
         import time as _time
         now = _time.monotonic()
         entry = self._rate_auth_counters.get(websocket)
@@ -611,6 +616,10 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
 
     def _check_heavy_rate_limit(self, websocket) -> bool:
         """Return True if heavy command is allowed (10 per minute per socket)."""
+        webid = self._client_webids.get(websocket, "")
+        if self._store and webid:
+            bucket_key = f"heavy:{webid}"
+            return self._store.rate_limit_check_and_increment(bucket_key, limit=10, window_seconds=60.0)
         import time as _time
         now = _time.monotonic()
         entry = self._rate_heavy_counters.get(websocket)
@@ -825,6 +834,14 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 await self._handle_get_all_presence(websocket, data)
             elif cmd == "search":
                 await self._handle_search(websocket, data)
+            elif cmd == "ack_delivered":
+                await self._handle_ack_delivered(websocket, data)
+            elif cmd == "ack_read":
+                await self._handle_ack_read(websocket, data)
+            elif cmd == "upload_prekeys":
+                await self._handle_upload_prekeys(websocket, data)
+            elif cmd == "get_prekey_bundle":
+                await self._handle_get_prekey_bundle(websocket, data)
             elif cmd == "join_voice_channel":
                 await self._handle_join_voice_channel(websocket, data)
             elif cmd == "get_identity":
@@ -2548,28 +2565,40 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                     await writer.drain()
                     return
 
-                # ── GET /metrics — Prometheus text format (R13.4) ──
+                # ── GET /metrics — OpenMetrics text format (R13.4, R17) ──
                 if method == "GET" and path == "/metrics":
-                    _metrics_peer = writer.get_extra_info("peername")
-                    if _metrics_peer and _metrics_peer[0] not in ("127.0.0.1", "::1"):
-                        _err = b'{"error":"forbidden"}'
-                        writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\nContent-Length: " +
-                                     str(len(_err)).encode() + b"\r\n\r\n" + _err)
-                        await writer.drain()
-                        return
                     _uptime = time.time() - self._start_time
+                    from .security_policy import get_policy
+                    _tier = get_policy().get_tier()
+                    _relay_depth = 0
+                    if self._store:
+                        try:
+                            _relay_depth = len(self._store.get_pending_relay_messages(max_attempts=99))
+                        except Exception:
+                            pass
                     lines = [
                         "# HELP proxion_uptime_seconds Seconds since gateway started",
                         "# TYPE proxion_uptime_seconds gauge",
                         f"proxion_uptime_seconds {_uptime:.3f}",
+                        "# HELP proxion_security_tier Current adaptive security tier (0-3)",
+                        "# TYPE proxion_security_tier gauge",
+                        f"proxion_security_tier {_tier}",
+                        "# HELP proxion_relay_queue_depth Pending relay messages awaiting delivery",
+                        "# TYPE proxion_relay_queue_depth gauge",
+                        f"proxion_relay_queue_depth {_relay_depth}",
+                        "# HELP proxion_ws_connections_current Active WebSocket connections",
+                        "# TYPE proxion_ws_connections_current gauge",
+                        f"proxion_ws_connections_current {len(self._client_webids)}",
                     ]
                     for _k, _v in self._metrics.items():
                         _typ = "gauge" if _k.endswith("_current") else "counter"
+                        _help = _k.replace("_", " ")
+                        lines.append(f"# HELP proxion_{_k} {_help}")
                         lines.append(f"# TYPE proxion_{_k} {_typ}")
                         lines.append(f"proxion_{_k} {_v}")
                     _mtext = ("\n".join(lines) + "\n").encode("utf-8")
                     writer.write(
-                        b"HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\n"
+                        b"HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4; charset=utf-8\r\n"
                         + _NO_STORE_HDR
                         + b"Content-Length: " + str(len(_mtext)).encode() + b"\r\n\r\n" + _mtext
                     )

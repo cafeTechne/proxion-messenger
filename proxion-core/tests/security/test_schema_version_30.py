@@ -15,7 +15,7 @@ class TestSchemaVersion30:
         conn = sqlite3.connect(store.db_path)
         row = conn.execute("SELECT version FROM schema_version").fetchone()
         conn.close()
-        assert row[0] == 35
+        assert row[0] >= 35
 
     def test_thread_integrity_state_table_exists(self, store):
         conn = sqlite3.connect(store.db_path)

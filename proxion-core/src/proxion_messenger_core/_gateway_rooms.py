@@ -1473,6 +1473,24 @@ class RoomHandlerMixin:
                 "room_id": room_id,
                 "webid": target_webid,
             }))
+            # R17: re-key room so kicked member cannot decrypt future messages
+            try:
+                from .room_rekey import rotate_room_key, build_room_key_update_event
+                remaining = list(self._store.get_room_members(room_id)) if self._store else []
+                rekey_result = rotate_room_key(room_id, remaining, store=self._store)
+                rekey_event = build_room_key_update_event(rekey_result)
+                if room_id in self._local_rooms:
+                    for ws in list(self._local_rooms[room_id]["members"]):
+                        try:
+                            sealed = rekey_result["sealed_keys"].get(
+                                self._client_webids.get(ws, ""), None
+                            )
+                            payload = {**rekey_event, "sealed_key": sealed}
+                            await ws.send(json.dumps(payload))
+                        except Exception:
+                            pass
+            except Exception as _rk_exc:
+                logger.warning("room_rekey after kick failed: %s", _rk_exc)
 
     async def _handle_pin_message(self, websocket, data: dict) -> None:
         message_id = data.get("message_id", "")
@@ -1642,7 +1660,7 @@ class RoomHandlerMixin:
         query = (data.get("query") or "").strip()
         webid = self._client_webids.get(websocket)
         if not webid or not query:
-            await websocket.send(json.dumps({"type": "search_results", "query": query or "", "results": []}))
+            await websocket.send(json.dumps({"type": "search_results", "query": query or "", "results": [], "next_offset": 0}))
             return
         member_threads: list = [
             rid for rid, room in self._local_rooms.items()
@@ -1652,16 +1670,31 @@ class RoomHandlerMixin:
             dm_thread_ids = [t["thread_id"] for t in self._store.get_dm_threads(owner_webid=webid)]
             member_threads = list(set(member_threads) | set(dm_thread_ids))
 
+        # Optional filters from client
+        filter_thread_id = data.get("thread_id") or None
+        filter_from_webid = data.get("from_webid") or None
+        filter_before = data.get("before") or None
+        filter_after = data.get("after") or None
+        limit = min(int(data.get("limit") or 50), 100)
+        offset = max(int(data.get("offset") or 0), 0)
+
         results = []
-        dm_thread_map = {}
+        next_offset = offset
         if self._store:
-            if member_threads:
-                rows = self._store.search_messages(query, member_threads, limit=50)
-            else:
-                rows = []
+            rows = self._store.search_messages(
+                query,
+                member_threads if not filter_thread_id else None,
+                limit=limit,
+                offset=offset,
+                thread_id=filter_thread_id,
+                from_webid=filter_from_webid,
+                before=filter_before,
+                after=filter_after,
+            )
+            next_offset = offset + len(rows)
             for row in rows:
                 room = self._local_rooms.get(row["thread_id"], {})
-                thread_name = room.get("name") or dm_thread_map.get(row["thread_id"], row["thread_id"])
+                thread_name = room.get("name") or row["thread_id"]
                 results.append({
                     "message_id": row["message_id"],
                     "thread_id": row["thread_id"],
@@ -1685,12 +1718,14 @@ class RoomHandlerMixin:
                             "from_display_name": msg.get("from_display_name", ""),
                             "timestamp": msg.get("timestamp", ""),
                         })
-                        if len(results) >= 50:
+                        if len(results) >= limit:
                             break
+            next_offset = offset + len(results)
         await websocket.send(json.dumps({
             "type": "search_results",
             "query": query,
             "results": results,
+            "next_offset": next_offset,
         }))
 
     async def _handle_typing(self, websocket, data: dict) -> None:

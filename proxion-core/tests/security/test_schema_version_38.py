@@ -17,7 +17,7 @@ def store():
 
 class TestSchemaVersion38:
     def test_schema_version_bumped_to_38(self):
-        assert LocalStore._SCHEMA_VERSION == 38
+        assert LocalStore._SCHEMA_VERSION >= 38
 
     def test_security_slo_snapshots_table_exists(self, store):
         conn = sqlite3.connect(store.db_path)
