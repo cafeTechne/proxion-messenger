@@ -48,6 +48,7 @@ from __future__ import annotations
 import base64
 import os
 import secrets
+import time as _time
 from dataclasses import dataclass, field
 
 from cryptography.hazmat.primitives import hashes, serialization
@@ -104,6 +105,9 @@ def _x25519_pub_from_ed25519_pub(ed25519_pub_bytes: bytes) -> X25519PublicKey:
     """
     return X25519PublicKey.from_public_bytes(ed25519_pub_bytes)
 
+
+# Maximum number of skipped message keys to cache before raising ValueError.
+MAX_SKIP = 100
 
 # ---------------------------------------------------------------------------
 # Chain ratchet
@@ -201,6 +205,8 @@ class SessionState:
     # True when we have recv_ratchet_pub but haven't yet done a send-side DH ratchet step.
     # Set on init_inbound (Bob knows Alice's ratchet pub from the X3DH header immediately).
     needs_ratchet_on_send: bool = False
+    # Cache of skipped message keys: "{ratchet_pub_b64}:{msg_num}" -> msg_key_b64
+    skipped_keys: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +261,7 @@ def generate_prekey_bundle(owner_webid: str, num_one_time_prekeys: int = 5) -> d
         "signed_prekey_pub_b64": _b64enc(spk_pub_bytes),
         "signed_prekey_priv_b64": _b64enc(spk_priv_bytes),
         "one_time_prekeys": one_time_prekeys,
+        "spk_created_at": _time.time(),
     }
 
 
@@ -523,16 +530,49 @@ def decrypt_session_message(
     ValueError
         If the payload is malformed.
     """
-    # DH ratchet step: if peer included a new ratchet key, advance before decrypting
     incoming_ratchet_pub = payload.get("ratchet_pub_b64")
+    msg_num = payload["msg_num"]
+
+    # --- skipped-key cache lookup ---
+    cache_ratchet = incoming_ratchet_pub or state.recv_ratchet_pub_b64
+    cache_key = f"{cache_ratchet}:{msg_num}"
+    if cache_key in state.skipped_keys:
+        msg_key = _b64dec(state.skipped_keys.pop(cache_key))
+        nonce = msg_num.to_bytes(12, "big")
+        plaintext_bytes = AESGCM(msg_key).decrypt(nonce, _b64dec(payload["ciphertext_b64"]), aad)
+        return state, plaintext_bytes.decode()
+
+    # --- DH ratchet step if peer sent a new ratchet key ---
     if (incoming_ratchet_pub
             and state.send_ratchet_key_priv_b64
             and incoming_ratchet_pub != state.recv_ratchet_pub_b64):
+        # Fill skipped keys for messages we may have missed in the OLD chain.
+        old_ratchet_pub = state.recv_ratchet_pub_b64
+        prev_count = payload.get("prev_send_count", state.recv_count)
+        if old_ratchet_pub and prev_count > state.recv_count:
+            gap = prev_count - state.recv_count
+            if gap > MAX_SKIP:
+                raise ValueError(f"MAX_SKIP exceeded filling old chain: {gap} > {MAX_SKIP}")
+            ck = state.recv_chain_key
+            for n in range(state.recv_count, prev_count):
+                ck, mk = advance_chain(ck)
+                state.skipped_keys[f"{old_ratchet_pub}:{n}"] = _b64enc(mk)
         state = dh_ratchet_advance(state, _b64dec(incoming_ratchet_pub))
 
-    next_chain_key, msg_key = advance_chain(state.recv_chain_key)
-    msg_num = payload["msg_num"]
+    # --- fill skipped keys for in-chain gap (same ratchet key, higher msg_num) ---
+    if msg_num > state.recv_count:
+        gap = msg_num - state.recv_count
+        if gap > MAX_SKIP:
+            raise ValueError(f"MAX_SKIP exceeded: gap {gap} > {MAX_SKIP}")
+        current_ratchet_pub = state.recv_ratchet_pub_b64
+        ck = state.recv_chain_key
+        for n in range(state.recv_count, msg_num):
+            ck, mk = advance_chain(ck)
+            state.skipped_keys[f"{current_ratchet_pub}:{n}"] = _b64enc(mk)
+        state.recv_chain_key = ck
+        state.recv_count = msg_num
 
+    next_chain_key, msg_key = advance_chain(state.recv_chain_key)
     nonce = msg_num.to_bytes(12, "big")
     ciphertext = _b64dec(payload["ciphertext_b64"])
     plaintext_bytes = AESGCM(msg_key).decrypt(nonce, ciphertext, aad)
@@ -562,6 +602,7 @@ def session_to_dict(state: SessionState) -> dict:
         "recv_ratchet_pub_b64": state.recv_ratchet_pub_b64,
         "prev_send_count": state.prev_send_count,
         "needs_ratchet_on_send": state.needs_ratchet_on_send,
+        "skipped_keys": state.skipped_keys,
     }
 
 
@@ -580,4 +621,5 @@ def session_from_dict(d: dict) -> SessionState:
         recv_ratchet_pub_b64=d.get("recv_ratchet_pub_b64", ""),
         prev_send_count=d.get("prev_send_count", 0),
         needs_ratchet_on_send=d.get("needs_ratchet_on_send", False),
+        skipped_keys=d.get("skipped_keys", {}),
     )

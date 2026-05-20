@@ -877,6 +877,22 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 await self._handle_get_sender_key(websocket, data)
             elif cmd == "distribute_sender_key":
                 await self._handle_distribute_sender_key(websocket, data)
+            elif cmd == "ack_sender_key_rotation":
+                await self._handle_ack_sender_key_rotation(websocket, data)
+            elif cmd == "register_device":
+                await self._handle_register_device(websocket, data)
+            elif cmd == "list_devices":
+                await self._handle_list_devices(websocket, data)
+            elif cmd == "unregister_device":
+                await self._handle_unregister_device(websocket, data)
+            elif cmd == "rotate_spk":
+                await self._handle_rotate_spk(websocket, data)
+            elif cmd == "session_unknown":
+                await self._handle_session_unknown(websocket, data)
+            elif cmd == "session_ready":
+                await self._handle_session_ready(websocket, data)
+            elif cmd == "catch_up":
+                await self._handle_catch_up(websocket, data)
             elif cmd == "join_voice_channel":
                 await self._handle_join_voice_channel(websocket, data)
             elif cmd == "get_identity":
@@ -3441,8 +3457,9 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 logger.warning("Retention purge failed: %s", exc)
 
     async def _prekey_replenishment_loop(self) -> None:
-        """Check prekey pool depth for connected users every 15 minutes."""
+        """Check prekey pool depth and SPK age for connected users every 15 minutes."""
         _THRESHOLD = int(__import__("os").environ.get("PROXION_PREKEY_LOW_THRESHOLD", "5"))
+        _SPK_MAX_AGE = float(__import__("os").environ.get("PROXION_SPK_MAX_AGE_SECONDS", "604800"))
         while True:
             await asyncio.sleep(900)  # 15 minutes
             if not self._store:
@@ -3451,6 +3468,7 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 for webid in list(self._webid_sockets.keys()):
                     if not webid:
                         continue
+                    # One-time prekey low-count check
                     count = self._store.count_unused_one_time_prekeys(webid)
                     if count < _THRESHOLD:
                         for ws in self._sockets_for(webid):
@@ -3462,8 +3480,40 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                                 }))
                             except Exception:
                                 pass
+                    # Signed prekey rotation check (7-day default)
+                    stale_spks = self._store.get_expired_signed_prekeys(webid, _SPK_MAX_AGE)
+                    for spk in stale_spks:
+                        for ws in self._sockets_for(webid):
+                            try:
+                                await ws.send(__import__("json").dumps({
+                                    "type": "spk_rotation_needed",
+                                    "prekey_id": spk["prekey_id"],
+                                }))
+                            except Exception:
+                                pass
             except Exception as exc:
                 logger.warning("Prekey replenishment check failed: %s", exc)
+
+    async def _handle_catch_up(self, websocket, data: dict) -> None:
+        """Return messages in a thread that the client missed (seq > since_seq)."""
+        if not self._store:
+            await websocket.send(__import__("json").dumps({
+                "type": "catch_up_batch", "messages": [], "thread_id": "",
+            }))
+            return
+        thread_id = data.get("thread_id", "")
+        since_seq = int(data.get("since_seq", 0))
+        limit = min(int(data.get("limit", 100)), 200)
+        if not thread_id:
+            await websocket.send(__import__("json").dumps({"type": "error", "message": "thread_id required"}))
+            return
+        msgs = self._store.get_messages_since_seq(thread_id, since_seq, limit=limit)
+        await websocket.send(__import__("json").dumps({
+            "type": "catch_up_batch",
+            "thread_id": thread_id,
+            "since_seq": since_seq,
+            "messages": msgs,
+        }))
 
     async def _presence_loop(self):
         """Periodically broadcast presence heartbeats and mark idle users as away."""

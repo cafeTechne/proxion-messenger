@@ -38,7 +38,7 @@ class LocalStore:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # Current schema version — increment when adding new migrations below
-    _SCHEMA_VERSION = 44
+    _SCHEMA_VERSION = 45
 
     # Set by _init_db if PRAGMA integrity_check fails — blocks mutating operations
     _integrity_ok: bool = True
@@ -862,6 +862,28 @@ class LocalStore:
                 )""",
                 """CREATE INDEX IF NOT EXISTS idx_push_subscriptions_owner
                    ON push_subscriptions(owner_webid)""",
+            ],
+            # 45: device registrations, SPK rotation columns, message seq numbers
+            [
+                """CREATE TABLE IF NOT EXISTS device_registrations (
+                    device_id TEXT PRIMARY KEY,
+                    owner_webid TEXT NOT NULL,
+                    device_pub_b64 TEXT NOT NULL,
+                    attestation_b64 TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    last_seen_at REAL
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_device_registrations_owner
+                   ON device_registrations(owner_webid)""",
+                "ALTER TABLE dm_prekeys ADD COLUMN spk_created_at REAL DEFAULT 0",
+                "ALTER TABLE dm_prekeys ADD COLUMN expired INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE messages ADD COLUMN seq INTEGER",
+                """CREATE INDEX IF NOT EXISTS idx_messages_thread_seq
+                   ON messages(thread_id, seq)""",
+                """CREATE TABLE IF NOT EXISTS room_seq_counters (
+                    thread_id TEXT PRIMARY KEY,
+                    next_seq INTEGER NOT NULL DEFAULT 0
+                )""",
             ],
         ]
 
@@ -4696,3 +4718,154 @@ class LocalStore:
                 )
             except Exception:
                 pass
+
+    # ------------------------------------------------------------------
+    # Device registrations (schema v45)
+    # ------------------------------------------------------------------
+
+    def register_device(
+        self,
+        device_id: str,
+        owner_webid: str,
+        device_pub_b64: str,
+        attestation_b64: str,
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO device_registrations
+                   (device_id, owner_webid, device_pub_b64, attestation_b64, created_at, last_seen_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (device_id, owner_webid, device_pub_b64, attestation_b64, time.time(), time.time()),
+            )
+
+    def get_device(self, device_id: str) -> dict | None:
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT * FROM device_registrations WHERE device_id=?",
+                    (device_id,),
+                ).fetchone()
+                return dict(row) if row else None
+            except Exception:
+                return None
+
+    def list_devices(self, owner_webid: str) -> list[dict]:
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM device_registrations WHERE owner_webid=? ORDER BY created_at ASC",
+                    (owner_webid,),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+
+    def unregister_device(self, device_id: str) -> None:
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    "DELETE FROM device_registrations WHERE device_id=?",
+                    (device_id,),
+                )
+            except Exception:
+                pass
+
+    def touch_device(self, device_id: str) -> None:
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    "UPDATE device_registrations SET last_seen_at=? WHERE device_id=?",
+                    (time.time(), device_id),
+                )
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------
+    # SPK rotation helpers (schema v45)
+    # ------------------------------------------------------------------
+
+    def get_expired_signed_prekeys(
+        self, owner_webid: str, max_age_seconds: float
+    ) -> list[dict]:
+        """Return signed (non-one-time) prekeys older than max_age_seconds."""
+        cutoff = time.time() - max_age_seconds
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    """SELECT * FROM dm_prekeys
+                       WHERE owner_webid=? AND one_time=0 AND expired=0
+                             AND spk_created_at > 0 AND spk_created_at < ?""",
+                    (owner_webid, cutoff),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+
+    def mark_prekey_expired(self, prekey_id: int) -> None:
+        """Mark a signed prekey as expired (retained for 48h, then hard-deleted by purge loop)."""
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    "UPDATE dm_prekeys SET expired=1 WHERE prekey_id=?",
+                    (prekey_id,),
+                )
+            except Exception:
+                pass
+
+    def save_prekey_with_timestamp(
+        self,
+        prekey_id: int,
+        owner_webid: str,
+        pub_b64: str,
+        priv_wrapped_b64: str,
+        one_time: bool = True,
+        spk_created_at: float = 0.0,
+    ) -> None:
+        """Like save_prekey but also stores spk_created_at for SPK rotation."""
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO dm_prekeys
+                   (prekey_id, owner_webid, pub_b64, priv_wrapped_b64, one_time, used,
+                    created_at, spk_created_at, expired)
+                   VALUES (?, ?, ?, ?, ?, 0, ?, ?, 0)""",
+                (
+                    prekey_id, owner_webid, pub_b64, priv_wrapped_b64,
+                    1 if one_time else 0, time.time(),
+                    spk_created_at or time.time(),
+                ),
+            )
+
+    # ------------------------------------------------------------------
+    # Message sequence numbers (schema v45)
+    # ------------------------------------------------------------------
+
+    def get_next_seq(self, thread_id: str) -> int:
+        """Atomically increment and return the next sequence number for a thread."""
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT INTO room_seq_counters (thread_id, next_seq)
+                   VALUES (?, 1)
+                   ON CONFLICT(thread_id) DO UPDATE SET next_seq = next_seq + 1""",
+                (thread_id,),
+            )
+            row = conn.execute(
+                "SELECT next_seq FROM room_seq_counters WHERE thread_id=?",
+                (thread_id,),
+            ).fetchone()
+            return row["next_seq"] if row else 1
+
+    def get_messages_since_seq(
+        self, thread_id: str, since_seq: int, limit: int = 100
+    ) -> list[dict]:
+        """Return messages with seq > since_seq, ascending, bounded by limit."""
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    """SELECT * FROM messages
+                       WHERE thread_id=? AND seq IS NOT NULL AND seq > ?
+                       ORDER BY seq ASC LIMIT ?""",
+                    (thread_id, since_seq, limit),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            except Exception:
+                return []

@@ -72,11 +72,17 @@ def test_chain_ratchet_advances_per_message(alice_key, bob_key, bob_bundle):
     assert pt2 == "message two"
 
 
-def test_old_chain_key_cannot_decrypt_new_messages(alice_key, bob_key, bob_bundle):
+def test_consumed_skipped_key_cannot_be_replayed(alice_key, bob_key, bob_bundle):
+    """A message key popped from the skipped-key cache cannot decrypt the same message again."""
     alice_state, bob_state = _bootstrap(alice_key, bob_key, bob_bundle)
     alice_state, enc1 = encrypt_session_message(alice_state, "first")
-    bob_state_before = session_from_dict(session_to_dict(bob_state))
-    bob_state, _ = decrypt_session_message(bob_state, enc1)
     alice_state, enc2 = encrypt_session_message(alice_state, "second")
+    # Decrypt enc2 first; enc1's key is cached in skipped_keys
+    bob_state, pt2 = decrypt_session_message(bob_state, enc2)
+    assert pt2 == "second"
+    # Consuming enc1's cached key succeeds exactly once
+    bob_state, pt1 = decrypt_session_message(bob_state, enc1)
+    assert pt1 == "first"
+    # Key was popped; replaying enc1 must now fail (wrong key used → InvalidTag)
     with pytest.raises(Exception):
-        decrypt_session_message(bob_state_before, enc2)
+        decrypt_session_message(bob_state, enc1)

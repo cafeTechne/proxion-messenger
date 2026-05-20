@@ -1436,6 +1436,12 @@ class RoomHandlerMixin:
                         await ws.send(json.dumps(join_event))
                     except Exception:
                         pass
+            # R19: trigger sender key exchange so the new member gets room E2E keys
+            if joiner_webid:
+                try:
+                    await self._notify_new_member_sender_keys(room_id, joiner_webid)
+                except Exception as _sk_exc:
+                    logger.warning("sender_key notify on join failed: %s", _sk_exc)
         else:
             # Record failed attempt for per-room and global rate limiting
             if self._store and _ip:
@@ -1491,6 +1497,11 @@ class RoomHandlerMixin:
                             pass
             except Exception as _rk_exc:
                 logger.warning("room_rekey after kick failed: %s", _rk_exc)
+            # R19: rotate sender keys so removed member cannot decrypt E2E group messages
+            try:
+                await self._trigger_sender_key_rotation(room_id, target_webid)
+            except Exception as _sk_exc:
+                logger.warning("sender_key_rotation after kick failed: %s", _sk_exc)
 
     async def _handle_pin_message(self, websocket, data: dict) -> None:
         message_id = data.get("message_id", "")
@@ -2042,3 +2053,85 @@ class RoomHandlerMixin:
             "room_id": room_id,
             "delivered_to": delivered,
         }))
+
+    async def _handle_ack_sender_key_rotation(self, websocket, data: dict) -> None:
+        """Client confirms receipt of new sender key after a rotation event."""
+        webid = self._client_webids.get(websocket, "")
+        room_id = data.get("room_id", "")
+        if not webid or not room_id:
+            return
+        await websocket.send(json.dumps({
+            "type": "sender_key_rotation_acked",
+            "room_id": room_id,
+            "webid": webid,
+        }))
+
+    async def _trigger_sender_key_rotation(self, room_id: str, removed_webid: str) -> None:
+        """Emit a sender_key_rotation event to all remaining members after a removal.
+
+        Clears stored sender keys for the room so the next upload_sender_key from
+        any member becomes the new key for the room.
+        """
+        if self._store:
+            self._store.delete_sender_keys_for_room(room_id)
+
+        # Collect remaining member webids
+        remaining: list[str] = []
+        if self._store:
+            remaining = [w for w in self._store.get_room_members(room_id) if w != removed_webid]
+        elif room_id in self._local_rooms:
+            remaining = [
+                self._client_webids.get(ws, "")
+                for ws in self._local_rooms[room_id].get("members", set())
+            ]
+            remaining = [w for w in remaining if w and w != removed_webid]
+
+        rotation_event = json.dumps({
+            "type": "sender_key_rotation",
+            "room_id": room_id,
+            "reason": "member_removed",
+            "removed_webid": removed_webid,
+            "remaining_members": remaining,
+        })
+        for member_webid in remaining:
+            for ws in self._sockets_for(member_webid):
+                try:
+                    await ws.send(rotation_event)
+                except Exception:
+                    pass
+
+    async def _notify_new_member_sender_keys(self, room_id: str, new_member_webid: str) -> None:
+        """Tell existing members and the new member to exchange sender keys."""
+        existing_members: list[str] = []
+        if self._store:
+            existing_members = [w for w in self._store.get_room_members(room_id) if w != new_member_webid]
+        elif room_id in self._local_rooms:
+            existing_members = [
+                self._client_webids.get(ws, "")
+                for ws in self._local_rooms[room_id].get("members", set())
+            ]
+            existing_members = [w for w in existing_members if w and w != new_member_webid]
+
+        # Tell existing members that the new member joined and needs their sender keys
+        join_notice = json.dumps({
+            "type": "new_member_joined",
+            "room_id": room_id,
+            "new_member_webid": new_member_webid,
+        })
+        for member_webid in existing_members:
+            for ws in self._sockets_for(member_webid):
+                try:
+                    await ws.send(join_notice)
+                except Exception:
+                    pass
+
+        # Tell the new member which existing senders' keys they need
+        for ws in self._sockets_for(new_member_webid):
+            try:
+                await ws.send(json.dumps({
+                    "type": "sender_key_distribution_needed",
+                    "room_id": room_id,
+                    "members": existing_members,
+                }))
+            except Exception:
+                pass

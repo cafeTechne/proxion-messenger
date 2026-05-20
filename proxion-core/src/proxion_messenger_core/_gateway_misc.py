@@ -1493,3 +1493,84 @@ class MiscHandlerMixin:
                 }))
             except Exception:
                 pass
+
+    # ------------------------------------------------------------------
+    # Device key registration (R19, schema v45)
+    # ------------------------------------------------------------------
+
+    async def _handle_register_device(self, websocket, data: dict) -> None:
+        """Register a new device key with Ed25519 attestation proof."""
+        owner_webid = self._client_webids.get(websocket, "")
+        if not owner_webid or not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "not_registered"}))
+            return
+        device_id = data.get("device_id", "")
+        device_pub_b64 = data.get("device_pub_b64", "")
+        attestation_b64 = data.get("attestation_b64", "")
+        timestamp = float(data.get("timestamp", 0))
+        if not device_id or not device_pub_b64 or not attestation_b64 or not timestamp:
+            await websocket.send(json.dumps({"type": "error", "message": "missing_fields"}))
+            return
+        from .device_registry import verify_device_attestation
+        if not verify_device_attestation(device_pub_b64, owner_webid, device_id, timestamp, attestation_b64):
+            await websocket.send(json.dumps({"type": "error", "message": "invalid_attestation"}))
+            return
+        self._store.register_device(device_id, owner_webid, device_pub_b64, attestation_b64)
+        await websocket.send(json.dumps({
+            "type": "device_registered",
+            "device_id": device_id,
+            "owner_webid": owner_webid,
+        }))
+
+    async def _handle_list_devices(self, websocket, data: dict) -> None:
+        """Return all registered devices for the caller."""
+        owner_webid = self._client_webids.get(websocket, "")
+        if not owner_webid or not self._store:
+            await websocket.send(json.dumps({"type": "devices", "devices": []}))
+            return
+        devices = self._store.list_devices(owner_webid)
+        # Strip attestation bytes from the public response
+        safe = [{k: v for k, v in d.items() if k != "attestation_b64"} for d in devices]
+        await websocket.send(json.dumps({"type": "devices", "devices": safe}))
+
+    async def _handle_unregister_device(self, websocket, data: dict) -> None:
+        """Remove a device registration (owner can only remove their own devices)."""
+        owner_webid = self._client_webids.get(websocket, "")
+        device_id = data.get("device_id", "")
+        if not owner_webid or not device_id or not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "missing_fields"}))
+            return
+        device = self._store.get_device(device_id)
+        if not device or device.get("owner_webid") != owner_webid:
+            await websocket.send(json.dumps({"type": "error", "message": "not_found"}))
+            return
+        self._store.unregister_device(device_id)
+        await websocket.send(json.dumps({"type": "device_unregistered", "device_id": device_id}))
+
+    async def _handle_rotate_spk(self, websocket, data: dict) -> None:
+        """Client uploads a fresh signed prekey after receiving spk_rotation_needed."""
+        owner_webid = self._client_webids.get(websocket, "")
+        if not owner_webid or not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "not_registered"}))
+            return
+        bundle = data.get("bundle", {})
+        spk_id = bundle.get("signed_prekey_id")
+        spk_pub = bundle.get("signed_prekey_pub_b64")
+        spk_priv = bundle.get("signed_prekey_priv_b64", "")
+        spk_created_at = float(bundle.get("spk_created_at", 0))
+        old_prekey_id = data.get("old_prekey_id")
+        if not spk_id or not spk_pub:
+            await websocket.send(json.dumps({"type": "error", "message": "missing_fields"}))
+            return
+        # Store the new SPK with its creation timestamp
+        self._store.save_prekey_with_timestamp(
+            spk_id, owner_webid, spk_pub, spk_priv, one_time=False,
+            spk_created_at=spk_created_at or __import__("time").time(),
+        )
+        # Mark the old SPK expired (retained 48h for in-flight sessions)
+        if old_prekey_id and self._store:
+            self._store.mark_prekey_expired(int(old_prekey_id))
+        await websocket.send(json.dumps({
+            "type": "spk_rotated",
+            "signed_prekey_id": spk_id,
+        }))

@@ -622,6 +622,78 @@ class DmHandlerMixin:
             "bundle": bundle,
         }))
 
+    async def _handle_session_unknown(self, websocket, data: dict) -> None:
+        """Client received a DM with an unknown session_id (e.g. after app reinstall).
+
+        Relay a reset request to the original peer so they can re-initiate X3DH.
+        If the peer is offline, store a pending reset flag and deliver on next connect.
+        """
+        requester_webid = self._client_webids.get(websocket, "unknown")
+        if requester_webid == "unknown":
+            await websocket.send(json.dumps({"type": "error", "message": "Not registered"}))
+            return
+        session_id = data.get("session_id", "")
+        if not session_id:
+            await websocket.send(json.dumps({"type": "error", "message": "session_id required"}))
+            return
+
+        # Look up the original peer from the session record
+        peer_webid = ""
+        if self._store:
+            sess = self._store.get_dm_session_by_id(session_id)
+            if sess:
+                # requester is the owner (the one who lost their session state)
+                peer_webid = sess.get("peer_webid") or sess.get("owner_webid", "")
+                # If the requester IS the owner, the peer is peer_webid; otherwise swap.
+                if sess.get("owner_webid") == requester_webid:
+                    peer_webid = sess.get("peer_webid", "")
+                else:
+                    peer_webid = sess.get("owner_webid", "")
+
+        reset_event = json.dumps({
+            "type": "session_reset_requested",
+            "from_webid": requester_webid,
+            "session_id": session_id,
+        })
+
+        peer_sockets = self._sockets_for(peer_webid) if peer_webid else []
+        if peer_sockets:
+            for ws in peer_sockets:
+                try:
+                    await ws.send(reset_event)
+                except Exception:
+                    pass
+            await websocket.send(json.dumps({
+                "type": "session_reset_pending",
+                "session_id": session_id,
+                "peer_webid": peer_webid,
+            }))
+        else:
+            # Peer offline — store pending reset; deliver on next peer connect
+            if not hasattr(self, "_pending_session_resets"):
+                self._pending_session_resets = {}
+            self._pending_session_resets.setdefault(peer_webid, []).append({
+                "session_id": session_id,
+                "requester_webid": requester_webid,
+                "event": reset_event,
+            })
+            await websocket.send(json.dumps({
+                "type": "session_reset_deferred",
+                "session_id": session_id,
+                "message": "Peer offline — reset request will be delivered on reconnect.",
+            }))
+
+    async def _handle_session_ready(self, websocket, data: dict) -> None:
+        """Client confirms a new session is ready; clean up the stale old session."""
+        owner_webid = self._client_webids.get(websocket, "unknown")
+        old_session_id = data.get("old_session_id", "")
+        if old_session_id and self._store:
+            self._store.delete_dm_session(old_session_id)
+        await websocket.send(json.dumps({
+            "type": "session_ready_ack",
+            "old_session_id": old_session_id,
+        }))
+
     async def _handle_sealed_dm(self, websocket, data: dict) -> None:
         """Relay a sealed-sender (e2e_v=3) DM. Gateway sees only recipient WebID."""
         sender_webid = self._client_webids.get(websocket, "unknown")
