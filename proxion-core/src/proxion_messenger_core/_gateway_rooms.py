@@ -2086,12 +2086,17 @@ class RoomHandlerMixin:
             ]
             remaining = [w for w in remaining if w and w != removed_webid]
 
+        # Determine the next expected epoch (1 since all keys were deleted; clients
+        # should treat any key they distribute after rotation as epoch 1)
+        next_epoch = 1
+
         rotation_event = json.dumps({
             "type": "sender_key_rotation",
             "room_id": room_id,
             "reason": "member_removed",
             "removed_webid": removed_webid,
             "remaining_members": remaining,
+            "next_epoch": next_epoch,
         })
         for member_webid in remaining:
             for ws in self._sockets_for(member_webid):

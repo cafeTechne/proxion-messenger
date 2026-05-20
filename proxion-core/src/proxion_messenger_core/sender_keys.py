@@ -54,17 +54,18 @@ def _hkdf(ikm: bytes, length: int, salt: bytes, info: bytes) -> bytes:
 # Sender key state
 # ---------------------------------------------------------------------------
 
-def generate_sender_key() -> dict:
+def generate_sender_key(epoch: int = 1) -> dict:
     """Generate a fresh sender key state dict.
 
     Returns
     -------
-    dict with keys: chain_key_b64 (32 bytes), iteration (0).
+    dict with keys: chain_key_b64 (32 bytes), iteration (0), epoch (int).
     """
     chain_key = os.urandom(32)
     return {
         "chain_key_b64": _b64e(chain_key),
         "iteration": 0,
+        "epoch": epoch,
     }
 
 
@@ -111,6 +112,7 @@ def encrypt_group_message(
         "e2e_v": 2,
         "sender_id": sender_webid,
         "iteration": iteration,
+        "sender_epoch": sender_key_state.get("epoch", 1),
         "nonce_b64": _b64e(nonce),
         "ciphertext_b64": _b64e(ciphertext),
     }
@@ -137,6 +139,13 @@ def decrypt_group_message(
     chain_key = _b64d(sender_key_state["chain_key_b64"])
     current_iteration = sender_key_state["iteration"]
     target_iteration = payload["iteration"]
+
+    state_epoch = sender_key_state.get("epoch", 1)
+    payload_epoch = payload.get("sender_epoch", 1)
+    if payload_epoch < state_epoch:
+        raise ValueError(
+            f"sender_key_epoch_stale: payload epoch {payload_epoch} < state epoch {state_epoch}"
+        )
 
     if target_iteration < current_iteration:
         raise ValueError(

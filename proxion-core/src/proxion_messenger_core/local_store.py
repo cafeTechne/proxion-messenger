@@ -38,7 +38,7 @@ class LocalStore:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # Current schema version — increment when adding new migrations below
-    _SCHEMA_VERSION = 45
+    _SCHEMA_VERSION = 46
 
     # Set by _init_db if PRAGMA integrity_check fails — blocks mutating operations
     _integrity_ok: bool = True
@@ -883,6 +883,47 @@ class LocalStore:
                 """CREATE TABLE IF NOT EXISTS room_seq_counters (
                     thread_id TEXT PRIMARY KEY,
                     next_seq INTEGER NOT NULL DEFAULT 0
+                )""",
+            ],
+            # 46: multi-device sessions, device deliveries, sender-key epochs,
+            #     idempotency ops, contact verification sync, catch-up watermarks
+            [
+                "ALTER TABLE dm_sessions ADD COLUMN owner_device_id TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE dm_sessions ADD COLUMN peer_device_id TEXT NOT NULL DEFAULT ''",
+                """CREATE INDEX IF NOT EXISTS idx_dm_sessions_device_scope
+                   ON dm_sessions(owner_webid, owner_device_id, peer_webid, peer_device_id, updated_at)""",
+                """CREATE TABLE IF NOT EXISTS dm_device_deliveries (
+                    message_id TEXT NOT NULL,
+                    to_webid TEXT NOT NULL,
+                    to_device_id TEXT NOT NULL,
+                    delivered_at TEXT,
+                    read_at TEXT,
+                    PRIMARY KEY (message_id, to_webid, to_device_id)
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_dm_device_deliveries_to
+                   ON dm_device_deliveries(to_webid, to_device_id, delivered_at)""",
+                "ALTER TABLE sender_keys ADD COLUMN epoch INTEGER NOT NULL DEFAULT 1",
+                """CREATE INDEX IF NOT EXISTS idx_sender_keys_room_epoch
+                   ON sender_keys(room_id, sender_webid, epoch, updated_at)""",
+                """CREATE TABLE IF NOT EXISTS idempotency_ops (
+                    op_id TEXT PRIMARY KEY,
+                    op_type TEXT NOT NULL,
+                    actor_webid TEXT NOT NULL,
+                    actor_device_id TEXT,
+                    result_code TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_idempotency_ops_actor
+                   ON idempotency_ops(actor_webid, actor_device_id, created_at)""",
+                "ALTER TABLE contact_verifications ADD COLUMN verified_on_device_id TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE contact_verifications ADD COLUMN verification_version INTEGER NOT NULL DEFAULT 1",
+                """CREATE TABLE IF NOT EXISTS catchup_watermarks (
+                    owner_webid TEXT NOT NULL,
+                    owner_device_id TEXT NOT NULL,
+                    thread_id TEXT NOT NULL,
+                    last_seq INTEGER NOT NULL DEFAULT 0,
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY (owner_webid, owner_device_id, thread_id)
                 )""",
             ],
         ]
@@ -4675,6 +4716,234 @@ class LocalStore:
         with self._conn() as conn:
             try:
                 conn.execute("DELETE FROM sender_keys WHERE room_id=?", (room_id,))
+            except Exception:
+                pass
+
+    def bump_sender_key_epoch(self, room_id: str, sender_webid: str) -> int:
+        """Increment epoch for a sender key row. Returns new epoch value."""
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    "UPDATE sender_keys SET epoch = epoch + 1 WHERE room_id=? AND sender_webid=?",
+                    (room_id, sender_webid),
+                )
+                row = conn.execute(
+                    "SELECT epoch FROM sender_keys WHERE room_id=? AND sender_webid=?",
+                    (room_id, sender_webid),
+                ).fetchone()
+                return row["epoch"] if row else 1
+            except Exception:
+                return 1
+
+    def get_sender_key_epoch(self, room_id: str, sender_webid: str) -> int:
+        """Return current epoch for a sender key row (default 1)."""
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT epoch FROM sender_keys WHERE room_id=? AND sender_webid=?",
+                    (room_id, sender_webid),
+                ).fetchone()
+                return row["epoch"] if row else 1
+            except Exception:
+                return 1
+
+    # ------------------------------------------------------------------
+    # Per-device DM session scope (schema v46)
+    # ------------------------------------------------------------------
+
+    def get_dm_sessions_for_device_scope(
+        self,
+        owner_webid: str,
+        owner_device_id: str,
+        peer_webid: str,
+        peer_device_id: str,
+    ) -> list[dict]:
+        """Return sessions matching the given device-pair scope, newest first."""
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    """SELECT * FROM dm_sessions
+                       WHERE owner_webid=? AND owner_device_id=?
+                         AND peer_webid=? AND peer_device_id=?
+                       ORDER BY updated_at DESC""",
+                    (owner_webid, owner_device_id, peer_webid, peer_device_id),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+
+    # ------------------------------------------------------------------
+    # Per-device DM delivery tracking (schema v46)
+    # ------------------------------------------------------------------
+
+    def record_dm_delivery(
+        self, message_id: str, to_webid: str, to_device_id: str
+    ) -> None:
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    """INSERT OR IGNORE INTO dm_device_deliveries
+                       (message_id, to_webid, to_device_id)
+                       VALUES (?, ?, ?)""",
+                    (message_id, to_webid, to_device_id),
+                )
+            except Exception:
+                pass
+
+    def mark_dm_delivered(
+        self,
+        message_id: str,
+        to_webid: str,
+        to_device_id: str,
+        *,
+        read: bool = False,
+    ) -> None:
+        with self._conn() as conn:
+            try:
+                now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                if read:
+                    conn.execute(
+                        """UPDATE dm_device_deliveries
+                           SET delivered_at = COALESCE(delivered_at, ?), read_at = ?
+                           WHERE message_id=? AND to_webid=? AND to_device_id=?""",
+                        (now, now, message_id, to_webid, to_device_id),
+                    )
+                else:
+                    conn.execute(
+                        """UPDATE dm_device_deliveries
+                           SET delivered_at = COALESCE(delivered_at, ?)
+                           WHERE message_id=? AND to_webid=? AND to_device_id=?""",
+                        (now, message_id, to_webid, to_device_id),
+                    )
+            except Exception:
+                pass
+
+    def get_dm_deliveries(self, message_id: str) -> list[dict]:
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM dm_device_deliveries WHERE message_id=?",
+                    (message_id,),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+
+    # ------------------------------------------------------------------
+    # Idempotency ledger (schema v46)
+    # ------------------------------------------------------------------
+
+    def record_operation_result(
+        self,
+        op_id: str,
+        op_type: str,
+        actor_webid: str,
+        actor_device_id: str | None,
+        result_code: str,
+    ) -> None:
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    """INSERT OR IGNORE INTO idempotency_ops
+                       (op_id, op_type, actor_webid, actor_device_id, result_code, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (op_id, op_type, actor_webid, actor_device_id, result_code, time.time()),
+                )
+            except Exception:
+                pass
+
+    def get_operation_result(self, op_id: str) -> dict | None:
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT * FROM idempotency_ops WHERE op_id=?", (op_id,)
+                ).fetchone()
+                return dict(row) if row else None
+            except Exception:
+                return None
+
+    # ------------------------------------------------------------------
+    # Contact verification sync (schema v46)
+    # ------------------------------------------------------------------
+
+    def list_contact_verifications(self, owner_webid: str) -> list[dict]:
+        """Return all contact verification records for a given owner (verified_by)."""
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    """SELECT * FROM contact_verifications
+                       WHERE verified_by=? ORDER BY verified_at DESC""",
+                    (owner_webid,),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+
+    def apply_contact_verification_sync(self, record: dict) -> None:
+        """Upsert a contact verification; higher verification_version wins."""
+        peer_webid = record.get("peer_webid", "")
+        if not peer_webid:
+            return
+        with self._conn() as conn:
+            try:
+                existing = conn.execute(
+                    "SELECT verification_version FROM contact_verifications WHERE peer_webid=?",
+                    (peer_webid,),
+                ).fetchone()
+                incoming_version = int(record.get("verification_version", 1))
+                if existing is None or incoming_version > existing["verification_version"]:
+                    conn.execute(
+                        """INSERT OR REPLACE INTO contact_verifications
+                           (peer_webid, safety_numbers, verified_at, verified_by,
+                            verified_on_device_id, verification_version)
+                           VALUES (?, ?, ?, ?, ?, ?)""",
+                        (
+                            peer_webid,
+                            record.get("safety_numbers", ""),
+                            record.get("verified_at", time.time()),
+                            record.get("verified_by", ""),
+                            record.get("verified_on_device_id", ""),
+                            incoming_version,
+                        ),
+                    )
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------
+    # Catch-up watermarks (schema v46)
+    # ------------------------------------------------------------------
+
+    def get_catchup_watermark(
+        self, owner_webid: str, owner_device_id: str, thread_id: str
+    ) -> int:
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    """SELECT last_seq FROM catchup_watermarks
+                       WHERE owner_webid=? AND owner_device_id=? AND thread_id=?""",
+                    (owner_webid, owner_device_id, thread_id),
+                ).fetchone()
+                return row["last_seq"] if row else 0
+            except Exception:
+                return 0
+
+    def set_catchup_watermark(
+        self,
+        owner_webid: str,
+        owner_device_id: str,
+        thread_id: str,
+        last_seq: int,
+    ) -> None:
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    """INSERT INTO catchup_watermarks
+                       (owner_webid, owner_device_id, thread_id, last_seq, updated_at)
+                       VALUES (?, ?, ?, ?, ?)
+                       ON CONFLICT(owner_webid, owner_device_id, thread_id)
+                       DO UPDATE SET last_seq=excluded.last_seq, updated_at=excluded.updated_at""",
+                    (owner_webid, owner_device_id, thread_id, last_seq, time.time()),
+                )
             except Exception:
                 pass
 

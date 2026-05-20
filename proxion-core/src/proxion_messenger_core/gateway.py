@@ -893,6 +893,16 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 await self._handle_session_ready(websocket, data)
             elif cmd == "catch_up":
                 await self._handle_catch_up(websocket, data)
+            elif cmd == "catch_up_ack":
+                await self._handle_catch_up_ack(websocket, data)
+            elif cmd == "get_peer_devices":
+                await self._handle_get_peer_devices(websocket, data)
+            elif cmd == "send_dm_fanout":
+                await self._handle_send_dm_fanout(websocket, data)
+            elif cmd == "sync_contact_verifications":
+                await self._handle_sync_contact_verifications(websocket, data)
+            elif cmd == "apply_contact_verification_sync":
+                await self._handle_apply_contact_verification_sync(websocket, data)
             elif cmd == "join_voice_channel":
                 await self._handle_join_voice_channel(websocket, data)
             elif cmd == "get_identity":
@@ -3495,25 +3505,54 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 logger.warning("Prekey replenishment check failed: %s", exc)
 
     async def _handle_catch_up(self, websocket, data: dict) -> None:
-        """Return messages in a thread that the client missed (seq > since_seq)."""
+        """Return messages in a thread that the client missed (seq > since_seq).
+
+        Response includes batch_hash = sha256(sorted "msg_id:seq" pairs) for
+        integrity verification, and first_seq/last_seq bounds.
+        """
+        import hashlib as _hl
+        import json as _j
         if not self._store:
-            await websocket.send(__import__("json").dumps({
+            await websocket.send(_j.dumps({
                 "type": "catch_up_batch", "messages": [], "thread_id": "",
+                "first_seq": None, "last_seq": None, "batch_hash": "",
             }))
             return
         thread_id = data.get("thread_id", "")
         since_seq = int(data.get("since_seq", 0))
         limit = min(int(data.get("limit", 100)), 200)
         if not thread_id:
-            await websocket.send(__import__("json").dumps({"type": "error", "message": "thread_id required"}))
+            await websocket.send(_j.dumps({"type": "error", "message": "thread_id required"}))
             return
         msgs = self._store.get_messages_since_seq(thread_id, since_seq, limit=limit)
-        await websocket.send(__import__("json").dumps({
+        first_seq = msgs[0]["seq"] if msgs else None
+        last_seq = msgs[-1]["seq"] if msgs else None
+        hash_input = "|".join(
+            sorted(f"{m.get('message_id', '')}:{m.get('seq', '')}" for m in msgs)
+        ).encode()
+        batch_hash = _hl.sha256(hash_input).hexdigest()
+        await websocket.send(_j.dumps({
             "type": "catch_up_batch",
             "thread_id": thread_id,
             "since_seq": since_seq,
+            "first_seq": first_seq,
+            "last_seq": last_seq,
+            "batch_hash": batch_hash,
             "messages": msgs,
         }))
+
+    async def _handle_catch_up_ack(self, websocket, data: dict) -> None:
+        """Client ACKs a catch-up batch; updates the per-device watermark."""
+        import json as _j
+        thread_id = data.get("thread_id", "")
+        last_seq = data.get("last_seq")
+        owner_device_id = data.get("owner_device_id", "")
+        owner_webid = self._client_webids.get(websocket, "")
+        if not self._store or not thread_id or last_seq is None:
+            await websocket.send(_j.dumps({"type": "catch_up_ack_ok", "ok": False}))
+            return
+        self._store.set_catchup_watermark(owner_webid, owner_device_id, thread_id, int(last_seq))
+        await websocket.send(_j.dumps({"type": "catch_up_ack_ok", "ok": True, "last_seq": last_seq}))
 
     async def _presence_loop(self):
         """Periodically broadcast presence heartbeats and mark idle users as away."""

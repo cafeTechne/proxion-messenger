@@ -749,3 +749,49 @@ class DmHandlerMixin:
                                 vapid_private_pem=_vapid_priv,
                                 vapid_subject=_vapid_sub,
                             )
+
+    async def _handle_send_dm_fanout(self, websocket, data: dict) -> None:
+        """Deliver per-device encrypted DM envelopes in one logical send.
+
+        Expects:
+            message_id: str
+            from_webid:  str
+            fanout: list[{to_webid, to_device_id, payload}]
+        """
+        message_id = data.get("message_id", "")
+        from_webid = data.get("from_webid", "") or self._client_webids.get(websocket, "")
+        fanout = data.get("fanout", [])
+        if not message_id or not fanout:
+            await websocket.send(json.dumps({"type": "error", "message": "message_id and fanout required"}))
+            return
+
+        delivered = []
+        for entry in fanout:
+            to_webid = entry.get("to_webid", "")
+            to_device_id = entry.get("to_device_id", "")
+            if not to_webid or not to_device_id:
+                continue
+            if self._store:
+                self._store.record_dm_delivery(message_id, to_webid, to_device_id)
+            target_sockets = self._sockets_for(to_webid) or []
+            event = json.dumps({
+                "type": "dm_fanout",
+                "message_id": message_id,
+                "from_webid": from_webid,
+                "to_device_id": to_device_id,
+                "payload": entry.get("payload"),
+            })
+            for ws in target_sockets:
+                try:
+                    await ws.send(event)
+                    if self._store:
+                        self._store.mark_dm_delivered(message_id, to_webid, to_device_id)
+                except Exception as exc:
+                    logger.warning("dm_fanout relay failed to %s/%s: %s", to_webid, to_device_id, exc)
+            delivered.append({"to_webid": to_webid, "to_device_id": to_device_id})
+
+        await websocket.send(json.dumps({
+            "type": "send_dm_fanout_ack",
+            "message_id": message_id,
+            "delivered": delivered,
+        }))

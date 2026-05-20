@@ -1574,3 +1574,57 @@ class MiscHandlerMixin:
             "type": "spk_rotated",
             "signed_prekey_id": spk_id,
         }))
+
+    async def _handle_get_peer_devices(self, websocket, data: dict) -> None:
+        """Return device list for a peer (public key refs only, no attestation)."""
+        peer_webid = data.get("peer_webid", "")
+        if not peer_webid:
+            await websocket.send(json.dumps({"type": "error", "message": "peer_webid required"}))
+            return
+        if not self._store:
+            await websocket.send(json.dumps({
+                "type": "peer_devices", "peer_webid": peer_webid, "devices": []
+            }))
+            return
+        devices = self._store.list_devices(peer_webid)
+        result = [
+            {
+                "device_id": d["device_id"],
+                "device_pub_b64": d["device_pub_b64"],
+                "last_seen_at": d.get("last_seen_at"),
+            }
+            for d in devices
+        ]
+        await websocket.send(json.dumps({
+            "type": "peer_devices", "peer_webid": peer_webid, "devices": result
+        }))
+
+    async def _handle_sync_contact_verifications(self, websocket, data: dict) -> None:
+        """Return contact verification records for the requesting user since a timestamp."""
+        owner_webid = self._client_webids.get(websocket, "")
+        since = float(data.get("since", 0))
+        if not owner_webid or not self._store:
+            await websocket.send(json.dumps({
+                "type": "contact_verifications_sync", "records": []
+            }))
+            return
+        records = self._store.list_contact_verifications(owner_webid)
+        result = [r for r in records if r.get("verified_at", 0) > since]
+        await websocket.send(json.dumps({
+            "type": "contact_verifications_sync",
+            "owner_webid": owner_webid,
+            "records": result,
+        }))
+
+    async def _handle_apply_contact_verification_sync(self, websocket, data: dict) -> None:
+        """Upsert a contact verification record from a peer device; higher version wins."""
+        record = data.get("record", {})
+        if not record or not self._store:
+            await websocket.send(json.dumps({
+                "type": "contact_verification_sync_ack", "ok": False
+            }))
+            return
+        self._store.apply_contact_verification_sync(record)
+        await websocket.send(json.dumps({
+            "type": "contact_verification_sync_ack", "ok": True
+        }))
