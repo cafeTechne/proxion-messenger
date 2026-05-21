@@ -217,14 +217,20 @@ class CssAccountManager:
         identity card — use setup_agent for first-time onboarding with profile
         publishing.
         """
-        with httpx.Client() as client:
-            try:
+        try:
+            with httpx.Client() as client:
                 controls = self._create_account_session(client)
                 self._set_password(client, controls, email, password)
                 controls = self._authenticated_controls(client)
                 pod_name = email.split("@")[0]
                 pod_url, webid = self._create_pod(client, controls, pod_name)
-            except CssAccountExistsError:
+                client_id, client_secret = self._issue_credentials(
+                    client, controls, webid, label
+                )
+        except CssAccountExistsError:
+            # Fresh client so the anonymous-session cookie from _create_account_session
+            # does not contaminate the login session and cause CSS to reject /pod/ with 400.
+            with httpx.Client() as client:
                 controls = self._login_session(client, email, password)
                 try:
                     pod_url, webid = self._get_pod_url_and_webid(client, controls)
@@ -232,10 +238,9 @@ class CssAccountManager:
                     # Account exists but pod was never created (partial prior registration).
                     pod_name = email.split("@")[0]
                     pod_url, webid = self._create_pod(client, controls, pod_name)
-
-            client_id, client_secret = self._issue_credentials(
-                client, controls, webid, label
-            )
+                client_id, client_secret = self._issue_credentials(
+                    client, controls, webid, label
+                )
 
         credentials = CssClientCredentials(
             css_base_url=self.css_base_url,
