@@ -38,7 +38,7 @@ class LocalStore:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # Current schema version — increment when adding new migrations below
-    _SCHEMA_VERSION = 48
+    _SCHEMA_VERSION = 49
 
     # Set by _init_db if PRAGMA integrity_check fails — blocks mutating operations
     _integrity_ok: bool = True
@@ -982,6 +982,33 @@ class LocalStore:
                 )""",
                 """CREATE INDEX IF NOT EXISTS idx_wg_connectivity_events_peer
                    ON wg_connectivity_events(peer_webid, created_at)""",
+            ],
+            # 49: STUN sessions + UDP hole punch attempt tracking
+            [
+                """CREATE TABLE IF NOT EXISTS stun_sessions (
+                    id TEXT PRIMARY KEY,
+                    external_ip TEXT NOT NULL,
+                    external_port INTEGER NOT NULL,
+                    stun_server TEXT NOT NULL,
+                    discovered_at REAL NOT NULL,
+                    expires_at REAL NOT NULL
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_stun_sessions_expires
+                   ON stun_sessions(expires_at)""",
+                """CREATE TABLE IF NOT EXISTS hole_punch_attempts (
+                    id TEXT PRIMARY KEY,
+                    peer_webid TEXT NOT NULL,
+                    local_ip TEXT NOT NULL,
+                    local_port INTEGER NOT NULL,
+                    peer_ip TEXT,
+                    peer_port INTEGER,
+                    state TEXT NOT NULL DEFAULT 'pending',
+                    initiated_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    completed_at REAL
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_hole_punch_attempts_peer
+                   ON hole_punch_attempts(peer_webid, state, updated_at)""",
             ],
         ]
 
@@ -5503,3 +5530,128 @@ class LocalStore:
                 return [dict(r) for r in rows]
             except Exception:
                 return []
+
+    # ------------------------------------------------------------------
+    # STUN sessions (schema v49)
+    # ------------------------------------------------------------------
+
+    def save_stun_session(
+        self,
+        session_id: str,
+        external_ip: str,
+        external_port: int,
+        stun_server: str,
+        ttl_seconds: int = 300,
+    ) -> None:
+        now = time.time()
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    """INSERT OR REPLACE INTO stun_sessions
+                       (id, external_ip, external_port, stun_server, discovered_at, expires_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (session_id, external_ip, external_port, stun_server, now, now + ttl_seconds),
+                )
+            except Exception:
+                pass
+
+    def get_latest_stun_session(self) -> dict | None:
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    """SELECT * FROM stun_sessions WHERE expires_at > ?
+                       ORDER BY discovered_at DESC LIMIT 1""",
+                    (time.time(),),
+                ).fetchone()
+                return dict(row) if row else None
+            except Exception:
+                return None
+
+    def prune_expired_stun_sessions(self) -> int:
+        with self._conn() as conn:
+            try:
+                cur = conn.execute(
+                    "DELETE FROM stun_sessions WHERE expires_at <= ?", (time.time(),)
+                )
+                return cur.rowcount
+            except Exception:
+                return 0
+
+    # ------------------------------------------------------------------
+    # Hole punch attempts (schema v49)
+    # ------------------------------------------------------------------
+
+    def create_hole_punch_attempt(
+        self,
+        attempt_id: str,
+        peer_webid: str,
+        local_ip: str,
+        local_port: int,
+    ) -> None:
+        now = time.time()
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    """INSERT INTO hole_punch_attempts
+                       (id, peer_webid, local_ip, local_port, state, initiated_at, updated_at)
+                       VALUES (?, ?, ?, ?, 'pending', ?, ?)""",
+                    (attempt_id, peer_webid, local_ip, local_port, now, now),
+                )
+            except Exception:
+                pass
+
+    def update_hole_punch_attempt(self, attempt_id: str, **kwargs) -> None:
+        if not kwargs:
+            return
+        allowed = {"peer_ip", "peer_port", "state", "updated_at", "completed_at"}
+        fields = {k: v for k, v in kwargs.items() if k in allowed}
+        if not fields:
+            return
+        fields.setdefault("updated_at", time.time())
+        set_clause = ", ".join(f"{k}=?" for k in fields)
+        values = list(fields.values()) + [attempt_id]
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    f"UPDATE hole_punch_attempts SET {set_clause} WHERE id=?",
+                    values,
+                )
+            except Exception:
+                pass
+
+    def get_hole_punch_attempt(self, attempt_id: str) -> dict | None:
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT * FROM hole_punch_attempts WHERE id=?", (attempt_id,)
+                ).fetchone()
+                return dict(row) if row else None
+            except Exception:
+                return None
+
+    def get_hole_punch_attempts_for_peer(self, peer_webid: str) -> list[dict]:
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    """SELECT * FROM hole_punch_attempts
+                       WHERE peer_webid=? ORDER BY initiated_at DESC""",
+                    (peer_webid,),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+
+    def expire_stale_hole_punch_attempts(self, timeout_seconds: int = 30) -> int:
+        cutoff = time.time() - timeout_seconds
+        with self._conn() as conn:
+            try:
+                cur = conn.execute(
+                    """UPDATE hole_punch_attempts
+                       SET state='expired', updated_at=?
+                       WHERE state NOT IN ('succeeded', 'failed', 'expired')
+                         AND initiated_at <= ?""",
+                    (time.time(), cutoff),
+                )
+                return cur.rowcount
+            except Exception:
+                return 0

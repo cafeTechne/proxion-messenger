@@ -191,6 +191,10 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             "wg_peers_relay": 0,
             "relay_fallback_total": 0,
             "relay_to_direct_recovery_total": 0,
+            # Hole punch counters (Round 23)
+            "hole_punch_attempts_total": 0,
+            "hole_punch_succeeded_total": 0,
+            "hole_punch_failed_total": 0,
         }
 
         # Per-identity connection count for aggregated presence (R13.13)
@@ -962,6 +966,10 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 await self._handle_get_connect_id(websocket, data)
             elif cmd == "resolve_connect_id":
                 await self._handle_resolve_connect_id(websocket, data)
+            elif cmd == "request_hole_punch":
+                await self._handle_request_hole_punch(websocket, data)
+            elif cmd == "hole_punch_complete_notify":
+                await self._handle_hole_punch_complete_notify(websocket, data)
             elif cmd == "typing":
                 await self._handle_typing(websocket, data)
             elif cmd == "add_reaction":

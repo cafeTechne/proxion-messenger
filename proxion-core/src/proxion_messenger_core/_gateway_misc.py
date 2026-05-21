@@ -1752,3 +1752,95 @@ class MiscHandlerMixin:
             "gateway_url": resolved.get("url", ""),
         }))
 
+    async def _handle_request_hole_punch(self, websocket, data: dict) -> None:
+        """Initiate a UDP hole punch with a peer.
+
+        The client provides its STUN-discovered external endpoint. The gateway
+        creates a pending hole_punch_attempt, fans out a ``hole_punch_offer``
+        to the peer (if online), and acks the initiating client.
+        """
+        from .hole_punch import HolePunchCoordinator
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "store_unavailable"}))
+            return
+
+        peer_webid = data.get("peer_webid", "")
+        local_ip = data.get("local_ip", "")
+        local_port = data.get("local_port")
+        if not peer_webid or not local_ip or local_port is None:
+            await websocket.send(json.dumps({
+                "type": "error",
+                "code": "missing_fields",
+                "message": "peer_webid, local_ip, and local_port are required.",
+            }))
+            return
+
+        coordinator = HolePunchCoordinator(self._store)
+        attempt_id = coordinator.initiate(peer_webid, local_ip, int(local_port))
+        coordinator.record_offer(attempt_id)
+
+        self._metrics["hole_punch_attempts_total"] += 1
+
+        # Fan out hole_punch_offer to all online sockets for peer_webid
+        peer_sockets = self._webid_sockets.get(peer_webid, set())
+        offer_msg = json.dumps({
+            "type": "hole_punch_offer",
+            "attempt_id": attempt_id,
+            "from_webid": self._client_webids.get(websocket, ""),
+            "local_ip": local_ip,
+            "local_port": local_port,
+        })
+        for peer_ws in list(peer_sockets):
+            try:
+                await peer_ws.send(offer_msg)
+            except Exception:
+                pass
+
+        await websocket.send(json.dumps({
+            "type": "hole_punch_initiated",
+            "attempt_id": attempt_id,
+            "peer_online": bool(peer_sockets),
+        }))
+
+    async def _handle_hole_punch_complete_notify(self, websocket, data: dict) -> None:
+        """Record the result of a hole punch attempt.
+
+        The client reports ``success`` or ``failure`` for a given *attempt_id*.
+        On success the transport layer is promoted to direct; on failure the
+        relay path remains active.
+        """
+        from .hole_punch import HolePunchCoordinator
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "store_unavailable"}))
+            return
+
+        attempt_id = data.get("attempt_id", "")
+        result = data.get("result", "")  # "success" or "failure"
+        peer_ip = data.get("peer_ip")
+        peer_port = data.get("peer_port")
+
+        if not attempt_id or result not in ("success", "failure"):
+            await websocket.send(json.dumps({
+                "type": "error",
+                "code": "missing_fields",
+                "message": "attempt_id and result ('success'|'failure') are required.",
+            }))
+            return
+
+        coordinator = HolePunchCoordinator(self._store)
+        if result == "success":
+            if peer_ip and peer_port is not None:
+                coordinator.record_peer_endpoint(attempt_id, peer_ip, int(peer_port))
+            coordinator.mark_succeeded(attempt_id)
+            self._metrics["hole_punch_succeeded_total"] += 1
+            self._metrics["relay_to_direct_recovery_total"] += 1
+        else:
+            coordinator.mark_failed(attempt_id)
+            self._metrics["hole_punch_failed_total"] += 1
+
+        await websocket.send(json.dumps({
+            "type": "hole_punch_complete_ack",
+            "attempt_id": attempt_id,
+            "result": result,
+        }))
+
