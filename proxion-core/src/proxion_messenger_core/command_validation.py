@@ -82,6 +82,12 @@ _SCHEMA: dict[str, dict[str, tuple]] = {
     "create_webhook":   {"bot_name": (str, 32), "direction": (str, 16, _is_valid_direction)},
     "connect_css":      {"css_url": (str, 256, _is_https_url), "email": (str, 254)},
     "resolve_did":      {"did": (str, 256, _is_did_key)},
+    # Hole punch (Round 24 — actor-bound, mutating)
+    "request_hole_punch": {"peer_webid": (str, 256)},
+    "hole_punch_complete_notify": {
+        "attempt_id": (str, 64),
+        "result": (str, 16),
+    },
 }
 
 # Commands that mutate state and should require auth / revocation check
@@ -91,6 +97,7 @@ MUTATING_COMMANDS: frozenset[str] = frozenset({
     "add_reaction", "remove_reaction", "pin_message", "unpin_message",
     "kick_member", "delete_room", "set_member_role", "transfer_ownership",
     "block", "unblock", "set_disappear_timer", "send_voice_message",
+    "request_hole_punch", "hole_punch_complete_notify",
 })
 
 # Commands that are auth-rate-limited (5 per minute per socket)
@@ -99,7 +106,7 @@ AUTH_RATE_COMMANDS: frozenset[str] = frozenset({"register", "auth_response"})
 # Commands that count against the heavy rate limit (10 per minute per socket)
 HEAVY_COMMANDS: frozenset[str] = frozenset({
     "search", "send_file", "send_voice_message", "voice_invite",
-    "schedule_message", "restore_contacts",
+    "schedule_message", "restore_contacts", "request_hole_punch",
 })
 
 

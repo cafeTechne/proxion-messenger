@@ -1755,30 +1755,87 @@ class MiscHandlerMixin:
     async def _handle_request_hole_punch(self, websocket, data: dict) -> None:
         """Initiate a UDP hole punch with a peer.
 
-        The client provides its STUN-discovered external endpoint. The gateway
-        creates a pending hole_punch_attempt, fans out a ``hole_punch_offer``
-        to the peer (if online), and acks the initiating client.
+        The endpoint used in the offer is sourced from the most recent valid
+        STUN session cached in the store for the caller.  If no cached session
+        exists, the client-supplied local_ip/local_port is used after endpoint
+        validation.  The gateway fans out a ``hole_punch_offer`` to the peer
+        (if online) and returns a generic ack — without leaking whether the peer
+        is currently connected.
         """
-        from .hole_punch import HolePunchCoordinator
+        from .hole_punch import HolePunchCoordinator, HolePunchForbidden
+        from .stun_client import validate_stun_endpoint
         if not self._store:
             await websocket.send(json.dumps({"type": "error", "message": "store_unavailable"}))
             return
 
+        actor_webid = self._client_webids.get(websocket, "")
+        if not actor_webid:
+            await websocket.send(json.dumps({"type": "error", "code": "unauthenticated"}))
+            return
+
         peer_webid = data.get("peer_webid", "")
-        local_ip = data.get("local_ip", "")
-        local_port = data.get("local_port")
-        if not peer_webid or not local_ip or local_port is None:
+        attempt_nonce = data.get("attempt_nonce", "")
+        if not peer_webid:
             await websocket.send(json.dumps({
                 "type": "error",
                 "code": "missing_fields",
-                "message": "peer_webid, local_ip, and local_port are required.",
+                "message": "peer_webid is required.",
             }))
             return
 
         coordinator = HolePunchCoordinator(self._store)
-        attempt_id = coordinator.initiate(peer_webid, local_ip, int(local_port))
-        coordinator.record_offer(attempt_id)
 
+        # Authorization: actor must share a room or have a wg_peer record with peer
+        if not coordinator.can_attempt_hole_punch(actor_webid, peer_webid):
+            if self._store:
+                self._store.save_security_event(
+                    "hole_punch_authz_denied", "warning", webid=actor_webid,
+                    details=f"peer_webid={peer_webid}",
+                )
+            await websocket.send(json.dumps({
+                "type": "error",
+                "code": "hole_punch_forbidden",
+                "message": "No established relationship with peer.",
+            }))
+            return
+
+        # Endpoint: prefer store-cached STUN session; fall back to client-supplied
+        cached = self._store.get_latest_stun_session_for_owner(actor_webid)
+        if cached:
+            local_ip = cached["external_ip"]
+            local_port = cached["external_port"]
+        else:
+            local_ip = data.get("local_ip", "")
+            local_port = data.get("local_port")
+            if not local_ip or local_port is None:
+                await websocket.send(json.dumps({
+                    "type": "error",
+                    "code": "missing_fields",
+                    "message": "No cached STUN session found; provide local_ip and local_port.",
+                }))
+                return
+            valid, reason = validate_stun_endpoint(local_ip, int(local_port))
+            if not valid:
+                if self._store:
+                    self._store.save_security_event(
+                        "hole_punch_endpoint_rejected", "warning", webid=actor_webid,
+                        details=reason,
+                    )
+                await websocket.send(json.dumps({
+                    "type": "error",
+                    "code": "invalid_endpoint",
+                    "message": reason,
+                }))
+                return
+
+        attempt_id = coordinator.initiate(
+            initiator_webid=actor_webid,
+            responder_webid=peer_webid,
+            local_ip=local_ip,
+            local_port=int(local_port),
+            attempt_nonce=attempt_nonce,
+        )
+        coordinator.record_offer(attempt_id)
         self._metrics["hole_punch_attempts_total"] += 1
 
         # Fan out hole_punch_offer to all online sockets for peer_webid
@@ -1786,7 +1843,7 @@ class MiscHandlerMixin:
         offer_msg = json.dumps({
             "type": "hole_punch_offer",
             "attempt_id": attempt_id,
-            "from_webid": self._client_webids.get(websocket, ""),
+            "from_webid": actor_webid,
             "local_ip": local_ip,
             "local_port": local_port,
         })
@@ -1796,28 +1853,35 @@ class MiscHandlerMixin:
             except Exception:
                 pass
 
+        # Return generic ack — no peer_online leak
         await websocket.send(json.dumps({
             "type": "hole_punch_initiated",
             "attempt_id": attempt_id,
-            "peer_online": bool(peer_sockets),
         }))
 
     async def _handle_hole_punch_complete_notify(self, websocket, data: dict) -> None:
         """Record the result of a hole punch attempt.
 
         The client reports ``success`` or ``failure`` for a given *attempt_id*.
-        On success the transport layer is promoted to direct; on failure the
-        relay path remains active.
+        The caller must be the initiator or responder of the attempt.  On success
+        the transport layer is promoted to direct; on failure the relay path
+        remains active.
         """
-        from .hole_punch import HolePunchCoordinator
+        from .hole_punch import HolePunchCoordinator, HolePunchForbidden, InvalidPunchTransition
         if not self._store:
             await websocket.send(json.dumps({"type": "error", "message": "store_unavailable"}))
+            return
+
+        actor_webid = self._client_webids.get(websocket, "")
+        if not actor_webid:
+            await websocket.send(json.dumps({"type": "error", "code": "unauthenticated"}))
             return
 
         attempt_id = data.get("attempt_id", "")
         result = data.get("result", "")  # "success" or "failure"
         peer_ip = data.get("peer_ip")
         peer_port = data.get("peer_port")
+        provided_nonce = data.get("attempt_nonce", "")
 
         if not attempt_id or result not in ("success", "failure"):
             await websocket.send(json.dumps({
@@ -1827,16 +1891,60 @@ class MiscHandlerMixin:
             }))
             return
 
+        # Actor authorization: must be initiator or responder
+        attempt = self._store.get_hole_punch_attempt_for_actor(attempt_id, actor_webid)
+        if attempt is None:
+            self._store.save_security_event(
+                "hole_punch_authz_denied", "warning", webid=actor_webid,
+                details=f"attempt_id={attempt_id}",
+            )
+            await websocket.send(json.dumps({
+                "type": "error",
+                "code": "hole_punch_forbidden",
+                "message": "Not authorized to complete this attempt.",
+            }))
+            return
+
+        # Nonce defense-in-depth: enforce only when both stored and provided are non-empty
+        stored_nonce = attempt.get("attempt_nonce", "")
+        if stored_nonce and provided_nonce and stored_nonce != provided_nonce:
+            self._store.save_security_event(
+                "hole_punch_nonce_mismatch", "warning", webid=actor_webid,
+                details=f"attempt_id={attempt_id}",
+            )
+            await websocket.send(json.dumps({
+                "type": "error",
+                "code": "hole_punch_nonce_mismatch",
+                "message": "Attempt nonce does not match.",
+            }))
+            return
+
         coordinator = HolePunchCoordinator(self._store)
-        if result == "success":
-            if peer_ip and peer_port is not None:
-                coordinator.record_peer_endpoint(attempt_id, peer_ip, int(peer_port))
-            coordinator.mark_succeeded(attempt_id)
-            self._metrics["hole_punch_succeeded_total"] += 1
-            self._metrics["relay_to_direct_recovery_total"] += 1
-        else:
-            coordinator.mark_failed(attempt_id)
-            self._metrics["hole_punch_failed_total"] += 1
+        try:
+            if result == "success":
+                if peer_ip and peer_port is not None:
+                    coordinator.record_peer_endpoint(attempt_id, actor_webid, peer_ip, int(peer_port))
+                coordinator.mark_succeeded(attempt_id, actor_webid)
+                self._store.save_security_event(
+                    "hole_punch_direct_promotion", "info", webid=actor_webid,
+                    details=f"attempt_id={attempt_id} peer={attempt.get('peer_webid','')}",
+                )
+                self._metrics["hole_punch_succeeded_total"] += 1
+                self._metrics["relay_to_direct_recovery_total"] += 1
+            else:
+                coordinator.mark_failed(attempt_id, actor_webid)
+                self._metrics["hole_punch_failed_total"] += 1
+        except (HolePunchForbidden, InvalidPunchTransition) as exc:
+            self._store.save_security_event(
+                "hole_punch_state_invalid", "warning", webid=actor_webid,
+                details=f"attempt_id={attempt_id} error={exc}",
+            )
+            await websocket.send(json.dumps({
+                "type": "error",
+                "code": "invalid_hole_punch_state_transition",
+                "message": str(exc),
+            }))
+            return
 
         await websocket.send(json.dumps({
             "type": "hole_punch_complete_ack",

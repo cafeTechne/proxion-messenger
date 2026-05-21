@@ -34,6 +34,35 @@ _ATTR_XOR_MAPPED_ADDRESS: int = 0x0020
 _HEADER_LEN: int = 20
 
 
+def validate_stun_endpoint(ip: str, port: int) -> tuple[bool, str]:
+    """Validate a candidate external endpoint before using it for hole punching.
+
+    Returns
+    -------
+    (valid, reason)
+        *valid* is True when the endpoint is acceptable.
+        *reason* is an empty string on success or a human-readable rejection reason.
+    """
+    import ipaddress
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False, f"invalid IP address: {ip!r}"
+    if addr.is_loopback:
+        return False, "loopback address rejected"
+    if addr.is_multicast:
+        return False, "multicast address rejected"
+    if addr.is_link_local:
+        return False, "link-local address rejected"
+    if addr.is_unspecified:
+        return False, "unspecified (0.0.0.0) address rejected"
+    if str(addr) == "255.255.255.255":
+        return False, "broadcast address rejected"
+    if not (1 <= port <= 65535):
+        return False, f"port {port} out of valid range [1, 65535]"
+    return True, ""
+
+
 class StunError(Exception):
     """Raised when STUN discovery fails."""
 

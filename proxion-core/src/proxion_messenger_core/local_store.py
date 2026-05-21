@@ -38,7 +38,7 @@ class LocalStore:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # Current schema version — increment when adding new migrations below
-    _SCHEMA_VERSION = 49
+    _SCHEMA_VERSION = 50
 
     # Set by _init_db if PRAGMA integrity_check fails — blocks mutating operations
     _integrity_ok: bool = True
@@ -1009,6 +1009,18 @@ class LocalStore:
                 )""",
                 """CREATE INDEX IF NOT EXISTS idx_hole_punch_attempts_peer
                    ON hole_punch_attempts(peer_webid, state, updated_at)""",
+            ],
+            # 50: actor binding for hole punch attempts + owner binding for STUN sessions
+            [
+                "ALTER TABLE hole_punch_attempts ADD COLUMN initiator_webid TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE hole_punch_attempts ADD COLUMN responder_webid TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE hole_punch_attempts ADD COLUMN attempt_nonce TEXT NOT NULL DEFAULT ''",
+                """CREATE INDEX IF NOT EXISTS idx_hole_punch_attempts_actor
+                   ON hole_punch_attempts(initiator_webid, responder_webid, state, updated_at)""",
+                "ALTER TABLE stun_sessions ADD COLUMN owner_webid TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE stun_sessions ADD COLUMN owner_device_id TEXT NOT NULL DEFAULT ''",
+                """CREATE INDEX IF NOT EXISTS idx_stun_sessions_owner_expires
+                   ON stun_sessions(owner_webid, expires_at)""",
             ],
         ]
 
@@ -5542,18 +5554,39 @@ class LocalStore:
         external_port: int,
         stun_server: str,
         ttl_seconds: int = 300,
+        owner_webid: str = "",
+        owner_device_id: str = "",
     ) -> None:
         now = time.time()
         with self._conn() as conn:
             try:
                 conn.execute(
                     """INSERT OR REPLACE INTO stun_sessions
-                       (id, external_ip, external_port, stun_server, discovered_at, expires_at)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (session_id, external_ip, external_port, stun_server, now, now + ttl_seconds),
+                       (id, external_ip, external_port, stun_server, discovered_at, expires_at,
+                        owner_webid, owner_device_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (session_id, external_ip, external_port, stun_server, now, now + ttl_seconds,
+                     owner_webid, owner_device_id),
                 )
             except Exception:
                 pass
+
+    def get_latest_stun_session_for_owner(
+        self,
+        owner_webid: str,
+        owner_device_id: str = "",
+    ) -> dict | None:
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    """SELECT * FROM stun_sessions
+                       WHERE owner_webid=? AND owner_device_id=? AND expires_at > ?
+                       ORDER BY discovered_at DESC LIMIT 1""",
+                    (owner_webid, owner_device_id, time.time()),
+                ).fetchone()
+                return dict(row) if row else None
+            except Exception:
+                return None
 
     def get_latest_stun_session(self) -> dict | None:
         with self._conn() as conn:
@@ -5587,18 +5620,34 @@ class LocalStore:
         peer_webid: str,
         local_ip: str,
         local_port: int,
+        initiator_webid: str = "",
+        responder_webid: str = "",
+        attempt_nonce: str = "",
     ) -> None:
         now = time.time()
         with self._conn() as conn:
             try:
                 conn.execute(
                     """INSERT INTO hole_punch_attempts
-                       (id, peer_webid, local_ip, local_port, state, initiated_at, updated_at)
-                       VALUES (?, ?, ?, ?, 'pending', ?, ?)""",
-                    (attempt_id, peer_webid, local_ip, local_port, now, now),
+                       (id, peer_webid, local_ip, local_port, state, initiated_at, updated_at,
+                        initiator_webid, responder_webid, attempt_nonce)
+                       VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)""",
+                    (attempt_id, peer_webid, local_ip, local_port, now, now,
+                     initiator_webid, responder_webid, attempt_nonce),
                 )
             except Exception:
                 pass
+
+    def get_hole_punch_attempt_for_actor(
+        self, attempt_id: str, actor_webid: str
+    ) -> dict | None:
+        """Return the attempt only if actor_webid is initiator or responder."""
+        attempt = self.get_hole_punch_attempt(attempt_id)
+        if attempt is None:
+            return None
+        if actor_webid in (attempt.get("initiator_webid", ""), attempt.get("responder_webid", "")):
+            return attempt
+        return None
 
     def update_hole_punch_attempt(self, attempt_id: str, **kwargs) -> None:
         if not kwargs:
