@@ -234,6 +234,62 @@ def test_build_dpop_client_returns_dpop_client(key):
     assert result._credentials is creds
 
 
+def test_validate_pod_url_same_origin_accepted(mgr):
+    """Pod on the exact same origin as CSS base URL is accepted."""
+    mgr._validate_pod_url(f"{BASE}/alice/")
+
+
+def test_validate_pod_url_subdomain_accepted(mgr):
+    """Pod hosted on a subdomain of the CSS base URL is accepted.
+
+    solidcommunity.net hosts pods at {username}.solidcommunity.net, so
+    subdomain URLs must be allowed.
+    """
+    mgr._validate_pod_url("http://alice.localhost/")
+
+
+def test_validate_pod_url_different_origin_rejected(mgr):
+    """Pod on a completely different domain is rejected."""
+    with pytest.raises(ValueError, match="different server"):
+        mgr._validate_pod_url("http://evil.com/alice/")
+
+
+def test_validate_pod_url_different_scheme_rejected(mgr):
+    """Pod using a different scheme (http vs https) is rejected."""
+    https_mgr = CssAccountManager("https://localhost:3001")
+    with pytest.raises(ValueError, match="different server"):
+        https_mgr._validate_pod_url("http://localhost:3001/alice/")
+
+
+def test_connect_agent_accepts_subdomain_pod(mgr, key):
+    """connect_agent() accepts pods hosted on subdomains of the CSS base URL."""
+    LOGIN_URL = f"{BASE}/.account/login/password/"
+    subdomain_pod = "http://alice.localhost/alice/"
+
+    with respx.mock:
+        _mock_register_flow(
+            respx,
+            pw_status=400,
+            pw_body={"message": "There already is a login for this e-mail address."},
+        )
+        respx.post(LOGIN_URL).mock(
+            return_value=httpx.Response(
+                200, json={}, headers={"Set-Cookie": "css-account=s2; Path=/"}
+            )
+        )
+        respx.get(POD_URL).mock(
+            return_value=httpx.Response(200, json={"pods": {subdomain_pod: POD_URL + "pod-id/"}})
+        )
+        respx.post(CREDS_URL).mock(
+            return_value=httpx.Response(200, json={"id": "cid-s", "secret": "sec-s"})
+        )
+
+        creds, pod_url, webid = mgr.connect_agent(key, "alice@test.com", "pass123")
+
+    assert pod_url == subdomain_pod
+    assert webid == "http://alice.localhost/alice/profile/card#me"
+
+
 def test_parse_jwt_exp_returns_zero_on_garbage():
     from proxion_messenger_core.css_setup import _parse_jwt_exp
     assert _parse_jwt_exp("not.a.jwt") == 0.0

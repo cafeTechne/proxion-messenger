@@ -4,9 +4,12 @@ from __future__ import annotations
 import httpx
 import base64
 import json
+import logging
 from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_origin(scheme: str, netloc: str) -> str:
@@ -92,9 +95,14 @@ class CssAccountManager:
             unauth.get("password", {}).get("login")
             or f"{self.css_base_url}/.account/login/password/"
         )
+        logger.debug("css_setup: POST login → %s", login_url)
         resp = client.post(login_url, json={"email": email, "password": password})
+        logger.debug("css_setup: login status=%d cookies=%s body=%s",
+                     resp.status_code, dict(client.cookies), resp.text[:400])
         resp.raise_for_status()
-        return self._authenticated_controls(client)
+        controls = self._authenticated_controls(client)
+        logger.debug("css_setup: authenticated controls keys=%s", list(controls.keys()))
+        return controls
 
     def _set_password(
         self, client: httpx.Client, controls: dict, email: str, password: str
@@ -112,10 +120,13 @@ class CssAccountManager:
         resp.raise_for_status()
 
     def _validate_pod_url(self, pod_url: str) -> None:
-        """Raise ValueError if *pod_url* is not on the same origin as css_base_url.
+        """Raise ValueError if pod_url is not on the same origin or a subdomain of css_base_url.
 
-        Prevents a malicious CSS server from redirecting pod writes to an
-        external resource (resource-phishing attack, audit finding #6).
+        solidcommunity.net and similar deployments host each pod at its own
+        subdomain ({username}.solidcommunity.net) rather than a path under the
+        base origin, so an exact-origin check is too strict. We allow any
+        subdomain of the CSS base hostname while still rejecting pods on a
+        completely unrelated domain (audit finding #6).
 
         Applies RFC 3986 normalisation before comparison so that mixed-case
         hostnames, trailing dots, and explicit default ports cannot bypass the
@@ -123,12 +134,14 @@ class CssAccountManager:
         """
         base = urlparse(self.css_base_url)
         pod = urlparse(pod_url)
-        base_origin = _normalize_origin(base.scheme, base.netloc)
-        pod_origin = _normalize_origin(pod.scheme, pod.netloc)
-        if base_origin != pod_origin:
+        base_host = (base.hostname or "").lower().rstrip(".")
+        pod_host = (pod.hostname or "").lower().rstrip(".")
+        same_host = pod_host == base_host
+        is_subdomain = pod_host.endswith("." + base_host)
+        if not (same_host or is_subdomain) or pod.scheme != base.scheme:
             raise ValueError(
-                f"Pod URL {pod_url!r} origin ({pod_origin}) does not match "
-                f"CSS base URL origin ({base_origin}). "
+                f"Pod URL {pod_url!r} is not on the same origin or a trusted subdomain of "
+                f"CSS base URL {self.css_base_url!r}. "
                 "Refusing to use a pod on a different server."
             )
 
@@ -149,7 +162,9 @@ class CssAccountManager:
     ) -> tuple[str, str]:
         """GET pod list for this account. Returns (pod_url, webid)."""
         url = controls["account"]["pod"]
+        logger.debug("css_setup: GET pod list → %s", url)
         resp = client.get(url)
+        logger.debug("css_setup: pod list status=%d body=%s", resp.status_code, resp.text[:400])
         resp.raise_for_status()
         body = resp.json()
         pods: dict = body.get("pods", {})
