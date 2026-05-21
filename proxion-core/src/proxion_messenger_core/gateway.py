@@ -185,6 +185,12 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             "session_recovery_attempts_total": 0,
             "catchup_batches_total": 0,
             "delivery_state_regressions_total": 0,
+            # WG overlay counters (Round 22)
+            "wg_peers_total": 0,
+            "wg_peers_direct": 0,
+            "wg_peers_relay": 0,
+            "relay_fallback_total": 0,
+            "relay_to_direct_recovery_total": 0,
         }
 
         # Per-identity connection count for aggregated presence (R13.13)
@@ -952,6 +958,10 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 await self._handle_join_voice_channel(websocket, data)
             elif cmd == "get_identity":
                 await self._handle_get_identity(websocket, data)
+            elif cmd == "get_connect_id":
+                await self._handle_get_connect_id(websocket, data)
+            elif cmd == "resolve_connect_id":
+                await self._handle_resolve_connect_id(websocket, data)
             elif cmd == "typing":
                 await self._handle_typing(websocket, data)
             elif cmd == "add_reaction":

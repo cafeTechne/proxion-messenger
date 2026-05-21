@@ -278,6 +278,41 @@ def evaluate_mvp_security_gate(store: Optional["LocalStore"] = None) -> dict:
     return {"pass": True, "reason": "e2e_crypto_baseline_intact", "detail": {"schema_version": schema_version}}
 
 
+_LAYPERSON_SCHEMA_VERSION = 48
+
+
+def evaluate_layperson_connectivity_gate(store: Optional["LocalStore"] = None) -> dict:
+    """Pass when schema >= 48 AND a WireGuard local identity record is present.
+
+    These are runtime-checkable conditions that confirm the overlay state layer
+    is initialized and ready.
+    """
+    try:
+        if store is None:
+            return {"pass": True, "reason": "no_store", "detail": {}}
+        schema_version = store._SCHEMA_VERSION
+        if schema_version < _LAYPERSON_SCHEMA_VERSION:
+            return {
+                "pass": False,
+                "reason": "schema_version_below_layperson",
+                "detail": {"schema_version": schema_version, "required": _LAYPERSON_SCHEMA_VERSION},
+            }
+        identity = store.get_wg_local_identity()
+        if identity is None:
+            return {
+                "pass": False,
+                "reason": "wg_identity_not_present",
+                "detail": {"hint": "call ensure_local_identity() to initialize the overlay"},
+            }
+    except Exception as exc:
+        return {"pass": False, "reason": f"evaluation_error: {exc}", "detail": {}}
+    return {
+        "pass": True,
+        "reason": "overlay_identity_present",
+        "detail": {"schema_version": schema_version},
+    }
+
+
 def evaluate_all_gates(store: Optional["LocalStore"] = None) -> dict:
     """Evaluate all exit gates and return a summary."""
     gates = {
@@ -288,6 +323,7 @@ def evaluate_all_gates(store: Optional["LocalStore"] = None) -> dict:
         "false_positive_gate": evaluate_false_positive_gate(store),
         "mvp_working_gate": evaluate_mvp_working_gate(store),
         "mvp_security_gate": evaluate_mvp_security_gate(store),
+        "layperson_connectivity_gate": evaluate_layperson_connectivity_gate(store),
     }
     all_pass = all(g["pass"] for g in gates.values())
     return {"all_pass": all_pass, "gates": gates, "evaluated_at": time.time()}

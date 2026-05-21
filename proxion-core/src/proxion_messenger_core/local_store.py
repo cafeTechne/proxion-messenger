@@ -38,7 +38,7 @@ class LocalStore:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # Current schema version — increment when adding new migrations below
-    _SCHEMA_VERSION = 47
+    _SCHEMA_VERSION = 48
 
     # Set by _init_db if PRAGMA integrity_check fails — blocks mutating operations
     _integrity_ok: bool = True
@@ -952,6 +952,36 @@ class LocalStore:
                    ON device_recovery_codes(owner_webid, created_at)""",
                 "ALTER TABLE device_registrations ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE message_receipts ADD COLUMN state TEXT",
+            ],
+            # 48: WireGuard overlay state — local identity, peers, connectivity events
+            [
+                """CREATE TABLE IF NOT EXISTS wg_local_identity (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    pubkey_b64 TEXT NOT NULL,
+                    priv_wrapped_b64 TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                )""",
+                """CREATE TABLE IF NOT EXISTS wg_peers (
+                    peer_webid TEXT PRIMARY KEY,
+                    peer_pubkey_b64 TEXT NOT NULL,
+                    endpoint_hint TEXT,
+                    allowed_ips TEXT NOT NULL,
+                    path_mode TEXT NOT NULL DEFAULT 'unknown',
+                    last_handshake_at REAL,
+                    updated_at REAL NOT NULL
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_wg_peers_mode
+                   ON wg_peers(path_mode, updated_at)""",
+                """CREATE TABLE IF NOT EXISTS wg_connectivity_events (
+                    id TEXT PRIMARY KEY,
+                    peer_webid TEXT NOT NULL,
+                    old_mode TEXT,
+                    new_mode TEXT NOT NULL,
+                    reason TEXT,
+                    created_at REAL NOT NULL
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_wg_connectivity_events_peer
+                   ON wg_connectivity_events(peer_webid, created_at)""",
             ],
         ]
 
@@ -5344,6 +5374,131 @@ class LocalStore:
                        WHERE thread_id=? AND seq IS NOT NULL AND seq > ?
                        ORDER BY seq ASC LIMIT ?""",
                     (thread_id, since_seq, limit),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+
+    # ------------------------------------------------------------------
+    # WireGuard overlay state (schema v48)
+    # ------------------------------------------------------------------
+
+    def save_wg_local_identity(self, pubkey_b64: str, priv_wrapped_b64: str) -> None:
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    """INSERT OR REPLACE INTO wg_local_identity
+                       (id, pubkey_b64, priv_wrapped_b64, created_at)
+                       VALUES (1, ?, ?, COALESCE(
+                           (SELECT created_at FROM wg_local_identity WHERE id=1), ?
+                       ))""",
+                    (pubkey_b64, priv_wrapped_b64, time.time()),
+                )
+            except Exception:
+                pass
+
+    def get_wg_local_identity(self) -> dict | None:
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT * FROM wg_local_identity WHERE id=1"
+                ).fetchone()
+                return dict(row) if row else None
+            except Exception:
+                return None
+
+    def upsert_wg_peer(
+        self,
+        peer_webid: str,
+        peer_pubkey_b64: str,
+        endpoint_hint: str | None,
+        allowed_ips: str,
+        path_mode: str = "unknown",
+    ) -> None:
+        now = time.time()
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    """INSERT INTO wg_peers
+                       (peer_webid, peer_pubkey_b64, endpoint_hint, allowed_ips, path_mode, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(peer_webid) DO UPDATE SET
+                           peer_pubkey_b64=excluded.peer_pubkey_b64,
+                           endpoint_hint=excluded.endpoint_hint,
+                           allowed_ips=excluded.allowed_ips,
+                           path_mode=excluded.path_mode,
+                           updated_at=excluded.updated_at""",
+                    (peer_webid, peer_pubkey_b64, endpoint_hint, allowed_ips, path_mode, now),
+                )
+            except Exception:
+                pass
+
+    def update_wg_peer_path_mode(
+        self, peer_webid: str, path_mode: str, last_handshake_at: float | None = None
+    ) -> None:
+        now = time.time()
+        with self._conn() as conn:
+            try:
+                if last_handshake_at is not None:
+                    conn.execute(
+                        """UPDATE wg_peers SET path_mode=?, last_handshake_at=?, updated_at=?
+                           WHERE peer_webid=?""",
+                        (path_mode, last_handshake_at, now, peer_webid),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE wg_peers SET path_mode=?, updated_at=? WHERE peer_webid=?",
+                        (path_mode, now, peer_webid),
+                    )
+            except Exception:
+                pass
+
+    def get_wg_peer(self, peer_webid: str) -> dict | None:
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT * FROM wg_peers WHERE peer_webid=?", (peer_webid,)
+                ).fetchone()
+                return dict(row) if row else None
+            except Exception:
+                return None
+
+    def get_wg_peers_by_mode(self, path_mode: str) -> list[dict]:
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM wg_peers WHERE path_mode=? ORDER BY updated_at DESC",
+                    (path_mode,),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+
+    def log_wg_connectivity_event(
+        self, peer_webid: str, old_mode: str | None, new_mode: str, reason: str = ""
+    ) -> None:
+        import uuid as _uuid_wg
+        event_id = str(_uuid_wg.uuid4())
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    """INSERT INTO wg_connectivity_events
+                       (id, peer_webid, old_mode, new_mode, reason, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (event_id, peer_webid, old_mode, new_mode, reason, time.time()),
+                )
+            except Exception:
+                pass
+
+    def get_wg_connectivity_events(
+        self, peer_webid: str, limit: int = 50
+    ) -> list[dict]:
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    """SELECT * FROM wg_connectivity_events
+                       WHERE peer_webid=? ORDER BY created_at DESC LIMIT ?""",
+                    (peer_webid, limit),
                 ).fetchall()
                 return [dict(r) for r in rows]
             except Exception:

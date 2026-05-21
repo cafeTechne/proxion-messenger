@@ -390,6 +390,17 @@ class DmHandlerMixin:
                     "message": _env_reason,
                 }))
                 return
+        # Relay-mode sealed-sender enforcement (Round 22)
+        if self._store and target_webid:
+            from .transport_policy import requires_sealed_sender
+            if requires_sealed_sender(self._store, target_webid):
+                if data.get("e2e_v") != 3:
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "code": "relay_requires_sealed_sender",
+                        "message": "Relay path is active — message must use sealed sender (e2e_v=3).",
+                    }))
+                    return
         thread_id = data.get("thread_id") or target_webid
         import uuid as _uuid_local
         message_id = data.get("message_id") or ("local-" + _uuid_local.uuid4().hex[:12])

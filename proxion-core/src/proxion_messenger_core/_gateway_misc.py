@@ -1717,3 +1717,38 @@ class MiscHandlerMixin:
             "owner_webid": record["owner_webid"],
         }))
 
+    async def _handle_get_connect_id(self, websocket, data: dict) -> None:
+        """Encode the caller's DID + gateway URL as a Connect ID for sharing."""
+        from .connect_id import encode_connect_id
+        own_did = self._client_webids.get(websocket, "") or getattr(self.agent, "webid", "")
+        gateway_url = data.get("gateway_url") or getattr(self, "_gateway_http_url", "")
+        if not own_did:
+            await websocket.send(json.dumps({"type": "error", "message": "not_registered"}))
+            return
+        connect_id = encode_connect_id(own_did, gateway_url or "")
+        await websocket.send(json.dumps({
+            "type": "connect_id",
+            "connect_id": connect_id,
+            "did": own_did,
+            "gateway_url": gateway_url,
+        }))
+
+    async def _handle_resolve_connect_id(self, websocket, data: dict) -> None:
+        """Decode a Connect ID and return the embedded DID + gateway URL."""
+        from .connect_id import decode_connect_id, is_valid_connect_id
+        connect_id = data.get("connect_id", "")
+        if not is_valid_connect_id(connect_id):
+            await websocket.send(json.dumps({
+                "type": "error",
+                "code": "invalid_connect_id",
+                "message": "Connect ID is invalid or has a bad checksum.",
+            }))
+            return
+        resolved = decode_connect_id(connect_id)
+        await websocket.send(json.dumps({
+            "type": "connect_id_resolved",
+            "connect_id": connect_id,
+            "did": resolved.get("did", ""),
+            "gateway_url": resolved.get("url", ""),
+        }))
+
