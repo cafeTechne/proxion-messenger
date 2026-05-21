@@ -88,3 +88,25 @@ def attachment_key_payload(
         "filename": filename,
         "mime_type": mime_type,
     }
+
+
+_REQUIRED_ENVELOPE_FIELDS = ("key_b64", "nonce_b64")
+
+
+def validate_attachment_envelope(envelope: dict) -> tuple[bool, str]:
+    """Validate that an attachment key payload has all required fields.
+
+    Returns
+    -------
+    (valid, reason)
+        valid is True if the envelope is well-formed; reason describes the failure.
+    """
+    if not isinstance(envelope, dict):
+        return False, "envelope_not_a_dict"
+    for field in _REQUIRED_ENVELOPE_FIELDS:
+        if not envelope.get(field):
+            return False, f"missing_required_field:{field}"
+    if envelope.get("type") == "attachment_key":
+        if not envelope.get("filename"):
+            return False, "missing_required_field:filename"
+    return True, "ok"

@@ -10,8 +10,8 @@ def store(tmp_path):
 
 
 def test_schema_version_bumped_to_46(store):
-    """_SCHEMA_VERSION class attribute must equal 46."""
-    assert LocalStore._SCHEMA_VERSION == 46
+    """_SCHEMA_VERSION class attribute must be >= 46."""
+    assert LocalStore._SCHEMA_VERSION >= 46
 
 
 def test_round20_tables_exist(store):

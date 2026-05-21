@@ -1628,3 +1628,92 @@ class MiscHandlerMixin:
         await websocket.send(json.dumps({
             "type": "contact_verification_sync_ack", "ok": True
         }))
+
+    async def _handle_set_primary_device(self, websocket, data: dict) -> None:
+        """Mark one device as primary for the requesting user."""
+        owner_webid = self._client_webids.get(websocket, "")
+        device_id = data.get("device_id", "")
+        if not owner_webid or not device_id or not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "invalid_request"}))
+            return
+        self._store.set_device_primary(device_id, owner_webid)
+        await websocket.send(json.dumps({
+            "type": "primary_device_set",
+            "device_id": device_id,
+            "owner_webid": owner_webid,
+        }))
+
+    async def _handle_revoke_device_and_rekey(self, websocket, data: dict) -> None:
+        """Unregister a device and notify remaining devices to rekey."""
+        owner_webid = self._client_webids.get(websocket, "")
+        device_id = data.get("device_id", "")
+        if not owner_webid or not device_id or not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "invalid_request"}))
+            return
+        existing = self._store.get_device(device_id)
+        if not existing or existing.get("owner_webid") != owner_webid:
+            await websocket.send(json.dumps({"type": "error", "message": "device_not_found"}))
+            return
+        self._store.unregister_device(device_id)
+        revoke_event = json.dumps({
+            "type": "device_revoked",
+            "device_id": device_id,
+            "owner_webid": owner_webid,
+        })
+        for ws in self._sockets_for(owner_webid):
+            if ws is not websocket:
+                try:
+                    await ws.send(revoke_event)
+                except Exception:
+                    pass
+        await websocket.send(json.dumps({
+            "type": "device_revoked_ack",
+            "device_id": device_id,
+        }))
+
+    async def _handle_device_recovery_code_generate(self, websocket, data: dict) -> None:
+        """Generate a single-use device recovery code for the requesting user."""
+        import hashlib
+        import secrets
+        import uuid
+        owner_webid = self._client_webids.get(websocket, "")
+        if not owner_webid or not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "not_registered"}))
+            return
+        plaintext = secrets.token_hex(16)  # 32 hex chars
+        code_hash = hashlib.sha256(plaintext.encode()).hexdigest()
+        code_id = str(uuid.uuid4())
+        self._store.save_device_recovery_code(code_id, owner_webid, code_hash)
+        await websocket.send(json.dumps({
+            "type": "device_recovery_code_generated",
+            "code_id": code_id,
+            "code": plaintext,
+            "owner_webid": owner_webid,
+        }))
+
+    async def _handle_device_recovery_code_use(self, websocket, data: dict) -> None:
+        """Validate a recovery code. Marks it used if valid; rejects if used or wrong."""
+        import hashlib
+        code_id = data.get("code_id", "")
+        plaintext = data.get("code", "")
+        if not code_id or not plaintext or not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "missing_fields"}))
+            return
+        record = self._store.get_device_recovery_code(code_id)
+        if not record:
+            await websocket.send(json.dumps({"type": "device_recovery_code_invalid", "reason": "not_found"}))
+            return
+        if record.get("used_at") is not None:
+            await websocket.send(json.dumps({"type": "device_recovery_code_invalid", "reason": "already_used"}))
+            return
+        expected_hash = hashlib.sha256(plaintext.encode()).hexdigest()
+        if expected_hash != record["code_hash"]:
+            await websocket.send(json.dumps({"type": "device_recovery_code_invalid", "reason": "wrong_code"}))
+            return
+        self._store.use_device_recovery_code(code_id)
+        await websocket.send(json.dumps({
+            "type": "device_recovery_code_accepted",
+            "code_id": code_id,
+            "owner_webid": record["owner_webid"],
+        }))
+

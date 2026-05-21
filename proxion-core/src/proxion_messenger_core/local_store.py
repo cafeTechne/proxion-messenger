@@ -38,7 +38,7 @@ class LocalStore:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # Current schema version — increment when adding new migrations below
-    _SCHEMA_VERSION = 46
+    _SCHEMA_VERSION = 47
 
     # Set by _init_db if PRAGMA integrity_check fails — blocks mutating operations
     _integrity_ok: bool = True
@@ -925,6 +925,33 @@ class LocalStore:
                     updated_at REAL NOT NULL,
                     PRIMARY KEY (owner_webid, owner_device_id, thread_id)
                 )""",
+            ],
+            # 47: session recovery attempts, device recovery codes,
+            #     message delivery state, device primary flag
+            [
+                """CREATE TABLE IF NOT EXISTS dm_session_recovery_attempts (
+                    thread_id TEXT NOT NULL,
+                    session_id TEXT,
+                    actor_webid TEXT NOT NULL,
+                    attempt_no INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY (thread_id, actor_webid, attempt_no)
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_dm_session_recovery_attempts_thread
+                   ON dm_session_recovery_attempts(thread_id, updated_at)""",
+                """CREATE TABLE IF NOT EXISTS device_recovery_codes (
+                    code_id TEXT PRIMARY KEY,
+                    owner_webid TEXT NOT NULL,
+                    code_hash TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    used_at REAL
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_device_recovery_codes_owner
+                   ON device_recovery_codes(owner_webid, created_at)""",
+                "ALTER TABLE device_registrations ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE message_receipts ADD COLUMN state TEXT",
             ],
         ]
 
@@ -4946,6 +4973,189 @@ class LocalStore:
                 )
             except Exception:
                 pass
+
+    # ------------------------------------------------------------------
+    # Session recovery attempts (schema v47)
+    # ------------------------------------------------------------------
+
+    def record_recovery_attempt(
+        self,
+        thread_id: str,
+        session_id: str | None,
+        actor_webid: str,
+        attempt_no: int,
+        status: str = "pending",
+    ) -> None:
+        now = time.time()
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    """INSERT OR IGNORE INTO dm_session_recovery_attempts
+                       (thread_id, session_id, actor_webid, attempt_no, status,
+                        created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (thread_id, session_id, actor_webid, attempt_no, status, now, now),
+                )
+            except Exception:
+                pass
+
+    def update_recovery_attempt(
+        self,
+        thread_id: str,
+        actor_webid: str,
+        attempt_no: int,
+        status: str,
+    ) -> None:
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    """UPDATE dm_session_recovery_attempts
+                       SET status=?, updated_at=?
+                       WHERE thread_id=? AND actor_webid=? AND attempt_no=?""",
+                    (status, time.time(), thread_id, actor_webid, attempt_no),
+                )
+            except Exception:
+                pass
+
+    def get_recovery_attempts(
+        self, thread_id: str, actor_webid: str
+    ) -> list[dict]:
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    """SELECT * FROM dm_session_recovery_attempts
+                       WHERE thread_id=? AND actor_webid=?
+                       ORDER BY attempt_no ASC""",
+                    (thread_id, actor_webid),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+
+    # ------------------------------------------------------------------
+    # Device recovery codes (schema v47)
+    # ------------------------------------------------------------------
+
+    def set_device_primary(self, device_id: str, owner_webid: str) -> None:
+        """Mark device_id as primary; clear is_primary on all other devices for owner."""
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    "UPDATE device_registrations SET is_primary=0 WHERE owner_webid=?",
+                    (owner_webid,),
+                )
+                conn.execute(
+                    "UPDATE device_registrations SET is_primary=1 WHERE device_id=? AND owner_webid=?",
+                    (device_id, owner_webid),
+                )
+            except Exception:
+                pass
+
+    def save_device_recovery_code(
+        self, code_id: str, owner_webid: str, code_hash: str
+    ) -> None:
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    """INSERT OR IGNORE INTO device_recovery_codes
+                       (code_id, owner_webid, code_hash, created_at)
+                       VALUES (?, ?, ?, ?)""",
+                    (code_id, owner_webid, code_hash, time.time()),
+                )
+            except Exception:
+                pass
+
+    def use_device_recovery_code(self, code_id: str) -> bool:
+        """Mark recovery code as used. Returns False if not found or already used."""
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT used_at FROM device_recovery_codes WHERE code_id=?",
+                    (code_id,),
+                ).fetchone()
+                if row is None or row["used_at"] is not None:
+                    return False
+                conn.execute(
+                    "UPDATE device_recovery_codes SET used_at=? WHERE code_id=?",
+                    (time.time(), code_id),
+                )
+                return True
+            except Exception:
+                return False
+
+    def get_device_recovery_code(self, code_id: str) -> dict | None:
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT * FROM device_recovery_codes WHERE code_id=?", (code_id,)
+                ).fetchone()
+                return dict(row) if row else None
+            except Exception:
+                return None
+
+    # ------------------------------------------------------------------
+    # Message delivery state (schema v47 + delivery_state module)
+    # ------------------------------------------------------------------
+
+    def set_message_delivery_state(
+        self, message_id: str, receiver_webid: str, state: str
+    ) -> bool:
+        """Apply a monotonic delivery state transition. Returns False if rejected."""
+        from .delivery_state import is_valid_transition
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT state FROM message_receipts WHERE message_id=? AND receiver_webid=?",
+                    (message_id, receiver_webid),
+                ).fetchone()
+                current = row["state"] if row else None
+                if not is_valid_transition(current, state):
+                    return False
+                if row is None:
+                    conn.execute(
+                        """INSERT OR IGNORE INTO message_receipts
+                           (message_id, receiver_webid, state)
+                           VALUES (?, ?, ?)""",
+                        (message_id, receiver_webid, state),
+                    )
+                else:
+                    conn.execute(
+                        """UPDATE message_receipts SET state=?
+                           WHERE message_id=? AND receiver_webid=?""",
+                        (state, message_id, receiver_webid),
+                    )
+                return True
+            except Exception:
+                return False
+
+    def get_message_delivery_state(
+        self, message_id: str, receiver_webid: str
+    ) -> dict | None:
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT * FROM message_receipts WHERE message_id=? AND receiver_webid=?",
+                    (message_id, receiver_webid),
+                ).fetchone()
+                return dict(row) if row else None
+            except Exception:
+                return None
+
+    # ------------------------------------------------------------------
+    # Idempotency TTL cleanup (schema v46)
+    # ------------------------------------------------------------------
+
+    def prune_expired_idempotency_ops(self, retention_hours: int = 72) -> int:
+        """Delete idempotency_ops records older than retention_hours. Returns count."""
+        cutoff = time.time() - retention_hours * 3600
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    "DELETE FROM idempotency_ops WHERE created_at < ?", (cutoff,)
+                )
+                return conn.execute("SELECT changes()").fetchone()[0]
+            except Exception:
+                return 0
 
     # ------------------------------------------------------------------
     # WebPush subscriptions (schema v44)

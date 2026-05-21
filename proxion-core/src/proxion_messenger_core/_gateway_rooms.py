@@ -350,6 +350,16 @@ class RoomHandlerMixin:
         if len(str(content).encode("utf-8")) > 16_384:
             await websocket.send(json.dumps({"type": "error", "code": "E_SCHEMA", "message": "content_too_large"}))
             return
+        if data.get("content_type") == "attachment":
+            from .attachment_crypto import validate_attachment_envelope
+            _env_valid, _env_reason = validate_attachment_envelope(data.get("attachment_descriptor") or {})
+            if not _env_valid:
+                await websocket.send(json.dumps({
+                    "type": "error",
+                    "code": "invalid_attachment_envelope",
+                    "message": _env_reason,
+                }))
+                return
         if room_id in self.room_memberships:
             membership, client = self.room_memberships[room_id]
 

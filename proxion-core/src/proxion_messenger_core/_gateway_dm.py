@@ -380,6 +380,16 @@ class DmHandlerMixin:
         if len(str(content).encode("utf-8")) > 16_384:
             await websocket.send(json.dumps({"type": "error", "code": "E_SCHEMA", "message": "content_too_large"}))
             return
+        if data.get("content_type") == "attachment":
+            from .attachment_crypto import validate_attachment_envelope
+            _env_valid, _env_reason = validate_attachment_envelope(data.get("attachment_descriptor") or {})
+            if not _env_valid:
+                await websocket.send(json.dumps({
+                    "type": "error",
+                    "code": "invalid_attachment_envelope",
+                    "message": _env_reason,
+                }))
+                return
         thread_id = data.get("thread_id") or target_webid
         import uuid as _uuid_local
         message_id = data.get("message_id") or ("local-" + _uuid_local.uuid4().hex[:12])
@@ -795,3 +805,71 @@ class DmHandlerMixin:
             "message_id": message_id,
             "delivered": delivered,
         }))
+
+    async def _handle_dm_decrypt_failed(self, websocket, data: dict) -> None:
+        """Client reports it could not decrypt a DM — initiate session recovery.
+
+        The gateway is a sealed-DM relay and cannot decrypt; failure detection is
+        client-triggered.  On receipt the gateway records the recovery attempt and
+        emits ``session_recovery_required`` to the sender so they can re-send their
+        ratchet state or kick off X3DH re-init.
+        """
+        reporter_webid = self._client_webids.get(websocket, "unknown")
+        if reporter_webid == "unknown":
+            await websocket.send(json.dumps({"type": "error", "message": "not_registered"}))
+            return
+
+        thread_id = data.get("thread_id", "")
+        session_id = data.get("session_id", "")
+        if not thread_id:
+            await websocket.send(json.dumps({"type": "error", "message": "thread_id required"}))
+            return
+
+        # Record the attempt in the store (metrics + observability)
+        attempt_no = 1
+        if self._store:
+            existing = self._store.get_recovery_attempts(thread_id, reporter_webid)
+            attempt_no = len(existing) + 1
+            self._store.record_recovery_attempt(thread_id, session_id, reporter_webid, attempt_no)
+            self._metrics["dm_decrypt_errors_total"] = self._metrics.get("dm_decrypt_errors_total", 0) + 1
+            self._metrics["session_recovery_attempts_total"] = (
+                self._metrics.get("session_recovery_attempts_total", 0) + 1
+            )
+
+        # Determine the original sender (the peer this reporter was talking to)
+        sender_webid = ""
+        if self._store and session_id:
+            sess = self._store.get_dm_session_by_id(session_id)
+            if sess:
+                owner = sess.get("owner_webid", "")
+                peer = sess.get("peer_webid", "")
+                sender_webid = peer if owner == reporter_webid else owner
+        if not sender_webid and thread_id:
+            sender_webid = thread_id  # thread_id is often the peer's webid
+
+        recovery_event = json.dumps({
+            "type": "session_recovery_required",
+            "thread_id": thread_id,
+            "session_id": session_id,
+            "reporter_webid": reporter_webid,
+        })
+
+        sender_sockets = self._sockets_for(sender_webid) if sender_webid else []
+        if sender_sockets:
+            for ws in sender_sockets:
+                try:
+                    await ws.send(recovery_event)
+                except Exception:
+                    pass
+            await websocket.send(json.dumps({
+                "type": "session_recovery_initiated",
+                "thread_id": thread_id,
+                "session_id": session_id,
+            }))
+        else:
+            await websocket.send(json.dumps({
+                "type": "session_recovery_deferred",
+                "thread_id": thread_id,
+                "session_id": session_id,
+                "message": "Sender offline — recovery request queued.",
+            }))

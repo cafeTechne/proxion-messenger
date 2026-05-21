@@ -180,6 +180,11 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             "ws_connections_current": 0,
             "ws_connections_total": 0,
             "identity_cache_evictions_total": 0,
+            # MVP runtime counters (Round 21)
+            "dm_decrypt_errors_total": 0,
+            "session_recovery_attempts_total": 0,
+            "catchup_batches_total": 0,
+            "delivery_state_regressions_total": 0,
         }
 
         # Per-identity connection count for aggregated presence (R13.13)
@@ -786,11 +791,31 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
 
         try:
             if cmd == "send_dm":
-                await self._handle_send_dm(websocket, data)
+                _op_id = data.get("op_id")
+                _actor = self._client_webids.get(websocket, "")
+                if _op_id and self._store:
+                    _prior = self._store.get_operation_result(_op_id)
+                    if _prior is not None:
+                        await websocket.send(_j.dumps({"type": "send_dm_ack", "op_id": _op_id, "result_code": _prior.get("result_code", "ok"), "replayed": True}))
+                    else:
+                        await self._handle_send_dm(websocket, data)
+                        self._store.record_operation_result(_op_id, "send_dm", _actor, data.get("device_id"), "ok")
+                else:
+                    await self._handle_send_dm(websocket, data)
             elif cmd == "edit_message":
                 await self._handle_edit_message(websocket, data)
             elif cmd == "send_room":
-                await self._handle_send_room(websocket, data)
+                _op_id = data.get("op_id")
+                _actor = self._client_webids.get(websocket, "")
+                if _op_id and self._store:
+                    _prior = self._store.get_operation_result(_op_id)
+                    if _prior is not None:
+                        await websocket.send(_j.dumps({"type": "send_room_ack", "op_id": _op_id, "result_code": _prior.get("result_code", "ok"), "replayed": True}))
+                    else:
+                        await self._handle_send_room(websocket, data)
+                        self._store.record_operation_result(_op_id, "send_room", _actor, data.get("device_id"), "ok")
+                else:
+                    await self._handle_send_room(websocket, data)
             elif cmd == "set_presence":
                 await self._handle_set_presence(websocket, data)
             elif cmd == "get_rooms":
@@ -876,7 +901,17 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             elif cmd == "get_sender_key":
                 await self._handle_get_sender_key(websocket, data)
             elif cmd == "distribute_sender_key":
-                await self._handle_distribute_sender_key(websocket, data)
+                _op_id = data.get("op_id")
+                _actor = self._client_webids.get(websocket, "")
+                if _op_id and self._store:
+                    _prior = self._store.get_operation_result(_op_id)
+                    if _prior is not None:
+                        await websocket.send(_j.dumps({"type": "distribute_sender_key_ack", "op_id": _op_id, "result_code": _prior.get("result_code", "ok"), "replayed": True}))
+                    else:
+                        await self._handle_distribute_sender_key(websocket, data)
+                        self._store.record_operation_result(_op_id, "distribute_sender_key", _actor, data.get("device_id"), "ok")
+                else:
+                    await self._handle_distribute_sender_key(websocket, data)
             elif cmd == "ack_sender_key_rotation":
                 await self._handle_ack_sender_key_rotation(websocket, data)
             elif cmd == "register_device":
@@ -903,6 +938,16 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 await self._handle_sync_contact_verifications(websocket, data)
             elif cmd == "apply_contact_verification_sync":
                 await self._handle_apply_contact_verification_sync(websocket, data)
+            elif cmd == "dm_decrypt_failed":
+                await self._handle_dm_decrypt_failed(websocket, data)
+            elif cmd == "set_primary_device":
+                await self._handle_set_primary_device(websocket, data)
+            elif cmd == "revoke_device_and_rekey":
+                await self._handle_revoke_device_and_rekey(websocket, data)
+            elif cmd == "device_recovery_code_generate":
+                await self._handle_device_recovery_code_generate(websocket, data)
+            elif cmd == "device_recovery_code_use":
+                await self._handle_device_recovery_code_use(websocket, data)
             elif cmd == "join_voice_channel":
                 await self._handle_join_voice_channel(websocket, data)
             elif cmd == "get_identity":
@@ -3456,11 +3501,15 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 sessions_purged = self._store.prune_expired_dm_sessions(
                     max_age_seconds=dm_session_days * 86400
                 )
+                idempotency_hours = int(_os_rp.environ.get("PROXION_IDEMPOTENCY_RETENTION_HOURS", "72"))
+                idempotency_pruned = self._store.prune_expired_idempotency_ops(retention_hours=idempotency_hours)
                 if audit_purged or sec_purged:
                     logger.info("Retention purge: %d audit logs, %d security events removed",
                                 audit_purged, sec_purged)
                 if sessions_purged:
                     logger.info("Retention purge: %d expired DM sessions removed", sessions_purged)
+                if idempotency_pruned:
+                    logger.info("Retention purge: %d expired idempotency records removed", idempotency_pruned)
                 self._metrics["audit_logs_purged"] = self._metrics.get("audit_logs_purged", 0) + audit_purged
                 self._metrics["security_events_purged"] = self._metrics.get("security_events_purged", 0) + sec_purged
             except Exception as exc:
@@ -3531,6 +3580,7 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             sorted(f"{m.get('message_id', '')}:{m.get('seq', '')}" for m in msgs)
         ).encode()
         batch_hash = _hl.sha256(hash_input).hexdigest()
+        self._metrics["catchup_batches_total"] += 1
         await websocket.send(_j.dumps({
             "type": "catch_up_batch",
             "thread_id": thread_id,
