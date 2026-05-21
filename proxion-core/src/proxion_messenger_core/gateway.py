@@ -4024,8 +4024,8 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             if self.config.push:
                 logger.info("Push mode enabled. Subscribing to resources...")
                 from .notifications import watch_stash_uri
-                import os
-                css_base = os.getenv("CSS_ALICE_URL", "") # simplified for discovery
+                import os as _os_push
+                css_base = _os_push.getenv("CSS_ALICE_URL", "") # simplified for discovery
                 
                 for cert_id, (cert, client) in self.dm_clients.items():
                     try:
