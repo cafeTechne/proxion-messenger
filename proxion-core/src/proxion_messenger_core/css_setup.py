@@ -99,13 +99,16 @@ class CssAccountManager:
     def _set_password(
         self, client: httpx.Client, controls: dict, email: str, password: str
     ) -> None:
-        url = controls["password"]["create"]
+        url = controls.get("password", {}).get("create")
+        if not url:
+            # No password.create control — account was already set up
+            raise CssAccountExistsError(f"Account already exists: {email}")
         resp = client.post(url, json={"email": email, "password": password})
         if resp.status_code in (400, 409):
-            body = resp.json()
-            msg = body.get("message", "")
-            if "already" in msg.lower() or resp.status_code == 409:
-                raise CssAccountExistsError(f"Account already exists: {email}")
+            # The password.create endpoint only returns 4xx when the email is
+            # already registered — treat any 4xx here as account-exists regardless
+            # of the exact message wording (which varies across CSS versions).
+            raise CssAccountExistsError(f"Account already exists: {email}")
         resp.raise_for_status()
 
     def _validate_pod_url(self, pod_url: str) -> None:
@@ -161,9 +164,23 @@ class CssAccountManager:
     def _issue_credentials(
         self, client: httpx.Client, controls: dict, webid: str, label: str
     ) -> tuple[str, str]:
-        """POST to client-credentials endpoint. Returns (client_id, client_secret)."""
+        """POST to client-credentials endpoint. Returns (client_id, client_secret).
+
+        If a credential with *label* already exists (CSS returns 409 or 400),
+        the old credential is revoked and a fresh one issued so the secret is
+        always known to the caller.
+        """
         url = controls["account"]["clientCredentials"]
         resp = client.post(url, json={"name": label, "webId": webid})
+        if resp.status_code in (400, 409):
+            # Credential name already in use — find and revoke it, then recreate.
+            listing = client.get(url)
+            if listing.is_success:
+                for cred_id, cred in listing.json().get("clientCredentials", {}).items():
+                    if cred.get("name") == label:
+                        client.delete(url.rstrip("/") + "/" + cred_id)
+                        break
+            resp = client.post(url, json={"name": label, "webId": webid})
         resp.raise_for_status()
         body = resp.json()
         return body["id"], body["secret"]

@@ -74,13 +74,46 @@ def test_register_returns_session_cookie(mgr):
 
 
 def test_register_raises_on_400_already_exists(mgr):
-    """register() raises CssAccountExistsError when password endpoint returns 400 with 'already'."""
+    """register() raises CssAccountExistsError on any 400 from the password endpoint."""
     with respx.mock:
         _mock_register_flow(
             respx,
             pw_status=400,
             pw_body={"message": "There already is a login for this e-mail address."},
         )
+        with pytest.raises(CssAccountExistsError):
+            mgr.register("alice@test.com", "pass123")
+
+
+def test_register_raises_on_400_without_already_keyword(mgr):
+    """register() raises CssAccountExistsError even when 400 body doesn't contain 'already'."""
+    with respx.mock:
+        _mock_register_flow(
+            respx,
+            pw_status=400,
+            pw_body={"message": "This email is already in use."},
+        )
+        with pytest.raises(CssAccountExistsError):
+            mgr.register("alice@test.com", "pass123")
+
+
+def test_register_raises_on_400_bare_account_url(mgr):
+    """register() raises CssAccountExistsError when CSS uses bare account URL as password.create."""
+    # Some CSS deployments return the bare account URL for password.create.
+    # A 400 at that URL must still be treated as account-exists.
+    bare_pw_url = f"{BASE}/.account/account/{ACCOUNT_ID}"
+    custom_auth = {
+        "controls": {
+            "password": {"create": bare_pw_url, "login": f"{BASE}/.account/login/password/"},
+            "account": {"pod": POD_URL, "clientCredentials": CREDS_URL},
+        }
+    }
+    with respx.mock:
+        respx.post(f"{BASE}/.account/account/").mock(
+            return_value=httpx.Response(200, json={}, headers={"Set-Cookie": "css-account=s; Path=/"})
+        )
+        respx.get(f"{BASE}/.account/").mock(return_value=httpx.Response(200, json=custom_auth))
+        respx.post(bare_pw_url).mock(return_value=httpx.Response(400, json={"message": "Bad Request"}))
         with pytest.raises(CssAccountExistsError):
             mgr.register("alice@test.com", "pass123")
 
@@ -153,6 +186,37 @@ def test_connect_agent_existing_account_falls_back_to_login(mgr, key):
     assert pod_url == f"{BASE}/alice/"
     assert webid == f"{BASE}/alice/profile/card#me"
     assert creds.client_id == "cid-2"
+
+
+def test_connect_agent_revokes_duplicate_credential(mgr, key):
+    """connect_agent() revokes an existing credential with the same name and re-issues."""
+    with respx.mock:
+        _mock_register_flow(respx)
+        respx.post(POD_URL).mock(
+            return_value=httpx.Response(200, json={
+                "pod": f"{BASE}/alice/",
+                "webId": f"{BASE}/alice/profile/card#me",
+            })
+        )
+        # First POST returns 409 (duplicate name)
+        cred_id = "existing-cred-id"
+        respx.post(CREDS_URL).mock(side_effect=[
+            httpx.Response(409, json={"message": "Credential name already in use"}),
+            httpx.Response(200, json={"id": "new-cid", "secret": "new-sec"}),
+        ])
+        # GET to list credentials
+        respx.get(CREDS_URL).mock(
+            return_value=httpx.Response(200, json={
+                "clientCredentials": {cred_id: {"name": "proxion", "webId": f"{BASE}/alice/profile/card#me"}}
+            })
+        )
+        # DELETE the existing credential
+        respx.delete(f"{CREDS_URL}{cred_id}").mock(return_value=httpx.Response(204))
+
+        creds, pod_url, webid = mgr.connect_agent(key, "alice@test.com", "pass123")
+
+    assert creds.client_id == "new-cid"
+    assert creds.client_secret == "new-sec"
 
 
 def test_build_dpop_client_returns_dpop_client(key):
