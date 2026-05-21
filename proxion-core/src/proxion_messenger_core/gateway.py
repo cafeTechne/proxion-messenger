@@ -1535,6 +1535,7 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             b"X-Content-Type-Options: nosniff\r\n"
             b"Referrer-Policy: no-referrer\r\n"
             b"Content-Security-Policy: default-src 'self'; connect-src 'self' ws: wss:; "
+            b"style-src 'self' 'unsafe-inline'; "
             b"img-src 'self' data: blob:; media-src 'self' data: blob:; "
             b"object-src 'none'; frame-ancestors 'none'; base-uri 'self'\r\n"
             b"Cross-Origin-Opener-Policy: same-origin\r\n"

@@ -306,7 +306,7 @@ button:hover { background: var(--accent-hover); }
     padding: 7px 16px; font-size: 0.85em; align-items: center;
     gap: 12px; flex-shrink: 0;
 }
-#backup-nudge.visible { display: flex; }
+#backup-nudge.visible { display: flex !important; }
 
 /* 13.7: Inline image preview */
 .msg-image-preview {
