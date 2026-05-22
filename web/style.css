@@ -106,12 +106,96 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
     gap: 12px;
 }
 
+/* Discord-style message row: avatar column beside body column */
 .message {
-    background: var(--bg-secondary);
-    padding: 10px 15px;
-    border-radius: 8px;
-    max-width: 80%;
-    align-self: flex-start;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 2px 16px;
+    border-radius: 4px;
+    background: transparent;
+    max-width: none;
+    align-self: stretch;
+    position: relative;
+}
+.message:hover { background: rgba(255,255,255,0.025); }
+.message:not(.msg-grouped) { padding-top: 16px; }
+
+/* Avatar column: 40 px wide, fixed */
+.msg-avatar-col {
+    flex-shrink: 0;
+    width: 40px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 1px;
+}
+/* Compact timestamp shown in avatar column for grouped messages */
+.msg-compact-ts {
+    font-size: 0.65em;
+    color: transparent;
+    user-select: none;
+    display: block;
+    text-align: center;
+    line-height: 1.6;
+    width: 40px;
+    white-space: nowrap;
+}
+.message:hover .msg-compact-ts { color: var(--text-secondary, #94a3b8); }
+
+/* Body column: grows, wraps long words */
+.msg-body { flex: 1; min-width: 0; }
+
+/* Name + timestamp on the first message in each group */
+.msg-header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 3px;
+}
+.msg-sender { font-weight: 600; font-size: 0.95em; }
+.msg-ts-header { font-size: 0.72em; color: var(--text-secondary, #94a3b8); }
+
+/* Message text */
+.msg-content {
+    color: var(--text-primary, #e1e1e1);
+    font-size: 0.95em;
+    line-height: 1.5;
+    word-break: break-word;
+    overflow-wrap: break-word;
+}
+
+/* Hover action bar (react / reply / edit / delete / pin) */
+.msg-actions {
+    display: none;
+    position: absolute;
+    right: 12px;
+    top: -14px;
+    background: var(--bg-secondary, #16213e);
+    border: 1px solid var(--border, #0f3460);
+    border-radius: 6px;
+    padding: 2px;
+    z-index: 10;
+    gap: 2px;
+}
+.message:hover .msg-actions { display: flex; }
+
+/* Icon buttons inside the action bar — override the global red accent */
+.icon-btn {
+    background: transparent !important;
+    border: none;
+    color: var(--text-secondary, #94a3b8);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.1s, background 0.1s;
+}
+.icon-btn:hover {
+    background: rgba(255,255,255,0.1) !important;
+    color: var(--text-primary, #e1e1e1);
 }
 
 .time {
@@ -231,8 +315,9 @@ button:hover { background: var(--accent-hover); }
         padding: 10px;
     }
     .message {
-        max-width: 95%;
+        padding: 2px 10px;
     }
+    .message:not(.msg-grouped) { padding-top: 12px; }
     #menu-toggle {
         display: block !important;
     }

@@ -370,9 +370,12 @@ class MiscHandlerMixin:
         self._pod_url = None
         self._pod_webid = None
         self.dm_clients.clear()
-        # pod_creds.json is intentionally kept — CSS credentials are long-lived
-        # server-side tokens independent of the browser OIDC session. The gateway
-        # can reconnect with them after the browser re-authenticates.
+        # Delete persisted credentials so the gateway does not auto-reconnect
+        # to the pod after a browser reload or gateway restart (sign-out).
+        if self.config.db_path:
+            from pathlib import Path
+            cred_path = Path(self.config.db_path).parent / "pod_creds.json"
+            cred_path.unlink(missing_ok=True)
         await websocket.send(json.dumps({"type": "pod_disconnected"}))
 
     async def _handle_reconnect_pod(self, websocket, data: dict) -> None:
