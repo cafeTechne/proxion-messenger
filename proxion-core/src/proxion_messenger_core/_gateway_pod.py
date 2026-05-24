@@ -133,6 +133,7 @@ class PodSyncMixin:
                 )
                 self._peer_gateway_urls[did] = gateway_url
                 self._store.save_peer_gateway(did, gateway_url)
+                asyncio.create_task(self._sync_peer_gateway_to_pod(did, gateway_url))
             elif pin["pinned_gateway_url"] != gateway_url:
                 # URL changed from pinned value — create a change request
                 if not pin.get("pending_change"):
@@ -176,6 +177,7 @@ class PodSyncMixin:
                 )
                 self._peer_gateway_urls[did] = gateway_url
                 self._store.save_peer_gateway(did, gateway_url)
+                asyncio.create_task(self._sync_peer_gateway_to_pod(did, gateway_url))
         else:
             self._peer_gateway_urls[did] = gateway_url
 
@@ -271,7 +273,19 @@ class PodSyncMixin:
                 None, self._reconnect_stored_pod_sync
             )
             if result:
+                await self._restore_relationships_from_pod()
+                await self._restore_dms_from_pod()
+                await self._restore_local_dms_from_pod()
+                await self._restore_read_positions_from_pod()
+                await self._restore_verifications_from_pod()
+                await self._restore_peer_gateways_from_pod()
+                await self._restore_rooms_from_pod()
                 await self._ensure_pod_room_containers()
+                await self._restore_e2e_sessions_from_pod()
+                await self._restore_sender_keys_from_pod()
+                await self._restore_devices_from_pod()
+                await self._restore_push_subscriptions_from_pod()
+                asyncio.create_task(self._run_pod_backfill())
                 return
         except Exception as exc:
             logger.warning(f"Stored pod reconnect failed: {exc}")
@@ -292,7 +306,19 @@ class PodSyncMixin:
                 self.config.css_password,
             )
             logger.info("Solid Pod connection established.")
+            await self._restore_relationships_from_pod()
+            await self._restore_dms_from_pod()
+            await self._restore_local_dms_from_pod()
+            await self._restore_read_positions_from_pod()
+            await self._restore_verifications_from_pod()
+            await self._restore_peer_gateways_from_pod()
+            await self._restore_rooms_from_pod()
             await self._ensure_pod_room_containers()
+            await self._restore_e2e_sessions_from_pod()
+            await self._restore_sender_keys_from_pod()
+            await self._restore_devices_from_pod()
+            await self._restore_push_subscriptions_from_pod()
+            asyncio.create_task(self._run_pod_backfill())
         except Exception as exc:
             logger.warning(f"Could not connect to Solid Pod at startup: {exc}")
 
@@ -620,6 +646,7 @@ class PodSyncMixin:
                     peer_did = pub_key_to_did(bytes.fromhex(cert.subject))
                     self._store.save_relationship(cert.to_dict(), peer_did=peer_did)
                     self._store.mark_invite_status(acceptance.invitation_id, "finalized")
+                    asyncio.create_task(self._sync_cert_to_pod(cert.to_dict()))
                 except Exception:
                     pass
                 try:
@@ -643,6 +670,7 @@ class PodSyncMixin:
                 try:
                     peer_did = pub_key_to_did(bytes.fromhex(cert.issuer))
                     self._store.save_relationship(cert.to_dict(), peer_did=peer_did)
+                    asyncio.create_task(self._sync_cert_to_pod(cert.to_dict()))
                     try:
                         pod_client = None
                         if self._pod_webid and self._pod_webid in self.dm_clients:
@@ -779,6 +807,576 @@ class PodSyncMixin:
                     else:
                         await asyncio.sleep(2)
 
+    async def _restore_relationships_from_pod(self) -> None:
+        """Pull relationship certs from pod into SQLite and dm_clients.
+
+        Pod path: stash://pod/relationships/{cert_id}.json
+        Ensures the contact graph survives a SQLite cold start or DID rotation.
+        """
+        client = self._pod_client()
+        if not client or not self._store:
+            return
+        loop = asyncio.get_event_loop()
+        container = "stash://pod/relationships/"
+        try:
+            member_uris = await loop.run_in_executor(None, client.list, container)
+        except Exception as exc:
+            logger.debug("_restore_relationships_from_pod: list failed: %s", exc)
+            return
+
+        known_ids = {r.get("certificate_id") for r in self._store.list_relationships()}
+        restored = 0
+        for uri in member_uris:
+            if not uri.endswith(".json"):
+                continue
+            try:
+                raw = await loop.run_in_executor(None, client.get, uri)
+                cert_dict = json.loads(raw.decode("utf-8"))
+                cert_id = cert_dict.get("certificate_id")
+                if not cert_id or cert_id in known_ids:
+                    continue
+                from .federation import RelationshipCertificate as _RC
+                cert = _RC.from_dict(cert_dict)
+                peer_pub = cert_dict.get("subject") or cert_dict.get("issuer", "")
+                peer_did = None
+                if peer_pub:
+                    peer_did = pub_key_to_did(bytes.fromhex(peer_pub))
+                self._store.save_relationship(cert_dict, peer_did=peer_did)
+                if cert_id not in self.dm_clients:
+                    self.dm_clients[cert_id] = (cert, client)
+                known_ids.add(cert_id)
+                restored += 1
+            except Exception as exc:
+                logger.debug("_restore_relationships_from_pod: failed for %s: %s", uri, exc)
+
+        if restored:
+            logger.info("_restore_relationships_from_pod: restored %d cert(s) from pod", restored)
+
+    async def _restore_dms_from_pod(self) -> None:
+        """Pull DM message history from the pod into SQLite for all known relationships.
+
+        Calls messaging.receive() for each RelationshipCertificate in dm_clients and
+        saves any messages not yet in SQLite. This is the pod→SQLite mirror step for DMs.
+        """
+        client = self._pod_client()
+        if not client or not self._store:
+            return
+        from .messaging import receive as _msg_receive
+        from .federation import RelationshipCertificate as _RC2
+        loop = asyncio.get_event_loop()
+
+        certs = [
+            cert for cert, _ in self.dm_clients.values()
+            if isinstance(cert, _RC2)
+        ]
+        if not certs:
+            return
+
+        restored = 0
+        for cert in certs:
+            try:
+                messages = await loop.run_in_executor(None, _msg_receive, cert, client)
+                for msg in messages:
+                    if self._store.get_message(msg.message_id):
+                        continue
+                    ts_iso = datetime.fromtimestamp(msg.timestamp, tz=timezone.utc).isoformat()
+                    try:
+                        self._store.save_message(
+                            message_id=msg.message_id,
+                            thread_id=cert.certificate_id,
+                            thread_type="dm",
+                            from_webid=msg.from_pub_hex,
+                            from_display_name=None,
+                            content=msg.content,
+                            timestamp=ts_iso,
+                            seq_num=int(msg.seq_num or 0),
+                            prev_hash=str(msg.prev_hash or ""),
+                        )
+                        restored += 1
+                    except Exception:
+                        pass
+            except Exception as exc:
+                logger.debug("_restore_dms_from_pod: failed for cert %s: %s",
+                             cert.certificate_id[:8], exc)
+
+        if restored:
+            logger.info("_restore_dms_from_pod: restored %d DM message(s) from pod", restored)
+
+    async def _sync_cert_to_pod(self, cert_dict: dict) -> None:
+        """Write a relationship cert to the pod for durability.
+
+        Pod path: stash://pod/relationships/{cert_id}.json
+        Call fire-and-forget via asyncio.create_task() alongside save_relationship().
+        """
+        client = self._pod_client()
+        if not client:
+            return
+        cert_id = cert_dict.get("certificate_id")
+        if not cert_id:
+            return
+        async with self._pod_sync_sem:
+            try:
+                loop = asyncio.get_event_loop()
+                uri = f"stash://pod/relationships/{cert_id}.json"
+                data = json.dumps(cert_dict).encode("utf-8")
+                await loop.run_in_executor(
+                    None, lambda: client.put(uri, data, content_type="application/json")
+                )
+            except Exception as exc:
+                logger.debug("_sync_cert_to_pod failed for %s: %s", cert_id[:8], exc)
+
+    async def _sync_profile_to_pod(
+        self, identity: str, display_name: str = "", x25519_pub: str = ""
+    ) -> None:
+        """Write the operator's own profile to the pod.
+
+        Pod path: stash://pod/profile/me.json
+        Provides a pod-durable record of identity and display name that survives
+        SQLite cold starts. Called fire-and-forget after register.
+        """
+        client = self._pod_client()
+        if not client:
+            return
+        async with self._pod_sync_sem:
+            try:
+                loop = asyncio.get_event_loop()
+                profile: dict = {"identity": identity,
+                                 "updated_at": datetime.now(timezone.utc).isoformat()}
+                if display_name:
+                    profile["display_name"] = display_name
+                if x25519_pub:
+                    profile["x25519_pub"] = x25519_pub
+                data = json.dumps(profile).encode("utf-8")
+                await loop.run_in_executor(
+                    None, lambda: client.put(
+                        "stash://pod/profile/me.json", data, content_type="application/json"
+                    )
+                )
+            except Exception as exc:
+                logger.debug("_sync_profile_to_pod failed: %s", exc)
+
+    async def _sync_local_dm_to_pod(self, thread_id: str, message: dict) -> None:
+        """Write a gateway-relayed (non-federated) DM message to the pod.
+
+        Pod path: stash://pod/local_dms/{thread_key}/{message_id}.json
+        thread_key is sha256(thread_id)[:16] to ensure path-safety.
+        """
+        client = self._pod_client()
+        if not client:
+            return
+        message_id = message.get("message_id", "")
+        if not message_id:
+            return
+        import hashlib as _hl
+        thread_key = _hl.sha256(thread_id.encode()).hexdigest()[:16]
+        async with self._pod_sync_sem:
+            try:
+                loop = asyncio.get_event_loop()
+                payload = json.dumps({**message, "thread_id": thread_id}).encode("utf-8")
+                uri = f"stash://pod/local_dms/{thread_key}/{message_id}.json"
+                await loop.run_in_executor(
+                    None, lambda: client.put(uri, payload, content_type="application/json")
+                )
+            except Exception as exc:
+                logger.debug("_sync_local_dm_to_pod failed [%s]: %s", thread_id[:20], exc)
+
+    async def _restore_local_dms_from_pod(self) -> None:
+        """Pull gateway-relayed DM messages from pod into SQLite on cold start.
+
+        Pod path: stash://pod/local_dms/{thread_key}/
+        """
+        client = self._pod_client()
+        if not client or not self._store:
+            return
+        loop = asyncio.get_event_loop()
+        try:
+            thread_uris = await loop.run_in_executor(None, client.list, "stash://pod/local_dms/")
+        except Exception as exc:
+            logger.debug("_restore_local_dms_from_pod: list failed: %s", exc)
+            return
+
+        restored = 0
+        for thread_uri in thread_uris:
+            try:
+                msg_uris = await loop.run_in_executor(None, client.list, thread_uri)
+            except Exception:
+                continue
+            for uri in msg_uris:
+                if not uri.endswith(".json"):
+                    continue
+                try:
+                    raw = await loop.run_in_executor(None, client.get, uri)
+                    msg = json.loads(raw.decode("utf-8"))
+                    message_id = msg.get("message_id", "")
+                    thread_id = msg.get("thread_id", "")
+                    if not message_id or not thread_id:
+                        continue
+                    if self._store.get_message(message_id):
+                        continue
+                    self._store.save_message(
+                        message_id=message_id,
+                        thread_id=thread_id,
+                        thread_type="dm",
+                        from_webid=msg.get("from_webid", ""),
+                        from_display_name=msg.get("from_display_name"),
+                        content=msg.get("content", ""),
+                        timestamp=msg.get("timestamp", ""),
+                        reply_to_id=msg.get("reply_to_id"),
+                        seq_num=int(msg.get("seq_num") or 0),
+                        prev_hash=str(msg.get("prev_hash") or ""),
+                    )
+                    restored += 1
+                except Exception as exc:
+                    logger.debug("_restore_local_dms_from_pod: failed for %s: %s", uri, exc)
+
+        if restored:
+            logger.info("_restore_local_dms_from_pod: restored %d local DM message(s) from pod", restored)
+
+    async def _read_position_flush_loop(self) -> None:
+        """Background task: flush dirty read positions to pod every 30 s."""
+        while True:
+            await asyncio.sleep(30)
+            if not getattr(self, "_dirty_read_positions", None):
+                continue
+            try:
+                await self._sync_read_positions_to_pod()
+            except Exception as exc:
+                logger.debug("_read_position_flush_loop error: %s", exc)
+
+    async def _sync_read_positions_to_pod(self) -> None:
+        """Flush all dirty read positions to pod as a single JSON document.
+
+        Pod path: stash://pod/read_positions.json
+        Format: { webid: { channel_id: ts, ... }, ... }
+        """
+        dirty = getattr(self, "_dirty_read_positions", {})
+        if not dirty:
+            return
+        client = self._pod_client()
+        if not client:
+            return
+        # Snapshot + clear before the await so new dirty entries aren't lost
+        snapshot = dict(dirty)
+        dirty.clear()
+        merged: dict = {}
+        for (webid, channel_id), ts in snapshot.items():
+            merged.setdefault(webid, {})[channel_id] = ts
+        async with self._pod_sync_sem:
+            try:
+                loop = asyncio.get_event_loop()
+                data = json.dumps(merged).encode("utf-8")
+                await loop.run_in_executor(
+                    None, lambda: client.put(
+                        "stash://pod/read_positions.json", data, content_type="application/json"
+                    )
+                )
+            except Exception as exc:
+                # Restore dirty entries on failure so they're retried next cycle
+                dirty.update(snapshot)
+                logger.debug("_sync_read_positions_to_pod failed: %s", exc)
+
+    async def _restore_read_positions_from_pod(self) -> None:
+        """Pull last-read timestamps from pod into SQLite on cold start.
+
+        Pod path: stash://pod/read_positions.json
+        Only imports entries newer than what SQLite already has.
+        """
+        client = self._pod_client()
+        if not client or not self._store:
+            return
+        loop = asyncio.get_event_loop()
+        try:
+            raw = await loop.run_in_executor(
+                None, client.get, "stash://pod/read_positions.json"
+            )
+            data = json.loads(raw.decode("utf-8"))
+        except Exception as exc:
+            logger.debug("_restore_read_positions_from_pod: %s", exc)
+            return
+
+        restored = 0
+        for webid, channels in data.items():
+            if not isinstance(channels, dict):
+                continue
+            for channel_id, ts in channels.items():
+                try:
+                    ts = float(ts)
+                except (TypeError, ValueError):
+                    continue
+                current = self._store.get_last_read(webid, channel_id)
+                if ts > current:
+                    self._store.set_last_read_ts(webid, channel_id, ts)
+                    restored += 1
+
+        if restored:
+            logger.info("_restore_read_positions_from_pod: restored %d read position(s)", restored)
+
+    async def _sync_pin_to_pod(self, room_id: str, message_id: str, pinned_by: str,
+                                content: str = "", pinned_at: float = 0.0) -> None:
+        """Write a pin record to the pod.
+
+        Pod path: stash://pod/rooms/{room_id}/pins/{message_id}.json
+        """
+        client = self._pod_client()
+        if not client or not room_id or not message_id:
+            return
+        async with self._pod_sync_sem:
+            try:
+                loop = asyncio.get_event_loop()
+                record = {
+                    "room_id": room_id,
+                    "message_id": message_id,
+                    "pinned_by": pinned_by,
+                    "content": content,
+                    "pinned_at": pinned_at or time.time(),
+                }
+                data = json.dumps(record).encode("utf-8")
+                uri = f"stash://pod/rooms/{room_id}/pins/{message_id}.json"
+                await loop.run_in_executor(
+                    None, lambda: client.put(uri, data, content_type="application/json")
+                )
+            except Exception as exc:
+                logger.debug("_sync_pin_to_pod failed [%s/%s]: %s", room_id, message_id, exc)
+
+    async def _delete_pin_from_pod(self, room_id: str, message_id: str) -> None:
+        """Remove a pin record from the pod."""
+        client = self._pod_client()
+        if not client or not room_id or not message_id:
+            return
+        async with self._pod_sync_sem:
+            try:
+                loop = asyncio.get_event_loop()
+                uri = f"stash://pod/rooms/{room_id}/pins/{message_id}.json"
+                from .solid_client import SolidError
+                def _del():
+                    try:
+                        client.delete(uri)
+                    except SolidError as e:
+                        if e.status_code != 404:
+                            raise
+                await loop.run_in_executor(None, _del)
+            except Exception as exc:
+                logger.debug("_delete_pin_from_pod failed [%s/%s]: %s", room_id, message_id, exc)
+
+    async def _restore_room_pins_from_pod(self, room_id: str) -> None:
+        """Pull pin records for a room from pod into SQLite.
+
+        Pod path: stash://pod/rooms/{room_id}/pins/
+        """
+        client = self._pod_client()
+        if not client or not self._store:
+            return
+        loop = asyncio.get_event_loop()
+        container = f"stash://pod/rooms/{room_id}/pins/"
+        try:
+            member_uris = await loop.run_in_executor(None, client.list, container)
+        except Exception:
+            return  # container doesn't exist yet — not an error
+
+        for uri in member_uris:
+            if not uri.endswith(".json"):
+                continue
+            try:
+                raw = await loop.run_in_executor(None, client.get, uri)
+                pin = json.loads(raw.decode("utf-8"))
+                message_id = pin.get("message_id", "")
+                pinned_by = pin.get("pinned_by", "")
+                content = pin.get("content", "")
+                if not message_id:
+                    continue
+                # INSERT OR IGNORE — save_pin uses INSERT OR IGNORE so it's idempotent
+                self._store.save_pin(room_id, message_id, pinned_by, content)
+            except Exception as exc:
+                logger.debug("_restore_room_pins_from_pod: failed for %s: %s", uri, exc)
+
+    async def _sync_verification_to_pod(
+        self, peer_webid: str, safety_numbers: str, verified_by: str
+    ) -> None:
+        """Write a contact verification record to the pod.
+
+        Pod path: stash://pod/verifications/{peer_hash}.json
+        peer_hash = sha256(peer_webid)[:24] to ensure path-safety.
+        """
+        client = self._pod_client()
+        if not client or not peer_webid:
+            return
+        import hashlib as _hl
+        peer_hash = _hl.sha256(peer_webid.encode()).hexdigest()[:24]
+        async with self._pod_sync_sem:
+            try:
+                loop = asyncio.get_event_loop()
+                record = {
+                    "peer_webid": peer_webid,
+                    "safety_numbers": safety_numbers,
+                    "verified_by": verified_by,
+                    "verified_at": time.time(),
+                }
+                data = json.dumps(record).encode("utf-8")
+                uri = f"stash://pod/verifications/{peer_hash}.json"
+                await loop.run_in_executor(
+                    None, lambda: client.put(uri, data, content_type="application/json")
+                )
+            except Exception as exc:
+                logger.debug("_sync_verification_to_pod failed [%s]: %s", peer_webid[:20], exc)
+
+    async def _restore_verifications_from_pod(self) -> None:
+        """Pull contact verification records from pod into SQLite on cold start.
+
+        Pod path: stash://pod/verifications/
+        """
+        client = self._pod_client()
+        if not client or not self._store:
+            return
+        loop = asyncio.get_event_loop()
+        try:
+            member_uris = await loop.run_in_executor(None, client.list, "stash://pod/verifications/")
+        except Exception as exc:
+            logger.debug("_restore_verifications_from_pod: list failed: %s", exc)
+            return
+
+        restored = 0
+        for uri in member_uris:
+            if not uri.endswith(".json"):
+                continue
+            try:
+                raw = await loop.run_in_executor(None, client.get, uri)
+                rec = json.loads(raw.decode("utf-8"))
+                peer_webid = rec.get("peer_webid", "")
+                safety_numbers = rec.get("safety_numbers", "")
+                verified_by = rec.get("verified_by", "")
+                if not peer_webid or not safety_numbers:
+                    continue
+                existing = self._store.get_contact_verification(peer_webid)
+                if existing:
+                    continue
+                self._store.save_contact_verification(peer_webid, safety_numbers, verified_by)
+                restored += 1
+            except Exception as exc:
+                logger.debug("_restore_verifications_from_pod: failed for %s: %s", uri, exc)
+
+        if restored:
+            logger.info("_restore_verifications_from_pod: restored %d verification(s) from pod", restored)
+
+    async def _sync_peer_gateway_to_pod(self, did: str, gateway_url: str) -> None:
+        """Write a peer gateway URL to the pod for durability.
+
+        Pod path: stash://pod/peer_gateways/{did_hash}.json
+        did_hash = sha256(did)[:24]
+        """
+        client = self._pod_client()
+        if not client or not did:
+            return
+        import hashlib as _hl
+        did_hash = _hl.sha256(did.encode()).hexdigest()[:24]
+        async with self._pod_sync_sem:
+            try:
+                loop = asyncio.get_event_loop()
+                record = {"did": did, "gateway_url": gateway_url, "updated_at": time.time()}
+                data = json.dumps(record).encode("utf-8")
+                uri = f"stash://pod/peer_gateways/{did_hash}.json"
+                await loop.run_in_executor(
+                    None, lambda: client.put(uri, data, content_type="application/json")
+                )
+            except Exception as exc:
+                logger.debug("_sync_peer_gateway_to_pod failed [%s]: %s", did[:20], exc)
+
+    async def _restore_peer_gateways_from_pod(self) -> None:
+        """Pull peer gateway URLs from pod into SQLite on cold start.
+
+        Pod path: stash://pod/peer_gateways/
+        Pod values are lower-trust than existing SQLite pins — never override a pin.
+        """
+        client = self._pod_client()
+        if not client or not self._store:
+            return
+        loop = asyncio.get_event_loop()
+        try:
+            member_uris = await loop.run_in_executor(
+                None, client.list, "stash://pod/peer_gateways/"
+            )
+        except Exception as exc:
+            logger.debug("_restore_peer_gateways_from_pod: list failed: %s", exc)
+            return
+
+        restored = 0
+        for uri in member_uris:
+            if not uri.endswith(".json"):
+                continue
+            try:
+                raw = await loop.run_in_executor(None, client.get, uri)
+                rec = json.loads(raw.decode("utf-8"))
+                did = rec.get("did", "")
+                gateway_url = rec.get("gateway_url", "")
+                if not did or not gateway_url:
+                    continue
+                # Only restore if no existing pin — pod value is lower-trust
+                pin = self._store.get_peer_gateway_pin(did)
+                if pin is not None:
+                    continue
+                existing = self._store.get_peer_gateway(did)
+                if existing:
+                    continue
+                self._store.save_peer_gateway(did, gateway_url)
+                self._peer_gateway_urls[did] = gateway_url
+                restored += 1
+            except Exception as exc:
+                logger.debug("_restore_peer_gateways_from_pod: failed for %s: %s", uri, exc)
+
+        if restored:
+            logger.info("_restore_peer_gateways_from_pod: restored %d peer gateway URL(s) from pod", restored)
+
+    async def _restore_rooms_from_pod(self) -> None:
+        """Pull room metadata from the pod into _local_rooms and SQLite.
+
+        The pod is the durable source of truth. This runs at startup so that
+        rooms are available even when the local SQLite mirror is cold or the
+        operator's DID has rotated.
+        """
+        client = self._pod_client()
+        if not client or not self._store:
+            return
+        from .pod_room_store import PodRoomStore
+        store = PodRoomStore(client)
+        loop = asyncio.get_event_loop()
+        try:
+            room_ids = await loop.run_in_executor(None, store.list_room_ids)
+        except Exception as exc:
+            logger.warning("_restore_rooms_from_pod: failed to list rooms: %s", exc)
+            return
+
+        restored = 0
+        for room_id in room_ids:
+            if room_id in self._local_rooms:
+                continue
+            try:
+                meta = await loop.run_in_executor(None, store.read_room_meta, room_id)
+            except Exception as exc:
+                logger.debug("_restore_rooms_from_pod: failed to read meta for %s: %s", room_id, exc)
+                continue
+            if not meta:
+                continue
+            name = meta.get("name", room_id)
+            code = meta.get("code", "")
+            creator_webid = meta.get("creator_webid", "")
+            history_mode = meta.get("history_mode", "none")
+            invite_url = meta.get("invite_url", "")
+            self._store.save_room(room_id, name, code, invite_url, history_mode, creator_webid)
+            self._local_rooms[room_id] = {
+                "name": name,
+                "code": code,
+                "invite_url": invite_url,
+                "creator_webid": creator_webid,
+                "history_mode": history_mode,
+                "members": set(),
+            }
+            if code:
+                self._room_codes[code] = room_id
+            asyncio.create_task(self._restore_room_pins_from_pod(room_id))
+            restored += 1
+
+        if restored:
+            logger.info("_restore_rooms_from_pod: restored %d room(s) from pod", restored)
+
     async def _ensure_pod_room_containers(self) -> None:
         """Create pod room.json for any local rooms not yet on the pod."""
         client = self._pod_client()
@@ -826,6 +1424,452 @@ class PodSyncMixin:
                 )
             except Exception as exc:
                 logger.warning("pod write-through failed: %s", exc)
+
+    async def _checkpoint_e2e_session(self, session_id: str) -> None:
+        """Checkpoint a DM ratchet session to the pod after every 5 messages.
+
+        Pod path: stash://pod/e2e_sessions/{session_id}.json
+        Uses If-Match ETag to prevent concurrent device overwrite.
+        """
+        if not self._store:
+            return
+        sess = self._store.get_dm_session_by_id(session_id)
+        if not sess:
+            return
+        step_count = sess.get("send_count", 0) + sess.get("recv_count", 0)
+        if step_count % 5 != 0:
+            return
+        client = self._pod_client()
+        if not client:
+            return
+        existing_etag = self._store.get_dm_session_checkpoint_etag(session_id)
+        async with self._pod_sync_sem:
+            try:
+                loop = asyncio.get_event_loop()
+                payload = {
+                    "session_id": sess["session_id"],
+                    "owner_webid": sess["owner_webid"],
+                    "peer_webid": sess["peer_webid"],
+                    "root_key_b64": sess["root_key"],
+                    "send_chain_key_b64": sess["send_chain_key"],
+                    "recv_chain_key_b64": sess["recv_chain_key"],
+                    "send_count": sess["send_count"],
+                    "recv_count": sess["recv_count"],
+                    "checkpoint_ts": time.time(),
+                }
+                data = json.dumps(payload).encode("utf-8")
+                uri = f"stash://pod/e2e_sessions/{session_id}.json"
+                kwargs = {"content_type": "application/json"}
+                if existing_etag:
+                    kwargs["etag"] = existing_etag
+                response = await loop.run_in_executor(
+                    None, lambda: client.put(uri, data, **kwargs)
+                )
+                new_etag = getattr(response, "etag", None) or ""
+                if new_etag:
+                    self._store.set_dm_session_checkpoint_etag(session_id, new_etag)
+            except Exception as exc:
+                _exc_str = str(exc)
+                if "412" in _exc_str or "Precondition Failed" in _exc_str:
+                    logger.debug(
+                        "_checkpoint_e2e_session: 412 for %s — another device is ahead, skipping",
+                        session_id[:16],
+                    )
+                else:
+                    logger.debug("_checkpoint_e2e_session failed [%s]: %s", session_id[:16], exc)
+
+    async def _restore_e2e_sessions_from_pod(self) -> None:
+        """Pull E2E session checkpoints from pod into SQLite on cold start.
+
+        Pod path: stash://pod/e2e_sessions/
+        Pod session wins when its (send_count + recv_count) > SQLite value.
+        """
+        client = self._pod_client()
+        if not client or not self._store:
+            return
+        loop = asyncio.get_event_loop()
+        try:
+            member_uris = await loop.run_in_executor(
+                None, client.list, "stash://pod/e2e_sessions/"
+            )
+        except Exception as exc:
+            logger.debug("_restore_e2e_sessions_from_pod: list failed: %s", exc)
+            return
+
+        restored = 0
+        for uri in member_uris:
+            if not uri.endswith(".json"):
+                continue
+            try:
+                raw = await loop.run_in_executor(None, client.get, uri)
+                pod_sess = json.loads(raw.decode("utf-8"))
+                session_id = pod_sess.get("session_id", "")
+                if not session_id:
+                    continue
+                pod_step = int(pod_sess.get("send_count", 0)) + int(pod_sess.get("recv_count", 0))
+                local_sess = self._store.get_dm_session_by_id(session_id)
+                local_step = 0
+                if local_sess:
+                    local_step = int(local_sess.get("send_count", 0)) + int(local_sess.get("recv_count", 0))
+                if pod_step > local_step:
+                    self._store.save_dm_session({
+                        "session_id": session_id,
+                        "peer_webid": pod_sess.get("peer_webid", ""),
+                        "owner_webid": pod_sess.get("owner_webid", ""),
+                        "root_key": pod_sess.get("root_key_b64", ""),
+                        "send_chain_key": pod_sess.get("send_chain_key_b64", ""),
+                        "recv_chain_key": pod_sess.get("recv_chain_key_b64", ""),
+                        "send_count": pod_sess.get("send_count", 0),
+                        "recv_count": pod_sess.get("recv_count", 0),
+                    })
+                    restored += 1
+            except Exception as exc:
+                logger.debug("_restore_e2e_sessions_from_pod: failed for %s: %s", uri, exc)
+
+        if restored:
+            logger.info("_restore_e2e_sessions_from_pod: restored %d session(s) from pod", restored)
+
+    async def _sync_sender_key_to_pod(
+        self, room_id: str, sender_webid: str, chain_key_b64: str, iteration: int
+    ) -> None:
+        """Write a group sender key to the pod.
+
+        Pod path: stash://pod/sender_keys/{room_key}/{sender_hash}.json
+        """
+        client = self._pod_client()
+        if not client or not room_id or not sender_webid:
+            return
+        import hashlib as _hl
+        room_key = _hl.sha256(room_id.encode()).hexdigest()[:16]
+        sender_hash = _hl.sha256(sender_webid.encode()).hexdigest()[:16]
+        async with self._pod_sync_sem:
+            try:
+                loop = asyncio.get_event_loop()
+                record = {
+                    "room_id": room_id,
+                    "sender_webid": sender_webid,
+                    "chain_key_b64": chain_key_b64,
+                    "iteration": iteration,
+                    "updated_at": time.time(),
+                }
+                data = json.dumps(record).encode("utf-8")
+                uri = f"stash://pod/sender_keys/{room_key}/{sender_hash}.json"
+                await loop.run_in_executor(
+                    None, lambda: client.put(uri, data, content_type="application/json")
+                )
+            except Exception as exc:
+                logger.debug("_sync_sender_key_to_pod failed [%s/%s]: %s", room_id[:16], sender_webid[:16], exc)
+
+    async def _delete_sender_keys_for_room_from_pod(self, room_id: str) -> None:
+        """Delete all sender key records for a room from the pod (called on rekey)."""
+        client = self._pod_client()
+        if not client or not room_id:
+            return
+        import hashlib as _hl
+        room_key = _hl.sha256(room_id.encode()).hexdigest()[:16]
+        container = f"stash://pod/sender_keys/{room_key}/"
+        async with self._pod_sync_sem:
+            try:
+                loop = asyncio.get_event_loop()
+                uris = await loop.run_in_executor(None, client.list, container)
+                from .solid_client import SolidError
+                for uri in uris:
+                    def _del(u=uri):
+                        try:
+                            client.delete(u)
+                        except SolidError as e:
+                            if e.status_code != 404:
+                                raise
+                    await loop.run_in_executor(None, _del)
+            except Exception as exc:
+                logger.debug("_delete_sender_keys_for_room_from_pod failed [%s]: %s", room_id[:16], exc)
+
+    async def _restore_sender_keys_from_pod(self) -> None:
+        """Pull group sender keys from pod into SQLite on cold start.
+
+        Pod path: stash://pod/sender_keys/{room_key}/{sender_hash}.json
+        """
+        client = self._pod_client()
+        if not client or not self._store:
+            return
+        loop = asyncio.get_event_loop()
+        try:
+            room_uris = await loop.run_in_executor(None, client.list, "stash://pod/sender_keys/")
+        except Exception as exc:
+            logger.debug("_restore_sender_keys_from_pod: list failed: %s", exc)
+            return
+
+        restored = 0
+        for room_uri in room_uris:
+            try:
+                sender_uris = await loop.run_in_executor(None, client.list, room_uri)
+            except Exception:
+                continue
+            for uri in sender_uris:
+                if not uri.endswith(".json"):
+                    continue
+                try:
+                    raw = await loop.run_in_executor(None, client.get, uri)
+                    rec = json.loads(raw.decode("utf-8"))
+                    room_id = rec.get("room_id", "")
+                    sender_webid = rec.get("sender_webid", "")
+                    chain_key_b64 = rec.get("chain_key_b64", "")
+                    iteration = int(rec.get("iteration", 0))
+                    if not room_id or not sender_webid or not chain_key_b64:
+                        continue
+                    existing = self._store.get_sender_key(room_id, sender_webid)
+                    if existing:
+                        continue
+                    self._store.save_sender_key(room_id, sender_webid, chain_key_b64, iteration)
+                    restored += 1
+                except Exception as exc:
+                    logger.debug("_restore_sender_keys_from_pod: failed for %s: %s", uri, exc)
+
+        if restored:
+            logger.info("_restore_sender_keys_from_pod: restored %d sender key(s) from pod", restored)
+
+    async def _sync_device_to_pod(
+        self, device_id: str, owner_webid: str, device_pub_b64: str,
+        attestation_b64: str, is_primary: bool = False
+    ) -> None:
+        """Write a device registration to the pod.
+
+        Pod path: stash://pod/devices/{device_id}.json
+        """
+        client = self._pod_client()
+        if not client or not device_id or not owner_webid:
+            return
+        async with self._pod_sync_sem:
+            try:
+                loop = asyncio.get_event_loop()
+                record = {
+                    "device_id": device_id,
+                    "owner_webid": owner_webid,
+                    "device_pub_b64": device_pub_b64,
+                    "attestation_b64": attestation_b64,
+                    "is_primary": is_primary,
+                    "registered_at": time.time(),
+                }
+                data = json.dumps(record).encode("utf-8")
+                uri = f"stash://pod/devices/{device_id}.json"
+                await loop.run_in_executor(
+                    None, lambda: client.put(uri, data, content_type="application/json")
+                )
+            except Exception as exc:
+                logger.debug("_sync_device_to_pod failed [%s]: %s", device_id[:16], exc)
+
+    async def _delete_device_from_pod(self, device_id: str) -> None:
+        """Remove a device registration from the pod."""
+        client = self._pod_client()
+        if not client or not device_id:
+            return
+        async with self._pod_sync_sem:
+            try:
+                loop = asyncio.get_event_loop()
+                uri = f"stash://pod/devices/{device_id}.json"
+                from .solid_client import SolidError
+                def _del():
+                    try:
+                        client.delete(uri)
+                    except SolidError as e:
+                        if e.status_code != 404:
+                            raise
+                await loop.run_in_executor(None, _del)
+            except Exception as exc:
+                logger.debug("_delete_device_from_pod failed [%s]: %s", device_id[:16], exc)
+
+    async def _restore_devices_from_pod(self) -> None:
+        """Pull device registrations from pod into SQLite on cold start.
+
+        Pod path: stash://pod/devices/
+        """
+        client = self._pod_client()
+        if not client or not self._store:
+            return
+        loop = asyncio.get_event_loop()
+        try:
+            member_uris = await loop.run_in_executor(None, client.list, "stash://pod/devices/")
+        except Exception as exc:
+            logger.debug("_restore_devices_from_pod: list failed: %s", exc)
+            return
+
+        restored = 0
+        for uri in member_uris:
+            if not uri.endswith(".json"):
+                continue
+            try:
+                raw = await loop.run_in_executor(None, client.get, uri)
+                rec = json.loads(raw.decode("utf-8"))
+                device_id = rec.get("device_id", "")
+                owner_webid = rec.get("owner_webid", "")
+                device_pub_b64 = rec.get("device_pub_b64", "")
+                attestation_b64 = rec.get("attestation_b64", "")
+                if not device_id or not owner_webid:
+                    continue
+                existing = self._store.get_device(device_id)
+                if existing:
+                    continue
+                self._store.register_device(device_id, owner_webid, device_pub_b64, attestation_b64)
+                restored += 1
+            except Exception as exc:
+                logger.debug("_restore_devices_from_pod: failed for %s: %s", uri, exc)
+
+        if restored:
+            logger.info("_restore_devices_from_pod: restored %d device(s) from pod", restored)
+
+    async def _sync_push_subscription_to_pod(
+        self, subscription_id: str, owner_webid: str,
+        endpoint: str, p256dh_b64: str, auth_b64: str
+    ) -> None:
+        """Write a push subscription to the pod.
+
+        Pod path: stash://pod/push/{subscription_id}.json
+        """
+        client = self._pod_client()
+        if not client or not subscription_id or not owner_webid:
+            return
+        async with self._pod_sync_sem:
+            try:
+                loop = asyncio.get_event_loop()
+                record = {
+                    "subscription_id": subscription_id,
+                    "owner_webid": owner_webid,
+                    "endpoint": endpoint,
+                    "p256dh_b64": p256dh_b64,
+                    "auth_b64": auth_b64,
+                    "created_at": time.time(),
+                }
+                data = json.dumps(record).encode("utf-8")
+                uri = f"stash://pod/push/{subscription_id}.json"
+                await loop.run_in_executor(
+                    None, lambda: client.put(uri, data, content_type="application/json")
+                )
+            except Exception as exc:
+                logger.debug("_sync_push_subscription_to_pod failed [%s]: %s", subscription_id[:16], exc)
+
+    async def _delete_push_subscription_from_pod(self, subscription_id: str) -> None:
+        """Remove a push subscription from the pod."""
+        client = self._pod_client()
+        if not client or not subscription_id:
+            return
+        async with self._pod_sync_sem:
+            try:
+                loop = asyncio.get_event_loop()
+                uri = f"stash://pod/push/{subscription_id}.json"
+                from .solid_client import SolidError
+                def _del():
+                    try:
+                        client.delete(uri)
+                    except SolidError as e:
+                        if e.status_code != 404:
+                            raise
+                await loop.run_in_executor(None, _del)
+            except Exception as exc:
+                logger.debug("_delete_push_subscription_from_pod failed [%s]: %s", subscription_id[:16], exc)
+
+    async def _restore_push_subscriptions_from_pod(self) -> None:
+        """Pull push subscriptions from pod into SQLite on cold start.
+
+        Pod path: stash://pod/push/
+        """
+        client = self._pod_client()
+        if not client or not self._store:
+            return
+        loop = asyncio.get_event_loop()
+        try:
+            member_uris = await loop.run_in_executor(None, client.list, "stash://pod/push/")
+        except Exception as exc:
+            logger.debug("_restore_push_subscriptions_from_pod: list failed: %s", exc)
+            return
+
+        restored = 0
+        for uri in member_uris:
+            if not uri.endswith(".json"):
+                continue
+            try:
+                raw = await loop.run_in_executor(None, client.get, uri)
+                rec = json.loads(raw.decode("utf-8"))
+                subscription_id = rec.get("subscription_id", "")
+                owner_webid = rec.get("owner_webid", "")
+                endpoint = rec.get("endpoint", "")
+                p256dh_b64 = rec.get("p256dh_b64", "")
+                auth_b64 = rec.get("auth_b64", "")
+                if not subscription_id or not owner_webid or not endpoint:
+                    continue
+                existing = self._store.get_push_subscriptions(owner_webid)
+                if any(s.get("subscription_id") == subscription_id for s in existing):
+                    continue
+                self._store.save_push_subscription(subscription_id, owner_webid, endpoint, p256dh_b64, auth_b64)
+                restored += 1
+            except Exception as exc:
+                logger.debug("_restore_push_subscriptions_from_pod: failed for %s: %s", uri, exc)
+
+        if restored:
+            logger.info("_restore_push_subscriptions_from_pod: restored %d push subscription(s) from pod", restored)
+
+    async def _run_pod_backfill(self) -> None:
+        """One-time migration: push pre-R25 SQLite data to pod.
+
+        Gated by stash://pod/meta/migration_version.json — skips if version >= 26.
+        All pod writes are fire-and-forget tasks so startup isn't blocked.
+        """
+        client = self._pod_client()
+        if not client or not self._store:
+            return
+        loop = asyncio.get_event_loop()
+
+        # Check migration marker
+        try:
+            raw = await loop.run_in_executor(None, client.get, "stash://pod/meta/migration_version.json")
+            marker = json.loads(raw.decode("utf-8"))
+            if int(marker.get("version", 0)) >= 26:
+                return
+        except Exception:
+            pass  # Marker missing — proceed with backfill
+
+        logger.info("_run_pod_backfill: starting pre-R25 data backfill")
+
+        # Backfill relationship certs
+        try:
+            for cert_dict in self._store.list_relationships():
+                asyncio.create_task(self._sync_cert_to_pod(cert_dict))
+        except Exception as exc:
+            logger.debug("_run_pod_backfill: cert backfill error: %s", exc)
+
+        # Backfill contact verifications
+        if self._pod_webid:
+            try:
+                for v in self._store.list_contact_verifications(self._pod_webid):
+                    peer_webid = v.get("peer_webid", "")
+                    safety_numbers = v.get("safety_numbers", "")
+                    verified_by = v.get("verified_by", "")
+                    if peer_webid and safety_numbers:
+                        asyncio.create_task(
+                            self._sync_verification_to_pod(peer_webid, safety_numbers, verified_by)
+                        )
+            except Exception as exc:
+                logger.debug("_run_pod_backfill: verification backfill error: %s", exc)
+
+        # Backfill rooms (ensure pod containers exist for all local rooms)
+        asyncio.create_task(self._ensure_pod_room_containers())
+
+        # Write migration marker
+        try:
+            marker_data = json.dumps({
+                "version": 26,
+                "completed_at": time.time(),
+            }).encode("utf-8")
+            await loop.run_in_executor(
+                None,
+                lambda: client.put(
+                    "stash://pod/meta/migration_version.json",
+                    marker_data,
+                    content_type="application/json",
+                )
+            )
+            logger.info("_run_pod_backfill: migration marker written (version=26)")
+        except Exception as exc:
+            logger.debug("_run_pod_backfill: failed to write migration marker: %s", exc)
 
     # ── Inbox event conversion ───────────────────────────────────────────────
 

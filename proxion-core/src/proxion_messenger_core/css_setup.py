@@ -136,9 +136,26 @@ class CssAccountManager:
         pod = urlparse(pod_url)
         base_host = (base.hostname or "").lower().rstrip(".")
         pod_host = (pod.hostname or "").lower().rstrip(".")
+
+        # Normalize default ports so http://h:80 equals http://h (RFC 3986).
+        _default_port = {"http": 80, "https": 443}
+        def _norm_port(p):
+            raw = p.port
+            return None if raw == _default_port.get(p.scheme) else raw
+
         same_host = pod_host == base_host
-        is_subdomain = pod_host.endswith("." + base_host)
-        if not (same_host or is_subdomain) or pod.scheme != base.scheme:
+        # Allow subdomain pods only when the CSS base is an apex domain (≤1 dot).
+        # This covers solidcommunity.net (pods at username.solidcommunity.net) and
+        # bare hostnames like localhost, while blocking CSS deployments that are
+        # themselves on a subdomain (e.g. css.example.com) from auto-trusting
+        # sibling subdomains that could be registered by an attacker.
+        _apex_like = base_host.count(".") <= 1
+        is_subdomain = _apex_like and pod_host.endswith("." + base_host)
+
+        scheme_ok = pod.scheme == base.scheme
+        port_ok = _norm_port(pod) == _norm_port(base)
+
+        if not (same_host or is_subdomain) or not scheme_ok or not port_ok:
             raise ValueError(
                 f"Pod URL {pod_url!r} is not on the same origin or a trusted subdomain of "
                 f"CSS base URL {self.css_base_url!r}. "

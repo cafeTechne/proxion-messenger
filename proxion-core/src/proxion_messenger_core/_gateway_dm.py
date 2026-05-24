@@ -479,6 +479,9 @@ class DmHandlerMixin:
             # R13.4: metrics
             self._metrics["messages_total"] += 1
 
+        # Write-through for gateway-relayed (non-federated) DMs
+        asyncio.create_task(self._sync_local_dm_to_pod(thread_id, event))
+
         # Write-through to pod if a relationship cert exists for this peer.
         # dm_clients is keyed by cert_id (federated) OR webid (own pod) —
         # try both so cross-gateway DMs actually reach the recipient's pod.
@@ -884,3 +887,33 @@ class DmHandlerMixin:
                 "session_id": session_id,
                 "message": "Sender offline — recovery request queued.",
             }))
+
+    async def _handle_save_session_state(self, websocket, data: dict) -> None:
+        """Client pushes E2E session state to gateway for backup.
+
+        Called by the client after every 5 ratchet steps. The gateway stores
+        the state in SQLite and checkpoints to the pod.
+        """
+        owner_webid = self._client_webids.get(websocket, "")
+        if not owner_webid or not self._store:
+            return
+        session_id = data.get("session_id", "")
+        if not session_id:
+            return
+        session = {
+            "session_id": session_id,
+            "peer_webid": data.get("peer_webid", ""),
+            "owner_webid": owner_webid,
+            "root_key": data.get("root_key_b64", ""),
+            "send_chain_key": data.get("send_chain_key_b64", ""),
+            "recv_chain_key": data.get("recv_chain_key_b64", ""),
+            "send_count": int(data.get("send_count", 0)),
+            "recv_count": int(data.get("recv_count", 0)),
+        }
+        if not session["root_key"] or not session["peer_webid"]:
+            return
+        try:
+            self._store.save_dm_session(session)
+            asyncio.create_task(self._checkpoint_e2e_session(session_id))
+        except Exception as exc:
+            logger.debug("_handle_save_session_state: %s", exc)

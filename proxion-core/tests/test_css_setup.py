@@ -239,13 +239,15 @@ def test_validate_pod_url_same_origin_accepted(mgr):
     mgr._validate_pod_url(f"{BASE}/alice/")
 
 
-def test_validate_pod_url_subdomain_accepted(mgr):
+def test_validate_pod_url_subdomain_accepted():
     """Pod hosted on a subdomain of the CSS base URL is accepted.
 
     solidcommunity.net hosts pods at {username}.solidcommunity.net, so
-    subdomain URLs must be allowed.
+    subdomain URLs must be allowed. Both base and subdomain must use the
+    same scheme and port (here: no explicit port → default 80/443).
     """
-    mgr._validate_pod_url("http://alice.localhost/")
+    mgr_noport = CssAccountManager("http://localhost")
+    mgr_noport._validate_pod_url("http://alice.localhost/")
 
 
 def test_validate_pod_url_different_origin_rejected(mgr):
@@ -261,30 +263,54 @@ def test_validate_pod_url_different_scheme_rejected(mgr):
         https_mgr._validate_pod_url("http://localhost:3001/alice/")
 
 
-def test_connect_agent_accepts_subdomain_pod(mgr, key):
-    """connect_agent() accepts pods hosted on subdomains of the CSS base URL."""
-    LOGIN_URL = f"{BASE}/.account/login/password/"
+def test_connect_agent_accepts_subdomain_pod(key):
+    """connect_agent() accepts pods hosted on subdomains of the CSS base URL.
+
+    Models solidcommunity.net: base URL has no explicit port; subdomain pod URL
+    also has no explicit port — ports are equal (both None → default).
+    """
+    SC_BASE = "http://localhost"
+    SC_ACCOUNT_ID = "sc-acct-id"
+    SC_PW_URL = f"{SC_BASE}/.account/account/{SC_ACCOUNT_ID}/login/password/"
+    SC_POD_URL = f"{SC_BASE}/.account/account/{SC_ACCOUNT_ID}/pod/"
+    SC_CREDS_URL = f"{SC_BASE}/.account/account/{SC_ACCOUNT_ID}/client-credentials/"
     subdomain_pod = "http://alice.localhost/alice/"
 
+    sc_unauth = {
+        "controls": {
+            "password": {"login": f"{SC_BASE}/.account/login/password/"},
+            "account": {"create": f"{SC_BASE}/.account/account/"},
+        }
+    }
+    sc_auth = {
+        "controls": {
+            "password": {"create": SC_PW_URL, "login": f"{SC_BASE}/.account/login/password/"},
+            "account": {"pod": SC_POD_URL, "clientCredentials": SC_CREDS_URL},
+        }
+    }
+
+    sc_mgr = CssAccountManager(SC_BASE)
     with respx.mock:
-        _mock_register_flow(
-            respx,
-            pw_status=400,
-            pw_body={"message": "There already is a login for this e-mail address."},
+        # Account creation → already exists (400)
+        respx.post(f"{SC_BASE}/.account/account/").mock(
+            return_value=httpx.Response(200, json=sc_unauth, headers={"Set-Cookie": "css-account=sc1; Path=/"})
         )
-        respx.post(LOGIN_URL).mock(
-            return_value=httpx.Response(
-                200, json={}, headers={"Set-Cookie": "css-account=s2; Path=/"}
-            )
+        respx.get(f"{SC_BASE}/.account/").mock(return_value=httpx.Response(200, json=sc_auth))
+        respx.post(SC_PW_URL).mock(
+            return_value=httpx.Response(400, json={"message": "already"})
         )
-        respx.get(POD_URL).mock(
-            return_value=httpx.Response(200, json={"pods": {subdomain_pod: POD_URL + "pod-id/"}})
+        # Login flow
+        respx.post(f"{SC_BASE}/.account/login/password/").mock(
+            return_value=httpx.Response(200, json={}, headers={"Set-Cookie": "css-account=sc2; Path=/"})
         )
-        respx.post(CREDS_URL).mock(
+        respx.get(SC_POD_URL).mock(
+            return_value=httpx.Response(200, json={"pods": {subdomain_pod: SC_POD_URL + "pod-id/"}})
+        )
+        respx.post(SC_CREDS_URL).mock(
             return_value=httpx.Response(200, json={"id": "cid-s", "secret": "sec-s"})
         )
 
-        creds, pod_url, webid = mgr.connect_agent(key, "alice@test.com", "pass123")
+        creds, pod_url, webid = sc_mgr.connect_agent(key, "alice@test.com", "pass123")
 
     assert pod_url == subdomain_pod
     assert webid == "http://alice.localhost/alice/profile/card#me"

@@ -167,6 +167,9 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
         self._room_disappear_timers: dict = {}
         self._dm_disappear_timers: dict = {}  # cert_id -> ms
 
+        # Dirty read positions for pod flush (flushed every 30s by _read_position_flush_loop)
+        self._dirty_read_positions: dict = {}  # (webid, channel_id) -> ts
+
         # Uptime tracking for /health endpoint
         self._start_time: float = time.time()
 
@@ -667,7 +670,7 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
         """Process inbound commands from clients."""
         cmd = data.get("cmd", "")
         _RATE_EXEMPT = {"ping", "pong"}
-        _AUTH_EXEMPT = {"ping", "pong", "auth_response", "register"}
+        _AUTH_EXEMPT = {"ping", "pong", "auth_response", "register", "disconnect_pod"}
 
         if not cmd:
             return
@@ -906,6 +909,8 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 await self._handle_list_dm_sessions(websocket, data)
             elif cmd == "expire_dm_session":
                 await self._handle_expire_dm_session(websocket, data)
+            elif cmd == "save_session_state":
+                await self._handle_save_session_state(websocket, data)
             elif cmd == "upload_sender_key":
                 await self._handle_upload_sender_key(websocket, data)
             elif cmd == "get_sender_key":
@@ -1309,8 +1314,9 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
         )
         cert.sign(self.agent.identity_key)
 
-        # Persist to SQLite
+        # Persist to SQLite and pod
         self._store.save_relationship(cert.to_dict(), peer_did=alice_did)
+        asyncio.create_task(self._sync_cert_to_pod(cert.to_dict()))
 
         # Register Alice's endpoint so relay routing works immediately
         requester_gw_ws = (invite.endpoint_hints or [None])[0]
@@ -1388,6 +1394,7 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                     peer_did = pub_key_to_did(bytes.fromhex(peer_pub_hex))
                 if self._store:
                     self._store.save_relationship(cert_dict, peer_did=peer_did)
+                    asyncio.create_task(self._sync_cert_to_pod(cert_dict))
                 pod_client = self._pod_client()
                 if pod_client and cert_id not in self.dm_clients:
                     cert_obj = RelationshipCertificate.from_dict(cert_dict)
@@ -2747,6 +2754,27 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                     await writer.drain()
                     return
 
+                # ── POST /api/pod-disconnect — sign-out fallback usable without WebSocket ──
+                if method == "POST" and path == "/api/pod-disconnect":
+                    if not self._is_trusted_origin(origin_header, http_port, peer_ip):
+                        writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+                        await writer.drain()
+                        return
+                    self._pod_url = None
+                    self._pod_webid = None
+                    self.dm_clients.clear()
+                    if self.config.db_path:
+                        from pathlib import Path as _Path_pd
+                        _cp = _Path_pd(self.config.db_path).parent / "pod_creds.json"
+                        _cp.unlink(missing_ok=True)
+                    logger.info("pod disconnected via HTTP /api/pod-disconnect")
+                    writer.write(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                        b"Access-Control-Allow-Origin: *\r\nContent-Length: 4\r\n\r\nnull"
+                    )
+                    await writer.drain()
+                    return
+
                 # ── GET /message-edits — edit history (R13.11) ──
                 if method == "GET" and path == "/message-edits":
                     if not self._is_trusted_origin(origin_header, http_port, peer_ip):
@@ -3480,6 +3508,7 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
 
         if self._store:
             self._store.save_relationship(cert.to_dict(), peer_did=acceptor_did)
+            asyncio.create_task(self._sync_cert_to_pod(cert.to_dict()))
             if invitation_id:
                 self._store.mark_invite_status(invitation_id, "accepted")
 
@@ -3706,7 +3735,7 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
         """R9: Periodic checksum verification for critical tables."""
         if not self._store:
             return
-        _CRITICAL_TABLES = ["relationships", "peer_gateway_pins", "audit_logs", "security_events"]
+        _CRITICAL_TABLES = ["relationships", "peer_gateway_pins", "audit_logs"]
         _INTERVAL = int(os.environ.get("PROXION_CHECKSUM_INTERVAL", "300"))  # 5 min default
         # Wait one interval before first check to allow initial snapshot
         await asyncio.sleep(_INTERVAL)
@@ -4009,6 +4038,7 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 asyncio.create_task(self._retention_purge_loop()),
                 asyncio.create_task(self._checksum_maintenance_loop()),
                 asyncio.create_task(self._prekey_replenishment_loop()),
+                asyncio.create_task(self._read_position_flush_loop()),
             ]
 
             # R16: Continuous assurance loop

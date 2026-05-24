@@ -38,7 +38,7 @@ class LocalStore:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # Current schema version — increment when adding new migrations below
-    _SCHEMA_VERSION = 50
+    _SCHEMA_VERSION = 51
 
     # Set by _init_db if PRAGMA integrity_check fails — blocks mutating operations
     _integrity_ok: bool = True
@@ -1021,6 +1021,10 @@ class LocalStore:
                 "ALTER TABLE stun_sessions ADD COLUMN owner_device_id TEXT NOT NULL DEFAULT ''",
                 """CREATE INDEX IF NOT EXISTS idx_stun_sessions_owner_expires
                    ON stun_sessions(owner_webid, expires_at)""",
+            ],
+            # 51: E2E session pod checkpoint ETag tracking
+            [
+                "ALTER TABLE dm_sessions ADD COLUMN pod_checkpoint_etag TEXT",
             ],
         ]
 
@@ -2440,6 +2444,13 @@ class LocalStore:
             )
             return cur.rowcount > 0
 
+    def mark_scheduled_delivered(self, sched_id: str) -> None:
+        with self._conn() as conn:
+            try:
+                conn.execute("UPDATE scheduled_messages SET cancelled=1 WHERE id=?", (sched_id,))
+            except Exception:
+                pass
+
     def get_scheduled_messages_for_user(self, from_webid: str) -> list:
         with self._conn() as conn:
             rows = conn.execute(
@@ -2499,6 +2510,14 @@ class LocalStore:
                 (webid, channel_id),
             ).fetchone()
         return row["last_read_ts"] if row else 0.0
+
+    def set_last_read_ts(self, webid: str, channel_id: str, ts: float) -> None:
+        """Set last-read timestamp to an explicit value (used for pod restore)."""
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO last_read (webid, channel_id, last_read_ts) VALUES (?, ?, ?)",
+                (webid, channel_id, ts),
+            )
 
     def get_all_last_reads(self, webid: str) -> dict[str, float]:
         """Return {channel_id: last_read_ts} for all channels this webid has read."""
@@ -4711,6 +4730,31 @@ class LocalStore:
             except Exception:
                 return None
 
+    def set_dm_session_checkpoint_etag(self, session_id: str, etag: str) -> None:
+        """Store the ETag from the last successful pod checkpoint for a DM session."""
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    "UPDATE dm_sessions SET pod_checkpoint_etag=? WHERE session_id=?",
+                    (etag, session_id),
+                )
+            except Exception:
+                pass
+
+    def get_dm_session_checkpoint_etag(self, session_id: str) -> str | None:
+        """Return the stored pod checkpoint ETag for a DM session, or None."""
+        with self._conn() as conn:
+            try:
+                row = conn.execute(
+                    "SELECT pod_checkpoint_etag FROM dm_sessions WHERE session_id=?",
+                    (session_id,),
+                ).fetchone()
+                if row is None:
+                    return None
+                return row["pod_checkpoint_etag"]
+            except Exception:
+                return None
+
     def list_dm_sessions(self, owner_webid: str) -> list[dict]:
         """Return all DM sessions owned by owner_webid, newest first."""
         with self._conn() as conn:
@@ -4721,6 +4765,31 @@ class LocalStore:
                        FROM dm_sessions WHERE owner_webid=?
                        ORDER BY updated_at DESC""",
                     (owner_webid,),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+
+    def list_dm_thread_ids(self, owner_webid: str) -> list[str]:
+        """Return distinct DM thread_ids for messages owned by owner_webid."""
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    """SELECT DISTINCT thread_id FROM messages
+                       WHERE thread_type='dm' AND from_webid=?""",
+                    (owner_webid,),
+                ).fetchall()
+                return [r["thread_id"] for r in rows]
+            except Exception:
+                return []
+
+    def list_messages_for_thread(self, thread_id: str) -> list[dict]:
+        """Return all messages for a thread_id, oldest first."""
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM messages WHERE thread_id=? ORDER BY timestamp ASC",
+                    (thread_id,),
                 ).fetchall()
                 return [dict(r) for r in rows]
             except Exception:

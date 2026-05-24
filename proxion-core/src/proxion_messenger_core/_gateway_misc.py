@@ -1410,6 +1410,7 @@ class MiscHandlerMixin:
             return
         # Persist the provided safety numbers (trust-on-first-use or explicit comparison)
         self._store.save_contact_verification(peer_webid, provided_numbers, verified_by=caller_webid)
+        asyncio.create_task(self._sync_verification_to_pod(peer_webid, provided_numbers, caller_webid))
         await websocket.send(json.dumps({
             "type": "contact_verified",
             "peer_webid": peer_webid,
@@ -1449,6 +1450,7 @@ class MiscHandlerMixin:
             await websocket.send(json.dumps({"type": "error", "message": "missing_subscription_fields"}))
             return
         self._store.save_push_subscription(subscription_id, owner_webid, endpoint, p256dh_b64, auth_b64)
+        asyncio.create_task(self._sync_push_subscription_to_pod(subscription_id, owner_webid, endpoint, p256dh_b64, auth_b64))
         await websocket.send(json.dumps({
             "type": "push_subscribed",
             "subscription_id": subscription_id,
@@ -1459,6 +1461,7 @@ class MiscHandlerMixin:
         subscription_id = data.get("subscription_id", "")
         if self._store and subscription_id:
             self._store.delete_push_subscription(subscription_id)
+            asyncio.create_task(self._delete_push_subscription_from_pod(subscription_id))
         await websocket.send(json.dumps({"type": "push_unsubscribed", "subscription_id": subscription_id}))
 
     # ------------------------------------------------------------------
@@ -1519,6 +1522,7 @@ class MiscHandlerMixin:
             await websocket.send(json.dumps({"type": "error", "message": "invalid_attestation"}))
             return
         self._store.register_device(device_id, owner_webid, device_pub_b64, attestation_b64)
+        asyncio.create_task(self._sync_device_to_pod(device_id, owner_webid, device_pub_b64, attestation_b64))
         await websocket.send(json.dumps({
             "type": "device_registered",
             "device_id": device_id,
@@ -1548,6 +1552,7 @@ class MiscHandlerMixin:
             await websocket.send(json.dumps({"type": "error", "message": "not_found"}))
             return
         self._store.unregister_device(device_id)
+        asyncio.create_task(self._delete_device_from_pod(device_id))
         await websocket.send(json.dumps({"type": "device_unregistered", "device_id": device_id}))
 
     async def _handle_rotate_spk(self, websocket, data: dict) -> None:

@@ -5,7 +5,7 @@ Requires on self: _pending_auth, _auth_verified, _client_webids, _webid_sockets,
                   _session_meta, _relay_queue, _peer_gateway_urls, _user_presence,
                   _display_names, _local_rooms, _store, agent, config,
                   broadcast(), _make_turn_creds(), _backfill_rooms_from_pod(),
-                  process_command().
+                  _sync_profile_to_pod(), process_command().
 """
 from __future__ import annotations
 
@@ -24,6 +24,8 @@ logger = logging.getLogger("proxion_messenger_core.gateway")
 class AuthHandlerMixin:
 
     async def _handle_auth_response(self, websocket, data: dict) -> None:
+        _ip_ar = (self._session_meta.get(websocket) or {}).get("ip_addr", "?")
+        logger.info("auth_response received from %s (has_pending=%s)", _ip_ar, websocket in self._pending_auth)
         pending = self._pending_auth.pop(websocket, None)
         if not pending:
             await websocket.send(json.dumps({"type": "auth_failed", "reason": "no_pending_challenge"}))
@@ -92,6 +94,10 @@ class AuthHandlerMixin:
                     except Exception:
                         pass
                     return
+                logger.warning(
+                    "auth_response signature verification FAILED for DID %s... from %s (attempt %d)",
+                    did[:20], _ip or "?", _fail_entry["count"],
+                )
                 await websocket.send(json.dumps({"type": "auth_failed", "reason": "invalid_signature"}))
                 return
         self._auth_verified.add(websocket)
@@ -110,6 +116,8 @@ class AuthHandlerMixin:
 
     async def _handle_register(self, websocket, data: dict) -> None:
         identity = data.get("did", "") or data.get("webid", "")
+        _ip_reg = (self._session_meta.get(websocket) or {}).get("ip_addr", "?")
+        logger.info("register received from %s — DID=%r", _ip_reg, identity[:40] if identity else "<empty>")
         gateway_url = data.get("gateway_url", "") or ""
         display_name = data.get("display_name", "")
         display_name = display_name[:100]
@@ -150,6 +158,11 @@ class AuthHandlerMixin:
             self._auth_verified.discard(websocket)
         if require_auth and not already_verified:
             if not identity.startswith("did:key:"):
+                _ip_dbg = (self._session_meta.get(websocket) or {}).get("ip_addr", "?")
+                logger.warning(
+                    "register rejected — unsupported_identity from %s (got %r, expected did:key:...)",
+                    _ip_dbg, identity[:40] if identity else "<empty>",
+                )
                 await websocket.send(json.dumps({
                     "type": "auth_failed",
                     "reason": "unsupported_identity",
@@ -172,6 +185,8 @@ class AuthHandlerMixin:
                 "expires_at": time.time() + 30,
                 "auth_ctx": _auth_ctx,
             }
+            _ip_dbg2 = (self._session_meta.get(websocket) or {}).get("ip_addr", "?")
+            logger.info("auth_challenge issued to %s for DID %s...", _ip_dbg2, identity[:20])
             await websocket.send(json.dumps({"type": "auth_challenge", "nonce": nonce}))
             return
 
@@ -263,6 +278,14 @@ class AuthHandlerMixin:
                 if x25519_pub:
                     self._store.save_x25519_pub(identity, x25519_pub)
 
+                # Write operator profile to pod (fire-and-forget)
+                _prof_dn = self._display_names.get(websocket, "")
+                _prof_x25519 = data.get("x25519_pub") or ""
+                if _prof_dn or _prof_x25519:
+                    asyncio.create_task(
+                        self._sync_profile_to_pod(identity, _prof_dn, _prof_x25519)
+                    )
+
                 restored_rooms = []
                 for room_id in self._store.get_rooms_for_member(identity):
                     if room_id in self._local_rooms:
@@ -276,6 +299,29 @@ class AuthHandlerMixin:
                             "creator_webid": r.get("creator_webid", ""),
                             "local": True,
                         })
+                # DID rotation recovery: if no SQLite membership exists but _local_rooms
+                # has rooms (restored from pod at startup), adopt them all. This handles
+                # the case where the operator's DID changed (e.g. after an IDB wipe) or
+                # where SQLite was cold but the pod had the authoritative room list.
+                if not restored_rooms and self._local_rooms:
+                    _ip = (self._session_meta.get(websocket) or {}).get("ip_addr", "")
+                    if _ip in ("127.0.0.1", "::1", "localhost"):
+                        logger.info(
+                            "DID rotation recovery: adopting %d local room(s) for %s from %s",
+                            len(self._local_rooms), identity[:20], _ip,
+                        )
+                        for room_id, r in list(self._local_rooms.items()):
+                            self._store.add_room_member(room_id, identity)
+                            r["members"].add(websocket)
+                            restored_rooms.append({
+                                "id": room_id,
+                                "name": r["name"],
+                                "code": r["code"],
+                                "invite_url": r.get("invite_url", ""),
+                                "creator_webid": r.get("creator_webid", ""),
+                                "local": True,
+                            })
+
                 if self._store and restored_rooms:
                     last_reads = self._store.get_all_last_reads(identity)
                     for r in restored_rooms:

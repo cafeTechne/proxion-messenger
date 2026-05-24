@@ -86,7 +86,8 @@ def test_resolve_peer_gateway_returns_none_when_unknown(tmp_path):
     assert gw._resolve_peer_gateway("did:key:nobody") is None
 
 
-def test_record_peer_gateway_persists_to_sqlite(tmp_path):
+@pytest.mark.asyncio
+async def test_record_peer_gateway_persists_to_sqlite(tmp_path):
     """_record_peer_gateway saves to both memory and SQLite."""
     gw, _, _, _ = _make_gateway(tmp_path)
     gw._record_peer_gateway("did:key:eve", "http://eve:9000")
@@ -95,7 +96,8 @@ def test_record_peer_gateway_persists_to_sqlite(tmp_path):
     assert gw._store.get_peer_gateway("did:key:eve") == "http://eve:9000"
 
 
-def test_record_peer_gateway_survives_restart(tmp_path):
+@pytest.mark.asyncio
+async def test_record_peer_gateway_survives_restart(tmp_path):
     """After recording a peer gateway, a new gateway instance sees it."""
     db = str(tmp_path / "gw.db")
     agent, key, did = _make_agent()

@@ -543,7 +543,8 @@ class RoomHandlerMixin:
                     logger.debug(f"Pod history read failed [{thread_id}]: {exc}")
                     raw = None
 
-            if not pod_ok and self._store:
+            # Fall back to SQLite if pod failed OR if pod returned nothing (not yet synced)
+            if (not pod_ok or not raw) and self._store:
                 raw = self._store.get_messages(thread_id, after_ts, before_ts, limit)
 
             if raw is None:
@@ -1010,6 +1011,7 @@ class RoomHandlerMixin:
             }
             if react_msg:
                 event["reaction_message_id"] = react_msg.message_id
+                asyncio.create_task(self._sync_room_message_to_pod(room_id, react_msg.to_dict()))
             for ws in list(room["members"]):
                 try:
                     await ws.send(json.dumps(event))
@@ -1226,6 +1228,10 @@ class RoomHandlerMixin:
         channel_id = data.get("channel_id", "")
         if reader_webid and channel_id and self._store:
             self._store.set_last_read(reader_webid, channel_id)
+            # Mark dirty for pod flush (flushed every 30 s by _read_position_flush_loop)
+            _rp = getattr(self, "_dirty_read_positions", None)
+            if _rp is not None:
+                _rp[(reader_webid, channel_id)] = time.time()
 
     async def _handle_read_dm(self, websocket, data: dict) -> None:
         if not self._client_webids.get(websocket):
@@ -1525,6 +1531,7 @@ class RoomHandlerMixin:
             msg_row = self._store.get_messages_by_ids([message_id])
             content = (msg_row[0].get("content", "") if msg_row else data.get("content", ""))
             self._store.save_pin(room_id, message_id, pinner_webid, content)
+            asyncio.create_task(self._sync_pin_to_pod(room_id, message_id, pinner_webid, content))
         client = None
         if thread_id in self.dm_clients:
             _, client = self.dm_clients[thread_id]
@@ -1574,6 +1581,7 @@ class RoomHandlerMixin:
                 return
         if room_id in self._local_rooms and self._store:
             self._store.remove_pin(room_id, message_id)
+            asyncio.create_task(self._delete_pin_from_pod(room_id, message_id))
         event = {"type": "unpinned", "thread_id": thread_id, "message_id": message_id}
         if room_id in self._local_rooms:
             room = self._local_rooms[room_id]
@@ -2015,6 +2023,7 @@ class RoomHandlerMixin:
             await websocket.send(json.dumps({"type": "error", "message": "missing_fields"}))
             return
         self._store.save_sender_key(room_id, sender_webid, chain_key_b64, iteration)
+        asyncio.create_task(self._sync_sender_key_to_pod(room_id, sender_webid, chain_key_b64, iteration))
         await websocket.send(json.dumps({
             "type": "sender_key_uploaded",
             "room_id": room_id,
@@ -2084,6 +2093,7 @@ class RoomHandlerMixin:
         """
         if self._store:
             self._store.delete_sender_keys_for_room(room_id)
+            asyncio.create_task(self._delete_sender_keys_for_room_from_pod(room_id))
 
         # Collect remaining member webids
         remaining: list[str] = []
