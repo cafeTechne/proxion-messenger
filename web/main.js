@@ -629,8 +629,17 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                 socket.send(JSON.stringify({cmd: "list_sessions"}));
             }
             document.getElementById("settings-modal").style.display = "flex";
-            // R16.4.2: set initial pod dot from cached state (live pod_status event will update)
-            _updateSettingsPodDot(localStorage.getItem('proxion_pod_connected') === '1' ? 'connected' : 'none');
+            // R16.4.2: restore pod connected/disconnected state from localStorage (live pod_status will update)
+            {
+                const _podOk = localStorage.getItem('proxion_pod_connected') === '1';
+                _updateSettingsPodDot(_podOk ? 'connected' : 'none');
+                const _scd = document.getElementById('settings-pod-connected');
+                const _sdd = document.getElementById('settings-pod-disconnected');
+                if (_scd) _scd.style.display = _podOk ? 'block' : 'none';
+                if (_sdd) _sdd.style.display = _podOk ? 'none' : 'block';
+                const _swe = document.getElementById('settings-pod-webid');
+                if (_swe) _swe.textContent = localStorage.getItem('proxion_pod_webid') || '';
+            }
             // R18.1.3 + R18.3.3: show Tauri-only section when running as desktop app
             if (window.__TAURI__?.invoke) {
                 const tauriSection = document.getElementById('settings-tauri-section');
@@ -902,13 +911,35 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
         function copyRoomInvite() {
             if (!activeView || !roomInviteUrls[activeView.id]) return;
             const url = roomInviteUrls[activeView.id];
-            navigator.clipboard.writeText(url).then(() => {
-                document.getElementById("invite-btn").innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>';
-                setTimeout(() => { document.getElementById("invite-btn").innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg>'; }, 1500);
-            }).catch(() => {
-                showCopyModal(url);
-            });
+            // Extract the raw code from the URL (?join=CODE) so users can share just the code
+            const codeMatch = url.match(/[?&]join=([^&]+)/);
+            const code = codeMatch ? codeMatch[1] : url;
+            const urlEl = document.getElementById("invite-modal-url");
+            const codeEl = document.getElementById("invite-modal-code");
+            if (urlEl) urlEl.textContent = url;
+            if (codeEl) codeEl.textContent = code;
+            document.getElementById("room-invite-modal").style.display = "flex";
         }
+
+        function _copyInviteText(text, btn) {
+            navigator.clipboard.writeText(text).then(() => {
+                const orig = btn.textContent;
+                btn.textContent = "Copied!";
+                setTimeout(() => { btn.textContent = orig; }, 1500);
+            }).catch(() => { showCopyModal(text); });
+        }
+
+        attachListener('#invite-modal-copy-url', 'click', () => {
+            const url = document.getElementById("invite-modal-url")?.textContent || "";
+            _copyInviteText(url, document.getElementById("invite-modal-copy-url"));
+        });
+        attachListener('#invite-modal-copy-code', 'click', () => {
+            const code = document.getElementById("invite-modal-code")?.textContent || "";
+            _copyInviteText(code, document.getElementById("invite-modal-copy-code"));
+        });
+        attachListener('#invite-modal-close', 'click', () => {
+            document.getElementById("room-invite-modal").style.display = "none";
+        });
 
         let _membersRoomId = null;
         function showRoomMembers(roomId) {
@@ -1061,9 +1092,13 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                 }
             }, 8000);
 
-            ws.onopen = () => {
+            ws.onopen = async () => {
                 if (socket !== ws) { ws.close(); return; } // superseded
                 clearTimeout(_connectTimeout);
+                // Ensure identity is always ready before we try to register.
+                // generateOrLoadIdentity() is idempotent — if already loaded it returns instantly.
+                await generateOrLoadIdentity();
+                if (socket !== ws) return; // socket superseded while we were loading identity
                 console.log("Connected to gateway");
                 _reconnectDelay = 3000;
                 document.querySelector(".dot").className = "dot online";
@@ -1078,43 +1113,18 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                     ws.send(JSON.stringify(payload));
                     if (statusEl) { statusEl.textContent = "Connecting…"; statusEl.style.color = "#94a3b8"; }
                 });
-                // Re-announce display name on every reconnect so gateway relays use it
-                const storedName = localStorage.getItem("proxion_display_name");
-                if (storedName) ws.send(JSON.stringify({cmd: "set_identity", display_name: storedName}));
                 // Register with this client's own DID (always — every user has one)
                 // Include x25519_pub so peers learn our E2E key when we reconnect
+                // Include display_name so the gateway has it immediately (avoids a separate set_identity before auth)
                 const _regPayload = {cmd: "register", did: clientDid};
+                const _storedName = localStorage.getItem("proxion_display_name");
+                if (_storedName) _regPayload.display_name = _storedName;
                 const _e2ePub = myX25519PubB64u();
                 if (_e2ePub) _regPayload.x25519_pub = _e2ePub;
-                if (clientDid) ws.send(JSON.stringify(_regPayload));
-                // Link pod webid separately (optional — only for pod operations)
-                const podWebid = localStorage.getItem("proxion_pod_webid");
-                if (podWebid) ws.send(JSON.stringify({cmd: "link_pod", webid: podWebid}));
-                // Set custom status if available
-                const statusMsg = localStorage.getItem("proxion_status_message");
-                if (statusMsg) ws.send(JSON.stringify({cmd: "set_presence", status: "online", status_message: statusMsg}));
-                // R10.3: push privacy settings to gateway
-                const _receiptsEnabled = localStorage.getItem("proxion_receipts_enabled") !== "0";
-                ws.send(JSON.stringify({cmd: "set_receipts_enabled", enabled: _receiptsEnabled}));
-                const _previewsEnabled = localStorage.getItem("proxion_link_previews_enabled") === "1";
-                ws.send(JSON.stringify({cmd: "set_link_previews_enabled", enabled: _previewsEnabled}));
-                // Sync authoritative pod state (belt-and-suspenders with config event)
-                ws.send(JSON.stringify({cmd: "pod_status"}));
+                ws.send(JSON.stringify(_regPayload)); // clientDid always set after generateOrLoadIdentity()
+                // All other init commands are deferred to the "registered" event handler so
+                // they never race with the auth challenge-response cycle under require_auth mode.
                 document.getElementById("message-feed").innerHTML += '<div class="system-msg">Connected to gateway.</div>';
-
-                // Defer discovery commands by 150 ms so a flapping first connection
-                // (1001 going-away race on page load) dies before commands are sent.
-                setTimeout(() => {
-                    if (ws.readyState !== WebSocket.OPEN || socket !== ws) return;
-                    document.getElementById("room-list").innerHTML = "";
-                    document.getElementById("dm-list").innerHTML = "";
-                    ws.send(JSON.stringify({cmd: "get_rooms"}));
-                    ws.send(JSON.stringify({cmd: "get_dms"}));
-                    ws.send(JSON.stringify({cmd: "get_identity"}));
-                    ws.send(JSON.stringify({cmd: "list_friend_requests"}));
-                    ws.send(JSON.stringify({cmd: "get_relationships"}));
-                    requestNotifPermission();
-                }, 150);
             };
 
             ws.onmessage = (event) => {
@@ -1288,6 +1298,32 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                     break;
                 case "registered":
                     if (event.turn) _turnIceServer = event.turn;
+                    // Auth is complete — now safe to send all init commands that
+                    // require an authenticated socket (they were withheld from onopen).
+                    (function _postAuthInit() {
+                        if (!socket || socket.readyState !== WebSocket.OPEN) return;
+                        const _podWid = localStorage.getItem("proxion_pod_webid");
+                        if (_podWid) socket.send(JSON.stringify({cmd: "link_pod", webid: _podWid}));
+                        const _statusMsg = localStorage.getItem("proxion_status_message");
+                        if (_statusMsg) socket.send(JSON.stringify({cmd: "set_presence", status: "online", status_message: _statusMsg}));
+                        const _rcpts = localStorage.getItem("proxion_receipts_enabled") !== "0";
+                        socket.send(JSON.stringify({cmd: "set_receipts_enabled", enabled: _rcpts}));
+                        const _prvw = localStorage.getItem("proxion_link_previews_enabled") === "1";
+                        socket.send(JSON.stringify({cmd: "set_link_previews_enabled", enabled: _prvw}));
+                        socket.send(JSON.stringify({cmd: "pod_status"}));
+                        // Defer discovery commands 150ms so a flapping connection dies first
+                        setTimeout(() => {
+                            if (!socket || socket.readyState !== WebSocket.OPEN) return;
+                            document.getElementById("room-list").innerHTML = "";
+                            document.getElementById("dm-list").innerHTML = "";
+                            socket.send(JSON.stringify({cmd: "get_rooms"}));
+                            socket.send(JSON.stringify({cmd: "get_dms"}));
+                            socket.send(JSON.stringify({cmd: "get_identity"}));
+                            socket.send(JSON.stringify({cmd: "list_friend_requests"}));
+                            socket.send(JSON.stringify({cmd: "get_relationships"}));
+                            requestNotifPermission();
+                        }, 150);
+                    })();
                     break;
                 case "config":
                     // Sync pod state from authoritative gateway truth first
@@ -1296,6 +1332,16 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                         if (event.pod_webid) localStorage.setItem("proxion_pod_webid", event.pod_webid);
                         if (event.pod_url)   localStorage.setItem("proxion_css_url", event.pod_url);
                         setPodBanner(false);
+                        // Show the sign-out button in settings (same as pod_status does)
+                        {
+                            const _cd = document.getElementById("settings-pod-connected");
+                            const _dd = document.getElementById("settings-pod-disconnected");
+                            const _we = document.getElementById("settings-pod-webid");
+                            if (_cd) _cd.style.display = "block";
+                            if (_dd) _dd.style.display = "none";
+                            if (_we && event.pod_webid) _we.textContent = event.pod_webid;
+                            _updateSettingsPodDot('connected');
+                        }
                     } else {
                         // Gateway has no CSS credentials — that's fine if the browser has
                         // a live Solid session (pod ops run via solidSession.fetch directly).
@@ -1464,6 +1510,21 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                     break;
                 case "voice_hangup":
                     handleVoiceHangup(event);
+                    break;
+                case "voice_signal":
+                    handleVoiceSignalRelay(event);
+                    break;
+                case "voice_peer_joined":
+                    handleVoicePeerJoined(event);
+                    break;
+                case "voice_peer_present":
+                    handleVoicePeerPresent(event);
+                    break;
+                case "voice_peer_left":
+                    handleVoicePeerLeft(event);
+                    break;
+                case "peer_discovered":
+                    handlePeerDiscovered(event);
                     break;
                 case "typing":
                     handleTyping(event);
@@ -3323,6 +3384,16 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
 
         async function initWebRTC(certId, sessionId, isCaller = false, sdpOffer = null) {
             let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+            // Fetch TURN credentials from gateway endpoint if not yet loaded
+            if (!_turnIceServer) {
+                try {
+                    const _tr = await fetch('/turn-credentials');
+                    const _tc = await _tr.json();
+                    if (_tc && _tc.urls && _tc.urls.length > 0) {
+                        _turnIceServer = { urls: _tc.urls, username: _tc.username, credential: _tc.credential };
+                    }
+                } catch (_) {}
+            }
             if (_turnIceServer) {
                 // Server-computed time-limited credentials (preferred)
                 iceServers.push(_turnIceServer);
@@ -3455,6 +3526,45 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
         function handleVoiceHangup(event) {
             if (_callState !== CallState.IDLE) setCallState(CallState.ENDING);
             hangupCleanup();
+        }
+
+        // Dispatch cross-gateway voice signals relayed via HTTP relay
+        function handleVoiceSignalRelay(event) {
+            const st = event.signal_type;
+            const sd = event.signal_data || {};
+            const merged = { session_id: event.session_id, from_webid: event.from_webid, ...sd };
+            if (st === "answer") handleVoiceAnswer(merged);
+            else if (st === "ice_candidate") handleIceCandidate(merged);
+            else if (st === "hangup") handleVoiceHangup(merged);
+            else if (st === "offer") showVoiceBanner({ ...merged, caller_webid: event.from_webid, sdp_offer: sd.sdp_offer });
+        }
+
+        // Group call: existing member joined before us — they will send us a voice_invite
+        function handleVoicePeerPresent(event) {
+            showToast(`${event.peer_webid.slice(0, 20)} is in the voice channel`, "info");
+        }
+
+        // Group call: a new peer joined after us — we should call them
+        function handleVoicePeerJoined(event) {
+            showToast(`${event.peer_webid.slice(0, 20)} joined the voice channel`, "info");
+            // Initiate a WebRTC session toward the new peer
+            if (activeView) {
+                initWebRTC(activeView.id, null, true).catch(console.warn);
+            }
+        }
+
+        // Group call: a peer left
+        function handleVoicePeerLeft(event) {
+            showToast(`${event.peer_webid.slice(0, 20)} left the voice channel`, "info");
+        }
+
+        // peer_discovered response handler — used by the Add Contact modal
+        let _peerDiscoveredResolve = null;
+        function handlePeerDiscovered(event) {
+            if (_peerDiscoveredResolve) {
+                _peerDiscoveredResolve(event);
+                _peerDiscoveredResolve = null;
+            }
         }
 
         async function handleVoiceAnswer(event) {
@@ -4058,7 +4168,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
             "contact_revoked": "This contact has been revoked. You can no longer send messages.",
         };
 
-        function submitAddPeer() {
+        async function submitAddPeer() {
             let raw = document.getElementById("add-peer-input").value.trim();
             const errEl = document.getElementById("add-peer-error");
             const submitBtn = document.getElementById("add-peer-submit-btn");
@@ -4075,6 +4185,26 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                 } catch (_) {}
             }
             errEl.textContent = "";
+
+            // If address looks like a cross-gateway Proxion address, discover peer first
+            if (raw.includes("@") && (raw.includes("http") || raw.startsWith("did:"))) {
+                if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = "Looking up…"; }
+                const discovered = await new Promise(resolve => {
+                    _peerDiscoveredResolve = resolve;
+                    socket.send(JSON.stringify({ cmd: "discover_peer", address: raw }));
+                    setTimeout(() => { _peerDiscoveredResolve = null; resolve(null); }, 8000);
+                });
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Send Request"; }
+                if (!discovered) {
+                    errEl.textContent = "Could not reach that gateway — check the address and try again.";
+                    return;
+                }
+                // Show discovered info briefly, then send friend request
+                errEl.style.color = "#4ade80";
+                errEl.textContent = `Found: ${discovered.display_name || discovered.did.slice(0, 20)} · ${discovered.fingerprint || ""}`;
+                setTimeout(() => { errEl.textContent = ""; errEl.style.color = ""; }, 3000);
+            }
+
             if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = "Sending…"; }
             _pendingFriendRequest = true;
             if (raw.includes("@")) {
@@ -4770,16 +4900,46 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                 if (!url.startsWith('https://')) { alert('Pod server URL must start with https://'); return; }
                 solidLogin(url);
             });
-            async function _signOutAndReset() {
-                // R16.3.2: clear pod credentials from OS keychain
+            // Disconnect from the CSS/Solid pod without touching the local identity key or
+            // room/message history. The user's DID, display name, and all rooms are preserved.
+            async function _signOutOfPod() {
                 if (window.__TAURI__?.invoke) {
                     window.__TAURI__.invoke('clear_pod_credentials').catch(() => {});
                 }
-                if (socket && socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({ cmd: 'disconnect_pod' }));
-                    await new Promise(r => setTimeout(r, 200));
+                // Tell gateway to drop pod credentials (HTTP endpoint — no WS auth needed)
+                try { await fetch('/api/pod-disconnect', { method: 'POST' }); } catch (_) {
+                    if (socket && socket.readyState === WebSocket.OPEN)
+                        socket.send(JSON.stringify({ cmd: 'disconnect_pod' }));
                 }
-                try { await solidSession.logout({ logoutType: 'app' }); } catch (_) {}
+                // Clear Solid OIDC browser session (if any) with timeout
+                try {
+                    await Promise.race([
+                        solidSession.logout({ logoutType: 'app' }),
+                        new Promise(r => setTimeout(r, 1500)),
+                    ]);
+                } catch (_) {}
+                // Clear only pod-related localStorage — identity, rooms, and messages survive
+                const _podKeys = [
+                    'proxion_pod_connected', 'proxion_pod_webid', 'proxion_css_url',
+                    'proxion_pod_setup_skipped', 'proxion_pod_banner_dismissed',
+                ];
+                _podKeys.forEach(k => localStorage.removeItem(k));
+                window.location.reload();
+            }
+
+            // Full wipe: clears identity key, all data, and pod credentials.
+            // Only used by "Reset Identity" — not by normal pod sign-out.
+            async function _resetIdentity() {
+                if (window.__TAURI__?.invoke) {
+                    window.__TAURI__.invoke('clear_pod_credentials').catch(() => {});
+                }
+                try { await fetch('/api/pod-disconnect', { method: 'POST' }); } catch (_) {}
+                try {
+                    await Promise.race([
+                        solidSession.logout({ logoutType: 'app' }),
+                        new Promise(r => setTimeout(r, 1500)),
+                    ]);
+                } catch (_) {}
                 localStorage.clear();
                 sessionStorage.clear();
                 try {
@@ -4791,7 +4951,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                 } catch (_) {}
                 window.location.reload();
             }
-            attachListener('#settings-pod-logout-btn', 'click', _signOutAndReset);
+            attachListener('#settings-pod-logout-btn', 'click', _signOutOfPod);
             // R18.1.3: autostart toggle
             attachListener('#settings-autostart-toggle', 'change', (e) => {
                 if (!window.__TAURI__?.invoke) return;
@@ -4808,8 +4968,8 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                 }
             });
             attachListener('#settings-reset-identity-btn', 'click', async () => {
-                if (!confirm('This will clear your local identity, pod session, and all cached data. You will start fresh on this device. Continue?')) return;
-                await _signOutAndReset();
+                if (!confirm('This will permanently delete your local identity key, all rooms, messages, and pod credentials. You cannot undo this. Continue?')) return;
+                await _resetIdentity();
             });
 
             // R14.3: Export/Import

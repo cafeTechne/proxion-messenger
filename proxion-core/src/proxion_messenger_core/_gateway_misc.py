@@ -1960,3 +1960,38 @@ class MiscHandlerMixin:
             "result": result,
         }))
 
+    async def _handle_discover_peer(self, websocket, data: dict) -> None:
+        """Resolve a peer's Proxion address to their gateway info."""
+        address = data.get("address", "").strip()
+        if not address:
+            await websocket.send(json.dumps({
+                "type": "error", "code": "missing_address", "message": "address required",
+            }))
+            return
+
+        result = await self._discover_peer_gateway(address)
+        if not result:
+            await websocket.send(json.dumps({
+                "type": "error", "code": "peer_not_found",
+                "message": "Could not reach peer gateway — check the address and try again.",
+            }))
+            return
+
+        discovered_did = result.get("did", "")
+        fp = ""
+        try:
+            from .pop import fingerprint as _fp
+            from .didkey import did_to_pub_key as _d2pk
+            fp = _fp(_d2pk(discovered_did))
+        except Exception:
+            pass
+
+        await websocket.send(json.dumps({
+            "type": "peer_discovered",
+            "did": discovered_did,
+            "gateway_http_url": result.get("gateway_http_url", ""),
+            "display_name": result.get("display_name") or discovered_did[:20],
+            "fingerprint": fp,
+            "x25519_pub": result.get("x25519_pub", ""),
+        }))
+

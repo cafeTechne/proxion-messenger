@@ -124,6 +124,7 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
 
         # Voice session tracking for direct WS relay
         self._voice_sessions = {}   # session_id -> {"caller_ws": ws, "callee_ws": ws|None}
+        self._voice_channels: dict = {}  # channel_id -> {"members": {webid: websocket}}
         self._webhook_fire_ts: deque = deque()
         self._webhook_breakers: dict = {}  # webhook_id -> {"failures": int, "opened_at": float|None}
         self._checksum_mismatch: bool = False  # R9: set by checksum loop, cleared by ack_checksum_mismatch
@@ -232,6 +233,27 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 logger.debug("Generated ephemeral VAPID keypair (set PROXION_VAPID_* env vars to persist)")
             except Exception as _ve:
                 logger.debug("VAPID keypair generation skipped: %s", _ve)
+
+        # Derive a stable X25519 keypair for sealed relay (derived from Ed25519 identity key)
+        self._own_x25519_priv: Optional[bytes] = None
+        self._own_x25519_pub_b64: str = ""
+        try:
+            from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey as _X25519Priv
+            from cryptography.hazmat.primitives.kdf.hkdf import HKDF as _HKDF_gw
+            from cryptography.hazmat.primitives.hashes import SHA256 as _SHA256_gw
+            from cryptography.hazmat.primitives.serialization import Encoding as _Enc, PrivateFormat as _PF, NoEncryption as _NE
+            import base64 as _b64_gw
+            _raw_ed_priv = agent.identity_key.private_bytes(_Enc.Raw, _PF.Raw, _NE())
+            _x25519_priv_bytes = _HKDF_gw(_SHA256_gw(), 32, salt=b"proxion-gw-x25519-v1", info=b"").derive(_raw_ed_priv)
+            self._own_x25519_priv = _x25519_priv_bytes
+            _x_priv = _X25519Priv.from_private_bytes(_x25519_priv_bytes)
+            _x_pub_bytes = _x_priv.public_key().public_bytes_raw()
+            self._own_x25519_pub_b64 = _b64_gw.urlsafe_b64encode(_x_pub_bytes).rstrip(b"=").decode()
+            if self._store:
+                _gw_did_x = pub_key_to_did(agent.identity_pub_bytes)
+                self._store.save_x25519_pub(_gw_did_x, self._own_x25519_pub_b64)
+        except Exception as _xe:
+            logger.debug("X25519 keypair derivation failed: %s", _xe)
 
     def _make_turn_creds(self, identity: str) -> Optional[dict]:
         """Return coturn-compatible time-limited TURN credentials, or None if not configured."""
@@ -867,6 +889,8 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 await self._handle_decline_ownership(websocket, data)
             elif cmd == "resolve_did":
                 await self._handle_resolve_did(websocket, data)
+            elif cmd == "discover_peer":
+                await self._handle_discover_peer(websocket, data)
             elif cmd == "voice_invite":
                 await self._handle_voice_invite(websocket, data)
 
@@ -878,6 +902,12 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
 
             elif cmd == "voice_hangup":
                 await self._handle_voice_hangup(websocket, data)
+
+            elif cmd == "join_voice_channel":
+                await self._handle_join_voice_channel(websocket, data)
+
+            elif cmd == "leave_voice_channel":
+                await self._handle_leave_voice_channel(websocket, data)
 
             elif cmd == "get_presence":
                 await self._handle_get_presence(websocket, data)
@@ -1740,6 +1770,21 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                         b"Access-Control-Allow-Origin: *\r\n"
                         b"Content-Length: " + str(len(resp_bytes)).encode() + b"\r\n\r\n" + resp_bytes
+                    )
+                    await writer.drain()
+                    return
+
+                # ── GET /turn-credentials — coturn HMAC credentials ──
+                if method == "GET" and path == "/turn-credentials":
+                    from .didkey import pub_key_to_did as _p2d_turn
+                    _turn_gw_did = _p2d_turn(self.agent.identity_pub_bytes)
+                    _turn_creds = self._make_turn_creds(_turn_gw_did)
+                    _turn_body = json.dumps(_turn_creds if _turn_creds else {"urls": []}).encode()
+                    writer.write(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                        b"Access-Control-Allow-Origin: *\r\n"
+                        b"Cache-Control: no-store\r\n"
+                        b"Content-Length: " + str(len(_turn_body)).encode() + b"\r\n\r\n" + _turn_body
                     )
                     await writer.drain()
                     return
@@ -3106,10 +3151,29 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             "e2e", "nonce", "msg_num", "key_header", "ratchet_pub", "pn", "x25519_pub",
             # chain-integrity fields
             "seq_num", "prev_hash",
+            # voice signaling
+            "content_type", "signal_type", "signal_data", "session_id",
+            # sealed relay
+            "sealed_payload",
         })
         _unknown = set(data.keys()) - _ALLOWED_RELAY_KEYS
         if _unknown:
             return "400 Bad Request", '{"error":"unknown_relay_fields"}'
+
+        # ── Voice signal relay — ephemeral, delivered immediately, not queued ──
+        if data.get("content_type") == "voice_signal":
+            return await self._handle_voice_signal_relay(data)
+
+        # ── Sealed DM relay — decrypt before processing ──
+        if data.get("content_type") == "sealed_dm":
+            sealed = data.get("sealed_payload", "")
+            if not sealed or not self._own_x25519_priv:
+                return "400 Bad Request", '{"error":"sealed_relay_not_supported"}'
+            try:
+                from .sealed_relay import unseal_relay_payload as _unseal
+                data = _unseal(sealed, self._own_x25519_priv)
+            except Exception as _ue:
+                return "400 Bad Request", '{"error":"sealed_relay_decrypt_failed"}'
 
         from_webid  = data.get("from_webid", "")
         to_webid    = data.get("to_webid", "")
@@ -3425,8 +3489,42 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             "endpoint_hints": invite.endpoint_hints,
         }
         await self.broadcast(event)
-        
+
         return "200 OK", '{"status":"received"}'
+
+    async def _handle_voice_signal_relay(self, data: dict) -> tuple[str, str]:
+        """Handle an inbound voice signal relayed from a peer gateway.
+
+        Delivers immediately to the target's WebSocket; never queued.
+        """
+        to_webid = data.get("to_webid", "")
+        from_webid = data.get("from_webid", "")
+        signal_type = data.get("signal_type", "")
+        signal_data = data.get("signal_data") or {}
+        session_id = data.get("session_id", "")
+
+        if not to_webid or not signal_type:
+            return "400 Bad Request", '{"error":"missing voice signal fields"}'
+
+        target_sockets = self._sockets_for(to_webid)
+        if not target_sockets:
+            return "202 Accepted", '{"status":"offline"}'
+
+        event = json.dumps({
+            "type": "voice_signal",
+            "signal_type": signal_type,
+            "session_id": session_id,
+            "from_webid": from_webid,
+            "signal_data": signal_data,
+        })
+        delivered = False
+        for ws in target_sockets:
+            try:
+                await ws.send(event)
+                delivered = True
+            except Exception:
+                pass
+        return ("200 OK", '{"status":"delivered"}') if delivered else ("202 Accepted", '{"status":"offline"}')
 
     async def _handle_invite_accept_post(self, body: bytes) -> tuple[str, str]:
         """Handle POST /invite/accept — receive acceptance from acceptor's gateway.

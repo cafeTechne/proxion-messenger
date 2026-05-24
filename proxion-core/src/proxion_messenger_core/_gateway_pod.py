@@ -181,6 +181,78 @@ class PodSyncMixin:
         else:
             self._peer_gateway_urls[did] = gateway_url
 
+    def _resolve_peer_x25519_pub(self, did: str) -> Optional[str]:
+        """Return the known X25519 public key (base64url) for a peer DID, or None."""
+        if self._store:
+            return self._store.get_x25519_pub(did)
+        return None
+
+    async def _discover_peer_gateway(self, address: str) -> Optional[dict]:
+        """Fetch /.well-known/proxion from a peer gateway and cache the result.
+
+        Accepts 'did:key:z6Mk...@https://gateway.example.com' or a bare gateway URL.
+        Returns the parsed .well-known JSON dict, or None on any error.
+        """
+        import urllib.request as _urlreq
+        from .relay import parse_proxion_address
+
+        peer_did: Optional[str] = None
+        gateway_url: Optional[str] = None
+        try:
+            peer_did, gateway_url = parse_proxion_address(address)
+        except Exception:
+            if address.startswith(("http://", "https://")):
+                gateway_url = address
+            else:
+                return None
+
+        if not gateway_url:
+            return None
+
+        gateway_http = gateway_url.replace("wss://", "https://").replace("ws://", "http://")
+        well_known_url = gateway_http.rstrip("/") + "/.well-known/proxion"
+
+        try:
+            loop = asyncio.get_event_loop()
+
+            def _fetch() -> Optional[dict]:
+                req = _urlreq.Request(
+                    well_known_url, headers={"Accept": "application/json", "User-Agent": "Proxion/0.1"}
+                )
+                with _urlreq.urlopen(req, timeout=5) as resp:
+                    if resp.getcode() != 200:
+                        return None
+                    raw = resp.read(65536)
+                    return json.loads(raw)
+
+            result = await loop.run_in_executor(None, _fetch)
+        except Exception as exc:
+            logger.debug("_discover_peer_gateway %s: %s", well_known_url, exc)
+            return None
+
+        if not isinstance(result, dict):
+            return None
+
+        discovered_did = result.get("did", "")
+        discovered_http = result.get("gateway_http_url", "")
+
+        if not discovered_did or not discovered_http:
+            return None
+
+        # Fingerprint check: DID in address must match DID in response
+        if peer_did and peer_did != discovered_did:
+            logger.warning("_discover_peer_gateway: DID mismatch expected=%s got=%s", peer_did, discovered_did)
+            return None
+
+        # Cache the gateway URL
+        self._record_peer_gateway(discovered_did, discovered_http)
+
+        # Cache x25519 pub for sealed relay
+        if "x25519_pub" in result and self._store:
+            self._store.save_x25519_pub(discovered_did, result["x25519_pub"])
+
+        return result
+
     # ── Pod connection ───────────────────────────────────────────────────────
 
     def _proxion_address(self) -> str:

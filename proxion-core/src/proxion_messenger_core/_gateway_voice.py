@@ -38,6 +38,85 @@ class VoiceHandlerMixin:
                     pass
             del self._voice_sessions[sid]
 
+        # Also remove from any voice channels
+        leaver_webid = self._client_webids.get(websocket, "")
+        if leaver_webid:
+            for ch_id in list(self._voice_channels.keys()):
+                ch = self._voice_channels.get(ch_id)
+                if ch and leaver_webid in ch.get("members", {}):
+                    ch["members"].pop(leaver_webid, None)
+                    for mws in list(ch.get("members", {}).values()):
+                        try:
+                            asyncio.create_task(mws.send(json.dumps({
+                                "type": "voice_peer_left",
+                                "channel_id": ch_id,
+                                "peer_webid": leaver_webid,
+                            })))
+                        except Exception:
+                            pass
+                    if not ch.get("members"):
+                        self._voice_channels.pop(ch_id, None)
+
+    async def _relay_voice_signal(
+        self,
+        target_webid: str,
+        signal_type: str,
+        signal_data: dict,
+    ) -> bool:
+        """Send a voice signal to a peer on a different gateway via HTTP relay.
+
+        Uses POST /relay with content_type='voice_signal' so the receiving
+        gateway delivers it immediately via WebSocket rather than queuing it.
+        Returns True if the POST succeeded.
+        """
+        import secrets as _sec
+        import time as _time
+        from .relay import sign_relay_message, post_relay
+        from .didkey import pub_key_to_did
+
+        gateway_url = self._resolve_peer_gateway(target_webid)
+        if not gateway_url:
+            return False
+
+        gateway_did = pub_key_to_did(self.agent.identity_pub_bytes)
+        relay_nonce = _sec.token_hex(8)
+        session_id = signal_data.get("session_id", "")
+        # Synthetic message_id so relay dedup logic has a stable key
+        message_id = f"vs:{signal_type}:{session_id}:{relay_nonce}"
+        ts = _time.strftime("%Y-%m-%dT%H:%M:%S+00:00", _time.gmtime())
+
+        try:
+            sig = sign_relay_message(
+                self.agent.identity_key,
+                gateway_did, target_webid,
+                message_id, signal_type, ts, relay_nonce,
+            )
+        except Exception as exc:
+            logger.debug("_relay_voice_signal sign failed: %s", exc)
+            return False
+
+        my_http = self._gateway_http_url() if hasattr(self, "_gateway_http_url") else ""
+        payload = {
+            "from_webid": gateway_did,
+            "to_webid": target_webid,
+            "message_id": message_id,
+            "content": signal_type,          # used by signature; receiver ignores
+            "timestamp": ts,
+            "relay_nonce": relay_nonce,
+            "signature": sig,
+            "origin_gateway_url": my_http,
+            "content_type": "voice_signal",
+            "signal_type": signal_type,
+            "signal_data": signal_data,
+            "session_id": session_id,
+        }
+        http_base = gateway_url.replace("wss://", "https://").replace("ws://", "http://")
+        try:
+            return await post_relay(http_base.rstrip("/") + "/relay", payload)
+        except Exception as exc:
+            logger.debug("_relay_voice_signal post failed: %s", exc)
+            return False
+
     async def _handle_voice_invite(self, websocket, data: dict) -> None:
         import secrets as _secrets
         import time as _time
@@ -164,18 +243,25 @@ class VoiceHandlerMixin:
                 await caller_ws.send(json.dumps(event))
 
         if sess and not (sess["caller_ws"] and sess["caller_ws"] in self.clients):
-            try:
-                client_entry = self.dm_clients.get(cert_id) if cert_id else None
-                if client_entry:
-                    cert, pod_client = client_entry
-                    from .voice import signal_voice_answer
-                    loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(
-                        None, signal_voice_answer,
-                        cert, pod_client, session_id, sdp_answer,
-                    )
-            except Exception as exc:
-                logger.debug("Pod voice_answer write skipped: %s", exc)
+            # Caller is on a different gateway — try direct relay before pod
+            _target = sess.get("caller_webid", "")
+            if _target:
+                asyncio.create_task(self._relay_voice_signal(
+                    _target, "answer", {"session_id": session_id, "sdp_answer": sdp_answer}
+                ))
+            else:
+                try:
+                    client_entry = self.dm_clients.get(cert_id) if cert_id else None
+                    if client_entry:
+                        cert, pod_client = client_entry
+                        from .voice import signal_voice_answer
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(
+                            None, signal_voice_answer,
+                            cert, pod_client, session_id, sdp_answer,
+                        )
+                except Exception as exc:
+                    logger.debug("Pod voice_answer write skipped: %s", exc)
 
     async def _handle_ice_candidate(self, websocket, data: dict) -> None:
         session_id = data.get("session_id", "")
@@ -206,21 +292,32 @@ class VoiceHandlerMixin:
         if other_ws and other_ws in self.clients:
             await other_ws.send(json.dumps(event))
         else:
-            # Peer is on a different gateway — write ICE candidate to pod.
-            # TURN relay is strongly recommended for cross-gateway calls to avoid
-            # ICE timeout (trickle ICE via 3-second pod poll is marginal).
-            try:
-                client_entry = self.dm_clients.get(cert_id) if cert_id else None
-                if client_entry:
-                    cert, pod_client = client_entry
-                    from .voice import signal_ice_candidate
-                    loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(
-                        None, signal_ice_candidate,
-                        cert, pod_client, session_id, candidate, sdp_mid, sdp_mline_index,
-                    )
-            except Exception as exc:
-                logger.debug("Pod ice_candidate write skipped: %s", exc)
+            # Peer is on a different gateway — relay signal directly for low-latency ICE
+            _sess_ice = self._voice_sessions.get(session_id, {})
+            _target_ice = (
+                _sess_ice.get("target_webid")
+                if websocket == _sess_ice.get("caller_ws")
+                else _sess_ice.get("caller_webid")
+            )
+            if _target_ice:
+                asyncio.create_task(self._relay_voice_signal(
+                    _target_ice, "ice_candidate",
+                    {"session_id": session_id, "candidate": candidate,
+                     "sdp_mid": sdp_mid, "sdp_mline_index": sdp_mline_index},
+                ))
+            else:
+                try:
+                    client_entry = self.dm_clients.get(cert_id) if cert_id else None
+                    if client_entry:
+                        cert, pod_client = client_entry
+                        from .voice import signal_ice_candidate
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(
+                            None, signal_ice_candidate,
+                            cert, pod_client, session_id, candidate, sdp_mid, sdp_mline_index,
+                        )
+                except Exception as exc:
+                    logger.debug("Pod ice_candidate write skipped: %s", exc)
 
     async def _handle_voice_hangup(self, websocket, data: dict) -> None:
         session_id = data.get("session_id", "")
@@ -240,15 +337,84 @@ class VoiceHandlerMixin:
         if other_ws and other_ws in self.clients:
             await other_ws.send(json.dumps(event))
         else:
+            _target_hup = sess.get("target_webid") if websocket == sess.get("caller_ws") else sess.get("caller_webid")
+            if _target_hup:
+                asyncio.create_task(self._relay_voice_signal(
+                    _target_hup, "hangup", {"session_id": session_id}
+                ))
+            else:
+                try:
+                    client_entry = self.dm_clients.get(cert_id) if cert_id else None
+                    if client_entry:
+                        cert, pod_client = client_entry
+                        from .voice import signal_voice_hangup
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(
+                            None, signal_voice_hangup,
+                            cert, pod_client, session_id,
+                        )
+                except Exception as exc:
+                    logger.debug("Pod voice_hangup write skipped: %s", exc)
+
+    async def _handle_join_voice_channel(self, websocket, data: dict) -> None:
+        """Add caller to a named voice channel and signal existing members."""
+        channel_id = data.get("channel_id", "")
+        joiner_webid = self._client_webids.get(websocket, "")
+        if not channel_id or not joiner_webid:
+            return
+
+        channel = self._voice_channels.setdefault(channel_id, {"members": {}})
+        existing = dict(channel["members"])  # snapshot before adding self
+
+        if len(existing) >= 6:
+            await websocket.send(json.dumps({
+                "type": "warning",
+                "code": "voice_channel_crowded",
+                "channel_id": channel_id,
+                "message": f"Channel has {len(existing)} members. Mesh connections may be slow.",
+            }))
+
+        channel["members"][joiner_webid] = websocket
+
+        # Notify existing members and inform joiner of who's already there
+        for member_webid, member_ws in existing.items():
             try:
-                client_entry = self.dm_clients.get(cert_id) if cert_id else None
-                if client_entry:
-                    cert, pod_client = client_entry
-                    from .voice import signal_voice_hangup
-                    loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(
-                        None, signal_voice_hangup,
-                        cert, pod_client, session_id,
-                    )
-            except Exception as exc:
-                logger.debug("Pod voice_hangup write skipped: %s", exc)
+                await member_ws.send(json.dumps({
+                    "type": "voice_peer_joined",
+                    "channel_id": channel_id,
+                    "peer_webid": joiner_webid,
+                }))
+            except Exception:
+                pass
+            # Tell joiner about this existing member (they will receive a voice_invite from them)
+            await websocket.send(json.dumps({
+                "type": "voice_peer_present",
+                "channel_id": channel_id,
+                "peer_webid": member_webid,
+            }))
+
+    async def _handle_leave_voice_channel(self, websocket, data: dict) -> None:
+        """Remove caller from a voice channel and notify remaining members."""
+        channel_id = data.get("channel_id", "")
+        leaver_webid = self._client_webids.get(websocket, "")
+        if not channel_id or not leaver_webid:
+            return
+
+        channel = self._voice_channels.get(channel_id)
+        if not channel:
+            return
+
+        channel["members"].pop(leaver_webid, None)
+
+        for member_ws in list(channel["members"].values()):
+            try:
+                await member_ws.send(json.dumps({
+                    "type": "voice_peer_left",
+                    "channel_id": channel_id,
+                    "peer_webid": leaver_webid,
+                }))
+            except Exception:
+                pass
+
+        if not channel["members"]:
+            self._voice_channels.pop(channel_id, None)

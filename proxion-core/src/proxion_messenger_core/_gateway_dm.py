@@ -569,7 +569,7 @@ class DmHandlerMixin:
                         message_id, content, ts, relay_nonce,
                     )
                     my_http_url = self._gateway_http_url()
-                    payload = {
+                    inner_payload = {
                         "from_webid": gateway_did,
                         "from_display_name": sender_name,
                         "to_webid": target_webid,
@@ -584,7 +584,28 @@ class DmHandlerMixin:
                     for _k in ("e2e", "nonce", "msg_num", "key_header",
                                "ratchet_pub", "pn", "x25519_pub"):
                         if _k in data:
-                            payload[_k] = data[_k]
+                            inner_payload[_k] = data[_k]
+                    # Attempt sealed relay if peer's x25519 pub is known
+                    _peer_x25519 = self._resolve_peer_x25519_pub(target_webid)
+                    if _peer_x25519:
+                        try:
+                            from .sealed_relay import seal_relay_payload as _seal
+                            _sealed = _seal(inner_payload, _peer_x25519)
+                            payload = {
+                                "to_webid": target_webid,
+                                "message_id": message_id,
+                                "timestamp": ts,
+                                "relay_nonce": relay_nonce,
+                                "signature": sig,
+                                "content": content,
+                                "content_type": "sealed_dm",
+                                "sealed_payload": _sealed,
+                            }
+                        except Exception as _se:
+                            logger.debug("seal_relay_payload failed, sending plaintext: %s", _se)
+                            payload = inner_payload
+                    else:
+                        payload = inner_payload
                     # Prefer gateway_http_url from discovery; fall back to ws→http heuristic
                     http_base = peer_gw.replace("wss://", "https://").replace("ws://", "http://")
                     relay_url = http_base.rstrip("/") + "/relay"
