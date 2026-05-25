@@ -1493,6 +1493,46 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             "peer_did": peer_did,
         })
 
+    def _build_discovery_data(self) -> dict:
+        """Build the /.well-known/proxion discovery payload."""
+        import pathlib as _pl
+        from .didkey import pub_key_to_did as _p2d
+        from .pop import fingerprint as _fp
+        gw_did = _p2d(self.agent.identity_pub_bytes)
+        _vpath = _pl.Path(__file__).parent.parent.parent / "version.txt"
+        if not _vpath.exists():
+            _vpath = _pl.Path(__file__).parent / "version.txt"
+        _gw_version = _vpath.read_text().strip() if _vpath.exists() else "0.1.0"
+        _env_auth = os.environ.get("PROXION_REQUIRE_AUTH", "")
+        _loopback_or_wildcard = self.config.host in (
+            "127.0.0.1", "localhost", "::1", "", "0.0.0.0", "::")
+        _require_auth_flag = (
+            _env_auth == "1" or
+            (_env_auth != "0" and not _loopback_or_wildcard)
+        )
+        data = {
+            "proxion_version": "0.1",
+            "gateway_version": _gw_version,
+            "did": gw_did,
+            "gateway_url": self._ws_public_url(),
+            "gateway_http_url": self._gateway_http_url(),
+            "proxion_address": self._proxion_address(),
+            "require_auth": _require_auth_flag,
+            "fingerprint": _fp(self.agent.identity_pub_bytes),
+        }
+        if not self.config.public_url:
+            data["nat_warning"] = True
+        if self.dm_clients and self._pod_url:
+            data["pod_url"] = self._pod_url
+        if self._store:
+            own_x25519 = self._store.get_x25519_pub(gw_did)
+            if own_x25519:
+                data["x25519_pub"] = own_x25519
+            dn = self._store.get_display_name(gw_did)
+            if dn:
+                data["display_name"] = dn
+        return data
+
     def _make_ssl_context(self):
         """Build and return an SSLContext from config, or None if no certs configured."""
         if self.config.ssl_certfile and self.config.ssl_keyfile:
@@ -1728,43 +1768,7 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
 
                 # ── GET /.well-known/proxion — discovery endpoint (R8.1) ──
                 if method == "GET" and path == "/.well-known/proxion":
-                    gw_did = pub_key_to_did(self.agent.identity_pub_bytes)
-                    http_url = self._gateway_http_url()
-                    proxion_addr = self._proxion_address()
-                    # R18.3.4: read version from version.txt next to the binary/package
-                    import pathlib as _pl
-                    _vpath = _pl.Path(__file__).parent.parent.parent / "version.txt"
-                    if not _vpath.exists():
-                        _vpath = _pl.Path(__file__).parent / "version.txt"
-                    _gw_version = _vpath.read_text().strip() if _vpath.exists() else "0.1.0"
-                    _env_auth = os.environ.get("PROXION_REQUIRE_AUTH", "")
-                    _loopback_or_wildcard = self.config.host in (
-                        "127.0.0.1", "localhost", "::1", "", "0.0.0.0", "::")
-                    _require_auth_flag = (
-                        _env_auth == "1" or
-                        (_env_auth != "0" and not _loopback_or_wildcard)
-                    )
-                    discovery_data = {
-                        "proxion_version": "0.1",
-                        "gateway_version": _gw_version,
-                        "did": gw_did,
-                        "gateway_url": self._ws_public_url(),
-                        "gateway_http_url": http_url,
-                        "proxion_address": proxion_addr,
-                        "require_auth": _require_auth_flag,
-                    }
-                    if self.dm_clients and self._pod_url:
-                        discovery_data["pod_url"] = self._pod_url
-                    if self._store:
-                        own_x25519 = self._store.get_x25519_pub(gw_did)
-                        if own_x25519:
-                            discovery_data["x25519_pub"] = own_x25519
-                        dn = self._store.get_display_name(gw_did)
-                        if dn:
-                            discovery_data["display_name"] = dn
-                    # R11.2.1: include own fingerprint
-                    from .pop import fingerprint as _fp
-                    discovery_data["fingerprint"] = _fp(self.agent.identity_pub_bytes)
+                    discovery_data = self._build_discovery_data()
                     resp_bytes = json.dumps(discovery_data).encode()
                     writer.write(
                         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
@@ -1826,6 +1830,9 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                         "connected_clients": len(self.clients),
                         "pod_available": self._pod_available,
                         "uptime_s": int(time.time() - self._start_time),
+                        "turn_configured": bool(self.config.turn_url and self.config.turn_secret),
+                        "relay_capable": bool(self.config.public_url),
+                        "public_url_set": bool(self.config.public_url),
                     }).encode()
                     writer.write(
                         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
@@ -3138,10 +3145,6 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             return "429 Too Many Requests", '{"error":"rate limit exceeded"}'
         bucket.append(now)
 
-        # Reject payloads with a file attachment (not supported over relay)
-        if "file" in data:
-            return "400 Bad Request", '{"error":"unsupported_relay_attachment"}'
-
         # Reject unknown top-level keys
         _ALLOWED_RELAY_KEYS = frozenset({
             "from_webid", "from_display_name", "to_webid", "message_id", "content", "timestamp",
@@ -3155,10 +3158,19 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             "content_type", "signal_type", "signal_data", "session_id",
             # sealed relay
             "sealed_payload",
+            # file relay (≤96 KB base64; enforced below)
+            "file",
         })
         _unknown = set(data.keys()) - _ALLOWED_RELAY_KEYS
         if _unknown:
             return "400 Bad Request", '{"error":"unknown_relay_fields"}'
+
+        # File relay: enforce per-field size limit (96 KB base64 ≈ 72 KB binary)
+        if "file" in data:
+            _file_field = data["file"]
+            _b64_len = len(_file_field.get("data_b64", "")) if isinstance(_file_field, dict) else 0
+            if _b64_len > 131072:  # 128 KiB base64
+                return "413 Content Too Large", '{"error":"file_too_large_for_relay"}'
 
         # ── Voice signal relay — ephemeral, delivered immediately, not queued ──
         if data.get("content_type") == "voice_signal":
@@ -3283,7 +3295,7 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             if "x25519_pub" in data:
                 self._store.save_x25519_pub(from_webid, data["x25519_pub"])
 
-        _E2E_KEYS = ("e2e", "nonce", "msg_num", "key_header", "ratchet_pub", "pn", "x25519_pub")
+        _E2E_KEYS = ("e2e", "nonce", "msg_num", "key_header", "ratchet_pub", "pn", "x25519_pub", "file")
         # Deliver to all connected sockets of the target identity
         target_sockets = self._sockets_for(to_webid)
         if target_sockets:

@@ -195,26 +195,42 @@ class VoiceHandlerMixin:
             self._voice_sessions[session_id]["callee_ws"] = target_ws
             await target_ws.send(json.dumps(event))
         else:
-            # Target on a different gateway — write invite to pod
-            try:
-                client_entry = (self.dm_clients.get(cert_id) if cert_id else None) or (
-                    self._store
-                    and self._store.get_relationship_by_did(target_webid or "")
-                    and self.dm_clients.get(
-                        (self._store.get_relationship_by_did(target_webid or "") or {}).get("certificate_id")
+            # Target is on a different gateway.
+            # First try: relay (fast, works without pod)
+            _relayed = False
+            if target_webid:
+                try:
+                    _relayed = await self._relay_voice_signal(
+                        target_webid, "offer",
+                        {
+                            "session_id": session_id,
+                            "sdp_offer": sdp_offer,
+                            "caller_webid": caller_webid,
+                        },
                     )
-                    if target_webid else None
-                )
-                if client_entry:
-                    cert, pod_client = client_entry
-                    from .voice import signal_voice_invite
-                    loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(
-                        None, signal_voice_invite,
-                        cert, pod_client, sdp_offer, session_id, caller_webid,
+                except Exception:
+                    pass
+            # Second try: pod write (slower, requires federation cert)
+            if not _relayed:
+                try:
+                    client_entry = (self.dm_clients.get(cert_id) if cert_id else None) or (
+                        self._store
+                        and self._store.get_relationship_by_did(target_webid or "")
+                        and self.dm_clients.get(
+                            (self._store.get_relationship_by_did(target_webid or "") or {}).get("certificate_id")
+                        )
+                        if target_webid else None
                     )
-            except Exception as exc:
-                logger.debug("Pod voice_invite write skipped: %s", exc)
+                    if client_entry:
+                        cert, pod_client = client_entry
+                        from .voice import signal_voice_invite
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(
+                            None, signal_voice_invite,
+                            cert, pod_client, sdp_offer, session_id, caller_webid,
+                        )
+                except Exception as exc:
+                    logger.debug("Pod voice_invite write skipped: %s", exc)
 
     async def _handle_voice_answer(self, websocket, data: dict) -> None:
         session_id = data.get("session_id", "")

@@ -65,6 +65,20 @@ async def main():
 
     agent = AgentState(identity_key=identity_key, store_key=store_key)
 
+    # Auto-generate self-signed TLS cert on first run when no cert is configured.
+    # Enables HTTPS (required for getUserMedia on non-localhost origins).
+    if not os.environ.get("PROXION_SSL_CERT"):
+        try:
+            from proxion_messenger_core.tls import ensure_self_signed_cert
+            import pathlib as _pathlib
+            _tls_dir = _pathlib.Path.home() / ".proxion" / "tls"
+            _cert, _key = ensure_self_signed_cert(_tls_dir)
+            os.environ["PROXION_SSL_CERT"] = str(_cert)
+            os.environ["PROXION_SSL_KEY"] = str(_key)
+        except Exception as _tls_err:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("TLS cert generation failed: %s", _tls_err)
+
     http_port_str = os.environ.get("PROXION_HTTP_PORT", "8080")
 
     # Web dir: env var > bundled web/ > None (Tauri serves its own assets in production)

@@ -629,6 +629,19 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                 socket.send(JSON.stringify({cmd: "list_sessions"}));
             }
             document.getElementById("settings-modal").style.display = "flex";
+            // R28: Fetch federation health status
+            fetch('/health').then(r => r.json()).then(h => {
+                const el = document.getElementById('settings-federation-status');
+                if (!el) return;
+                const tick = ok => ok
+                    ? '<span style="color:#4ade80">&#x2713;</span>'
+                    : '<span style="color:#f87171">&#x2717;</span>';
+                el.innerHTML = [
+                    `${tick(h.public_url_set)} Public URL: ${h.public_url_set ? 'configured' : '<span style="color:#fbbf24">not set — federation limited</span>'}`,
+                    `${tick(h.turn_configured)} TURN server: ${h.turn_configured ? 'configured' : '<span style="color:#fbbf24">not set — WebRTC may fail across NAT</span>'}`,
+                    `${tick(h.pod_available)} Solid Pod: ${h.pod_available ? 'connected' : 'offline'}`,
+                ].join('<br>');
+            }).catch(() => {});
             // R16.4.2: restore pod connected/disconnected state from localStorage (live pod_status will update)
             {
                 const _podOk = localStorage.getItem('proxion_pod_connected') === '1';
@@ -1787,6 +1800,18 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                         const addrEl = document.getElementById("settings-proxion-address");
                         if (addrEl) addrEl.textContent = event.proxion_address;
                         updateMyAddressBar(event.proxion_address);
+                        // Populate ob-my-addr if onboarding step-6 is visible
+                        const obAddr = document.getElementById("ob-my-addr");
+                        if (obAddr) obAddr.textContent = event.proxion_address;
+                    }
+                    // R28: NAT warning banner (shown once per session)
+                    if (!sessionStorage.getItem('proxion_nat_warned')) {
+                        fetch('/.well-known/proxion').then(r => r.json()).then(d => {
+                            if (d.nat_warning) {
+                                sessionStorage.setItem('proxion_nat_warned', '1');
+                                _showNatWarning();
+                            }
+                        }).catch(() => {});
                     }
                     // R8.2.2: Store invite_link from my_address event
                     if (event.invite_link) {
@@ -3777,6 +3802,15 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
             const el = document.getElementById("pod-connect-banner");
             if (el) el.style.display = show ? "flex" : "none";
         }
+        function _showNatWarning() {
+            if (document.getElementById("nat-warning-banner")) return;
+            const banner = document.createElement("div");
+            banner.id = "nat-warning-banner";
+            banner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:2000;background:#78350f;color:#fef3c7;padding:8px 16px;font-size:0.85em;display:flex;align-items:center;gap:8px;";
+            banner.innerHTML = `<span style="flex:1">Federation is limited: no public URL configured. Set <code>PROXION_PUBLIC_URL</code> in <code>.env</code> to allow peers on other gateways to reach you.</span><button style="background:transparent;border:none;color:#fef3c7;cursor:pointer;font-size:1.1em;padding:0 4px;" aria-label="Dismiss">&#x2715;</button>`;
+            banner.querySelector("button").onclick = () => banner.remove();
+            document.body.prepend(banner);
+        }
         function openSettingsToPod() {
             document.getElementById("settings-btn").click();
         }
@@ -3810,6 +3844,13 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
             }
             const target = document.getElementById(`ob-step-${step}`);
             if (target) target.style.display = "block";
+            if (step === 6) {
+                const obAddr = document.getElementById("ob-my-addr");
+                if (obAddr) {
+                    const addr = window.proxionAddress || localStorage.getItem("proxion_my_address") || "";
+                    obAddr.textContent = addr || "(connecting…)";
+                }
+            }
         }
         function obStep3() {
             const selected = document.querySelector('input[name="ob-status"]:checked');

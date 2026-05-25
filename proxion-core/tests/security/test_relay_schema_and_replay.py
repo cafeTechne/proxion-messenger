@@ -79,17 +79,21 @@ async def test_relay_rejects_unknown_payload_keys():
 
 
 @pytest.mark.asyncio
-async def test_relay_rejects_file_attachment():
+async def test_relay_rejects_oversized_file_attachment():
+    """File relay is allowed, but files exceeding 128 KiB base64 are rejected (413)."""
+    import base64
     gw, agent = _make_gateway()
     from_did = f"did:key:{agent.identity_pub_bytes.hex()[:10]}"
     to_did = "did:key:zother"
     payload = _signed_payload(agent, from_did, to_did)
-    payload["file"] = {"name": "evil.exe", "data": "AAAA"}
+    huge_b64 = base64.b64encode(b"x" * 100000).decode()  # ~133 KiB base64
+    payload["file"] = {"filename": "big.bin", "mime_type": "text/plain",
+                       "size": 100000, "data_b64": huge_b64}
     body = json.dumps(payload).encode()
     status, resp = await gw._handle_relay_post(body)
-    assert status.startswith("400"), f"Expected 400, got {status}"
+    assert status.startswith("413"), f"Expected 413, got {status}"
     data = json.loads(resp)
-    assert "unsupported_relay_attachment" in data.get("error", "")
+    assert "file_too_large_for_relay" in data.get("error", "")
 
 
 @pytest.mark.asyncio

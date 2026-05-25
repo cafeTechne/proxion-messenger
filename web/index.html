@@ -636,6 +636,30 @@
       </div>
     </div>
 
+    <!-- Room invite modal -->
+    <div id="room-invite-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1002;align-items:center;justify-content:center;">
+      <div style="background:#1e293b;border-radius:8px;padding:24px;min-width:340px;max-width:480px;color:#f1f5f9;">
+        <h3 style="margin:0 0 4px;">Invite to Room</h3>
+        <p style="margin:0 0 16px;font-size:0.85em;color:#94a3b8;">Share the link or code with anyone you want to join.</p>
+        <label style="display:block;margin-bottom:4px;font-size:0.85em;color:#94a3b8;">Invite link</label>
+        <div style="display:flex;gap:6px;margin-bottom:14px;">
+          <div id="invite-modal-url"
+               style="flex:1;font-size:0.78em;color:#94a3b8;word-break:break-all;padding:8px;background:#0f172a;border-radius:4px;user-select:all;cursor:text;"></div>
+          <button id="invite-modal-copy-url"
+                  style="flex-shrink:0;background:#334155;border:none;color:#f1f5f9;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:0.82em;">Copy</button>
+        </div>
+        <label style="display:block;margin-bottom:4px;font-size:0.85em;color:#94a3b8;">Room code (paste into "Join Room")</label>
+        <div style="display:flex;gap:6px;margin-bottom:20px;">
+          <div id="invite-modal-code"
+               style="flex:1;font-size:0.9em;font-family:monospace;letter-spacing:0.05em;color:#f1f5f9;padding:8px;background:#0f172a;border-radius:4px;user-select:all;cursor:text;"></div>
+          <button id="invite-modal-copy-code"
+                  style="flex-shrink:0;background:#334155;border:none;color:#f1f5f9;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:0.82em;">Copy</button>
+        </div>
+        <button id="invite-modal-close"
+                style="background:#e94560;border:none;color:#fff;padding:8px 20px;border-radius:4px;cursor:pointer;width:100%;">Done</button>
+      </div>
+    </div>
+
     <!-- R13.6: backup nudge banner (shown if no backup downloaded after 24h) -->
     <div id="backup-nudge" role="alert" style="display:none;background:#92400e;color:#fef3c7;padding:7px 16px;font-size:0.85em;display:none;align-items:center;gap:12px;flex-shrink:0;">
       <span>Back up your identity before you lose access.</span>
@@ -966,6 +990,15 @@
                        margin-bottom:12px;width:100%;text-align:left;">
           Reset all local data (switch account)
         </button>
+        <!-- R28: Federation health status -->
+        <div id="settings-federation-section">
+          <hr style="border-color:#334155;margin:16px 0 12px;">
+          <p style="margin:0 0 8px;font-size:0.8em;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Federation</p>
+          <div id="settings-federation-status" style="font-size:0.85em;color:#94a3b8;line-height:1.8;">
+            <span style="color:#475569;">Loading…</span>
+          </div>
+        </div>
+
         <!-- R18.1.3 + R18.3.3: App section (shown only in Tauri desktop app) -->
         <div id="settings-tauri-section" style="display:none;">
           <hr style="border-color:#334155;margin:16px 0 12px;">
@@ -1145,6 +1178,15 @@
         <div id="ob-step-6" style="display:none">
           <h2>You're all set!</h2>
           <p>Start chatting with your Proxion network.</p>
+          <div id="ob-my-addr-section" style="margin-bottom:14px;padding:10px;background:#0f172a;border-radius:6px;border:1px solid #334155;">
+            <p style="margin:0 0 4px;font-size:0.82em;color:#94a3b8;">Your Proxion address — share with contacts:</p>
+            <code id="ob-my-addr" style="font-size:0.82em;color:#e2e8f0;word-break:break-all;">(connecting…)</code>
+            <p style="margin:6px 0 0;font-size:0.78em;color:#64748b;">
+              Contacts on other gateways can add you using this address.
+              For federation to work, your gateway must be reachable from the internet
+              (set <code>PROXION_PUBLIC_URL</code> in <code>.env</code>).
+            </p>
+          </div>
           <div id="ob-invite-display" style="display:none; margin-bottom:12px;">
             <p style="margin:0 0 4px; font-size:0.85em; color:#94a3b8;">
               Share this invite link with a contact:
