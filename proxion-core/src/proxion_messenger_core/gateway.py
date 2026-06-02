@@ -3242,6 +3242,18 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
         if data.get("content_type") == "room_message":
             return await self._handle_room_relay(data)
 
+        # ── Room reaction relay — deliver to local members ──
+        if data.get("content_type") == "room_reaction":
+            return await self._handle_room_reaction_relay(data)
+
+        # ── Room edit relay — update store and deliver to local members ──
+        if data.get("content_type") == "room_edit":
+            return await self._handle_room_edit_relay(data)
+
+        # ── Room delete relay — remove from store and deliver to local members ──
+        if data.get("content_type") == "room_delete":
+            return await self._handle_room_delete_relay(data)
+
         # ── Presence relay — update cache and broadcast ──
         if data.get("content_type") == "presence":
             return await self._handle_presence_relay(data)
@@ -3424,6 +3436,34 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                     except Exception:
                         pass
                 return "200 OK", '{"status":"delivered"}'
+
+        # WebPush for offline DM relay target
+        _vpk_dm  = getattr(self, "_vapid_private_pem", None)
+        _vsub_dm = getattr(self, "_vapid_subject", None)
+        if self._store and _vpk_dm and _vsub_dm and to_webid:
+            from .webpush import send_web_push as _swp
+            _dm_subs = self._store.get_push_subscriptions(to_webid)
+            for _sub in (_dm_subs or []):
+                try:
+                    _swp(
+                        subscription={
+                            "endpoint": _sub["endpoint"],
+                            "keys": {
+                                "p256dh": _sub["p256dh_b64"],
+                                "auth":   _sub["auth_b64"],
+                            },
+                        },
+                        payload={
+                            "type": "message",
+                            "thread_id": cert_id or from_webid,
+                            "display_name": display_name,
+                        },
+                        vapid_private_pem=_vpk_dm,
+                        vapid_subject=_vsub_dm,
+                    )
+                except Exception:
+                    pass
+
         # Target not connected — queue + store for when they reconnect.
         # Two-level budget: max 500 unique recipients AND max 5000 total messages
         # globally. Both limits bound worst-case memory even when messages are large.
@@ -3652,7 +3692,127 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 message_id, room_id, "relay",
                 from_webid, display_name, content, timestamp,
             )
+
+        # WebPush for members with no active socket
+        _vpk  = getattr(self, "_vapid_private_pem", None)
+        _vsub = getattr(self, "_vapid_subject", None)
+        if self._store and _vpk and _vsub:
+            from .webpush import send_web_push
+            _all_member_dids = self._store.get_room_members(room_id) or []
+            for _mid in _all_member_dids:
+                if _mid == from_webid:
+                    continue
+                if self._any_socket(_mid):
+                    continue  # already delivered via WebSocket
+                _subs = self._store.get_push_subscriptions(_mid)
+                for _sub in (_subs or []):
+                    try:
+                        send_web_push(
+                            subscription={
+                                "endpoint": _sub["endpoint"],
+                                "keys": {
+                                    "p256dh": _sub["p256dh_b64"],
+                                    "auth":   _sub["auth_b64"],
+                                },
+                            },
+                            payload={
+                                "type": "message",
+                                "thread_id": room_id,
+                                "display_name": display_name,
+                                "room_name": room.get("name", ""),
+                            },
+                            vapid_private_pem=_vpk,
+                            vapid_subject=_vsub,
+                        )
+                    except Exception:
+                        pass
+
         return "200 OK", '{"status":"delivered"}' if delivered else '{"status":"offline"}'
+
+    async def _handle_room_reaction_relay(self, data: dict) -> tuple[str, str]:
+        """Inbound relayed reaction add/remove — deliver to local room members."""
+        room_id    = data.get("room_id", "")
+        message_id = data.get("message_id", "")
+        emoji      = data.get("emoji", "")
+        from_webid = data.get("from_webid", "")
+        action     = data.get("action", "add")
+        if not all([room_id, message_id, emoji, from_webid]):
+            return "400 Bad Request", '{"error":"missing_reaction_fields"}'
+        room = self._local_rooms.get(room_id)
+        if not room:
+            return "404 Not Found", '{"error":"room_not_found"}'
+        if self._store:
+            if action == "add":
+                self._store.save_reaction(room_id, message_id, emoji, from_webid)
+            else:
+                self._store.remove_reaction(room_id, message_id, emoji, from_webid)
+        event_type = "reaction_added" if action == "add" else "reaction_removed"
+        event = json.dumps({
+            "type": event_type,
+            "thread_id": room_id,
+            "message_id": message_id,
+            "emoji": emoji,
+            "from_webid": from_webid,
+        })
+        for ws in list(room.get("members", set())):
+            try:
+                await ws.send(event)
+            except Exception:
+                pass
+        return "200 OK", '{"status":"ok"}'
+
+    async def _handle_room_edit_relay(self, data: dict) -> tuple[str, str]:
+        """Inbound relayed message edit — apply to local store and deliver to room members."""
+        room_id     = data.get("room_id", "")
+        message_id  = data.get("message_id", "")
+        new_content = data.get("new_content", "")
+        edited_at   = data.get("edited_at", "")
+        from_webid  = data.get("from_webid", "")
+        if not all([room_id, message_id, new_content]):
+            return "400 Bad Request", '{"error":"missing_edit_fields"}'
+        room = self._local_rooms.get(room_id)
+        if not room:
+            return "404 Not Found", '{"error":"room_not_found"}'
+        if self._store:
+            self._store.update_message(message_id, new_content, edited_at,
+                                       editor_webid=from_webid)
+        event = json.dumps({
+            "type": "message_edited",
+            "message_id": message_id,
+            "thread_id": room_id,
+            "new_content": new_content,
+            "edited_at": edited_at,
+            "has_history": True,
+        })
+        for ws in list(room.get("members", set())):
+            try:
+                await ws.send(event)
+            except Exception:
+                pass
+        return "200 OK", '{"status":"ok"}'
+
+    async def _handle_room_delete_relay(self, data: dict) -> tuple[str, str]:
+        """Inbound relayed message delete — remove from local store and deliver to room members."""
+        room_id    = data.get("room_id", "")
+        message_id = data.get("message_id", "")
+        if not room_id or not message_id:
+            return "400 Bad Request", '{"error":"missing_delete_fields"}'
+        room = self._local_rooms.get(room_id)
+        if not room:
+            return "404 Not Found", '{"error":"room_not_found"}'
+        if self._store:
+            self._store.delete_message(message_id)
+        event = json.dumps({
+            "type": "message_deleted",
+            "message_id": message_id,
+            "thread_id": room_id,
+        })
+        for ws in list(room.get("members", set())):
+            try:
+                await ws.send(event)
+            except Exception:
+                pass
+        return "200 OK", '{"status":"ok"}'
 
     async def _handle_presence_relay(self, data: dict) -> tuple[str, str]:
         """Inbound relayed presence update — update local cache and broadcast to connected clients."""

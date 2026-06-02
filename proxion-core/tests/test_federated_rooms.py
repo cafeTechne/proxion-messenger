@@ -78,10 +78,10 @@ async def test_announce_room_join_stores_federated_member(gateway):
         "home_gateway": "https://bob.example.com",
     })
 
-    ws.send.assert_called_once()
     import json
-    sent = json.loads(ws.send.call_args[0][0])
-    assert sent["type"] == "federated_room_joined"
+    calls = [json.loads(c[0][0]) for c in ws.send.call_args_list]
+    # R30 T1: caller also receives room_member_joined; at minimum federated_room_joined is sent
+    assert any(c.get("type") == "federated_room_joined" for c in calls)
     members = gateway._store.get_federated_room_members(room_id)
     assert any(m["member_did"] == caller_webid for m in members)
 

@@ -670,6 +670,20 @@ class RoomHandlerMixin:
                     await ws.send(json.dumps(event))
                 except Exception:
                     pass
+            # Relay delete to federated member gateways
+            if thread_id in self._local_rooms and self._store:
+                _fed_del = self._store.get_federated_room_members(thread_id)
+                _seen_del: set = set()
+                for _fm in _fed_del:
+                    _gw = _fm["gateway_url"]
+                    if _gw not in _seen_del:
+                        _seen_del.add(_gw)
+                        asyncio.create_task(self._relay_ephemeral(_gw, {
+                            "content_type": "room_delete",
+                            "room_id": thread_id,
+                            "message_id": message_id,
+                            "from_webid": caller_webid or "",
+                        }))
         else:
             # DM thread: deliver only to the two participants
             participants: set = {caller_webid}
@@ -720,6 +734,22 @@ class RoomHandlerMixin:
                         await ws.send(json.dumps(event))
                     except Exception:
                         pass
+                # Relay edit to federated member gateways
+                if thread_id in self._local_rooms and self._store:
+                    _fed_edt = self._store.get_federated_room_members(thread_id)
+                    _seen_edt: set = set()
+                    for _fm in _fed_edt:
+                        _gw = _fm["gateway_url"]
+                        if _gw not in _seen_edt:
+                            _seen_edt.add(_gw)
+                            asyncio.create_task(self._relay_ephemeral(_gw, {
+                                "content_type": "room_edit",
+                                "room_id": thread_id,
+                                "message_id": message_id,
+                                "new_content": new_content,
+                                "edited_at": edited_at,
+                                "from_webid": caller_webid_edit or "",
+                            }))
             else:
                 # DM thread: deliver only to the two participants
                 participants_edit: set = {caller_webid_edit}
@@ -822,6 +852,21 @@ class RoomHandlerMixin:
                     display_name = self._display_names.get(ws) or webid[:12]
                     status = self._user_presence.get(webid, {}).get("status", "offline")
                     members.append({"webid": webid, "display_name": display_name, "status": status})
+        # Include federated (cross-gateway) members
+        if room_id in self._local_rooms and self._store:
+            for _fm in (self._store.get_federated_room_members(room_id) or []):
+                _fwid = _fm.get("member_did", "")
+                if _fwid and _fwid not in seen_webids:
+                    seen_webids.add(_fwid)
+                    _fdn = (self._store.get_display_name(_fwid) if self._store else None) or _fwid[:12]
+                    _fst = self._user_presence.get(_fwid, {}).get("status", "offline")
+                    members.append({
+                        "webid": _fwid,
+                        "display_name": _fdn,
+                        "status": _fst,
+                        "federated": True,
+                        "gateway": _fm.get("gateway_url", ""),
+                    })
         await websocket.send(json.dumps({
             "type": "room_members",
             "room_id": room_id,
@@ -1026,6 +1071,22 @@ class RoomHandlerMixin:
                     await ws.send(json.dumps(event))
                 except Exception:
                     pass
+            # Relay reaction to federated member gateways
+            if self._store:
+                _fed_react = self._store.get_federated_room_members(room_id)
+                _seen_react: set = set()
+                for _fm in _fed_react:
+                    _gw = _fm["gateway_url"]
+                    if _gw not in _seen_react:
+                        _seen_react.add(_gw)
+                        asyncio.create_task(self._relay_ephemeral(_gw, {
+                            "content_type": "room_reaction",
+                            "room_id": room_id,
+                            "message_id": message_id,
+                            "emoji": emoji,
+                            "from_webid": sender_webid,
+                            "action": "add",
+                        }))
         elif cert_id and cert_id not in self.dm_clients:
             # Verify caller is a participant of this local DM thread
             if self._store:
@@ -1098,6 +1159,22 @@ class RoomHandlerMixin:
                     await ws.send(json.dumps(event))
                 except Exception:
                     pass
+            # Relay reaction removal to federated member gateways
+            if self._store:
+                _fed_rm = self._store.get_federated_room_members(room_id)
+                _seen_rm: set = set()
+                for _fm in _fed_rm:
+                    _gw = _fm["gateway_url"]
+                    if _gw not in _seen_rm:
+                        _seen_rm.add(_gw)
+                        asyncio.create_task(self._relay_ephemeral(_gw, {
+                            "content_type": "room_reaction",
+                            "room_id": room_id,
+                            "message_id": message_id,
+                            "emoji": emoji,
+                            "from_webid": sender_webid,
+                            "action": "remove",
+                        }))
         elif cert_id and cert_id not in self.dm_clients:
             # Verify caller is a participant of this local DM thread
             if self._store:

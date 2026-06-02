@@ -2046,6 +2046,21 @@ class MiscHandlerMixin:
         if self._store:
             self._store.add_federated_room_member(room_id, caller_webid, home_gateway)
 
+        # Notify locally connected members that a federated peer has joined
+        _join_event = json.dumps({
+            "type": "room_member_joined",
+            "room_id": room_id,
+            "webid": caller_webid,
+            "display_name": self._name_for(websocket, caller_webid),
+            "federated": True,
+            "gateway": home_gateway,
+        })
+        for _ws in list(self._local_rooms.get(room_id, {}).get("members", set())):
+            try:
+                await _ws.send(_join_event)
+            except Exception:
+                pass
+
         await websocket.send(json.dumps({
             "type": "federated_room_joined",
             "room_id": room_id,
