@@ -877,6 +877,8 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 await self._handle_forward_message(websocket, data)
             elif cmd == "get_room_members":
                 await self._handle_get_room_members(websocket, data)
+            elif cmd == "announce_room_join":
+                await self._handle_announce_room_join(websocket, data)
             elif cmd == "leave_local_room":
                 await self._handle_leave_local_room(websocket, data)
             elif cmd == "delete_room":
@@ -1839,6 +1841,64 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                         + _SEC_HDR + _NO_STORE_HDR
                         + b"Access-Control-Allow-Origin: *\r\n"
                         b"Content-Length: " + str(len(health_body)).encode() + b"\r\n\r\n" + health_body
+                    )
+                    await writer.drain()
+                    return
+
+                # ── GET /profile/{did} — contact profile lookup ──
+                if method == "GET" and path.startswith("/profile/"):
+                    _prof_did = path[len("/profile/"):]
+                    if not _prof_did:
+                        writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+                        await writer.drain()
+                        return
+                    from .didkey import pub_key_to_did as _p2d, did_to_pub_key as _d2p
+                    from .pop import fingerprint as _fp
+                    try:
+                        _d2p(_prof_did)  # validate DID format
+                    except Exception:
+                        writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+                        await writer.drain()
+                        return
+                    _own_did = _p2d(self.agent.identity_pub_bytes)
+                    _profile: dict = {"did": _prof_did}
+                    if self._store:
+                        _dn = self._store.get_display_name(_prof_did)
+                        if _dn:
+                            _profile["display_name"] = _dn
+                        _x25 = self._store.get_x25519_pub(_prof_did)
+                        if _x25:
+                            _profile["x25519_pub"] = _x25
+                        _rel = self._store.get_relationship_by_did(_prof_did)
+                        if _rel:
+                            _profile["gateway_url"] = _rel.get("pod_url") or ""
+                    if _prof_did in self._user_presence:
+                        _pr = self._user_presence[_prof_did]
+                        _profile["status"] = _pr.get("status", "offline")
+                        _profile["status_message"] = _pr.get("status_message", "")
+                        _profile["last_active_at"] = _pr.get("last_active_at", "")
+                    else:
+                        _profile["status"] = "offline"
+                    _peer_gw = self._peer_gateway_urls.get(_prof_did)
+                    if _peer_gw:
+                        _profile["gateway_url"] = _peer_gw
+                    try:
+                        _pk = _d2p(_prof_did)
+                        from cryptography.hazmat.primitives import serialization as _ser
+                        _raw = _pk.public_bytes(_ser.Encoding.Raw, _ser.PublicFormat.Raw)
+                        _profile["fingerprint"] = _fp(_raw)
+                    except Exception:
+                        pass
+                    if not _profile.get("display_name") and _prof_did == _own_did:
+                        _dn_own = os.environ.get("PROXION_DISPLAY_NAME", "")
+                        if _dn_own:
+                            _profile["display_name"] = _dn_own
+                    _prof_bytes = json.dumps(_profile).encode()
+                    writer.write(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                        + _SEC_HDR + _NO_STORE_HDR
+                        + b"Access-Control-Allow-Origin: *\r\n"
+                        b"Content-Length: " + str(len(_prof_bytes)).encode() + b"\r\n\r\n" + _prof_bytes
                     )
                     await writer.drain()
                     return
@@ -3160,6 +3220,8 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             "sealed_payload",
             # file relay (≤96 KB base64; enforced below)
             "file",
+            # room federation (R29)
+            "room_id", "room_name", "status", "status_message", "updated_at", "from_display_name", "cert_id", "thread_id", "source", "local",
         })
         _unknown = set(data.keys()) - _ALLOWED_RELAY_KEYS
         if _unknown:
@@ -3175,6 +3237,18 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
         # ── Voice signal relay — ephemeral, delivered immediately, not queued ──
         if data.get("content_type") == "voice_signal":
             return await self._handle_voice_signal_relay(data)
+
+        # ── Room message relay — deliver to local members ──
+        if data.get("content_type") == "room_message":
+            return await self._handle_room_relay(data)
+
+        # ── Presence relay — update cache and broadcast ──
+        if data.get("content_type") == "presence":
+            return await self._handle_presence_relay(data)
+
+        # ── Typing relay — deliver to local DM peer ──
+        if data.get("content_type") == "typing":
+            return await self._handle_typing_relay(data)
 
         # ── Sealed DM relay — decrypt before processing ──
         if data.get("content_type") == "sealed_dm":
@@ -3537,6 +3611,99 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             except Exception:
                 pass
         return ("200 OK", '{"status":"delivered"}') if delivered else ("202 Accepted", '{"status":"offline"}')
+
+    async def _handle_room_relay(self, data: dict) -> tuple[str, str]:
+        """Inbound relayed room message — deliver to local members of that room."""
+        room_id = data.get("room_id", "")
+        from_webid = data.get("from_webid", "")
+        message_id = data.get("message_id", "")
+        content = data.get("content", "")
+        timestamp = data.get("timestamp", "")
+        display_name = data.get("from_display_name") or data.get("display_name") or from_webid[:12]
+
+        if not room_id or not from_webid or not message_id:
+            return "400 Bad Request", '{"error":"missing_room_relay_fields"}'
+
+        room = self._local_rooms.get(room_id)
+        if not room:
+            return "404 Not Found", '{"error":"room_not_found"}'
+
+        event = {
+            "type": "message",
+            "source": "relay",
+            "room_id": room_id,
+            "thread_id": room_id,
+            "from_webid": from_webid,
+            "from_display_name": display_name,
+            "content": content,
+            "timestamp": timestamp,
+            "message_id": message_id,
+            "own": False,
+        }
+        delivered = False
+        for ws in list(room.get("members", set())):
+            try:
+                await ws.send(json.dumps(event))
+                delivered = True
+            except Exception:
+                pass
+        if delivered and self._store:
+            self._store.save_message(
+                message_id, room_id, "relay",
+                from_webid, display_name, content, timestamp,
+            )
+        return "200 OK", '{"status":"delivered"}' if delivered else '{"status":"offline"}'
+
+    async def _handle_presence_relay(self, data: dict) -> tuple[str, str]:
+        """Inbound relayed presence update — update local cache and broadcast to connected clients."""
+        from_webid = data.get("from_webid", "")
+        status = data.get("status", "")
+        status_message = data.get("status_message", "")
+        updated_at = data.get("updated_at", "")
+
+        if not from_webid or status not in ("online", "away", "busy", "offline"):
+            return "400 Bad Request", '{"error":"invalid_presence"}'
+
+        self._user_presence[from_webid] = {
+            "status": status,
+            "status_message": status_message,
+            "updated_at": updated_at,
+            "last_active_at": updated_at,
+        }
+        presence_event = json.dumps({
+            "type": "presence",
+            "webid": from_webid,
+            "status": status,
+            "status_message": status_message,
+            "updated_at": updated_at,
+        })
+        for ws in list(self.clients):
+            try:
+                await ws.send(presence_event)
+            except Exception:
+                pass
+        return "200 OK", '{"status":"ok"}'
+
+    async def _handle_typing_relay(self, data: dict) -> tuple[str, str]:
+        """Inbound relayed typing indicator — deliver to the local DM peer."""
+        from_webid = data.get("from_webid", "")
+        cert_id = data.get("cert_id", "")
+        if not from_webid:
+            return "400 Bad Request", '{"error":"missing_from_webid"}'
+        # Find the local user who is in this DM thread
+        if self._store and cert_id:
+            threads = [t for t in (self._store.get_dm_threads() or []) if t["thread_id"] == cert_id]
+            if threads:
+                local_webid = threads[0].get("peer_webid") or threads[0].get("owner_webid")
+                if local_webid:
+                    sockets = self._sockets_for(local_webid)
+                    event = json.dumps({"type": "typing", "from_webid": from_webid, "cert_id": cert_id})
+                    for ws in sockets:
+                        try:
+                            await ws.send(event)
+                        except Exception:
+                            pass
+        return "200 OK", '{"status":"ok"}'
 
     async def _handle_invite_accept_post(self, body: bytes) -> tuple[str, str]:
         """Handle POST /invite/accept — receive acceptance from acceptor's gateway.

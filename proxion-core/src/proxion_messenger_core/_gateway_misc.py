@@ -58,6 +58,19 @@ class MiscHandlerMixin:
             except Exception as e:
                 logger.debug(f"Failed to set presence on pod: {e}")
 
+        # Relay presence to all known federated peers (fire-and-forget)
+        if webid and self._peer_gateway_urls:
+            _now_iso = datetime.now(timezone.utc).isoformat()
+            _pres_payload = {
+                "content_type": "presence",
+                "from_webid": webid,
+                "status": status,
+                "status_message": status_message,
+                "updated_at": _now_iso,
+            }
+            for _peer_gw in set(self._peer_gateway_urls.values()):
+                asyncio.create_task(self._relay_ephemeral(_peer_gw, _pres_payload))
+
         await websocket.send(json.dumps({"type": "presence_set", "status": status, "status_message": status_message}))
 
     async def _handle_resolve_did(self, websocket, data: dict) -> None:
@@ -1993,5 +2006,49 @@ class MiscHandlerMixin:
             "display_name": result.get("display_name") or discovered_did[:20],
             "fingerprint": fp,
             "x25519_pub": result.get("x25519_pub", ""),
+        }))
+
+    async def _handle_announce_room_join(self, websocket, data: dict) -> None:
+        """Remote user announces they want to federate a local room to their home gateway."""
+        room_id = data.get("room_id", "")
+        code = data.get("code", "")
+        home_gateway = data.get("home_gateway", "").strip()
+        caller_webid = self._client_webids.get(websocket, "")
+
+        if not room_id or not caller_webid or not home_gateway:
+            await websocket.send(json.dumps({"type": "error", "message": "missing_fields"}))
+            return
+
+        room = self._local_rooms.get(room_id)
+        if not room:
+            await websocket.send(json.dumps({"type": "error", "message": "room_not_found"}))
+            return
+
+        # Validate code OR caller must already be a member
+        stored_code = room.get("code", "")
+        import hmac as _hmac
+        code_ok = stored_code and _hmac.compare_digest(
+            str(code).encode(), str(stored_code).encode()
+        )
+        already_member = websocket in room.get("members", set()) or (
+            self._store and caller_webid in (self._store.get_room_members(room_id) or [])
+        )
+        if not code_ok and not already_member:
+            await websocket.send(json.dumps({"type": "error", "message": "invalid_code"}))
+            return
+
+        own_http = self._gateway_http_url()
+        if home_gateway == own_http or home_gateway == self._ws_public_url():
+            # Same gateway — no federation needed
+            await websocket.send(json.dumps({"type": "federated_room_joined", "room_id": room_id, "same_gateway": True}))
+            return
+
+        if self._store:
+            self._store.add_federated_room_member(room_id, caller_webid, home_gateway)
+
+        await websocket.send(json.dumps({
+            "type": "federated_room_joined",
+            "room_id": room_id,
+            "gateway": home_gateway,
         }))
 

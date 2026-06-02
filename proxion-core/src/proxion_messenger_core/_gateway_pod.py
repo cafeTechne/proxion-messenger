@@ -2002,3 +2002,39 @@ class PodSyncMixin:
             "reply_to_id": entry.message.reply_to_id,
             "mentions": mentions
         }
+
+    async def _relay_room_message(self, gateway_url: str, room_id: str, event: dict) -> None:
+        """Relay a room message to a federated peer gateway."""
+        from .relay import sign_relay_message, post_relay
+        from .didkey import pub_key_to_did
+        import secrets as _sec
+        gw_did = pub_key_to_did(self.agent.identity_pub_bytes)
+        relay_nonce = _sec.token_hex(8)
+        ts = event.get("timestamp", datetime.now(timezone.utc).isoformat())
+        sig = sign_relay_message(
+            self.agent.identity_key, gw_did, room_id,
+            event.get("message_id", ""), event.get("content", ""), ts, relay_nonce,
+        )
+        payload = {
+            **{k: v for k, v in event.items() if k not in ("own",)},
+            "content_type": "room_message",
+            "room_id": room_id,
+            "relay_nonce": relay_nonce,
+            "signature": sig,
+            "origin_gateway_url": self._gateway_http_url(),
+        }
+        http_base = gateway_url.replace("wss://", "https://").replace("ws://", "http://")
+        try:
+            await post_relay(http_base.rstrip("/") + "/relay", payload)
+        except Exception as exc:
+            logger.debug("room relay to %s failed: %s", gateway_url, exc)
+
+    async def _relay_ephemeral(self, gateway_url: str, payload: dict) -> None:
+        """POST a lightweight ephemeral event (presence/typing) to a peer gateway.
+        No signature required — advisory only, fire-and-forget."""
+        from .relay import post_relay
+        http_base = gateway_url.replace("wss://", "https://").replace("ws://", "http://")
+        try:
+            await post_relay(http_base.rstrip("/") + "/relay", payload)
+        except Exception:
+            pass

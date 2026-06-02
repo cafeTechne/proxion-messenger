@@ -3811,6 +3811,50 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
             banner.querySelector("button").onclick = () => banner.remove();
             document.body.prepend(banner);
         }
+        function showContactProfile(webid) {
+            if (!webid) return;
+            const panel = document.getElementById("contact-profile-panel");
+            if (!panel) return;
+            const cached = {
+                did: webid,
+                display_name: '',
+                status: 'offline',
+                status_message: '',
+                gateway_url: '',
+                fingerprint: '',
+            };
+            _renderContactProfile(cached);
+            panel.style.display = '';
+            fetch(`/profile/${encodeURIComponent(webid)}`)
+                .then(r => r.ok ? r.json() : null)
+                .then(d => { if (d) _renderContactProfile(d); })
+                .catch(() => {});
+        }
+        function _renderContactProfile(d) {
+            const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val || ''; };
+            setText('contact-profile-name', d.display_name || d.did?.slice(-12) || '');
+            setText('contact-profile-did', d.did || '');
+            setText('contact-profile-gateway', d.gateway_url || '(unknown gateway)');
+            setText('contact-profile-fingerprint', d.fingerprint || '');
+            setText('contact-profile-status-msg', d.status_message || '');
+            const statusEl = document.getElementById('contact-profile-status');
+            if (statusEl) {
+                const colors = {online:'#4ade80', away:'#fbbf24', busy:'#f87171', offline:'#475569'};
+                const st = d.status || 'offline';
+                statusEl.innerHTML = `<span style="color:${colors[st]||'#475569'}">&#x25cf;</span> ${st}`;
+            }
+            const avatarEl = document.getElementById('contact-profile-avatar');
+            if (avatarEl) {
+                const initials = (d.display_name || d.did || '?').slice(0,2).toUpperCase();
+                avatarEl.textContent = initials;
+            }
+            const dmBtn = document.getElementById('contact-profile-dm-btn');
+            if (dmBtn) dmBtn.dataset.webid = d.did || '';
+            const didEl = document.getElementById('contact-profile-did');
+            if (didEl) {
+                didEl.onclick = () => navigator.clipboard.writeText(d.did || '').then(() => showToast('DID copied'));
+            }
+        }
         function openSettingsToPod() {
             document.getElementById("settings-btn").click();
         }
@@ -4697,6 +4741,26 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
             // Chat header: Pin panel button
             attachListener('#pin-panel-btn', 'click', showPinPanel);
 
+            // Contact profile panel: Close button
+            attachListener('#contact-profile-close', 'click', () => {
+                const p = document.getElementById('contact-profile-panel');
+                if (p) p.style.display = 'none';
+            });
+
+            // Contact profile panel: Send DM button
+            attachListener('#contact-profile-dm-btn', 'click', () => {
+                const webid = document.getElementById('contact-profile-dm-btn')?.dataset.webid;
+                if (webid) {
+                    const p = document.getElementById('contact-profile-panel');
+                    if (p) p.style.display = 'none';
+                    const addPeerInput = document.getElementById('add-peer-input');
+                    if (addPeerInput) {
+                        addPeerInput.value = webid;
+                        document.getElementById('add-peer-btn')?.click();
+                    }
+                }
+            });
+
             // Message feed: Scroll to bottom button
             attachListener('#scroll-bottom-btn', 'click', scrollToBottom);
 
@@ -5132,13 +5196,19 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                     return;
                 }
                 const item = e.target.closest('[data-msg-action="profile"]');
-                if (item) showProfileCard(item.dataset.webid, item.dataset.name, e.clientX, e.clientY);
+                if (item) {
+                    showProfileCard(item.dataset.webid, item.dataset.name, e.clientX, e.clientY);
+                    showContactProfile(item.dataset.webid);
+                }
             });
 
             // Event delegation: #contacts-list — member-item profile cards
             document.getElementById('contacts-list')?.addEventListener('click', e => {
                 const item = e.target.closest('[data-msg-action="profile"]');
-                if (item) showProfileCard(item.dataset.webid, item.dataset.name, e.clientX, e.clientY);
+                if (item) {
+                    showProfileCard(item.dataset.webid, item.dataset.name, e.clientX, e.clientY);
+                    showContactProfile(item.dataset.webid);
+                }
             });
 
             // Round 64: member-context-menu — right-click on member items to assign roles

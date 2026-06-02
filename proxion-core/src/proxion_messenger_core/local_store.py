@@ -38,7 +38,7 @@ class LocalStore:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # Current schema version — increment when adding new migrations below
-    _SCHEMA_VERSION = 51
+    _SCHEMA_VERSION = 52
 
     # Set by _init_db if PRAGMA integrity_check fails — blocks mutating operations
     _integrity_ok: bool = True
@@ -1026,6 +1026,14 @@ class LocalStore:
             [
                 "ALTER TABLE dm_sessions ADD COLUMN pod_checkpoint_etag TEXT",
             ],
+            # 52: room_federated_members table
+            """CREATE TABLE IF NOT EXISTS room_federated_members (
+                room_id      TEXT NOT NULL,
+                member_did   TEXT NOT NULL,
+                gateway_url  TEXT NOT NULL,
+                joined_at    REAL NOT NULL DEFAULT (unixepoch('now','subsec')),
+                PRIMARY KEY (room_id, member_did)
+            )""",
         ]
 
         for version, migration in enumerate(migrations, start=1):
@@ -1122,6 +1130,28 @@ class LocalStore:
                 "SELECT webid FROM room_members WHERE room_id = ?", (room_id,)
             ).fetchall()
             return [r["webid"] for r in rows]
+
+    def add_federated_room_member(self, room_id: str, member_did: str, gateway_url: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO room_federated_members (room_id, member_did, gateway_url) VALUES (?,?,?)",
+                (room_id, member_did, gateway_url),
+            )
+
+    def remove_federated_room_member(self, room_id: str, member_did: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM room_federated_members WHERE room_id=? AND member_did=?",
+                (room_id, member_did),
+            )
+
+    def get_federated_room_members(self, room_id: str) -> list:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT member_did, gateway_url FROM room_federated_members WHERE room_id=?",
+                (room_id,),
+            ).fetchall()
+        return [{"member_did": r[0], "gateway_url": r[1]} for r in rows]
 
     def get_rooms_for_member(self, webid: str) -> list[str]:
         """Return all room_ids that this webid is a member of."""

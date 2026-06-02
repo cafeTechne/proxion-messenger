@@ -1212,6 +1212,23 @@
     </div>
 
     <!-- Pin panel -->
+    <!-- Contact profile panel (R29) -->
+    <div id="contact-profile-panel" style="display:none; position:fixed; right:0; top:0; bottom:0; width:300px; background:var(--bg-secondary,#1e293b); box-shadow:-2px 0 10px rgba(0,0,0,.5); z-index:900; overflow-y:auto; padding:16px;">
+      <button id="contact-profile-close" style="position:absolute;top:12px;right:12px;background:transparent;border:none;color:#94a3b8;font-size:1.2em;cursor:pointer;">&#x2715;</button>
+      <div id="contact-profile-avatar" style="width:56px;height:56px;border-radius:50%;background:#334155;display:flex;align-items:center;justify-content:center;font-size:1.5em;color:#f1f5f9;margin:0 auto 12px;"></div>
+      <p id="contact-profile-name" style="text-align:center;font-weight:600;color:#f1f5f9;margin:0 0 4px;"></p>
+      <p id="contact-profile-status" style="text-align:center;font-size:0.82em;color:#94a3b8;margin:0 0 12px;"></p>
+      <hr style="border-color:#334155;margin:0 0 12px;">
+      <p style="font-size:0.78em;color:#64748b;margin:0 0 2px;text-transform:uppercase;letter-spacing:.05em;">DID</p>
+      <p id="contact-profile-did" style="font-size:0.75em;color:#94a3b8;word-break:break-all;margin:0 0 10px;cursor:pointer;" title="Click to copy"></p>
+      <p style="font-size:0.78em;color:#64748b;margin:0 0 2px;text-transform:uppercase;letter-spacing:.05em;">Gateway</p>
+      <p id="contact-profile-gateway" style="font-size:0.82em;color:#94a3b8;word-break:break-all;margin:0 0 10px;"></p>
+      <p style="font-size:0.78em;color:#64748b;margin:0 0 2px;text-transform:uppercase;letter-spacing:.05em;">Fingerprint</p>
+      <p id="contact-profile-fingerprint" style="font-size:0.75em;color:#94a3b8;word-break:break-all;margin:0 0 10px;font-family:monospace;" title="Verify out-of-band"></p>
+      <p id="contact-profile-status-msg" style="font-size:0.82em;color:#64748b;font-style:italic;margin:0 0 12px;"></p>
+      <button id="contact-profile-dm-btn" style="background:var(--accent,#e94560);border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;width:100%;font-size:0.9em;">Send DM</button>
+    </div>
+
     <div id="pin-panel" style="display:none; position:fixed; right:0; top:0; bottom:0; width:300px; background:var(--bg-secondary,#1e293b); box-shadow:-2px 0 10px rgba(0,0,0,.5); z-index:900; overflow-y:auto; padding:16px;">
       <h3 style="color:var(--text-primary,#f1f5f9); margin:0 0 12px;">Pinned Messages</h3>
       <button id="pin-panel-close"

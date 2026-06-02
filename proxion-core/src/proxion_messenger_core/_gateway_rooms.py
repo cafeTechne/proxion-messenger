@@ -453,6 +453,15 @@ class RoomHandlerMixin:
                     await ws.send(json.dumps({**event, "own": own}))
                 except Exception as exc:
                     logger.warning(f"Room relay failed for member: {exc}")
+            # Relay to federated (cross-gateway) members
+            if self._store:
+                _fed_members = self._store.get_federated_room_members(room_id)
+                _relayed_gws: set = set()
+                for _fm in _fed_members:
+                    _gw = _fm["gateway_url"]
+                    if _gw not in _relayed_gws:
+                        _relayed_gws.add(_gw)
+                        asyncio.create_task(self._relay_room_message(_gw, room_id, event))
             if self._store:
                 outgoing_hooks = self._store.get_webhooks_for_thread(room_id, "outgoing")
                 for _wh in outgoing_hooks:
@@ -1779,10 +1788,19 @@ class RoomHandlerMixin:
             if self._store:
                 threads = [t for t in self._store.get_dm_threads() if t["thread_id"] == cert_id]
                 if threads:
-                    peer_ws = self._any_socket(threads[0]["peer_webid"])
+                    peer_webid = threads[0].get("peer_webid", "")
+                    peer_ws = self._any_socket(peer_webid) if peer_webid else None
                     if peer_ws and peer_ws != websocket:
                         await peer_ws.send(json.dumps(typing_event))
-            # cert_id not in store or no peer socket found — drop silently rather than broadcasting
+                    elif peer_webid:
+                        # Peer is on a different gateway — relay ephemeral typing event
+                        peer_gw = self._resolve_peer_gateway(peer_webid)
+                        if peer_gw:
+                            asyncio.create_task(self._relay_ephemeral(peer_gw, {
+                                "content_type": "typing",
+                                "from_webid": typing_event["from_webid"],
+                                "cert_id": cert_id,
+                            }))
         # no room_id and no cert_id — drop silently
 
     async def _handle_schedule_message(self, websocket, data: dict) -> None:
