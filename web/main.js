@@ -377,12 +377,15 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
             const displayName = m.display_name || m.webid || "?";
             const initial = escHtml(displayName[0].toUpperCase());
             const presenceClass = m.status === "online" ? "online" : m.status === "away" ? "away" : m.status === "busy" ? "busy" : "";
+            const fedBadge = m.federated
+                ? `<span title="Federated member (${escHtml(m.gateway || 'remote gateway')})" style="font-size:0.65em;color:#64748b;margin-left:4px;vertical-align:middle;">&#x1F517;</span>`
+                : "";
             return `<div class="member-item" data-msg-action="profile" data-webid="${escHtml(m.webid)}" data-name="${escHtml(displayName)}">
                 <div style="position:relative;display:inline-block;margin-right:8px;">
                     <div class="avatar placeholder" style="background:${color};width:28px;height:28px;line-height:28px;font-size:12px;font-weight:bold;text-align:center;">${initial}</div>
                     <div class="avatar-presence ${presenceClass}" title="${escHtml(m.status || '')}"></div>
                 </div>
-                <span>${escHtml(m.display_name || m.webid.slice(0, 12))}</span>
+                <span>${escHtml(m.display_name || m.webid.slice(0, 12))}${fedBadge}</span>
             </div>`;
         }
 
@@ -1484,6 +1487,29 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                         const li = document.getElementById(`nav-${event.room_id}`);
                         if (li) li.click();
                     }, 50);
+                    // R31: register home gateway for federated relay fanout
+                    {
+                        const _homeGw = localStorage.getItem("proxion_gateway_http_url") || "";
+                        if (_homeGw && socket?.readyState === WebSocket.OPEN) {
+                            socket.send(JSON.stringify({
+                                cmd: "announce_room_join",
+                                room_id: event.room_id,
+                                code: event.code || "",
+                                home_gateway: _homeGw,
+                            }));
+                        }
+                    }
+                    break;
+                case "room_history":
+                    if (activeView && activeView.id === event.room_id) {
+                        const _existingIds = new Set(allMessages.map(m => m.message_id));
+                        const _newMsgs = (event.messages || []).filter(m => !_existingIds.has(m.message_id));
+                        if (_newMsgs.length > 0) {
+                            allMessages = [..._newMsgs, ...allMessages];
+                            _newMsgs.forEach(m => { messageMap[m.message_id] = m; });
+                            renderMessages();
+                        }
+                    }
                     break;
                 case "room_member_joined":
                     if (_local_rooms[event.room_id]) {
@@ -2685,9 +2711,27 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
             // Voice channels not yet implemented — keep section hidden
         }
 
+        let _inVoiceChannel = null;
+
         async function joinVoice(roomId) {
-            console.log("Joining voice channel:", roomId);
             socket.send(JSON.stringify({cmd: "join_voice_channel", room_id: roomId}));
+            _inVoiceChannel = roomId;
+            const leaveBtn = document.getElementById("leave-voice-channel-btn");
+            if (leaveBtn) leaveBtn.style.display = "";
+        }
+
+        function leaveVoiceChannel() {
+            if (!_inVoiceChannel) return;
+            socket.send(JSON.stringify({cmd: "leave_voice_channel", room_id: _inVoiceChannel}));
+            _inVoiceChannel = null;
+            const leaveBtn = document.getElementById("leave-voice-channel-btn");
+            if (leaveBtn) leaveBtn.style.display = "none";
+            // Close all peer connections in the channel
+            for (const peerId of Object.keys(peerConnections || {})) {
+                try { peerConnections[peerId].close(); } catch (_) {}
+                delete peerConnections[peerId];
+            }
+            showToast("Left voice channel");
         }
 
         function _expireLabel(msRemaining) {
@@ -3581,6 +3625,10 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
         // Group call: a peer left
         function handleVoicePeerLeft(event) {
             showToast(`${event.peer_webid.slice(0, 20)} left the voice channel`, "info");
+            if (peerConnections?.[event.peer_webid]) {
+                try { peerConnections[event.peer_webid].close(); } catch (_) {}
+                delete peerConnections[event.peer_webid];
+            }
         }
 
         // peer_discovered response handler — used by the Add Contact modal
@@ -4886,6 +4934,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
             attachListener('#members-toggle', 'click', toggleMembersPanel);
             attachListener('#delete-room-btn', 'click', deleteRoom);
             attachListener('#leave-room-btn', 'click', leaveRoom);
+            attachListener('#leave-voice-channel-btn', 'click', leaveVoiceChannel);
 
             // Members panel close
             attachListener('#members-panel-close', 'click', toggleMembersPanel);
@@ -5169,7 +5218,10 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                     case 'react':        togglePicker(msgId, e.clientX, e.clientY); break;
                     case 'reply':        setReply(msgId); break;
                     case 'pin':          pinMsg(msgId); break;
-                    case 'profile':      showProfileCard(webid, name, e.clientX, e.clientY); break;
+                    case 'profile':
+                        showProfileCard(webid, name, e.clientX, e.clientY);
+                        showContactProfile(webid);
+                        break;
                     case 'scroll-reply': document.getElementById(`msg-${replyId}`)?.scrollIntoView({ behavior: 'smooth' }); break;
                 }
             });

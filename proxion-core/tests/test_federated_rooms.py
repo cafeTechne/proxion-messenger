@@ -72,11 +72,12 @@ async def test_announce_room_join_stores_federated_member(gateway):
     }
     gateway.clients.add(ws)
 
-    await gateway._handle_announce_room_join(ws, {
-        "room_id": room_id,
-        "code": code,
-        "home_gateway": "https://bob.example.com",
-    })
+    with patch("proxion_messenger_core.relay._validate_relay_target", return_value=True):
+        await gateway._handle_announce_room_join(ws, {
+            "room_id": room_id,
+            "code": code,
+            "home_gateway": "https://bob.example.com",
+        })
 
     import json
     calls = [json.loads(c[0][0]) for c in ws.send.call_args_list]

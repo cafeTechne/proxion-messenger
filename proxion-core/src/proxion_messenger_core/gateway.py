@@ -3367,9 +3367,13 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
         if from_webid in self._revoked_dids:
             return "403 Forbidden", '{"error":"sender revoked"}'
 
-        # Record the sender's gateway URL for future relay (persist to SQLite)
+        # Record the sender's gateway URL — validate first to prevent SSRF pinning
         if origin_gateway and from_webid:
-            self._record_peer_gateway(from_webid, origin_gateway)
+            if _is_safe_gateway_url(origin_gateway):
+                self._record_peer_gateway(from_webid, origin_gateway)
+            else:
+                logger.debug("relay: rejected unsafe origin_gateway_url from %s: %s",
+                             from_webid, origin_gateway)
 
         # Resolve thread_id: prefer cert_id so the browser routes to the right thread
         cert_id = None

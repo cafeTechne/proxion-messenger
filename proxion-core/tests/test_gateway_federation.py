@@ -353,7 +353,8 @@ async def test_handle_relay_post_records_origin_gateway(tmp_path):
         "origin_gateway_url": "http://sender-gw:8080",
     }).encode()
 
-    status, _ = await gw._handle_relay_post(body)
+    with patch("proxion_messenger_core.gateway._is_safe_gateway_url", return_value=True):
+        status, _ = await gw._handle_relay_post(body)
     assert status.startswith("2")
 
     # Gateway URL should now be persisted

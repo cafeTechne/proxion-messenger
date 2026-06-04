@@ -2,7 +2,7 @@
 from __future__ import annotations
 import json
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from proxion_messenger_core.gateway import ProxionGateway, GatewayConfig
 from proxion_messenger_core.persist import AgentState
 from proxion_messenger_core.readstate import ReadState
@@ -48,11 +48,12 @@ async def test_announce_room_join_broadcasts_member_joined(gateway):
     gateway.clients.add(local_ws)
     gateway.clients.add(caller_ws)
 
-    await gateway._handle_announce_room_join(caller_ws, {
-        "room_id": room_id,
-        "code": code,
-        "home_gateway": "https://bob.example.com",
-    })
+    with patch("proxion_messenger_core.relay._validate_relay_target", return_value=True):
+        await gateway._handle_announce_room_join(caller_ws, {
+            "room_id": room_id,
+            "code": code,
+            "home_gateway": "https://bob.example.com",
+        })
 
     # local_ws should have received room_member_joined
     calls = [json.loads(c[0][0]) for c in local_ws.send.call_args_list]
@@ -78,10 +79,11 @@ async def test_room_member_joined_has_gateway_field(gateway):
     gateway.clients.add(local_ws)
     gateway.clients.add(caller_ws)
 
-    await gateway._handle_announce_room_join(caller_ws, {
-        "room_id": room_id, "code": code,
-        "home_gateway": "https://carol.example.com",
-    })
+    with patch("proxion_messenger_core.relay._validate_relay_target", return_value=True):
+        await gateway._handle_announce_room_join(caller_ws, {
+            "room_id": room_id, "code": code,
+            "home_gateway": "https://carol.example.com",
+        })
 
     calls = [json.loads(c[0][0]) for c in local_ws.send.call_args_list]
     joined = [c for c in calls if c.get("type") == "room_member_joined"]
@@ -108,3 +110,27 @@ async def test_get_room_members_includes_federated(gateway):
     assert "did:key:zBob" in webids
     fed_member = next(m for m in resp["members"] if m["webid"] == "did:key:zBob")
     assert fed_member.get("federated") is True
+
+
+@pytest.mark.asyncio
+async def test_announce_room_join_rejects_private_ip_gateway(gateway):
+    """announce_room_join returns error when home_gateway is a private IP (S3 SSRF guard)."""
+    ws = _ws()
+    room_id = "room-ssrf-1"
+    code = "ssrfcode"
+    caller_webid = "did:key:zEve"
+    gateway._client_webids[ws] = caller_webid
+    gateway._local_rooms[room_id] = {"name": "Test", "code": code, "members": {ws}}
+    gateway.clients.add(ws)
+
+    import json
+    await gateway._handle_announce_room_join(ws, {
+        "room_id": room_id,
+        "code": code,
+        "home_gateway": "http://10.0.0.1/admin",
+    })
+
+    calls = [json.loads(c[0][0]) for c in ws.send.call_args_list]
+    assert any(c.get("type") == "error" for c in calls), \
+        f"Expected error for private IP gateway, got: {calls}"
+    assert gateway._store.get_federated_room_members(room_id) == []

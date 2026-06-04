@@ -120,7 +120,7 @@ class DmHandlerMixin:
 
     # MIME types accepted for file transfers
     _ALLOWED_FILE_MIMES = frozenset({
-        "image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml",
+        "image/jpeg", "image/png", "image/gif", "image/webp",
         "audio/ogg", "audio/webm", "audio/mpeg", "audio/wav",
         "video/mp4", "video/webm",
         "application/pdf", "application/zip",

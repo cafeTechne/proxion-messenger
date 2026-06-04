@@ -2043,6 +2043,13 @@ class MiscHandlerMixin:
             await websocket.send(json.dumps({"type": "federated_room_joined", "room_id": room_id, "same_gateway": True}))
             return
 
+        # Reject private/loopback URLs to prevent SSRF via relay fanout
+        from .relay import _validate_relay_target as _vrt
+        _gw_for_check = home_gateway.replace("wss://", "https://").replace("ws://", "http://")
+        if not _vrt(_gw_for_check):
+            await websocket.send(json.dumps({"type": "error", "message": "invalid_home_gateway"}))
+            return
+
         if self._store:
             self._store.add_federated_room_member(room_id, caller_webid, home_gateway)
 
@@ -2066,4 +2073,14 @@ class MiscHandlerMixin:
             "room_id": room_id,
             "gateway": home_gateway,
         }))
+
+        # Send recent room history so the federated member isn't starting blank
+        if self._store:
+            _history = self._store.get_messages(room_id, limit=50)
+            if _history:
+                await websocket.send(json.dumps({
+                    "type": "room_history",
+                    "room_id": room_id,
+                    "messages": _history,
+                }))
 
