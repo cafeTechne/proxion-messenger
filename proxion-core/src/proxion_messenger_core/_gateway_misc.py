@@ -2037,6 +2037,10 @@ class MiscHandlerMixin:
             await websocket.send(json.dumps({"type": "error", "message": "invalid_code"}))
             return
 
+        if self._store and caller_webid and self._store.is_room_banned(room_id, caller_webid):
+            await websocket.send(json.dumps({"type": "error", "message": "banned_from_room"}))
+            return
+
         own_http = self._gateway_http_url()
         if home_gateway == own_http or home_gateway == self._ws_public_url():
             # Same gateway — no federation needed

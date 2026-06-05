@@ -383,8 +383,11 @@ class RoomHandlerMixin:
             if not self._check_room_permission(websocket, room_id):
                 await websocket.send(json.dumps({"type": "error", "message": "Not a member of this room"}))
                 return
-            import uuid as _uuid_room
             sender_webid = self._client_webids.get(websocket, "unknown")
+            if sender_webid and self._store and self._store.is_room_muted(room_id, sender_webid):
+                await websocket.send(json.dumps({"type": "error", "message": "you_are_muted"}))
+                return
+            import uuid as _uuid_room
             sender_name = self._name_for(websocket, sender_webid)
             _client_mid = data.get("message_id", "")
             try:
@@ -1226,6 +1229,10 @@ class RoomHandlerMixin:
             if thread_id in self._local_rooms and message_id_read:
                 self._store.mark_room_read(thread_id, reader_webid, message_id_read,
                                            datetime.now(timezone.utc).isoformat())
+            # R32: save per-message receipt if receipts enabled
+            if reader_webid and message_id_read and self._client_receipts_prefs.get(reader_webid, True):
+                self._store.save_message_receipt(message_id_read, reader_webid,
+                                                  datetime.now(timezone.utc).isoformat())
 
         # R10.1.1: relay read-receipt to peer gateway for cert DMs or relay DIDs
         if reader_webid and thread_id and message_id_read:
@@ -1240,7 +1247,7 @@ class RoomHandlerMixin:
             else:
                 peer_did = ""
                 peer_gw = None
-            if self._receipts_enabled and peer_gw and peer_did and message_id_read:
+            if self._client_receipts_prefs.get(reader_webid, True) and peer_gw and peer_did and message_id_read:
                 try:
                     from datetime import datetime as _dt, timezone as _tz
                     from .relay import sign_relay_message as _sign_relay
@@ -1270,7 +1277,8 @@ class RoomHandlerMixin:
             })
             if thread_id in self._local_rooms:
                 for ws in list(self._local_rooms[thread_id].get("members", set())):
-                    if ws is not websocket:
+                    _ws_wid = self._client_webids.get(ws, "")
+                    if ws is not websocket and self._client_receipts_prefs.get(_ws_wid, True):
                         try:
                             await ws.send(receipt_payload)
                         except Exception:
@@ -1490,10 +1498,13 @@ class RoomHandlerMixin:
                 return
 
         if room_id and room_id in self._local_rooms:
+            joiner_webid = self._client_webids.get(websocket, "")
+            if self._store and joiner_webid and self._store.is_room_banned(room_id, joiner_webid):
+                await websocket.send(json.dumps({"type": "error", "message": "banned_from_room"}))
+                return
             room = self._local_rooms[room_id]
             room["members"].add(websocket)
             logger.info(f"Client joined local room {room_id} via code {code}")
-            joiner_webid = self._client_webids.get(websocket, "")
             if self._store and joiner_webid:
                 self._store.add_room_member(room_id, joiner_webid)
             if joiner_webid:
@@ -1604,6 +1615,114 @@ class RoomHandlerMixin:
                 await self._trigger_sender_key_rotation(room_id, target_webid)
             except Exception as _sk_exc:
                 logger.warning("sender_key_rotation after kick failed: %s", _sk_exc)
+
+    async def _handle_ban_member(self, websocket, data: dict) -> None:
+        room_id = data.get("room_id", "")
+        target_webid = data.get("webid", "")
+        reason = str(data.get("reason", ""))[:200]
+        caller_webid = self._client_webids.get(websocket, "")
+        if not self._check_room_permission(websocket, room_id, "admin"):
+            await websocket.send(json.dumps({"type": "error", "message": "insufficient_permissions"}))
+            return
+        if not target_webid or not self._store:
+            return
+        self._store.ban_room_member(room_id, target_webid, caller_webid, reason)
+        # Also kick if currently online
+        room = self._local_rooms.get(room_id, {})
+        target_ws = self._any_socket(target_webid)
+        if target_ws and target_ws in room.get("members", set()):
+            room["members"].discard(target_ws)
+            if self._store:
+                self._store.remove_room_member(room_id, target_webid)
+            try:
+                await target_ws.send(json.dumps({"type": "kicked_from_room", "room_id": room_id,
+                                                  "message": "You were banned from this room"}))
+            except Exception:
+                pass
+        display_name = self._store.get_display_name(target_webid) or target_webid[:12]
+        event = json.dumps({"type": "member_banned", "room_id": room_id,
+                            "webid": target_webid, "display_name": display_name, "reason": reason})
+        for ws in list(self._local_rooms.get(room_id, {}).get("members", set())):
+            try:
+                await ws.send(event)
+            except Exception:
+                pass
+
+    async def _handle_unban_member(self, websocket, data: dict) -> None:
+        room_id = data.get("room_id", "")
+        target_webid = data.get("webid", "")
+        if not self._check_room_permission(websocket, room_id, "admin"):
+            await websocket.send(json.dumps({"type": "error", "message": "insufficient_permissions"}))
+            return
+        if self._store:
+            self._store.unban_room_member(room_id, target_webid)
+        event = json.dumps({"type": "member_unbanned", "room_id": room_id, "webid": target_webid})
+        for ws in list(self._local_rooms.get(room_id, {}).get("members", set())):
+            try:
+                await ws.send(event)
+            except Exception:
+                pass
+
+    async def _handle_mute_member(self, websocket, data: dict) -> None:
+        room_id = data.get("room_id", "")
+        target_webid = data.get("webid", "")
+        duration_seconds = data.get("duration_seconds")
+        caller_webid = self._client_webids.get(websocket, "")
+        if not self._check_room_permission(websocket, room_id, "admin"):
+            await websocket.send(json.dumps({"type": "error", "message": "insufficient_permissions"}))
+            return
+        import time as _t
+        expires_at = (_t.time() + float(duration_seconds)) if duration_seconds else None
+        if self._store:
+            self._store.mute_room_member(room_id, target_webid, caller_webid, expires_at)
+        event = json.dumps({"type": "member_muted", "room_id": room_id,
+                            "webid": target_webid, "expires_at": expires_at})
+        for ws in list(self._local_rooms.get(room_id, {}).get("members", set())):
+            try:
+                await ws.send(event)
+            except Exception:
+                pass
+
+    async def _handle_unmute_member(self, websocket, data: dict) -> None:
+        room_id = data.get("room_id", "")
+        target_webid = data.get("webid", "")
+        if not self._check_room_permission(websocket, room_id, "admin"):
+            await websocket.send(json.dumps({"type": "error", "message": "insufficient_permissions"}))
+            return
+        if self._store:
+            self._store.unmute_room_member(room_id, target_webid)
+        event = json.dumps({"type": "member_unmuted", "room_id": room_id, "webid": target_webid})
+        for ws in list(self._local_rooms.get(room_id, {}).get("members", set())):
+            try:
+                await ws.send(event)
+            except Exception:
+                pass
+
+    async def _handle_get_room_bans(self, websocket, data: dict) -> None:
+        room_id = data.get("room_id", "")
+        if not self._check_room_permission(websocket, room_id, "admin"):
+            await websocket.send(json.dumps({"type": "error", "message": "insufficient_permissions"}))
+            return
+        bans = self._store.get_room_bans(room_id) if self._store else []
+        for b in bans:
+            b["display_name"] = (self._store.get_display_name(b["banned_did"]) if self._store else None) or b["banned_did"][:12]
+        await websocket.send(json.dumps({"type": "room_bans", "room_id": room_id, "bans": bans}))
+
+    async def _handle_get_message_readers(self, websocket, data: dict) -> None:
+        message_id = data.get("message_id", "")
+        room_id = data.get("room_id", "")
+        if not message_id or not self._store:
+            await websocket.send(json.dumps({"type": "message_readers", "message_id": message_id, "readers": []}))
+            return
+        # Permission: caller must be a member
+        if room_id and room_id in self._local_rooms:
+            if websocket not in self._local_rooms[room_id].get("members", set()):
+                await websocket.send(json.dumps({"type": "message_readers", "message_id": message_id, "readers": []}))
+                return
+        readers = self._store.get_message_readers(message_id)
+        for r in readers:
+            r["display_name"] = self._store.get_display_name(r["receiver_webid"]) or r["receiver_webid"][:12]
+        await websocket.send(json.dumps({"type": "message_readers", "message_id": message_id, "readers": readers}))
 
     async def _handle_pin_message(self, websocket, data: dict) -> None:
         message_id = data.get("message_id", "")

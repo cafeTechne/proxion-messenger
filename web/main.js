@@ -630,6 +630,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                 socket.send(JSON.stringify({cmd: "get_my_address"}));
                 socket.send(JSON.stringify({cmd: "pod_status"}));
                 socket.send(JSON.stringify({cmd: "list_sessions"}));
+                socket.send(JSON.stringify({cmd: "list_devices"}));
             }
             document.getElementById("settings-modal").style.display = "flex";
             // R28: Fetch federation health status
@@ -1614,6 +1615,10 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                             const kickBtn = isOwner && !isSelf
                                 ? `<button data-rm-action="kick" data-room-id="${event.room_id}" data-webid="${m.webid}"
                                           style="margin-left:4px;background:#7f1d1d;border:none;color:#fca5a5;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:0.75em;flex-shrink:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></svg></button>` : "";
+                            const banBtn = isOwner && !isSelf
+                                ? `<button data-rm-action="ban" data-room-id="${event.room_id}" data-webid="${m.webid}" style="margin-left:4px;background:#451a03;border:none;color:#fed7aa;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:0.75em;">Ban</button>` : "";
+                            const muteBtn = isOwner && !isSelf
+                                ? `<button data-rm-action="mute" data-room-id="${event.room_id}" data-webid="${m.webid}" style="margin-left:4px;background:#1c1917;border:none;color:#a8a29e;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:0.75em;">Mute</button>` : "";
                             const ownerBtn = isOwner && !isSelf
                                 ? `<button data-rm-action="transfer" data-room-id="${event.room_id}" data-webid="${m.webid}"
                                           style="margin-left:4px;background:#1e3a5f;border:none;color:#7dd3fc;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:0.75em;flex-shrink:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></svg></button>` : "";
@@ -1621,7 +1626,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                             const label = isSelf ? `${displayName} (you)` : displayName;
                             return `<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #334155;">
                                 <span style="font-size:0.8em;color:#cbd5e1;word-break:break-all;flex:1;">${label}</span>
-                                ${ownerBtn}${kickBtn}
+                                ${ownerBtn}${kickBtn}${banBtn}${muteBtn}
                             </div>`;
                         }).join("");
                     }
@@ -2201,6 +2206,86 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                     showToast("Scheduled message cancelled.");
                     if (event.id) podDeleteScheduled(event.id).catch(() => {});
                     break;
+                case "devices": {
+                    const container = document.getElementById("settings-devices-list");
+                    if (!container) break;
+                    const devs = event.devices || [];
+                    if (devs.length === 0) {
+                        container.innerHTML = '<span style="color:#475569;">No linked devices.</span>';
+                        break;
+                    }
+                    container.innerHTML = devs.map(d => {
+                        const label = escHtml(d.display_name || d.device_id.slice(0, 16));
+                        const since = d.registered_at
+                            ? new Date(d.registered_at * 1000).toLocaleDateString() : "";
+                        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid #1e293b;gap:8px;">
+                            <span style="flex:1">${label}<br><span style="color:#475569;font-size:0.8em;">${since}</span></span>
+                            <button data-device-id="${escHtml(d.device_id)}" style="background:transparent;border:none;color:#f87171;font-size:0.8em;cursor:pointer;padding:2px 6px;">Revoke</button>
+                        </div>`;
+                    }).join("");
+                    container.querySelectorAll("[data-device-id]").forEach(btn => {
+                        btn.addEventListener("click", () => {
+                            const id = btn.dataset.deviceId;
+                            showConfirm(`Revoke device "${id.slice(0, 16)}"?`, () => {
+                                socket.send(JSON.stringify({cmd: "unregister_device", device_id: id}));
+                                btn.closest("div").remove();
+                            });
+                        });
+                    });
+                    break;
+                }
+                case "member_banned":
+                    _appendSystemMsg(`${event.display_name || event.webid.slice(-12)} was banned${event.reason ? ' (' + escHtml(event.reason) + ')' : ''}`);
+                    if (_membersRoomId === event.room_id) showRoomMembers(event.room_id);
+                    break;
+                case "member_unbanned":
+                    _appendSystemMsg(`${event.webid.slice(-12)} was unbanned`);
+                    break;
+                case "member_muted":
+                    _appendSystemMsg(`${event.webid.slice(-12)} was muted` +
+                        (event.expires_at ? ` until ${new Date(event.expires_at * 1000).toLocaleTimeString()}` : ''));
+                    break;
+                case "member_unmuted":
+                    _appendSystemMsg(`${event.webid.slice(-12)} was unmuted`);
+                    break;
+                case "room_bans": {
+                    const list = document.getElementById("room-bans-list");
+                    if (!list) break;
+                    const bans = event.bans || [];
+                    if (bans.length === 0) {
+                        list.innerHTML = '<p style="color:#78716c;font-size:0.85em;">No banned members.</p>';
+                        break;
+                    }
+                    list.innerHTML = bans.map(b => `
+                        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #292524;">
+                          <span style="flex:1;font-size:0.85em;">
+                            <span style="color:#f5f5f4;">${escHtml(b.display_name || b.banned_did.slice(-12))}</span>
+                            ${b.reason ? `<br><span style="color:#78716c;font-size:0.8em;">${escHtml(b.reason)}</span>` : ''}
+                          </span>
+                          <button data-unban-did="${escHtml(b.banned_did)}" data-room-id="${escHtml(event.room_id)}"
+                                  style="background:transparent;border:none;color:#4ade80;font-size:0.8em;cursor:pointer;">
+                            Unban
+                          </button>
+                        </div>`).join("");
+                    list.querySelectorAll("[data-unban-did]").forEach(btn => {
+                        btn.addEventListener("click", () => {
+                            socket.send(JSON.stringify({cmd: "unban_member", room_id: btn.dataset.roomId, webid: btn.dataset.unbanDid}));
+                            btn.closest("div").remove();
+                        });
+                    });
+                    break;
+                }
+                case "message_readers": {
+                    const el = document.querySelector(`.seen-by-row[data-msg-id="${event.message_id}"]`);
+                    if (!el) break;
+                    const readers = (event.readers || []).filter(r => r.receiver_webid !== selfWebId);
+                    if (readers.length === 0) break;
+                    const names = readers.slice(0, 3).map(r => escHtml(r.display_name || r.receiver_webid.slice(-8))).join(", ");
+                    el.textContent = readers.length <= 3
+                        ? `Seen by ${names}`
+                        : `Seen by ${names} +${readers.length - 3} more`;
+                    break;
+                }
                 case "import_complete":
                     showToast(`Import complete: ${event.counts?.messages || 0} messages imported.`);
                     // Reload relationships and rooms
@@ -4261,6 +4346,17 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
             reader.readAsDataURL(file);
         };
 
+        // --------------- System messages ---------------
+        function _appendSystemMsg(text) {
+            const feed = document.getElementById("message-feed");
+            if (!feed) return;
+            const el = document.createElement("div");
+            el.className = "system-msg";
+            el.textContent = text;
+            feed.appendChild(el);
+            feed.scrollTop = feed.scrollHeight;
+        }
+
         // --------------- Toast ---------------
         function showToast(message, type) {
             const container = document.getElementById("toast-container");
@@ -5023,6 +5119,11 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                 document.getElementById('room-members-modal').style.display = 'none';
             });
 
+            // R32: Room bans panel
+            attachListener('#room-bans-close', 'click', () => {
+                document.getElementById('room-bans-panel').style.display = 'none';
+            });
+
             // Onboarding: skip pod
             attachListener('#ob-skip-pod', 'click', (e) => { e.preventDefault(); obSkipPod(); });
             attachListener('#ob-finish-skip', 'click', finishOnboarding);
@@ -5238,13 +5339,26 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                 }
             });
 
-            // Event delegation: #room-members-list — kick/transfer
+            // Event delegation: #room-members-list — kick/transfer/ban/mute
             document.getElementById('room-members-list')?.addEventListener('click', e => {
                 const btn = e.target.closest('[data-rm-action]');
                 if (btn) {
                     const { rmAction, roomId, webid } = btn.dataset;
                     if (rmAction === 'kick') kickMember(roomId, webid);
                     else if (rmAction === 'transfer') transferOwnership(roomId, webid);
+                    else if (rmAction === 'ban') {
+                        showConfirm(`Ban this member?`, () => {
+                            const reason = prompt("Reason (optional):") || "";
+                            socket.send(JSON.stringify({cmd: "ban_member", room_id: roomId, webid, reason}));
+                        });
+                    } else if (rmAction === 'mute') {
+                        const dur = prompt("Mute duration: 5m / 1h / 24h / blank=indefinite") || "";
+                        const secs = dur === "5m" ? 300 : dur === "1h" ? 3600 : dur === "24h" ? 86400 : null;
+                        socket.send(JSON.stringify({
+                            cmd: "mute_member", room_id: roomId, webid,
+                            ...(secs !== null ? {duration_seconds: secs} : {}),
+                        }));
+                    }
                     return;
                 }
                 const item = e.target.closest('[data-msg-action="profile"]');

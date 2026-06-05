@@ -38,7 +38,7 @@ class LocalStore:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # Current schema version — increment when adding new migrations below
-    _SCHEMA_VERSION = 52
+    _SCHEMA_VERSION = 53
 
     # Set by _init_db if PRAGMA integrity_check fails — blocks mutating operations
     _integrity_ok: bool = True
@@ -1034,6 +1034,25 @@ class LocalStore:
                 joined_at    REAL NOT NULL DEFAULT (unixepoch('now','subsec')),
                 PRIMARY KEY (room_id, member_did)
             )""",
+            # 53: room bans and mutes
+            [
+                """CREATE TABLE IF NOT EXISTS room_bans (
+                    room_id    TEXT NOT NULL,
+                    banned_did TEXT NOT NULL,
+                    banned_by  TEXT NOT NULL,
+                    banned_at  REAL NOT NULL DEFAULT (unixepoch('now','subsec')),
+                    reason     TEXT,
+                    PRIMARY KEY (room_id, banned_did)
+                )""",
+                """CREATE TABLE IF NOT EXISTS room_mutes (
+                    room_id    TEXT NOT NULL,
+                    muted_did  TEXT NOT NULL,
+                    muted_by   TEXT NOT NULL,
+                    muted_at   REAL NOT NULL DEFAULT (unixepoch('now','subsec')),
+                    expires_at REAL,
+                    PRIMARY KEY (room_id, muted_did)
+                )""",
+            ],
         ]
 
         for version, migration in enumerate(migrations, start=1):
@@ -1465,6 +1484,60 @@ class LocalStore:
             conn.execute("DELETE FROM messages WHERE thread_id = ?", (room_id,))
             conn.execute("DELETE FROM room_members WHERE room_id = ?", (room_id,))
             conn.execute("DELETE FROM rooms WHERE room_id = ?", (room_id,))
+
+    # ------------------------------------------------------------------
+    # Room bans and mutes
+    # ------------------------------------------------------------------
+
+    def ban_room_member(self, room_id: str, banned_did: str, banned_by: str, reason: str = "") -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO room_bans (room_id, banned_did, banned_by, reason) VALUES (?,?,?,?)",
+                (room_id, banned_did, banned_by, reason),
+            )
+
+    def unban_room_member(self, room_id: str, banned_did: str) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM room_bans WHERE room_id=? AND banned_did=?", (room_id, banned_did))
+
+    def get_room_bans(self, room_id: str) -> list:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT banned_did, banned_by, banned_at, reason FROM room_bans WHERE room_id=? ORDER BY banned_at DESC",
+                (room_id,),
+            ).fetchall()
+        return [{"banned_did": r[0], "banned_by": r[1], "banned_at": r[2], "reason": r[3] or ""} for r in rows]
+
+    def is_room_banned(self, room_id: str, did: str) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM room_bans WHERE room_id=? AND banned_did=?", (room_id, did)
+            ).fetchone()
+        return bool(row)
+
+    def mute_room_member(self, room_id: str, muted_did: str, muted_by: str, expires_at: float | None = None) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO room_mutes (room_id, muted_did, muted_by, expires_at) VALUES (?,?,?,?)",
+                (room_id, muted_did, muted_by, expires_at),
+            )
+
+    def unmute_room_member(self, room_id: str, muted_did: str) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM room_mutes WHERE room_id=? AND muted_did=?", (room_id, muted_did))
+
+    def is_room_muted(self, room_id: str, did: str) -> bool:
+        import time as _t
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT expires_at FROM room_mutes WHERE room_id=? AND muted_did=?", (room_id, did)
+            ).fetchone()
+        if not row:
+            return False
+        expires_at = row[0]
+        if expires_at is not None and _t.time() > expires_at:
+            return False
+        return True
 
     # ------------------------------------------------------------------
     # Messages
@@ -4691,6 +4764,31 @@ class LocalStore:
                 return [dict(r) for r in rows]
             except Exception:
                 return []
+
+    def save_message_receipt(self, message_id: str, receiver_webid: str, read_at: str) -> None:
+        with self._conn() as conn:
+            try:
+                conn.execute(
+                    """INSERT INTO message_receipts (message_id, receiver_webid, delivered_at, read_at)
+                       VALUES (?, ?, ?, ?)
+                       ON CONFLICT(message_id, receiver_webid) DO UPDATE SET read_at = excluded.read_at""",
+                    (message_id, receiver_webid, None, read_at),
+                )
+            except Exception:
+                pass
+
+    def get_message_readers(self, message_id: str) -> list:
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    """SELECT receiver_webid, read_at FROM message_receipts
+                       WHERE message_id = ? AND read_at IS NOT NULL
+                       ORDER BY read_at""",
+                    (message_id,),
+                ).fetchall()
+            except Exception:
+                return []
+        return [{"receiver_webid": r[0], "read_at": r[1]} for r in rows]
 
     def rebuild_messages_fts(self) -> None:
         """Rebuild the FTS5 index from scratch (repair stale/partial index)."""

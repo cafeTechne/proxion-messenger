@@ -207,8 +207,8 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
         # Semaphore bounding concurrent fire-and-forget pod sync tasks
         self._pod_sync_sem: asyncio.Semaphore = asyncio.Semaphore(8)
 
-        # Read receipt toggle
-        self._receipts_enabled: bool = True
+        # Per-user read receipt preferences
+        self._client_receipts_prefs: dict = {}  # webid → bool
 
         # Link previews toggle (default off)
         self._link_previews_enabled: bool = os.environ.get("PROXION_LINK_PREVIEWS", "0") == "1"
@@ -1036,7 +1036,9 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             elif cmd == "set_identity":
                 await self._handle_set_identity(websocket, data)
             elif cmd == "set_receipts_enabled":
-                self._receipts_enabled = bool(data.get("enabled", True))
+                _pref_webid = self._client_webids.get(websocket, "")
+                if _pref_webid:
+                    self._client_receipts_prefs[_pref_webid] = bool(data.get("enabled", True))
             elif cmd == "set_link_previews_enabled":
                 self._link_previews_enabled = bool(data.get("enabled", False))
             elif cmd == "read_dm":
@@ -1049,6 +1051,18 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 await self._handle_join_room(websocket, data)
             elif cmd == "kick_member":
                 await self._handle_kick_member(websocket, data)
+            elif cmd == "ban_member":
+                await self._handle_ban_member(websocket, data)
+            elif cmd == "unban_member":
+                await self._handle_unban_member(websocket, data)
+            elif cmd == "mute_member":
+                await self._handle_mute_member(websocket, data)
+            elif cmd == "unmute_member":
+                await self._handle_unmute_member(websocket, data)
+            elif cmd == "get_room_bans":
+                await self._handle_get_room_bans(websocket, data)
+            elif cmd == "get_message_readers":
+                await self._handle_get_message_readers(websocket, data)
             elif cmd == "pin_message":
                 await self._handle_pin_message(websocket, data)
             elif cmd == "get_pins":
