@@ -239,6 +239,28 @@ class VoiceHandlerMixin:
         sdp_answer = data.get("sdp_answer", "")
         cert_id = data.get("cert_id")
 
+        # Group voice: answer addressed directly to the calling peer by webid.
+        target_webid = data.get("target_webid")
+        if target_webid:
+            sender_wid = self._client_webids.get(websocket, "")
+            answer_event = {
+                "type": "voice_answer",
+                "from_webid": sender_wid,
+                "session_id": session_id,
+                "sdp_answer": sdp_answer,
+            }
+            target_ws = self._any_socket(target_webid)
+            if target_ws and target_ws in self.clients:
+                await target_ws.send(json.dumps(answer_event))
+            else:
+                peer_gw = self._resolve_peer_gateway(target_webid)
+                if peer_gw:
+                    asyncio.create_task(self._relay_voice_signal(
+                        target_webid, "answer",
+                        {"session_id": session_id, "sdp_answer": sdp_answer},
+                    ))
+            return
+
         sess = self._voice_sessions.get(session_id)
         if sess:
             _sender_wid = self._client_webids.get(websocket, "")
@@ -295,6 +317,27 @@ class VoiceHandlerMixin:
             "sdp_mid": sdp_mid,
             "sdp_mline_index": sdp_mline_index,
         }
+
+        # Group voice: candidates are addressed directly to a peer webid.
+        # Route by webid (local socket or cross-gateway relay) bypassing the
+        # 1:1 session model.
+        target_webid = data.get("target_webid")
+        if target_webid:
+            sender_wid = self._client_webids.get(websocket, "")
+            event["from_webid"] = sender_wid
+            target_ws = self._any_socket(target_webid)
+            if target_ws and target_ws in self.clients:
+                await target_ws.send(json.dumps(event))
+            else:
+                peer_gw = self._resolve_peer_gateway(target_webid)
+                if peer_gw:
+                    asyncio.create_task(self._relay_voice_signal(
+                        target_webid, "ice_candidate",
+                        {"session_id": session_id, "candidate": candidate,
+                         "sdp_mid": sdp_mid, "sdp_mline_index": sdp_mline_index},
+                    ))
+            return
+
         sess = self._voice_sessions.get(session_id)
         if not sess:
             return

@@ -1683,7 +1683,9 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 origin_header = headers_raw.get(b"origin", b"")
                 parts = req.decode(errors="replace").split()
                 method = parts[0] if parts else "GET"
-                path = parts[1].split("?")[0] if len(parts) > 1 else "/"
+                _raw_target = parts[1] if len(parts) > 1 else "/"
+                path = _raw_target.split("?")[0]
+                _query_string = _raw_target.split("?", 1)[1] if "?" in _raw_target else ""
                 _peer_info = writer.get_extra_info("peername")
                 peer_ip = _peer_info[0] if isinstance(_peer_info, tuple) and _peer_info else ""
 
@@ -1890,6 +1892,53 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                         + _SEC_HDR + _NO_STORE_HDR
                         + b"Access-Control-Allow-Origin: *\r\n"
                         b"Content-Length: " + str(len(conn_body)).encode() + b"\r\n\r\n" + conn_body
+                    )
+                    await writer.drain()
+                    return
+
+                # ── GET /room-history/{room_id} — fetch room message history ──
+                if method == "GET" and path.startswith("/room-history/"):
+                    if _check_http_rate(peer_ip, "room_history"):
+                        await _write_429(writer)
+                        await writer.drain()
+                        return
+                    from urllib.parse import unquote as _rh_unquote, parse_qs as _rh_parse_qs
+                    _rh_room_id = _rh_unquote(path[len("/room-history/"):])
+                    _rh_qs = _rh_parse_qs(_query_string)
+                    _rh_code = _rh_qs.get("code", [""])[0]
+                    try:
+                        _rh_limit = min(int(_rh_qs.get("limit", ["50"])[0]), 200)
+                    except ValueError:
+                        _rh_limit = 50
+                    _rh_before = _rh_qs.get("before", [""])[0] or None
+
+                    _rh_room = self._local_rooms.get(_rh_room_id)
+                    if not _rh_room:
+                        writer.write(b"HTTP/1.1 404 Not Found\r\n" + _SEC_HDR +
+                                     b"Content-Length: 9\r\n\r\nNot found")
+                        await writer.drain()
+                        return
+                    import hmac as _rh_hmac
+                    _rh_stored_code = _rh_room.get("code", "")
+                    if not (_rh_stored_code and _rh_code and
+                            _rh_hmac.compare_digest(_rh_code.encode(), _rh_stored_code.encode())):
+                        writer.write(b"HTTP/1.1 403 Forbidden\r\n" + _SEC_HDR +
+                                     b"Content-Length: 9\r\n\r\nForbidden")
+                        await writer.drain()
+                        return
+                    _rh_messages = []
+                    if self._store:
+                        _rh_messages = self._store.get_messages(
+                            _rh_room_id, before_timestamp=_rh_before, limit=_rh_limit
+                        )
+                    _rh_body = json.dumps({
+                        "room_id": _rh_room_id, "messages": _rh_messages,
+                    }).encode()
+                    writer.write(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                        + _SEC_HDR + _NO_STORE_HDR
+                        + b"Access-Control-Allow-Origin: *\r\n"
+                        b"Content-Length: " + str(len(_rh_body)).encode() + b"\r\n\r\n" + _rh_body
                     )
                     await writer.drain()
                     return

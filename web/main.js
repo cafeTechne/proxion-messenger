@@ -234,7 +234,12 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
         let activeView = null;
         let currentCall = null;
         let localStream = null;
-        let pc = null;
+        let pc = null;                    // 1:1 DM call connection
+        const peerConnections = {};       // group voice: {peer_webid: RTCPeerConnection}
+        const peerAudioElements = {};     // group voice: {peer_webid: HTMLAudioElement}
+        let _channelSessionIds = {};      // group voice: {peer_webid: session_id} for ICE routing
+        const _channelParticipants = {};  // group voice: {peer_webid: {name, state}}
+        const _roomCodes = {};            // room_id -> invite code (for REST history catch-up)
         let typingUsers = {}; // webid -> room/dm id
         let unreadCounts = {}; // id -> count
         let messageReactions = {}; // messageId -> { emoji: [webid] }
@@ -1496,6 +1501,8 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                         const li = document.getElementById(`nav-${event.room_id}`);
                         if (li) li.click();
                     }, 50);
+                    // R34: remember room code for REST history catch-up
+                    if (event.code) _roomCodes[event.room_id] = event.code;
                     // R31: register home gateway for federated relay fanout
                     {
                         const _homeGw = localStorage.getItem("proxion_gateway_http_url") || "";
@@ -1506,6 +1513,26 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                                 code: event.code || "",
                                 home_gateway: _homeGw,
                             }));
+                        }
+                    }
+                    break;
+                case "federated_room_joined":
+                    // R34: pull older history via REST to supplement the WebSocket snapshot
+                    if (!event.same_gateway && event.room_id) {
+                        const _rc = _roomCodes[event.room_id] || "";
+                        if (_rc) {
+                            fetch(`/room-history/${encodeURIComponent(event.room_id)}?code=${encodeURIComponent(_rc)}&limit=100`)
+                                .then(r => r.ok ? r.json() : null)
+                                .then(data => {
+                                    if (!data || !data.messages || !data.messages.length) return;
+                                    const existing = new Set(allMessages.map(m => m.message_id));
+                                    const newMsgs = data.messages.filter(m => !existing.has(m.message_id));
+                                    if (!newMsgs.length) return;
+                                    allMessages = [...newMsgs, ...allMessages];
+                                    newMsgs.forEach(m => { messageMap[m.message_id] = m; });
+                                    if (activeView && activeView.id === event.room_id) renderMessages();
+                                })
+                                .catch(() => {});
                         }
                     }
                     break;
@@ -1546,15 +1573,33 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                     renderSearchResults(event);
                     break;
                 case "voice_invite":
-                    showVoiceBanner(event);
-                    showOsNotification('Incoming Call',
-                        `${event.display_name || 'Someone'} is calling`);
+                    // Group channel: if we're in a voice channel, auto-answer offers
+                    // from channel peers instead of showing the 1:1 ringing banner.
+                    if (_inVoiceChannel && event.caller_webid) {
+                        _addChannelParticipant(event.caller_webid);
+                        initWebRTCForPeer(event.caller_webid, event.session_id, false, event.sdp_offer)
+                            .catch(console.warn);
+                    } else {
+                        showVoiceBanner(event);
+                        showOsNotification('Incoming Call',
+                            `${event.display_name || 'Someone'} is calling`);
+                    }
                     break;
                 case "voice_answer":
-                    handleVoiceAnswer(event);
+                    // Group channel: route the answer to the per-peer connection.
+                    if (event.from_webid && peerConnections[event.from_webid]) {
+                        handleGroupVoiceAnswer(event);
+                    } else {
+                        handleVoiceAnswer(event);
+                    }
                     break;
                 case "ice_candidate":
-                    handleIceCandidate(event);
+                    // Group channel: route the candidate to the per-peer connection.
+                    if (event.from_webid && peerConnections[event.from_webid]) {
+                        handleGroupIceCandidate(event);
+                    } else {
+                        handleIceCandidate(event);
+                    }
                     break;
                 case "voice_hangup":
                     handleVoiceHangup(event);
@@ -2818,6 +2863,8 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
             _inVoiceChannel = roomId;
             const leaveBtn = document.getElementById("leave-voice-channel-btn");
             if (leaveBtn) leaveBtn.style.display = "";
+            _showChannelPanel();
+            _renderChannelPanel();
         }
 
         function leaveVoiceChannel() {
@@ -2827,10 +2874,16 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
             const leaveBtn = document.getElementById("leave-voice-channel-btn");
             if (leaveBtn) leaveBtn.style.display = "none";
             // Close all peer connections in the channel
-            for (const peerId of Object.keys(peerConnections || {})) {
+            for (const peerId of Object.keys(peerConnections)) {
                 try { peerConnections[peerId].close(); } catch (_) {}
                 delete peerConnections[peerId];
             }
+            for (const peerId of Object.keys(peerAudioElements)) {
+                peerAudioElements[peerId].srcObject = null;
+                delete peerAudioElements[peerId];
+            }
+            _channelSessionIds = {};
+            _hideChannelPanel();
             showToast("Left voice channel");
         }
 
@@ -3551,28 +3604,142 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
             _pendingCandidates = [];
         }
 
-        async function initWebRTC(certId, sessionId, isCaller = false, sdpOffer = null) {
-            let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
-            // Fetch TURN credentials from gateway endpoint if not yet loaded
+        // Shared ICE server resolution (STUN + TURN), used by 1:1 and group calls
+        async function _getIceServers() {
+            const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
             if (!_turnIceServer) {
                 try {
-                    const _tr = await fetch('/turn-credentials');
-                    const _tc = await _tr.json();
+                    const _tc = await fetch('/turn-credentials').then(r => r.json());
                     if (_tc && _tc.urls && _tc.urls.length > 0) {
                         _turnIceServer = { urls: _tc.urls, username: _tc.username, credential: _tc.credential };
                     }
                 } catch (_) {}
             }
             if (_turnIceServer) {
-                // Server-computed time-limited credentials (preferred)
                 iceServers.push(_turnIceServer);
             } else if (turnUrl && turnSecret) {
-                // Legacy: client-side HMAC credential generation
                 const timestamp = Math.floor(Date.now() / 1000) + 86400;
                 const username = `${timestamp}:${selfWebId}`;
                 const credential = await getTurnCredentials(username, turnSecret);
                 iceServers.push({ urls: turnUrl, username, credential });
             }
+            return iceServers;
+        }
+
+        // Group voice: one RTCPeerConnection per remote peer, keyed by webid.
+        async function initWebRTCForPeer(targetWebid, sessionId, isCaller = false, sdpOffer = null) {
+            if (peerConnections[targetWebid]) {
+                try { peerConnections[targetWebid].close(); } catch (_) {}
+                delete peerConnections[targetWebid];
+            }
+            const iceServers = await _getIceServers();
+            const peerPc = new RTCPeerConnection({ iceServers });
+            peerConnections[targetWebid] = peerPc;
+            if (sessionId) _channelSessionIds[targetWebid] = sessionId;
+
+            const stream = await getMedia();
+            if (stream) stream.getTracks().forEach(t => peerPc.addTrack(t, stream));
+
+            peerPc.ontrack = (event) => {
+                let audio = peerAudioElements[targetWebid];
+                if (!audio) {
+                    audio = new Audio();
+                    audio.autoplay = true;
+                    peerAudioElements[targetWebid] = audio;
+                }
+                audio.srcObject = event.streams[0];
+                audio.play().catch(() => {});
+                _updateChannelParticipantUI(targetWebid, "connected");
+            };
+
+            peerPc.onicecandidate = (e) => {
+                if (!e.candidate) return;
+                socket?.send(JSON.stringify({
+                    cmd: "ice_candidate",
+                    target_webid: targetWebid,
+                    session_id: _channelSessionIds[targetWebid] || sessionId || "",
+                    candidate: e.candidate.candidate,
+                    sdp_mid: e.candidate.sdpMid,
+                    sdp_mline_index: e.candidate.sdpMLineIndex,
+                }));
+            };
+
+            peerPc.oniceconnectionstatechange = () => {
+                _updateChannelParticipantUI(targetWebid, peerPc.iceConnectionState);
+                if (peerPc.iceConnectionState === "failed") {
+                    try { peerPc.restartIce(); } catch (_) {}
+                }
+            };
+
+            if (isCaller) {
+                const offer = await peerPc.createOffer();
+                await peerPc.setLocalDescription(offer);
+                socket?.send(JSON.stringify({
+                    cmd: "voice_invite",
+                    target_webid: targetWebid,
+                    sdp_offer: offer.sdp,
+                    channel_id: _inVoiceChannel || "",
+                }));
+            } else if (sdpOffer) {
+                await peerPc.setRemoteDescription({ type: "offer", sdp: sdpOffer });
+                const answer = await peerPc.createAnswer();
+                await peerPc.setLocalDescription(answer);
+                socket?.send(JSON.stringify({
+                    cmd: "voice_answer",
+                    target_webid: targetWebid,
+                    session_id: sessionId,
+                    sdp_answer: answer.sdp,
+                }));
+            }
+            return peerPc;
+        }
+
+        // ── Voice channel participant panel ──
+        function _addChannelParticipant(webid) {
+            _channelParticipants[webid] = { name: webid.slice(-12), state: "connecting" };
+            _showChannelPanel();
+            _renderChannelPanel();
+        }
+        function _removeChannelParticipant(webid) {
+            delete _channelParticipants[webid];
+            if (Object.keys(_channelParticipants).length === 0 && !_inVoiceChannel) {
+                _hideChannelPanel();
+            } else {
+                _renderChannelPanel();
+            }
+        }
+        function _updateChannelParticipantUI(webid, state) {
+            if (_channelParticipants[webid]) {
+                _channelParticipants[webid].state = state;
+                _renderChannelPanel();
+            }
+        }
+        function _renderChannelPanel() {
+            const container = document.getElementById("voice-channel-participants");
+            if (!container) return;
+            const stateColor = { connected: "#4ade80", connecting: "#fbbf24",
+                                  checking: "#fbbf24", completed: "#4ade80",
+                                  disconnected: "#f87171", failed: "#f87171", closed: "#64748b" };
+            container.innerHTML = Object.entries(_channelParticipants).map(([webid, info]) => {
+                const color = stateColor[info.state] || "#94a3b8";
+                return `<span style="background:#1e293b;padding:3px 8px;border-radius:12px;font-size:0.78em;color:#f1f5f9;display:flex;align-items:center;gap:4px;">
+                    <span style="width:6px;height:6px;border-radius:50%;background:${color};display:inline-block;"></span>
+                    ${escHtml(info.name)}
+                </span>`;
+            }).join("");
+        }
+        function _showChannelPanel() {
+            const p = document.getElementById("voice-channel-panel");
+            if (p) p.style.display = "flex";
+        }
+        function _hideChannelPanel() {
+            const p = document.getElementById("voice-channel-panel");
+            if (p) p.style.display = "none";
+            Object.keys(_channelParticipants).forEach(k => delete _channelParticipants[k]);
+        }
+
+        async function initWebRTC(certId, sessionId, isCaller = false, sdpOffer = null) {
+            const iceServers = await _getIceServers();
             pc = new RTCPeerConnection({ iceServers: iceServers });
             _pendingCandidates = [];
             _remoteDescSet = false;
@@ -3702,53 +3869,49 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
             const st = event.signal_type;
             const sd = event.signal_data || {};
             const merged = { session_id: event.session_id, from_webid: event.from_webid, ...sd };
-            if (st === "answer") handleVoiceAnswer(merged);
-            else if (st === "ice_candidate") handleIceCandidate(merged);
-            else if (st === "hangup") handleVoiceHangup(merged);
-            else if (st === "offer") showVoiceBanner({ ...merged, caller_webid: event.from_webid, sdp_offer: sd.sdp_offer });
+            const isGroupPeer = event.from_webid && peerConnections[event.from_webid];
+            if (st === "answer") {
+                isGroupPeer ? handleGroupVoiceAnswer(merged) : handleVoiceAnswer(merged);
+            } else if (st === "ice_candidate") {
+                isGroupPeer ? handleGroupIceCandidate(merged) : handleIceCandidate(merged);
+            } else if (st === "hangup") {
+                handleVoiceHangup(merged);
+            } else if (st === "offer") {
+                // Cross-gateway group channel offer: auto-answer if we're in a channel
+                if (_inVoiceChannel && event.from_webid) {
+                    _addChannelParticipant(event.from_webid);
+                    initWebRTCForPeer(event.from_webid, event.session_id, false, sd.sdp_offer)
+                        .catch(console.warn);
+                } else {
+                    showVoiceBanner({ ...merged, caller_webid: event.from_webid, sdp_offer: sd.sdp_offer });
+                }
+            }
         }
 
-        // Group call: existing member joined before us — they will send us a voice_invite
+        // Group call: an existing member was already in the channel when we joined.
+        // They will initiate the WebRTC offer toward us; we just register them in the UI.
         function handleVoicePeerPresent(event) {
             showToast(`${event.peer_webid.slice(0, 20)} is in the voice channel`, "info");
-            // If the existing peer is remote, we should send them an offer via relay
-            if (event.gateway_url && activeView) {
-                socket.send(JSON.stringify({
-                    cmd: "voice_invite",
-                    target_webid: event.peer_webid,
-                    session_id: `ch-${event.channel_id}-${Date.now()}`,
-                    sdp_offer: null,  // gateway will initiate WebRTC offer toward target
-                    channel_id: event.channel_id,
-                }));
-            }
+            _addChannelParticipant(event.peer_webid);
         }
 
-        // Group call: a new peer joined after us — we should call them
+        // Group call: a new peer joined after us — we initiate the offer toward them.
         function handleVoicePeerJoined(event) {
             showToast(`${event.peer_webid.slice(0, 20)} joined the voice channel`, "info");
-            if (event.gateway_url) {
-                // Remote peer — initiate a relayed call toward them
-                if (activeView) {
-                    socket.send(JSON.stringify({
-                        cmd: "voice_invite",
-                        target_webid: event.peer_webid,
-                        session_id: `ch-${event.channel_id || activeView.id}-${Date.now()}`,
-                        channel_id: event.channel_id || activeView.id,
-                    }));
-                }
-            } else {
-                // Local peer — existing mesh path
-                if (activeView) initWebRTC(activeView.id, null, true).catch(console.warn);
-            }
+            _addChannelParticipant(event.peer_webid);
+            // We are an existing member; call the new joiner (one offer per pair).
+            initWebRTCForPeer(event.peer_webid, null, true).catch(console.warn);
         }
 
         // Group call: a peer left
         function handleVoicePeerLeft(event) {
             showToast(`${event.peer_webid.slice(0, 20)} left the voice channel`, "info");
-            if (peerConnections?.[event.peer_webid]) {
-                try { peerConnections[event.peer_webid].close(); } catch (_) {}
-                delete peerConnections[event.peer_webid];
-            }
+            const peerPc = peerConnections[event.peer_webid];
+            if (peerPc) { try { peerPc.close(); } catch (_) {} delete peerConnections[event.peer_webid]; }
+            const audio = peerAudioElements[event.peer_webid];
+            if (audio) { audio.srcObject = null; delete peerAudioElements[event.peer_webid]; }
+            delete _channelSessionIds[event.peer_webid];
+            _removeChannelParticipant(event.peer_webid);
         }
 
         // peer_discovered response handler — used by the Add Contact modal
@@ -3779,6 +3942,29 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                     });
                 } catch (e) { console.warn("ICE error", e); }
             }
+        }
+
+        // Group voice: apply an answer to the specific peer connection.
+        async function handleGroupVoiceAnswer(event) {
+            const peerPc = peerConnections[event.from_webid];
+            if (!peerPc) return;
+            try {
+                await peerPc.setRemoteDescription({ type: "answer", sdp: event.sdp_answer });
+                _updateChannelParticipantUI(event.from_webid, "connected");
+            } catch (e) { console.warn("group answer error", e); }
+        }
+
+        // Group voice: add an ICE candidate to the specific peer connection.
+        async function handleGroupIceCandidate(event) {
+            const peerPc = peerConnections[event.from_webid];
+            if (!peerPc) return;
+            try {
+                await peerPc.addIceCandidate({
+                    candidate: event.candidate,
+                    sdpMid: event.sdp_mid,
+                    sdpMLineIndex: event.sdp_mline_index,
+                });
+            } catch (e) { console.warn("group ICE error", e); }
         }
 
         document.getElementById("start-call-btn").onclick = async () => {
@@ -5107,6 +5293,20 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
             attachListener('#delete-room-btn', 'click', deleteRoom);
             attachListener('#leave-room-btn', 'click', leaveRoom);
             attachListener('#leave-voice-channel-btn', 'click', leaveVoiceChannel);
+            attachListener('#voice-channel-mute-btn', 'click', () => {
+                isMuted = !isMuted;
+                // Toggle the local audio track on every peer connection in the channel
+                for (const peerPc of Object.values(peerConnections)) {
+                    peerPc.getSenders().forEach(s => {
+                        if (s.track && s.track.kind === "audio") s.track.enabled = !isMuted;
+                    });
+                }
+                const btn = document.getElementById("voice-channel-mute-btn");
+                if (btn) {
+                    btn.textContent = isMuted ? "Unmute" : "Mute";
+                    btn.style.background = isMuted ? "#7f1d1d" : "#334155";
+                }
+            });
 
             // Members panel close
             attachListener('#members-panel-close', 'click', toggleMembersPanel);
