@@ -57,6 +57,8 @@ class GatewayConfig:
     css_default_url: Optional[str] = field(default_factory=lambda: os.environ.get("PROXION_CSS_DEFAULT_URL"))
     # Override the HTTP base URL advertised to federation peers (required behind a reverse proxy)
     http_public_url: Optional[str] = field(default_factory=lambda: os.environ.get("PROXION_HTTP_PUBLIC_URL"))
+    # Set automatically by run_gateway.py when UPnP succeeds
+    upnp_mapped: bool = field(default_factory=lambda: os.environ.get("PROXION_UPNP_MAPPED") == "1")
 
 class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandlerMixin, AuthHandlerMixin, MiscHandlerMixin):
     def __init__(
@@ -173,6 +175,16 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
 
         # Uptime tracking for /health endpoint
         self._start_time: float = time.time()
+
+        # Local LAN IP — detected once at startup for connectivity guidance
+        try:
+            import socket as _sock
+            _s = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+            _s.connect(("8.8.8.8", 80))
+            self._local_ip: str = _s.getsockname()[0]
+            _s.close()
+        except Exception:
+            self._local_ip = "127.0.0.1"
 
         # Prometheus-style counters (R13.4)
         self._metrics: dict = {
@@ -1538,6 +1550,9 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
         }
         if not self.config.public_url:
             data["nat_warning"] = True
+        data["upnp_mapped"] = self.config.upnp_mapped
+        data["local_ip"]    = getattr(self, "_local_ip", "127.0.0.1")
+        data["local_port"]  = self.config.http_port or 8080
         if self.dm_clients and self._pod_url:
             data["pod_url"] = self._pod_url
         if self._store:
@@ -1855,6 +1870,26 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                         + _SEC_HDR + _NO_STORE_HDR
                         + b"Access-Control-Allow-Origin: *\r\n"
                         b"Content-Length: " + str(len(health_body)).encode() + b"\r\n\r\n" + health_body
+                    )
+                    await writer.drain()
+                    return
+
+                # ── GET /connectivity — NAT/reachability status for setup guide ──
+                if method == "GET" and path == "/connectivity":
+                    conn_body = json.dumps({
+                        "public_url_set": bool(self.config.public_url),
+                        "upnp_mapped":    self.config.upnp_mapped,
+                        "relay_capable":  bool(self.config.public_url),
+                        "local_ip":       getattr(self, "_local_ip", "127.0.0.1"),
+                        "local_port":     self.config.http_port or 8080,
+                        "turn_configured": bool(self.config.turn_url and self.config.turn_secret),
+                        "pod_available":  self._pod_available,
+                    }).encode()
+                    writer.write(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                        + _SEC_HDR + _NO_STORE_HDR
+                        + b"Access-Control-Allow-Origin: *\r\n"
+                        b"Content-Length: " + str(len(conn_body)).encode() + b"\r\n\r\n" + conn_body
                     )
                     await writer.drain()
                     return
@@ -3236,6 +3271,8 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             "file",
             # room federation (R29)
             "room_id", "room_name", "status", "status_message", "updated_at", "from_display_name", "cert_id", "thread_id", "source", "local",
+            # voice channel federation (R33)
+            "channel_id", "peer_gateway_url", "peer_webid", "target_webid", "action",
         })
         _unknown = set(data.keys()) - _ALLOWED_RELAY_KEYS
         if _unknown:
@@ -3267,6 +3304,16 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
         # ── Room delete relay — remove from store and deliver to local members ──
         if data.get("content_type") == "room_delete":
             return await self._handle_room_delete_relay(data)
+
+        # ── Voice channel relay (cross-gateway group voice) ──
+        if data.get("content_type") == "voice_channel_join":
+            return await self._handle_voice_channel_join_relay(data)
+        if data.get("content_type") == "voice_channel_leave":
+            return await self._handle_voice_channel_leave_relay(data)
+        if data.get("content_type") == "voice_channel_peer_joined":
+            return await self._handle_voice_channel_peer_joined_relay(data)
+        if data.get("content_type") == "voice_channel_peer_present":
+            return await self._handle_voice_channel_peer_present_relay(data)
 
         # ── Presence relay — update cache and broadcast ──
         if data.get("content_type") == "presence":

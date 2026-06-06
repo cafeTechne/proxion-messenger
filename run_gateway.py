@@ -80,13 +80,27 @@ async def main():
             _logging.getLogger(__name__).warning("TLS cert generation failed: %s", _tls_err)
 
     http_port_str = os.environ.get("PROXION_HTTP_PORT", "8080")
+    http_port = int(http_port_str) if http_port_str else 8080
+
+    # Attempt UPnP port mapping so the gateway is internet-reachable without manual config.
+    _upnp_mapped_port: int | None = None
+    if not os.environ.get("PROXION_PUBLIC_URL"):
+        try:
+            from proxion_messenger_core.upnp import try_upnp_map
+            _upnp_result = try_upnp_map(http_port)
+            if _upnp_result:
+                os.environ["PROXION_PUBLIC_URL"] = _upnp_result
+                os.environ["PROXION_UPNP_MAPPED"] = "1"
+                _upnp_mapped_port = http_port
+        except Exception:
+            pass
 
     # Web dir: env var > bundled web/ > None (Tauri serves its own assets in production)
     bundled_web = base / "web"
     web_dir = os.environ.get("PROXION_WEB_DIR") or (str(bundled_web) if bundled_web.exists() else None)
 
     config = GatewayConfig(
-        http_port=int(http_port_str) if http_port_str else None,
+        http_port=http_port,
         web_dir=web_dir,
         db_path=str(data_dir / "proxion.db"),
     )
@@ -99,8 +113,25 @@ async def main():
         read_state=ReadState(),
     )
 
-    # Signal Tauri (or any parent) that the gateway is ready
+    # Human-readable startup output — useful when running the .exe directly
     print("PROXION_GATEWAY_READY", flush=True)
+    try:
+        _addr = gw._proxion_address()
+        print(f"  Address : {_addr}", flush=True)
+    except Exception:
+        pass
+    print(f"  Web UI  : http://127.0.0.1:{http_port}", flush=True)
+    if config.public_url:
+        _how = " (via UPnP)" if os.environ.get("PROXION_UPNP_MAPPED") == "1" else ""
+        print(f"  Public  : {config.public_url}{_how}", flush=True)
+    else:
+        print("  Public  : not reachable from internet — open the app for setup guide", flush=True)
+
+    # Remove UPnP mapping cleanly on shutdown
+    if _upnp_mapped_port:
+        import atexit
+        from proxion_messenger_core.upnp import remove_upnp_map
+        atexit.register(remove_upnp_map, _upnp_mapped_port)
 
     await gw.run()
 

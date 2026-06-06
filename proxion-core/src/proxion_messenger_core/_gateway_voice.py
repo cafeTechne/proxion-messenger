@@ -45,15 +45,17 @@ class VoiceHandlerMixin:
                 ch = self._voice_channels.get(ch_id)
                 if ch and leaver_webid in ch.get("members", {}):
                     ch["members"].pop(leaver_webid, None)
-                    for mws in list(ch.get("members", {}).values()):
-                        try:
-                            asyncio.create_task(mws.send(json.dumps({
-                                "type": "voice_peer_left",
-                                "channel_id": ch_id,
-                                "peer_webid": leaver_webid,
-                            })))
-                        except Exception:
-                            pass
+                    for minfo in list(ch.get("members", {}).values()):
+                        mws = minfo.get("ws") if isinstance(minfo, dict) else minfo
+                        if mws:
+                            try:
+                                asyncio.create_task(mws.send(json.dumps({
+                                    "type": "voice_peer_left",
+                                    "channel_id": ch_id,
+                                    "peer_webid": leaver_webid,
+                                })))
+                            except Exception:
+                                pass
                     if not ch.get("members"):
                         self._voice_channels.pop(ch_id, None)
 
@@ -373,14 +375,43 @@ class VoiceHandlerMixin:
                     logger.debug("Pod voice_hangup write skipped: %s", exc)
 
     async def _handle_join_voice_channel(self, websocket, data: dict) -> None:
-        """Add caller to a named voice channel and signal existing members."""
-        channel_id = data.get("channel_id", "")
+        """Add caller to a named voice channel and signal existing members.
+
+        If the channel belongs to a federated room hosted on another gateway,
+        relay the join request there instead of handling it locally.
+        """
+        channel_id = data.get("channel_id", "") or data.get("room_id", "")
         joiner_webid = self._client_webids.get(websocket, "")
         if not channel_id or not joiner_webid:
             return
 
+        own_gw = self._gateway_http_url()
+
+        # If the room is not local but is in room_federated_members, relay join to host gateway
+        if channel_id not in self._local_rooms and self._store:
+            # Look for the room's host gateway via peer_gateways or federated membership
+            _host_gw = self._resolve_peer_gateway(channel_id)
+            if not _host_gw:
+                # Try finding any peer gateway that hosts this room
+                for _did, _gw in list(self._peer_gateway_urls.items()):
+                    if _gw != own_gw:
+                        _host_gw = _gw
+                        break
+            if _host_gw and _host_gw != own_gw:
+                asyncio.create_task(self._relay_ephemeral(_host_gw, {
+                    "content_type": "voice_channel_join",
+                    "channel_id": channel_id,
+                    "from_webid": joiner_webid,
+                    "origin_gateway_url": own_gw,
+                }))
+                await websocket.send(json.dumps({
+                    "type": "voice_channel_join_relayed",
+                    "channel_id": channel_id,
+                }))
+                return
+
         channel = self._voice_channels.setdefault(channel_id, {"members": {}})
-        existing = dict(channel["members"])  # snapshot before adding self
+        existing = dict(channel["members"])
 
         if len(existing) >= 6:
             await websocket.send(json.dumps({
@@ -390,28 +421,159 @@ class VoiceHandlerMixin:
                 "message": f"Channel has {len(existing)} members. Mesh connections may be slow.",
             }))
 
-        channel["members"][joiner_webid] = websocket
+        # Store local member with gateway_url=None
+        channel["members"][joiner_webid] = {"ws": websocket, "gateway_url": None}
 
-        # Notify existing members and inform joiner of who's already there
-        for member_webid, member_ws in existing.items():
-            try:
-                await member_ws.send(json.dumps({
-                    "type": "voice_peer_joined",
+        # Notify existing members of new joiner; tell joiner about each existing member
+        for member_webid, member_info in existing.items():
+            member_ws = member_info.get("ws") if isinstance(member_info, dict) else member_info
+            member_gw = member_info.get("gateway_url") if isinstance(member_info, dict) else None
+            if member_ws:
+                try:
+                    await member_ws.send(json.dumps({
+                        "type": "voice_peer_joined",
+                        "channel_id": channel_id,
+                        "peer_webid": joiner_webid,
+                        "gateway_url": "",
+                    }))
+                except Exception:
+                    pass
+            elif member_gw:
+                # Remote member — relay the notification
+                asyncio.create_task(self._relay_ephemeral(member_gw, {
+                    "content_type": "voice_channel_peer_joined",
                     "channel_id": channel_id,
                     "peer_webid": joiner_webid,
+                    "peer_gateway_url": own_gw or "",
+                }))
+            # Tell joiner about this existing member
+            try:
+                await websocket.send(json.dumps({
+                    "type": "voice_peer_present",
+                    "channel_id": channel_id,
+                    "peer_webid": member_webid,
+                    "gateway_url": member_gw or "",
                 }))
             except Exception:
                 pass
-            # Tell joiner about this existing member (they will receive a voice_invite from them)
-            await websocket.send(json.dumps({
-                "type": "voice_peer_present",
+
+    async def _handle_voice_channel_join_relay(self, data: dict) -> tuple[str, str]:
+        """Inbound relay: a user on another gateway joins our local voice channel."""
+        channel_id   = data.get("channel_id", "")
+        from_webid   = data.get("from_webid", "")
+        origin_gw    = data.get("origin_gateway_url", "")
+        if not channel_id or not from_webid or not origin_gw:
+            return "400 Bad Request", '{"error":"missing_voice_channel_join_fields"}'
+
+        channel = self._voice_channels.setdefault(channel_id, {"members": {}})
+        existing = dict(channel["members"])
+        channel["members"][from_webid] = {"ws": None, "gateway_url": origin_gw}
+
+        own_gw = self._gateway_http_url()
+
+        # Notify local members of the remote joiner
+        for member_webid, member_info in existing.items():
+            member_ws = member_info.get("ws") if isinstance(member_info, dict) else member_info
+            if member_ws:
+                try:
+                    await member_ws.send(json.dumps({
+                        "type": "voice_peer_joined",
+                        "channel_id": channel_id,
+                        "peer_webid": from_webid,
+                        "gateway_url": origin_gw,
+                    }))
+                except Exception:
+                    pass
+
+        # Tell the remote joiner who is already in the channel
+        for member_webid, member_info in existing.items():
+            member_gw = (member_info.get("gateway_url") if isinstance(member_info, dict) else None) or own_gw
+            asyncio.create_task(self._relay_ephemeral(origin_gw, {
+                "content_type": "voice_channel_peer_present",
                 "channel_id": channel_id,
                 "peer_webid": member_webid,
+                "peer_gateway_url": member_gw,
             }))
+
+        return "200 OK", '{"status":"ok"}'
+
+    async def _handle_voice_channel_leave_relay(self, data: dict) -> tuple[str, str]:
+        """Inbound relay: a remote user left a local voice channel."""
+        channel_id  = data.get("channel_id", "")
+        from_webid  = data.get("from_webid", "")
+        if not channel_id or not from_webid:
+            return "400 Bad Request", '{"error":"missing_fields"}'
+
+        channel = self._voice_channels.get(channel_id)
+        if not channel:
+            return "200 OK", '{"status":"ok"}'
+
+        channel["members"].pop(from_webid, None)
+        for member_webid, member_info in list(channel["members"].items()):
+            member_ws = member_info.get("ws") if isinstance(member_info, dict) else member_info
+            if member_ws:
+                try:
+                    await member_ws.send(json.dumps({
+                        "type": "voice_peer_left",
+                        "channel_id": channel_id,
+                        "peer_webid": from_webid,
+                    }))
+                except Exception:
+                    pass
+        if not channel["members"]:
+            self._voice_channels.pop(channel_id, None)
+        return "200 OK", '{"status":"ok"}'
+
+    async def _handle_voice_channel_peer_joined_relay(self, data: dict) -> tuple[str, str]:
+        """Deliver voice_peer_joined to a local user from a relay notification."""
+        target_webid = data.get("target_webid", "")
+        channel_id   = data.get("channel_id", "")
+        peer_webid   = data.get("peer_webid", "")
+        peer_gw      = data.get("peer_gateway_url", "")
+        # Deliver to all sockets of the target (or broadcast to channel members)
+        sockets = self._sockets_for(target_webid) if target_webid else []
+        event = json.dumps({
+            "type": "voice_peer_joined",
+            "channel_id": channel_id,
+            "peer_webid": peer_webid,
+            "gateway_url": peer_gw,
+        })
+        if not sockets and channel_id in self._voice_channels:
+            for info in self._voice_channels[channel_id]["members"].values():
+                ws = info.get("ws") if isinstance(info, dict) else info
+                if ws:
+                    sockets.append(ws)
+        for ws in sockets:
+            try:
+                await ws.send(event)
+            except Exception:
+                pass
+        return "200 OK", '{"status":"ok"}'
+
+    async def _handle_voice_channel_peer_present_relay(self, data: dict) -> tuple[str, str]:
+        """Deliver voice_peer_present to a local user from a relay notification."""
+        channel_id = data.get("channel_id", "")
+        peer_webid = data.get("peer_webid", "")
+        peer_gw    = data.get("peer_gateway_url", "")
+        event = json.dumps({
+            "type": "voice_peer_present",
+            "channel_id": channel_id,
+            "peer_webid": peer_webid,
+            "gateway_url": peer_gw,
+        })
+        if channel_id in self._voice_channels:
+            for info in self._voice_channels[channel_id]["members"].values():
+                ws = info.get("ws") if isinstance(info, dict) else info
+                if ws:
+                    try:
+                        await ws.send(event)
+                    except Exception:
+                        pass
+        return "200 OK", '{"status":"ok"}'
 
     async def _handle_leave_voice_channel(self, websocket, data: dict) -> None:
         """Remove caller from a voice channel and notify remaining members."""
-        channel_id = data.get("channel_id", "")
+        channel_id = data.get("channel_id", "") or data.get("room_id", "")
         leaver_webid = self._client_webids.get(websocket, "")
         if not channel_id or not leaver_webid:
             return
@@ -421,16 +583,28 @@ class VoiceHandlerMixin:
             return
 
         channel["members"].pop(leaver_webid, None)
+        own_gw = self._gateway_http_url()
 
-        for member_ws in list(channel["members"].values()):
-            try:
-                await member_ws.send(json.dumps({
-                    "type": "voice_peer_left",
+        for member_webid, member_info in list(channel["members"].items()):
+            member_ws = member_info.get("ws") if isinstance(member_info, dict) else member_info
+            member_gw = member_info.get("gateway_url") if isinstance(member_info, dict) else None
+            leave_event = json.dumps({
+                "type": "voice_peer_left",
+                "channel_id": channel_id,
+                "peer_webid": leaver_webid,
+            })
+            if member_ws:
+                try:
+                    await member_ws.send(leave_event)
+                except Exception:
+                    pass
+            elif member_gw:
+                asyncio.create_task(self._relay_ephemeral(member_gw, {
+                    "content_type": "voice_channel_leave",
                     "channel_id": channel_id,
-                    "peer_webid": leaver_webid,
+                    "from_webid": leaver_webid,
+                    "origin_gateway_url": own_gw,
                 }))
-            except Exception:
-                pass
 
         if not channel["members"]:
             self._voice_channels.pop(channel_id, None)

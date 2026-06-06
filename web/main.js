@@ -633,19 +633,27 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                 socket.send(JSON.stringify({cmd: "list_devices"}));
             }
             document.getElementById("settings-modal").style.display = "flex";
-            // R28: Fetch federation health status
-            fetch('/health').then(r => r.json()).then(h => {
+            // R33: Fetch connectivity + health for settings federation panel
+            Promise.all([fetch('/connectivity').then(r=>r.json()), fetch('/health').then(r=>r.json())])
+              .then(([c, h]) => {
                 const el = document.getElementById('settings-federation-status');
                 if (!el) return;
-                const tick = ok => ok
-                    ? '<span style="color:#4ade80">&#x2713;</span>'
-                    : '<span style="color:#f87171">&#x2717;</span>';
+                const tick = ok => ok ? '<span style="color:#4ade80">&#x2713;</span>' : '<span style="color:#f87171">&#x2717;</span>';
+                const reachable = c.public_url_set || c.relay_capable;
+                const reachHow = reachable
+                    ? (c.upnp_mapped ? ' <span style="color:#64748b;font-size:0.85em;">(via UPnP)</span>' : ' <span style="color:#64748b;font-size:0.85em;">(manual)</span>')
+                    : ` <span style="color:#fbbf24">not reachable — <a href="#" id="fix-conn-link" style="color:#fbbf24;text-decoration:underline;">fix this</a></span>`;
                 el.innerHTML = [
-                    `${tick(h.public_url_set)} Public URL: ${h.public_url_set ? 'configured' : '<span style="color:#fbbf24">not set — federation limited</span>'}`,
-                    `${tick(h.turn_configured)} TURN server: ${h.turn_configured ? 'configured' : '<span style="color:#fbbf24">not set — WebRTC may fail across NAT</span>'}`,
+                    `${tick(reachable)} Internet reachable:${reachHow}`,
+                    `${tick(h.turn_configured)} TURN: ${h.turn_configured ? 'configured' : '<span style="color:#fbbf24">not set</span>'}`,
                     `${tick(h.pod_available)} Solid Pod: ${h.pod_available ? 'connected' : 'offline'}`,
                 ].join('<br>');
-            }).catch(() => {});
+                document.getElementById('fix-conn-link')?.addEventListener('click', e => {
+                    e.preventDefault();
+                    sessionStorage.removeItem('proxion_nat_dismissed');
+                    _showNatWarning();
+                });
+              }).catch(() => {});
             // R16.4.2: restore pod connected/disconnected state from localStorage (live pod_status will update)
             {
                 const _podOk = localStorage.getItem('proxion_pod_connected') === '1';
@@ -1562,6 +1570,13 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                     break;
                 case "voice_peer_left":
                     handleVoicePeerLeft(event);
+                    break;
+                // Cross-gateway voice channel relay deliveries
+                case "voice_channel_peer_joined":
+                    handleVoicePeerJoined(event);
+                    break;
+                case "voice_channel_peer_present":
+                    handleVoicePeerPresent(event);
                     break;
                 case "peer_discovered":
                     handlePeerDiscovered(event);
@@ -3696,14 +3711,34 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
         // Group call: existing member joined before us — they will send us a voice_invite
         function handleVoicePeerPresent(event) {
             showToast(`${event.peer_webid.slice(0, 20)} is in the voice channel`, "info");
+            // If the existing peer is remote, we should send them an offer via relay
+            if (event.gateway_url && activeView) {
+                socket.send(JSON.stringify({
+                    cmd: "voice_invite",
+                    target_webid: event.peer_webid,
+                    session_id: `ch-${event.channel_id}-${Date.now()}`,
+                    sdp_offer: null,  // gateway will initiate WebRTC offer toward target
+                    channel_id: event.channel_id,
+                }));
+            }
         }
 
         // Group call: a new peer joined after us — we should call them
         function handleVoicePeerJoined(event) {
             showToast(`${event.peer_webid.slice(0, 20)} joined the voice channel`, "info");
-            // Initiate a WebRTC session toward the new peer
-            if (activeView) {
-                initWebRTC(activeView.id, null, true).catch(console.warn);
+            if (event.gateway_url) {
+                // Remote peer — initiate a relayed call toward them
+                if (activeView) {
+                    socket.send(JSON.stringify({
+                        cmd: "voice_invite",
+                        target_webid: event.peer_webid,
+                        session_id: `ch-${event.channel_id || activeView.id}-${Date.now()}`,
+                        channel_id: event.channel_id || activeView.id,
+                    }));
+                }
+            } else {
+                // Local peer — existing mesh path
+                if (activeView) initWebRTC(activeView.id, null, true).catch(console.warn);
             }
         }
 
@@ -3937,12 +3972,53 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
         }
         function _showNatWarning() {
             if (document.getElementById("nat-warning-banner")) return;
-            const banner = document.createElement("div");
-            banner.id = "nat-warning-banner";
-            banner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:2000;background:#78350f;color:#fef3c7;padding:8px 16px;font-size:0.85em;display:flex;align-items:center;gap:8px;";
-            banner.innerHTML = `<span style="flex:1">Federation is limited: no public URL configured. Set <code>PROXION_PUBLIC_URL</code> in <code>.env</code> to allow peers on other gateways to reach you.</span><button style="background:transparent;border:none;color:#fef3c7;cursor:pointer;font-size:1.1em;padding:0 4px;" aria-label="Dismiss">&#x2715;</button>`;
-            banner.querySelector("button").onclick = () => banner.remove();
-            document.body.prepend(banner);
+            if (sessionStorage.getItem("proxion_nat_dismissed")) return;
+            // Fetch connectivity details to give actionable, user-friendly guidance
+            fetch("/connectivity").then(r => r.json()).then(c => {
+                if (c.public_url_set) return;
+                const banner = document.createElement("div");
+                banner.id = "nat-warning-banner";
+                banner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:2000;background:#78350f;color:#fef3c7;padding:10px 16px;font-size:0.85em;line-height:1.5;";
+                const port = c.local_port || 8080;
+                const localIp = c.local_ip || "192.168.x.x";
+                const triedUpnp = c.upnp_mapped === false;
+                let guide;
+                if (triedUpnp) {
+                    guide = `<strong>Your gateway isn’t reachable from the internet.</strong>
+                        Friends on other gateways can’t message or call you yet.
+                        <details style="margin-top:6px;cursor:pointer;">
+                          <summary><strong>How to fix this ▾</strong></summary>
+                          <div style="margin-top:8px;line-height:1.9;padding:0 4px;">
+                            <strong>Option 1 — Port forward your router</strong> (most reliable)<br>
+                            Forward port <code style="background:#451a03;padding:1px 4px;border-radius:3px;">${port}</code> (TCP)
+                            to <code style="background:#451a03;padding:1px 4px;border-radius:3px;">${localIp}</code> in your router admin page,
+                            then set <code style="background:#451a03;padding:1px 4px;border-radius:3px;">PROXION_PUBLIC_URL=http://YOUR_EXTERNAL_IP:${port}</code> in your <code>.env</code>.
+                            &nbsp;<a href="https://portforward.com" target="_blank" rel="noopener" style="color:#fcd34d;">portforward.com</a> has guides for every router.<br><br>
+                            <strong>Option 2 — Cloudflare Tunnel</strong> (free, no router changes needed)<br>
+                            Run: <code style="background:#451a03;padding:1px 4px;border-radius:3px;">cloudflared tunnel --url http://localhost:${port}</code><br>
+                            Copy the <code>https://xxxx.trycloudflare.com</code> URL it gives you and set it as <code>PROXION_PUBLIC_URL</code>.
+                          </div>
+                        </details>`;
+                } else {
+                    guide = `Your gateway isn’t publicly reachable. Friends on other gateways won’t be able to message or call you. Open Settings → Federation for setup guidance.`;
+                }
+                banner.innerHTML = `<div style="display:flex;gap:12px;align-items:flex-start;max-width:900px;margin:0 auto;">
+                    <span style="flex:1;">${guide}</span>
+                    <button style="background:transparent;border:none;color:#fef3c7;cursor:pointer;font-size:1.2em;flex-shrink:0;padding:0 4px;line-height:1;" aria-label="Dismiss">×</button>
+                </div>`;
+                banner.querySelector("button").onclick = () => {
+                    banner.remove();
+                    sessionStorage.setItem("proxion_nat_dismissed", "1");
+                };
+                document.body.prepend(banner);
+            }).catch(() => {
+                // Fallback: minimal banner if /connectivity unreachable
+                const banner = document.createElement("div");
+                banner.id = "nat-warning-banner";
+                banner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:2000;background:#78350f;color:#fef3c7;padding:8px 16px;font-size:0.85em;display:flex;gap:8px;";
+                banner.innerHTML = `<span style="flex:1">Federation limited — gateway not publicly reachable. Set <code>PROXION_PUBLIC_URL</code> in <code>.env</code>.</span><button onclick="this.closest('#nat-warning-banner').remove()" style="background:transparent;border:none;color:#fef3c7;cursor:pointer;">×</button>`;
+                document.body.prepend(banner);
+            });
         }
         function showContactProfile(webid) {
             if (!webid) return;
