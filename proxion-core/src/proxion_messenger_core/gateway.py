@@ -20,6 +20,7 @@ from .readstate import ReadState
 from .inbox import InboxEntry, poll_inbox
 from .didkey import pub_key_to_did
 from ._gateway_voice import VoiceHandlerMixin
+from ._gateway_files import FileTransferMixin
 from ._gateway_pod import PodSyncMixin, extract_mentions
 from ._gateway_rooms import RoomHandlerMixin
 from ._gateway_dm import DmHandlerMixin
@@ -60,7 +61,7 @@ class GatewayConfig:
     # Set automatically by run_gateway.py when UPnP succeeds
     upnp_mapped: bool = field(default_factory=lambda: os.environ.get("PROXION_UPNP_MAPPED") == "1")
 
-class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandlerMixin, AuthHandlerMixin, MiscHandlerMixin):
+class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, PodSyncMixin, RoomHandlerMixin, DmHandlerMixin, AuthHandlerMixin, MiscHandlerMixin):
     def __init__(
         self,
         agent: AgentState,
@@ -871,6 +872,16 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
                 await self._handle_get_dms(websocket, data)
             elif cmd == "send_file":
                 await self._handle_send_file(websocket, data)
+            elif cmd == "file_offer":
+                await self._handle_file_offer(websocket, data)
+            elif cmd == "file_accept":
+                await self._handle_file_accept(websocket, data)
+            elif cmd == "file_reject":
+                await self._handle_file_reject(websocket, data)
+            elif cmd == "file_chunk":
+                await self._handle_file_chunk(websocket, data)
+            elif cmd == "file_complete":
+                await self._handle_file_complete(websocket, data)
             elif cmd == "auth_response":
                 await self._handle_auth_response(websocket, data)
             elif cmd == "register":
@@ -3322,6 +3333,8 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             "room_id", "room_name", "status", "status_message", "updated_at", "from_display_name", "cert_id", "thread_id", "source", "local",
             # voice channel federation (R33)
             "channel_id", "peer_gateway_url", "peer_webid", "target_webid", "action",
+            # chunked file transfer (R39)
+            "file_id", "filename", "mime_type", "size_bytes", "total_chunks", "seq", "data", "reason",
         })
         _unknown = set(data.keys()) - _ALLOWED_RELAY_KEYS
         if _unknown:
@@ -3363,6 +3376,12 @@ class ProxionGateway(VoiceHandlerMixin, PodSyncMixin, RoomHandlerMixin, DmHandle
             return await self._handle_voice_channel_peer_joined_relay(data)
         if data.get("content_type") == "voice_channel_peer_present":
             return await self._handle_voice_channel_peer_present_relay(data)
+
+        # ── Chunked file transfer relay (cross-gateway) ──
+        if data.get("content_type") in (
+            "file_offer", "file_accept", "file_reject", "file_chunk", "file_complete"
+        ):
+            return await self._handle_file_relay(data)
 
         # ── Presence relay — update cache and broadcast ──
         if data.get("content_type") == "presence":
