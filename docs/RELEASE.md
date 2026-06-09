@@ -1,57 +1,77 @@
-# Releasing Proxion (signed installers + auto-update)
+# Releasing & distributing Proxion
 
-The release pipeline (`.github/workflows/release.yml`) builds desktop
-installers for Windows, macOS, and Linux on a `v*` tag. To make them
-**signed** (no OS warnings) and **auto-updating**, provision the secrets
-below. Until then, tagging produces functional but **unsigned** artifacts
-with auto-update inactive.
+Proxion is distributed **off GitHub, free, with no vendor lock-in**. Users
+install from a GitHub Pages landing page that points at the latest GitHub
+Release. There is intentionally **no required dependency on Apple or
+Microsoft**.
 
-## One-time setup (human actions — these need credentials only you can obtain)
+## The two independent "signing" layers (don't confuse them)
 
-### 1. Updater signing key (required for auto-update)
+| Layer | What it does | Vendor? | Cost | Default |
+|-------|-------------|---------|------|---------|
+| **Updater key** | Verifies auto-updates came from you | None (self-generated) | Free | **Recommended** |
+| **OS code signing** | Removes the OS first-launch caution prompt | Apple / Microsoft | Paid | **Optional** |
+
+You can ship a fully working, auto-updating, sovereign app using only the
+updater key. The OS prompt is a one-time "are you sure?" — see the landing
+page copy for the honest per-OS story (Linux: none; Windows: More info → Run
+anyway; macOS: right-click → Open).
+
+## Install front door (GitHub Pages)
+
+`landing/index.html` is an OS-detecting page that reads the latest release via
+the GitHub API at view time (no rebuild per release) and serves the right
+asset with honest first-run instructions.
+
+One-time setup:
+1. Edit `landing/index.html`: set `const REPO = "<owner>/<repo>"`.
+2. Repo Settings → Pages → Source = **GitHub Actions**.
+3. Push; `.github/workflows/pages.yml` deploys it. Share that Pages URL.
+
+## Recommended: sovereign auto-update (free, no vendor)
+
 ```
-cargo install tauri-cli --version "^1"   # if not installed
+cargo install tauri-cli --version "^1"
 tauri signer generate -w ~/.proxion-updater.key
 ```
-- Put the **public** key into `tauri-app/src-tauri/tauri.conf.json` →
-  `tauri.updater.pubkey`, set `tauri.updater.active = true`, and replace
-  `<ORG>` in `endpoints` with your GitHub `org/repo`.
-- Add the **private** key + its password as repo secrets
-  `TAURI_PRIVATE_KEY` and `TAURI_KEY_PASSWORD`.
+- Put the **public** key in `tauri-app/src-tauri/tauri.conf.json` →
+  `tauri.updater.pubkey`; set `updater.active = true`; replace `ORG` in
+  `endpoints` with your `owner/repo`.
+- Add the **private** key + password as repo secrets `TAURI_PRIVATE_KEY` /
+  `TAURI_KEY_PASSWORD`.
 
-### 2. Windows code signing (removes SmartScreen warning)
-Obtain an OV/EV Authenticode certificate (a CA, or Azure Trusted Signing).
-- `WINDOWS_CERTIFICATE` — base64 of the `.pfx`
-- `WINDOWS_CERTIFICATE_PASSWORD`
+Running apps then check the endpoint, see the new version, verify it against
+your public key, and update — with no Apple/Microsoft involvement.
 
-### 3. macOS signing + notarization (removes Gatekeeper warning)
-Requires an Apple Developer account.
-- `APPLE_CERTIFICATE` — base64 of the Developer ID Application `.p12`
-- `APPLE_CERTIFICATE_PASSWORD`
-- `APPLE_SIGNING_IDENTITY` — e.g. `Developer ID Application: Name (TEAMID)`
-- `APPLE_ID`, `APPLE_PASSWORD` (app-specific), `APPLE_TEAM_ID`
+## Optional: remove the OS prompt (paid, only if you want to)
 
-### 4. Linux
-AppImage is unsigned by convention; publish the SHA-256 (and optionally a
-GPG signature) alongside the release.
+- **Windows** — Authenticode cert (a CA, or Azure Trusted Signing ~$10/mo):
+  secrets `WINDOWS_CERTIFICATE` (base64 .pfx), `WINDOWS_CERTIFICATE_PASSWORD`.
+- **macOS** — Apple Developer ID + notarization: `APPLE_CERTIFICATE`,
+  `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`,
+  `APPLE_PASSWORD`, `APPLE_TEAM_ID`.
+
+Absent secrets are skipped — the release still builds.
 
 ## Cutting a release
+
 ```
 git tag vX.Y.Z
-git push origin vX.Y.Z
+git push origin vX.Y.Z      # (requires a configured GitHub remote)
 ```
-The workflow builds, signs, generates `latest.json` (the updater manifest),
-and creates a **draft** GitHub Release with the installers + `latest.json`.
-Review, then publish. Running apps on the previous version check the
-`endpoints` URL, see the new signed version, and update on next launch.
+`.github/workflows/release.yml` builds Windows/macOS/Linux installers (after
+building the PyInstaller gateway sidecar), generates `latest.json` if the
+updater key is set, and creates a **draft** Release with the assets. Review
+and publish; the landing page picks it up automatically.
 
 ## Verifying the updater manifest
-`latest.json` must contain a `version`, per-platform `url` + `signature`
-entries, and `notes`. `tests/test_updater_manifest.py` validates the shape
-of a manifest dict.
+
+`latest.json` must carry a `version` and per-platform `url`+`signature`
+entries. `proxion-core/tests/test_updater_manifest.py` validates the shape.
 
 ## Status
-- ✅ Wired: updater config (default-off), `updater` crate feature, release CI
-  with all signing env slots, manifest validation test.
-- ⏳ Pending human action: provision the secrets above and flip
-  `updater.active = true` with the real pubkey.
+
+- ✅ Wired: landing page + Pages deploy, release CI (unsigned builds succeed),
+  updater config (default-off), manifest validation test.
+- ⏳ One-line edits for you: set `REPO` in the landing page + the updater
+  endpoint; enable Pages; optionally generate the updater key.

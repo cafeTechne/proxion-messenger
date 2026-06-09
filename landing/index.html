@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proxion — sovereign messaging</title>
+<style>
+  :root { --bg:#0f172a; --bg2:#1e293b; --fg:#f1f5f9; --muted:#94a3b8; --dim:#64748b; --accent:#e94560; --ok:#4ade80; --line:#334155; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         background: radial-gradient(1200px 600px at 50% -10%, #15233f, var(--bg)); color: var(--fg);
+         min-height:100vh; line-height:1.5; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 64px 20px 80px; }
+  h1 { font-size: 2.6rem; margin: 0 0 8px; letter-spacing:-0.02em; }
+  .tag { color: var(--muted); font-size: 1.1rem; margin: 0 0 36px; }
+  .card { background: var(--bg2); border: 1px solid var(--line); border-radius: 14px; padding: 24px; margin: 0 0 20px; }
+  .dl-primary { display:inline-flex; align-items:center; gap:10px; background: var(--accent); color:#fff;
+                text-decoration:none; font-weight:600; font-size:1.05rem; padding: 14px 24px; border-radius:10px; }
+  .dl-primary:hover { filter: brightness(1.08); }
+  .dl-sub { margin-top: 14px; font-size:0.9em; }
+  .dl-sub a { color: var(--muted); text-decoration: none; margin-right: 14px; }
+  .dl-sub a:hover { color: var(--fg); text-decoration: underline; }
+  .ver { color: var(--dim); font-size:0.85em; margin-top:10px; }
+  .steps { font-size:0.92em; color: var(--muted); }
+  .steps code { background:#0b1220; padding:1px 6px; border-radius:4px; color:#cbd5e1; }
+  .steps h3 { color: var(--fg); font-size:1rem; margin: 18px 0 6px; }
+  .badge { display:inline-block; font-size:0.72em; color:var(--ok); border:1px solid #14532d; background:#052e16;
+           padding:2px 8px; border-radius:999px; margin-left:8px; vertical-align:middle; }
+  .why { color: var(--dim); font-size:0.88em; }
+  .why strong { color: var(--muted); }
+  footer { color: var(--dim); font-size:0.82em; margin-top:30px; }
+  a.link { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Proxion</h1>
+  <p class="tag">Sovereign messaging &amp; voice for small groups. No company in the middle. No account. Your data, your machine.</p>
+
+  <div class="card">
+    <a id="dl" class="dl-primary" href="#">Detecting your system…</a>
+    <div id="dl-sub" class="dl-sub"></div>
+    <div id="ver" class="ver"></div>
+  </div>
+
+  <div class="card steps" id="steps"></div>
+
+  <div class="card">
+    <p class="why"><strong>Why a one-time "are you sure?" on Windows/macOS?</strong><br>
+    Proxion ships free and unsigned-by-a-vendor on purpose — no Apple or Microsoft
+    gatekeeping, no certificate fees, no middleman. Updates are still cryptographically
+    verified with Proxion's own signing key. The OS just shows a caution prompt the first
+    time because it can't phone home to a paid certificate authority. Linux has no prompt.</p>
+  </div>
+
+  <footer>
+    Open source · <a class="link" id="repo-link" href="#">View on GitHub</a> ·
+    <a class="link" id="all-releases" href="#">All downloads</a>
+  </footer>
+</div>
+
+<script>
+// ── Configure once: set this to your GitHub "owner/repo" ──
+const REPO = "ORG/proxion";
+// ─────────────────────────────────────────────────────────
+
+const $ = (id) => document.getElementById(id);
+$("repo-link").href = `https://github.com/${REPO}`;
+$("all-releases").href = `https://github.com/${REPO}/releases/latest`;
+
+function detectOS() {
+  const p = (navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || "").toLowerCase();
+  const ua = navigator.userAgent.toLowerCase();
+  if (p.includes("win") || ua.includes("windows")) return "windows";
+  if (p.includes("mac") || ua.includes("mac os")) return "macos";
+  if (p.includes("linux") || ua.includes("linux") || ua.includes("x11")) return "linux";
+  return "unknown";
+}
+
+// Match a release asset to an OS by file extension.
+function pickAsset(assets, os) {
+  const by = (exts) => assets.find(a => exts.some(e => a.name.toLowerCase().endsWith(e)));
+  if (os === "windows") return by([".msi", ".exe"]);
+  if (os === "macos")   return by([".dmg", ".app.tar.gz"]);
+  if (os === "linux")   return by([".appimage"]) || by([".deb"]) || by([".rpm"]);
+  return null;
+}
+
+const OS_LABEL = { windows: "Windows", macos: "macOS", linux: "Linux", unknown: "your system" };
+
+const STEPS = {
+  windows: `<h3>First launch on Windows</h3>
+    If SmartScreen shows <em>"Windows protected your PC"</em>, click
+    <code>More info</code> → <code>Run anyway</code>. You only do this once.`,
+  macos: `<h3>First launch on macOS</h3>
+    Right-click (or Control-click) the app → <code>Open</code> → <code>Open</code> in the prompt.
+    You only do this once. (Gatekeeper blocks a normal double-click for apps not notarized by Apple.)`,
+  linux: `<h3>First launch on Linux</h3>
+    AppImage: make it executable (<code>chmod +x Proxion*.AppImage</code>) and run it.
+    Or install the <code>.deb</code>/<code>.rpm</code> with your package manager. No prompts.`,
+  unknown: `<h3>Pick your platform</h3> Choose the right download for your operating system above.`,
+};
+
+async function init() {
+  const os = detectOS();
+  $("steps").innerHTML = STEPS[os];
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
+      headers: { "Accept": "application/vnd.github+json" },
+    });
+    if (!res.ok) throw new Error("no release");
+    const rel = await res.json();
+    const assets = rel.assets || [];
+    $("ver").textContent = `Latest: ${rel.tag_name || rel.name || ""}`;
+
+    const primary = pickAsset(assets, os);
+    const dl = $("dl");
+    if (primary) {
+      dl.href = primary.browser_download_url;
+      dl.textContent = `Download for ${OS_LABEL[os]}`;
+    } else {
+      dl.href = `https://github.com/${REPO}/releases/latest`;
+      dl.textContent = `Download for ${OS_LABEL[os]}`;
+    }
+
+    // Alternate-platform links
+    const others = ["windows", "macos", "linux"].filter(o => o !== os);
+    const sub = others.map(o => {
+      const a = pickAsset(assets, o);
+      const href = a ? a.browser_download_url : `https://github.com/${REPO}/releases/latest`;
+      return `<a href="${href}">${OS_LABEL[o]}</a>`;
+    }).join("");
+    $("dl-sub").innerHTML = sub ? ("Other systems: " + sub) : "";
+  } catch (e) {
+    const dl = $("dl");
+    dl.href = `https://github.com/${REPO}/releases/latest`;
+    dl.textContent = "Download from GitHub";
+    $("ver").textContent = "Could not load release info — opening GitHub releases.";
+  }
+}
+init();
+</script>
+</body>
+</html>

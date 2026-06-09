@@ -1,20 +1,24 @@
 name: Release
 
-# Builds signed, auto-updatable desktop installers on a version tag.
+# Builds desktop installers on a version tag and publishes them to a GitHub
+# Release. The landing page (landing/index.html, served via Pages) points users
+# at these assets — that's the "install off GitHub" front door.
 #
-# REQUIRED SECRETS (provision in repo Settings → Secrets and variables → Actions):
-#   TAURI_PRIVATE_KEY            — Tauri updater private key (from `tauri signer generate`)
-#   TAURI_KEY_PASSWORD           — password for the updater private key
-#   WINDOWS_CERTIFICATE          — base64-encoded Authenticode .pfx (or use Azure Trusted Signing)
-#   WINDOWS_CERTIFICATE_PASSWORD — password for the .pfx
-#   APPLE_CERTIFICATE            — base64 Developer ID Application .p12
-#   APPLE_CERTIFICATE_PASSWORD   — password for the .p12
-#   APPLE_SIGNING_IDENTITY       — e.g. "Developer ID Application: Name (TEAMID)"
-#   APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID — for notarization
+# DISTRIBUTION STANCE: no vendor lock-in. The default build is unsigned-by-a-CA
+# and fully functional off GitHub (Linux runs clean; Windows/macOS show a
+# one-time caution prompt). Two independent, OPTIONAL layers:
 #
-# Until these are set + tauri.conf.json updater.active=true with a real pubkey,
-# this workflow builds UNSIGNED artifacts (still functional, but the OS will warn
-# and auto-update is inactive). See docs/RELEASE.md.
+# RECOMMENDED (free, sovereign — enables auto-update, no Apple/Microsoft):
+#   TAURI_PRIVATE_KEY   — Tauri updater private key (from `tauri signer generate`)
+#   TAURI_KEY_PASSWORD  — password for that key
+#   (also set tauri.conf.json updater.active=true with the matching pubkey)
+#
+# OPTIONAL (paid, removes the OS caution prompt — only if you choose to):
+#   WINDOWS_CERTIFICATE / WINDOWS_CERTIFICATE_PASSWORD          — Authenticode
+#   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD /
+#   APPLE_SIGNING_IDENTITY / APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID
+#
+# Any absent secret is simply skipped — the build still succeeds. See docs/RELEASE.md.
 
 on:
   push:
