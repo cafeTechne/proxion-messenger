@@ -1053,6 +1053,18 @@ class LocalStore:
                     PRIMARY KEY (room_id, muted_did)
                 )""",
             ],
+            # 54: relay-node mailbox (sealed store-and-forward for unreachable gateways)
+            [
+                """CREATE TABLE IF NOT EXISTS relay_mailbox (
+                    blob_id       TEXT PRIMARY KEY,
+                    recipient_did TEXT NOT NULL,
+                    sealed_blob   TEXT NOT NULL,
+                    received_at   REAL NOT NULL DEFAULT (unixepoch('now','subsec')),
+                    expires_at    REAL NOT NULL
+                )""",
+                """CREATE INDEX IF NOT EXISTS idx_relay_mailbox_recipient
+                   ON relay_mailbox(recipient_did)""",
+            ],
         ]
 
         for version, migration in enumerate(migrations, start=1):
@@ -1538,6 +1550,59 @@ class LocalStore:
         if expires_at is not None and _t.time() > expires_at:
             return False
         return True
+
+    # ------------------------------------------------------------------
+    # Relay mailbox (relay-node store-and-forward; R38)
+    # ------------------------------------------------------------------
+
+    # Bounds to prevent abuse of a relay node
+    _MAILBOX_MAX_PER_DID = 500
+    _MAILBOX_MAX_TOTAL = 50_000
+
+    def enqueue_mailbox(self, blob_id: str, recipient_did: str, sealed_blob: str,
+                        expires_at: float) -> bool:
+        """Store a sealed blob for a recipient. Returns False if a quota is exceeded."""
+        with self._conn() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM relay_mailbox").fetchone()[0]
+            if total >= self._MAILBOX_MAX_TOTAL:
+                return False
+            per = conn.execute(
+                "SELECT COUNT(*) FROM relay_mailbox WHERE recipient_did=?", (recipient_did,)
+            ).fetchone()[0]
+            if per >= self._MAILBOX_MAX_PER_DID:
+                return False
+            conn.execute(
+                "INSERT OR REPLACE INTO relay_mailbox (blob_id, recipient_did, sealed_blob, expires_at) VALUES (?,?,?,?)",
+                (blob_id, recipient_did, sealed_blob, expires_at),
+            )
+        return True
+
+    def drain_mailbox(self, recipient_did: str, limit: int = 200) -> list[dict]:
+        """Return and DELETE up to *limit* non-expired blobs for the recipient."""
+        import time as _t
+        now = _t.time()
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT blob_id, sealed_blob FROM relay_mailbox WHERE recipient_did=? AND expires_at > ? ORDER BY received_at LIMIT ?",
+                (recipient_did, now, limit),
+            ).fetchall()
+            result = [{"blob_id": r[0], "sealed_blob": r[1]} for r in rows]
+            if result:
+                ids = [r["blob_id"] for r in result]
+                conn.executemany("DELETE FROM relay_mailbox WHERE blob_id=?", [(i,) for i in ids])
+        return result
+
+    def mailbox_count(self, recipient_did: str) -> int:
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM relay_mailbox WHERE recipient_did=?", (recipient_did,)
+            ).fetchone()[0]
+
+    def purge_expired_mailbox(self) -> int:
+        import time as _t
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM relay_mailbox WHERE expires_at <= ?", (_t.time(),))
+            return cur.rowcount or 0
 
     # ------------------------------------------------------------------
     # Messages

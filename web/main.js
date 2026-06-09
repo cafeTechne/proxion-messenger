@@ -649,9 +649,11 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                 const el = document.getElementById('settings-federation-status');
                 if (!el) return;
                 const tick = ok => ok ? '<span style="color:#4ade80">&#x2713;</span>' : '<span style="color:#f87171">&#x2717;</span>';
-                const reachable = c.public_url_set || c.relay_capable;
+                const reachable = c.public_url_set || c.relay_capable || c.relay_fallback_active;
                 const reachHow = reachable
-                    ? (c.upnp_mapped ? ' <span style="color:#64748b;font-size:0.85em;">(via UPnP)</span>' : ' <span style="color:#64748b;font-size:0.85em;">(manual)</span>')
+                    ? (c.upnp_mapped ? ' <span style="color:#64748b;font-size:0.85em;">(via UPnP)</span>'
+                       : c.relay_fallback_active && !c.public_url_set ? ' <span style="color:#64748b;font-size:0.85em;">(via relay)</span>'
+                       : ' <span style="color:#64748b;font-size:0.85em;">(manual)</span>')
                     : ` <span style="color:#fbbf24">not reachable — <a href="#" id="fix-conn-link" style="color:#fbbf24;text-decoration:underline;">fix this</a></span>`;
                 el.innerHTML = [
                     `${tick(reachable)} Internet reachable:${reachHow}`,
@@ -4173,7 +4175,8 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
             if (sessionStorage.getItem("proxion_nat_dismissed")) return;
             // Fetch connectivity details to give actionable, user-friendly guidance
             fetch("/connectivity").then(r => r.json()).then(c => {
-                if (c.public_url_set) return;
+                // Reachable directly OR via the sealed relay fallback → no warning.
+                if (c.public_url_set || c.relay_fallback_active) return;
                 const banner = document.createElement("div");
                 banner.id = "nat-warning-banner";
                 banner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:2000;background:#78350f;color:#fef3c7;padding:10px 16px;font-size:0.85em;line-height:1.5;";

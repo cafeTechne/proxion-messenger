@@ -571,6 +571,19 @@ class PodSyncMixin:
                     payload = {}
 
                 _peer_did_chain = payload.get("to_webid", "") or ""
+
+                # R38: if direct delivery failed, try the sealed relay-node mailbox
+                # (works when the recipient gateway is unreachable / behind CGNAT).
+                if not delivered and _peer_did_chain:
+                    try:
+                        from ._gateway_mailbox import relay_fallback_url as _rfu
+                        if _rfu() and hasattr(self, "_send_via_mailbox"):
+                            if await self._send_via_mailbox(_peer_did_chain, payload):
+                                delivered = True
+                                logger.info("Pending relay %s delivered via mailbox fallback", relay["id"])
+                    except Exception as _mb_exc:
+                        logger.debug("mailbox fallback failed: %s", _mb_exc)
+
                 if delivered:
                     self._store.mark_relay_delivered(relay["id"])
                     try:

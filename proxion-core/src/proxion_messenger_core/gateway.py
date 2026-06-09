@@ -21,6 +21,7 @@ from .inbox import InboxEntry, poll_inbox
 from .didkey import pub_key_to_did
 from ._gateway_voice import VoiceHandlerMixin
 from ._gateway_files import FileTransferMixin
+from ._gateway_mailbox import MailboxMixin, relay_node_enabled, relay_fallback_url
 from ._gateway_pod import PodSyncMixin, extract_mentions
 from ._gateway_rooms import RoomHandlerMixin
 from ._gateway_dm import DmHandlerMixin
@@ -61,7 +62,7 @@ class GatewayConfig:
     # Set automatically by run_gateway.py when UPnP succeeds
     upnp_mapped: bool = field(default_factory=lambda: os.environ.get("PROXION_UPNP_MAPPED") == "1")
 
-class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, PodSyncMixin, RoomHandlerMixin, DmHandlerMixin, AuthHandlerMixin, MiscHandlerMixin):
+class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSyncMixin, RoomHandlerMixin, DmHandlerMixin, AuthHandlerMixin, MiscHandlerMixin):
     def __init__(
         self,
         agent: AgentState,
@@ -1897,12 +1898,42 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, PodSyncMixin, RoomHan
                         "local_port":     self.config.http_port or 8080,
                         "turn_configured": bool(self.config.turn_url and self.config.turn_secret),
                         "pod_available":  self._pod_available,
+                        "relay_fallback_active": bool(relay_fallback_url()),
+                        "relay_node": relay_node_enabled(),
                     }).encode()
                     writer.write(
                         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                         + _SEC_HDR + _NO_STORE_HDR
                         + b"Access-Control-Allow-Origin: *\r\n"
                         b"Content-Length: " + str(len(conn_body)).encode() + b"\r\n\r\n" + conn_body
+                    )
+                    await writer.drain()
+                    return
+
+                # ── Mailbox endpoints (relay-node sealed store-and-forward; R38) ──
+                if path.startswith("/mailbox/") and method in ("POST", "GET"):
+                    if _check_http_rate(peer_ip, "mailbox"):
+                        await _write_429(writer)
+                        await writer.drain()
+                        return
+                    from urllib.parse import unquote as _mb_unq, parse_qs as _mb_qs
+                    _mb_did = _mb_unq(path[len("/mailbox/"):])
+                    if method == "POST":
+                        _mb_body = b""
+                        if content_length > 0:
+                            _mb_body = await asyncio.wait_for(
+                                reader.read(min(content_length, 262144 + 4096)), timeout=10.0)
+                        _mb_status, _mb_resp = await self._handle_mailbox_store(_mb_did, _mb_body)
+                    else:
+                        _q = _mb_qs(_query_string)
+                        _mb_status, _mb_resp = await self._handle_mailbox_drain(
+                            _mb_did, _q.get("sig", [""])[0], _q.get("ts", [""])[0],
+                            _q.get("nonce", [""])[0])
+                    _mb_bytes = _mb_resp.encode()
+                    writer.write(
+                        f"HTTP/1.1 {_mb_status}\r\n".encode()
+                        + b"Content-Type: application/json\r\n" + _SEC_HDR + _NO_STORE_HDR
+                        + b"Content-Length: " + str(len(_mb_bytes)).encode() + b"\r\n\r\n" + _mb_bytes
                     )
                     await writer.drain()
                     return
@@ -4614,6 +4645,13 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, PodSyncMixin, RoomHan
             # R16: Continuous assurance loop
             if self._assurance_loop_instance is not None:
                 main_tasks.append(asyncio.create_task(self._continuous_assurance_loop()))
+
+            # R38: drain our sealed mailbox from the relay node (if configured)
+            if relay_fallback_url():
+                main_tasks.append(asyncio.create_task(self._mailbox_drain_loop()))
+            # R38: relay node — periodically purge expired mailbox blobs
+            if relay_node_enabled():
+                main_tasks.append(asyncio.create_task(self._mailbox_purge_loop()))
 
             # 1b. Optional HTTP server for serving the web UI
             if self.config.http_port and self.config.web_dir:
