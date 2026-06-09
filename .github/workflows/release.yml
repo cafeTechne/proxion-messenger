@@ -1,0 +1,85 @@
+name: Release
+
+# Builds signed, auto-updatable desktop installers on a version tag.
+#
+# REQUIRED SECRETS (provision in repo Settings → Secrets and variables → Actions):
+#   TAURI_PRIVATE_KEY            — Tauri updater private key (from `tauri signer generate`)
+#   TAURI_KEY_PASSWORD           — password for the updater private key
+#   WINDOWS_CERTIFICATE          — base64-encoded Authenticode .pfx (or use Azure Trusted Signing)
+#   WINDOWS_CERTIFICATE_PASSWORD — password for the .pfx
+#   APPLE_CERTIFICATE            — base64 Developer ID Application .p12
+#   APPLE_CERTIFICATE_PASSWORD   — password for the .p12
+#   APPLE_SIGNING_IDENTITY       — e.g. "Developer ID Application: Name (TEAMID)"
+#   APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID — for notarization
+#
+# Until these are set + tauri.conf.json updater.active=true with a real pubkey,
+# this workflow builds UNSIGNED artifacts (still functional, but the OS will warn
+# and auto-update is inactive). See docs/RELEASE.md.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Build installers (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Build gateway sidecar
+        run: pip install pyinstaller && pip install -e "./proxion-core[gateway]" && python build_sidecar.py
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Build + sign Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # Updater signing (empty until provisioned → unsigned, no auto-update)
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          # Windows Authenticode
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          # macOS signing + notarization
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          projectPath: tauri-app
+          tagName: ${{ github.ref_name }}
+          releaseName: "Proxion ${{ github.ref_name }}"
+          releaseBody: "See the assets below to download and install. Auto-update applies on next launch once signing is configured."
+          releaseDraft: true
+          prerelease: false
+          # tauri-action generates latest.json (the updater manifest) automatically
+          # when updater signing is configured, and uploads it to the release.
+          includeUpdaterJson: true

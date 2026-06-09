@@ -9,7 +9,7 @@ edition = "2021"
 tauri-build = { version = "1.5", features = [] }
 
 [dependencies]
-tauri = { version = "1.5", features = ["shell-all", "notification-all", "system-tray", "window-all"] }
+tauri = { version = "1.5", features = ["shell-all", "notification-all", "system-tray", "window-all", "updater"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 keyring = "2"

@@ -63,6 +63,14 @@
         }
       }
     },
+    "updater": {
+      "active": false,
+      "endpoints": [
+        "https://github.com/ORG/proxion/releases/latest/download/latest.json"
+      ],
+      "dialog": true,
+      "pubkey": ""
+    },
     "plugins": {
       "autostart": {
         "windows": {
