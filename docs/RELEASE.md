@@ -43,6 +43,11 @@ tauri signer generate -w ~/.proxion-updater.key
 Running apps then check the endpoint, see the new version, verify it against
 your public key, and update — with no Apple/Microsoft involvement.
 
+The app shows a custom in-app banner ("A new version is ready — Restart &
+update") instead of Tauri's native dialog (`updater.dialog` is `false`). The
+banner is wired in `web/main.js` (`_checkForUpdates`) and stays dormant in
+the browser and until the updater is active.
+
 ## Optional: remove the OS prompt (paid, only if you want to)
 
 - **Windows** — Authenticode cert (a CA, or Azure Trusted Signing ~$10/mo):

@@ -6028,6 +6028,46 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
                 });
             })();
 
+            // R37: in-app auto-update banner (Tauri desktop only; dormant until
+            // the updater is configured with a pubkey + active=true).
+            (function _checkForUpdates() {
+                const updater = window.__TAURI__ && window.__TAURI__.updater;
+                if (!updater || typeof updater.checkUpdate !== "function") return;
+                setTimeout(async () => {
+                    let info;
+                    try {
+                        info = await updater.checkUpdate();
+                    } catch (_) { return; } // updater inactive / network error — stay quiet
+                    if (!info || !info.shouldUpdate) return;
+                    const ver = (info.manifest && info.manifest.version) || "";
+                    if (document.getElementById("update-banner")) return;
+                    const banner = document.createElement("div");
+                    banner.id = "update-banner";
+                    banner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:2100;background:#134e26;color:#d1fae5;padding:9px 16px;font-size:0.88em;display:flex;align-items:center;gap:12px;";
+                    banner.innerHTML = `<span style="flex:1">A new version of Proxion${ver ? " (" + ver + ")" : ""} is ready.</span>
+                        <button id="update-install-btn" style="background:#4ade80;border:none;color:#052e16;font-weight:600;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:0.95em;">Restart &amp; update</button>
+                        <button id="update-dismiss-btn" style="background:transparent;border:none;color:#d1fae5;cursor:pointer;font-size:1.1em;padding:0 4px;" aria-label="Later">&#x2715;</button>`;
+                    document.body.prepend(banner);
+                    document.getElementById("update-dismiss-btn").onclick = () => banner.remove();
+                    document.getElementById("update-install-btn").onclick = async () => {
+                        const btn = document.getElementById("update-install-btn");
+                        btn.disabled = true; btn.textContent = "Updating…";
+                        try {
+                            await updater.installUpdate();
+                            if (window.__TAURI__.process && window.__TAURI__.process.relaunch) {
+                                await window.__TAURI__.process.relaunch();
+                            } else {
+                                btn.textContent = "Please restart Proxion";
+                            }
+                        } catch (e) {
+                            btn.disabled = false;
+                            btn.textContent = "Retry";
+                            showToast("Update failed — try again");
+                        }
+                    };
+                }, 8000);
+            })();
+
             // R13.7: Image lightbox
             document.getElementById("lightbox-close")?.addEventListener("click", () => {
                 document.getElementById("lightbox")?.classList.remove("visible");
