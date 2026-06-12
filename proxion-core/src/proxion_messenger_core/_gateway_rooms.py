@@ -1647,6 +1647,7 @@ class RoomHandlerMixin:
                 await ws.send(event)
             except Exception:
                 pass
+        self._relay_room_moderation(room_id, "ban", target_webid, caller_webid, reason=reason)
 
     async def _handle_unban_member(self, websocket, data: dict) -> None:
         room_id = data.get("room_id", "")
@@ -1662,6 +1663,7 @@ class RoomHandlerMixin:
                 await ws.send(event)
             except Exception:
                 pass
+        self._relay_room_moderation(room_id, "unban", target_webid, self._client_webids.get(websocket, ""))
 
     async def _handle_mute_member(self, websocket, data: dict) -> None:
         room_id = data.get("room_id", "")
@@ -1682,6 +1684,7 @@ class RoomHandlerMixin:
                 await ws.send(event)
             except Exception:
                 pass
+        self._relay_room_moderation(room_id, "mute", target_webid, caller_webid, expires_at=expires_at)
 
     async def _handle_unmute_member(self, websocket, data: dict) -> None:
         room_id = data.get("room_id", "")
@@ -1697,6 +1700,28 @@ class RoomHandlerMixin:
                 await ws.send(event)
             except Exception:
                 pass
+        self._relay_room_moderation(room_id, "unmute", target_webid, self._client_webids.get(websocket, ""))
+
+    def _relay_room_moderation(self, room_id: str, action: str, target_webid: str,
+                               caller_webid: str, reason: str = "", expires_at=None) -> None:
+        """Fan a moderation action out to federated member gateways (R-C1)."""
+        if not self._store or not target_webid:
+            return
+        _seen: set = set()
+        for _fm in (self._store.get_federated_room_members(room_id) or []):
+            _gw = _fm.get("gateway_url", "")
+            if not _gw or _gw in _seen:
+                continue
+            _seen.add(_gw)
+            _payload = {
+                "content_type": "room_moderation", "action": action,
+                "room_id": room_id, "webid": target_webid, "from_webid": caller_webid,
+            }
+            if reason:
+                _payload["reason"] = reason
+            if expires_at is not None:
+                _payload["expires_at"] = expires_at
+            asyncio.create_task(self._relay_ephemeral(_gw, _payload))
 
     async def _handle_get_room_bans(self, websocket, data: dict) -> None:
         room_id = data.get("room_id", "")

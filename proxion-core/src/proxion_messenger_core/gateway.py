@@ -3366,6 +3366,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             "channel_id", "peer_gateway_url", "peer_webid", "target_webid", "action",
             # chunked file transfer (R39)
             "file_id", "filename", "mime_type", "size_bytes", "total_chunks", "seq", "data", "reason",
+            # room moderation federation (R-C1)
+            "webid", "expires_at",
         })
         _unknown = set(data.keys()) - _ALLOWED_RELAY_KEYS
         if _unknown:
@@ -3397,6 +3399,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # ── Room delete relay — remove from store and deliver to local members ──
         if data.get("content_type") == "room_delete":
             return await self._handle_room_delete_relay(data)
+
+        # ── Room moderation relay — ban/mute propagation (R-C1) ──
+        if data.get("content_type") == "room_moderation":
+            return await self._handle_room_moderation_relay(data)
 
         # ── Voice channel relay (cross-gateway group voice) ──
         if data.get("content_type") == "voice_channel_join":
@@ -3832,6 +3838,15 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if not room:
             return "404 Not Found", '{"error":"room_not_found"}'
 
+        # Moderation enforcement (R-C1): drop relayed messages from banned/muted
+        # senders. This is what makes ban/mute effective across gateways — a
+        # banned user on another gateway cannot get messages into the room.
+        if self._store:
+            if self._store.is_room_banned(room_id, from_webid):
+                return "403 Forbidden", '{"error":"sender_banned"}'
+            if self._store.is_room_muted(room_id, from_webid):
+                return "403 Forbidden", '{"error":"sender_muted"}'
+
         event = {
             "type": "message",
             "source": "relay",
@@ -3905,6 +3920,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         room = self._local_rooms.get(room_id)
         if not room:
             return "404 Not Found", '{"error":"room_not_found"}'
+        # Moderation enforcement (R-C1): banned/muted senders cannot react.
+        if self._store and (self._store.is_room_banned(room_id, from_webid)
+                            or self._store.is_room_muted(room_id, from_webid)):
+            return "403 Forbidden", '{"error":"sender_moderated"}'
         if self._store:
             if action == "add":
                 self._store.save_reaction(room_id, message_id, emoji, from_webid)
@@ -3923,6 +3942,44 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await ws.send(event)
             except Exception:
                 pass
+        return "200 OK", '{"status":"ok"}'
+
+    async def _handle_room_moderation_relay(self, data: dict) -> tuple[str, str]:
+        """Inbound relayed moderation action (R-C1) — apply locally and notify members.
+
+        Lets a ban/mute issued on the host gateway propagate to federated member
+        gateways so they enforce and display it consistently.
+        """
+        room_id = data.get("room_id", "")
+        action  = data.get("action", "")
+        target  = data.get("webid", "")
+        caller  = data.get("from_webid", "")
+        if not room_id or not action or not target or not self._store:
+            return "400 Bad Request", '{"error":"missing_moderation_fields"}'
+        if action == "ban":
+            self._store.ban_room_member(room_id, target, caller, str(data.get("reason", "")))
+            evt = {"type": "member_banned", "room_id": room_id, "webid": target,
+                   "reason": data.get("reason", "")}
+        elif action == "unban":
+            self._store.unban_room_member(room_id, target)
+            evt = {"type": "member_unbanned", "room_id": room_id, "webid": target}
+        elif action == "mute":
+            self._store.mute_room_member(room_id, target, caller, data.get("expires_at"))
+            evt = {"type": "member_muted", "room_id": room_id, "webid": target,
+                   "expires_at": data.get("expires_at")}
+        elif action == "unmute":
+            self._store.unmute_room_member(room_id, target)
+            evt = {"type": "member_unmuted", "room_id": room_id, "webid": target}
+        else:
+            return "400 Bad Request", '{"error":"unknown_moderation_action"}'
+        room = self._local_rooms.get(room_id)
+        if room:
+            payload = json.dumps(evt)
+            for ws in list(room.get("members", set())):
+                try:
+                    await ws.send(payload)
+                except Exception:
+                    pass
         return "200 OK", '{"status":"ok"}'
 
     async def _handle_room_edit_relay(self, data: dict) -> tuple[str, str]:
