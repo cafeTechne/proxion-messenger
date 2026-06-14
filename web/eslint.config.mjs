@@ -5,7 +5,7 @@ import globals from "globals";
 
 export default [
   {
-    files: ["main.js", "util.js", "auth.js", "e2e.js", "pod.js"],
+    files: ["main.js", "util.js", "filetransfer.js", "auth.js", "e2e.js", "pod.js"],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "module",

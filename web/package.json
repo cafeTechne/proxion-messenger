@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "vitest run",
-    "lint": "eslint main.js util.js auth.js e2e.js pod.js",
+    "lint": "eslint main.js util.js filetransfer.js auth.js e2e.js pod.js",
     "check:solid-sdk": "node --experimental-vm-modules scripts/check_solid_sdk_versions.mjs"
   },
   "keywords": [],
