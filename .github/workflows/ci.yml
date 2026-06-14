@@ -36,6 +36,9 @@ jobs:
       - name: Install web deps
         working-directory: web
         run: npm install --no-audit --no-fund
+      - name: Lint (no-undef net)
+        working-directory: web
+        run: npm run lint
       - name: Run vitest
         working-directory: web
         run: npm test

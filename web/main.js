@@ -12,7 +12,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podWriteWebhook, podDeleteWebhook,
          podWriteContact, podReadContacts, podDeleteContact,
          podWriteInvite, podReadInvites, podDeleteInvite,
-         podReadRoomIndex, _podUpdateRoomIndex,
+         podReadRoomIndex, _podUpdateRoomIndex, podReadRoomMeta,
          podReadDmIndex, _podUpdateDmIndex } from './pod.js';
 import {
     didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, timeAgo,
