@@ -14,6 +14,10 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podWriteInvite, podReadInvites, podDeleteInvite,
          podReadRoomIndex, _podUpdateRoomIndex,
          podReadDmIndex, _podUpdateDmIndex } from './pod.js';
+import {
+    didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, timeAgo,
+    expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8,
+} from './util.js';
 
         const WS_URL = (() => {
             const metaUrl = document.querySelector('meta[name="x-gateway-url"]')?.content;
@@ -100,24 +104,6 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
         }
         // Returns the last 5 chars of a DID (or any identity string) as a short, unique suffix.
         // For did:key, these chars are from the base58btc-encoded key — cryptographically unique.
-        function didSuffix(id) {
-            if (!id || id.length < 5) return "";
-            return id.slice(-5);
-        }
-        function escHtml(str) {
-            return String(str)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
-        }
-        function formatTimestamp(ts) {
-            if (!ts) return '';
-            const d = new Date(typeof ts === 'number' ? ts * 1000 : ts);
-            if (isNaN(d)) return String(ts);
-            return d.toLocaleString();
-        }
         let clientDid = localStorage.getItem("proxion_identity_did") || null;
         // R9.1: live handle to the non-extractable private CryptoKey — never serialised
         let _identityPrivKey = null;
@@ -2718,35 +2704,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
         }
 
         // Derive a consistent hue-based background color from a webid string
-        function webidColor(webid) {
-            let hash = 0;
-            for (let i = 0; i < (webid || "").length; i++)
-                hash = (Math.imul(hash, 31) + webid.charCodeAt(i)) | 0;
-            const hue = Math.abs(hash) % 360;
-            return `hsl(${hue}, 55%, 42%)`;
-        }
-
-        // Lightweight Markdown renderer (no external deps)
-        function renderMarkdown(text) {
-            if (!text) return "";
-            let s = text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-            // Code blocks
-            s = s.replace(/```([\s\S]*?)```/g, (_, code) =>
-                `<pre class="code-block"><code>${code.trim()}</code></pre>`);
-            // Inline code
-            s = s.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
-            // Bold
-            s = s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
-            s = s.replace(/__(.+?)__/g, '<b>$1</b>');
-            // Italic
-            s = s.replace(/\*([^*\n]+)\*/g, '<i>$1</i>');
-            s = s.replace(/_([^_\n]+)_/g, '<i>$1</i>');
-            // Strikethrough
-            s = s.replace(/~~(.+?)~~/g, '<s>$1</s>');
-            // Newlines (not inside pre blocks)
-            s = s.replace(/\n/g, '<br>');
-            return s;
-        }
+        // (webidColor + renderMarkdown moved to util.js)
 
         // Scroll-to-bottom button logic
         function scrollToBottom() {
@@ -2899,27 +2857,6 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
             _channelSessionIds = {};
             _hideChannelPanel();
             showToast("Left voice channel");
-        }
-
-        function _expireLabel(msRemaining) {
-            if (msRemaining <= 0) return "expired";
-            const s = Math.floor(msRemaining / 1000);
-            if (s < 60) return `${s}s`;
-            const m = Math.floor(s / 60);
-            if (m < 60) return `${m}m`;
-            const h = Math.floor(m / 60);
-            if (h < 24) return `${h}h`;
-            return `${Math.floor(h / 24)}d`;
-        }
-
-        function timeAgo(date) {
-            const seconds = Math.floor((new Date() - new Date(date)) / 1000);
-            if (seconds < 60) return "Just now";
-            const minutes = Math.floor(seconds / 60);
-            if (minutes < 60) return `${minutes}m ago`;
-            const hours = Math.floor(minutes / 60);
-            if (hours < 24) return `${hours}h ago`;
-            return new Date(date).toLocaleDateString();
         }
 
         function renderMessages() {
@@ -4600,17 +4537,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
         const _outgoingFiles = {};   // file_id -> {resolve, reject}
         const _incomingFiles = {};   // file_id -> {meta, chunks[], received, total, fromWebid}
 
-        function _u8ToB64(u8) {
-            let s = "";
-            for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
-            return btoa(s);
-        }
-        function _b64ToU8(b64) {
-            const bin = atob(b64 || "");
-            const u8 = new Uint8Array(bin.length);
-            for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-            return u8;
-        }
+        // (_u8ToB64 / _b64ToU8 moved to util.js, imported above)
         function _showTransferProgress(fileId, name, pct, verb) {
             let el = document.getElementById("xfer-" + fileId);
             if (!el) {
