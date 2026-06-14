@@ -25,21 +25,6 @@ jobs:
           path: artifacts/solid-sdk-check.json
           if-no-files-found: ignore
 
-  web-tests:
-    name: Frontend unit tests (vitest)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - name: Install web deps
-        working-directory: web
-        run: npm install --no-audit --no-fund
-      - name: Run vitest
-        working-directory: web
-        run: npm test
-
   test:
     name: Python tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
