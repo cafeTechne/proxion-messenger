@@ -19,6 +19,7 @@ import {
     expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8,
 } from './util.js';
 import { createFileTransfer } from './filetransfer.js';
+import { createVoice, CallState } from './voice.js';
 
         const WS_URL = (() => {
             const metaUrl = document.querySelector('meta[name="x-gateway-url"]')?.content;
@@ -224,13 +225,6 @@ import { createFileTransfer } from './filetransfer.js';
 
         let socket = null;
         let activeView = null;
-        let currentCall = null;
-        let localStream = null;
-        let pc = null;                    // 1:1 DM call connection
-        const peerConnections = {};       // group voice: {peer_webid: RTCPeerConnection}
-        const peerAudioElements = {};     // group voice: {peer_webid: HTMLAudioElement}
-        let _channelSessionIds = {};      // group voice: {peer_webid: session_id} for ICE routing
-        const _channelParticipants = {};  // group voice: {peer_webid: {name, state}}
         const _roomCodes = {};            // room_id -> invite code (for REST history catch-up)
         let typingUsers = {}; // webid -> room/dm id
         let unreadCounts = {}; // id -> count
@@ -246,27 +240,15 @@ import { createFileTransfer } from './filetransfer.js';
         let selfPubHex = null;
         let turnUrl = null;
         let turnSecret = null;
-        let _turnIceServer = null; // pre-computed from gateway 'registered' event
         let editingMsgId = null;
-        let currentCallSessionId = null;
-        let isMuted = false;
-        let _pendingCandidates = [];
-        let _remoteDescSet = false;
-        let _callTimeoutId = null;
-        const CALL_TIMEOUT_MS = 30000;
-        const CallState = Object.freeze({
-            IDLE: 'idle',
-            CALLING: 'calling',
-            RINGING: 'ringing',
-            CONNECTED: 'connected',
-            ENDING: 'ending',
-        });
-        let _callState = CallState.IDLE;
-        let callStartTime = null;
-        let callTimerInterval = null;
         let roomInviteUrls = {}; // room_id -> invite_url
+        const voice = createVoice({
+            showToast, renderMessage, showOsNotification, sendCmd, playNotificationSound, normalizeRelayThreadId, stopScreenShare,
+            getSocket: () => socket, getActiveView: () => activeView, getSelfWebId: () => selfWebId,
+            getTurnUrl: () => turnUrl, getTurnSecret: () => turnSecret,
+            getLocalDmPeers: () => localDmPeers, getCurrentRoomMembers: () => currentRoomMembers, getIsSharing: () => _isSharing,
+        });
         let roomCreatorOf = new Set(); // room_ids this user owns
-        let ringOscillator = null;
         let _lastRenderedDate = null;   // for date dividers
         let _scrollBottomUnread = 0;    // count of messages arrived while scrolled up
         let _reconnectTimer = null;     // for "Server unreachable" banner escalation
@@ -1321,7 +1303,7 @@ import { createFileTransfer } from './filetransfer.js';
                     console.warn('[Proxion] Auth failed:', event.reason);
                     break;
                 case "registered":
-                    if (event.turn) _turnIceServer = event.turn;
+                    if (event.turn) voice.state._turnIceServer = event.turn;
                     // Auth is complete — now safe to send all init commands that
                     // require an authenticated socket (they were withheld from onopen).
                     (function _postAuthInit() {
@@ -1569,53 +1551,53 @@ import { createFileTransfer } from './filetransfer.js';
                 case "voice_invite":
                     // Group channel: if we're in a voice channel, auto-answer offers
                     // from channel peers instead of showing the 1:1 ringing banner.
-                    if (_inVoiceChannel && event.caller_webid) {
-                        _addChannelParticipant(event.caller_webid);
-                        initWebRTCForPeer(event.caller_webid, event.session_id, false, event.sdp_offer)
+                    if (voice.state._inVoiceChannel && event.caller_webid) {
+                        voice._addChannelParticipant(event.caller_webid);
+                        voice.initWebRTCForPeer(event.caller_webid, event.session_id, false, event.sdp_offer)
                             .catch(console.warn);
                     } else {
-                        showVoiceBanner(event);
+                        voice.showVoiceBanner(event);
                         showOsNotification('Incoming Call',
                             `${event.display_name || 'Someone'} is calling`);
                     }
                     break;
                 case "voice_answer":
                     // Group channel: route the answer to the per-peer connection.
-                    if (event.from_webid && peerConnections[event.from_webid]) {
-                        handleGroupVoiceAnswer(event);
+                    if (event.from_webid && voice.state.peerConnections[event.from_webid]) {
+                        voice.handleGroupVoiceAnswer(event);
                     } else {
-                        handleVoiceAnswer(event);
+                        voice.handleVoiceAnswer(event);
                     }
                     break;
                 case "ice_candidate":
                     // Group channel: route the candidate to the per-peer connection.
-                    if (event.from_webid && peerConnections[event.from_webid]) {
-                        handleGroupIceCandidate(event);
+                    if (event.from_webid && voice.state.peerConnections[event.from_webid]) {
+                        voice.handleGroupIceCandidate(event);
                     } else {
-                        handleIceCandidate(event);
+                        voice.handleIceCandidate(event);
                     }
                     break;
                 case "voice_hangup":
-                    handleVoiceHangup(event);
+                    voice.handleVoiceHangup(event);
                     break;
                 case "voice_signal":
-                    handleVoiceSignalRelay(event);
+                    voice.handleVoiceSignalRelay(event);
                     break;
                 case "voice_peer_joined":
-                    handleVoicePeerJoined(event);
+                    voice.handleVoicePeerJoined(event);
                     break;
                 case "voice_peer_present":
-                    handleVoicePeerPresent(event);
+                    voice.handleVoicePeerPresent(event);
                     break;
                 case "voice_peer_left":
-                    handleVoicePeerLeft(event);
+                    voice.handleVoicePeerLeft(event);
                     break;
                 // Cross-gateway voice channel relay deliveries
                 case "voice_channel_peer_joined":
-                    handleVoicePeerJoined(event);
+                    voice.handleVoicePeerJoined(event);
                     break;
                 case "voice_channel_peer_present":
-                    handleVoicePeerPresent(event);
+                    voice.handleVoicePeerPresent(event);
                     break;
                 // R39: chunked file transfer
                 case "file_offer":    fileTransfer.handleFileOffer(event); break;
@@ -2809,7 +2791,7 @@ import { createFileTransfer } from './filetransfer.js';
                         socket.send(JSON.stringify({cmd: "mark_read", thread_id: id}));
 
                     if (type === "room") {
-                        updateVoiceChannels(id);
+                        voice.updateVoiceChannels(id);
                     }
                 };
                 li.addEventListener("contextmenu", e => openSidebarCtx(e, id));
@@ -2825,40 +2807,9 @@ import { createFileTransfer } from './filetransfer.js';
             });
         }
 
-        function updateVoiceChannels(roomId) {
-            // Voice channels not yet implemented — keep section hidden
-        }
 
-        let _inVoiceChannel = null;
 
-        async function joinVoice(roomId) {
-            socket.send(JSON.stringify({cmd: "join_voice_channel", room_id: roomId}));
-            _inVoiceChannel = roomId;
-            const leaveBtn = document.getElementById("leave-voice-channel-btn");
-            if (leaveBtn) leaveBtn.style.display = "";
-            _showChannelPanel();
-            _renderChannelPanel();
-        }
 
-        function leaveVoiceChannel() {
-            if (!_inVoiceChannel) return;
-            socket.send(JSON.stringify({cmd: "leave_voice_channel", room_id: _inVoiceChannel}));
-            _inVoiceChannel = null;
-            const leaveBtn = document.getElementById("leave-voice-channel-btn");
-            if (leaveBtn) leaveBtn.style.display = "none";
-            // Close all peer connections in the channel
-            for (const peerId of Object.keys(peerConnections)) {
-                try { peerConnections[peerId].close(); } catch (_) {}
-                delete peerConnections[peerId];
-            }
-            for (const peerId of Object.keys(peerAudioElements)) {
-                peerAudioElements[peerId].srcObject = null;
-                delete peerAudioElements[peerId];
-            }
-            _channelSessionIds = {};
-            _hideChannelPanel();
-            showToast("Left voice channel");
-        }
 
         function renderMessages() {
             const feed = document.getElementById("message-feed");
@@ -3321,19 +3272,19 @@ import { createFileTransfer } from './filetransfer.js';
         // -- Round 67: Screen sharing --
         let _screenStream = null, _isSharing = false;
         async function startScreenShare() {
-            if (_isSharing || !pc) return;
+            if (_isSharing || !voice.state.pc) return;
             try {
                 _screenStream = await navigator.mediaDevices.getDisplayMedia({video:{cursor:'always'},audio:false});
             } catch { showToast('Screen share cancelled'); return; }
             _isSharing = true;
             const screenTrack = _screenStream.getVideoTracks()[0];
-            const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+            const sender = voice.state.pc.getSenders().find(s => s.track?.kind === 'video');
             if (sender) sender.replaceTrack(screenTrack);
-            else pc.addTrack(screenTrack, _screenStream);
+            else voice.state.pc.addTrack(screenTrack, _screenStream);
             screenTrack.onended = () => stopScreenShare();
             const sBtn = document.getElementById('screenshare-btn');
             if (sBtn) sBtn.classList.add('vw-sharing');
-            if (socket && currentCall) socket.send(JSON.stringify({cmd:'screenshare_started',session_id:currentCall.session_id||''}));
+            if (socket && voice.state.currentCall) socket.send(JSON.stringify({cmd:'screenshare_started',session_id:voice.state.currentCall.session_id||''}));
         }
         function stopScreenShare() {
             _isSharing = false;
@@ -3341,7 +3292,7 @@ import { createFileTransfer } from './filetransfer.js';
             _screenStream = null;
             const sBtn = document.getElementById('screenshare-btn');
             if (sBtn) sBtn.classList.remove('vw-sharing');
-            if (socket && currentCall) socket.send(JSON.stringify({cmd:'screenshare_stopped',session_id:currentCall.session_id||''}));
+            if (socket && voice.state.currentCall) socket.send(JSON.stringify({cmd:'screenshare_stopped',session_id:voice.state.currentCall.session_id||''}));
         }
 
         // -- Round 68: Forward modal --
@@ -3447,424 +3398,36 @@ import { createFileTransfer } from './filetransfer.js';
             setTimeout(() => { typingThrottled = false; }, 3000);
         });
 
-        function _callerDisplayName(webid) {
-            const dmPeer = Object.values(localDmPeers).find(p => p.peer_webid === webid);
-            if (dmPeer && dmPeer.display_name) return dmPeer.display_name;
-            const member = currentRoomMembers.find(m => m.webid === webid);
-            if (member && member.display_name) return member.display_name;
-            return webid.slice(0, 28);
-        }
 
-        function showVoiceBanner(invite) {
-            currentCall = invite;
-            setCallState(CallState.RINGING);
-            const banner = document.getElementById("voice-banner");
-            document.getElementById("voice-msg").innerText =
-                `Incoming call from ${_callerDisplayName(invite.caller_webid)}`;
-            banner.style.display = "flex";
-            playRingTone();
-            setTimeout(() => {
-                if (_callState === CallState.RINGING) {
-                    banner.style.display = "none";
-                    currentCall = null;
-                    setCallState(CallState.IDLE);
-                }
-            }, 30000);
-        }
 
-        async function getMedia() {
-            if (!localStream) {
-                try {
-                    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-                } catch (err) {
-                    showToast("Could not access microphone: " + err, "error");
-                }
-            }
-            return localStream;
-        }
 
-        async function getTurnCredentials(username, secret) {
-            const enc = new TextEncoder();
-            const key = await crypto.subtle.importKey(
-                "raw", enc.encode(secret),
-                { name: "HMAC", hash: "SHA-1" },
-                false, ["sign"]
-            );
-            const signature = await crypto.subtle.sign("HMAC", key, enc.encode(username));
-            const b64 = btoa(String.fromCharCode(...new Uint8Array(signature)));
-            return b64;
-        }
 
-        function setCallState(newState) {
-            const valid = {
-                [CallState.IDLE]: [CallState.CALLING, CallState.RINGING],
-                [CallState.CALLING]: [CallState.CONNECTED, CallState.ENDING, CallState.IDLE],
-                [CallState.RINGING]: [CallState.CONNECTED, CallState.ENDING, CallState.IDLE],
-                [CallState.CONNECTED]: [CallState.ENDING],
-                [CallState.ENDING]: [CallState.IDLE],
-            };
-            if (!valid[_callState]?.includes(newState)) return;
-            _callState = newState;
-            _updateCallUI();
-        }
 
-        function _updateCallUI() {
-            const widget = document.getElementById("voice-widget");
-            if (!widget) return;
-            const connected = _callState === CallState.CONNECTED;
-            const active = connected
-                || _callState === CallState.CALLING
-                || _callState === CallState.RINGING;
-            widget.style.display = active ? "flex" : "none";
-            const ssBtn = document.getElementById("screenshare-btn");
-            if (ssBtn) ssBtn.style.display = connected ? "flex" : "none";
-            if (!connected && _isSharing) stopScreenShare();
-            const statusEl = document.getElementById("vw-status");
-            if (statusEl && !connected) {
-                statusEl.textContent = _callState === CallState.CALLING ? "Calling..." : "Incoming...";
-            }
-        }
 
-        function _startCallTimeout() {
-            if (_callTimeoutId) clearTimeout(_callTimeoutId);
-            _callTimeoutId = setTimeout(() => {
-                if (_callState === CallState.CALLING) {
-                    showToast("Call not answered");
-                    _doHangup();
-                }
-            }, CALL_TIMEOUT_MS);
-        }
 
-        function _clearCallTimeout() {
-            if (_callTimeoutId) clearTimeout(_callTimeoutId);
-            _callTimeoutId = null;
-        }
 
-        async function _setRemoteAndDrainCandidates(sdp, type) {
-            await pc.setRemoteDescription({ type, sdp });
-            _remoteDescSet = true;
-            for (const c of _pendingCandidates) {
-                socket.send(JSON.stringify({
-                    cmd: "ice_candidate",
-                    cert_id: activeView?.id,
-                    session_id: currentCallSessionId,
-                    candidate: c.candidate,
-                    sdp_mid: c.sdpMid,
-                    sdp_mline_index: c.sdpMLineIndex
-                }));
-            }
-            _pendingCandidates = [];
-        }
 
         // Shared ICE server resolution (STUN + TURN), used by 1:1 and group calls
-        async function _getIceServers() {
-            const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
-            if (!_turnIceServer) {
-                try {
-                    const _tc = await fetch('/turn-credentials').then(r => r.json());
-                    if (_tc && _tc.urls && _tc.urls.length > 0) {
-                        _turnIceServer = { urls: _tc.urls, username: _tc.username, credential: _tc.credential };
-                    }
-                } catch (_) {}
-            }
-            if (_turnIceServer) {
-                iceServers.push(_turnIceServer);
-            } else if (turnUrl && turnSecret) {
-                const timestamp = Math.floor(Date.now() / 1000) + 86400;
-                const username = `${timestamp}:${selfWebId}`;
-                const credential = await getTurnCredentials(username, turnSecret);
-                iceServers.push({ urls: turnUrl, username, credential });
-            }
-            return iceServers;
-        }
 
         // Group voice: one RTCPeerConnection per remote peer, keyed by webid.
-        async function initWebRTCForPeer(targetWebid, sessionId, isCaller = false, sdpOffer = null) {
-            if (peerConnections[targetWebid]) {
-                try { peerConnections[targetWebid].close(); } catch (_) {}
-                delete peerConnections[targetWebid];
-            }
-            const iceServers = await _getIceServers();
-            const peerPc = new RTCPeerConnection({ iceServers });
-            peerConnections[targetWebid] = peerPc;
-            if (sessionId) _channelSessionIds[targetWebid] = sessionId;
-
-            const stream = await getMedia();
-            if (stream) stream.getTracks().forEach(t => peerPc.addTrack(t, stream));
-
-            peerPc.ontrack = (event) => {
-                let audio = peerAudioElements[targetWebid];
-                if (!audio) {
-                    audio = new Audio();
-                    audio.autoplay = true;
-                    peerAudioElements[targetWebid] = audio;
-                }
-                audio.srcObject = event.streams[0];
-                audio.play().catch(() => {});
-                _updateChannelParticipantUI(targetWebid, "connected");
-            };
-
-            peerPc.onicecandidate = (e) => {
-                if (!e.candidate) return;
-                socket?.send(JSON.stringify({
-                    cmd: "ice_candidate",
-                    target_webid: targetWebid,
-                    session_id: _channelSessionIds[targetWebid] || sessionId || "",
-                    candidate: e.candidate.candidate,
-                    sdp_mid: e.candidate.sdpMid,
-                    sdp_mline_index: e.candidate.sdpMLineIndex,
-                }));
-            };
-
-            peerPc.oniceconnectionstatechange = () => {
-                _updateChannelParticipantUI(targetWebid, peerPc.iceConnectionState);
-                if (peerPc.iceConnectionState === "failed") {
-                    try { peerPc.restartIce(); } catch (_) {}
-                }
-            };
-
-            if (isCaller) {
-                const offer = await peerPc.createOffer();
-                await peerPc.setLocalDescription(offer);
-                socket?.send(JSON.stringify({
-                    cmd: "voice_invite",
-                    target_webid: targetWebid,
-                    sdp_offer: offer.sdp,
-                    channel_id: _inVoiceChannel || "",
-                }));
-            } else if (sdpOffer) {
-                await peerPc.setRemoteDescription({ type: "offer", sdp: sdpOffer });
-                const answer = await peerPc.createAnswer();
-                await peerPc.setLocalDescription(answer);
-                socket?.send(JSON.stringify({
-                    cmd: "voice_answer",
-                    target_webid: targetWebid,
-                    session_id: sessionId,
-                    sdp_answer: answer.sdp,
-                }));
-            }
-            return peerPc;
-        }
 
         // ── Voice channel participant panel ──
-        function _addChannelParticipant(webid) {
-            _channelParticipants[webid] = { name: webid.slice(-12), state: "connecting" };
-            _showChannelPanel();
-            _renderChannelPanel();
-        }
-        function _removeChannelParticipant(webid) {
-            delete _channelParticipants[webid];
-            if (Object.keys(_channelParticipants).length === 0 && !_inVoiceChannel) {
-                _hideChannelPanel();
-            } else {
-                _renderChannelPanel();
-            }
-        }
-        function _updateChannelParticipantUI(webid, state) {
-            if (_channelParticipants[webid]) {
-                _channelParticipants[webid].state = state;
-                _renderChannelPanel();
-            }
-        }
-        function _renderChannelPanel() {
-            const container = document.getElementById("voice-channel-participants");
-            if (!container) return;
-            const stateColor = { connected: "#4ade80", connecting: "#fbbf24",
-                                  checking: "#fbbf24", completed: "#4ade80",
-                                  disconnected: "#f87171", failed: "#f87171", closed: "#64748b" };
-            container.innerHTML = Object.entries(_channelParticipants).map(([webid, info]) => {
-                const color = stateColor[info.state] || "#94a3b8";
-                return `<span style="background:#1e293b;padding:3px 8px;border-radius:12px;font-size:0.78em;color:#f1f5f9;display:flex;align-items:center;gap:4px;">
-                    <span style="width:6px;height:6px;border-radius:50%;background:${color};display:inline-block;"></span>
-                    ${escHtml(info.name)}
-                </span>`;
-            }).join("");
-        }
-        function _showChannelPanel() {
-            const p = document.getElementById("voice-channel-panel");
-            if (p) p.style.display = "flex";
-        }
-        function _hideChannelPanel() {
-            const p = document.getElementById("voice-channel-panel");
-            if (p) p.style.display = "none";
-            Object.keys(_channelParticipants).forEach(k => delete _channelParticipants[k]);
-        }
 
-        async function initWebRTC(certId, sessionId, isCaller = false, sdpOffer = null) {
-            const iceServers = await _getIceServers();
-            pc = new RTCPeerConnection({ iceServers: iceServers });
-            _pendingCandidates = [];
-            _remoteDescSet = false;
-            
-            const stream = await getMedia();
-            if (stream) {
-                stream.getTracks().forEach(track => pc.addTrack(track, stream));
-            }
 
-            pc.ontrack = (event) => {
-                console.log("Remote track received");
-                const remoteAudio = new Audio();
-                remoteAudio.srcObject = event.streams[0];
-                remoteAudio.play();
-                setCallState(CallState.CONNECTED);
-                const peerName = activeView ? (activeView.name || activeView.id || "") : "";
-                document.getElementById("vw-peer-name").textContent = peerName || "";
-            };
 
-            pc.onicecandidate = (e) => {
-                if (e.candidate) {
-                    if (_remoteDescSet) {
-                        socket.send(JSON.stringify({
-                            cmd: "ice_candidate",
-                            cert_id: certId,
-                            session_id: sessionId,
-                            candidate: e.candidate.candidate,
-                            sdp_mid: e.candidate.sdpMid,
-                            sdp_mline_index: e.candidate.sdpMLineIndex
-                        }));
-                    } else {
-                        _pendingCandidates.push(e.candidate);
-                    }
-                }
-            };
 
-            if (isCaller) {
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                currentCallSessionId = sessionId;
-                setCallState(CallState.CALLING);
-                _startCallTimeout();
-                socket.send(JSON.stringify({
-                    cmd: "voice_invite",
-                    cert_id: certId,
-                    session_id: sessionId,
-                    target_webid: activeView ? activeView.peerWebid : null,
-                    sdp_offer: offer.sdp
-                }));
-            } else if (sdpOffer) {
-                await _setRemoteAndDrainCandidates(sdpOffer, 'offer');
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                currentCallSessionId = sessionId;
-                socket.send(JSON.stringify({
-                    cmd: "voice_answer",
-                    cert_id: certId,
-                    session_id: sessionId,
-                    sdp_answer: answer.sdp
-                }));
-                setCallState(CallState.CONNECTED);
-                startCallTimer();
-            }
-        }
 
-        function startCallTimer() {
-            callStartTime = Date.now();
-            if (callTimerInterval) clearInterval(callTimerInterval);
-            callTimerInterval = setInterval(() => {
-                const s = Math.floor((Date.now() - callStartTime) / 1000);
-                const mm = String(Math.floor(s / 60)).padStart(2, "0");
-                const ss = String(s % 60).padStart(2, "0");
-                const statusEl = document.getElementById("vw-status");
-                if (statusEl) statusEl.textContent = `In Call ${mm}:${ss}`;
-            }, 1000);
-        }
 
-        function stopCallTimer() {
-            if (callTimerInterval) { clearInterval(callTimerInterval); callTimerInterval = null; }
-            callStartTime = null;
-        }
 
-        function stopRingTone() {
-            if (ringOscillator) { try { ringOscillator.stop(); } catch(e) {} ringOscillator = null; }
-        }
-
-        function playRingTone() {
-            stopRingTone();
-            try {
-                const ctx = new AudioContext();
-                const osc = ctx.createOscillator();
-                const gain = ctx.createGain();
-                osc.connect(gain); gain.connect(ctx.destination);
-                osc.frequency.value = 440; gain.gain.value = 0.08;
-                osc.start();
-                ringOscillator = osc;
-                setTimeout(() => stopRingTone(), 30000); // auto-stop after 30s
-            } catch(e) { console.warn("Ring tone failed", e); }
-        }
-
-        function hangupCleanup() {
-            if (pc) { pc.close(); pc = null; }
-            if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
-            stopCallTimer();
-            stopRingTone();
-            _clearCallTimeout();
-            _pendingCandidates = [];
-            _remoteDescSet = false;
-            isMuted = false;
-            currentCallSessionId = null;
-            setCallState(CallState.IDLE);
-            const muteBtn = document.getElementById("mute-btn");
-            if (muteBtn) muteBtn.classList.remove("vw-muted");
-            const vwPeer = document.getElementById("vw-peer-name");
-            if (vwPeer) vwPeer.textContent = "";
-            const vwStatus = document.getElementById("vw-status");
-            if (vwStatus) vwStatus.textContent = "In Call";
-        }
-
-        function handleVoiceHangup(event) {
-            if (_callState !== CallState.IDLE) setCallState(CallState.ENDING);
-            hangupCleanup();
-        }
 
         // Dispatch cross-gateway voice signals relayed via HTTP relay
-        function handleVoiceSignalRelay(event) {
-            const st = event.signal_type;
-            const sd = event.signal_data || {};
-            const merged = { session_id: event.session_id, from_webid: event.from_webid, ...sd };
-            const isGroupPeer = event.from_webid && peerConnections[event.from_webid];
-            if (st === "answer") {
-                isGroupPeer ? handleGroupVoiceAnswer(merged) : handleVoiceAnswer(merged);
-            } else if (st === "ice_candidate") {
-                isGroupPeer ? handleGroupIceCandidate(merged) : handleIceCandidate(merged);
-            } else if (st === "hangup") {
-                handleVoiceHangup(merged);
-            } else if (st === "offer") {
-                // Cross-gateway group channel offer: auto-answer if we're in a channel
-                if (_inVoiceChannel && event.from_webid) {
-                    _addChannelParticipant(event.from_webid);
-                    initWebRTCForPeer(event.from_webid, event.session_id, false, sd.sdp_offer)
-                        .catch(console.warn);
-                } else {
-                    showVoiceBanner({ ...merged, caller_webid: event.from_webid, sdp_offer: sd.sdp_offer });
-                }
-            }
-        }
 
         // Group call: an existing member was already in the channel when we joined.
         // They will initiate the WebRTC offer toward us; we just register them in the UI.
-        function handleVoicePeerPresent(event) {
-            showToast(`${event.peer_webid.slice(0, 20)} is in the voice channel`, "info");
-            _addChannelParticipant(event.peer_webid);
-        }
 
         // Group call: a new peer joined after us — we initiate the offer toward them.
-        function handleVoicePeerJoined(event) {
-            showToast(`${event.peer_webid.slice(0, 20)} joined the voice channel`, "info");
-            _addChannelParticipant(event.peer_webid);
-            // We are an existing member; call the new joiner (one offer per pair).
-            initWebRTCForPeer(event.peer_webid, null, true).catch(console.warn);
-        }
 
         // Group call: a peer left
-        function handleVoicePeerLeft(event) {
-            showToast(`${event.peer_webid.slice(0, 20)} left the voice channel`, "info");
-            const peerPc = peerConnections[event.peer_webid];
-            if (peerPc) { try { peerPc.close(); } catch (_) {} delete peerConnections[event.peer_webid]; }
-            const audio = peerAudioElements[event.peer_webid];
-            if (audio) { audio.srcObject = null; delete peerAudioElements[event.peer_webid]; }
-            delete _channelSessionIds[event.peer_webid];
-            _removeChannelParticipant(event.peer_webid);
-        }
 
         // peer_discovered response handler — used by the Add Contact modal
         let _peerDiscoveredResolve = null;
@@ -3875,87 +3438,42 @@ import { createFileTransfer } from './filetransfer.js';
             }
         }
 
-        async function handleVoiceAnswer(event) {
-            if (pc) {
-                await _setRemoteAndDrainCandidates(event.sdp_answer, 'answer');
-                _clearCallTimeout();
-                setCallState(CallState.CONNECTED);
-                startCallTimer();
-            }
-        }
 
-        async function handleIceCandidate(event) {
-            if (pc) {
-                try {
-                    await pc.addIceCandidate({
-                        candidate: event.candidate,
-                        sdpMid: event.sdp_mid,
-                        sdpMLineIndex: event.sdp_mline_index
-                    });
-                } catch (e) { console.warn("ICE error", e); }
-            }
-        }
 
         // Group voice: apply an answer to the specific peer connection.
-        async function handleGroupVoiceAnswer(event) {
-            const peerPc = peerConnections[event.from_webid];
-            if (!peerPc) return;
-            try {
-                await peerPc.setRemoteDescription({ type: "answer", sdp: event.sdp_answer });
-                _updateChannelParticipantUI(event.from_webid, "connected");
-            } catch (e) { console.warn("group answer error", e); }
-        }
 
         // Group voice: add an ICE candidate to the specific peer connection.
-        async function handleGroupIceCandidate(event) {
-            const peerPc = peerConnections[event.from_webid];
-            if (!peerPc) return;
-            try {
-                await peerPc.addIceCandidate({
-                    candidate: event.candidate,
-                    sdpMid: event.sdp_mid,
-                    sdpMLineIndex: event.sdp_mline_index,
-                });
-            } catch (e) { console.warn("group ICE error", e); }
-        }
 
         document.getElementById("start-call-btn").onclick = async () => {
             if (!activeView || (activeView.type !== "dm" && activeView.type !== "local_dm")) return;
-            await initWebRTC(activeView.id, null, true);
+            await voice.initWebRTC(activeView.id, null, true);
         };
 
         document.getElementById("voice-answer").onclick = async () => {
-            if (!currentCall) return;
-            stopRingTone();
-            const certId = currentCall.cert_id || (activeView ? activeView.id : "");
-            await initWebRTC(certId, currentCall.session_id, false, currentCall.sdp_offer);
+            if (!voice.state.currentCall) return;
+            voice.stopRingTone();
+            const certId = voice.state.currentCall.cert_id || (activeView ? activeView.id : "");
+            await voice.initWebRTC(certId, voice.state.currentCall.session_id, false, voice.state.currentCall.sdp_offer);
             document.getElementById("voice-banner").style.display = "none";
         };
 
         document.getElementById("voice-decline").onclick = () => {
-            stopRingTone();
+            voice.stopRingTone();
             document.getElementById("voice-banner").style.display = "none";
-            currentCall = null;
-            setCallState(CallState.IDLE);
+            voice.state.currentCall = null;
+            voice.setCallState(CallState.IDLE);
         };
 
-        function _doHangup() {
-            setCallState(CallState.ENDING);
-            if (currentCallSessionId && socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({cmd: "voice_hangup", session_id: currentCallSessionId}));
-            }
-            hangupCleanup();
-        }
 
         document.getElementById("end-call").onclick = () => {
-            _doHangup();
+            voice._doHangup();
         };
 
         document.getElementById("mute-btn").onclick = () => {
-            if (!localStream) return;
-            isMuted = !isMuted;
-            localStream.getAudioTracks().forEach(t => { t.enabled = !isMuted; });
-            document.getElementById("mute-btn").classList.toggle("vw-muted", isMuted);
+            if (!voice.state.localStream) return;
+            voice.state.isMuted = !voice.state.isMuted;
+            voice.state.localStream.getAudioTracks().forEach(t => { t.enabled = !voice.state.isMuted; });
+            document.getElementById("mute-btn").classList.toggle("vw-muted", voice.state.isMuted);
         };
 
         // --------------- Edit message ---------------
@@ -4418,8 +3936,8 @@ import { createFileTransfer } from './filetransfer.js';
 
         // Send voice_hangup when tab/window closes mid-call
         window.addEventListener("beforeunload", () => {
-            if (currentCallSessionId && socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({cmd: "voice_hangup", session_id: currentCallSessionId}));
+            if (voice.state.currentCallSessionId && socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({cmd: "voice_hangup", session_id: voice.state.currentCallSessionId}));
             }
         });
 
@@ -4753,9 +4271,9 @@ import { createFileTransfer } from './filetransfer.js';
             e.preventDefault();
             e.stopPropagation();
             _sctxTargetId = threadId;
-            const isMuted = mutedThreads.has(threadId);
-            document.getElementById("sctx-mute").style.display   = isMuted ? "none" : "";
-            document.getElementById("sctx-unmute").style.display = isMuted ? "" : "none";
+            const threadMutedFlag = mutedThreads.has(threadId);
+            document.getElementById("sctx-mute").style.display   = threadMutedFlag ? "none" : "";
+            document.getElementById("sctx-unmute").style.display = threadMutedFlag ? "" : "none";
             const menu = document.getElementById("sidebar-ctx-menu");
             menu.style.display = "block";
             const vw = window.innerWidth, vh = window.innerHeight;
@@ -5267,19 +4785,19 @@ import { createFileTransfer } from './filetransfer.js';
             attachListener('#members-toggle', 'click', toggleMembersPanel);
             attachListener('#delete-room-btn', 'click', deleteRoom);
             attachListener('#leave-room-btn', 'click', leaveRoom);
-            attachListener('#leave-voice-channel-btn', 'click', leaveVoiceChannel);
+            attachListener('#leave-voice-channel-btn', 'click', voice.leaveVoiceChannel);
             attachListener('#voice-channel-mute-btn', 'click', () => {
-                isMuted = !isMuted;
+                voice.state.isMuted = !voice.state.isMuted;
                 // Toggle the local audio track on every peer connection in the channel
-                for (const peerPc of Object.values(peerConnections)) {
+                for (const peerPc of Object.values(voice.state.peerConnections)) {
                     peerPc.getSenders().forEach(s => {
-                        if (s.track && s.track.kind === "audio") s.track.enabled = !isMuted;
+                        if (s.track && s.track.kind === "audio") s.track.enabled = !voice.state.isMuted;
                     });
                 }
                 const btn = document.getElementById("voice-channel-mute-btn");
                 if (btn) {
-                    btn.textContent = isMuted ? "Unmute" : "Mute";
-                    btn.style.background = isMuted ? "#7f1d1d" : "#334155";
+                    btn.textContent = voice.state.isMuted ? "Unmute" : "Mute";
+                    btn.style.background = voice.state.isMuted ? "#7f1d1d" : "#334155";
                 }
             });
 
