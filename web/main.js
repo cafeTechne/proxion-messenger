@@ -22,6 +22,7 @@ import { createFileTransfer } from './filetransfer.js';
 import { createVoice, CallState } from './voice.js';
 import { createNotifications } from './notifications.js';
 import { createOnboarding } from './onboarding.js';
+import { createReactions } from './reactions.js';
 
         const WS_URL = (() => {
             const metaUrl = document.querySelector('meta[name="x-gateway-url"]')?.content;
@@ -230,8 +231,7 @@ import { createOnboarding } from './onboarding.js';
         const _roomCodes = {};            // room_id -> invite code (for REST history catch-up)
         let typingUsers = {}; // webid -> room/dm id
         let unreadCounts = {}; // id -> count
-        let messageReactions = {}; // messageId -> { emoji: [webid] }
-        let lastEmojiMsgId = null;
+        let messageReactions = {}; // messageId -> { emoji: [webid] } (host-owned; reactions.js mutates by reference)
         let replyingTo = null; // { id, name, content }
         let messageMap = {}; // id -> msg object
         let currentRoomMembers = []; // [{ webid, display_name, status }] for @mention autocomplete
@@ -266,6 +266,14 @@ import { createOnboarding } from './onboarding.js';
         } = createOnboarding({
             getSocket: () => socket, setPodBanner, showToast, showCopyModal,
         });
+        // Reactions / emoji picker: destructured into same-named bindings.
+        // messageReactions stays host-owned (the message loader populates it);
+        // it is injected by reference and mutated in place, never reassigned.
+        const { handleReactionEvent, renderReactions, togglePicker, addEmoji, removeReaction } =
+            createReactions({
+                getSocket: () => socket, getActiveView: () => activeView,
+                getSelfWebId: () => selfWebId, getMessageReactions: () => messageReactions,
+            });
         let roomCreatorOf = new Set(); // room_ids this user owns
         let _lastRenderedDate = null;   // for date dividers
         let _scrollBottomUnread = 0;    // count of messages arrived while scrolled up
@@ -2307,24 +2315,7 @@ import { createOnboarding } from './onboarding.js';
             }
         }
 
-        function handleReactionEvent(event, action) {
-            const { message_id, emoji, from_webid } = event;
-            if (!messageReactions[message_id]) messageReactions[message_id] = {};
-            if (!messageReactions[message_id][emoji]) messageReactions[message_id][emoji] = [];
-            
-            if (action === "add") {
-                if (!messageReactions[message_id][emoji].includes(from_webid)) {
-                    messageReactions[message_id][emoji].push(from_webid);
-                }
-            } else {
-                messageReactions[message_id][emoji] = messageReactions[message_id][emoji].filter(w => w !== from_webid);
-            }
-            renderReactions(message_id);
-            // Pod: persist reaction state (only the acting user writes to their own pod)
-            if (activeView && activeView.type === 'local_room') {
-                podWriteReactions(activeView.id, message_id, messageReactions[message_id] || {}).catch(() => {});
-            }
-        }
+        // handleReactionEvent: moved to reactions.js (createReactions).
 
         function renderLinkPreview(event) {
             const { message_id, preview } = event;
@@ -2351,22 +2342,7 @@ import { createOnboarding } from './onboarding.js';
             msgEl.appendChild(card);
         }
 
-        function renderReactions(mid) {
-            const container = document.getElementById(`reactions-${mid}`);
-            if (!container) return;
-            const reacts = messageReactions[mid] || {};
-            container.innerHTML = "";
-            Object.keys(reacts).forEach(emoji => {
-                const count = reacts[emoji].length;
-                if (count === 0) return;
-                const alreadyReacted = selfWebId && reacts[emoji].includes(selfWebId);
-                const span = document.createElement("span");
-                span.className = "reaction" + (alreadyReacted ? " active" : "");
-                span.innerText = `${emoji} ${count}`;
-                span.onclick = () => alreadyReacted ? removeReaction(emoji, mid) : addEmoji(emoji, mid);
-                container.appendChild(span);
-            });
-        }
+        // renderReactions: moved to reactions.js (createReactions).
 
         /* Confirmation Modal — Replace confirm() dialogs */
         function showConfirm(message, onConfirm, onCancel) {
@@ -2497,48 +2473,7 @@ import { createOnboarding } from './onboarding.js';
 
         function updatePresence(event) { handlePresenceUpdate(event); }
 
-        function togglePicker(msgId, x, y) {
-            const picker = document.getElementById("emoji-picker");
-            if (lastEmojiMsgId === msgId && picker.style.display === "grid") {
-                picker.style.display = "none";
-                return;
-            }
-            lastEmojiMsgId = msgId;
-            picker.style.display = "grid";
-            // Clamp to viewport so picker never clips off-screen on mobile
-            const pw = picker.offsetWidth || 160;
-            const ph = picker.offsetHeight || 120;
-            const clampedLeft = Math.max(8, Math.min(x, window.innerWidth - pw - 8));
-            const clampedTop = Math.max(8, y - ph - 8);
-            picker.style.left = `${clampedLeft}px`;
-            picker.style.top = `${clampedTop}px`;
-        }
-
-        function addEmoji(emoji, msgId = null) {
-            const mid = msgId || lastEmojiMsgId;
-            const picker = document.getElementById("emoji-picker");
-            picker.style.display = "none";
-
-            const payload = {
-                cmd: "add_reaction",
-                message_id: mid,
-                emoji: emoji
-            };
-            if (activeView.type === "dm" || activeView.type === "local_dm") payload.cert_id = activeView.id;
-            else payload.room_id = activeView.id;
-
-            socket.send(JSON.stringify(payload));
-        }
-
-        function removeReaction(emoji, msgId) {
-            if (!socket || !activeView) return;
-            const payload = {cmd: "remove_reaction", message_id: msgId, emoji: emoji};
-            if (activeView.type === "dm" || activeView.type === "local_dm")
-                payload.cert_id = activeView.id;
-            else
-                payload.room_id = activeView.id;
-            socket.send(JSON.stringify(payload));
-        }
+        // togglePicker / addEmoji / removeReaction: moved to reactions.js (createReactions).
 
         document.addEventListener("click", (e) => {
             const picker = document.getElementById("emoji-picker");
