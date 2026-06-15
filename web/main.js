@@ -23,6 +23,7 @@ import { createVoice, CallState } from './voice.js';
 import { createNotifications } from './notifications.js';
 import { createOnboarding } from './onboarding.js';
 import { createReactions } from './reactions.js';
+import { createPins } from './pins.js';
 
         const WS_URL = (() => {
             const metaUrl = document.querySelector('meta[name="x-gateway-url"]')?.content;
@@ -274,6 +275,9 @@ import { createReactions } from './reactions.js';
                 getSocket: () => socket, getActiveView: () => activeView,
                 getSelfWebId: () => selfWebId, getMessageReactions: () => messageReactions,
             });
+        // Pinned messages: destructured into same-named bindings.
+        const { pinMsg, showPinPanel, renderPins, unpinMsg, jumpToMsg } =
+            createPins({ getSocket: () => socket, getActiveView: () => activeView });
         let roomCreatorOf = new Set(); // room_ids this user owns
         let _lastRenderedDate = null;   // for date dividers
         let _scrollBottomUnread = 0;    // count of messages arrived while scrolled up
@@ -3476,55 +3480,8 @@ import { createReactions } from './reactions.js';
         }
 
         // --------------- Pin message ---------------
-        function pinMsg(msgId) {
-            if (!socket || !activeView) return;
-            const threadId = (activeView.type === "dm" || activeView.type === "local_dm" ? "dm:" : "room:") + activeView.id;
-            socket.send(JSON.stringify({ cmd: "pin_message", message_id: msgId, thread_id: threadId }));
-        }
-
-        function showPinPanel() {
-            if (!socket || !activeView) return;
-            const threadId = (activeView.type === "dm" || activeView.type === "local_dm" ? "dm:" : "room:") + activeView.id;
-            socket.send(JSON.stringify({ cmd: "get_pins", thread_id: threadId }));
-            document.getElementById("pin-panel").style.display = "block";
-        }
-
-        function renderPins(pins) {
-            const list = document.getElementById("pin-list");
-            list.innerHTML = "";
-            if (!pins || pins.length === 0) {
-                list.innerHTML = '<p style="color:#94a3b8">No pinned messages.</p>';
-                return;
-            }
-            const threadId = activeView
-                ? (activeView.type === "local_dm" ? "dm:" : "room:") + activeView.id
-                : "";
-            pins.forEach(pin => {
-                const div = document.createElement("div");
-                div.style.cssText = "border-bottom:1px solid #334155;padding:8px 0;color:#f1f5f9;";
-                const pinner = (pin.pinned_by || "").slice(0, 20) || "unknown";
-                const preview = (pin.content || "").slice(0, 80);
-                div.innerHTML = `<div style="font-size:0.85em;color:#94a3b8">${pinner}</div>
-                    <div style="margin:2px 0;">${preview.replace(/</g,"&lt;")}</div>
-                    <div style="display:flex;gap:8px;margin-top:4px;">
-                        <button data-pin-action="jump" data-msg-id="${pin.message_id}"
-                            style="background:transparent;border:none;color:#7dd3fc;cursor:pointer;padding:0;font-size:0.8em;">[Jump]</button>
-                        <button data-pin-action="unpin" data-msg-id="${pin.message_id}" data-thread-id="${threadId}"
-                            style="background:transparent;border:none;color:#94a3b8;cursor:pointer;padding:0;font-size:0.8em;">Unpin</button>
-                    </div>`;
-                list.appendChild(div);
-            });
-        }
-
-        function unpinMsg(msgId, threadId) {
-            if (!socket) return;
-            socket.send(JSON.stringify({ cmd: "unpin_message", message_id: msgId, thread_id: threadId }));
-        }
-
-        function jumpToMsg(msgId) {
-            const el = document.getElementById(`msg-${msgId}`);
-            if (el) { el.scrollIntoView({ behavior: "smooth" }); el.style.background = "#334155"; setTimeout(() => el.style.background = "", 1500); }
-        }
+        // pinMsg / showPinPanel / renderPins / unpinMsg / jumpToMsg:
+        // moved to pins.js (createPins).
 
         // --------------- Onboarding ---------------
         function setPodBanner(show) {
