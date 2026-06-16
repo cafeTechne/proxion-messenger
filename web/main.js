@@ -28,6 +28,7 @@ import { createMedia } from './media.js';
 import { createModals } from './modals.js';
 import { createProfile } from './profile.js';
 import { createEdit } from './edit.js';
+import { createMute } from './mute.js';
 
         const WS_URL = (() => {
             const metaUrl = document.querySelector('meta[name="x-gateway-url"]')?.content;
@@ -312,6 +313,9 @@ import { createEdit } from './edit.js';
             getClientDid: () => clientDid, getMessageMap: () => messageMap,
         });
         const { startEdit, commitEdit, cancelEdit, handleMessageEdited } = edit;
+        // Mute: mutedThreads is a host-owned Set (read by renderer/dispatch),
+        // injected by reference and mutated in place.
+        const { muteThread, unmuteThread } = createMute({ getMutedThreads: () => mutedThreads });
         let roomCreatorOf = new Set(); // room_ids this user owns
         let _lastRenderedDate = null;   // for date dividers
         let _scrollBottomUnread = 0;    // count of messages arrived while scrolled up
@@ -3579,27 +3583,8 @@ import { createEdit } from './edit.js';
         });
 
         // --------------- Thread Mute ---------------
-        function _saveMuted() {
-            localStorage.setItem("proxion_muted_threads", JSON.stringify([...mutedThreads]));
-        }
-        function muteThread(id) {
-            mutedThreads.add(id);
-            _saveMuted();
-            _rerenderMuteIcon(id);
-        }
-        function unmuteThread(id) {
-            mutedThreads.delete(id);
-            _saveMuted();
-            _rerenderMuteIcon(id);
-        }
-        function _rerenderMuteIcon(id) {
-            const el = document.getElementById(`nav-${id}`);
-            if (!el) return;
-            const badge = el.querySelector(".badge");
-            if (badge) badge.style.display = mutedThreads.has(id) ? "none" : "";
-            const icon = el.querySelector(".mute-icon");
-            if (icon) icon.style.display = mutedThreads.has(id) ? "" : "none";
-        }
+        // _saveMuted / muteThread / unmuteThread / _rerenderMuteIcon:
+        // moved to mute.js (createMute).
 
         // --------------- Sidebar Context Menu ---------------
         let _sctxTargetId = null;
