@@ -26,6 +26,7 @@ import { createReactions } from './reactions.js';
 import { createPins } from './pins.js';
 import { createMedia } from './media.js';
 import { createModals } from './modals.js';
+import { createProfile } from './profile.js';
 
         const WS_URL = (() => {
             const metaUrl = document.querySelector('meta[name="x-gateway-url"]')?.content;
@@ -295,6 +296,15 @@ import { createModals } from './modals.js';
         // Pinned messages: destructured into same-named bindings.
         const { pinMsg, showPinPanel, renderPins, unpinMsg, jumpToMsg } =
             createPins({ getSocket: () => socket, getActiveView: () => activeView });
+        // Profile / presence: userPresence and messageMap stay host-owned (the
+        // dispatch and renderer also touch them) and are injected by reference.
+        const {
+            handlePresenceUpdate, updatePresence, showProfileCard, profileCardOpenDM,
+            hideProfileCard, showContactProfile,
+        } = createProfile({
+            getSocket: () => socket, showToast,
+            getUserPresence: () => userPresence, getMessageMap: () => messageMap,
+        });
         let roomCreatorOf = new Set(); // room_ids this user owns
         let _lastRenderedDate = null;   // for date dividers
         let _scrollBottomUnread = 0;    // count of messages arrived while scrolled up
@@ -317,7 +327,6 @@ import { createModals } from './modals.js';
         const _SVG_BELL = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"/></svg>';
         const _SVG_BELL_SLASH = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M9.143 17.082a24.248 24.248 0 0 0 3.844.148m-3.844-.148a23.856 23.856 0 0 1-5.455-1.31 8.964 8.964 0 0 0 2.3-5.542m3.155 6.852a3 3 0 0 0 5.667 1.97m1.965-2.277L21 21m-4.225-4.225a23.81 23.81 0 0 0 3.536-1.003A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6.53 6.53m10.245 10.245L6.53 6.53M3 3l3.53 3.53"/></svg>';
         let soundEnabled = localStorage.getItem("soundEnabled") === "true";
-        let _profileCardActive = null;  // webid of user whose profile is currently shown
         const soundBtn = document.getElementById("sound-toggle");
         soundBtn.innerHTML = soundEnabled ? _SVG_BELL : _SVG_BELL_SLASH;
         soundBtn.onclick = () => {
@@ -2391,74 +2400,7 @@ import { createModals } from './modals.js';
         }
 
         /* Profile Card (B2) — Show user profile popover on avatar click */
-        function showProfileCard(webid, displayName, x, y) {
-            if (!webid) return;
-            _profileCardActive = webid;
-
-            // Get presence status for this user
-            const presenceData = userPresence[webid] || { status: "offline" };
-            const avatarColor = webidColor(webid);
-            const shortName = (displayName || webid.slice(0, 12))[0].toUpperCase();
-
-            // Update card contents
-            document.getElementById("profile-name").textContent = displayName || webid.slice(0, 12);
-            document.getElementById("profile-webid").textContent = webid;
-            document.getElementById("profile-status-text").textContent = presenceData.status || "offline";
-            
-            // Display custom status message if available
-            const customStatusEl = document.getElementById("profile-custom-status");
-            if (presenceData.status_message && presenceData.status_message.trim()) {
-                customStatusEl.textContent = presenceData.status_message;
-                customStatusEl.style.display = "block";
-            } else {
-                customStatusEl.textContent = "";
-                customStatusEl.style.display = "none";
-            }
-            
-            const statusDot = document.getElementById("profile-status-dot");
-            statusDot.className = "profile-status-dot " + (presenceData.status === "online" ? "online" : presenceData.status === "away" ? "away" : presenceData.status === "busy" ? "busy" : "");
-
-            const avatarEl = document.getElementById("profile-avatar-el");
-            avatarEl.style.background = avatarColor;
-            avatarEl.textContent = shortName;
-
-            // Position popover near click point
-            const card = document.getElementById("profile-card");
-            card.classList.add("show");
-            card.style.left = Math.min(x, window.innerWidth - 310) + "px";
-            card.style.top = Math.min(y, window.innerHeight - 250) + "px";
-        }
-
-        function profileCardOpenDM() {
-            const webid = _profileCardActive;
-            if (!webid) return;
-            hideProfileCard();
-            
-            // Check if a DM thread already exists with this webid
-            const navId = "local-" + webid.replace(/[^a-zA-Z0-9]/g, "-");
-            const existingLi = document.getElementById(`nav-${navId}`);
-            
-            if (existingLi) {
-                // Click existing DM
-                existingLi.click();
-            } else {
-                // Trigger resolve_did which will create a DM sidebar entry
-                if (socket && socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({cmd: "resolve_did", did: webid}));
-                    // The resolve_did handler will add it to sidebar and we can click it
-                    setTimeout(() => {
-                        const newLi = document.getElementById(`nav-${navId}`);
-                        if (newLi) newLi.click();
-                    }, 100);
-                }
-            }
-        }
-
-        function hideProfileCard() {
-            const card = document.getElementById("profile-card");
-            card.classList.remove("show");
-            _profileCardActive = null;
-        }
+        // showProfileCard / profileCardOpenDM / hideProfileCard: moved to profile.js.
 
         // Close profile card on outside click
         document.addEventListener("click", (e) => {
@@ -2468,31 +2410,7 @@ import { createModals } from './modals.js';
             }
         });
 
-        function handlePresenceUpdate(event) {
-            const { webid, status, updated_at } = event;
-            if (!webid) return;
-            
-            // Store presence data
-            userPresence[webid] = { status, updated_at };
-            
-            // Re-render all messages from this user to update presence indicators
-            const feed = document.getElementById("message-feed");
-            const messages = feed.querySelectorAll(".message");
-            messages.forEach(msgEl => {
-                const msgId = msgEl.getAttribute("data-message-id");
-                const msg = messageMap[msgId];
-                if (msg && msg.from_webid === webid) {
-                    // Find the avatar-presence dot and update it
-                    const presenceDot = msgEl.querySelector(".avatar-presence");
-                    if (presenceDot) {
-                        presenceDot.className = "avatar-presence " + (status === "online" ? "online" : status === "away" ? "away" : status === "busy" ? "busy" : "");
-                        presenceDot.title = status;
-                    }
-                }
-            });
-        }
-
-        function updatePresence(event) { handlePresenceUpdate(event); }
+        // handlePresenceUpdate / updatePresence: moved to profile.js (createProfile).
 
         // togglePicker / addEmoji / removeReaction: moved to reactions.js (createReactions).
 
@@ -3411,50 +3329,8 @@ import { createModals } from './modals.js';
                 document.body.prepend(banner);
             });
         }
-        function showContactProfile(webid) {
-            if (!webid) return;
-            const panel = document.getElementById("contact-profile-panel");
-            if (!panel) return;
-            const cached = {
-                did: webid,
-                display_name: '',
-                status: 'offline',
-                status_message: '',
-                gateway_url: '',
-                fingerprint: '',
-            };
-            _renderContactProfile(cached);
-            panel.style.display = '';
-            fetch(`/profile/${encodeURIComponent(webid)}`)
-                .then(r => r.ok ? r.json() : null)
-                .then(d => { if (d) _renderContactProfile(d); })
-                .catch(() => {});
-        }
-        function _renderContactProfile(d) {
-            const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val || ''; };
-            setText('contact-profile-name', d.display_name || d.did?.slice(-12) || '');
-            setText('contact-profile-did', d.did || '');
-            setText('contact-profile-gateway', d.gateway_url || '(unknown gateway)');
-            setText('contact-profile-fingerprint', d.fingerprint || '');
-            setText('contact-profile-status-msg', d.status_message || '');
-            const statusEl = document.getElementById('contact-profile-status');
-            if (statusEl) {
-                const colors = {online:'#4ade80', away:'#fbbf24', busy:'#f87171', offline:'#475569'};
-                const st = d.status || 'offline';
-                statusEl.innerHTML = `<span style="color:${colors[st]||'#475569'}">&#x25cf;</span> ${st}`;
-            }
-            const avatarEl = document.getElementById('contact-profile-avatar');
-            if (avatarEl) {
-                const initials = (d.display_name || d.did || '?').slice(0,2).toUpperCase();
-                avatarEl.textContent = initials;
-            }
-            const dmBtn = document.getElementById('contact-profile-dm-btn');
-            if (dmBtn) dmBtn.dataset.webid = d.did || '';
-            const didEl = document.getElementById('contact-profile-did');
-            if (didEl) {
-                didEl.onclick = () => navigator.clipboard.writeText(d.did || '').then(() => showToast('DID copied'));
-            }
-        }
+        // showContactProfile / _renderContactProfile: moved to profile.js (createProfile).
+
         // Onboarding wizard (openSettingsToPod, showOnboarding, obGoto, obStep2/3,
         // obSelectProvider, obPodTestConnection, obStep4Create/Join, ...):
         // moved to onboarding.js (createOnboarding).
