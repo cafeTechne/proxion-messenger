@@ -7,7 +7,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          ensureProxionContainer, podWriteProfile, podReadProfile,
          podWriteMessageJsonLd, podDeleteMessage, podWriteRoomMembers,
          podWriteReactions, podWriteReadState,
-         podUploadFile, podUploadVoiceAudio,
+         podUploadFile,
          podWriteScheduled, podDeleteScheduled,
          podWriteWebhook, podDeleteWebhook,
          podWriteContact, podReadContacts, podDeleteContact,
@@ -24,6 +24,7 @@ import { createNotifications } from './notifications.js';
 import { createOnboarding } from './onboarding.js';
 import { createReactions } from './reactions.js';
 import { createPins } from './pins.js';
+import { createMedia } from './media.js';
 
         const WS_URL = (() => {
             const metaUrl = document.querySelector('meta[name="x-gateway-url"]')?.content;
@@ -250,11 +251,20 @@ import { createPins } from './pins.js';
         // read live via the getter — only invoked at notify-time, so no TDZ.
         const { showToast, playNotificationSound, requestNotifPermission, showOsNotification } =
             createNotifications({ getSoundEnabled: () => soundEnabled });
+        // Media capture (voice messages + screen share). Created before the voice
+        // instance because voice's deps reference media.stopScreenShare and
+        // media.state.isSharing; media's getVoiceState is a deferred getter, so the
+        // forward reference to `voice` is only resolved at runtime (no TDZ).
+        const media = createMedia({
+            getSocket: () => socket, getActiveView: () => activeView,
+            showToast, getVoiceState: () => voice.state,
+        });
+        const { startVoiceRecording, stopVoiceRecording, sendVoiceMessage, startScreenShare, stopScreenShare } = media;
         const voice = createVoice({
             showToast, renderMessage, showOsNotification, sendCmd, playNotificationSound, normalizeRelayThreadId, stopScreenShare,
             getSocket: () => socket, getActiveView: () => activeView, getSelfWebId: () => selfWebId,
             getTurnUrl: () => turnUrl, getTurnSecret: () => turnSecret,
-            getLocalDmPeers: () => localDmPeers, getCurrentRoomMembers: () => currentRoomMembers, getIsSharing: () => _isSharing,
+            getLocalDmPeers: () => localDmPeers, getCurrentRoomMembers: () => currentRoomMembers, getIsSharing: () => media.state.isSharing,
         });
         // Onboarding wizard: destructured into same-named bindings so the
         // setupEventListeners wiring + handleEvent calls keep working unchanged.
@@ -3133,76 +3143,8 @@ import { createPins } from './pins.js';
         }, 60000);
 
         // -- Round 62: Voice recording --
-        let _mediaRecorder = null, _recordingChunks = [], _recordingTimerInterval = null, _recordingSeconds = 0;
-        function startVoiceRecording() {
-            navigator.mediaDevices.getUserMedia({audio:true}).then(stream => {
-                _recordingChunks = []; _recordingSeconds = 0;
-                _mediaRecorder = new MediaRecorder(stream, {mimeType:'audio/webm'});
-                _mediaRecorder.ondataavailable = e => { if(e.data.size>0) _recordingChunks.push(e.data); };
-                _mediaRecorder.onstop = sendVoiceMessage;
-                _mediaRecorder.start();
-                document.getElementById('voice-recording-bar')?.classList.add('active');
-                document.getElementById('voice-record-btn')?.classList.add('recording');
-                _recordingTimerInterval = setInterval(() => {
-                    _recordingSeconds++;
-                    const t = document.getElementById('recording-timer');
-                    if (t) t.textContent = Math.floor(_recordingSeconds/60)+':'+String(_recordingSeconds%60).padStart(2,'0');
-                    if (_recordingSeconds >= 60) stopVoiceRecording(false);
-                }, 1000);
-            }).catch(() => showToast('Microphone access denied', 'error'));
-        }
-        function stopVoiceRecording(send=true) {
-            clearInterval(_recordingTimerInterval);
-            document.getElementById('voice-recording-bar')?.classList.remove('active');
-            document.getElementById('voice-record-btn')?.classList.remove('recording');
-            if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
-                _mediaRecorder._sendOnStop = send;
-                _mediaRecorder.stop();
-            }
-        }
-        function sendVoiceMessage() {
-            if (!_mediaRecorder || !_mediaRecorder._sendOnStop || !activeView || !socket) return;
-            const blob = new Blob(_recordingChunks, {type:'audio/webm'});
-            const voiceMsgId = crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36));
-            const reader2 = new FileReader();
-            reader2.onloadend = () => {
-                socket.send(JSON.stringify({
-                    cmd:'send_voice_message', thread_id:activeView.id,
-                    audio_b64:reader2.result.split(',')[1], duration_ms:_recordingSeconds*1000,
-                    message_id: voiceMsgId,
-                }));
-                if (activeView.type === 'local_room') {
-                    podUploadVoiceAudio(activeView.id, voiceMsgId, blob).catch(() => {});
-                }
-            };
-            reader2.readAsDataURL(blob);
-        }
-
-        // -- Round 67: Screen sharing --
-        let _screenStream = null, _isSharing = false;
-        async function startScreenShare() {
-            if (_isSharing || !voice.state.pc) return;
-            try {
-                _screenStream = await navigator.mediaDevices.getDisplayMedia({video:{cursor:'always'},audio:false});
-            } catch { showToast('Screen share cancelled'); return; }
-            _isSharing = true;
-            const screenTrack = _screenStream.getVideoTracks()[0];
-            const sender = voice.state.pc.getSenders().find(s => s.track?.kind === 'video');
-            if (sender) sender.replaceTrack(screenTrack);
-            else voice.state.pc.addTrack(screenTrack, _screenStream);
-            screenTrack.onended = () => stopScreenShare();
-            const sBtn = document.getElementById('screenshare-btn');
-            if (sBtn) sBtn.classList.add('vw-sharing');
-            if (socket && voice.state.currentCall) socket.send(JSON.stringify({cmd:'screenshare_started',session_id:voice.state.currentCall.session_id||''}));
-        }
-        function stopScreenShare() {
-            _isSharing = false;
-            _screenStream?.getTracks().forEach(t => t.stop());
-            _screenStream = null;
-            const sBtn = document.getElementById('screenshare-btn');
-            if (sBtn) sBtn.classList.remove('vw-sharing');
-            if (socket && voice.state.currentCall) socket.send(JSON.stringify({cmd:'screenshare_stopped',session_id:voice.state.currentCall.session_id||''}));
-        }
+        // startVoiceRecording / stopVoiceRecording / sendVoiceMessage /
+        // startScreenShare / stopScreenShare: moved to media.js (createMedia).
 
         // -- Round 68: Forward modal --
         let _forwardingMsgId = null;
@@ -4368,7 +4310,7 @@ import { createPins } from './pins.js';
             });
 
             // Round 67: Screenshare button
-            attachListener('#screenshare-btn', 'click', () => _isSharing ? stopScreenShare() : startScreenShare());
+            attachListener('#screenshare-btn', 'click', () => media.state.isSharing ? stopScreenShare() : startScreenShare());
 
             // Round 68: Forward modal close
             attachListener('#forward-modal-close', 'click', () => {
