@@ -27,6 +27,7 @@ import { createPins } from './pins.js';
 import { createMedia } from './media.js';
 import { createModals } from './modals.js';
 import { createProfile } from './profile.js';
+import { createEdit } from './edit.js';
 
         const WS_URL = (() => {
             const metaUrl = document.querySelector('meta[name="x-gateway-url"]')?.content;
@@ -246,7 +247,6 @@ import { createProfile } from './profile.js';
         let selfPubHex = null;
         let turnUrl = null;
         let turnSecret = null;
-        let editingMsgId = null;
         let roomInviteUrls = {}; // room_id -> invite_url
         // Notifications: destructured into same-named bindings so all call sites and
         // the DI deps below keep working unchanged. soundEnabled (declared later) is
@@ -305,6 +305,13 @@ import { createProfile } from './profile.js';
             getSocket: () => socket, showToast,
             getUserPresence: () => userPresence, getMessageMap: () => messageMap,
         });
+        // Message editing: editingMsgId is cluster-owned (read by the Escape-key
+        // handler via edit.state); messageMap stays host-owned, injected by ref.
+        const edit = createEdit({
+            getSocket: () => socket, getActiveView: () => activeView,
+            getClientDid: () => clientDid, getMessageMap: () => messageMap,
+        });
+        const { startEdit, commitEdit, cancelEdit, handleMessageEdited } = edit;
         let roomCreatorOf = new Set(); // room_ids this user owns
         let _lastRenderedDate = null;   // for date dividers
         let _scrollBottomUnread = 0;    // count of messages arrived while scrolled up
@@ -3176,98 +3183,8 @@ import { createProfile } from './profile.js';
         };
 
         // --------------- Edit message ---------------
-        function startEdit(msgId) {
-            const msgEl = document.getElementById(`msg-${msgId}`);
-            if (!msgEl) return;
-            const textEl = msgEl.querySelector(".msg-text");
-            if (!textEl) return;
-            const original = textEl.innerText;
-            editingMsgId = msgId;
-            const inp = document.createElement("input");
-            inp.type = "text";
-            inp.value = original;
-            inp.style.cssText = "width:60%;padding:4px;border-radius:4px;border:1px solid #555;background:#0f172a;color:#f1f5f9;font-size:0.95em;";
-            const confirmBtn = document.createElement("button");
-            confirmBtn.innerText = "✓";
-            confirmBtn.className = "edit-confirm-btn";
-            confirmBtn.style.cssText = "background:transparent;border:none;cursor:pointer;font-size:1em;margin-left:4px;";
-            confirmBtn.onclick = () => commitEdit(msgId, inp.value);
-            inp.onkeydown = (e) => {
-                if (e.key === "Enter") { e.preventDefault(); commitEdit(msgId, inp.value); }
-                if (e.key === "Escape") { cancelEdit(msgId, original); }
-            };
-            textEl.replaceWith(inp);
-            (inp.closest(".msg-body") || msgEl).appendChild(confirmBtn);
-            inp.focus();
-        }
-
-        function commitEdit(msgId, newContent) {
-            if (!socket || !activeView || !newContent.trim()) return;
-            const isLocal = activeView.local || activeView.type === "local_room" || activeView.type === "local_dm";
-            let payload;
-            if (isLocal) {
-                payload = { cmd: "edit_local_message", message_id: msgId, thread_id: activeView.id, content: newContent.trim(), from_webid: clientDid };
-            } else {
-                payload = { cmd: "edit_message", message_id: msgId, content: newContent.trim() };
-                if (activeView.type === "dm") payload.cert_id = activeView.id;
-                else payload.room_id = activeView.id;
-            }
-            socket.send(JSON.stringify(payload));
-            editingMsgId = null;
-            // Immediately restore UI — server will confirm via message_edited event
-            const msgEl = document.getElementById(`msg-${msgId}`);
-            if (msgEl) {
-                const inp = msgEl.querySelector("input[type=text]");
-                if (inp) {
-                    const span = document.createElement("span");
-                    span.className = "msg-text";
-                    span.innerText = newContent.trim();
-                    inp.replaceWith(span);
-                }
-                const btn = msgEl.querySelector(".edit-confirm-btn");
-                if (btn) btn.remove();
-            }
-        }
-
-        function cancelEdit(msgId, original) {
-            const msgEl = document.getElementById(`msg-${msgId}`);
-            if (!msgEl) return;
-            const inp = msgEl.querySelector("input[type=text]");
-            if (inp) {
-                const span = document.createElement("span");
-                span.className = "msg-text";
-                span.innerText = original;
-                inp.replaceWith(span);
-            }
-            const confirmBtn = msgEl.querySelector(".edit-confirm-btn");
-            if (confirmBtn) confirmBtn.remove();
-            editingMsgId = null;
-        }
-
-        function handleMessageEdited(event) {
-            const msgEl = document.getElementById(`msg-${event.message_id}`);
-            if (!msgEl) return;
-            let textEl = msgEl.querySelector(".msg-text");
-            if (!textEl) {
-                textEl = document.createElement("span");
-                textEl.className = "msg-text";
-                msgEl.appendChild(textEl);
-            }
-            textEl.innerText = event.new_content;
-            let tag = msgEl.querySelector(".edited-tag");
-            if (!tag) {
-                tag = document.createElement("span");
-                tag.className = "edited-tag";
-                tag.style.cssText = "font-size:0.75em;color:#94a3b8;margin-left:4px;";
-                textEl.after(tag);
-            }
-            const editedTime = event.edited_at ? new Date(event.edited_at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}) : "";
-            tag.innerText = editedTime ? `(edited ${editedTime})` : "(edited)";
-            if (messageMap[event.message_id]) {
-                messageMap[event.message_id].content = event.new_content;
-                messageMap[event.message_id].edited_at = event.edited_at;
-            }
-        }
+        // startEdit / commitEdit / cancelEdit / handleMessageEdited:
+        // moved to edit.js (createEdit).
 
         // --------------- Pin message ---------------
         // pinMsg / showPinPanel / renderPins / unpinMsg / jumpToMsg:
@@ -3350,10 +3267,11 @@ import { createProfile } from './profile.js';
                     .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = "none"; });
                 document.getElementById("pin-panel").style.display = "none";
                 cancelReply();
-                if (editingMsgId) {
-                    const msgEl = document.getElementById(`msg-${editingMsgId}`);
+                if (edit.state.editingMsgId) {
+                    const eid = edit.state.editingMsgId;
+                    const msgEl = document.getElementById(`msg-${eid}`);
                     const inp = msgEl && msgEl.querySelector("input[type=text]");
-                    if (inp) cancelEdit(editingMsgId, messageMap[editingMsgId]?.content || "");
+                    if (inp) cancelEdit(eid, messageMap[eid]?.content || "");
                 }
             } else if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
                 e.preventDefault();
