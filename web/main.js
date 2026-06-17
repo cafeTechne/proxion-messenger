@@ -29,6 +29,7 @@ import { createModals } from './modals.js';
 import { createProfile } from './profile.js';
 import { createEdit } from './edit.js';
 import { createMute } from './mute.js';
+import { createMentions } from './mentions.js';
 
         const WS_URL = (() => {
             const metaUrl = document.querySelector('meta[name="x-gateway-url"]')?.content;
@@ -316,6 +317,10 @@ import { createMute } from './mute.js';
         // Mute: mutedThreads is a host-owned Set (read by renderer/dispatch),
         // injected by reference and mutated in place.
         const { muteThread, unmuteThread } = createMute({ getMutedThreads: () => mutedThreads });
+        // @-mention autocomplete: owns its own cursor state + input listeners;
+        // call mentions.attach(inputEl) once the input exists.
+        const mentions = createMentions({ getCurrentRoomMembers: () => currentRoomMembers });
+        const { closeMentionDropdown, _selectMention } = mentions;
         let roomCreatorOf = new Set(); // room_ids this user owns
         let _lastRenderedDate = null;   // for date dividers
         let _scrollBottomUnread = 0;    // count of messages arrived while scrolled up
@@ -3622,107 +3627,9 @@ import { createMute } from './mute.js';
         });
 
         // --------------- @Mention Autocomplete ---------------
-        let _mentionStart = -1;
-        let _mentionFocusIdx = 0;
-        const _msgInput = document.getElementById("message-input");
-
-        _msgInput.addEventListener("input", () => {
-            const val = _msgInput.value;
-            const caret = _msgInput.selectionStart;
-            let atPos = -1;
-            for (let i = caret - 1; i >= 0; i--) {
-                if (val[i] === "@" && (i === 0 || /\s/.test(val[i - 1]))) { atPos = i; break; }
-                if (/\s/.test(val[i])) break;
-            }
-            if (atPos === -1 || !currentRoomMembers.length) { closeMentionDropdown(); return; }
-            const query = val.slice(atPos + 1, caret).toLowerCase();
-            const matches = currentRoomMembers.filter(m =>
-                (m.display_name || "").toLowerCase().includes(query) ||
-                (m.webid || "").toLowerCase().includes(query)
-            ).slice(0, 8);
-            if (!matches.length) { closeMentionDropdown(); return; }
-            _mentionStart = atPos;
-            _renderMentionDropdown(matches);
-        });
-
-        function _renderMentionDropdown(matches) {
-            const dd = document.getElementById("mention-dropdown");
-            if (!dd) return;
-            _mentionFocusIdx = 0;
-            dd.innerHTML = "";
-            matches.forEach((m, i) => {
-                const name = m.display_name || (m.webid || "").slice(0, 12);
-                const color = webidColor(m.webid);
-                const initial = (name[0] || "?").toUpperCase();
-                const row = document.createElement("div");
-                row.className = "mention-option" + (i === 0 ? " focused" : "");
-                row.dataset.idx = String(i);
-                row.dataset.name = name;
-
-                const avatar = document.createElement("div");
-                avatar.className = "mo-avatar";
-                avatar.style.background = color;
-                avatar.textContent = initial;
-                row.appendChild(avatar);
-
-                const label = document.createElement("span");
-                label.textContent = name;
-                row.appendChild(label);
-
-                if (m.status === "online") {
-                    const dot = document.createElement("span");
-                    dot.style.width = "6px";
-                    dot.style.height = "6px";
-                    dot.style.borderRadius = "50%";
-                    dot.style.background = "#22c55e";
-                    dot.style.display = "inline-block";
-                    dot.style.marginLeft = "auto";
-                    dot.style.flexShrink = "0";
-                    row.appendChild(dot);
-                }
-                dd.appendChild(row);
-            });
-            dd.style.display = "block";
-        }
-
-        function _selectMention(name) {
-            const val = _msgInput.value;
-            const caret = _msgInput.selectionStart;
-            const before = val.slice(0, _mentionStart);
-            const after  = val.slice(caret);
-            _msgInput.value = `${before}@${name} ${after}`;
-            const newPos = _mentionStart + name.length + 2;
-            _msgInput.setSelectionRange(newPos, newPos);
-            closeMentionDropdown();
-            _msgInput.focus();
-        }
-
-        function closeMentionDropdown() {
-            const dd = document.getElementById("mention-dropdown");
-            if (dd) dd.style.display = "none";
-            _mentionStart = -1;
-        }
-
-        _msgInput.addEventListener("keydown", e => {
-            const dd = document.getElementById("mention-dropdown");
-            if (!dd || dd.style.display === "none") return;
-            const items = dd.querySelectorAll(".mention-option");
-            if (!items.length) return;
-            if (e.key === "ArrowDown") {
-                e.preventDefault();
-                _mentionFocusIdx = Math.min(_mentionFocusIdx + 1, items.length - 1);
-                items.forEach((el, i) => el.classList.toggle("focused", i === _mentionFocusIdx));
-            } else if (e.key === "ArrowUp") {
-                e.preventDefault();
-                _mentionFocusIdx = Math.max(_mentionFocusIdx - 1, 0);
-                items.forEach((el, i) => el.classList.toggle("focused", i === _mentionFocusIdx));
-            } else if (e.key === "Enter" || e.key === "Tab") {
-                const name = items[_mentionFocusIdx]?.dataset.name;
-                if (name) { e.preventDefault(); _selectMention(name); }
-            } else if (e.key === "Escape") {
-                e.preventDefault(); closeMentionDropdown();
-            }
-        });
+        // @-mention autocomplete moved to mentions.js (createMentions); wire it
+        // to the message input here.
+        mentions.attach(document.getElementById("message-input"));
 
         // --------------- Context Menu ---------------
         let _ctxTarget = null; // { msgId, fromWebid, content, isOwn }
