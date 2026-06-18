@@ -30,6 +30,7 @@ import { createProfile } from './profile.js';
 import { createEdit } from './edit.js';
 import { createMute } from './mute.js';
 import { createMentions } from './mentions.js';
+import { createRooms } from './rooms.js';
 
         const WS_URL = (() => {
             const metaUrl = document.querySelector('meta[name="x-gateway-url"]')?.content;
@@ -321,6 +322,17 @@ import { createMentions } from './mentions.js';
         // call mentions.attach(inputEl) once the input exists.
         const mentions = createMentions({ getCurrentRoomMembers: () => currentRoomMembers });
         const { closeMentionDropdown, _selectMention } = mentions;
+        // Rooms (command actions). roomCreatorOf (Set) and roomInviteUrls (object)
+        // are host-owned shared state, injected by reference. showConfirm and
+        // showCopyModal are hoisted function declarations.
+        const {
+            requestRoomMembers, leaveRoom, deleteRoom, transferOwnership,
+            copyRoomInviteFromModal, copyRoomInvite, _copyInviteText, kickMember, submitJoinRoom,
+        } = createRooms({
+            getSocket: () => socket, getActiveView: () => activeView,
+            getRoomCreatorOf: () => roomCreatorOf, getRoomInviteUrls: () => roomInviteUrls,
+            showConfirm, showCopyModal,
+        });
         let roomCreatorOf = new Set(); // room_ids this user owns
         let _lastRenderedDate = null;   // for date dividers
         let _scrollBottomUnread = 0;    // count of messages arrived while scrolled up
@@ -369,11 +381,7 @@ import { createMentions } from './mentions.js';
             }
         }
 
-        function requestRoomMembers(roomId) {
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({ cmd: "get_room_members", room_id: roomId }));
-            }
-        }
+        // requestRoomMembers: moved to rooms.js (createRooms).
 
         function memberHtml(m) {
             const color = webidColor(m.webid);
@@ -589,28 +597,7 @@ import { createMentions } from './mentions.js';
         }
 
         // â"€â"€ Leave / delete room â"€â"€
-        function leaveRoom() {
-            if (!activeView || activeView.type !== "local_room") return;
-            const isOwner = roomCreatorOf.has(activeView.id);
-            const msg = isOwner
-                ? "Leave this room? As the owner, ownership will be transferred to another member, or the room will be deleted if you're the last member."
-                : "Leave this room? You can rejoin with the invite link.";
-            showConfirm(msg, () => {
-                socket.send(JSON.stringify({ cmd: "leave_local_room", room_id: activeView.id }));
-            });
-        }
-
-        function deleteRoom() {
-            if (!activeView || !roomCreatorOf.has(activeView.id)) return;
-            showConfirm("Delete this room permanently? All messages and history will be lost for all members.", () => {
-                socket.send(JSON.stringify({ cmd: "delete_room", room_id: activeView.id }));
-            });
-        }
-
-        function transferOwnership(roomId, toDid) {
-            if (!socket || socket.readyState !== WebSocket.OPEN) return;
-            socket.send(JSON.stringify({ cmd: "transfer_ownership", room_id: roomId, to_did: toDid }));
-        }
+        // leaveRoom / deleteRoom / transferOwnership: moved to rooms.js (createRooms).
 
         // Settings modal
         document.getElementById("settings-btn").onclick = () => {
@@ -928,36 +915,8 @@ import { createMentions } from './mentions.js';
             if (e.key === "Enter") document.getElementById("room-create-submit").click();
         };
 
-        function copyRoomInviteFromModal() {
-            const url = document.getElementById("room-invite-url").textContent;
-            navigator.clipboard.writeText(url).then(() => {
-                document.getElementById("room-invite-url").textContent = "Copied!";
-                setTimeout(() => { document.getElementById("room-invite-url").textContent = url; }, 1500);
-            }).catch(() => {
-                showCopyModal(url);
-            });
-        }
-
-        function copyRoomInvite() {
-            if (!activeView || !roomInviteUrls[activeView.id]) return;
-            const url = roomInviteUrls[activeView.id];
-            // Extract the raw code from the URL (?join=CODE) so users can share just the code
-            const codeMatch = url.match(/[?&]join=([^&]+)/);
-            const code = codeMatch ? codeMatch[1] : url;
-            const urlEl = document.getElementById("invite-modal-url");
-            const codeEl = document.getElementById("invite-modal-code");
-            if (urlEl) urlEl.textContent = url;
-            if (codeEl) codeEl.textContent = code;
-            document.getElementById("room-invite-modal").style.display = "flex";
-        }
-
-        function _copyInviteText(text, btn) {
-            navigator.clipboard.writeText(text).then(() => {
-                const orig = btn.textContent;
-                btn.textContent = "Copied!";
-                setTimeout(() => { btn.textContent = orig; }, 1500);
-            }).catch(() => { showCopyModal(text); });
-        }
+        // copyRoomInviteFromModal / copyRoomInvite / _copyInviteText:
+        // moved to rooms.js (createRooms).
 
         attachListener('#invite-modal-copy-url', 'click', () => {
             const url = document.getElementById("invite-modal-url")?.textContent || "";
@@ -978,11 +937,7 @@ import { createMentions } from './mentions.js';
             document.getElementById("room-members-modal").style.display = "flex";
             if (socket) socket.send(JSON.stringify({cmd: "get_room_members", room_id: roomId}));
         }
-        function kickMember(roomId, webid) {
-            showConfirm("Kick this member?", () => {
-                if (socket) socket.send(JSON.stringify({cmd: "kick_member", room_id: roomId, webid: webid}));
-            });
-        }
+        // kickMember: moved to rooms.js (createRooms).
 
         function updateRoomPreview(roomId) {
             const li = document.getElementById(`nav-${roomId}`);
@@ -3551,32 +3506,7 @@ import { createMentions } from './mentions.js';
         });
 
         // --------------- Join Room modal ---------------
-        function submitJoinRoom() {
-            const raw = document.getElementById("join-room-input").value.trim();
-            const errEl = document.getElementById("join-room-error");
-            if (!socket || socket.readyState !== WebSocket.OPEN) {
-                errEl.textContent = "Not connected to gateway."; return;
-            }
-            if (!raw) { errEl.textContent = "Please enter a link or code."; return; }
-            if (raw.startsWith("http://") || raw.startsWith("https://")) {
-                try {
-                    const url = new URL(raw);
-                    const code = url.searchParams.get("join");
-                    const sameOrigin = url.origin === window.location.origin;
-                    if (sameOrigin && code) {
-                        socket.send(JSON.stringify({cmd: "join_room", code: code}));
-                    } else if (!sameOrigin) {
-                        window.location.href = raw;
-                        return;
-                    } else {
-                        errEl.textContent = "Link has no join code."; return;
-                    }
-                } catch (e) { errEl.textContent = "Invalid URL: " + e.message; return; }
-            } else {
-                socket.send(JSON.stringify({cmd: "join_room", code: raw}));
-            }
-            document.getElementById("join-room-modal").style.display = "none";
-        }
+        // submitJoinRoom: moved to rooms.js (createRooms).
         document.getElementById("join-room-input").addEventListener("keydown", e => {
             if (e.key === "Enter") submitJoinRoom();
         });
