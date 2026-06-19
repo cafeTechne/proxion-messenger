@@ -31,6 +31,7 @@ import { createEdit } from './edit.js';
 import { createMute } from './mute.js';
 import { createMentions } from './mentions.js';
 import { createRooms } from './rooms.js';
+import { createAddress } from './address.js';
 
         const WS_URL = (() => {
             const metaUrl = document.querySelector('meta[name="x-gateway-url"]')?.content;
@@ -333,6 +334,9 @@ import { createRooms } from './rooms.js';
             getRoomCreatorOf: () => roomCreatorOf, getRoomInviteUrls: () => roomInviteUrls,
             showConfirm, showCopyModal,
         });
+        // Own-address bar + invite QR sharing (no host state).
+        const { copyMyAddress, renderMyQR, shareInviteLink, updateMyAddressBar } =
+            createAddress({ showToast, showCopyModal });
         let roomCreatorOf = new Set(); // room_ids this user owns
         let _lastRenderedDate = null;   // for date dividers
         let _scrollBottomUnread = 0;    // count of messages arrived while scrolled up
@@ -705,69 +709,8 @@ import { createRooms } from './rooms.js';
             setTimeout(() => document.getElementById("add-peer-input").focus(), 50);
         };
 
-        function copyMyAddress() {
-            const addr = localStorage.getItem("proxion_my_address") || "";
-            if (!addr) return;
-            navigator.clipboard.writeText(addr).then(() => {
-                showToast("Address copied!");
-                const btn = document.getElementById("copy-addr-btn");
-                if (btn) {
-                    const orig = btn.textContent;
-                    btn.textContent = "✓ Copied";
-                    setTimeout(() => { btn.textContent = orig; }, 2000);
-                }
-            }).catch(() => { showCopyModal(addr); });
-        }
-
-        // R17.1: Render QR code into #my-qr container
-        function renderMyQR(url) {
-            if (!url || typeof QRCode === 'undefined') return;
-            const container = document.getElementById('my-qr');
-            if (!container) return;
-            container.innerHTML = '';
-            new QRCode(container, {
-                text: url,
-                width: 200,
-                height: 200,
-                colorDark: '#0f172a',
-                colorLight: '#ffffff',
-                correctLevel: QRCode.CorrectLevel.M,
-            });
-        }
-
-        // R17.1: Open QR share panel anchored near the button
-        function shareInviteLink() {
-            const link = window.proxionInviteLink;
-            if (!link) { showToast('No invite link available yet — wait for connection.'); return; }
-            const panel = document.getElementById('qr-share-panel');
-            if (!panel) return;
-            // R17.4.5: encode proxion:// deep-link so scanning on a device with the app installed
-            // opens it directly; fall back to HTTP short/invite URL on devices without the app.
-            const addr = window.proxionAddress || localStorage.getItem('proxion_my_address');
-            const qrUrl = addr
-                ? `proxion://invite?from=${encodeURIComponent(addr)}`
-                : (window.proxionShortInviteUrl || link);
-            renderMyQR(qrUrl);
-            // position near top-right
-            panel.style.top = '64px';
-            panel.style.right = '12px';
-            panel.style.left = 'auto';
-            panel.style.display = 'block';
-        }
-
-        function updateMyAddressBar(addr) {
-            const bar = document.getElementById("my-address-bar");
-            const short = document.getElementById("my-address-short");
-            const full = document.getElementById("settings-proxion-address");
-            if (full) full.textContent = addr || "";
-            if (!addr || !bar || !short) return;
-            const atIdx = addr.lastIndexOf("@");
-            const truncDid = addr.slice(0, 20) + "…";
-            const domain = atIdx > -1 ? addr.slice(atIdx) : "";
-            short.textContent = truncDid + domain;
-            short.title = addr;
-            bar.style.display = "flex";
-        }
+        // copyMyAddress / renderMyQR / shareInviteLink / updateMyAddressBar:
+        // moved to address.js (createAddress).
 
         function renderPendingInvite(req) {
             const list = document.getElementById("friend-request-list");
