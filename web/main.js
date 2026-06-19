@@ -32,6 +32,7 @@ import { createMute } from './mute.js';
 import { createMentions } from './mentions.js';
 import { createRooms } from './rooms.js';
 import { createAddress } from './address.js';
+import { createTyping } from './typing.js';
 
         const WS_URL = (() => {
             const metaUrl = document.querySelector('meta[name="x-gateway-url"]')?.content;
@@ -238,7 +239,6 @@ import { createAddress } from './address.js';
         let socket = null;
         let activeView = null;
         const _roomCodes = {};            // room_id -> invite code (for REST history catch-up)
-        let typingUsers = {}; // webid -> room/dm id
         let unreadCounts = {}; // id -> count
         let messageReactions = {}; // messageId -> { emoji: [webid] } (host-owned; reactions.js mutates by reference)
         let replyingTo = null; // { id, name, content }
@@ -337,6 +337,10 @@ import { createAddress } from './address.js';
         // Own-address bar + invite QR sharing (no host state).
         const { copyMyAddress, renderMyQR, shareInviteLink, updateMyAddressBar } =
             createAddress({ showToast, showCopyModal });
+        // Typing indicators: owns typingUsers + outgoing throttle; call
+        // typing.attach(inputEl) once the message input exists.
+        const typing = createTyping({ getSocket: () => socket, getActiveView: () => activeView });
+        const { handleTyping } = typing;
         let roomCreatorOf = new Set(); // room_ids this user owns
         let _lastRenderedDate = null;   // for date dividers
         let _scrollBottomUnread = 0;    // count of messages arrived while scrolled up
@@ -2477,25 +2481,8 @@ import { createAddress } from './address.js';
             return d.toLocaleDateString(undefined, {month:"long", day:"numeric"});
         }
 
-        function handleTyping(event) {
-            const id = event.room_id || event.cert_id;
-            if (!activeView || activeView.id !== id) return;
-            
-            typingUsers[event.from_webid] = Date.now();
-            updateTypingDisplay();
-        }
-
-        function updateTypingDisplay() {
-            const now = Date.now();
-            const activeTyping = Object.keys(typingUsers).filter(uid => now - typingUsers[uid] < 4000);
-            const el = document.getElementById("typing-indicator");
-            if (activeTyping.length > 0) {
-                el.innerText = `${activeTyping[0].slice(0, 8)}... is typing...`;
-            } else {
-                el.innerText = "";
-            }
-        }
-        setInterval(updateTypingDisplay, 1000);
+        // handleTyping / updateTypingDisplay + typing interval: moved to typing.js
+        // (createTyping). Outgoing throttled "typing" send is in typing.attach().
 
         function populateSidebar(listId, items, type) {
             const list = document.getElementById(listId);
@@ -3000,16 +2987,8 @@ import { createAddress } from './address.js';
             }, 500);
         };
 
-        let typingThrottled = false;
-        document.getElementById("message-input").addEventListener("input", (e) => {
-            if (!socket || !activeView || typingThrottled) return;
-            const payload = { cmd: "typing" };
-            if (activeView.type === "dm" || activeView.type === "local_dm") payload.cert_id = activeView.id;
-            else payload.room_id = activeView.id;
-            socket.send(JSON.stringify(payload));
-            typingThrottled = true;
-            setTimeout(() => { typingThrottled = false; }, 3000);
-        });
+        // Outgoing throttled "typing" + staleness sweep interval: wired by typing.js.
+        typing.attach(document.getElementById("message-input"));
 
 
 
