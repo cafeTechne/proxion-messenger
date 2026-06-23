@@ -735,18 +735,8 @@ import { createConnection } from './connection.js';
 
         // copyRoomInviteFromModal / copyRoomInvite / _copyInviteText:
         // moved to rooms.js (createRooms).
-
-        attachListener('#invite-modal-copy-url', 'click', () => {
-            const url = document.getElementById("invite-modal-url")?.textContent || "";
-            _copyInviteText(url, document.getElementById("invite-modal-copy-url"));
-        });
-        attachListener('#invite-modal-copy-code', 'click', () => {
-            const code = document.getElementById("invite-modal-code")?.textContent || "";
-            _copyInviteText(code, document.getElementById("invite-modal-copy-code"));
-        });
-        attachListener('#invite-modal-close', 'click', () => {
-            document.getElementById("room-invite-modal").style.display = "none";
-        });
+        // NOTE: the invite-modal copy/close listeners live inside
+        // setupEventListeners() (attachListener is scoped to that function).
 
         let _membersRoomId = null;
         function showRoomMembers(roomId) {
@@ -3438,6 +3428,19 @@ import { createConnection } from './connection.js';
 
             // Room create modal: Invite URL (click to copy)
             attachListener('#room-invite-url', 'click', copyRoomInviteFromModal);
+
+            // Room invite modal: copy url/code + close
+            attachListener('#invite-modal-copy-url', 'click', () => {
+                const url = document.getElementById("invite-modal-url")?.textContent || "";
+                _copyInviteText(url, document.getElementById("invite-modal-copy-url"));
+            });
+            attachListener('#invite-modal-copy-code', 'click', () => {
+                const code = document.getElementById("invite-modal-code")?.textContent || "";
+                _copyInviteText(code, document.getElementById("invite-modal-copy-code"));
+            });
+            attachListener('#invite-modal-close', 'click', () => {
+                document.getElementById("room-invite-modal").style.display = "none";
+            });
 
             // Room create modal: Done button
             attachListener('#room-create-done-btn', 'click', () => {

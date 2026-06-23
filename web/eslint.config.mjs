@@ -21,7 +21,10 @@ export default [
         jsQR: "readonly",
         // KNOWN PRE-EXISTING undefined refs (latent bugs predating the lint net;
         // declared here to keep the net's signal clean for new work — TODO: fix).
-        attachListener: "readonly",
+        // attachListener was removed: it is scoped to setupEventListeners(); any
+        // reference outside it is a real bug (3 stranded top-level calls that
+        // threw "attachListener is not defined" at eval and broke the page were
+        // fixed by moving them inside setupEventListeners).
         sendNotification: "readonly",
       },
     },

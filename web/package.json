@@ -6,7 +6,8 @@
   "scripts": {
     "test": "vitest run",
     "lint": "eslint main.js util.js filetransfer.js voice.js notifications.js onboarding.js reactions.js pins.js media.js modals.js profile.js edit.js mute.js mentions.js rooms.js address.js typing.js members.js friend-requests.js e2e-status.js status-banners.js connection.js auth.js e2e.js pod.js",
-    "check:solid-sdk": "node --experimental-vm-modules scripts/check_solid_sdk_versions.mjs"
+    "check:solid-sdk": "node --experimental-vm-modules scripts/check_solid_sdk_versions.mjs",
+    "smoke:browser": "node smoke_browser.mjs"
   },
   "keywords": [],
   "author": "",
@@ -24,6 +25,7 @@
     "@inrupt/solid-client-authn-node": "^2.0.0",
     "eslint": "^9.39.4",
     "globals": "^17.6.0",
+    "puppeteer-core": "^24.43.1",
     "vitest": "^3.0.0"
   },
   "overrides": {
