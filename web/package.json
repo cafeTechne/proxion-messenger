@@ -7,7 +7,8 @@
     "test": "vitest run",
     "lint": "eslint main.js util.js filetransfer.js voice.js notifications.js onboarding.js reactions.js pins.js media.js modals.js profile.js edit.js mute.js mentions.js rooms.js address.js typing.js members.js friend-requests.js e2e-status.js status-banners.js connection.js rendering.js view.js auth.js e2e.js pod.js",
     "check:solid-sdk": "node --experimental-vm-modules scripts/check_solid_sdk_versions.mjs",
-    "smoke:browser": "node smoke_browser.mjs"
+    "smoke:browser": "node smoke_browser.mjs",
+    "smoke:webrtc": "node smoke_webrtc.mjs"
   },
   "keywords": [],
   "author": "",
