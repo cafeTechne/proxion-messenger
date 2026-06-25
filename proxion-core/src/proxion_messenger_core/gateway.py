@@ -1587,9 +1587,18 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
     def _ws_public_url(self) -> str:
         """Return the public WebSocket URL for this gateway."""
+        tls_on = bool(self.config.ssl_certfile and self.config.ssl_keyfile)
         if self.config.public_url:
-            return self.config.public_url
-        scheme = "wss" if (self.config.ssl_certfile and self.config.ssl_keyfile) else "ws"
+            url = self.config.public_url
+            # When this gateway terminates TLS, the web UI is served over https and
+            # a secure page cannot open an insecure ws:// socket (browsers block it
+            # as mixed content). An explicit ws:// public_url in that case can never
+            # connect, so upgrade it to wss://. (Reverse-proxy setups terminate TLS
+            # upstream and leave ssl_certfile unset, so they're untouched.)
+            if tls_on and url.startswith("ws://"):
+                url = "wss://" + url[len("ws://"):]
+            return url
+        scheme = "wss" if tls_on else "ws"
         # Use 127.0.0.1 (not "localhost") when binding to all interfaces — on Windows,
         # "localhost" resolves to ::1 (IPv6) first but the server only binds IPv4 (0.0.0.0),
         # causing the browser WebSocket to get connection-refused before falling back.

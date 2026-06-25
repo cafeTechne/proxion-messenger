@@ -477,17 +477,29 @@ class RoomHandlerMixin:
         rooms = []
         for rid, (m, _) in self.room_memberships.items():
             rooms.append({"id": rid, "name": m.room_id})
+        _caller_wid = self._client_webids.get(websocket)
         for rid, room in self._local_rooms.items():
-            if websocket in room["members"]:
-                rooms.append({
-                    "id": rid,
-                    "name": room["name"],
-                    "code": room.get("code", ""),
-                    "invite_url": room.get("invite_url", ""),
-                    "history_mode": room.get("history_mode", "none"),
-                    "creator_webid": room.get("creator_webid", ""),
-                    "local": True,
-                })
+            # room["members"] is a set of *live* websockets, rebuilt each run;
+            # after a gateway restart it is empty even for legitimate members.
+            # Fall back to persistent store membership (by webid) so reconnecting
+            # members still get their rooms, and re-attach the websocket to the
+            # live set (mirrors _handle_get_local_history).
+            _in_live = websocket in room["members"]
+            _in_store = bool(_caller_wid and self._store and
+                             _caller_wid in self._store.get_room_members(rid))
+            if not _in_live and not _in_store:
+                continue
+            if not _in_live and _in_store:
+                room["members"].add(websocket)
+            rooms.append({
+                "id": rid,
+                "name": room["name"],
+                "code": room.get("code", ""),
+                "invite_url": room.get("invite_url", ""),
+                "history_mode": room.get("history_mode", "none"),
+                "creator_webid": room.get("creator_webid", ""),
+                "local": True,
+            })
         await websocket.send(json.dumps({"type": "rooms", "rooms": rooms}))
 
     async def _handle_get_local_history(self, websocket, data: dict) -> None:

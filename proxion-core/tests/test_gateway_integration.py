@@ -149,3 +149,50 @@ async def test_gateway_get_rooms(gateway_server):
         assert resp["type"] == "rooms"
         assert len(resp["rooms"]) == 1
         assert resp["rooms"][0]["id"] == "room123"
+
+
+@pytest.mark.asyncio
+async def test_gateway_get_rooms_uses_store_membership_after_restart(gateway_server):
+    """Regression: a reconnecting member must still receive their local rooms when
+    the live members set is empty (as it is after a gateway restart hydrates rooms
+    from the store). Previously get_rooms only checked live websocket membership,
+    so every member saw an empty room list until they re-joined."""
+    url, gw = gateway_server
+    room_id = "persisted-room"
+    member_wid = "did:key:integrationtestuser"  # matches _register() default
+
+    # This fixture runs without a persistent store; inject a minimal one so the
+    # store-membership fallback path can be exercised.
+    class _FakeStore:
+        def __init__(self):
+            self._members = {}
+        def add_room_member(self, rid, wid):
+            self._members.setdefault(rid, set()).add(wid)
+        def get_room_members(self, rid):
+            return list(self._members.get(rid, set()))
+    gw._store = _FakeStore()
+
+    # Simulate hydration-from-store: room present, but the live members set is EMPTY.
+    gw._local_rooms[room_id] = {
+        "name": "Persisted Room", "code": "RM-CODE", "invite_url": "",
+        "history_mode": "none", "creator_webid": member_wid,
+        "members": set(), "messages": [],
+    }
+    # Persistent membership lives in the store, keyed by webid.
+    gw._store.add_room_member(room_id, member_wid)
+
+    async with websockets.connect(url) as ws:
+        await _register(ws, member_wid)
+        await asyncio.sleep(0.15)
+        await ws.send(json.dumps({"cmd": "get_rooms"}))
+        resp = None
+        for _ in range(10):
+            msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=3))
+            if msg.get("type") == "rooms":
+                resp = msg
+                break
+        assert resp is not None, "no 'rooms' response received"
+        ids = [r["id"] for r in resp["rooms"]]
+        assert room_id in ids, f"reconnecting member should see persisted room; got {ids}"
+        # and the websocket should have been re-attached to the live members set
+        assert ws is not None and len(gw._local_rooms[room_id]["members"]) == 1

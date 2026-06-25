@@ -86,6 +86,39 @@ def test_ws_public_url_uses_public_url_if_set():
     assert gw._ws_public_url() == "wss://chat.example.com"
 
 
+def _gw_with(**cfg):
+    from proxion_messenger_core.persist import AgentState
+    from proxion_messenger_core.readstate import ReadState
+    from proxion_messenger_core.gateway import ProxionGateway
+    agent = MagicMock(spec=AgentState)
+    agent.identity_pub_bytes = b"\x00" * 32
+    return ProxionGateway(
+        agent=agent, dm_clients=[], room_memberships=[],
+        config=GatewayConfig(**cfg), read_state=ReadState(),
+    )
+
+
+def test_ws_public_url_upgrades_ws_to_wss_when_gateway_terminates_tls():
+    # A ws:// public_url is unusable when the gateway serves the UI over https
+    # (the secure page can't open an insecure socket — mixed content). Upgrade it.
+    gw = _gw_with(public_url="ws://localhost:7474",
+                  ssl_certfile="/x/cert.pem", ssl_keyfile="/x/key.pem")
+    assert gw._ws_public_url() == "wss://localhost:7474"
+
+
+def test_ws_public_url_leaves_ws_untouched_without_gateway_tls():
+    # Reverse-proxy / plain-local: gateway has no TLS of its own, leave ws:// alone.
+    gw = _gw_with(public_url="ws://localhost:7474",
+                  ssl_certfile=None, ssl_keyfile=None)
+    assert gw._ws_public_url() == "ws://localhost:7474"
+
+
+def test_ws_public_url_leaves_explicit_wss_untouched():
+    gw = _gw_with(public_url="wss://chat.example.com",
+                  ssl_certfile=None, ssl_keyfile=None)
+    assert gw._ws_public_url() == "wss://chat.example.com"
+
+
 def test_ws_public_url_falls_back_to_ws_scheme():
     from proxion_messenger_core.persist import AgentState
     from proxion_messenger_core.readstate import ReadState
