@@ -88,7 +88,7 @@ async def test_valid_public_origin_stored(gateway, sender_key):
     from unittest.mock import patch
     body = _make_body(priv, from_did, to_did, "https://alice.example.com")
 
-    with patch("proxion_messenger_core.gateway._is_safe_gateway_url", return_value=True):
+    with patch("proxion_messenger_core._gateway_http._is_safe_gateway_url", return_value=True):
         await gateway._handle_relay_post(body, client_ip="127.0.0.1")
 
     assert gateway._peer_gateway_urls.get(from_did) == "https://alice.example.com"
