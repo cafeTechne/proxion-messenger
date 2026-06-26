@@ -165,7 +165,7 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
                 statusEl.style.color = "#f87171";
             }
         } catch (e) {
-            statusEl.textContent = "Could not reach gateway. Is Proxion running?";
+            statusEl.textContent = "Couldn't connect. Is Proxion running?";
             statusEl.style.color = "#f87171";
         }
         testBtn.textContent = "Test connection";
