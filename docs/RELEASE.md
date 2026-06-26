@@ -72,7 +72,7 @@ and publish; the landing page picks it up automatically.
 ## Verifying the updater manifest
 
 `latest.json` must carry a `version` and per-platform `url`+`signature`
-entries. `proxion-core/tests/test_updater_manifest.py` validates the shape.
+entries. `proxion-messenger-core/tests/test_updater_manifest.py` validates the shape.
 
 ## Status
 

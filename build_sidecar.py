@@ -33,7 +33,7 @@ TRIPLE_MAP: dict[tuple[str, str], str] = {
 
 ROOT        = Path(__file__).resolve().parent
 ENTRY       = ROOT / "run_gateway.py"
-PROXION_SRC = ROOT / "proxion-core" / "src"
+PROXION_SRC = ROOT / "proxion-messenger-core" / "src"
 WEB_DIR     = ROOT / "web"
 SIDECAR_DIR = ROOT / "tauri-app" / "src-tauri" / "sidecar"
 BUILD_DIR   = ROOT / "build"

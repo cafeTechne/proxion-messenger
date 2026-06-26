@@ -1,6 +1,6 @@
 # EI0 UI Mapping
 
-This document maps the EI0 reference implementation in `proxion-core` to the
+This document maps the EI0 reference implementation in `proxion-messenger-core` to the
 Universal Architecture (UI) invariants and sections.
 
 ## UI Invariants I1–I6

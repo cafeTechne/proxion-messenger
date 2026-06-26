@@ -145,7 +145,7 @@ cd web && npm test          # 39 tests: 15 pod.js + 24 e2e.js
 ### Python interop tests
 
 ```powershell
-python -m pytest proxion-core/tests/test_e2e_crypto.py -v   # 28 tests
+python -m pytest proxion-messenger-core/tests/test_e2e_crypto.py -v   # 28 tests
 ```
 
 Verifies HKDF-SHA256 salt/info strings, HMAC chain constants, AES-256-GCM wire format,

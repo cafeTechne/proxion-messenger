@@ -63,11 +63,11 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        working-directory: proxion-core
+        working-directory: proxion-messenger-core
         run: pip install -e ".[gateway,test]"
 
       - name: Run unit tests
-        working-directory: proxion-core
+        working-directory: proxion-messenger-core
         run: pytest tests/ -q --tb=short -m "not integration"
 
   build-sidecar:
@@ -88,7 +88,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install pyinstaller && pip install -e "./proxion-core[gateway]"
+        run: pip install pyinstaller && pip install -e "./proxion-messenger-core[gateway]"
 
       - name: Build sidecar
         run: python build_sidecar.py

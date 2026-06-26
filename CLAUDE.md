@@ -5,7 +5,7 @@ Personal data sovereignty messenger built on the Solid Protocol. Users own their
 ## Stack
 
 - `web/` — frontend (vanilla JS, no framework). Single-page app served by the gateway.
-- `proxion-messenger-core/` — Python backend library + WebSocket/HTTP gateway server (directory currently named `proxion-core` pending manual rename)
+- `proxion-messenger-core/` — Python backend library + WebSocket/HTTP gateway server
 - `run_gateway.py` — process entry point (loads keys, starts ProxionGateway)
 - `tauri-app/` — Rust/Tauri desktop app wrapper (bundles gateway as PyInstaller sidecar)
 - `build_sidecar.py` — builds native `proxion-gateway[.exe]` for all 6 platform triples

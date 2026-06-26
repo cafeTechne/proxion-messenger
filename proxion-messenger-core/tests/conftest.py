@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for proxion-core tests.
+"""Shared pytest fixtures for proxion-messenger-core tests.
 
 All fixtures are function-scoped by default (fresh state per test) unless
 explicitly marked otherwise.  This prevents state leakage between tests.

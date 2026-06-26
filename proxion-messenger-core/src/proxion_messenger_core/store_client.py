@@ -82,7 +82,7 @@ class RemoteStore:
         if not _HTTPX_AVAILABLE:
             raise ImportError(
                 "httpx is required to use RemoteStore. "
-                "Install it with: pip install 'proxion-core[client]'"
+                "Install it with: pip install 'proxion-messenger-core[client]'"
             )
         self._base = base_url.rstrip("/")
         headers = kwargs.pop("headers", {})

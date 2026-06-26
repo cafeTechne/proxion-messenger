@@ -10,7 +10,7 @@ This EI₀ reference implementation is a **frozen witness** for the Universal Ar
 
 Status: EI₀ is frozen as of v0.1.0. Architectural changes must occur at the UI level or via separate EI repositories.
 
-The purpose of `proxion-core` is to prove that the Universal Architecture defined in `proxion-spec` is implementable. It serves as a **witness** to the specification.
+The purpose of `proxion-messenger-core` is to prove that the Universal Architecture defined in `proxion-spec` is implementable. It serves as a **witness** to the specification.
 
 **It is explicitly NOT:**
 *   A product.

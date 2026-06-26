@@ -1,6 +1,6 @@
 # Proxion Core Capabilities
 
-`proxion-core` (EI₀) is the reference logic for the Proxion Universal Architecture. It provides the cryptographic and logical primitives that power the entire ecosystem.
+`proxion-messenger-core` (EI₀) is the reference logic for the Proxion Universal Architecture. It provides the cryptographic and logical primitives that power the entire ecosystem.
 
 ## 1. Capability Tokens (ZCAP-LD)
 The core of Proxion security is the **Capability Token**. Unlike traditional Bearer tokens (JWTs), Proxion tokens are attenuated and cryptographically delegated.
@@ -19,7 +19,7 @@ The system supports sophisticated "fail-closed" logic for restricting token usag
 - **Context Validation**: A `RequestContext` object provides the semantic environment (action, resource, audience, timestamp, IP) against which caveats are evaluated.
 
 ## 3. DPoP (Proof-of-Possession)
-To prevent token theft, `proxion-core` enforces Proof-of-Possession.
+To prevent token theft, `proxion-messenger-core` enforces Proof-of-Possession.
 - **Key Fingerprinting**: Tokens are bound to the public key fingerprint of the intended holder.
 - **Challenge/Response**: Holders must sign a challenge (or the request itself) to prove they possess the private key associated with the token.
 

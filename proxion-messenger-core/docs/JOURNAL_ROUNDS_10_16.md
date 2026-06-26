@@ -14,7 +14,7 @@ Entries are append-only. Each entry has a date, a category tag, and a status.
 
 ### Context
 
-Unit tests and the developer example (`proxion-core/docs/example_app.py`) verify
+Unit tests and the developer example (`proxion-messenger-core/docs/example_app.py`) verify
 the protocol mechanics in isolation. Round 10 stress-tests the spec by building a
 minimal federated messaging layer — two `AgentState` instances exchanging messages
 via their Solid Pods using capability tokens — with no central server.
@@ -144,7 +144,7 @@ token issuance can record revocation IDs to a per-cert ledger mailbox, and
 ### [J-005] spec-gap | closed
 **Pod ACL bootstrap: LDP ACL format for Proxion tokens vs Solid DPoP is unspecified**
 
-`SolidClient.set_acl()` exists in `proxion-core/src/proxion_core/solid_client.py`
+`SolidClient.set_acl()` exists in `proxion-messenger-core/src/proxion_core/solid_client.py`
 and `AuthenticatedSolidClient` gates access via capability token fingerprint
 checking. But:
 

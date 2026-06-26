@@ -6,7 +6,7 @@ Messages in the current release are encrypted in transit via TLS (WebSocket over
 
 The gateway already has the structural groundwork for E2E:
 - Every user has a persistent Ed25519 identity (`did:key`) stored in browser localStorage.
-- The `msgcrypto.py` module (`proxion-core/src/proxion_core/msgcrypto.py`) implements `derive_message_key`, `decrypt_message`, and `is_encrypted` for pod-to-pod federated messages.
+- The `msgcrypto.py` module (`proxion-messenger-core/src/proxion_core/msgcrypto.py`) implements `derive_message_key`, `decrypt_message`, and `is_encrypted` for pod-to-pod federated messages.
 - The DID-to-public-key resolver (`didkey.py`) is in place.
 
 ---

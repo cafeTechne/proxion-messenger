@@ -1,4 +1,4 @@
-"""Error types for proxion-core EI0."""
+"""Error types for proxion-messenger-core EI0."""
 
 class ProxionError(Exception):
     """Base error for Proxion core."""

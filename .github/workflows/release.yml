@@ -45,7 +45,7 @@ jobs:
           cache: pip
 
       - name: Build gateway sidecar
-        run: pip install pyinstaller && pip install -e "./proxion-core[gateway]" && python build_sidecar.py
+        run: pip install pyinstaller && pip install -e "./proxion-messenger-core[gateway]" && python build_sidecar.py
 
       - name: Set up Node
         uses: actions/setup-node@v4

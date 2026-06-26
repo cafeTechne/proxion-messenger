@@ -316,7 +316,7 @@ def run_mutant(mutant: Mutant, test_selector: str, timeout: int) -> MutantResult
              "--tb=no", "--no-header", "--timeout=20"],
             capture_output=True, text=True,
             timeout=timeout,
-            cwd=orig_path.parent.parent.parent.parent,  # proxion-core root
+            cwd=orig_path.parent.parent.parent.parent,  # proxion-messenger-core root
         )
         elapsed = time.monotonic() - t0
         if result.returncode == 0:

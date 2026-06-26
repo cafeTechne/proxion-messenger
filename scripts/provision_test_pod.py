@@ -5,10 +5,10 @@ import os
 import sys
 from pathlib import Path
 
-# Add proxion-core/src to path (two levels up from scripts/)
+# Add proxion-messenger-core/src to path (two levels up from scripts/)
 scripts_dir = Path(__file__).resolve().parent
 repo_root = scripts_dir.parent
-sys.path.insert(0, str(repo_root / "proxion-core" / "src"))
+sys.path.insert(0, str(repo_root / "proxion-messenger-core" / "src"))
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from proxion_messenger_core.css_setup import CssAccountManager
