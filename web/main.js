@@ -40,6 +40,7 @@ import { createStatusBanners } from './status-banners.js';
 import { createConnection } from './connection.js';
 import { createRendering } from './rendering.js';
 import { createView } from './view.js';
+import { createInvite } from './invite.js';
 
         const WS_URL = (() => {
             const metaUrl = document.querySelector('meta[name="x-gateway-url"]')?.content;
@@ -86,22 +87,11 @@ import { createView } from './view.js';
             }
         })();
 
-        // R8.3.1: pre-fill add-contact modal from ?from= URL param
-        (function() {
-            const params = new URLSearchParams(window.location.search);
-            const fromAddr = params.get('from');
-            if (fromAddr) {
-                const inp = document.getElementById('add-peer-input');
-                if (inp) inp.value = fromAddr;
-                // Trigger the modal open after a short delay (wait for connection)
-                setTimeout(() => {
-                    const btn = document.getElementById('add-peer-btn');
-                    if (btn) btn.click();
-                }, 1500);
-                // Clean URL
-                history.replaceState({}, '', window.location.pathname);
-            }
-        })();
+        // A4 (R41): invite-link carry-through. The fragile R8.3.1 fixed-timeout
+        // pre-fill is replaced by createInvite() below — capturePendingInvite()
+        // stashes ?from= into localStorage at startup (survives reload/first-run)
+        // and consumePendingInvite() fires it on the "registered" event when the
+        // socket is provably ready, routing through the deep-link confirm modal.
 
         // wizard-overlay removed: onboarding-modal is the single first-run wizard
         const RENDER_WINDOW = 100;
@@ -413,6 +403,13 @@ import { createView } from './view.js';
             updateVoiceChannels: (id) => voice.updateVoiceChannels(id),
             openSidebarCtx, resetDateDivider: () => { rendering.state._lastRenderedDate = null; },
         });
+        // Invite-link carry-through (A4): capture now (survives reload/first-run),
+        // consume on the "registered" event via the deep-link confirm modal.
+        const invite = createInvite({
+            getSocket: () => socket,
+            onPendingInvite: (addr) => _handleDeepLinkUrl('proxion://invite?from=' + encodeURIComponent(addr)),
+        });
+        invite.capturePendingInvite();
         let roomCreatorOf = new Set(); // room_ids this user owns
         // Render-cursor state (date divider, scroll-unread counter, older-history
         // in-flight flag): moved to rendering.js (createRendering state). External
@@ -886,6 +883,9 @@ import { createView } from './view.js';
                             socket.send(JSON.stringify({cmd: "list_friend_requests"}));
                             socket.send(JSON.stringify({cmd: "get_relationships"}));
                             requestNotifPermission();
+                            // A4: if we arrived via an invite link, add the inviter now
+                            // that the socket is registered (routes via confirm modal).
+                            invite.consumePendingInvite();
                         }, 150);
                     })();
                     break;
