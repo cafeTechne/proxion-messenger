@@ -723,6 +723,24 @@ class HttpEndpointsMixin:
                         b"Content-Length: " + str(len(_429_BODY)).encode() + b"\r\n\r\n" + _429_BODY
                     )
 
+                async def _write_json(writer, code, obj):
+                    """Write a JSON HTTP response with an explicit status code.
+
+                    Restores a helper referenced ~15x in cold error/recovery
+                    response paths but never defined (latent NameError landmine,
+                    predating the B2 extraction). Matches the _write_429 framing.
+                    """
+                    import http as _http
+                    try:
+                        _reason = _http.HTTPStatus(code).phrase
+                    except ValueError:
+                        _reason = ""
+                    _wj_body = json.dumps(obj).encode()
+                    writer.write(
+                        f"HTTP/1.1 {code} {_reason}\r\nContent-Type: application/json\r\n".encode()
+                        + b"Content-Length: " + str(len(_wj_body)).encode() + b"\r\n\r\n" + _wj_body
+                    )
+
                 # Per-endpoint POST body size limits.
                 _ENDPOINT_SIZE_LIMITS = {
                     "/relay":         128 * 1024,        # 128 KiB
@@ -732,6 +750,7 @@ class HttpEndpointsMixin:
                     "/import":        20 * 1024 * 1024,  # 20 MiB
                 }
                 _POST_MAX = 2 * 1024 * 1024  # 2 MB default for unlisted endpoints
+                _IMPORT_MAX = _ENDPOINT_SIZE_LIMITS["/import"]  # cap the /import body read (was undefined)
                 if method == "POST" and content_length > 0:
                     _limit = _ENDPOINT_SIZE_LIMITS.get(path, _POST_MAX)
                     if content_length > _limit:
