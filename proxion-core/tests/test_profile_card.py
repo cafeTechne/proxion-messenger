@@ -46,11 +46,16 @@ def _get_index_html_path():
 
 
 def _get_web_content():
-    """Return combined content of index.html + main.js (JS now lives in main.js)."""
+    """Return combined content of the web shell + extracted ES modules.
+
+    The profile-card JS was extracted from main.js into profile.js during the
+    R40 modularization; include the relevant modules so these content checks
+    follow the code instead of asserting on main.js alone.
+    """
     script_dir = os.path.dirname(os.path.abspath(__file__))
     web_dir = os.path.join(script_dir, "..", "..", "web")
     content = ""
-    for fname in ("index.html", "main.js"):
+    for fname in ("index.html", "main.js", "profile.js", "view.js"):
         fpath = os.path.join(web_dir, fname)
         try:
             with open(fpath, "r", encoding="utf-8") as f:
