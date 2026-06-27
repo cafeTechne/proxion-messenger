@@ -130,8 +130,16 @@
         .reaction.reaction-anim {
             animation: reaction-pop 0.28s cubic-bezier(0.2, 0.7, 0.3, 1.35);
         }
+        /* F4: honour reduced-motion globally — covers the reaction pop, skeleton
+           shimmer, popover fade, recording pulse, every token transition, and
+           smooth scrolling, not just the one reaction rule it replaced. */
         @media (prefers-reduced-motion: reduce) {
-            .reaction.reaction-anim { animation: none; }
+            *, *::before, *::after {
+                animation-duration: 0.001ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.001ms !important;
+                scroll-behavior: auto !important;
+            }
         }
         .emoji-picker {
             display: none;
@@ -381,7 +389,7 @@
             cursor: pointer;
             font-size: 0.85em;
             font-weight: 500;
-            transition: all 0.2s;
+            transition: all var(--transition-base);
         }
         .profile-btn:hover {
             background: #d63550;

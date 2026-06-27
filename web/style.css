@@ -23,6 +23,10 @@
     --color-warning-bg: #92400e;
     --color-warning-text: #fef3c7;
 
+    /* Motion (R51/F4) — consistent transition timings; honour reduced-motion. */
+    --transition-fast: 0.15s ease;
+    --transition-base: 0.2s ease;
+
     /* Neutral slate scale — the palette the legacy inline styles draw from */
     --slate-50: #f1f5f9;
     --slate-300: #cbd5e1;
@@ -103,7 +107,7 @@ nav li {
     border-radius: 4px;
     cursor: pointer;
     margin-bottom: 2px;
-    transition: background 0.2s;
+    transition: background var(--transition-base);
 }
 
 nav li:hover { background: rgba(255,255,255,0.05); }
@@ -216,7 +220,7 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: color 0.1s, background 0.1s;
+    transition: color var(--transition-fast), background var(--transition-fast);
 }
 .icon-btn:hover {
     background: rgba(255,255,255,0.1) !important;
@@ -255,7 +259,7 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
     cursor: pointer;
     color: var(--text-secondary);
     line-height: 0;
-    transition: color 0.15s, background 0.15s;
+    transition: color var(--transition-fast), background var(--transition-fast);
 }
 .paperclip:hover {
     color: var(--text-primary);
@@ -278,7 +282,7 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
     padding: 0;
     line-height: 0;
     font-weight: normal;
-    transition: color 0.15s, background 0.15s;
+    transition: color var(--transition-fast), background var(--transition-fast);
 }
 .voice-record-btn:hover,
 .schedule-btn:hover {
@@ -320,7 +324,7 @@ button:hover { background: var(--accent-hover); }
         height: 100%;
         width: 80%;
         left: 0;
-        transition: transform 0.3s ease;
+        transition: transform var(--transition-base);
         transform: translateX(-100%);
     }
     #sidebar.active {
@@ -374,7 +378,7 @@ button:hover { background: var(--accent-hover); }
     cursor: pointer;
     padding: 7px 6px;
     line-height: 0;
-    transition: background 0.15s, color 0.15s;
+    transition: background var(--transition-fast), color var(--transition-fast);
 }
 .vw-controls button:hover {
     background: rgba(255,255,255,0.13);
