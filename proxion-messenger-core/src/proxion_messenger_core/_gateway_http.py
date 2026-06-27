@@ -21,7 +21,56 @@ from ._gateway_mailbox import relay_node_enabled, relay_fallback_url
 logger = logging.getLogger(__name__)
 
 
+_INVITE_DOWNLOAD_URL = "https://github.com/proxion-messenger"
+
+
 class HttpEndpointsMixin:
+    def _render_invite_landing(self, from_addr: str) -> bytes:
+        """A4.1: the /i/<token> landing page — branch app-installed vs download,
+        carrying the inviter (`from_addr`) through every path. Self-contained
+        (no external assets); from_addr is the gateway's own Proxion address so
+        it's server-controlled, but we still HTML-escape / URL-encode it."""
+        import html as _html
+        import urllib.parse as _up
+        addr_txt = _html.escape(from_addr) if from_addr else ""
+        addr_q = _up.quote(from_addr, safe="") if from_addr else ""
+        web_href = "/?from=" + addr_q if addr_q else "/"
+        app_href = "proxion://invite?from=" + addr_q if addr_q else "proxion://invite"
+        from_block = (
+            f'<p class="from">from <code>{addr_txt}</code></p>' if addr_txt else ""
+        )
+        html_doc = f"""<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>You're invited to Proxion</title>
+<style>
+  :root {{ color-scheme: dark; }}
+  body {{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    background:#1a1a2e; color:#e1e1e1; font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; padding:24px; }}
+  .card {{ background:#16213e; border-radius:12px; padding:32px 28px; max-width:380px; width:100%; text-align:center;
+    box-shadow:0 8px 32px rgba(0,0,0,.4); }}
+  h1 {{ margin:0 0 4px; font-size:1.6em; letter-spacing:.02em; }}
+  .tag {{ color:#94a3b8; margin:0 0 16px; font-size:.95em; }}
+  .from {{ color:#94a3b8; font-size:.82em; word-break:break-all; margin:0 0 20px; }}
+  .from code {{ background:#0f172a; padding:2px 6px; border-radius:4px; }}
+  .btn {{ display:block; text-decoration:none; padding:11px 16px; border-radius:6px; margin:8px 0;
+    font-weight:600; font-size:.95em; }}
+  .btn.primary {{ background:#e94560; color:#fff; }}
+  .btn.secondary {{ background:#0f3460; color:#e1e1e1; }}
+  .btn.ghost {{ background:transparent; color:#94a3b8; border:1px solid #334155; font-weight:500; }}
+  .hint {{ color:#64748b; font-size:.8em; margin:16px 0 0; }}
+</style></head><body>
+  <div class="card">
+    <h1>Proxion</h1>
+    <p class="tag">You've been invited to a private, sovereign chat.</p>
+    {from_block}
+    <a class="btn primary" href="{web_href}">Open in browser</a>
+    <a class="btn secondary" href="{app_href}">Open the desktop app</a>
+    <a class="btn ghost" href="{_INVITE_DOWNLOAD_URL}" target="_blank" rel="noopener">Get Proxion for desktop</a>
+    <p class="hint">No account or install needed - "Open in browser" just works.</p>
+  </div>
+</body></html>"""
+        return html_doc.encode("utf-8")
+
     async def _handle_invite_post(self, body: bytes) -> tuple[str, str]:
         """Handle POST /invite — receive federation invite."""
         # R9: federation quarantine mode
@@ -1139,12 +1188,14 @@ class HttpEndpointsMixin:
                         _enum_entry[0] += 1
                     token = path[3:]
                     if token == self._short_invite_token:
-                        import urllib.parse as _up
-                        proxion_addr = self._proxion_address()
-                        redirect_url = "/invite?from=" + _up.quote(proxion_addr, safe="")
+                        # A4.1: serve the invite landing page (branch app/web/download)
+                        # instead of bouncing straight into the web app, carrying the
+                        # inviter's address through every path.
+                        landing = self._render_invite_landing(self._proxion_address())
                         writer.write(
-                            b"HTTP/1.1 302 Found\r\nLocation: " + redirect_url.encode()
-                            + b"\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: 0\r\n\r\n"
+                            b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+                            b"Access-Control-Allow-Origin: *\r\n"
+                            b"Content-Length: " + str(len(landing)).encode() + b"\r\n\r\n" + landing
                         )
                     else:
                         writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")

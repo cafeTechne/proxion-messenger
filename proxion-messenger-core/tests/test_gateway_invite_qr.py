@@ -56,12 +56,13 @@ def _start_gateway(tmp_path):
     return gw, http_port, ws_port, ready
 
 
-# ── R17.5.1: GET /i/<token> redirects to invite page ─────────────────────────
+# ── R17.5.1 / A4.1: GET /i/<token> serves the invite landing page ────────────
 
 
 @pytest.mark.asyncio
-async def test_short_invite_redirect_valid_token(tmp_path):
-    """R17.5.1: GET /i/<token> with the correct token returns 302 to /invite?from=..."""
+async def test_short_invite_landing_valid_token(tmp_path):
+    """A4.1: GET /i/<token> with the correct token returns a 200 landing page that
+    branches app/web/download and carries the inviter address through each path."""
     gw, http_port, _, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
     await asyncio.sleep(0.2)
@@ -74,10 +75,17 @@ async def test_short_invite_redirect_valid_token(tmp_path):
         follow_redirects=False,
         timeout=5,
     )
-    assert resp.status_code == 302
-    location = resp.headers.get("location", "")
-    assert "/invite" in location
-    assert "from=" in location
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("content-type", "")
+    body = resp.text
+    # All three branches are present and carry the inviter through.
+    assert "Open in browser" in body
+    assert "proxion://invite" in body          # desktop app deep link
+    assert "Get Proxion" in body               # download fallback
+    addr = gw._proxion_address()
+    if addr:
+        from urllib.parse import quote
+        assert "from=" + quote(addr, safe="") in body
 
 
 # ── R17.5.2: GET /i/<bad-token> returns 404 ──────────────────────────────────
@@ -170,7 +178,7 @@ async def test_well_known_includes_gateway_version(tmp_path):
 
 @pytest.mark.asyncio
 async def test_short_invite_token_stable_in_session(tmp_path):
-    """R18.4.3: The same short invite token redirects consistently (stable per gateway instance)."""
+    """R18.4.3: The same short invite token serves the landing consistently (stable per gateway instance)."""
     gw, http_port, _, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
     await asyncio.sleep(0.2)
@@ -180,6 +188,6 @@ async def test_short_invite_token_stable_in_session(tmp_path):
     r1 = httpx.get(f"http://127.0.0.1:{http_port}/i/{token}", follow_redirects=False, timeout=5)
     r2 = httpx.get(f"http://127.0.0.1:{http_port}/i/{token}", follow_redirects=False, timeout=5)
 
-    assert r1.status_code == 302
-    assert r2.status_code == 302
-    assert r1.headers["location"] == r2.headers["location"]
+    assert r1.status_code == 200
+    assert r2.status_code == 200
+    assert r1.text == r2.text
