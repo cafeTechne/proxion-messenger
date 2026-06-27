@@ -48,10 +48,37 @@ function make(over = {}) {
     renderReactions: vi.fn(),
     openCtxMenu: vi.fn(),
     sendUpdateLastRead: vi.fn(),
+    getRoomCode: () => 'CODE',
     renderWindow: 100, scrollBatch: 50,
     ...over,
   });
 }
+
+describe('mergeOlderHistory (C3 federated pagination)', () => {
+  it('prepends deduped older messages in chronological order and re-renders', () => {
+    els['message-feed'] = mkEl();
+    host.allMessages = [{ message_id: 'c', timestamp: '2026-01-03' }];
+    host.messageMap = { c: host.allMessages[0] };
+    const r = make();
+    const added = r.mergeOlderHistory([
+      { message_id: 'a', timestamp: '2026-01-01' },
+      { message_id: 'b', timestamp: '2026-01-02' },
+      { message_id: 'c', timestamp: '2026-01-03' }, // duplicate — ignored
+    ]);
+    expect(added).toBe(2);
+    expect(host.allMessages.map(m => m.message_id)).toEqual(['a', 'b', 'c']); // chronological
+    expect(host.messageMap.a).toBeTruthy();
+    expect(els['message-feed'].scrollTop).toBe(10); // held near top for more paging
+  });
+  it('returns 0 and no-ops when every message is already present', () => {
+    els['message-feed'] = mkEl();
+    host.allMessages = [{ message_id: 'a', timestamp: '2026-01-01' }];
+    host.messageMap = { a: host.allMessages[0] };
+    const r = make();
+    expect(r.mergeOlderHistory([{ message_id: 'a', timestamp: '2026-01-01' }])).toBe(0);
+    expect(host.allMessages).toHaveLength(1);
+  });
+});
 
 describe('_buildThreadedMessages', () => {
   it('orders replies immediately after their parent and assigns depth', () => {

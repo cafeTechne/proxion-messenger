@@ -25,7 +25,7 @@ export function createRendering({
     getActiveView, getSocket, getSelfWebId, getSelfPubHex,
     getCurrentDisappearMs, getMessageMap, getAllMessages, getUserPresence,
     renderReactions, openCtxMenu, sendUpdateLastRead,
-    renderWindow, scrollBatch,
+    getRoomCode, renderWindow, scrollBatch,
 }) {
     const RENDER_WINDOW = renderWindow;
     const SCROLL_BATCH = scrollBatch;
@@ -386,6 +386,29 @@ export function createRendering({
         renderReactions(msgId);
     }
 
+    // C3: merge a batch of older messages (e.g. a federated /room-history page)
+    // into the buffer — dedupe, keep chronological order, re-render the expanded
+    // window and hold the scroll near the top so the user can keep paging up.
+    // Returns the number of new messages actually merged.
+    function mergeOlderHistory(olderMsgs) {
+        const am = getAllMessages();
+        const mm = getMessageMap();
+        const seen = new Set(am.map(m => m.message_id));
+        const older = (olderMsgs || []).filter(m => m && m.message_id && !seen.has(m.message_id));
+        if (!older.length) return 0;
+        const feed = document.getElementById("message-feed");
+        const renderedCount = feed ? feed.querySelectorAll(".message").length : 0;
+        older.forEach(m => { mm[m.message_id] = m; am.push(m); });
+        am.sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || ""));
+        if (feed) {
+            feed.innerHTML = "";
+            state._lastRenderedDate = null;
+            _renderThreaded(am.slice(-(renderedCount + older.length)), feed);
+            feed.scrollTop = 10;
+        }
+        return older.length;
+    }
+
     // Virtual scroll + persistent history: load earlier messages on scroll to top.
     // Wired once via attach() so the #message-feed element exists.
     function attach() {
@@ -410,6 +433,22 @@ export function createRendering({
                 state._lastRenderedDate = null;
                 _renderThreaded(slice, feed);
                 feed.scrollTop = 10;
+                return;
+            }
+            // C3: federated room (hosted on another gateway) — page older history
+            // via the host's REST endpoint (the WS get_local_history path only
+            // serves locally-stored rooms).
+            const _isFedRoom = activeView && activeView.type === "room" && !activeView.local;
+            if (_isFedRoom && !state._loadingOlderHistory) {
+                const _code = getRoomCode ? getRoomCode(activeView.id) : "";
+                const _oldest = allMessages[0];
+                if (_code && _oldest && _oldest.timestamp) {
+                    state._loadingOlderHistory = true;
+                    fetch(`/room-history/${encodeURIComponent(activeView.id)}?code=${encodeURIComponent(_code)}&before=${encodeURIComponent(_oldest.timestamp)}&limit=${SCROLL_BATCH}`)
+                        .then(r => r.ok ? r.json() : null)
+                        .then(data => { state._loadingOlderHistory = false; mergeOlderHistory(data && data.messages); })
+                        .catch(() => { state._loadingOlderHistory = false; });
+                }
                 return;
             }
             // Then fetch older messages from DB
@@ -442,6 +481,6 @@ export function createRendering({
     return {
         renderMessages, renderMessage, _renderThreaded, scrollToBottom,
         _renderMessageEl, _insertReplyInFeed, _buildThreadedMessages, _dateLabelForTimestamp,
-        attach, state,
+        mergeOlderHistory, attach, state,
     };
 }

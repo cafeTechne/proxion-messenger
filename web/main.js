@@ -275,6 +275,7 @@ import { createInvite } from './invite.js';
             getUserPresence: () => userPresence,
             renderReactions: (id) => renderReactions(id),
             openCtxMenu, sendUpdateLastRead: _sendUpdateLastRead,
+            getRoomCode: (id) => _roomCodes[id] || "",
             renderWindow: RENDER_WINDOW, scrollBatch: SCROLL_BATCH,
         });
         const { renderMessages, renderMessage, _renderThreaded, scrollToBottom } = rendering;
