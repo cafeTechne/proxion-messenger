@@ -941,6 +941,17 @@
              style="font-size:0.72em; color:var(--text-secondary); word-break:break-all; margin-bottom:14px;
                     padding:6px; background:var(--slate-900); border-radius:4px; min-height:1.5em;
                     cursor:text; user-select:all;"></div>
+        <!-- G1: progressive disclosure — identity essentials stay above; everything
+             below (gateway, pod, data, privacy, account, federation, backup, sessions)
+             is folded into an Advanced section so a first-run user sees ~5 things. -->
+        <button type="button" id="settings-advanced-toggle" aria-expanded="false" aria-controls="settings-advanced"
+                style="width:100%;background:transparent;border:none;border-top:1px solid var(--slate-700);
+                       color:var(--text-secondary);padding:12px 0 4px;margin-top:4px;cursor:pointer;
+                       font-size:0.85em;text-align:left;display:flex;align-items:center;justify-content:space-between;">
+          <span style="text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Advanced settings</span>
+          <span id="settings-advanced-caret" aria-hidden="true">▾</span>
+        </button>
+        <div id="settings-advanced" style="display:none;">
         <label style="display:block; margin-bottom:8px; font-size:0.9em;">Gateway WebSocket URL</label>
         <input id="settings-gw-url" type="text" placeholder="ws://127.0.0.1:7474"
                style="width:100%; box-sizing:border-box; padding:8px; border-radius:4px; border:1px solid #555; background:var(--slate-900); color:var(--slate-50); font-size:0.95em; margin-bottom:16px;">
@@ -1071,6 +1082,7 @@
         <hr style="border-color:var(--slate-700);margin:16px 0 12px;">
         <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;font-weight:600;">Linked Devices</p>
         <div id="settings-devices-list" style="font-size:0.85em;color:var(--text-secondary);min-height:24px;"></div>
+        </div><!-- /settings-advanced -->
         <div style="display:flex; gap:8px; justify-content:flex-end;">
           <button id="settings-cancel-btn"
                   style="background:var(--slate-700); border:none; color:var(--slate-50); padding:8px 16px; border-radius:4px; cursor:pointer;">Cancel</button>

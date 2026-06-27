@@ -559,6 +559,10 @@ import { inlineNotice, feedEmptyState } from './states.js';
                 socket.send(JSON.stringify({cmd: "list_devices"}));
             }
             document.getElementById("settings-modal").style.display = "flex";
+            // G1: always open with Advanced collapsed (openSettingsToPod re-expands it).
+            document.getElementById("settings-advanced").style.display = "none";
+            document.getElementById("settings-advanced-toggle").setAttribute("aria-expanded", "false");
+            document.getElementById("settings-advanced-caret").textContent = "▾";
             // R33: Fetch connectivity + health for settings federation panel
             Promise.all([fetch('/connectivity').then(r=>r.json()), fetch('/health').then(r=>r.json())])
               .then(([c, h]) => {
@@ -2912,6 +2916,15 @@ import { inlineNotice, feedEmptyState } from './states.js';
             // Settings modal: Cancel button
             attachListener('#settings-cancel-btn', 'click', () => {
                 document.getElementById('settings-modal').style.display = 'none';
+            });
+
+            // G1: Advanced settings progressive disclosure
+            attachListener('#settings-advanced-toggle', 'click', () => {
+                const adv = document.getElementById('settings-advanced');
+                const open = adv.style.display === 'none';
+                adv.style.display = open ? '' : 'none';
+                document.getElementById('settings-advanced-toggle').setAttribute('aria-expanded', String(open));
+                document.getElementById('settings-advanced-caret').textContent = open ? '▴' : '▾';
             });
 
             // Round 62: Voice recording button

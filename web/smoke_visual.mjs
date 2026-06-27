@@ -63,6 +63,16 @@ try {
     await page.addStyleTag({ content:
       '*, *::before, *::after { animation: none !important; transition: none !important; caret-color: transparent !important; }' +
       '#history-skeleton { display: none !important; }' });
+    // Normalize per-session-volatile content (a fresh headless launch mints a new
+    // did:key identity and the pod/address status resolves live) so the diff
+    // reflects layout/colour, not values that legitimately change every run.
+    await page.evaluate(() => {
+      for (const id of ['settings-did', 'settings-proxion-address']) {
+        const e = document.getElementById(id); if (e) e.textContent = '—';
+      }
+      const dot = document.getElementById('settings-pod-status-dot');
+      if (dot) { dot.textContent = '● status'; dot.style.color = '#64748b'; }
+    });
     await new Promise(r => setTimeout(r, 120));    // let the freeze take effect
     const shot = await page.screenshot();          // Buffer (PNG)
     await page.close();
