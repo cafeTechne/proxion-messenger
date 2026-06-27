@@ -6,6 +6,7 @@
 // imported directly. _forwardingMsgId is cluster-owned and lives in `state`.
 // The returned functions are destructured into same-named bindings in main.js.
 import { escHtml } from './util.js';
+import { inlineNotice } from './states.js';
 
 export function createModals({ getSocket, getActiveView, sendCmd, showToast, renderMessage }) {
     const state = { forwardingMsgId: null };
@@ -21,7 +22,7 @@ export function createModals({ getSocket, getActiveView, sendCmd, showToast, ren
             const name = el.querySelector('.room-name')?.textContent || el.dataset.roomId;
             threads.push({ id: el.dataset.roomId, name });
         });
-        if (!threads.length) { list.innerHTML = '<em style="color:#94a3b8">No rooms to forward to.</em>'; }
+        if (!threads.length) { list.innerHTML = inlineNotice("No rooms to forward to."); }
         else {
             list.innerHTML = '';
             threads.forEach(t => {

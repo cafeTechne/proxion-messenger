@@ -272,6 +272,11 @@
 
         /* Empty state */
         .empty-state { text-align: center; color: var(--text-secondary); padding: 48px 24px; line-height: 1.8; }
+        .empty-state-icon { opacity: 0.3; }
+        .empty-state-hint { font-size: 0.85em; color: var(--slate-500); margin-top: 4px; }
+        /* F3: consistent inline empty/loading/error notice for lists & popovers */
+        .state-msg { color: var(--text-secondary); text-align: center; padding: 12px 8px; font-size: 0.9em; margin: 0; }
+        .state-msg.state-error { color: var(--color-danger-soft); }
 
         /* Connection banner */
         #conn-banner {

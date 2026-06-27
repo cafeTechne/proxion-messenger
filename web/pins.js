@@ -4,6 +4,8 @@
 // activeView) is read live via getters. The returned functions are destructured
 // into same-named bindings in main.js so the dispatch and listener wiring keep
 // working unchanged.
+import { inlineNotice } from './states.js';
+
 export function createPins({ getSocket, getActiveView }) {
 
     function pinMsg(msgId) {
@@ -27,7 +29,7 @@ export function createPins({ getSocket, getActiveView }) {
         const list = document.getElementById("pin-list");
         list.innerHTML = "";
         if (!pins || pins.length === 0) {
-            list.innerHTML = '<p style="color:#94a3b8">No pinned messages.</p>';
+            list.innerHTML = inlineNotice("No pinned messages.");
             return;
         }
         const activeView = getActiveView();

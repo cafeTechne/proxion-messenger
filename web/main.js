@@ -42,6 +42,7 @@ import { createRendering } from './rendering.js';
 import { createView } from './view.js';
 import { createInvite } from './invite.js';
 import { createPush } from './push.js';
+import { inlineNotice, feedEmptyState } from './states.js';
 
         const WS_URL = (() => {
             const metaUrl = document.querySelector('meta[name="x-gateway-url"]')?.content;
@@ -699,7 +700,7 @@ import { createPush } from './push.js';
         let _membersRoomId = null;
         function showRoomMembers(roomId) {
             _membersRoomId = roomId;
-            document.getElementById("room-members-list").innerHTML = "<p style='color:#94a3b8'>Loading...</p>";
+            document.getElementById("room-members-list").innerHTML = inlineNotice("Loading members…", "loading");
             document.getElementById("room-members-modal").style.display = "flex";
             if (socket) socket.send(JSON.stringify({cmd: "get_room_members", room_id: roomId}));
         }
@@ -1215,7 +1216,7 @@ import { createPush } from './push.js';
                     const list = document.getElementById("room-members-list");
                     if (list && _membersRoomId) {
                         if (!event.members || event.members.length === 0) {
-                            list.innerHTML = "<p style='color:#94a3b8'>No members found.</p>";
+                            list.innerHTML = inlineNotice("No members found.");
                             break;
                         }
                         const isOwner = roomCreatorOf.has(event.room_id);
@@ -2093,12 +2094,7 @@ import { createPush } from './push.js';
         function maybeShowEmptyState() {
             const feed = document.getElementById("message-feed");
             if (allMessages.length === 0 && !feed.querySelector(".empty-state, .system-msg")) {
-                const el = document.createElement("div");
-                el.className = "empty-state";
-                el.innerHTML = `<div style="opacity:0.3;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="48" height="48"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 0 1 1.037-.443 48.282 48.282 0 0 0 5.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z"/></svg></div>
-                    <div>No messages yet.</div>
-                    <div style="font-size:0.85em;color:#64748b;margin-top:4px;">Be the first to say hello.</div>`;
-                feed.appendChild(el);
+                feed.appendChild(feedEmptyState({ title: "No messages yet.", hint: "Be the first to say hello." }));
             }
         }
 
@@ -3672,13 +3668,13 @@ import { createPush } from './push.js';
                     if (!msgId) return;
                     const popover = document.createElement("div");
                     popover.className = "edit-history-popover";
-                    popover.innerHTML = "<em>Loading…</em>";
+                    popover.innerHTML = inlineNotice("Loading…", "loading");
                     badge.style.position = "relative";
                     badge.appendChild(popover);
                     fetch(`/message-edits?message_id=${encodeURIComponent(msgId)}`)
                         .then(r => r.json())
                         .then(edits => {
-                            if (!edits.length) { popover.innerHTML = "<em>No history available.</em>"; return; }
+                            if (!edits.length) { popover.innerHTML = inlineNotice("No history available."); return; }
                             popover.innerHTML = edits.map(ed =>
                                 `<div class="edit-history-entry">
                                   <div class="edit-history-meta">${escHtml(new Date(ed.edited_at).toLocaleString())} — ${escHtml(ed.edited_by)}</div>
@@ -3686,7 +3682,7 @@ import { createPush } from './push.js';
                                 </div>`
                             ).join("");
                         })
-                        .catch(() => { popover.innerHTML = "<em>Could not load history.</em>"; });
+                        .catch(() => { popover.innerHTML = inlineNotice("Could not load history.", "error"); });
                     return;
                 }
                 // Close popover on outside click
