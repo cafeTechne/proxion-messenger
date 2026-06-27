@@ -256,7 +256,26 @@ export function createView({
             list.appendChild(li);
             updateSidebarBadge(id); // apply existing unreads
         });
+        // G3/G4: an empty list is a dead end — show an actionable CTA that fires
+        // the section's existing header button (create-room / add-peer).
+        if (items.length === 0) {
+            const cta = _SIDEBAR_EMPTY[listId];
+            if (cta) {
+                const li = document.createElement("li");
+                li.className = "sidebar-empty";
+                li.innerHTML = `<p class="state-msg state-empty">${cta.msg}</p>` +
+                    `<button type="button" class="state-cta">${cta.label}</button>`;
+                li.querySelector("button").onclick = () => document.getElementById(cta.btn)?.click();
+                list.appendChild(li);
+            }
+        }
     }
+
+    // Sidebar empty-state CTAs, keyed by list id (G3/G4).
+    const _SIDEBAR_EMPTY = {
+        "room-list": { msg: "No rooms yet.", label: "Create a room", btn: "create-room-btn" },
+        "dm-list":   { msg: "No direct messages yet.", label: "Add someone", btn: "add-peer-btn" },
+    };
 
     // R18.2.2: navigate to a thread from tray unread click (clicks the nav item,
     // whose onclick is the view-switcher above).

@@ -145,6 +145,27 @@ describe('populateSidebar + its click', () => {
     expect(sent).toContainEqual({ cmd: 'read_room', room_id: 'r9' });
     expect(calls.updateVoiceChannels[0]).toEqual(['r9']);
   });
+
+  it('renders an actionable CTA when the list is empty (G3/G4)', () => {
+    const v = make();
+    const ctaBtn = mkEl();
+    const createRoomClick = vi.fn();
+    els['create-room-btn'] = mkEl({ onclick: createRoomClick });
+    let li;
+    global.document.createElement = () => (li = mkEl({ querySelector: () => ctaBtn }));
+    v.populateSidebar('room-list', [], 'room');
+    expect(li.className).toBe('sidebar-empty');
+    expect(li.innerHTML).toContain('Create a room');
+    ctaBtn.onclick();                       // user taps the CTA
+    expect(createRoomClick).toHaveBeenCalled();
+  });
+
+  it('renders no CTA for lists without an empty-state mapping', () => {
+    const v = make();
+    els['voice-list'] = mkEl();
+    v.populateSidebar('voice-list', [], 'room');
+    expect(els['voice-list']._children.length).toBe(0);
+  });
 });
 
 describe('_navigateToThread', () => {

@@ -285,6 +285,13 @@
         /* F3: consistent inline empty/loading/error notice for lists & popovers */
         .state-msg { color: var(--text-secondary); text-align: center; padding: 12px 8px; font-size: 0.9em; margin: 0; }
         .state-msg.state-error { color: var(--color-danger-soft); }
+        /* G3/G4: actionable empty-state CTA in the sidebar lists */
+        .sidebar-empty { list-style: none; padding: 8px 4px 12px; text-align: center; }
+        .sidebar-empty .state-msg { padding: 4px 8px; }
+        .state-cta { background: var(--slate-700); border: none; color: var(--slate-50);
+            padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85em;
+            transition: background var(--transition-fast); }
+        .state-cta:hover { background: var(--slate-600); }
 
         /* Connection banner */
         #conn-banner {
