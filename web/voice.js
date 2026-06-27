@@ -96,7 +96,13 @@ export function createVoice(deps) {
         async function getMedia() {
             if (!state.localStream) {
                 try {
-                    state.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                    // D1: browser-native call-quality DSP (noise suppression, echo
+                    // cancellation, auto gain). Falls back gracefully if a browser
+                    // ignores unknown constraints.
+                    state.localStream = await navigator.mediaDevices.getUserMedia({
+                        audio: { noiseSuppression: true, echoCancellation: true, autoGainControl: true },
+                        video: false,
+                    });
                 } catch (err) {
                     showToast("Could not access microphone: " + err, "error");
                 }

@@ -41,6 +41,7 @@ import { createConnection } from './connection.js';
 import { createRendering } from './rendering.js';
 import { createView } from './view.js';
 import { createInvite } from './invite.js';
+import { createPush } from './push.js';
 
         const WS_URL = (() => {
             const metaUrl = document.querySelector('meta[name="x-gateway-url"]')?.content;
@@ -411,6 +412,9 @@ import { createInvite } from './invite.js';
             onPendingInvite: (addr) => _handleDeepLinkUrl('proxion://invite?from=' + encodeURIComponent(addr)),
         });
         invite.capturePendingInvite();
+        // WebPush subscription (D4): registered with the gateway on connect so
+        // messages arrive with the window closed.
+        const push = createPush({ getSocket: () => socket });
         let roomCreatorOf = new Set(); // room_ids this user owns
         // Render-cursor state (date divider, scroll-unread counter, older-history
         // in-flight flag): moved to rendering.js (createRendering state). External
@@ -884,6 +888,9 @@ import { createInvite } from './invite.js';
                             socket.send(JSON.stringify({cmd: "list_friend_requests"}));
                             socket.send(JSON.stringify({cmd: "get_relationships"}));
                             requestNotifPermission();
+                            // D4: subscribe to WebPush so messages arrive with the
+                            // window closed (idempotent; no-op if permission denied).
+                            push.enablePush();
                             // A4: if we arrived via an invite link, add the inviter now
                             // that the socket is registered (routes via confirm modal).
                             invite.consumePendingInvite();
