@@ -53,6 +53,17 @@ try {
     await page.goto(URL, { waitUntil: 'load', timeout: 20000 });
     await new Promise(r => setTimeout(r, 3000));   // let the bootstrap settle
     if (screen.prepare) { await page.evaluate(screen.prepare); await new Promise(r => setTimeout(r, 600)); }
+    // Freeze animations/transitions + hide the text caret so the screenshot is
+    // deterministic regardless of animation phase. Without this, continuously
+    // animated elements (e.g. the skeleton-loader shimmer gradient) land at a
+    // different phase each run and produce flaky pixel diffs unrelated to any
+    // actual change. The history skeleton is additionally hidden outright: it's
+    // transient loading chrome added/removed around the connect race, so its
+    // mere presence (and shimmer phase) at the 3 s capture mark is nondeterministic.
+    await page.addStyleTag({ content:
+      '*, *::before, *::after { animation: none !important; transition: none !important; caret-color: transparent !important; }' +
+      '#history-skeleton { display: none !important; }' });
+    await new Promise(r => setTimeout(r, 120));    // let the freeze take effect
     const shot = await page.screenshot();          // Buffer (PNG)
     await page.close();
 
