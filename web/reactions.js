@@ -24,7 +24,8 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         } else {
             messageReactions[message_id][emoji] = messageReactions[message_id][emoji].filter(w => w !== from_webid);
         }
-        renderReactions(message_id);
+        // D3: animate the pill that was just added (not on initial message render).
+        renderReactions(message_id, action === "add" ? emoji : null);
         // Pod: persist reaction state (only the acting user writes to their own pod)
         const activeView = getActiveView();
         if (activeView && activeView.type === 'local_room') {
@@ -32,7 +33,7 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         }
     }
 
-    function renderReactions(mid) {
+    function renderReactions(mid, animateEmoji) {
         const container = document.getElementById(`reactions-${mid}`);
         if (!container) return;
         const messageReactions = getMessageReactions();
@@ -44,7 +45,8 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
             if (count === 0) return;
             const alreadyReacted = selfWebId && reacts[emoji].includes(selfWebId);
             const span = document.createElement("span");
-            span.className = "reaction" + (alreadyReacted ? " active" : "");
+            span.className = "reaction" + (alreadyReacted ? " active" : "") +
+                (emoji === animateEmoji ? " reaction-anim" : "");
             span.innerText = `${emoji} ${count}`;
             span.onclick = () => alreadyReacted ? removeReaction(emoji, mid) : addEmoji(emoji, mid);
             container.appendChild(span);

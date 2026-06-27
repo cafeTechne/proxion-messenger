@@ -45,6 +45,31 @@ describe('handleReactionEvent', () => {
   });
 });
 
+describe('renderReactions animation (D3)', () => {
+  function capture() {
+    const spans = [];
+    const container = { innerHTML: '', appendChild: (s) => spans.push(s) };
+    global.document = {
+      getElementById: (id) => (id === 'reactions-m1' ? container : null),
+      createElement: () => ({ style: {}, className: '', innerText: '', onclick: null }),
+    };
+    return spans;
+  }
+  it('adds reaction-anim only to the just-added emoji pill', () => {
+    const spans = capture();
+    const { r } = make({ messageReactions: { m1: { '👍': ['did:key:zBob'], '🎉': ['did:key:zCarol'] } } });
+    r.renderReactions('m1', '👍');
+    expect(spans.find(s => s.innerText.startsWith('👍')).className).toContain('reaction-anim');
+    expect(spans.find(s => s.innerText.startsWith('🎉')).className).not.toContain('reaction-anim');
+  });
+  it('does not animate on a plain render (e.g. initial message render)', () => {
+    const spans = capture();
+    const { r } = make({ messageReactions: { m1: { '👍': ['did:key:zBob'] } } });
+    r.renderReactions('m1');
+    expect(spans[0].className).not.toContain('reaction-anim');
+  });
+});
+
 describe('addEmoji', () => {
   it('routes to room_id for a room view', () => {
     const { r, sent } = make({ activeView: { type: 'local_room', id: 'room-1' } });
