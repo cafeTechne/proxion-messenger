@@ -1,12 +1,37 @@
 :root {
+    /* ── Design tokens (R49/F1) — single source of truth, document-wide.
+       Values are unchanged from the prior palette so this is pixel-identical;
+       the inline-style de-inline (F2) migrates onto these. ── */
+
+    /* Surfaces */
     --bg-primary: #1a1a2e;
     --bg-secondary: #16213e;
     --bg-accent: #0f3460;
+    /* Text */
     --text-primary: #e1e1e1;
     --text-secondary: #94a3b8;
+    /* Brand accent */
     --accent: #e94560;
     --accent-hover: #ff4d6d;
     --border: #0f3460;
+
+    /* Status */
+    --color-success: #22c55e;
+    --color-success-soft: #4ade80;
+    --color-danger: #ef4444;
+    --color-danger-soft: #f87171;
+    --color-warning-bg: #92400e;
+    --color-warning-text: #fef3c7;
+
+    /* Neutral slate scale — the palette the legacy inline styles draw from */
+    --slate-50: #f1f5f9;
+    --slate-300: #cbd5e1;
+    --slate-400: #94a3b8;
+    --slate-500: #64748b;
+    --slate-600: #475569;
+    --slate-700: #334155;
+    --slate-800: #1e293b;
+    --slate-900: #0f172a;
 }
 
 * { box-sizing: border-box; }
@@ -51,8 +76,8 @@ body {
     height: 10px;
     border-radius: 50%;
 }
-.dot.online { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
-.dot.offline { background: #64748b; }
+.dot.online { background: var(--color-success); box-shadow: 0 0 8px var(--color-success); }
+.dot.offline { background: var(--slate-500); }
 
 nav {
     flex: 1;
@@ -331,7 +356,7 @@ button:hover { background: var(--accent-hover); }
     color: var(--text-primary);
 }
 
-.vw-sharing { color: #e94560 !important; }
+.vw-sharing { color: var(--accent) !important; }
 
 .vw-controls {
     display: flex;
@@ -345,7 +370,7 @@ button:hover { background: var(--accent-hover); }
     background: rgba(255,255,255,0.07);
     border: none;
     border-radius: 4px;
-    color: #94a3b8;
+    color: var(--text-secondary);
     cursor: pointer;
     padding: 7px 6px;
     line-height: 0;
@@ -353,17 +378,17 @@ button:hover { background: var(--accent-hover); }
 }
 .vw-controls button:hover {
     background: rgba(255,255,255,0.13);
-    color: #f1f5f9;
+    color: var(--slate-50);
 }
 #end-call {
-    color: #ef4444;
+    color: var(--color-danger);
 }
 #end-call:hover {
     background: rgba(239,68,68,0.15) !important;
-    color: #ef4444;
+    color: var(--color-danger);
 }
 .vw-muted {
-    color: #ef4444 !important;
+    color: var(--color-danger) !important;
 }
 
 .relay-pending-badge { margin-left: 4px; font-size: 0.75em; opacity: 0.7; vertical-align: middle; }
@@ -387,7 +412,7 @@ button:hover { background: var(--accent-hover); }
 
 /* 13.6: Backup nudge banner */
 #backup-nudge {
-    display: none; background: #92400e; color: #fef3c7;
+    display: none; background: var(--color-warning-bg); color: var(--color-warning-text);
     padding: 7px 16px; font-size: 0.85em; align-items: center;
     gap: 12px; flex-shrink: 0;
 }
@@ -408,11 +433,11 @@ button:hover { background: var(--accent-hover); }
 
 /* 13.11: Edit history */
 .edited-badge {
-    font-size: 0.75em; color: #94a3b8;
+    font-size: 0.75em; color: var(--text-secondary);
     text-decoration: underline dotted; cursor: pointer;
     margin-left: 4px; vertical-align: middle;
 }
-.edited-badge:hover { color: #cbd5e1; }
+.edited-badge:hover { color: var(--slate-300); }
 .edit-history-popover {
     position: absolute; z-index: 500; background: var(--bg-secondary, #1e293b);
     border: 1px solid var(--border, #334155); border-radius: 6px;
@@ -420,9 +445,9 @@ button:hover { background: var(--accent-hover); }
     max-width: 340px; max-height: 200px; overflow-y: auto;
     box-shadow: 0 4px 16px rgba(0,0,0,.5);
 }
-.edit-history-entry { border-bottom: 1px solid #334155; padding: 5px 0; }
+.edit-history-entry { border-bottom: 1px solid var(--slate-700); padding: 5px 0; }
 .edit-history-entry:last-child { border-bottom: none; }
-.edit-history-meta { font-size: 0.8em; color: #94a3b8; margin-bottom: 2px; }
+.edit-history-meta { font-size: 0.8em; color: var(--text-secondary); margin-bottom: 2px; }
 
 /* 13.12: Room unread count badge */
 .unread-count-badge {
@@ -446,4 +471,4 @@ button:hover { background: var(--accent-hover); }
 }
 .contact-search-item:hover { background: rgba(255,255,255,0.06); }
 .contact-search-name { font-size: 0.9em; color: var(--text-primary, #f1f5f9); }
-.contact-search-did { font-size: 0.75em; color: #94a3b8; font-family: monospace; }
+.contact-search-did { font-size: 0.75em; color: var(--text-secondary); font-family: monospace; }
