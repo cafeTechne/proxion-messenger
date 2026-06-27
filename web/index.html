@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Proxion</title>
-    <meta name="theme-color" content="#e94560">
+    <meta name="theme-color" content="var(--accent)">
     <meta name="description" content="Sovereign messaging on your Solid Pod">
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="/icons/icon-192.svg">
@@ -523,21 +523,21 @@
     </div>
     <!-- Round 68: Forward modal -->
     <div id="forward-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1003; align-items:center; justify-content:center;">
-      <div style="background:#1e293b; border-radius:8px; padding:20px; min-width:320px; max-width:420px; color:#f1f5f9;">
+      <div style="background:var(--slate-800); border-radius:8px; padding:20px; min-width:320px; max-width:420px; color:var(--slate-50);">
         <h3 style="margin:0 0 12px;">Forward to…</h3>
         <div id="forward-thread-list" style="max-height:260px; overflow-y:auto;"></div>
-        <button id="forward-modal-close" style="margin-top:12px; background:#334155; border:none; color:#f1f5f9; padding:8px 16px; border-radius:4px; cursor:pointer;">Cancel</button>
+        <button id="forward-modal-close" style="margin-top:12px; background:var(--slate-700); border:none; color:var(--slate-50); padding:8px 16px; border-radius:4px; cursor:pointer;">Cancel</button>
       </div>
     </div>
     <!-- Round 70: Webhook created modal -->
     <div id="webhook-created-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1003; align-items:center; justify-content:center;">
-      <div style="background:#1e293b; border-radius:8px; padding:20px; min-width:340px; max-width:480px; color:#f1f5f9;">
+      <div style="background:var(--slate-800); border-radius:8px; padding:20px; min-width:340px; max-width:480px; color:var(--slate-50);">
         <h3 style="margin:0 0 8px;">Webhook Created</h3>
-        <p style="color:#94a3b8; font-size:0.88em; margin:0 0 4px;">POST JSON to this URL to send messages to the room:</p>
+        <p style="color:var(--text-secondary); font-size:0.88em; margin:0 0 4px;">POST JSON to this URL to send messages to the room:</p>
         <code id="webhook-url-display" class="copyable-code"></code>
         <div style="display:flex; gap:8px; margin-top:10px;">
-          <button id="copy-webhook-url-btn" style="background:#334155; border:none; color:#f1f5f9; padding:8px 14px; border-radius:4px; cursor:pointer;">Copy URL</button>
-          <button id="webhook-created-close" style="background:var(--accent,#e94560); border:none; color:#fff; padding:8px 14px; border-radius:4px; cursor:pointer;">Done</button>
+          <button id="copy-webhook-url-btn" style="background:var(--slate-700); border:none; color:var(--slate-50); padding:8px 14px; border-radius:4px; cursor:pointer;">Copy URL</button>
+          <button id="webhook-created-close" style="background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 14px; border-radius:4px; cursor:pointer;">Done</button>
         </div>
       </div>
     </div>
@@ -547,136 +547,136 @@
 
     <!-- Round 47: Generic confirm dialog -->
     <div id="confirm-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1400;align-items:center;justify-content:center;">
-      <div style="background:#1e293b;border-radius:8px;padding:24px;min-width:300px;max-width:400px;color:#f1f5f9;">
+      <div style="background:var(--slate-800);border-radius:8px;padding:24px;min-width:300px;max-width:400px;color:var(--slate-50);">
         <p id="confirm-msg" style="margin:0 0 20px;font-size:0.95em;"></p>
         <div style="display:flex;gap:8px;justify-content:flex-end;">
-          <button id="confirm-cancel" style="background:#334155;border:none;color:#f1f5f9;padding:8px 16px;border-radius:4px;cursor:pointer;">Cancel</button>
-          <button id="confirm-ok" style="background:#e94560;border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;">Confirm</button>
+          <button id="confirm-cancel" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 16px;border-radius:4px;cursor:pointer;">Cancel</button>
+          <button id="confirm-ok" style="background:var(--accent);border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;">Confirm</button>
         </div>
       </div>
     </div>
 
     <!-- Round 47: Copy-to-clipboard modal -->
     <div id="copy-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1400;align-items:center;justify-content:center;">
-      <div style="background:#1e293b;border-radius:8px;padding:24px;min-width:320px;max-width:480px;color:#f1f5f9;">
+      <div style="background:var(--slate-800);border-radius:8px;padding:24px;min-width:320px;max-width:480px;color:var(--slate-50);">
         <h3 style="margin:0 0 12px;">Copy</h3>
-        <textarea id="copy-modal-text" readonly style="width:100%;box-sizing:border-box;padding:8px;background:#0f172a;border:1px solid #334155;color:#94a3b8;border-radius:4px;font-size:0.85em;resize:none;min-height:80px;"></textarea>
+        <textarea id="copy-modal-text" readonly style="width:100%;box-sizing:border-box;padding:8px;background:var(--slate-900);border:1px solid var(--slate-700);color:var(--text-secondary);border-radius:4px;font-size:0.85em;resize:none;min-height:80px;"></textarea>
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
-          <button id="copy-modal-copy-btn" style="background:#e94560;border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;">Copy</button>
-          <button id="copy-modal-close-btn" style="background:#334155;border:none;color:#f1f5f9;padding:8px 16px;border-radius:4px;cursor:pointer;">Close</button>
+          <button id="copy-modal-copy-btn" style="background:var(--accent);border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;">Copy</button>
+          <button id="copy-modal-close-btn" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 16px;border-radius:4px;cursor:pointer;">Close</button>
         </div>
       </div>
     </div>
 
     <!-- R10.6.1: Deep link confirmation modal -->
     <div id="deeplink-confirm-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1010;align-items:center;justify-content:center;">
-      <div style="background:#1e293b;border-radius:8px;padding:24px;min-width:320px;max-width:440px;color:#f1f5f9;">
+      <div style="background:var(--slate-800);border-radius:8px;padding:24px;min-width:320px;max-width:440px;color:var(--slate-50);">
         <h3 style="margin:0 0 10px;font-size:1em;">Add contact via link?</h3>
-        <p style="margin:0 0 6px;font-size:0.85em;color:#94a3b8;">Proxion received a link asking to add:</p>
-        <p id="deeplink-confirm-address" style="margin:0 0 14px;font-size:0.82em;color:#e2e8f0;word-break:break-all;background:#0f172a;padding:8px 10px;border-radius:4px;"></p>
-        <p style="margin:0 0 16px;font-size:0.8em;color:#64748b;">This link came from outside the app. Continue only if you recognise this address.</p>
+        <p style="margin:0 0 6px;font-size:0.85em;color:var(--text-secondary);">Proxion received a link asking to add:</p>
+        <p id="deeplink-confirm-address" style="margin:0 0 14px;font-size:0.82em;color:#e2e8f0;word-break:break-all;background:var(--slate-900);padding:8px 10px;border-radius:4px;"></p>
+        <p style="margin:0 0 16px;font-size:0.8em;color:var(--slate-500);">This link came from outside the app. Continue only if you recognise this address.</p>
         <div style="display:flex;gap:10px;justify-content:flex-end;">
-          <button id="deeplink-confirm-cancel" style="background:#334155;border:none;color:#f1f5f9;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:0.9em;">Cancel</button>
-          <button id="deeplink-confirm-ok" style="background:#e94560;border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:0.9em;">Add contact</button>
+          <button id="deeplink-confirm-cancel" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 16px;border-radius:4px;cursor:pointer;font-size:0.9em;">Cancel</button>
+          <button id="deeplink-confirm-ok" style="background:var(--accent);border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:0.9em;">Add contact</button>
         </div>
       </div>
     </div>
 
     <!-- Round 47: Add peer modal -->
     <div id="add-peer-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1002;align-items:center;justify-content:center;">
-      <div style="background:#1e293b;border-radius:8px;padding:24px;min-width:340px;max-width:480px;color:#f1f5f9;">
+      <div style="background:var(--slate-800);border-radius:8px;padding:24px;min-width:340px;max-width:480px;color:var(--slate-50);">
         <h3 style="margin:0 0 12px;">Add Peer</h3>
         <label style="display:block;margin-bottom:4px;font-size:0.9em;">Peer DID or Proxion address</label>
         <input id="add-peer-input" type="text" placeholder="Paste an invite link or your friend's address"
-               style="width:100%;box-sizing:border-box;padding:8px;border-radius:4px;border:1px solid #555;background:#0f172a;color:#f1f5f9;font-size:0.9em;margin-bottom:8px;">
-        <p id="add-peer-error" style="color:#f87171;font-size:0.85em;margin:0 0 12px;min-height:1.2em;"></p>
+               style="width:100%;box-sizing:border-box;padding:8px;border-radius:4px;border:1px solid #555;background:var(--slate-900);color:var(--slate-50);font-size:0.9em;margin-bottom:8px;">
+        <p id="add-peer-error" style="color:var(--color-danger-soft);font-size:0.85em;margin:0 0 12px;min-height:1.2em;"></p>
         <!-- R17.3: QR scan -->
         <div style="margin-bottom:12px;">
           <label id="scan-qr-label" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;
-                 background:#334155;padding:7px 14px;border-radius:4px;font-size:0.85em;color:#f1f5f9;">
+                 background:var(--slate-700);padding:7px 14px;border-radius:4px;font-size:0.85em;color:var(--slate-50);">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h1v1h-1zM17 14h1v1h-1zM20 14h1v1h-1zM14 17h1v1h-1zM17 17h4v4h-4z"/></svg>
             Scan QR code
             <input type="file" id="scan-qr-input" accept="image/*" capture="environment" style="display:none;">
           </label>
-          <span id="scan-qr-error" style="display:none;color:#f87171;font-size:0.82em;margin-left:8px;"></span>
+          <span id="scan-qr-error" style="display:none;color:var(--color-danger-soft);font-size:0.82em;margin-left:8px;"></span>
         </div>
         <div style="display:flex;gap:8px;justify-content:flex-end;">
-          <button id="add-peer-cancel-btn" style="background:#334155;border:none;color:#f1f5f9;padding:8px 16px;border-radius:4px;cursor:pointer;">Cancel</button>
-          <button id="add-peer-submit-btn" style="background:#e94560;border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;">Add</button>
+          <button id="add-peer-cancel-btn" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 16px;border-radius:4px;cursor:pointer;">Cancel</button>
+          <button id="add-peer-submit-btn" style="background:var(--accent);border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;">Add</button>
         </div>
       </div>
     </div>
 
     <!-- R17.1: QR share panel -->
     <div id="qr-share-panel" style="display:none;position:fixed;z-index:1010;
-         background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;
+         background:var(--slate-800);border:1px solid var(--slate-700);border-radius:10px;padding:20px;
          box-shadow:0 8px 32px rgba(0,0,0,.5);min-width:260px;text-align:center;">
-      <p style="margin:0 0 12px;font-size:0.85em;color:#94a3b8;">Scan to add me on Proxion</p>
+      <p style="margin:0 0 12px;font-size:0.85em;color:var(--text-secondary);">Scan to add me on Proxion</p>
       <div id="my-qr" style="width:200px;height:200px;border-radius:6px;background:#fff;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;overflow:hidden;"></div>
       <div style="display:flex;flex-direction:column;gap:6px;">
         <button id="qr-download-btn"
-                style="background:#334155;border:none;color:#f1f5f9;padding:7px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;">
+                style="background:var(--slate-700);border:none;color:var(--slate-50);padding:7px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;">
           Download QR
         </button>
         <button id="qr-copy-invite-btn"
-                style="background:#334155;border:none;color:#f1f5f9;padding:7px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;">
+                style="background:var(--slate-700);border:none;color:var(--slate-50);padding:7px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;">
           Copy invite link
         </button>
         <button id="qr-copy-short-btn"
-                style="background:#334155;border:none;color:#f1f5f9;padding:7px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;">
+                style="background:var(--slate-700);border:none;color:var(--slate-50);padding:7px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;">
           Copy short link
         </button>
       </div>
       <button id="qr-close-btn"
-              style="margin-top:12px;background:transparent;border:none;color:#64748b;cursor:pointer;font-size:0.82em;">
+              style="margin-top:12px;background:transparent;border:none;color:var(--slate-500);cursor:pointer;font-size:0.82em;">
         Close
       </button>
     </div>
 
     <!-- Round 47: Join room modal -->
     <div id="join-room-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1002;align-items:center;justify-content:center;">
-      <div style="background:#1e293b;border-radius:8px;padding:24px;min-width:340px;max-width:480px;color:#f1f5f9;">
+      <div style="background:var(--slate-800);border-radius:8px;padding:24px;min-width:340px;max-width:480px;color:var(--slate-50);">
         <h3 style="margin:0 0 12px;">Join Room</h3>
         <label style="display:block;margin-bottom:4px;font-size:0.9em;">Invite link or room code</label>
         <input id="join-room-input" type="text" placeholder="Paste invite link or code"
-               style="width:100%;box-sizing:border-box;padding:8px;border-radius:4px;border:1px solid #555;background:#0f172a;color:#f1f5f9;font-size:0.9em;margin-bottom:8px;">
-        <p id="join-room-error" style="color:#f87171;font-size:0.85em;margin:0 0 12px;min-height:1.2em;"></p>
+               style="width:100%;box-sizing:border-box;padding:8px;border-radius:4px;border:1px solid #555;background:var(--slate-900);color:var(--slate-50);font-size:0.9em;margin-bottom:8px;">
+        <p id="join-room-error" style="color:var(--color-danger-soft);font-size:0.85em;margin:0 0 12px;min-height:1.2em;"></p>
         <div style="display:flex;gap:8px;justify-content:flex-end;">
-          <button id="join-room-cancel-btn" style="background:#334155;border:none;color:#f1f5f9;padding:8px 16px;border-radius:4px;cursor:pointer;">Cancel</button>
-          <button id="join-room-submit-btn" style="background:#e94560;border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;">Join</button>
+          <button id="join-room-cancel-btn" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 16px;border-radius:4px;cursor:pointer;">Cancel</button>
+          <button id="join-room-submit-btn" style="background:var(--accent);border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;">Join</button>
         </div>
       </div>
     </div>
 
     <!-- Room invite modal -->
     <div id="room-invite-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1002;align-items:center;justify-content:center;">
-      <div style="background:#1e293b;border-radius:8px;padding:24px;min-width:340px;max-width:480px;color:#f1f5f9;">
+      <div style="background:var(--slate-800);border-radius:8px;padding:24px;min-width:340px;max-width:480px;color:var(--slate-50);">
         <h3 style="margin:0 0 4px;">Invite to Room</h3>
-        <p style="margin:0 0 16px;font-size:0.85em;color:#94a3b8;">Share the link or code with anyone you want to join.</p>
-        <label style="display:block;margin-bottom:4px;font-size:0.85em;color:#94a3b8;">Invite link</label>
+        <p style="margin:0 0 16px;font-size:0.85em;color:var(--text-secondary);">Share the link or code with anyone you want to join.</p>
+        <label style="display:block;margin-bottom:4px;font-size:0.85em;color:var(--text-secondary);">Invite link</label>
         <div style="display:flex;gap:6px;margin-bottom:14px;">
           <div id="invite-modal-url"
-               style="flex:1;font-size:0.78em;color:#94a3b8;word-break:break-all;padding:8px;background:#0f172a;border-radius:4px;user-select:all;cursor:text;"></div>
+               style="flex:1;font-size:0.78em;color:var(--text-secondary);word-break:break-all;padding:8px;background:var(--slate-900);border-radius:4px;user-select:all;cursor:text;"></div>
           <button id="invite-modal-copy-url"
-                  style="flex-shrink:0;background:#334155;border:none;color:#f1f5f9;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:0.82em;">Copy</button>
+                  style="flex-shrink:0;background:var(--slate-700);border:none;color:var(--slate-50);padding:6px 12px;border-radius:4px;cursor:pointer;font-size:0.82em;">Copy</button>
         </div>
-        <label style="display:block;margin-bottom:4px;font-size:0.85em;color:#94a3b8;">Room code (paste into "Join Room")</label>
+        <label style="display:block;margin-bottom:4px;font-size:0.85em;color:var(--text-secondary);">Room code (paste into "Join Room")</label>
         <div style="display:flex;gap:6px;margin-bottom:20px;">
           <div id="invite-modal-code"
-               style="flex:1;font-size:0.9em;font-family:monospace;letter-spacing:0.05em;color:#f1f5f9;padding:8px;background:#0f172a;border-radius:4px;user-select:all;cursor:text;"></div>
+               style="flex:1;font-size:0.9em;font-family:monospace;letter-spacing:0.05em;color:var(--slate-50);padding:8px;background:var(--slate-900);border-radius:4px;user-select:all;cursor:text;"></div>
           <button id="invite-modal-copy-code"
-                  style="flex-shrink:0;background:#334155;border:none;color:#f1f5f9;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:0.82em;">Copy</button>
+                  style="flex-shrink:0;background:var(--slate-700);border:none;color:var(--slate-50);padding:6px 12px;border-radius:4px;cursor:pointer;font-size:0.82em;">Copy</button>
         </div>
         <button id="invite-modal-close"
-                style="background:#e94560;border:none;color:#fff;padding:8px 20px;border-radius:4px;cursor:pointer;width:100%;">Done</button>
+                style="background:var(--accent);border:none;color:#fff;padding:8px 20px;border-radius:4px;cursor:pointer;width:100%;">Done</button>
       </div>
     </div>
 
     <!-- R13.6: backup nudge banner (shown if no backup downloaded after 24h) -->
-    <div id="backup-nudge" role="alert" style="display:none;background:#92400e;color:#fef3c7;padding:7px 16px;font-size:0.85em;display:none;align-items:center;gap:12px;flex-shrink:0;">
+    <div id="backup-nudge" role="alert" style="display:none;background:var(--color-warning-bg);color:var(--color-warning-text);padding:7px 16px;font-size:0.85em;display:none;align-items:center;gap:12px;flex-shrink:0;">
       <span>Back up your identity before you lose access.</span>
-      <button id="backup-nudge-action" style="background:#fef3c7;color:#92400e;border:none;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:0.85em;flex-shrink:0;">Back up now</button>
-      <button id="backup-nudge-dismiss" aria-label="Dismiss backup reminder" style="background:transparent;border:none;color:#fef3c7;cursor:pointer;margin-left:auto;font-size:1.1em;">×</button>
+      <button id="backup-nudge-action" style="background:var(--color-warning-text);color:var(--color-warning-bg);border:none;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:0.85em;flex-shrink:0;">Back up now</button>
+      <button id="backup-nudge-dismiss" aria-label="Dismiss backup reminder" style="background:transparent;border:none;color:var(--color-warning-text);cursor:pointer;margin-left:auto;font-size:1.1em;">×</button>
     </div>
 
     <!-- R13.7: image lightbox -->
@@ -700,14 +700,14 @@
                     <span id="username">Connecting...</span>
                 </div>
                 <div id="my-address-bar"
-                     style="display:none; padding:2px 10px 6px; font-size:0.65em; color:#475569;
+                     style="display:none; padding:2px 10px 6px; font-size:0.65em; color:var(--slate-600);
                             overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
                   <span id="my-address-short" style="cursor:pointer; user-select:all;"
                         title="Click to copy your Proxion address"></span>
                   <button id="copy-addr-btn"
-                          style="background:transparent; border:none; color:#475569; cursor:pointer;
+                          style="background:transparent; border:none; color:var(--slate-600); cursor:pointer;
                                  font-size:0.9em; padding:0 0 0 4px;">⧉</button>
-                  <button id="share-invite-btn" title="Share invite link" style="background:transparent;border:none;color:#475569;cursor:pointer;padding:2px 6px;">🔗</button>
+                  <button id="share-invite-btn" title="Share invite link" style="background:transparent;border:none;color:var(--slate-600);cursor:pointer;padding:2px 6px;">🔗</button>
                 </div>
             </header>
             <nav>
@@ -719,8 +719,8 @@
                         <h3 style="margin:0;">Rooms</h3>
                         <div style="display:flex;gap:2px;">
                             <button id="join-room-btn" title="Join room with invite link or code"
-                                    style="background:transparent;border:none;color:var(--text-secondary,#94a3b8);cursor:pointer;font-size:0.95em;padding:2px 6px;">Join</button>
-                            <button id="create-room-btn" title="Create room" style="background:transparent;border:none;color:var(--text-secondary,#94a3b8);cursor:pointer;padding:2px 6px;line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
+                                    style="background:transparent;border:none;color:var(--text-secondary,var(--text-secondary));cursor:pointer;font-size:0.95em;padding:2px 6px;">Join</button>
+                            <button id="create-room-btn" title="Create room" style="background:transparent;border:none;color:var(--text-secondary,var(--text-secondary));cursor:pointer;padding:2px 6px;line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
                         </div>
                     </div>
                     <ul id="room-list"></ul>
@@ -739,14 +739,14 @@
                     </div>
                     <ul id="contacts-list"></ul>
                     <div id="empty-state" style="display:none;">
-                        <p style="color:#94a3b8;font-size:0.9em;text-align:center;padding:12px 0;">No contacts yet</p>
-                        <button id="empty-add-contact-btn" style="width:100%;background:#334155;border:none;color:#f1f5f9;padding:8px 12px;border-radius:4px;cursor:pointer;font-size:0.9em;">Add Contact</button>
+                        <p style="color:var(--text-secondary);font-size:0.9em;text-align:center;padding:12px 0;">No contacts yet</p>
+                        <button id="empty-add-contact-btn" style="width:100%;background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 12px;border-radius:4px;cursor:pointer;font-size:0.9em;">Add Contact</button>
                     </div>
                 </section>
                 <section>
                     <div style="display:flex;align-items:center;justify-content:space-between;">
                         <h3 style="margin:0;">DMs</h3>
-                        <button id="add-peer-btn" title="Add peer by DID" style="background:transparent;border:none;color:var(--text-secondary,#94a3b8);cursor:pointer;padding:2px 6px;line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
+                        <button id="add-peer-btn" title="Add peer by DID" style="background:transparent;border:none;color:var(--text-secondary,var(--text-secondary));cursor:pointer;padding:2px 6px;line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
                     </div>
                     <ul id="dm-list"></ul>
                 </section>
@@ -756,8 +756,8 @@
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;overflow:hidden;">
                     <span class="dot online" style="flex-shrink:0;"></span>
                     <div style="display:flex;flex-direction:column;gap:1px;overflow:hidden;min-width:0;">
-                        <span id="vw-peer-name" style="font-size:0.82em;font-weight:600;color:#f1f5f9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
-                        <span id="vw-status" style="font-size:0.72em;color:#4ade80;">In Call</span>
+                        <span id="vw-peer-name" style="font-size:0.82em;font-weight:600;color:var(--slate-50);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+                        <span id="vw-status" style="font-size:0.72em;color:var(--color-success-soft);">In Call</span>
                     </div>
                 </div>
                 <div class="vw-controls">
@@ -784,7 +784,7 @@
                 Connect
               </button>
               <button id="pod-banner-dismiss-btn"
-                      style="background:transparent;border:none;color:#64748b;cursor:pointer;
+                      style="background:transparent;border:none;color:var(--slate-500);cursor:pointer;
                              font-size:1em;padding:0 2px;line-height:1;" title="Dismiss">
                 ×
               </button>
@@ -792,13 +792,13 @@
             <header id="chat-header" style="display: flex; align-items: center;">
                 <button id="menu-toggle" style="background: transparent; border: none; cursor: pointer; color: inherit; padding-right: 15px; line-height: 0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="24" height="24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg></button>
                 <h2 id="chat-header-name" style="flex: 1;">Welcome</h2>
-                <span id="dm-e2e-status" style="display:none;font-size:0.7em;padding:2px 6px;border-radius:3px;background:#134e26;color:#4ade80;margin-left:6px;" title="End-to-end encrypted"></span>
-                <button id="dm-e2e-verify-btn" title="Verify contact identity" style="display:none;background:transparent;border:none;color:#4ade80;font-size:0.75em;cursor:pointer;margin-left:2px;padding:2px 6px;">Verify</button>
-                <span id="pod-sync-indicator" style="display:none;font-size:0.72em;color:#64748b;margin-left:6px;">&#x2601; syncing...</span>
-                <button id="invite-btn" title="Copy room invite link" style="display:none;background:transparent;border:none;color:#94a3b8;cursor:pointer;margin-right:4px;line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg></button>
-                <button id="pin-panel-btn" title="Pinned messages" style="background:transparent;border:none;color:#94a3b8;cursor:pointer;margin-right:4px;line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z"/></svg></button>
+                <span id="dm-e2e-status" style="display:none;font-size:0.7em;padding:2px 6px;border-radius:3px;background:#134e26;color:var(--color-success-soft);margin-left:6px;" title="End-to-end encrypted"></span>
+                <button id="dm-e2e-verify-btn" title="Verify contact identity" style="display:none;background:transparent;border:none;color:var(--color-success-soft);font-size:0.75em;cursor:pointer;margin-left:2px;padding:2px 6px;">Verify</button>
+                <span id="pod-sync-indicator" style="display:none;font-size:0.72em;color:var(--slate-500);margin-left:6px;">&#x2601; syncing...</span>
+                <button id="invite-btn" title="Copy room invite link" style="display:none;background:transparent;border:none;color:var(--text-secondary);cursor:pointer;margin-right:4px;line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg></button>
+                <button id="pin-panel-btn" title="Pinned messages" style="background:transparent;border:none;color:var(--text-secondary);cursor:pointer;margin-right:4px;line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z"/></svg></button>
                 <!-- Round 65: Disappear timer picker (inline in header) -->
-                <select id="disappear-timer-select" title="Disappearing messages" style="display:none;background:#0f172a;border:1px solid #334155;color:#94a3b8;padding:3px 6px;border-radius:4px;font-size:0.78em;cursor:pointer;margin-right:4px;">
+                <select id="disappear-timer-select" title="Disappearing messages" style="display:none;background:var(--slate-900);border:1px solid var(--slate-700);color:var(--text-secondary);padding:3px 6px;border-radius:4px;font-size:0.78em;cursor:pointer;margin-right:4px;">
                     <option value="0">Off</option>
                     <option value="30000">30s</option>
                     <option value="300000">5m</option>
@@ -809,23 +809,23 @@
                 <!-- Round 70: Integrations button -->
                 <button id="integrations-btn" class="room-integrations-btn" title="Room Integrations" style="display:none;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg></button>
                 <!-- Round 47: Members toggle, leave, delete buttons -->
-                <button id="members-toggle" style="display:none;background:transparent;border:none;color:#94a3b8;font-size:0.9em;cursor:pointer;padding:4px 8px;" title="Room members"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></svg></button>
-                <button id="leave-room-btn" style="display:none;background:transparent;border:none;color:#94a3b8;font-size:0.9em;cursor:pointer;padding:4px 8px;" title="Leave room">↩ Leave</button>
-                <button id="delete-room-btn" style="display:none;background:transparent;border:none;color:#ef4444;font-size:0.9em;cursor:pointer;padding:4px 8px;" title="Delete room"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg> Delete</button>
+                <button id="members-toggle" style="display:none;background:transparent;border:none;color:var(--text-secondary);font-size:0.9em;cursor:pointer;padding:4px 8px;" title="Room members"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></svg></button>
+                <button id="leave-room-btn" style="display:none;background:transparent;border:none;color:var(--text-secondary);font-size:0.9em;cursor:pointer;padding:4px 8px;" title="Leave room">↩ Leave</button>
+                <button id="delete-room-btn" style="display:none;background:transparent;border:none;color:var(--color-danger);font-size:0.9em;cursor:pointer;padding:4px 8px;" title="Delete room"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg> Delete</button>
                 <button id="leave-voice-channel-btn" style="display:none;background:#dc2626;border:none;color:#fff;padding:3px 10px;border-radius:4px;cursor:pointer;font-size:0.8em;margin-right:4px;" title="Leave voice channel">&#x1F50A; Leave channel</button>
                 <button id="start-call-btn" style="display:none;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.176.42l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.175l-1.106-4.423a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z"/></svg> Call</button>
             </header>
             <!-- R34: Voice channel participant panel -->
-            <div id="voice-channel-panel" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#0f172a;border-top:1px solid #1e293b;padding:8px 16px;z-index:800;align-items:center;gap:12px;">
-              <span style="font-size:0.8em;color:#4ade80;font-weight:600;flex-shrink:0;">&#x1F50A; Voice channel</span>
+            <div id="voice-channel-panel" style="display:none;position:fixed;bottom:0;left:0;right:0;background:var(--slate-900);border-top:1px solid var(--slate-800);padding:8px 16px;z-index:800;align-items:center;gap:12px;">
+              <span style="font-size:0.8em;color:var(--color-success-soft);font-weight:600;flex-shrink:0;">&#x1F50A; Voice channel</span>
               <div id="voice-channel-participants" style="display:flex;gap:8px;flex:1;flex-wrap:wrap;"></div>
-              <button id="voice-channel-mute-btn" style="background:#334155;border:none;color:#f1f5f9;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:0.8em;flex-shrink:0;">Mute</button>
+              <button id="voice-channel-mute-btn" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:4px 10px;border-radius:4px;cursor:pointer;font-size:0.8em;flex-shrink:0;">Mute</button>
             </div>
             <!-- R11.2.2: Safety number bar (DM only) -->
-            <div id="fingerprint-bar" style="display:none;padding:6px 16px;background:#0f172a;border-bottom:1px solid #1e293b;font-size:0.78em;color:#64748b;align-items:center;gap:10px;flex-wrap:wrap;">
-              <span style="color:#475569;font-size:0.9em;text-transform:uppercase;letter-spacing:0.05em;">Safety #</span>
-              <span id="fingerprint-words" style="font-family:monospace;letter-spacing:0.08em;color:#94a3b8;"></span>
-              <button id="fingerprint-verify-btn" style="background:#134e26;border:none;color:#4ade80;padding:2px 10px;border-radius:3px;cursor:pointer;font-size:0.85em;margin-left:auto;">Mark as verified</button>
+            <div id="fingerprint-bar" style="display:none;padding:6px 16px;background:var(--slate-900);border-bottom:1px solid var(--slate-800);font-size:0.78em;color:var(--slate-500);align-items:center;gap:10px;flex-wrap:wrap;">
+              <span style="color:var(--slate-600);font-size:0.9em;text-transform:uppercase;letter-spacing:0.05em;">Safety #</span>
+              <span id="fingerprint-words" style="font-family:monospace;letter-spacing:0.08em;color:var(--text-secondary);"></span>
+              <button id="fingerprint-verify-btn" style="background:#134e26;border:none;color:var(--color-success-soft);padding:2px 10px;border-radius:3px;cursor:pointer;font-size:0.85em;margin-left:auto;">Mark as verified</button>
             </div>
             <!-- Round 65: Disappear timer banner -->
             <div id="disappear-banner" class="disappear-banner">
@@ -835,7 +835,7 @@
                 <div class="system-msg">Connect to the gateway to start chatting.</div>
             </div>
             <button id="scroll-bottom-btn"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg> <span id="scroll-bottom-count"></span></button>
-            <div id="typing-indicator" style="padding: 5px 20px; font-size: 0.8em; color: #94a3b8; height: 1.5em;"></div>
+            <div id="typing-indicator" style="padding: 5px 20px; font-size: 0.8em; color: var(--text-secondary); height: 1.5em;"></div>
             <div id="reply-bar">
                 <span class="reply-preview" id="reply-text">Replying to...</span>
                 <span class="cancel-reply" id="cancel-reply-btn"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></span>
@@ -844,16 +844,16 @@
             <div id="voice-recording-bar" class="voice-recording-bar">
                 <span class="recording-dot">●</span>
                 <span id="recording-timer">0:00</span>
-                <span style="color:#94a3b8;font-size:0.85em;">Recording… tap × to cancel</span>
-                <button id="voice-record-cancel" style="margin-left:auto;background:transparent;border:none;color:#94a3b8;cursor:pointer;font-size:1.1em;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+                <span style="color:var(--text-secondary);font-size:0.85em;">Recording… tap × to cancel</span>
+                <button id="voice-record-cancel" style="margin-left:auto;background:transparent;border:none;color:var(--text-secondary);cursor:pointer;font-size:1.1em;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
             </div>
             <!-- Round 69: Schedule picker -->
             <div id="schedule-picker" class="schedule-picker" style="display:none;">
                 <label>Send at</label>
                 <input type="datetime-local" id="schedule-datetime-input">
-                <button id="schedule-confirm-btn" style="background:var(--accent,#e94560);border:none;color:#fff;padding:7px 14px;border-radius:4px;cursor:pointer;">Schedule</button>
-                <button id="schedule-cancel-btn" style="background:#334155;border:none;color:#f1f5f9;padding:7px 14px;border-radius:4px;cursor:pointer;">Cancel</button>
-                <div id="scheduled-msgs-list" style="margin-top:8px;max-height:120px;overflow-y:auto;font-size:0.85em;color:#94a3b8;"></div>
+                <button id="schedule-confirm-btn" style="background:var(--accent,var(--accent));border:none;color:#fff;padding:7px 14px;border-radius:4px;cursor:pointer;">Schedule</button>
+                <button id="schedule-cancel-btn" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:7px 14px;border-radius:4px;cursor:pointer;">Cancel</button>
+                <div id="scheduled-msgs-list" style="margin-top:8px;max-height:120px;overflow-y:auto;font-size:0.85em;color:var(--text-secondary);"></div>
             </div>
             <form id="message-form">
                 <label for="file-input" class="paperclip"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13"/></svg></label>
@@ -869,90 +869,90 @@
         </main>
 
         <!-- Members panel (right sidebar for room member list) -->
-        <aside id="members-panel" style="display:none;width:220px;background:#1e293b;border-left:1px solid #334155;overflow-y:auto;flex-shrink:0;">
-          <div style="padding:12px 16px;border-bottom:1px solid #334155;font-size:0.8em;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Members</div>
+        <aside id="members-panel" style="display:none;width:220px;background:var(--slate-800);border-left:1px solid var(--slate-700);overflow-y:auto;flex-shrink:0;">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--slate-700);font-size:0.8em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Members</div>
           <div id="members-list" style="padding:8px 0;"></div>
         </aside>
     </div>
 
     <!-- Room create modal -->
     <div id="room-create-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1002; align-items:center; justify-content:center;">
-      <div style="background:var(--bg-secondary,#1e293b); border-radius:8px; padding:24px; min-width:360px; max-width:480px; color:var(--text-primary,#f1f5f9);">
+      <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:8px; padding:24px; min-width:360px; max-width:480px; color:var(--text-primary,var(--slate-50));">
         <h3 style="margin:0 0 16px;">Create a Room</h3>
         <div id="room-create-form">
           <label style="display:block; margin-bottom:6px; font-size:0.9em;">Room name</label>
           <input id="room-name-input" type="text" placeholder="e.g. general"
-                 style="width:100%; box-sizing:border-box; padding:8px; border-radius:4px; border:1px solid #555; background:#0f172a; color:#f1f5f9; font-size:0.95em; margin-bottom:12px;">
+                 style="width:100%; box-sizing:border-box; padding:8px; border-radius:4px; border:1px solid #555; background:var(--slate-900); color:var(--slate-50); font-size:0.95em; margin-bottom:12px;">
           <label style="display:flex; align-items:center; gap:8px; margin-bottom:16px; cursor:pointer;">
             <input type="checkbox" id="room-history-toggle">
-            <span style="font-size:0.9em; color:#94a3b8;">Share message history with new members</span>
+            <span style="font-size:0.9em; color:var(--text-secondary);">Share message history with new members</span>
           </label>
           <div style="display:flex; gap:8px; justify-content:flex-end;">
             <button id="room-create-cancel-btn"
-                    style="background:#334155; border:none; color:#f1f5f9; padding:8px 16px; border-radius:4px; cursor:pointer;">Cancel</button>
+                    style="background:var(--slate-700); border:none; color:var(--slate-50); padding:8px 16px; border-radius:4px; cursor:pointer;">Cancel</button>
             <button id="room-create-submit"
-                    style="background:var(--accent,#e94560); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer;">Create</button>
+                    style="background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer;">Create</button>
           </div>
         </div>
         <div id="room-invite-result" style="display:none;">
-          <p style="margin:0 0 8px; color:#22c55e; font-weight:600;">Room created!</p>
+          <p style="margin:0 0 8px; color:var(--color-success); font-weight:600;">Room created!</p>
           <label style="display:block; margin-bottom:4px; font-size:0.9em;">Invite link (click to copy)</label>
           <div id="room-invite-url"
-               style="font-size:0.8em; color:#94a3b8; word-break:break-all; padding:8px; background:#0f172a; border-radius:4px; cursor:pointer; user-select:all; margin-bottom:12px;"></div>
-          <p style="font-size:0.8em; color:#94a3b8; margin:0 0 12px;">Share this link with a friend. When they open it, Proxion adds you automatically — they'll be prompted to install it first if they don't have it yet.</p>
+               style="font-size:0.8em; color:var(--text-secondary); word-break:break-all; padding:8px; background:var(--slate-900); border-radius:4px; cursor:pointer; user-select:all; margin-bottom:12px;"></div>
+          <p style="font-size:0.8em; color:var(--text-secondary); margin:0 0 12px;">Share this link with a friend. When they open it, Proxion adds you automatically — they'll be prompted to install it first if they don't have it yet.</p>
           <button id="room-create-done-btn"
-                  style="background:var(--accent,#e94560); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer; width:100%;">Done</button>
+                  style="background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer; width:100%;">Done</button>
         </div>
       </div>
     </div>
 
     <!-- Settings modal -->
     <div id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1002; align-items:center; justify-content:center;">
-      <div style="background:var(--bg-secondary,#1e293b); border-radius:8px; padding:24px; min-width:360px; max-width:480px; color:var(--text-primary,#f1f5f9);">
+      <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:8px; padding:24px; min-width:360px; max-width:480px; color:var(--text-primary,var(--slate-50));">
         <div style="display:flex;align-items:center;justify-content:space-between;margin:0 0 16px;">
           <h3 style="margin:0;">Settings</h3>
-          <span id="settings-pod-status-dot" style="font-size:0.78em;color:#64748b;white-space:nowrap;">● No pod</span>
+          <span id="settings-pod-status-dot" style="font-size:0.78em;color:var(--slate-500);white-space:nowrap;">● No pod</span>
         </div>
         <label style="display:block; margin-bottom:4px; font-size:0.9em;">Display name</label>
         <input id="settings-display-name" type="text" placeholder="Your name"
-               style="width:100%; box-sizing:border-box; padding:8px; border-radius:4px; border:1px solid #555; background:#0f172a; color:#f1f5f9; font-size:0.95em; margin-bottom:14px;">
+               style="width:100%; box-sizing:border-box; padding:8px; border-radius:4px; border:1px solid #555; background:var(--slate-900); color:var(--slate-50); font-size:0.95em; margin-bottom:14px;">
         <label style="display:block; margin-bottom:4px; font-size:0.9em;">Custom Status (max 100 chars)</label>
         <input id="settings-status-message" type="text" placeholder="What are you doing?"
-               style="width:100%; box-sizing:border-box; padding:8px; border-radius:4px; border:1px solid #555; background:#0f172a; color:#f1f5f9; font-size:0.95em; margin-bottom:14px;" maxlength="100">
+               style="width:100%; box-sizing:border-box; padding:8px; border-radius:4px; border:1px solid #555; background:var(--slate-900); color:var(--slate-50); font-size:0.95em; margin-bottom:14px;" maxlength="100">
         <label style="display:block; margin-bottom:4px; font-size:0.9em;">Your DID (share this with peers)</label>
-        <div id="settings-did" style="font-size:0.75em; color:#94a3b8; word-break:break-all; margin-bottom:14px; padding:6px; background:#0f172a; border-radius:4px; min-height:1.5em; cursor:text; user-select:all;"></div>
+        <div id="settings-did" style="font-size:0.75em; color:var(--text-secondary); word-break:break-all; margin-bottom:14px; padding:6px; background:var(--slate-900); border-radius:4px; min-height:1.5em; cursor:text; user-select:all;"></div>
         <label style="display:block; margin-bottom:4px; font-size:0.9em;">
-          Your Proxion Address <span style="color:#64748b;">(share this with cross-gateway peers)</span>
+          Your Proxion Address <span style="color:var(--slate-500);">(share this with cross-gateway peers)</span>
         </label>
         <div id="settings-proxion-address"
-             style="font-size:0.72em; color:#94a3b8; word-break:break-all; margin-bottom:14px;
-                    padding:6px; background:#0f172a; border-radius:4px; min-height:1.5em;
+             style="font-size:0.72em; color:var(--text-secondary); word-break:break-all; margin-bottom:14px;
+                    padding:6px; background:var(--slate-900); border-radius:4px; min-height:1.5em;
                     cursor:text; user-select:all;"></div>
         <label style="display:block; margin-bottom:8px; font-size:0.9em;">Gateway WebSocket URL</label>
         <input id="settings-gw-url" type="text" placeholder="ws://127.0.0.1:7474"
-               style="width:100%; box-sizing:border-box; padding:8px; border-radius:4px; border:1px solid #555; background:#0f172a; color:#f1f5f9; font-size:0.95em; margin-bottom:16px;">
+               style="width:100%; box-sizing:border-box; padding:8px; border-radius:4px; border:1px solid #555; background:var(--slate-900); color:var(--slate-50); font-size:0.95em; margin-bottom:16px;">
         <!-- Pod section -->
-        <hr style="border-color:#334155;margin:16px 0 12px;">
-        <p style="margin:0 0 8px;font-size:0.8em;color:#94a3b8;
+        <hr style="border-color:var(--slate-700);margin:16px 0 12px;">
+        <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);
                    text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">
           Solid Pod
         </p>
         <!-- Connected state (hidden until pod auth) -->
         <div id="settings-pod-connected" style="display:none;">
-          <p style="margin:0 0 4px;font-size:0.85em;color:#4ade80;">● Connected</p>
+          <p style="margin:0 0 4px;font-size:0.85em;color:var(--color-success-soft);">● Connected</p>
           <div id="settings-pod-webid"
-               style="font-size:0.72em;color:#94a3b8;word-break:break-all;
-                      margin-bottom:10px;padding:4px 6px;background:#0f172a;
+               style="font-size:0.72em;color:var(--text-secondary);word-break:break-all;
+                      margin-bottom:10px;padding:4px 6px;background:var(--slate-900);
                       border-radius:3px;user-select:all;cursor:text;"></div>
           <button id="settings-pod-logout-btn"
-                  style="background:#334155;border:none;color:#f87171;
+                  style="background:var(--slate-700);border:none;color:var(--color-danger-soft);
                          padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:12px;">
             Sign out of Pod
           </button>
         </div>
         <!-- Disconnected state (default) -->
         <div id="settings-pod-disconnected" style="margin-bottom:12px;">
-          <p style="margin:0 0 8px;font-size:0.85em;color:#64748b;">Not connected</p>
+          <p style="margin:0 0 8px;font-size:0.85em;color:var(--slate-500);">Not connected</p>
           <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
             <button id="settings-solid-solidcommunity"
                     style="background:#1a56db;border:none;color:#fff;padding:8px 14px;
@@ -969,109 +969,109 @@
             <input id="settings-solid-custom-url" type="url"
                    placeholder="https://your-pod-server.example"
                    autocomplete="off" spellcheck="false"
-                   style="flex:1;padding:6px 8px;background:#0f172a;border:1px solid #334155;
-                          color:#f1f5f9;border-radius:4px;font-size:0.85em;" />
+                   style="flex:1;padding:6px 8px;background:var(--slate-900);border:1px solid var(--slate-700);
+                          color:var(--slate-50);border-radius:4px;font-size:0.85em;" />
             <button id="settings-solid-custom-btn"
-                    style="background:#334155;border:none;color:#f1f5f9;padding:6px 12px;
+                    style="background:var(--slate-700);border:none;color:var(--slate-50);padding:6px 12px;
                            border-radius:4px;cursor:pointer;font-size:0.85em;white-space:nowrap;">
               Sign in
             </button>
           </div>
         </div>
         <!-- R14.3: Data section -->
-        <hr style="border-color:#334155;margin:16px 0 12px;">
-        <p style="margin:0 0 8px;font-size:0.8em;color:#94a3b8;
+        <hr style="border-color:var(--slate-700);margin:16px 0 12px;">
+        <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);
                   text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Data</p>
-        <button id="export-data-btn" style="width:100%;background:#334155;border:none;color:#f1f5f9;padding:8px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:6px;text-align:left;">Export Data</button>
+        <button id="export-data-btn" style="width:100%;background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:6px;text-align:left;">Export Data</button>
         <label style="display:block;width:100%;margin-bottom:12px;">
-          <span style="display:block;background:#334155;border:none;color:#f1f5f9;padding:8px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;text-align:center;margin-bottom:6px;">Import Data</span>
+          <span style="display:block;background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;text-align:center;margin-bottom:6px;">Import Data</span>
           <input type="file" id="import-file-input" accept=".json" style="display:none;">
         </label>
         <!-- R10.3: Privacy toggles -->
-        <hr style="border-color:#334155;margin:16px 0 12px;">
-        <p style="margin:0 0 8px;font-size:0.8em;color:#94a3b8;
+        <hr style="border-color:var(--slate-700);margin:16px 0 12px;">
+        <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);
                   text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Privacy</p>
         <label style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;font-size:0.9em;cursor:pointer;">
-          <span style="color:#cbd5e1;">Send read receipts</span>
+          <span style="color:var(--slate-300);">Send read receipts</span>
           <input type="checkbox" id="settings-receipts-toggle" checked style="width:18px;height:18px;cursor:pointer;">
         </label>
         <label style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;font-size:0.9em;cursor:pointer;">
-          <span style="color:#cbd5e1;">Generate link previews<br><span style="font-size:0.78em;color:#64748b;">Sends URLs to gateway for fetching</span></span>
+          <span style="color:var(--slate-300);">Generate link previews<br><span style="font-size:0.78em;color:var(--slate-500);">Sends URLs to gateway for fetching</span></span>
           <input type="checkbox" id="settings-link-previews-toggle" style="width:18px;height:18px;cursor:pointer;">
         </label>
         <!-- Account reset -->
-        <hr style="border-color:#334155;margin:16px 0 12px;">
-        <p style="margin:0 0 8px;font-size:0.8em;color:#94a3b8;
+        <hr style="border-color:var(--slate-700);margin:16px 0 12px;">
+        <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);
                   text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Account</p>
         <button id="settings-reset-identity-btn"
-                style="background:#1e293b;border:1px solid #475569;color:#f87171;
+                style="background:var(--slate-800);border:1px solid var(--slate-600);color:var(--color-danger-soft);
                        padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;
                        margin-bottom:12px;width:100%;text-align:left;">
           Reset all local data (switch account)
         </button>
         <!-- R28: Federation health status -->
         <div id="settings-federation-section">
-          <hr style="border-color:#334155;margin:16px 0 12px;">
-          <p style="margin:0 0 8px;font-size:0.8em;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Federation</p>
-          <div id="settings-federation-status" style="font-size:0.85em;color:#94a3b8;line-height:1.8;">
-            <span style="color:#475569;">Loading…</span>
+          <hr style="border-color:var(--slate-700);margin:16px 0 12px;">
+          <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Federation</p>
+          <div id="settings-federation-status" style="font-size:0.85em;color:var(--text-secondary);line-height:1.8;">
+            <span style="color:var(--slate-600);">Loading…</span>
           </div>
         </div>
 
         <!-- R18.1.3 + R18.3.3: App section (shown only in Tauri desktop app) -->
         <div id="settings-tauri-section" style="display:none;">
-          <hr style="border-color:#334155;margin:16px 0 12px;">
-          <p style="margin:0 0 8px;font-size:0.8em;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">App</p>
+          <hr style="border-color:var(--slate-700);margin:16px 0 12px;">
+          <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">App</p>
           <label style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;font-size:0.9em;cursor:pointer;">
             Start Proxion when I log in
             <input type="checkbox" id="settings-autostart-toggle" style="width:16px;height:16px;cursor:pointer;">
           </label>
-          <hr style="border-color:#334155;margin:16px 0 12px;">
-          <p style="margin:0 0 4px;font-size:0.8em;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">About</p>
-          <p style="margin:0 0 2px;font-size:0.9em;color:#f1f5f9;">Proxion <span id="settings-app-version" style="color:#64748b;font-size:0.9em;"></span></p>
-          <p style="margin:0 0 8px;font-size:0.82em;color:#64748b;">Sovereign messaging on your Solid Pod</p>
+          <hr style="border-color:var(--slate-700);margin:16px 0 12px;">
+          <p style="margin:0 0 4px;font-size:0.8em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">About</p>
+          <p style="margin:0 0 2px;font-size:0.9em;color:var(--slate-50);">Proxion <span id="settings-app-version" style="color:var(--slate-500);font-size:0.9em;"></span></p>
+          <p style="margin:0 0 8px;font-size:0.82em;color:var(--slate-500);">Sovereign messaging on your Solid Pod</p>
           <button id="settings-about-website-btn"
-                  style="background:#334155;border:none;color:#f1f5f9;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;">
+                  style="background:var(--slate-700);border:none;color:var(--slate-50);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;">
             View project website
           </button>
         </div>
 
         <!-- Round 66: Active Sessions -->
-        <hr style="border-color:#334155;margin:16px 0 12px;">
-        <p style="margin:0 0 8px;font-size:0.8em;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Identity Backup</p>
+        <hr style="border-color:var(--slate-700);margin:16px 0 12px;">
+        <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Identity Backup</p>
         <button id="settings-backup-btn"
-                style="background:#1e293b;border:1px solid #475569;color:#94a3b8;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:6px;width:100%;text-align:left;">
+                style="background:var(--slate-800);border:1px solid var(--slate-600);color:var(--text-secondary);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:6px;width:100%;text-align:left;">
           Download identity backup
         </button>
         <button id="settings-restore-btn"
-                style="background:#1e293b;border:1px solid #475569;color:#94a3b8;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:12px;width:100%;text-align:left;">
+                style="background:var(--slate-800);border:1px solid var(--slate-600);color:var(--text-secondary);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:12px;width:100%;text-align:left;">
           Restore from backup
         </button>
         <input type="file" id="settings-restore-input" accept=".json" style="display:none">
-        <hr style="border-color:#334155;margin:16px 0 12px;">
-        <p style="margin:0 0 8px;font-size:0.8em;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Active Sessions</p>
-        <div id="sessions-list" style="margin-bottom:8px;color:#94a3b8;font-size:0.85em;">Loading…</div>
+        <hr style="border-color:var(--slate-700);margin:16px 0 12px;">
+        <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Active Sessions</p>
+        <div id="sessions-list" style="margin-bottom:8px;color:var(--text-secondary);font-size:0.85em;">Loading…</div>
         <button id="settings-logout-all-btn"
-                style="background:#1e293b;border:1px solid #475569;color:#f87171;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.82em;margin-bottom:12px;">
+                style="background:var(--slate-800);border:1px solid var(--slate-600);color:var(--color-danger-soft);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.82em;margin-bottom:12px;">
           Logout all other devices
         </button>
-        <hr style="border-color:#334155;margin:16px 0 12px;">
-        <p style="margin:0 0 8px;font-size:0.8em;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;font-weight:600;">Linked Devices</p>
-        <div id="settings-devices-list" style="font-size:0.85em;color:#94a3b8;min-height:24px;"></div>
+        <hr style="border-color:var(--slate-700);margin:16px 0 12px;">
+        <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;font-weight:600;">Linked Devices</p>
+        <div id="settings-devices-list" style="font-size:0.85em;color:var(--text-secondary);min-height:24px;"></div>
         <div style="display:flex; gap:8px; justify-content:flex-end;">
           <button id="settings-cancel-btn"
-                  style="background:#334155; border:none; color:#f1f5f9; padding:8px 16px; border-radius:4px; cursor:pointer;">Cancel</button>
+                  style="background:var(--slate-700); border:none; color:var(--slate-50); padding:8px 16px; border-radius:4px; cursor:pointer;">Cancel</button>
           <button id="settings-save-btn"
-                  style="background:var(--accent,#e94560); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer;">Save &amp; Reconnect</button>
+                  style="background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer;">Save &amp; Reconnect</button>
         </div>
       </div>
     </div>
 
     <!-- Keyboard shortcut help modal -->
     <div id="shortcut-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1000; align-items:center; justify-content:center;">
-      <div style="background:var(--bg-secondary,#1e293b); border-radius:8px; padding:24px; min-width:360px; max-width:500px;">
-        <h3 style="margin:0 0 16px; color:var(--text-primary,#f1f5f9)">Keyboard Shortcuts</h3>
-        <table style="width:100%; border-collapse:collapse; color:var(--text-primary,#f1f5f9)">
+      <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:8px; padding:24px; min-width:360px; max-width:500px;">
+        <h3 style="margin:0 0 16px; color:var(--text-primary,var(--slate-50))">Keyboard Shortcuts</h3>
+        <table style="width:100%; border-collapse:collapse; color:var(--text-primary,var(--slate-50))">
           <tr><td><kbd>Ctrl+K</kbd></td><td>Focus search</td></tr>
           <tr><td><kbd>Ctrl+/</kbd></td><td>Show this help</td></tr>
           <tr><td><kbd>Alt+↑ / ↓</kbd></td><td>Previous / next thread</td></tr>
@@ -1080,37 +1080,37 @@
           <tr><td><kbd>Escape</kbd></td><td>Cancel reply / edit / close modal</td></tr>
         </table>
         <button id="shortcut-close-btn"
-                style="margin-top:16px; background:var(--accent,#e94560); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer;">Close</button>
+                style="margin-top:16px; background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer;">Close</button>
       </div>
     </div>
 
     <!-- Onboarding wizard -->
     <div id="onboarding-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1001; align-items:center; justify-content:center;">
-      <div style="background:var(--bg-secondary,#1e293b); border-radius:10px; padding:32px; min-width:380px; max-width:480px; color:var(--text-primary,#f1f5f9);">
+      <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:10px; padding:32px; min-width:380px; max-width:480px; color:var(--text-primary,var(--slate-50));">
         <div id="ob-step-1">
           <h2>Welcome to Proxion</h2>
-          <p style="color:#94a3b8;font-size:0.92em;margin:0 0 12px;">
+          <p style="color:var(--text-secondary);font-size:0.92em;margin:0 0 12px;">
             Sovereign messaging — your messages stay on your hardware.<br>
             Connect a Solid Pod to sync across devices, or start locally right now.
           </p>
-          <button id="ob-start-btn" style="background:var(--accent,#e94560);border:none;color:#fff;padding:10px 24px;border-radius:4px;cursor:pointer;font-size:1em;">Get Started</button>
+          <button id="ob-start-btn" style="background:var(--accent,var(--accent));border:none;color:#fff;padding:10px 24px;border-radius:4px;cursor:pointer;font-size:1em;">Get Started</button>
         </div>
         <div id="ob-step-2" style="display:none">
           <h2>What's your name?</h2>
-          <input id="ob-name" placeholder="Display name" style="width:100%;padding:8px;border-radius:4px;border:1px solid #555;background:#0f172a;color:#f1f5f9;font-size:1em;box-sizing:border-box;margin-bottom:12px;">
-          <button id="ob-step2-btn" style="background:var(--accent,#e94560);border:none;color:#fff;padding:10px 24px;border-radius:4px;cursor:pointer;font-size:1em;">Continue</button>
+          <input id="ob-name" placeholder="Display name" style="width:100%;padding:8px;border-radius:4px;border:1px solid #555;background:var(--slate-900);color:var(--slate-50);font-size:1em;box-sizing:border-box;margin-bottom:12px;">
+          <button id="ob-step2-btn" style="background:var(--accent,var(--accent));border:none;color:#fff;padding:10px 24px;border-radius:4px;cursor:pointer;font-size:1em;">Continue</button>
         </div>
         <div id="ob-step-3" style="display:none">
           <h2>Set your presence</h2>
-          <label><input type="radio" name="ob-status" value="online" checked> <span style="color:#22c55e;">●</span> Online</label><br>
+          <label><input type="radio" name="ob-status" value="online" checked> <span style="color:var(--color-success);">●</span> Online</label><br>
           <label><input type="radio" name="ob-status" value="away"> <span style="color:#f59e0b;">●</span> Away</label><br>
-          <label><input type="radio" name="ob-status" value="busy"> <span style="color:#ef4444;">●</span> Busy</label><br><br>
-          <button id="ob-step3-btn" style="background:var(--accent,#e94560);border:none;color:#fff;padding:10px 24px;border-radius:4px;cursor:pointer;font-size:1em;">Continue</button>
+          <label><input type="radio" name="ob-status" value="busy"> <span style="color:var(--color-danger);">●</span> Busy</label><br><br>
+          <button id="ob-step3-btn" style="background:var(--accent,var(--accent));border:none;color:#fff;padding:10px 24px;border-radius:4px;cursor:pointer;font-size:1em;">Continue</button>
         </div>
         <!-- Step 4: Connect Solid Pod (R16) -->
         <div id="ob-step-4" style="display:none">
           <h2 style="margin:0 0 6px;">Where should your data live?</h2>
-          <p style="color:#94a3b8;font-size:0.88em;margin:0 0 16px;">
+          <p style="color:var(--text-secondary);font-size:0.88em;margin:0 0 16px;">
             Your messages are stored on your own Solid Pod — a personal data store you control.
             Pick a free provider or use your own server.
           </p>
@@ -1130,7 +1130,7 @@
               <span style="display:block;font-size:0.82em;opacity:0.85;margin-top:2px;">Free tier. Founded by Tim Berners-Lee.</span>
             </button>
             <button class="ob-provider-card" data-css="custom"
-                    style="background:#334155;border:none;color:#f1f5f9;padding:12px 16px;border-radius:6px;
+                    style="background:var(--slate-700);border:none;color:var(--slate-50);padding:12px 16px;border-radius:6px;
                            cursor:pointer;font-size:0.92em;text-align:left;line-height:1.4;">
               <strong>My own server</strong>
               <span style="display:block;font-size:0.82em;opacity:0.85;margin-top:2px;">Self-hosted Community Solid Server.</span>
@@ -1139,23 +1139,23 @@
 
           <!-- Credential form (hidden until provider selected) -->
           <div id="ob-pod-cred-form" style="display:none;margin-top:14px;">
-            <div id="ob-pod-provider-label" style="font-size:0.82em;color:#94a3b8;margin-bottom:10px;"></div>
+            <div id="ob-pod-provider-label" style="font-size:0.82em;color:var(--text-secondary);margin-bottom:10px;"></div>
             <input id="ob-pod-css-url" type="url" placeholder="Pod server URL (e.g. https://solidcommunity.net)"
                    autocomplete="off" spellcheck="false"
                    style="display:none;width:100%;box-sizing:border-box;padding:8px;border-radius:4px;
-                          border:1px solid #334155;background:#0f172a;color:#f1f5f9;font-size:0.9em;margin-bottom:8px;">
+                          border:1px solid var(--slate-700);background:var(--slate-900);color:var(--slate-50);font-size:0.9em;margin-bottom:8px;">
             <input id="ob-pod-email" type="email" placeholder="Email address"
                    autocomplete="email"
                    style="width:100%;box-sizing:border-box;padding:8px;border-radius:4px;
-                          border:1px solid #334155;background:#0f172a;color:#f1f5f9;font-size:0.9em;margin-bottom:8px;">
+                          border:1px solid var(--slate-700);background:var(--slate-900);color:var(--slate-50);font-size:0.9em;margin-bottom:8px;">
             <div style="position:relative;margin-bottom:10px;">
               <input id="ob-pod-password" type="password" placeholder="Password"
                      autocomplete="current-password"
                      style="width:100%;box-sizing:border-box;padding:8px 36px 8px 8px;border-radius:4px;
-                            border:1px solid #334155;background:#0f172a;color:#f1f5f9;font-size:0.9em;">
+                            border:1px solid var(--slate-700);background:var(--slate-900);color:var(--slate-50);font-size:0.9em;">
               <button id="ob-pod-pw-toggle" type="button" tabindex="-1"
                       style="position:absolute;right:6px;top:50%;transform:translateY(-50%);
-                             background:none;border:none;color:#64748b;cursor:pointer;font-size:0.9em;padding:2px 4px;">
+                             background:none;border:none;color:var(--slate-500);cursor:pointer;font-size:0.9em;padding:2px 4px;">
                 Show
               </button>
             </div>
@@ -1167,13 +1167,13 @@
                 Test connection
               </button>
               <button id="ob-pod-continue-btn" disabled
-                      style="flex:1;padding:9px;background:#22c55e;border:none;color:#fff;
+                      style="flex:1;padding:9px;background:var(--color-success);border:none;color:#fff;
                              border-radius:4px;cursor:not-allowed;opacity:0.45;font-size:0.9em;">
                 Continue →
               </button>
             </div>
             <button id="ob-pod-back-btn"
-                    style="margin-top:8px;background:transparent;border:none;color:#64748b;
+                    style="margin-top:8px;background:transparent;border:none;color:var(--slate-500);
                            cursor:pointer;font-size:0.82em;padding:4px 0;text-decoration:underline;">
               ← Choose a different provider
             </button>
@@ -1182,7 +1182,7 @@
           <!-- Skip link (advanced only) -->
           <div style="margin-top:14px;text-align:center;">
             <a id="ob-skip-pod" href="#"
-               style="color:#475569;font-size:0.78em;text-decoration:none;border-bottom:1px dashed #475569;">
+               style="color:var(--slate-600);font-size:0.78em;text-decoration:none;border-bottom:1px dashed var(--slate-600);">
               Advanced: skip pod setup
             </a>
           </div>
@@ -1190,42 +1190,42 @@
         <!-- Step 5: Join or create a room (was step 4) -->
         <div id="ob-step-5" style="display:none">
           <h2>Join or create a room</h2>
-          <button id="ob-step5-create" style="background:var(--accent,#e94560);border:none;color:#fff;padding:10px 20px;border-radius:4px;cursor:pointer;margin-right:10px;">Create a Room</button>
+          <button id="ob-step5-create" style="background:var(--accent,var(--accent));border:none;color:#fff;padding:10px 20px;border-radius:4px;cursor:pointer;margin-right:10px;">Create a Room</button>
           <br><br>
           <p style="margin:8px 0 4px;">Or join with an invite code:</p>
-          <input id="ob-invite-code" placeholder="prx1_..." style="width:100%;padding:8px;border-radius:4px;border:1px solid #555;background:#0f172a;color:#f1f5f9;font-size:1em;box-sizing:border-box;">
-          <button id="ob-step5-join" style="margin-top:8px;background:#334155;border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;">Join with Code</button>
+          <input id="ob-invite-code" placeholder="prx1_..." style="width:100%;padding:8px;border-radius:4px;border:1px solid #555;background:var(--slate-900);color:var(--slate-50);font-size:1em;box-sizing:border-box;">
+          <button id="ob-step5-join" style="margin-top:8px;background:var(--slate-700);border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;">Join with Code</button>
         </div>
         <!-- Step 6: Done (was step 5) -->
         <div id="ob-step-6" style="display:none">
           <h2>You're all set!</h2>
           <p>Start chatting with your Proxion network.</p>
-          <div id="ob-my-addr-section" style="margin-bottom:14px;padding:10px;background:#0f172a;border-radius:6px;border:1px solid #334155;">
-            <p style="margin:0 0 4px;font-size:0.82em;color:#94a3b8;">Your Proxion address — share with contacts:</p>
+          <div id="ob-my-addr-section" style="margin-bottom:14px;padding:10px;background:var(--slate-900);border-radius:6px;border:1px solid var(--slate-700);">
+            <p style="margin:0 0 4px;font-size:0.82em;color:var(--text-secondary);">Your Proxion address — share with contacts:</p>
             <code id="ob-my-addr" style="font-size:0.82em;color:#e2e8f0;word-break:break-all;">(connecting…)</code>
-            <p style="margin:6px 0 0;font-size:0.78em;color:#64748b;">
+            <p style="margin:6px 0 0;font-size:0.78em;color:var(--slate-500);">
               Contacts on other gateways can add you using this address.
               For federation to work, your gateway must be reachable from the internet
               (set <code>PROXION_PUBLIC_URL</code> in <code>.env</code>).
             </p>
           </div>
           <div id="ob-invite-display" style="display:none; margin-bottom:12px;">
-            <p style="margin:0 0 4px; font-size:0.85em; color:#94a3b8;">
+            <p style="margin:0 0 4px; font-size:0.85em; color:var(--text-secondary);">
               Share this invite link with a contact:
             </p>
             <div id="ob-room-invite-url"
-                 style="font-size:0.78em; color:#94a3b8; word-break:break-all; padding:8px;
-                        background:#0f172a; border-radius:4px; cursor:pointer; user-select:all;
+                 style="font-size:0.78em; color:var(--text-secondary); word-break:break-all; padding:8px;
+                        background:var(--slate-900); border-radius:4px; cursor:pointer; user-select:all;
                         margin-bottom:8px;"></div>
             <button id="ob-copy-invite-btn"
-                    style="background:#334155; border:none; color:#f1f5f9; padding:6px 14px;
+                    style="background:var(--slate-700); border:none; color:var(--slate-50); padding:6px 14px;
                            border-radius:4px; cursor:pointer; font-size:0.85em;">
               Copy invite link
             </button>
           </div>
-          <button id="ob-finish-btn" style="background:var(--accent,#e94560);border:none;color:#fff;padding:10px 24px;border-radius:4px;cursor:pointer;font-size:1em;">Open Proxion</button>
+          <button id="ob-finish-btn" style="background:var(--accent,var(--accent));border:none;color:#fff;padding:10px 24px;border-radius:4px;cursor:pointer;font-size:1em;">Open Proxion</button>
           <button id="ob-finish-skip"
-                  style="display:none;background:transparent;border:none;color:#64748b;cursor:pointer;
+                  style="display:none;background:transparent;border:none;color:var(--slate-500);cursor:pointer;
                          font-size:0.9em;padding:6px 0 0;text-decoration:underline;">
             Skip
           </button>
@@ -1244,31 +1244,31 @@
 
     <!-- Pin panel -->
     <!-- Contact profile panel (R29) -->
-    <div id="contact-profile-panel" style="display:none; position:fixed; right:0; top:0; bottom:0; width:300px; background:var(--bg-secondary,#1e293b); box-shadow:-2px 0 10px rgba(0,0,0,.5); z-index:900; overflow-y:auto; padding:16px;">
-      <button id="contact-profile-close" style="position:absolute;top:12px;right:12px;background:transparent;border:none;color:#94a3b8;font-size:1.2em;cursor:pointer;">&#x2715;</button>
-      <div id="contact-profile-avatar" style="width:56px;height:56px;border-radius:50%;background:#334155;display:flex;align-items:center;justify-content:center;font-size:1.5em;color:#f1f5f9;margin:0 auto 12px;"></div>
-      <p id="contact-profile-name" style="text-align:center;font-weight:600;color:#f1f5f9;margin:0 0 4px;"></p>
-      <p id="contact-profile-status" style="text-align:center;font-size:0.82em;color:#94a3b8;margin:0 0 12px;"></p>
-      <hr style="border-color:#334155;margin:0 0 12px;">
-      <p style="font-size:0.78em;color:#64748b;margin:0 0 2px;text-transform:uppercase;letter-spacing:.05em;">DID</p>
-      <p id="contact-profile-did" style="font-size:0.75em;color:#94a3b8;word-break:break-all;margin:0 0 10px;cursor:pointer;" title="Click to copy"></p>
-      <p style="font-size:0.78em;color:#64748b;margin:0 0 2px;text-transform:uppercase;letter-spacing:.05em;">Gateway</p>
-      <p id="contact-profile-gateway" style="font-size:0.82em;color:#94a3b8;word-break:break-all;margin:0 0 10px;"></p>
-      <p style="font-size:0.78em;color:#64748b;margin:0 0 2px;text-transform:uppercase;letter-spacing:.05em;">Fingerprint</p>
-      <p id="contact-profile-fingerprint" style="font-size:0.75em;color:#94a3b8;word-break:break-all;margin:0 0 10px;font-family:monospace;" title="Verify out-of-band"></p>
-      <p id="contact-profile-status-msg" style="font-size:0.82em;color:#64748b;font-style:italic;margin:0 0 12px;"></p>
-      <button id="contact-profile-dm-btn" style="background:var(--accent,#e94560);border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;width:100%;font-size:0.9em;">Send DM</button>
+    <div id="contact-profile-panel" style="display:none; position:fixed; right:0; top:0; bottom:0; width:300px; background:var(--bg-secondary,var(--slate-800)); box-shadow:-2px 0 10px rgba(0,0,0,.5); z-index:900; overflow-y:auto; padding:16px;">
+      <button id="contact-profile-close" style="position:absolute;top:12px;right:12px;background:transparent;border:none;color:var(--text-secondary);font-size:1.2em;cursor:pointer;">&#x2715;</button>
+      <div id="contact-profile-avatar" style="width:56px;height:56px;border-radius:50%;background:var(--slate-700);display:flex;align-items:center;justify-content:center;font-size:1.5em;color:var(--slate-50);margin:0 auto 12px;"></div>
+      <p id="contact-profile-name" style="text-align:center;font-weight:600;color:var(--slate-50);margin:0 0 4px;"></p>
+      <p id="contact-profile-status" style="text-align:center;font-size:0.82em;color:var(--text-secondary);margin:0 0 12px;"></p>
+      <hr style="border-color:var(--slate-700);margin:0 0 12px;">
+      <p style="font-size:0.78em;color:var(--slate-500);margin:0 0 2px;text-transform:uppercase;letter-spacing:.05em;">DID</p>
+      <p id="contact-profile-did" style="font-size:0.75em;color:var(--text-secondary);word-break:break-all;margin:0 0 10px;cursor:pointer;" title="Click to copy"></p>
+      <p style="font-size:0.78em;color:var(--slate-500);margin:0 0 2px;text-transform:uppercase;letter-spacing:.05em;">Gateway</p>
+      <p id="contact-profile-gateway" style="font-size:0.82em;color:var(--text-secondary);word-break:break-all;margin:0 0 10px;"></p>
+      <p style="font-size:0.78em;color:var(--slate-500);margin:0 0 2px;text-transform:uppercase;letter-spacing:.05em;">Fingerprint</p>
+      <p id="contact-profile-fingerprint" style="font-size:0.75em;color:var(--text-secondary);word-break:break-all;margin:0 0 10px;font-family:monospace;" title="Verify out-of-band"></p>
+      <p id="contact-profile-status-msg" style="font-size:0.82em;color:var(--slate-500);font-style:italic;margin:0 0 12px;"></p>
+      <button id="contact-profile-dm-btn" style="background:var(--accent,var(--accent));border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;width:100%;font-size:0.9em;">Send DM</button>
     </div>
 
-    <div id="pin-panel" style="display:none; position:fixed; right:0; top:0; bottom:0; width:300px; background:var(--bg-secondary,#1e293b); box-shadow:-2px 0 10px rgba(0,0,0,.5); z-index:900; overflow-y:auto; padding:16px;">
-      <h3 style="color:var(--text-primary,#f1f5f9); margin:0 0 12px;">Pinned Messages</h3>
+    <div id="pin-panel" style="display:none; position:fixed; right:0; top:0; bottom:0; width:300px; background:var(--bg-secondary,var(--slate-800)); box-shadow:-2px 0 10px rgba(0,0,0,.5); z-index:900; overflow-y:auto; padding:16px;">
+      <h3 style="color:var(--text-primary,var(--slate-50)); margin:0 0 12px;">Pinned Messages</h3>
       <button id="pin-panel-close"
-              style="position:absolute;top:12px;right:12px;background:transparent;border:none;color:#94a3b8;font-size:1.2em;cursor:pointer;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+              style="position:absolute;top:12px;right:12px;background:transparent;border:none;color:var(--text-secondary);font-size:1.2em;cursor:pointer;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
       <div id="pin-list"></div>
     </div>
     <ul id="mention-dropdown"
-        style="display:none; position:fixed; background:var(--bg-secondary,#1e293b);
-               border:1px solid var(--border,#334155); border-radius:6px;
+        style="display:none; position:fixed; background:var(--bg-secondary,var(--slate-800));
+               border:1px solid var(--border,var(--slate-700)); border-radius:6px;
                list-style:none; padding:4px 0; margin:0; z-index:1100;
                min-width:180px; max-height:200px; overflow-y:auto;
                box-shadow:0 4px 16px rgba(0,0,0,.4);"></ul>
@@ -1281,7 +1281,7 @@
     <!-- E2E identity verification modal -->
     <div id="e2e-verify-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:999;align-items:center;justify-content:center;">
       <div style="background:#1a1a2e;border-radius:8px;padding:24px;max-width:420px;width:90%;color:#e0e0e0;">
-        <h3 style="margin:0 0 12px;color:#4ade80;">Verify Contact</h3>
+        <h3 style="margin:0 0 12px;color:var(--color-success-soft);">Verify Contact</h3>
         <p style="font-size:.82em;color:#9ca3af;margin:0 0 14px;">Compare this safety number with your contact out-of-band (voice call, in person). If it matches, tap <strong>Mark as Verified</strong>.</p>
         <div id="e2e-modal-safety-number" style="font-family:monospace;font-size:1.25em;letter-spacing:.12em;text-align:center;padding:14px;background:#0d0d1a;border-radius:4px;margin-bottom:14px;">— — — —</div>
         <div style="font-size:.75em;color:#6b7280;margin-bottom:16px;">
@@ -1291,7 +1291,7 @@
         <input type="hidden" id="e2e-modal-current-peer" value="">
         <div style="display:flex;gap:8px;justify-content:flex-end;">
           <button id="e2e-modal-cancel" style="padding:6px 16px;background:#374151;border:none;border-radius:4px;color:#d1d5db;cursor:pointer;">Cancel</button>
-          <button id="e2e-modal-verify" style="padding:6px 16px;background:#134e26;border:none;border-radius:4px;color:#4ade80;cursor:pointer;">Mark as Verified</button>
+          <button id="e2e-modal-verify" style="padding:6px 16px;background:#134e26;border:none;border-radius:4px;color:var(--color-success-soft);cursor:pointer;">Mark as Verified</button>
         </div>
       </div>
     </div>
