@@ -152,6 +152,7 @@ class HttpEndpointsMixin:
         # R8: DID-pair invite flood control — max 10 pending invites per (from_did, to_did) per 24h
         _inv_from_did = invite.issuer.get("did") or ""
         if _inv_from_did and self._store:
+            from .didkey import pub_key_to_did
             _inv_to_did = pub_key_to_did(self.agent.identity_pub_bytes)
             import time as _t_inv
             _inv_count = self._store.increment_invite_pair_counter(_inv_from_did, _inv_to_did, _t_inv.time())

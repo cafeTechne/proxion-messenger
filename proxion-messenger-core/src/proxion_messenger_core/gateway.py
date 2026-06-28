@@ -846,7 +846,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 if _op_id and self._store:
                     _prior = self._store.get_operation_result(_op_id)
                     if _prior is not None:
-                        await websocket.send(_j.dumps({"type": "send_dm_ack", "op_id": _op_id, "result_code": _prior.get("result_code", "ok"), "replayed": True}))
+                        await websocket.send(json.dumps({"type": "send_dm_ack", "op_id": _op_id, "result_code": _prior.get("result_code", "ok"), "replayed": True}))
                     else:
                         await self._handle_send_dm(websocket, data)
                         self._store.record_operation_result(_op_id, "send_dm", _actor, data.get("device_id"), "ok")
@@ -860,7 +860,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 if _op_id and self._store:
                     _prior = self._store.get_operation_result(_op_id)
                     if _prior is not None:
-                        await websocket.send(_j.dumps({"type": "send_room_ack", "op_id": _op_id, "result_code": _prior.get("result_code", "ok"), "replayed": True}))
+                        await websocket.send(json.dumps({"type": "send_room_ack", "op_id": _op_id, "result_code": _prior.get("result_code", "ok"), "replayed": True}))
                     else:
                         await self._handle_send_room(websocket, data)
                         self._store.record_operation_result(_op_id, "send_room", _actor, data.get("device_id"), "ok")
@@ -978,7 +978,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 if _op_id and self._store:
                     _prior = self._store.get_operation_result(_op_id)
                     if _prior is not None:
-                        await websocket.send(_j.dumps({"type": "distribute_sender_key_ack", "op_id": _op_id, "result_code": _prior.get("result_code", "ok"), "replayed": True}))
+                        await websocket.send(json.dumps({"type": "distribute_sender_key_ack", "op_id": _op_id, "result_code": _prior.get("result_code", "ok"), "replayed": True}))
                     else:
                         await self._handle_distribute_sender_key(websocket, data)
                         self._store.record_operation_result(_op_id, "distribute_sender_key", _actor, data.get("device_id"), "ok")

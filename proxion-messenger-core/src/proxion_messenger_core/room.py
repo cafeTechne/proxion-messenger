@@ -203,6 +203,7 @@ def invite_to_room(
                     return v
             return ""
 
+        from unittest.mock import MagicMock
         data = {
             "invitation_id": _get_best(invite, ["invite_id", "invitation_id"]),
             "capabilities": [

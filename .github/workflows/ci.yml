@@ -66,6 +66,9 @@ jobs:
         working-directory: proxion-messenger-core
         run: pip install -e ".[gateway,test]"
 
+      - name: Cold-path undefined-name gate (H1)
+        run: python scripts/check_cold_paths.py
+
       - name: Run unit tests
         working-directory: proxion-messenger-core
         run: pytest tests/ -q --tb=short -m "not integration"

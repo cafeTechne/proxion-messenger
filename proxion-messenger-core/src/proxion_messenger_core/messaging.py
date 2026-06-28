@@ -46,7 +46,7 @@ import datetime
 import json
 import secrets
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable, Optional, TYPE_CHECKING
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
@@ -59,6 +59,11 @@ from .certtoken import issue_from_certificate
 from .federation import RelationshipCertificate
 from .solid_client import SolidClient, SolidError
 from .tokens import Token
+
+if TYPE_CHECKING:  # annotation-only names (from __future__ import annotations)
+    from .persist import AgentState
+    from .context import RequestContext
+    from .validator import Decision
 
 
 # ---------------------------------------------------------------------------

@@ -19,7 +19,7 @@ client = ["httpx>=0.27"]
 http   = ["fastapi>=0.111", "uvicorn[standard]>=0.29", "httpx>=0.27"]
 cli    = ["fastapi>=0.111", "uvicorn[standard]>=0.29", "httpx>=0.27", "typer>=0.12", "rich>=13"]
 gateway = ["websockets>=12.0", "pytest-asyncio"]
-test = ["pytest", "pytest-asyncio", "respx", "httpx"]
+test = ["pytest", "pytest-asyncio", "respx", "httpx", "ruff>=0.6"]
 
 [project.scripts]
 proxion = "proxion_messenger_core.cli:main"
