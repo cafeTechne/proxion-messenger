@@ -9,7 +9,8 @@
     "check:solid-sdk": "node --experimental-vm-modules scripts/check_solid_sdk_versions.mjs",
     "smoke:browser": "node smoke_browser.mjs",
     "smoke:webrtc": "node smoke_webrtc.mjs",
-    "smoke:visual": "node smoke_visual.mjs"
+    "smoke:visual": "node smoke_visual.mjs",
+    "smoke:journey": "node smoke_journey.mjs"
   },
   "keywords": [],
   "author": "",
