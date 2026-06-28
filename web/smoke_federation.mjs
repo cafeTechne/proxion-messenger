@@ -199,6 +199,10 @@ try {
     console.log(delivered
       ? `  ✓ cross-gateway DM "${MSG}" also rendered on Bob.`
       : `  ⚠ cross-gateway DM "${MSG}" did NOT render on Bob (relay POST succeeds — known cert-based-e2e render gap; not failing the handshake check).`);
+    if (!delivered) {
+      const rx = /relay|sealed|deliver|to_webid|mailbox|webpush|accepted|decrypt/i;
+      console.error(`  · Bob GW relay:\n${(procs[1]._log() || '').split('\n').filter(l => rx.test(l)).slice(-10).map(l => '    ' + l).join('\n')}`);
+    }
   }
 } catch (e) {
   if (e.message !== 'stop' && e.message !== 'no bob addr') console.error(`  ✗ [${step}] threw: ${e.message}`);

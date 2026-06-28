@@ -557,6 +557,15 @@ class HttpEndpointsMixin:
         _E2E_KEYS = ("e2e", "nonce", "msg_num", "key_header", "ratchet_pub", "pn", "x25519_pub", "file")
         # Deliver to all connected sockets of the target identity
         target_sockets = self._sockets_for(to_webid)
+        if not target_sockets:
+            # One-gateway-per-user: a relay addressed to THIS gateway's own identity
+            # (the DID half of the Proxion address peers share) is for our local
+            # user, whose browser registered under its own client-generated DID, not
+            # the gateway DID. Fall back to the connected client(s) — mirrors how an
+            # inbound invite is broadcast to local clients.
+            from .didkey import pub_key_to_did as _pk2d
+            if to_webid == _pk2d(self.agent.identity_pub_bytes):
+                target_sockets = list(self.clients)
         if target_sockets:
             event = {
                 "type": "message",

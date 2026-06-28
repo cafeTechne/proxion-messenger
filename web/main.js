@@ -773,9 +773,14 @@ import { inlineNotice, feedEmptyState } from './states.js';
 
         function normalizeRelayThreadId(event) {
             if (event.source !== "relay") return event;
-            if (event.cert_id) return { ...event, thread_id: event.cert_id };
+            // A relayed DM carries the SENDER's cert_id, which is meaningless to us:
+            // each side holds its own cert_id for the same relationship. Map by the
+            // sender's DID to OUR cert_id first so the message lands in the thread we
+            // actually opened; only fall back to the carried cert_id if we have no
+            // relationship mapping yet.
             const mapped = peerDidToCertId[event.from_webid];
             if (mapped) return { ...event, thread_id: mapped };
+            if (event.cert_id) return { ...event, thread_id: event.cert_id };
             return event;
         }
 
