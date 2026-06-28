@@ -575,6 +575,13 @@ def set_room_acl(
     # WAC path
     member_mode_str = "acl:Read, acl:Write" if not room.read_only else "acl:Read"
     container = room.stash_root if room.stash_root.endswith("/") else room.stash_root + "/"
+    # WAC ACL bodies must reference the resource by its real HTTP URL. stash:// is
+    # Proxion's internal scheme: the pod server can't match it, so acl:accessTo /
+    # acl:default would target a non-existent URI — the new container ACL then
+    # replaces inherited access and grants nothing, leaving the room (and its
+    # messages/) unwritable even by the owner (HTTP 403). Resolve to the same HTTP
+    # URL that put() writes to so the grant actually matches the resource.
+    container = owner_client._resolve_uri(container)
     member_agents = "\n".join(f"    acl:agent <{w}>;" for w in member_webids)
     acl_content = (
         "@prefix acl: <http://www.w3.org/ns/auth/acl#> .\n\n"
