@@ -200,8 +200,11 @@ try {
       ? `  ✓ cross-gateway DM "${MSG}" also rendered on Bob.`
       : `  ⚠ cross-gateway DM "${MSG}" did NOT render on Bob (relay POST succeeds — known cert-based-e2e render gap; not failing the handshake check).`);
     if (!delivered) {
-      const rx = /relay|sealed|deliver|to_webid|mailbox|webpush|accepted|decrypt/i;
-      console.error(`  · Bob GW relay:\n${(procs[1]._log() || '').split('\n').filter(l => rx.test(l)).slice(-10).map(l => '    ' + l).join('\n')}`);
+      const feed = await bob.evaluate(() => document.getElementById('message-feed')?.textContent || '');
+      const arrived = /could not decrypt|decryption error/i.test(feed);
+      console.error(arrived
+        ? `  · DM DID arrive on Bob but failed to decrypt (feed shows decrypt-failure marker) — E2E key issue, not delivery.`
+        : `  · DM did NOT arrive on Bob's client (delivery issue).`);
     }
   }
 } catch (e) {
