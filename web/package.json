@@ -10,7 +10,8 @@
     "smoke:browser": "node smoke_browser.mjs",
     "smoke:webrtc": "node smoke_webrtc.mjs",
     "smoke:visual": "node smoke_visual.mjs",
-    "smoke:journey": "node smoke_journey.mjs"
+    "smoke:journey": "node smoke_journey.mjs",
+    "smoke:federation": "node smoke_federation.mjs"
   },
   "keywords": [],
   "author": "",

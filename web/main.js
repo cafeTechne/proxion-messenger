@@ -2403,7 +2403,6 @@ import { inlineNotice, feedEmptyState } from './states.js';
                     payload.reply_to_id = replyingTo.id;
                     cancelReply();
                 }
-
                 socketSendOrQueue(payload);
 
                 if (activeView?.type === 'local_room') {
@@ -2567,6 +2566,8 @@ import { inlineNotice, feedEmptyState } from './states.js';
         document.getElementById("add-peer-input").addEventListener("keydown", e => {
             if (e.key === "Enter") submitAddPeer();
         });
+        // The "Add" button had no handler — only Enter worked. Wire the obvious click.
+        document.getElementById("add-peer-submit-btn").addEventListener("click", submitAddPeer);
 
         // --------------- Join Room modal ---------------
         // submitJoinRoom: moved to rooms.js (createRooms).
