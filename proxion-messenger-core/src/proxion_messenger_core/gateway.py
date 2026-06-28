@@ -1290,6 +1290,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             caps,
             endpoint_hints=[my_http_url],
             display_name=sender_dn or None,
+            e2e_pub=self._store.get_x25519_pub(self._client_webids.get(websocket, "")) if self._store else None,
         )
 
         # POST invite to target gateway — accept both http:// and ws:// target URLs
@@ -1387,6 +1388,11 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
         # Persist to SQLite and pod
         self._store.save_relationship(cert.to_dict(), peer_did=alice_did)
+        # Store the requester's browser E2E key (from the invite) so we can encrypt
+        # the first DM to the right key even if we message before receiving one.
+        _alice_e2e = invite.issuer.get("e2e_key")
+        if _alice_e2e and alice_did:
+            self._store.save_e2e_key(alice_did, _alice_e2e)
         asyncio.create_task(self._sync_cert_to_pod(cert.to_dict()))
 
         # Register Alice's endpoint so relay routing works immediately
@@ -1414,6 +1420,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                     "from_did": bob_did,
                     "from_pub_hex": bob_pub_hex,
                     "from_gateway_http_url": self._gateway_http_url(),
+                    # Browser-level E2E key (NOT the gateway store key used for sealing):
+                    # carry the acceptor's client x25519 so the requester can encrypt the
+                    # first DM to the right key. See federation-status memory.
+                    "from_e2e_key": self._store.get_x25519_pub(self._client_webids.get(websocket, "")) or "",
                 }
                 asyncio.create_task(self._post_invite_accept(accept_url, accept_payload))
             else:

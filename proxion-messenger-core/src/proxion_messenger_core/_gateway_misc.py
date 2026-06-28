@@ -444,7 +444,10 @@ class MiscHandlerMixin:
                     "peer_did": peer_did,
                     "expires_at": cert_dict.get("expires_at"),
                     "display_name": self._store.get_display_name(peer_did) if peer_did else None,
-                    "x25519_pub": self._store.get_x25519_pub(peer_did) if peer_did else None,
+                    # Prefer the peer's browser E2E key over the gateway store key so the
+                    # client caches the right key for content encryption (the store key
+                    # is for sealed-sender only).
+                    "x25519_pub": (self._store.get_e2e_key(peer_did) or self._store.get_x25519_pub(peer_did)) if peer_did else None,
                 })
         await websocket.send(json.dumps({"type": "relationships", "contacts": rels}))
 

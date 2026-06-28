@@ -360,7 +360,7 @@ class AuthHandlerMixin:
                         "peer_did":       peer_did,
                         "expires_at":     cert_dict.get("expires_at"),
                         "display_name":   self._store.get_display_name(peer_did) if peer_did else None,
-                        "x25519_pub":     self._store.get_x25519_pub(peer_did) if peer_did else None,
+                        "x25519_pub":     (self._store.get_e2e_key(peer_did) or self._store.get_x25519_pub(peer_did)) if peer_did else None,
                         "last_read_ts":   lr_ts,
                         "unread_count":   unread,
                     })

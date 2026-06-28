@@ -80,6 +80,22 @@ class IdentityStoreMixin(object):
                 "SELECT pub_b64u FROM x25519_pubs WHERE did = ?", (did,)
             ).fetchone()
         return row["pub_b64u"] if row else None
+
+    def save_e2e_key(self, did: str, pub_b64u: str) -> None:
+        """Persist a peer's BROWSER-level E2E x25519 pub (separate from the gateway
+        store key in x25519_pubs, which is used for sealed-sender)."""
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO e2e_keys (did, pub_b64u, updated_at) VALUES (?,?,?)",
+                (did, pub_b64u, int(time.time())),
+            )
+
+    def get_e2e_key(self, did: str) -> Optional[str]:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT pub_b64u FROM e2e_keys WHERE did = ?", (did,)
+            ).fetchone()
+        return row["pub_b64u"] if row else None
     def save_relationship(
         self, cert_dict: dict, peer_did: Optional[str] = None, owner_webid: str = ""
     ) -> None:

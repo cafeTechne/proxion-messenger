@@ -288,7 +288,16 @@ class HttpEndpointsMixin:
             "certificate": cert.to_dict(),
             "peer_did": acceptor_did,
             "invitation_id": invitation_id,
+            # Acceptor's browser E2E key (from the acceptance) so our client caches the
+            # right key for the first outgoing DM, overriding the gateway key cached at
+            # discover time. (The sealed-relay layer still uses the gateway store key.)
+            "x25519_pub": data.get("from_e2e_key") or None,
         })
+        # Persist the acceptor's browser E2E key (separate from the gateway store key)
+        # so it survives a contacts-list refresh and isn't clobbered by the store key.
+        _acc_e2e = data.get("from_e2e_key")
+        if _acc_e2e and acceptor_did and self._store:
+            self._store.save_e2e_key(acceptor_did, _acc_e2e)
 
         return "200 OK", '{"status":"ok"}'
 

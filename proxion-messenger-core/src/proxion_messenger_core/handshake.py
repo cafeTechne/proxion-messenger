@@ -115,6 +115,7 @@ def create_invite(
     endpoint_hints: Optional[List[str]] = None,
     certificate_id: Optional[str] = None,
     display_name: Optional[str] = None,
+    e2e_pub: Optional[str] = None,
 ) -> FederationInvite:
     """Build and sign a :class:`~proxion_messenger_core.federation.FederationInvite`.
 
@@ -146,6 +147,10 @@ def create_invite(
     }
     if display_name:
         issuer_dict["display_name"] = display_name
+    if e2e_pub:
+        # Browser-level E2E key (separate from store_key, which is the gateway key
+        # used for sealing) so the acceptor can encrypt the first DM to the right key.
+        issuer_dict["e2e_key"] = e2e_pub
     invite = FederationInvite(
         issuer=issuer_dict,
         endpoint_hints=endpoint_hints or [],

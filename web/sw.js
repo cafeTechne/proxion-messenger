@@ -1,4 +1,4 @@
-const CACHE = "proxion-shell-v50";
+const CACHE = "proxion-shell-v51";
 const SHELL = [
   "/",
   "/index.html",

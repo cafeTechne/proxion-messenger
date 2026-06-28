@@ -185,27 +185,23 @@ try {
   // friend request → accept → cert exchange → DM thread open on BOTH sides). This
   // is the federation coverage test_relay_e2e doesn't have (it drives the protocol
   // directly). If we got here, all of that worked.
+  // Hard assertion: the cross-gateway, cert-based, E2E-encrypted DM must arrive,
+  // decrypt, and render on Bob. This exercises the full path test_relay_e2e doesn't:
+  // the UI handshake + browser-to-browser E2E key reconciliation across gateways.
+  step = 'bob-receive-dm';
+  await bob.waitForFunction(
+    (t) => document.getElementById('message-feed')?.textContent.includes(t),
+    { timeout: 15000 }, MSG).catch(async () => {
+      const feed = await bob.evaluate(() => document.getElementById('message-feed')?.textContent || '');
+      fail(/could not decrypt|decryption error/i.test(feed)
+        ? `cross-gateway DM "${MSG}" arrived but failed to DECRYPT (E2E key reconciliation)`
+        : `cross-gateway DM "${MSG}" did not arrive/render on Bob`);
+    });
+
   step = 'done';
   if (!process.exitCode) {
-    console.log('  ✓ federation handshake OK — Alice discovered Bob across gateways, friend request delivered + accepted, cert exchanged, DM thread open on both sides.');
-
-    // Soft check: the actual relayed DM rendering on Bob. The relay transport is
-    // asserted by test_relay_e2e; here it's a best-effort report because cert-based
-    // e2e DM render across gateways has a known thread-reconciliation gap (the two
-    // sides hold different cert_ids for the same relationship). Reported, not fatal.
-    const delivered = await bob.waitForFunction(
-      (t) => document.getElementById('message-feed')?.textContent.includes(t),
-      { timeout: 10000 }, MSG).then(() => true).catch(() => false);
-    console.log(delivered
-      ? `  ✓ cross-gateway DM "${MSG}" also rendered on Bob.`
-      : `  ⚠ cross-gateway DM "${MSG}" did NOT render on Bob (relay POST succeeds — known cert-based-e2e render gap; not failing the handshake check).`);
-    if (!delivered) {
-      const feed = await bob.evaluate(() => document.getElementById('message-feed')?.textContent || '');
-      const arrived = /could not decrypt|decryption error/i.test(feed);
-      console.error(arrived
-        ? `  · DM DID arrive on Bob but failed to decrypt (feed shows decrypt-failure marker) — E2E key issue, not delivery.`
-        : `  · DM did NOT arrive on Bob's client (delivery issue).`);
-    }
+    console.log('  ✓ federation OK — discover → friend request → accept → cert exchange → DM thread on both sides,');
+    console.log(`    AND cross-gateway E2E DM "${MSG}" delivered, decrypted, and rendered on Bob.`);
   }
 } catch (e) {
   if (e.message !== 'stop' && e.message !== 'no bob addr') console.error(`  ✗ [${step}] threw: ${e.message}`);
