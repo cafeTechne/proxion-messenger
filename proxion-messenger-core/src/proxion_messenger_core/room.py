@@ -220,6 +220,12 @@ def invite_to_room(
     if "inviter_key" not in data:
         data["inviter_key"] = owner_agent.identity_pub_bytes.hex()
 
+    # Carry the owner's pod URL (unsigned routing hint) so the joiner knows WHICH
+    # host to read the room from — the stash:// capability only gives the relative
+    # path. Not security-sensitive (it's just a public pod location).
+    if room.pod_url and room.pod_url != "unknown":
+        data["room_pod_url"] = room.pod_url
+
     return json.dumps(data, indent=2, default=str)
 
 
@@ -298,11 +304,18 @@ def join_room(
             stash_root = cap.with_
             break
 
+    # The owner's pod URL travels as an unsigned routing hint in the invite wrapper
+    # (set by invite_to_room) so the joiner knows which host to read the room from.
+    _owner_pod_url = invite_data.get("room_pod_url") or "unknown"
+    # The room_id is embedded in the stash_root (stash://rooms/{room_id}/) and the
+    # AES room key is derived from it, so it MUST equal the owner's room_id — NOT the
+    # invite's certificate_id (a different random id), or members can't decrypt.
+    _room_id = stash_root.rstrip("/").split("/")[-1] if stash_root else (invite.certificate_id or "unknown")
     room = RoomConfig(
-        room_id=invite.certificate_id or "unknown",
+        room_id=_room_id,
         name="Joined Room",
         owner_webid=invite.issuer.get("public_key", "unknown"),
-        pod_url="unknown",
+        pod_url=_owner_pod_url,
         stash_root=stash_root,
         created_at=datetime.now(timezone.utc).isoformat(),
     )
@@ -482,8 +495,11 @@ def read_room(
     for uri in uris:
         if not uri.endswith(".json"):
             continue
+        # list() may return bare filenames or relative paths; resolve against the
+        # absolute messages container URL so get() doesn't treat them as stash:// URIs.
+        full_uri = uri if uri.startswith("http") else messages_url.rstrip("/") + "/" + uri.lstrip("/")
         try:
-            raw = pod_client.get(uri)
+            raw = pod_client.get(full_uri)
             msg = Message.from_dict(_json.loads(raw.decode("utf-8")))
         except Exception:
             continue

@@ -345,27 +345,28 @@ class SolidClient:
                     chunks.append(chunk)
                 body = b"".join(chunks).decode("utf-8", errors="replace")
 
-            # Parse Turtle-like RDF to extract ldp:contains member URIs.
-            # Lines of interest: <container> ldp:contains <member> .
-            # We look for lines that contain "ldp:contains" and extract the
-            # last <...> on the line (the member, not the container subject).
+            # Parse Turtle-like RDF to extract ldp:contains member URIs. CSS (and
+            # most Solid servers) serialize a container's members as ONE
+            # comma-separated predicate-object list — possibly across lines —
+            # e.g. `<c> ... ; ldp:contains <m1>, <m2>, <m3> .`. A per-line parser
+            # that grabs only the last <...> on the ldp:contains line therefore
+            # returns just the final member. Instead, capture each ldp:contains
+            # clause (prefixed or full-IRI form) up to the next `.`/`;` and pull
+            # EVERY member URI from it.
             members = []
-            for line in body.split("\n"):
-                if "ldp:contains" not in line:
-                    continue
-                uris = _re.findall(r"<([^>]+)>", line)
-                if len(uris) >= 2:
-                    http_uri = uris[-1]
-                elif len(uris) == 1:
-                    http_uri = uris[0]
-                else:
-                    continue
-                try:
-                    members.append(
-                        self._resolver.resolve_back(http_uri, self._stash_owner)
-                    )
-                except SolidResolverError:
-                    members.append(http_uri)
+            # Capture the run of `<...>` member tokens that follow each ldp:contains
+            # predicate — they're a comma-separated list (`<m1.json>, <m2.json>.`),
+            # so terminating on the first `.` would stop inside a `.json` filename.
+            for clause in _re.findall(
+                r"(?:ldp:contains|ldp#contains>)\s*((?:<[^>]+>\s*,?\s*)+)", body, _re.IGNORECASE
+            ):
+                for http_uri in _re.findall(r"<([^>]+)>", clause):
+                    try:
+                        members.append(
+                            self._resolver.resolve_back(http_uri, self._stash_owner)
+                        )
+                    except SolidResolverError:
+                        members.append(http_uri)
 
             return members
 
