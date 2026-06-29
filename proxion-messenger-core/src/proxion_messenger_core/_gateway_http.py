@@ -628,6 +628,12 @@ class HttpEndpointsMixin:
                         pass
                 return "200 OK", '{"status":"delivered"}'
 
+        # No live socket for the recipient — fall back to offline delivery. Log it
+        # (H4): a relay returning 202 while the recipient's browser silently never
+        # received the DM (registered under a different DID than to_webid) was the
+        # exact blindness behind the cross-gateway delivery bug.
+        logger.debug("relay: no live socket for to_webid=%s — offline fallback (push/mailbox)", to_webid)
+
         # WebPush for offline DM relay target
         _vpk_dm  = getattr(self, "_vapid_private_pem", None)
         _vsub_dm = getattr(self, "_vapid_subject", None)

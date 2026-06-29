@@ -7,11 +7,14 @@ the room container using the messaging module.
 
 from __future__ import annotations
 
+import logging
 import uuid
 import json
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from typing import Optional, TYPE_CHECKING, Union, List
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .federation import RelationshipCertificate
@@ -488,7 +491,11 @@ def read_room(
 
     try:
         uris = pod_client.list(messages_url)
-    except (SolidError, Exception):
+    except (SolidError, Exception) as exc:
+        # Graceful degradation: the room still works over the relay; the pod is an
+        # optional history backbone. But log it (H4) — a silent [] here hid four
+        # real bugs in this exact path until the integration suite was run live.
+        logger.warning("read_room: pod list(%s) failed, returning no pod history: %s", messages_url, exc)
         return []
 
     messages: list = []
@@ -501,7 +508,8 @@ def read_room(
         try:
             raw = pod_client.get(full_uri)
             msg = Message.from_dict(_json.loads(raw.decode("utf-8")))
-        except Exception:
+        except Exception as exc:
+            logger.debug("read_room: skipping unreadable message %s: %s", full_uri, exc)
             continue
         messages.append(msg)
 
@@ -516,8 +524,11 @@ def read_room(
                     from .msgcrypto import decrypt_message
                     plain = decrypt_message(msg.content, key)
                     msg = _dc.replace(msg, content=plain)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # Leave the ciphertext in place but make the failure visible —
+                    # a wrong room key (e.g. room_id mismatch) silently looked like
+                    # plaintext "enc1:..." before.
+                    logger.debug("read_room: could not decrypt message %s: %s", msg.message_id, exc)
             decrypted.append(msg)
         messages = decrypted
 
