@@ -790,6 +790,14 @@ import { inlineNotice, feedEmptyState } from './states.js';
                     const msg = normalizeRelayThreadId(event);
                     const id = msg.thread_id;
 
+                    // If this is the server echo of an optimistically-rendered message,
+                    // mark it confirmed (clear the pending state). renderMessage below
+                    // then dedups by message_id, so no duplicate is appended.
+                    const _echoEl = document.getElementById("msg-" + (msg.message_id || ""));
+                    if (_echoEl && _echoEl.classList.contains("msg-pending")) {
+                        _echoEl.classList.remove("msg-pending");
+                    }
+
                     // Auto-add unknown relay sender to DM sidebar
                     if (msg.source === "relay" && !document.getElementById("nav-" + id)) {
                         const label = msg.from_display_name || (msg.from_webid || "").slice(8, 22) + "…";
@@ -2409,6 +2417,23 @@ import { inlineNotice, feedEmptyState } from './states.js';
                     cancelReply();
                 }
                 socketSendOrQueue(payload);
+
+                // Optimistic render: show the message instantly instead of waiting for
+                // the server echo. The echo carries the same message_id, so renderMessage
+                // dedups (allMessages + DOM both key on message_id). Plaintext `content`
+                // is used even for E2E sends (payload.content is ciphertext) — the echo
+                // dedups regardless, and it's marked .msg-pending until the echo confirms.
+                renderMessage({
+                    message_id: clientMsgId,
+                    thread_id: activeView.id,
+                    from_webid: selfWebId,
+                    from_display_name: localStorage.getItem('proxion_display_name') || '',
+                    content: content,
+                    timestamp: new Date().toISOString(),
+                    reply_to_id: payload.reply_to_id || null,
+                    local: true,
+                });
+                document.getElementById('msg-' + clientMsgId)?.classList.add('msg-pending');
 
                 if (activeView?.type === 'local_room') {
                     podWriteMessageJsonLd(activeView.id, clientMsgId, {

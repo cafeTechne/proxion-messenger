@@ -148,6 +148,9 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
     position: relative;
 }
 .message:hover { background: rgba(255,255,255,0.025); }
+/* Optimistic send: dim until the server echo confirms, then fade to full opacity. */
+.message { transition: opacity var(--transition-base); }
+.message.msg-pending { opacity: 0.5; }
 .message:not(.msg-grouped) { padding-top: 16px; }
 
 /* Avatar column: 40 px wide, fixed */

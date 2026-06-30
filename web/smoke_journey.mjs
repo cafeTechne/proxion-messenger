@@ -151,8 +151,17 @@ try {
   await page.focus('#message-input');
   await page.type('#message-input', MSG);
   await page.keyboard.press('Enter');
+  // Optimistic render should make it appear ~instantly; then the server echo dedups.
   await page.waitForFunction((text) => document.getElementById('message-feed')?.textContent.includes(text),
     { timeout: 10000 }, MSG).catch(() => fail(`sent message "${MSG}" never rendered in the feed`));
+  // Wait for the echo to settle, then assert EXACTLY ONE copy (optimistic + echo must dedup).
+  await new Promise(r => setTimeout(r, 1500));
+  const copies = await page.evaluate((text) =>
+    [...document.querySelectorAll('#message-feed .message')].filter(el => (el.textContent || '').includes(text)).length, MSG);
+  if (copies !== 1) fail(`expected exactly 1 rendered copy of "${MSG}", found ${copies} (optimistic/echo dedup failed)`);
+  const stillPending = await page.evaluate((text) =>
+    [...document.querySelectorAll('#message-feed .message.msg-pending')].some(el => (el.textContent || '').includes(text)), MSG);
+  if (stillPending) fail(`message "${MSG}" stuck in pending state — echo never cleared .msg-pending`);
 
   step = 'done';
   if (fatal.length) { console.error('  page/console errors:\n   - ' + fatal.join('\n   - ')); process.exitCode = 1; }
