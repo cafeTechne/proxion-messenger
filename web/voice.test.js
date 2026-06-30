@@ -71,6 +71,15 @@ describe('channel participant tracking', () => {
     voice._removeChannelParticipant('did:key:zBob');
     expect(voice.state._channelParticipants['did:key:zBob']).toBeUndefined();
   });
+
+  it('updates a participant connection-state (regression: param no longer shadows cluster state)', () => {
+    const { voice } = makeVoice();
+    voice._addChannelParticipant('did:key:zBob');
+    voice._updateChannelParticipantUI('did:key:zBob', 'failed');
+    expect(voice.state._channelParticipants['did:key:zBob'].state).toBe('failed');
+    voice._updateChannelParticipantUI('did:key:zBob', 'connected');
+    expect(voice.state._channelParticipants['did:key:zBob'].state).toBe('connected');
+  });
 });
 
 describe('handleVoicePeerLeft cleanup', () => {

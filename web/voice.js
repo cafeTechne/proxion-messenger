@@ -242,9 +242,19 @@ export function createVoice(deps) {
             };
 
             peerPc.oniceconnectionstatechange = () => {
-                _updateChannelParticipantUI(targetWebid, peerPc.iceConnectionState);
-                if (peerPc.iceConnectionState === "failed") {
+                const _st = peerPc.iceConnectionState;
+                _updateChannelParticipantUI(targetWebid, _st);  // updates the status dot
+                if (_st === "failed") {
+                    // Surface it (H4): a silently-failing call is the worst case. Toast
+                    // once per failure episode (reset on recovery) so ICE flapping
+                    // doesn't spam. restartIce attempts automatic recovery.
+                    if (!peerPc._proxionFailToasted) {
+                        peerPc._proxionFailToasted = true;
+                        showToast("Voice connection trouble with " + targetWebid.slice(0, 20) + " — reconnecting…", "error");
+                    }
                     try { peerPc.restartIce(); } catch (_) {}
+                } else if (_st === "connected" || _st === "completed") {
+                    peerPc._proxionFailToasted = false;
                 }
             };
 
@@ -286,9 +296,13 @@ export function createVoice(deps) {
             }
         }
 
-        function _updateChannelParticipantUI(webid, state) {
+        function _updateChannelParticipantUI(webid, connState) {
+            // NB: param was named `state`, shadowing the voice-state cluster — so
+            // `state._channelParticipants` read off the connState STRING and the
+            // participant connection-status dot (green/amber/red) never updated,
+            // making a failed/dropped peer connection invisible. Use connState.
             if (state._channelParticipants[webid]) {
-                state._channelParticipants[webid].state = state;
+                state._channelParticipants[webid].state = connState;
                 _renderChannelPanel();
             }
         }
