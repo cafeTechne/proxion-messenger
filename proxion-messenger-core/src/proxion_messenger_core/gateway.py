@@ -344,13 +344,33 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 return ws
         return None
 
+    def _own_gateway_did(self) -> str:
+        """This gateway's own identity DID (the DID half of its Proxion address). Cached."""
+        d = getattr(self, "_own_gateway_did_cache", None)
+        if d is None:
+            from .didkey import pub_key_to_did
+            d = pub_key_to_did(self.agent.identity_pub_bytes)
+            self._own_gateway_did_cache = d
+        return d
+
     def _sockets_for(self, identity: str) -> list:
-        """Return all connected sockets for identity (handles set and single-socket values)."""
+        """Return all connected sockets for identity (handles set and single-socket values).
+
+        One-gateway-per-user: a delivery addressed to THIS gateway's own identity
+        (the DID peers send to — the Proxion address) is for our local user, whose
+        browser registers under its OWN client DID, not the gateway DID. So when the
+        identity is our own and the normal lookup yields nothing, return the connected
+        client(s). Centralizes the fix that cross-gateway DMs/voice/receipts all need;
+        without it those silently never reach the local browser.
+        """
         val = self._webid_sockets.get(identity)
-        if val is None:
-            return []
-        candidates = val if isinstance(val, set) else {val}
-        return [ws for ws in candidates if ws in self.clients]
+        result = []
+        if val is not None:
+            candidates = val if isinstance(val, set) else {val}
+            result = [ws for ws in candidates if ws in self.clients]
+        if not result and identity and identity == self._own_gateway_did():
+            return [ws for ws in self.clients]
+        return result
 
     async def _send_to_identity(self, identity: str, payload: str):
         """Send a message to all connected sockets for an identity, skipping broken ones."""
@@ -1665,16 +1685,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if not to_webid or not signal_type:
             return "400 Bad Request", '{"error":"missing voice signal fields"}'
 
-        target_sockets = self._sockets_for(to_webid)
-        if not target_sockets:
-            # One-gateway-per-user: a voice signal addressed to THIS gateway's own
-            # identity (the DID half of the Proxion address) is for our local user,
-            # whose browser registered under its own client DID, not the gateway DID.
-            # Without this, cross-gateway voice calls silently never connect — the
-            # same identity-routing bug that broke cross-gateway DMs.
-            from .didkey import pub_key_to_did as _pk2d
-            if to_webid == _pk2d(self.agent.identity_pub_bytes):
-                target_sockets = list(self.clients)
+        target_sockets = self._sockets_for(to_webid)  # _sockets_for handles the own-identity fallback
         if not target_sockets:
             return "202 Accepted", '{"status":"offline"}'
 
