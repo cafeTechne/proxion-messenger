@@ -542,7 +542,7 @@
         <button data-role-action="kick" class="danger">Kick</button>
     </div>
     <!-- Round 68: Forward modal -->
-    <div id="forward-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1003; align-items:center; justify-content:center;">
+    <div id="forward-modal" role="dialog" aria-modal="true" aria-label="Forward message" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1003; align-items:center; justify-content:center;">
       <div style="background:var(--slate-800); border-radius:8px; padding:20px; min-width:320px; max-width:420px; color:var(--slate-50);">
         <h3 style="margin:0 0 12px;">Forward to…</h3>
         <div id="forward-thread-list" style="max-height:260px; overflow-y:auto;"></div>
@@ -550,7 +550,7 @@
       </div>
     </div>
     <!-- Round 70: Webhook created modal -->
-    <div id="webhook-created-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1003; align-items:center; justify-content:center;">
+    <div id="webhook-created-modal" role="dialog" aria-modal="true" aria-label="Webhook created" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1003; align-items:center; justify-content:center;">
       <div style="background:var(--slate-800); border-radius:8px; padding:20px; min-width:340px; max-width:480px; color:var(--slate-50);">
         <h3 style="margin:0 0 8px;">Webhook Created</h3>
         <p style="color:var(--text-secondary); font-size:0.88em; margin:0 0 4px;">POST JSON to this URL to send messages to the room:</p>
@@ -566,7 +566,7 @@
     <div id="toast-container" style="position:fixed;bottom:24px;right:24px;z-index:2000;display:flex;flex-direction:column;gap:8px;pointer-events:none;"></div>
 
     <!-- Round 47: Generic confirm dialog -->
-    <div id="confirm-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1400;align-items:center;justify-content:center;">
+    <div id="confirm-modal" role="dialog" aria-modal="true" aria-label="Confirmation" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1400;align-items:center;justify-content:center;">
       <div style="background:var(--slate-800);border-radius:8px;padding:24px;min-width:300px;max-width:400px;color:var(--slate-50);">
         <p id="confirm-msg" style="margin:0 0 20px;font-size:0.95em;"></p>
         <div style="display:flex;gap:8px;justify-content:flex-end;">
@@ -577,7 +577,7 @@
     </div>
 
     <!-- Round 47: Copy-to-clipboard modal -->
-    <div id="copy-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1400;align-items:center;justify-content:center;">
+    <div id="copy-modal" role="dialog" aria-modal="true" aria-label="Copy" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1400;align-items:center;justify-content:center;">
       <div style="background:var(--slate-800);border-radius:8px;padding:24px;min-width:320px;max-width:480px;color:var(--slate-50);">
         <h3 style="margin:0 0 12px;">Copy</h3>
         <textarea id="copy-modal-text" readonly style="width:100%;box-sizing:border-box;padding:8px;background:var(--slate-900);border:1px solid var(--slate-700);color:var(--text-secondary);border-radius:4px;font-size:0.85em;resize:none;min-height:80px;"></textarea>
@@ -589,7 +589,7 @@
     </div>
 
     <!-- R10.6.1: Deep link confirmation modal -->
-    <div id="deeplink-confirm-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1010;align-items:center;justify-content:center;">
+    <div id="deeplink-confirm-modal" role="dialog" aria-modal="true" aria-label="Add contact" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1010;align-items:center;justify-content:center;">
       <div style="background:var(--slate-800);border-radius:8px;padding:24px;min-width:320px;max-width:440px;color:var(--slate-50);">
         <h3 style="margin:0 0 10px;font-size:1em;">Add contact via link?</h3>
         <p style="margin:0 0 6px;font-size:0.85em;color:var(--text-secondary);">Proxion received a link asking to add:</p>
@@ -603,7 +603,7 @@
     </div>
 
     <!-- Round 47: Add peer modal -->
-    <div id="add-peer-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1002;align-items:center;justify-content:center;">
+    <div id="add-peer-modal" role="dialog" aria-modal="true" aria-label="Add contact" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1002;align-items:center;justify-content:center;">
       <div style="background:var(--slate-800);border-radius:8px;padding:24px;min-width:340px;max-width:480px;color:var(--slate-50);">
         <h3 style="margin:0 0 12px;">Add Peer</h3>
         <label style="display:block;margin-bottom:4px;font-size:0.9em;">Peer DID or Proxion address</label>
@@ -654,7 +654,7 @@
     </div>
 
     <!-- Round 47: Join room modal -->
-    <div id="join-room-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1002;align-items:center;justify-content:center;">
+    <div id="join-room-modal" role="dialog" aria-modal="true" aria-label="Join room" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1002;align-items:center;justify-content:center;">
       <div style="background:var(--slate-800);border-radius:8px;padding:24px;min-width:340px;max-width:480px;color:var(--slate-50);">
         <h3 style="margin:0 0 12px;">Join Room</h3>
         <label style="display:block;margin-bottom:4px;font-size:0.9em;">Invite link or room code</label>
@@ -669,7 +669,7 @@
     </div>
 
     <!-- Room invite modal -->
-    <div id="room-invite-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1002;align-items:center;justify-content:center;">
+    <div id="room-invite-modal" role="dialog" aria-modal="true" aria-label="Invite to room" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1002;align-items:center;justify-content:center;">
       <div style="background:var(--slate-800);border-radius:8px;padding:24px;min-width:340px;max-width:480px;color:var(--slate-50);">
         <h3 style="margin:0 0 4px;">Invite to Room</h3>
         <p style="margin:0 0 16px;font-size:0.85em;color:var(--text-secondary);">Share the link or code with anyone you want to join.</p>
@@ -896,7 +896,7 @@
     </div>
 
     <!-- Room create modal -->
-    <div id="room-create-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1002; align-items:center; justify-content:center;">
+    <div id="room-create-modal" role="dialog" aria-modal="true" aria-label="Create a room" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1002; align-items:center; justify-content:center;">
       <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:8px; padding:24px; min-width:360px; max-width:480px; color:var(--text-primary,var(--slate-50));">
         <h3 style="margin:0 0 16px;">Create a Room</h3>
         <div id="room-create-form">
@@ -1100,7 +1100,7 @@
     </div>
 
     <!-- Keyboard shortcut help modal -->
-    <div id="shortcut-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1000; align-items:center; justify-content:center;">
+    <div id="shortcut-modal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1000; align-items:center; justify-content:center;">
       <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:8px; padding:24px; min-width:360px; max-width:500px;">
         <h3 style="margin:0 0 16px; color:var(--text-primary,var(--slate-50))">Keyboard Shortcuts</h3>
         <table style="width:100%; border-collapse:collapse; color:var(--text-primary,var(--slate-50))">
@@ -1117,7 +1117,7 @@
     </div>
 
     <!-- Onboarding wizard -->
-    <div id="onboarding-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1001; align-items:center; justify-content:center;">
+    <div id="onboarding-modal" role="dialog" aria-modal="true" aria-label="Welcome to Proxion" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1001; align-items:center; justify-content:center;">
       <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:10px; padding:32px; min-width:380px; max-width:480px; color:var(--text-primary,var(--slate-50));">
         <div id="ob-step-1">
           <h2>Welcome to Proxion</h2>
