@@ -2302,9 +2302,11 @@ import { inlineNotice, feedEmptyState } from './states.js';
                 const modal = document.getElementById("shortcut-modal");
                 modal.style.display = modal.style.display === "flex" ? "none" : "flex";
             } else if (e.key === "Escape") {
-                ["settings-modal","shortcut-modal","room-create-modal",
-                 "room-members-modal","add-peer-modal","join-room-modal"]
-                    .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = "none"; });
+                // Keyboard a11y: Escape dismisses ANY open dialog/modal. Generic
+                // (every modal now has role="dialog"; the id suffix catches any without).
+                document.querySelectorAll('[role="dialog"], [id$="-modal"]').forEach(el => {
+                    if (getComputedStyle(el).display !== "none") el.style.display = "none";
+                });
                 document.getElementById("pin-panel").style.display = "none";
                 cancelReply();
                 if (edit.state.editingMsgId) {
