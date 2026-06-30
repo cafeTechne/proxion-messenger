@@ -64,9 +64,22 @@ try {
     title: document.title,
   }));
 
+  // a11y guard: every interactive control must have an accessible name (aria-label,
+  // title, or text). An icon-only button with none announces as just "button" to a
+  // screen reader. Covers hidden modal/sidebar buttons too.
+  const unnamed = await page.evaluate(() =>
+    [...document.querySelectorAll('button, a[href], [role=button]')]
+      .filter(el => !(el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent.trim()))
+      .map(el => el.id || el.className || el.outerHTML.slice(0, 50)));
+
   console.log(`Loaded ${URL}`);
   console.log('probe:', JSON.stringify(probe));
   console.log(`console/page messages: ${all.length}, fatal: ${fatal.length}`);
+  if (unnamed.length) {
+    console.error(`\n✗ ${unnamed.length} interactive control(s) without an accessible name (a11y):`);
+    unnamed.forEach(u => console.error('  ✗ ' + u));
+    process.exitCode = 1;
+  }
   if (fatal.length) {
     console.error('\nFATAL page errors (page code is broken):');
     fatal.forEach(e => console.error('  ✗ ' + e));
