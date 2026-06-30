@@ -154,6 +154,10 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
 /* Voice speaking indicator (Phase J): green ring on the active speaker's pill. */
 #voice-channel-participants span { transition: box-shadow var(--transition-fast); }
 #voice-channel-participants span.vc-speaking { box-shadow: 0 0 0 2px var(--color-success-soft); }
+/* Tall-modal safety (esp. mobile): cap a dialog's inner container to the viewport
+   and let it scroll, so a tall modal (e.g. expanded settings) never pushes its top/
+   bottom — including the action buttons — off-screen with no way to reach them. */
+[role="dialog"] > div { max-height: 90vh; overflow-y: auto; }
 .message:not(.msg-grouped) { padding-top: 16px; }
 
 /* Avatar column: 40 px wide, fixed */
