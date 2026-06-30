@@ -336,6 +336,11 @@ button:hover { background: var(--accent-hover); }
     #sidebar.active {
         transform: translateX(0);
     }
+    /* Phone composer: the message input was squeezed to ~37% width by four buttons.
+       Reclaim room for the primary input by dropping the secondary schedule action
+       (still available on desktop) and tightening the Send button. */
+    #schedule-btn { display: none; }
+    #message-form > button[type="submit"] { padding-left: 14px; padding-right: 14px; }
     .mobile-overlay {
         display: none;
         position: absolute;
