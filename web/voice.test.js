@@ -1,5 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createVoice, CallState } from './voice.js';
+import { createVoice, CallState, audioLevel } from './voice.js';
+
+describe('audioLevel (speaking detection)', () => {
+  it('is ~0 for silence (all samples at the 128 midpoint)', () => {
+    expect(audioLevel(new Uint8Array(256).fill(128))).toBeCloseTo(0, 5);
+  });
+  it('rises with amplitude and exceeds the speaking threshold for loud audio', () => {
+    const quiet = new Uint8Array(256).map((_, i) => 128 + (i % 2 ? 4 : -4));   // tiny wobble
+    const loud  = new Uint8Array(256).map((_, i) => (i % 2 ? 255 : 0));         // full-scale
+    expect(audioLevel(loud)).toBeGreaterThan(audioLevel(quiet));
+    expect(audioLevel(loud)).toBeGreaterThan(0.045);   // over the detector threshold
+    expect(audioLevel(quiet)).toBeLessThan(0.045);
+  });
+  it('handles empty/missing input', () => {
+    expect(audioLevel(new Uint8Array(0))).toBe(0);
+    expect(audioLevel(null)).toBe(0);
+  });
+});
 
 // DOM stub: getElementById returns a fake element so DOM-touching helpers
 // (channel panel, leave button) don't throw in the node test env.

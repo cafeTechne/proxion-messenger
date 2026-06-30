@@ -12,6 +12,18 @@ export const CallState = Object.freeze({
     ENDING: 'ending',
 });
 
+// RMS of AnalyserNode time-domain samples (bytes 0-255 centered at 128), normalized
+// to ~0-1. Used by the speaking detector to decide who's talking. Pure + testable.
+export function audioLevel(data) {
+    if (!data || !data.length) return 0;
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) {
+        const v = (data[i] - 128) / 128;
+        sum += v * v;
+    }
+    return Math.sqrt(sum / data.length);
+}
+
 export function createVoice(deps) {
     const { showToast, renderMessage, showOsNotification, sendCmd, playNotificationSound, normalizeRelayThreadId, stopScreenShare, getSocket, getActiveView, getSelfWebId, getTurnUrl, getTurnSecret, getLocalDmPeers, getCurrentRoomMembers, getIsSharing } = deps;
     const state = {
@@ -64,6 +76,7 @@ export function createVoice(deps) {
                 delete state.peerAudioElements[peerId];
             }
             state._channelSessionIds = {};
+            _speaking.stopAll();
             _hideChannelPanel();
             showToast("Left voice channel");
         }
@@ -227,6 +240,7 @@ export function createVoice(deps) {
                 audio.srcObject = event.streams[0];
                 audio.play().catch(() => {});
                 _updateChannelParticipantUI(targetWebid, "connected");
+                _speaking.attach(targetWebid, event.streams[0]);
             };
 
             peerPc.onicecandidate = (e) => {
@@ -287,6 +301,65 @@ export function createVoice(deps) {
             _renderChannelPanel();
         }
 
+        // Speaking detection (Phase J): one shared AudioContext + an AnalyserNode per
+        // remote stream; a single throttled rAF loop samples levels and toggles the
+        // .vc-speaking ring on each participant pill directly (no full re-render).
+        const _speaking = (() => {
+            let ctx = null, raf = null, lastTick = 0;
+            const nodes = {};  // webid -> { source, analyser, data }
+            const THRESHOLD = 0.045;
+            function setSpeaking(webid, on) {
+                const el = document.querySelector?.(
+                    '#voice-channel-participants [data-vc-webid="' + webid + '"]');
+                if (el) el.classList.toggle('vc-speaking', on);
+            }
+            function loop() {
+                if (raf) return;
+                const tick = (ts) => {
+                    if (Object.keys(nodes).length === 0) { raf = null; return; }
+                    raf = requestAnimationFrame(tick);
+                    if (ts - lastTick < 80) return;  // ~12 Hz
+                    lastTick = ts;
+                    for (const webid of Object.keys(nodes)) {
+                        const n = nodes[webid];
+                        n.analyser.getByteTimeDomainData(n.data);
+                        setSpeaking(webid, audioLevel(n.data) > THRESHOLD);
+                    }
+                };
+                raf = requestAnimationFrame(tick);
+            }
+            return {
+                attach(webid, stream) {
+                    try {
+                        const AC = window.AudioContext || window.webkitAudioContext;
+                        if (!AC || !stream) return;
+                        if (!ctx) ctx = new AC();
+                        this.detach(webid);
+                        const source = ctx.createMediaStreamSource(stream);
+                        const analyser = ctx.createAnalyser();
+                        analyser.fftSize = 256;
+                        source.connect(analyser);
+                        nodes[webid] = { source, analyser, data: new Uint8Array(analyser.fftSize) };
+                        loop();
+                    } catch (_) {}
+                },
+                detach(webid) {
+                    const n = nodes[webid];
+                    if (n) { try { n.source.disconnect(); } catch (_) {} delete nodes[webid]; }
+                    setSpeaking(webid, false);
+                    if (Object.keys(nodes).length === 0) this.stopAll();
+                },
+                stopAll() {
+                    for (const w of Object.keys(nodes)) {
+                        try { nodes[w].source.disconnect(); } catch (_) {}
+                        delete nodes[w];
+                    }
+                    if (raf) { cancelAnimationFrame(raf); raf = null; }
+                    if (ctx) { try { ctx.close(); } catch (_) {} ctx = null; }
+                },
+            };
+        })();
+
         function _removeChannelParticipant(webid) {
             delete state._channelParticipants[webid];
             if (Object.keys(state._channelParticipants).length === 0 && !state._inVoiceChannel) {
@@ -315,7 +388,7 @@ export function createVoice(deps) {
                                   disconnected: "#f87171", failed: "#f87171", closed: "#64748b" };
             container.innerHTML = Object.entries(state._channelParticipants).map(([webid, info]) => {
                 const color = stateColor[info.state] || "#94a3b8";
-                return `<span style="background:#1e293b;padding:3px 8px;border-radius:12px;font-size:0.78em;color:#f1f5f9;display:flex;align-items:center;gap:4px;">
+                return `<span data-vc-webid="${escHtml(webid)}" style="background:#1e293b;padding:3px 8px;border-radius:12px;font-size:0.78em;color:#f1f5f9;display:flex;align-items:center;gap:4px;">
                     <span style="width:6px;height:6px;border-radius:50%;background:${color};display:inline-block;"></span>
                     ${escHtml(info.name)}
                 </span>`;
@@ -501,6 +574,7 @@ export function createVoice(deps) {
             const audio = state.peerAudioElements[event.peer_webid];
             if (audio) { audio.srcObject = null; delete state.peerAudioElements[event.peer_webid]; }
             delete state._channelSessionIds[event.peer_webid];
+            _speaking.detach(event.peer_webid);
             _removeChannelParticipant(event.peer_webid);
         }
 

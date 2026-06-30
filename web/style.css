@@ -151,6 +151,9 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
 /* Optimistic send: dim until the server echo confirms, then fade to full opacity. */
 .message { transition: opacity var(--transition-base); }
 .message.msg-pending { opacity: 0.5; }
+/* Voice speaking indicator (Phase J): green ring on the active speaker's pill. */
+#voice-channel-participants span { transition: box-shadow var(--transition-fast); }
+#voice-channel-participants span.vc-speaking { box-shadow: 0 0 0 2px var(--color-success-soft); }
 .message:not(.msg-grouped) { padding-top: 16px; }
 
 /* Avatar column: 40 px wide, fixed */
