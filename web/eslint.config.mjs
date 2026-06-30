@@ -31,6 +31,10 @@ export default [
     rules: {
       "no-undef": "error",
       "no-unused-vars": "off",
+      // A param/local shadowing a closure var (e.g. a handler param named `state`
+      // shadowing the module's state cluster) silently broke voice ICE handling —
+      // exactly the class no-shadow catches. Kept as an error to prevent recurrence.
+      "no-shadow": "error",
     },
   },
 ];

@@ -3598,7 +3598,7 @@ import { inlineNotice, feedEmptyState } from './states.js';
                     if (!resp.ok) { showToast('Restore failed: ' + resp.status); return; }
                     showToast('Identity restored. Reconnecting…');
                     setTimeout(() => { if (socket) socket.close(); }, 1000);
-                } catch (e) { showToast('Restore error: ' + e.message); }
+                } catch (err) { showToast('Restore error: ' + err.message); }
                 e.target.value = '';
             });
 

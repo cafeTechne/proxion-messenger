@@ -425,7 +425,6 @@ export function createRendering({
             if (feed.scrollTop !== 0) return;
             // First expand in-memory buffer
             if (allMessages.length > RENDER_WINDOW) {
-                const feed = e.target;
                 const rendered = feed.querySelectorAll(".message").length;
                 const totalLoaded = rendered + SCROLL_BATCH;
                 const slice = allMessages.slice(-Math.min(totalLoaded, allMessages.length));
