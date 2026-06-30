@@ -122,6 +122,8 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
 
 #chat-header {
     padding: 15px 25px;
+    /* Clear the notch/status bar in standalone PWA mode (0 on non-notch/desktop). */
+    padding-top: calc(15px + env(safe-area-inset-top, 0px));
     background: var(--bg-primary);
     border-bottom: 1px solid var(--bg-secondary);
 }
@@ -252,6 +254,8 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
 
 #message-form {
     padding: 8px 10px;
+    /* Clear the home indicator in standalone PWA mode (0 on non-notch/desktop). */
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
     display: flex;
     gap: 4px;
     align-items: center;

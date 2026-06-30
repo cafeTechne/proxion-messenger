@@ -2,11 +2,18 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Proxion</title>
-    <meta name="theme-color" content="var(--accent)">
+    <!-- theme-color must be a literal colour (CSS var() is invalid here) so mobile
+         browsers tint the toolbar/status bar; matches manifest theme_color. -->
+    <meta name="theme-color" content="#e94560">
     <meta name="description" content="Sovereign messaging on your Solid Pod">
     <link rel="manifest" href="/manifest.json">
+    <!-- iOS PWA: enable standalone home-screen launch + status-bar styling. -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Proxion">
     <link rel="apple-touch-icon" href="/icons/icon-192.svg">
     <link rel="icon" type="image/svg+xml" href="/icons/icon-192.svg">
     <link rel="stylesheet" href="style.css">
