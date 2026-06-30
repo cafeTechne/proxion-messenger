@@ -75,6 +75,32 @@ async def test_voice_signal_relay_delivered_to_connected_socket(gateway):
     assert sent["signal_type"] == "ice_candidate"
 
 @pytest.mark.asyncio
+async def test_voice_signal_relay_to_gateway_identity_reaches_local_client(gateway):
+    """Cross-gateway voice: a signal addressed to THIS gateway's own identity (the
+    DID half of the Proxion address) must reach the local user's browser, which
+    registered under its OWN client DID, not the gateway DID. Without the
+    one-gateway-per-user fallback this returns 202/offline and the call silently
+    never connects — the same identity-routing bug that broke cross-gateway DMs."""
+    from proxion_messenger_core.didkey import pub_key_to_did
+    ws = _ws()
+    gateway.clients.add(ws)
+    gateway._client_webids[ws] = "did:key:zBrowserClient"          # browser's own DID
+    gateway._webid_sockets["did:key:zBrowserClient"] = {ws}
+
+    gateway_did = pub_key_to_did(gateway.agent.identity_pub_bytes)  # the address DID peers use
+    status, body = await gateway._handle_voice_signal_relay({
+        "to_webid": gateway_did,
+        "from_webid": "did:key:zAlice",
+        "signal_type": "offer",
+        "session_id": "sess-x",
+        "signal_data": {"sdp": "v=0..."},
+    })
+
+    assert status == "200 OK"
+    ws.send.assert_called_once()
+    assert json.loads(ws.send.call_args[0][0])["signal_type"] == "offer"
+
+@pytest.mark.asyncio
 async def test_voice_signal_relay_offline_returns_202(gateway):
     """Voice signal for offline target returns 202 without queuing."""
     status, body = await gateway._handle_voice_signal_relay({

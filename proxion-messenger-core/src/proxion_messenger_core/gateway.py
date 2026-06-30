@@ -1667,6 +1667,15 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
         target_sockets = self._sockets_for(to_webid)
         if not target_sockets:
+            # One-gateway-per-user: a voice signal addressed to THIS gateway's own
+            # identity (the DID half of the Proxion address) is for our local user,
+            # whose browser registered under its own client DID, not the gateway DID.
+            # Without this, cross-gateway voice calls silently never connect — the
+            # same identity-routing bug that broke cross-gateway DMs.
+            from .didkey import pub_key_to_did as _pk2d
+            if to_webid == _pk2d(self.agent.identity_pub_bytes):
+                target_sockets = list(self.clients)
+        if not target_sockets:
             return "202 Accepted", '{"status":"offline"}'
 
         event = json.dumps({
