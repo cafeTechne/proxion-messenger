@@ -105,6 +105,32 @@ async def test_relay_oversized_file_rejected(gateway, sender_key):
 
 
 @pytest.mark.asyncio
+async def test_file_chunk_relay_to_gateway_identity_reaches_local_client(gateway):
+    """Cross-gateway file transfer: a chunk addressed to THIS gateway's own identity
+    (the recipient's Proxion address) must reach the local user's browser, which
+    registered under its own client DID. Covered by the centralized _sockets_for
+    one-gateway-per-user fallback (same fix as cross-gateway DM/voice)."""
+    ws = AsyncMock()
+    ws.send = AsyncMock()
+    ws.__hash__ = lambda s: id(s)
+    ws.__eq__ = lambda s, o: s is o
+    gateway.clients.add(ws)
+    gateway._client_webids[ws] = "did:key:zBrowserClient"
+    gateway._webid_sockets["did:key:zBrowserClient"] = {ws}
+
+    gateway_did = pub_key_to_did(gateway.agent.identity_pub_bytes)
+    status, _ = await gateway._handle_file_relay({
+        "content_type": "file_chunk",
+        "to_webid": gateway_did,
+        "from_webid": "did:key:zAlice",
+        "file_id": "f1", "seq": 0, "data": "AAAA",
+    })
+    assert status == "200 OK"
+    ws.send.assert_called_once()
+    assert json.loads(ws.send.call_args[0][0])["type"] == "file_chunk"
+
+
+@pytest.mark.asyncio
 async def test_relay_file_forwarded_to_target_socket(gateway, sender_key):
     """File in relay payload is forwarded to the target's WebSocket."""
     priv, from_did = sender_key
