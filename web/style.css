@@ -369,6 +369,15 @@ button:hover { background: var(--accent-hover); }
     #menu-toggle {
         display: block !important;
     }
+    /* Modal boxes carry inline min-width (e.g. onboarding's 380px) that overflows
+       a 375px phone. Cap every dialog's inner box to the viewport with a small
+       gutter; !important is required to beat the inline min-width. Lightbox is
+       excluded (it's a full-bleed image viewer, not a card). */
+    [role="dialog"]:not(#lightbox) > div,
+    [id$="-modal"]:not(#lightbox) > div {
+        min-width: 0 !important;
+        max-width: calc(100vw - 24px) !important;
+    }
 }
 
 #menu-toggle {
