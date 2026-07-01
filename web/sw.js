@@ -1,4 +1,4 @@
-const CACHE = "proxion-shell-v61";
+const CACHE = "proxion-shell-v62";
 const SHELL = [
   "/",
   "/index.html",
@@ -36,6 +36,9 @@ const SHELL = [
   "/manifest.json",
   "/icons/icon-192.svg",
   "/icons/icon-512.svg",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+  "/icons/apple-touch-icon-180.png",
 ];
 
 // On localhost, skip all caching so development changes are always live.
