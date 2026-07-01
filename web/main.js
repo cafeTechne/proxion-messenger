@@ -43,6 +43,11 @@ import { createView } from './view.js';
 import { createInvite } from './invite.js';
 import { createPush } from './push.js';
 import { inlineNotice, feedEmptyState } from './states.js';
+import { installFocusTrap } from './focus-trap.js';
+
+        // Modal a11y: focus-restore + Tab-trap for every dialog (observer-based,
+        // so it covers all ~20 modals without retrofitting their open/close sites).
+        installFocusTrap();
 
         const WS_URL = (() => {
             const metaUrl = document.querySelector('meta[name="x-gateway-url"]')?.content;
