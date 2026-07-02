@@ -110,6 +110,15 @@ class IdentityStoreMixin(object):
                 (account_did, device_id, pub_b64u, int(time.time())),
             )
 
+    def delete_device_e2e_key(self, account_did: str, device_id: str) -> None:
+        """Remove one device's E2E key (device revoked) so DM fanout stops
+        encrypting copies to it."""
+        with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM device_e2e_keys WHERE account_did = ? AND device_id = ?",
+                (account_did, device_id),
+            )
+
     def list_device_e2e_keys(self, account_did: str) -> list[dict]:
         """Return [{device_id, pub_b64u}] for every device of an account."""
         with self._conn() as conn:

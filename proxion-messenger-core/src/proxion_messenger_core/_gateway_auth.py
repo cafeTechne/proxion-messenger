@@ -319,16 +319,23 @@ class AuthHandlerMixin:
 
                 x25519_pub = data.get("x25519_pub")
                 if x25519_pub:
-                    self._store.save_x25519_pub(identity, x25519_pub)
-                    # Multi-device: also record this device's E2E key under the
-                    # account so peers can fan a DM out to every device. device_id
-                    # is the physical device's did (== account_did for the primary).
-                    _dev_id = self._session_device_did.get(websocket) or identity
-                    self._store.save_device_e2e_key(identity, _dev_id, x25519_pub)
+                    _dev_id = self._session_device_did.get(websocket)
+                    if _dev_id is None:
+                        # Primary / single device: this key IS the account default.
+                        self._store.save_x25519_pub(identity, x25519_pub)
+                        self._store.save_device_e2e_key(identity, identity, x25519_pub)
+                    else:
+                        # Delegated device: record per-device ONLY. Writing it to the
+                        # account-level tables would clobber the primary's key, and
+                        # peers on the single-send path would then encrypt to the
+                        # last-registered device — the primary couldn't decrypt.
+                        self._store.save_device_e2e_key(identity, _dev_id, x25519_pub)
 
-                # Write operator profile to pod (fire-and-forget)
+                # Write operator profile to pod (fire-and-forget). A delegated
+                # device must not publish its device key as the account's profile
+                # key (remote flavor of the same clobber).
                 _prof_dn = self._display_names.get(websocket, "")
-                _prof_x25519 = data.get("x25519_pub") or ""
+                _prof_x25519 = "" if websocket in self._session_device_did else (data.get("x25519_pub") or "")
                 if _prof_dn or _prof_x25519:
                     asyncio.create_task(
                         self._sync_profile_to_pod(identity, _prof_dn, _prof_x25519)

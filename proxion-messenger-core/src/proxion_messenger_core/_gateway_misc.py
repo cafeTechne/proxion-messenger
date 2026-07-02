@@ -1690,22 +1690,54 @@ class MiscHandlerMixin:
         if not owner_webid or not device_id or not self._store:
             await websocket.send(json.dumps({"type": "error", "message": "invalid_request"}))
             return
+        # Refuse to revoke the account's own primary identity through this path —
+        # device_id == owner_webid would put the account DID itself in the
+        # revocation set and lock the whole account out.
+        if device_id == owner_webid:
+            await websocket.send(json.dumps({"type": "error", "message": "cannot_revoke_primary"}))
+            return
         existing = self._store.get_device(device_id)
         if not existing or existing.get("owner_webid") != owner_webid:
             await websocket.send(json.dumps({"type": "error", "message": "device_not_found"}))
             return
         self._store.unregister_device(device_id)
+        # Delegation-linked devices use their did:key as device_id. Deleting the
+        # registry row is NOT revocation — the delegation cert stays valid for its
+        # TTL, so persist the device DID as revoked (checked in the register path)
+        # and drop its fanout key so peers stop encrypting copies to it.
+        if device_id.startswith("did:key:"):
+            self._revoked_dids.add(device_id)
+            try:
+                self._store.mark_revoked(f"device:{device_id}", device_id)
+            except Exception:
+                logger.warning("could not persist device revocation for %s", device_id[:24])
+            try:
+                self._store.delete_device_e2e_key(owner_webid, device_id)
+            except Exception:
+                pass
         revoke_event = json.dumps({
             "type": "device_revoked",
             "device_id": device_id,
             "owner_webid": owner_webid,
         })
+        revoked_sockets = []
         for ws in self._sockets_for(owner_webid):
-            if ws is not websocket:
-                try:
-                    await ws.send(revoke_event)
-                except Exception:
-                    pass
+            if ws is websocket:
+                continue
+            # The revoked device's own live session gets cut, not just notified.
+            if self._session_device_did.get(ws) == device_id:
+                revoked_sockets.append(ws)
+                continue
+            try:
+                await ws.send(revoke_event)
+            except Exception:
+                pass
+        for ws in revoked_sockets:
+            try:
+                await ws.send(json.dumps({"type": "session_revoked", "reason": "device_revoked"}))
+                await ws.close(1008, "device_revoked")
+            except Exception:
+                pass
         await websocket.send(json.dumps({
             "type": "device_revoked_ack",
             "device_id": device_id,

@@ -804,10 +804,21 @@ class DmHandlerMixin:
             fanout: list[{to_webid, to_device_id, payload}]
         """
         message_id = data.get("message_id", "")
-        from_webid = data.get("from_webid", "") or self._client_webids.get(websocket, "")
+        # Sender identity comes from the authenticated session ONLY — a
+        # client-supplied from_webid would let anyone impersonate any account
+        # in fanout DMs (receivers trust it for threading + ratchet identity).
+        from_webid = self._client_webids.get(websocket, "")
         fanout = data.get("fanout", [])
+        if not from_webid:
+            await websocket.send(json.dumps({"type": "error", "message": "not_registered"}))
+            return
         if not message_id or not fanout:
             await websocket.send(json.dumps({"type": "error", "message": "message_id and fanout required"}))
+            return
+        # Cap the envelope count: one command fans to every socket of each target
+        # account, so an unbounded list is an amplification lever.
+        if not isinstance(fanout, list) or len(fanout) > 16:
+            await websocket.send(json.dumps({"type": "error", "message": "fanout too large"}))
             return
 
         delivered = []

@@ -105,3 +105,36 @@ async def test_fanout_requires_message_id_and_entries(gateway, noauth_env):
     await gateway.process_command(ws, {"cmd": "send_dm_fanout", "message_id": "", "fanout": []})
     errs = _events(ws, "error")
     assert errs and "fanout" in errs[-1]["message"]
+
+
+@pytest.mark.asyncio
+async def test_fanout_from_webid_cannot_be_spoofed(gateway, noauth_env):
+    """A client-supplied from_webid must be ignored — sender identity comes from
+    the authenticated session, otherwise fanout DMs allow impersonation."""
+    target_did = _did(Ed25519PrivateKey.generate())
+    mallory_did = _did(Ed25519PrivateKey.generate())
+    ws_target = _mock_ws()
+    ws_mallory = _mock_ws()
+    await _register(gateway, ws_target, target_did)
+    await _register(gateway, ws_mallory, mallory_did)
+
+    ws_target.send.reset_mock()
+    await gateway.process_command(ws_mallory, {
+        "cmd": "send_dm_fanout", "message_id": "m-spoof",
+        "from_webid": "did:key:zSomeoneElse",   # forged
+        "fanout": [{"to_webid": target_did, "to_device_id": target_did, "payload": {"content": "hi"}}],
+    })
+    evs = _events(ws_target, "dm_fanout")
+    assert evs, "envelope should still deliver"
+    assert all(e["from_webid"] == mallory_did for e in evs), "forged from_webid must be overwritten"
+
+
+@pytest.mark.asyncio
+async def test_fanout_entry_count_is_capped(gateway, noauth_env):
+    ws = _mock_ws()
+    await _register(gateway, ws, _did(Ed25519PrivateKey.generate()))
+    ws.send.reset_mock()
+    big = [{"to_webid": f"did:key:z{i}", "to_device_id": f"d{i}", "payload": {}} for i in range(64)]
+    await gateway.process_command(ws, {"cmd": "send_dm_fanout", "message_id": "m-big", "fanout": big})
+    errs = _events(ws, "error")
+    assert errs and "too large" in errs[-1]["message"]
