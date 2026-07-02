@@ -21,6 +21,28 @@ from ._gateway_mailbox import relay_node_enabled, relay_fallback_url
 logger = logging.getLogger(__name__)
 
 
+async def _read_http_body(reader, n: int, timeout: float = 10.0) -> bytes:
+    """Read exactly *n* bytes of request body (or until EOF/timeout).
+
+    asyncio ``reader.read(n)`` returns as soon as ANY data is available, so a
+    body spanning multiple TCP segments (backups, relay payloads over a real
+    network — anything past one segment) gets silently truncated. Loop until we
+    have *n* bytes or the peer stops sending.
+    """
+    if n <= 0:
+        return b""
+    buf = bytearray()
+    while len(buf) < n:
+        try:
+            chunk = await asyncio.wait_for(reader.read(n - len(buf)), timeout=timeout)
+        except asyncio.TimeoutError:
+            break
+        if not chunk:
+            break
+        buf += chunk
+    return bytes(buf)
+
+
 _INVITE_DOWNLOAD_URL = "https://github.com/proxion-messenger"
 
 
@@ -870,9 +892,7 @@ class HttpEndpointsMixin:
                         return
                     body = b""
                     if content_length > 0:
-                        body = await asyncio.wait_for(
-                            reader.read(min(content_length, 65536)), timeout=10.0
-                        )
+                        body = await _read_http_body(reader, min(content_length, 65536), 10.0)
                     peer = writer.get_extra_info("peername")
                     client_ip = peer[0] if isinstance(peer, tuple) and peer else "unknown"
                     status, response = await self._handle_relay_post(body, client_ip=client_ip)
@@ -1006,8 +1026,7 @@ class HttpEndpointsMixin:
                     if method == "POST":
                         _mb_body = b""
                         if content_length > 0:
-                            _mb_body = await asyncio.wait_for(
-                                reader.read(min(content_length, 262144 + 4096)), timeout=10.0)
+                            _mb_body = await _read_http_body(reader, min(content_length, 262144 + 4096), 10.0)
                         _mb_status, _mb_resp = await self._handle_mailbox_store(_mb_did, _mb_body)
                     else:
                         _q = _mb_qs(_query_string)
@@ -1136,9 +1155,7 @@ class HttpEndpointsMixin:
                         return
                     body = b""
                     if content_length > 0:
-                        body = await asyncio.wait_for(
-                            reader.read(min(content_length, 65536)), timeout=10.0
-                        )
+                        body = await _read_http_body(reader, min(content_length, 65536), 10.0)
                     status, response = await self._handle_invite_post(body)
                     resp_bytes = response.encode()
                     writer.write(
@@ -1237,9 +1254,7 @@ class HttpEndpointsMixin:
                     _rr_bucket.append(_rr_now)
                     body = b""
                     if content_length > 0:
-                        body = await asyncio.wait_for(
-                            reader.read(min(content_length, 4096)), timeout=5.0
-                        )
+                        body = await _read_http_body(reader, min(content_length, 4096), 5.0)
                     try:
                         rdata = json.loads(body)
                         from_did = rdata.get("from_did", "")
@@ -1317,9 +1332,7 @@ class HttpEndpointsMixin:
                             return
                     body = b""
                     if content_length > 0:
-                        body = await asyncio.wait_for(
-                            reader.read(min(content_length, 65536)), timeout=10.0
-                        )
+                        body = await _read_http_body(reader, min(content_length, 65536), 10.0)
                     status, response = await self._handle_invite_accept_post(body)
                     resp_bytes = response.encode()
                     writer.write(
@@ -1470,9 +1483,7 @@ class HttpEndpointsMixin:
                         return
                     body = b""
                     if content_length > 0:
-                        body = await asyncio.wait_for(
-                            reader.read(min(content_length, 8192)), timeout=10.0
-                        )
+                        body = await _read_http_body(reader, min(content_length, 8192), 10.0)
                     try:
                         req = json.loads(body) if body else {}
                     except Exception:
@@ -1541,9 +1552,7 @@ class HttpEndpointsMixin:
                         return
                     body = b""
                     if content_length > 0:
-                        body = await asyncio.wait_for(
-                            reader.read(min(content_length, 4096)), timeout=5.0
-                        )
+                        body = await _read_http_body(reader, min(content_length, 4096), 5.0)
                     try:
                         req = json.loads(body) if body else {}
                     except Exception:
@@ -1733,9 +1742,7 @@ class HttpEndpointsMixin:
                         return
                     body = b""
                     if content_length > 0:
-                        body = await asyncio.wait_for(
-                            reader.read(min(content_length, 4 * 1024 * 1024)), timeout=30.0
-                        )
+                        body = await _read_http_body(reader, min(content_length, 4 * 1024 * 1024), 30.0)
                     # R7: Restore manifest verification
                     _manifest_hdr_r = headers_raw.get(b"x-proxion-import-manifest", b"").decode("utf-8", errors="replace")
                     _require_manifest_r = os.environ.get("PROXION_REQUIRE_IMPORT_MANIFEST") == "1"
@@ -1900,9 +1907,7 @@ class HttpEndpointsMixin:
                         # (unread body on close causes ConnectionAbortedError on the client).
                         if content_length > 0:
                             try:
-                                await asyncio.wait_for(
-                                    reader.read(min(content_length, _IMPORT_MAX)), timeout=5.0
-                                )
+                                await _read_http_body(reader, min(content_length, _IMPORT_MAX), 5.0)
                             except Exception:
                                 pass
                         fb = b'{"error":"forbidden origin"}'
@@ -1919,9 +1924,7 @@ class HttpEndpointsMixin:
                         return
                     body = b""
                     if content_length > 0:
-                        body = await asyncio.wait_for(
-                            reader.read(min(content_length, 10 * 1024 * 1024)), timeout=30.0
-                        )
+                        body = await _read_http_body(reader, min(content_length, 10 * 1024 * 1024), 30.0)
                     # R8: Two-person recovery control for /import
                     if os.environ.get("PROXION_REQUIRE_RECOVERY_APPROVAL") == "1":
                         _recovery_op_id_i = headers_raw.get(b"x-proxion-recovery-op-id", b"").decode("utf-8", errors="replace").strip()
@@ -2195,9 +2198,7 @@ class HttpEndpointsMixin:
                         return
                     _body_c = b""
                     if content_length > 0:
-                        _body_c = await asyncio.wait_for(
-                            reader.read(min(content_length, 4096)), timeout=10.0
-                        )
+                        _body_c = await _read_http_body(reader, min(content_length, 4096), 10.0)
                     try:
                         _cd = json.loads(_body_c)
                         if self._store and _cd.get("webid") and _cd.get("display_name"):
@@ -2255,9 +2256,7 @@ class HttpEndpointsMixin:
                             return
                     body_bytes = b""
                     if content_length > 0:
-                        body_bytes = await asyncio.wait_for(
-                            reader.read(min(content_length, 65536)), timeout=10.0
-                        )
+                        body_bytes = await _read_http_body(reader, min(content_length, 65536), 10.0)
                     try:
                         body_json = json.loads(body_bytes)
                     except Exception:
