@@ -76,6 +76,10 @@ export function createVoice(deps) {
                 delete state.peerAudioElements[peerId];
             }
             state._channelSessionIds = {};
+            // Release the microphone — otherwise the OS/browser recording
+            // indicator stays lit after leaving the channel.
+            if (state.localStream) { state.localStream.getTracks().forEach(t => t.stop()); state.localStream = null; }
+            state._mediaDenied = false;
             _speaking.stopAll();
             _hideChannelPanel();
             showToast("Left voice channel");
@@ -107,18 +111,21 @@ export function createVoice(deps) {
         }
 
         async function getMedia() {
-            if (!state.localStream) {
-                try {
-                    // D1: browser-native call-quality DSP (noise suppression, echo
-                    // cancellation, auto gain). Falls back gracefully if a browser
-                    // ignores unknown constraints.
-                    state.localStream = await navigator.mediaDevices.getUserMedia({
-                        audio: { noiseSuppression: true, echoCancellation: true, autoGainControl: true },
-                        video: false,
-                    });
-                } catch (err) {
-                    showToast("Could not access microphone: " + err, "error");
-                }
+            if (state.localStream) return state.localStream;
+            // If the mic was already denied this session, don't re-prompt or
+            // re-toast on every peer connection (group calls call this per peer).
+            if (state._mediaDenied) return null;
+            try {
+                // D1: browser-native call-quality DSP (noise suppression, echo
+                // cancellation, auto gain). Falls back gracefully if a browser
+                // ignores unknown constraints.
+                state.localStream = await navigator.mediaDevices.getUserMedia({
+                    audio: { noiseSuppression: true, echoCancellation: true, autoGainControl: true },
+                    video: false,
+                });
+            } catch (err) {
+                state._mediaDenied = true;
+                showToast("Could not access microphone: " + (err && err.name ? err.name : err), "error");
             }
             return state.localStream;
         }
@@ -413,6 +420,13 @@ export function createVoice(deps) {
             state._remoteDescSet = false;
             
             const stream = await getMedia();
+            // A caller with no microphone would start a call the other side can't
+            // hear — abort cleanly instead of silently establishing a dead call.
+            if (isCaller && !stream) {
+                showToast("Microphone is required to start a call.", "error");
+                hangupCleanup();
+                return;
+            }
             if (stream) {
                 stream.getTracks().forEach(track => state.pc.addTrack(track, stream));
             }
@@ -421,7 +435,9 @@ export function createVoice(deps) {
                 console.log("Remote track received");
                 const remoteAudio = new Audio();
                 remoteAudio.srcObject = event.streams[0];
-                remoteAudio.play();
+                remoteAudio.play().catch(() => {});
+                // Keep a reference so the element isn't garbage-collected mid-call.
+                state._remoteAudio = remoteAudio;
                 setCallState(CallState.CONNECTED);
                 const peerName = getActiveView() ? (getActiveView().name || getActiveView().id || "") : "";
                 document.getElementById("vw-peer-name").textContent = peerName || "";
@@ -510,7 +526,9 @@ export function createVoice(deps) {
 
         function hangupCleanup() {
             if (state.pc) { state.pc.close(); state.pc = null; }
+            if (state._remoteAudio) { try { state._remoteAudio.pause(); state._remoteAudio.srcObject = null; } catch (_) {} state._remoteAudio = null; }
             if (state.localStream) { state.localStream.getTracks().forEach(t => t.stop()); state.localStream = null; }
+            state._mediaDenied = false;
             stopCallTimer();
             stopRingTone();
             _clearCallTimeout();
