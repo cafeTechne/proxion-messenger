@@ -1695,6 +1695,137 @@ class MiscHandlerMixin:
             "device_id": device_id,
         }))
 
+    # ---- Multi-device pairing relay (delegation cert distribution) -----------
+    # A primary starts a pairing session and shows a QR carrying the pairing_code
+    # (+ its gateway URL). The new device connects, submits its freshly-generated
+    # device_did against the code; the gateway forwards that to the primary, which
+    # signs a delegation cert and relays it back through the gateway. The cert is
+    # NON-secret (public authorization), so the relay carries no key material.
+    _PAIRING_TTL = 300           # seconds a pairing session stays claimable
+    _PAIRING_MAX = 64            # cap concurrent sessions (DoS guard)
+
+    def _prune_pairing_sessions(self) -> None:
+        import time as _t
+        now = _t.time()
+        for _c in [c for c, s in self._pairing_sessions.items() if s.get("expires_at", 0) <= now]:
+            self._pairing_sessions.pop(_c, None)
+
+    @staticmethod
+    def _pairing_safety_code(device_did: str) -> str:
+        """Short human-verifiable code so the user can confirm the right device."""
+        import hashlib
+        h = hashlib.sha256(device_did.encode()).hexdigest()
+        return f"{int(h[:8], 16) % 1000000:06d}"
+
+    async def _handle_pair_start(self, websocket, data: dict) -> None:
+        """Authenticated primary opens a pairing session; returns a pairing_code."""
+        import secrets
+        import time as _t
+        owner_webid = self._client_webids.get(websocket, "")
+        if not owner_webid:
+            await websocket.send(json.dumps({"type": "error", "message": "not_registered"}))
+            return
+        self._prune_pairing_sessions()
+        if len(self._pairing_sessions) >= self._PAIRING_MAX:
+            await websocket.send(json.dumps({"type": "error", "message": "pairing_busy"}))
+            return
+        code = secrets.token_urlsafe(12)
+        self._pairing_sessions[code] = {
+            "account_webid": owner_webid,
+            "primary_ws": websocket,
+            "device_ws": None,
+            "device_did": None,
+            "created_at": _t.time(),
+            "expires_at": _t.time() + self._PAIRING_TTL,
+            "status": "started",
+        }
+        await websocket.send(json.dumps({
+            "type": "pairing_started",
+            "pairing_code": code,
+            "expires_in": self._PAIRING_TTL,
+        }))
+
+    async def _handle_pair_submit(self, websocket, data: dict) -> None:
+        """New (unregistered) device submits its device_did against a pairing_code."""
+        code = data.get("pairing_code", "")
+        device_did = data.get("device_did", "")
+        if not code or not device_did.startswith("did:key:"):
+            await websocket.send(json.dumps({"type": "pairing_invalid", "reason": "missing_fields"}))
+            return
+        self._prune_pairing_sessions()
+        sess = self._pairing_sessions.get(code)
+        if not sess or sess["status"] != "started":
+            # Unknown, already-claimed, expired, or already-approved.
+            await websocket.send(json.dumps({"type": "pairing_invalid", "reason": "no_such_session"}))
+            return
+        sess["device_ws"] = websocket
+        sess["device_did"] = device_did
+        sess["status"] = "submitted"
+        safety = self._pairing_safety_code(device_did)
+        try:
+            await sess["primary_ws"].send(json.dumps({
+                "type": "pairing_request",
+                "pairing_code": code,
+                "device_did": device_did,
+                "safety_code": safety,
+            }))
+        except Exception:
+            self._pairing_sessions.pop(code, None)
+            await websocket.send(json.dumps({"type": "pairing_invalid", "reason": "primary_gone"}))
+            return
+        await websocket.send(json.dumps({
+            "type": "pairing_submitted", "pairing_code": code, "safety_code": safety,
+        }))
+
+    async def _handle_pair_approve(self, websocket, data: dict) -> None:
+        """Primary approves: relays the signed delegation cert to the new device."""
+        from .device_cert import verify_device_cert
+        owner_webid = self._client_webids.get(websocket, "")
+        code = data.get("pairing_code", "")
+        cert = data.get("delegation_cert")
+        sess = self._pairing_sessions.get(code)
+        if not owner_webid or not sess or sess.get("primary_ws") is not websocket:
+            await websocket.send(json.dumps({"type": "error", "message": "pairing_not_found"}))
+            return
+        if sess["status"] != "submitted":
+            await websocket.send(json.dumps({"type": "error", "message": "pairing_not_ready"}))
+            return
+        # Defense in depth: the cert must authorize exactly this device for this account.
+        acct = verify_device_cert(
+            cert, expected_device_did=sess["device_did"], expected_account_did=owner_webid,
+        )
+        if not acct:
+            await websocket.send(json.dumps({"type": "error", "message": "invalid_cert"}))
+            return
+        device_ws = sess.get("device_ws")
+        self._pairing_sessions.pop(code, None)  # single-use
+        if device_ws is not None:
+            try:
+                await device_ws.send(json.dumps({
+                    "type": "pairing_approved",
+                    "delegation_cert": cert,
+                    "account_did": owner_webid,
+                }))
+            except Exception:
+                pass
+        await websocket.send(json.dumps({"type": "pairing_approve_ack", "pairing_code": code}))
+
+    async def _handle_pair_cancel(self, websocket, data: dict) -> None:
+        """Either party cancels; the other side is notified if still present."""
+        code = data.get("pairing_code", "")
+        sess = self._pairing_sessions.get(code)
+        if not sess or websocket not in (sess.get("primary_ws"), sess.get("device_ws")):
+            await websocket.send(json.dumps({"type": "pairing_cancelled", "pairing_code": code}))
+            return
+        self._pairing_sessions.pop(code, None)
+        other = sess["device_ws"] if websocket is sess.get("primary_ws") else sess["primary_ws"]
+        if other is not None:
+            try:
+                await other.send(json.dumps({"type": "pairing_cancelled", "pairing_code": code}))
+            except Exception:
+                pass
+        await websocket.send(json.dumps({"type": "pairing_cancelled", "pairing_code": code}))
+
     async def _handle_device_recovery_code_generate(self, websocket, data: dict) -> None:
         """Generate a single-use device recovery code for the requesting user."""
         import hashlib

@@ -139,6 +139,11 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # when it authenticated as a delegated device (account_did lives in
         # _client_webids). Absent for primary/single-device sessions.
         self._session_device_did: dict = {}
+        # Multi-device pairing relay: pairing_code -> pairing session dict. A
+        # primary starts a session; a new device submits its device_did against
+        # the code; the primary signs+relays a delegation cert back. Short TTL,
+        # single-use. See _gateway_misc pairing handlers.
+        self._pairing_sessions: dict = {}
         self._webid_sockets: dict = {}  # identity str -> set of websockets
         self._session_meta: dict = {}   # websocket -> {session_id, connected_at, ip_addr}
         self._did_pod_webids = {}   # did:key -> pod webid (set via link_pod)
@@ -626,6 +631,12 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             self._auth_verified.discard(websocket)
             webid = self._client_webids.pop(websocket, None)
             self._session_device_did.pop(websocket, None)
+            # Drop any pairing session this socket was part of (primary or new device).
+            for _pc in [
+                _c for _c, _s in self._pairing_sessions.items()
+                if _s.get("primary_ws") is websocket or _s.get("device_ws") is websocket
+            ]:
+                self._pairing_sessions.pop(_pc, None)
             self._session_meta.pop(websocket, None)
             self._rate_counters.pop(websocket, None)
             self._rate_auth_counters.pop(websocket, None)
@@ -732,7 +743,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         """Process inbound commands from clients."""
         cmd = data.get("cmd", "")
         _RATE_EXEMPT = {"ping", "pong"}
-        _AUTH_EXEMPT = {"ping", "pong", "auth_response", "register", "disconnect_pod"}
+        # pair_submit is sent by a NOT-yet-registered new device (it has no
+        # account identity until it receives the delegation cert), so it must be
+        # reachable before register — like auth_response.
+        _AUTH_EXEMPT = {"ping", "pong", "auth_response", "register", "disconnect_pod", "pair_submit"}
 
         if not cmd:
             return
@@ -1041,6 +1055,14 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_set_primary_device(websocket, data)
             elif cmd == "revoke_device_and_rekey":
                 await self._handle_revoke_device_and_rekey(websocket, data)
+            elif cmd == "pair_start":
+                await self._handle_pair_start(websocket, data)
+            elif cmd == "pair_submit":
+                await self._handle_pair_submit(websocket, data)
+            elif cmd == "pair_approve":
+                await self._handle_pair_approve(websocket, data)
+            elif cmd == "pair_cancel":
+                await self._handle_pair_cancel(websocket, data)
             elif cmd == "device_recovery_code_generate":
                 await self._handle_device_recovery_code_generate(websocket, data)
             elif cmd == "device_recovery_code_use":
