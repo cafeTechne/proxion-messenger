@@ -97,13 +97,27 @@ class DmHandlerMixin:
             try:
                 send(msg, client)
                 logger.info(f"Sent edit for {message_id} to {cert_id}")
-                # Broadcast locally
-                await self.broadcast({
+                # Deliver the edit to the DM participants ONLY — never broadcast a
+                # private DM edit to every client on the gateway.
+                _edited_event = json.dumps({
                     "type": "message_edited",
                     "thread_id": cert_id,
                     "message_id": message_id,
-                    "new_content": content
+                    "new_content": content,
                 })
+                _caller = self._client_webids.get(websocket, "")
+                _peer = getattr(cert, "subject", "")
+                # cert.subject is an ed25519 pub hex; _send_to_identity keys by
+                # did:key, so map it (a local cert-DM peer must still get the edit).
+                if _peer and not _peer.startswith("did:key:"):
+                    try:
+                        from .didkey import pub_key_to_did
+                        _peer = pub_key_to_did(bytes.fromhex(_peer))
+                    except Exception:
+                        _peer = ""
+                for _identity in {_caller, _peer}:
+                    if _identity:
+                        await self._send_to_identity(_identity, _edited_event)
             except Exception as e:
                 logger.warning(f"Failed to send edit message, enqueuing: {e}")
                 self.outbox.enqueue(msg, target_cert_id=cert_id)
