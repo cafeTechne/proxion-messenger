@@ -449,16 +449,21 @@ class SolidClient:
 """
 
         try:
-            response = self._session.put(
-                acl_url,
-                content=turtle_content.encode("utf-8"),
-                headers={"Content-Type": "text/turtle", **self._auth_headers, **self._dynamic_headers("PUT", acl_url)},
-            )
-            if response.status_code < 200 or response.status_code >= 300:
-                raise SolidError(
-                    f"set_acl {stash_uri}: HTTP {response.status_code}",
-                    status_code=response.status_code,
+            for _attempt in range(2):
+                response = self._session.put(
+                    acl_url,
+                    content=turtle_content.encode("utf-8"),
+                    headers={"Content-Type": "text/turtle", **self._auth_headers, **self._dynamic_headers("PUT", acl_url)},
                 )
+                if response.status_code == 401 and _attempt == 0:
+                    self._refresh_auth(response)
+                    continue
+                if response.status_code < 200 or response.status_code >= 300:
+                    raise SolidError(
+                        f"set_acl {stash_uri}: HTTP {response.status_code}",
+                        status_code=response.status_code,
+                    )
+                return
         except SolidError:
             raise
         except Exception as exc:
@@ -513,16 +518,21 @@ class SolidClient:
         turtle_content = "@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n\n" + "\n\n".join(stanzas) + "\n"
 
         try:
-            response = self._session.put(
-                acl_url,
-                content=turtle_content.encode("utf-8"),
-                headers={"Content-Type": "text/turtle", **self._auth_headers, **self._dynamic_headers("PUT", acl_url)},
-            )
-            if response.status_code < 200 or response.status_code >= 300:
-                raise SolidError(
-                    f"set_acl_multi {stash_uri}: HTTP {response.status_code}",
-                    status_code=response.status_code,
+            for _attempt in range(2):
+                response = self._session.put(
+                    acl_url,
+                    content=turtle_content.encode("utf-8"),
+                    headers={"Content-Type": "text/turtle", **self._auth_headers, **self._dynamic_headers("PUT", acl_url)},
                 )
+                if response.status_code == 401 and _attempt == 0:
+                    self._refresh_auth(response)
+                    continue
+                if response.status_code < 200 or response.status_code >= 300:
+                    raise SolidError(
+                        f"set_acl_multi {stash_uri}: HTTP {response.status_code}",
+                        status_code=response.status_code,
+                    )
+                return
         except SolidError:
             raise
         except Exception as exc:
