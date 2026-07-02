@@ -52,7 +52,7 @@ describe('connect', () => {
     expect(made[0].url).toBe('ws://test/gw');
     expect(hostSocket).toBe(made[0]);
   });
-  it('on open: registers with the client DID + e2e pub and flushes queued cmds', async () => {
+  it('on open: registers, but defers queued cmds until flushPending (post-register)', async () => {
     const c = make();
     c.connect();
     const ws = made[0];
@@ -62,6 +62,11 @@ describe('connect', () => {
     await ws.onopen();
     const register = ws.sent.find(m => m.cmd === 'register');
     expect(register).toMatchObject({ did: 'did:key:zSelf', x25519_pub: 'MYX25519PUB' });
+    // Queued command must NOT be sent yet — it would hit the gateway before we're
+    // registered and be dropped as "Not registered".
+    expect(ws.sent.find(m => m.cmd === 'queued_thing')).toBeFalsy();
+    // Once registration is confirmed, flushPending delivers it.
+    c.flushPending();
     expect(ws.sent.find(m => m.cmd === 'queued_thing')).toBeTruthy();
   });
   it('on message: delegates parsed data to handleEventAsync', () => {

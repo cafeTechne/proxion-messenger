@@ -92,13 +92,11 @@ export function createConnection({
             document.getElementById("username").innerText = _connName || "Online";
             document.getElementById("conn-banner").style.display = "none";
             if (state._reconnectTimer) { clearTimeout(state._reconnectTimer); state._reconnectTimer = null; }
-            // Flush any commands that were queued while socket was connecting
-            const pending = state._pendingOnConnect.splice(0);
-            pending.forEach(({ payload, statusEl, nudgeTimer }) => {
-                clearTimeout(nudgeTimer);
-                ws.send(JSON.stringify(payload));
-                if (statusEl) { statusEl.textContent = "Connecting…"; statusEl.style.color = "#94a3b8"; }
-            });
+            // NOTE: queued commands are NOT flushed here — they must wait until we
+            // are actually REGISTERED (and, under require_auth, past the challenge).
+            // Flushing at onopen sent them before register, so the gateway dropped
+            // them as "Not registered" and offline-composed messages were lost.
+            // flushPending() is called from the "registered" event handler instead.
             // Register with this client's own DID (always — every user has one)
             // Include x25519_pub so peers learn our E2E key when we reconnect
             // Include display_name so the gateway has it immediately (avoids a separate set_identity before auth)
@@ -166,5 +164,19 @@ export function createConnection({
         };
     }
 
-    return { socketSendOrQueue, forceReconnect, connect, state };
+    // Flush commands queued while offline/connecting. Called once we're provably
+    // REGISTERED (from the "registered" event), so they land after auth — not
+    // before it, where the gateway would drop them as "Not registered".
+    function flushPending() {
+        const socket = getSocket();
+        if (!socket || socket.readyState !== WebSocket.OPEN) return;
+        const pending = state._pendingOnConnect.splice(0);
+        pending.forEach(({ payload, statusEl, nudgeTimer }) => {
+            clearTimeout(nudgeTimer);
+            socket.send(JSON.stringify(payload));
+            if (statusEl) { statusEl.textContent = ""; }
+        });
+    }
+
+    return { socketSendOrQueue, forceReconnect, connect, flushPending, state };
 }

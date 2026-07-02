@@ -396,7 +396,7 @@ import { installFocusTrap } from './focus-trap.js';
         // WebSocket connection lifecycle (first core slice). Reassigns socket via
         // setSocket; _handleEventAsync (dispatch) + generateOrLoadIdentity stay in
         // main.js and are injected. Reconnect state is cluster-owned.
-        const { socketSendOrQueue, forceReconnect, connect } = createConnection({
+        const { socketSendOrQueue, forceReconnect, connect, flushPending } = createConnection({
             wsUrl: WS_URL,
             getSocket: () => socket, setSocket: (s) => { socket = s; },
             getClientDid: () => clientDid,
@@ -961,6 +961,10 @@ import { installFocusTrap } from './focus-trap.js';
                     // require an authenticated socket (they were withheld from onopen).
                     (function _postAuthInit() {
                         if (!socket || socket.readyState !== WebSocket.OPEN) return;
+                        // Now that we're registered (past the auth challenge), send
+                        // any commands queued while offline — they'd have been dropped
+                        // if flushed at onopen, before registration.
+                        flushPending();
                         const _podWid = localStorage.getItem("proxion_pod_webid");
                         if (_podWid) socket.send(JSON.stringify({cmd: "link_pod", webid: _podWid}));
                         const _statusMsg = localStorage.getItem("proxion_status_message");
