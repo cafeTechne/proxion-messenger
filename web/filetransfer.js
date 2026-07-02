@@ -67,6 +67,14 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
             sendCmd("file_reject", { to_webid: event.from_webid, file_id: event.file_id, reason: "too_large" });
             return;
         }
+        // total_chunks is attacker-controlled — reject nonsensical counts before
+        // allocating an array from it (new Array(huge) / mismatched size).
+        const _maxChunks = Math.ceil(MAX_FILE_BYTES / CHUNK_BYTES) + 1;
+        const _tc = event.total_chunks;
+        if (!Number.isInteger(_tc) || _tc <= 0 || _tc > _maxChunks) {
+            sendCmd("file_reject", { to_webid: event.from_webid, file_id: event.file_id, reason: "bad_offer" });
+            return;
+        }
         _incomingFiles[event.file_id] = {
             meta: { filename: event.filename, mime_type: event.mime_type, size: event.size_bytes },
             chunks: new Array(event.total_chunks), received: 0, total: event.total_chunks,
@@ -88,6 +96,14 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         const rec = _incomingFiles[event.file_id];
         if (!rec) return;
         _clearTransferProgress(event.file_id);
+        // Verify every chunk actually arrived. Without this, a dropped or
+        // never-delivered chunk is silently filled with empty bytes below,
+        // producing a corrupt file the user can't tell apart from a good one.
+        if (rec.received < rec.total) {
+            delete _incomingFiles[event.file_id];
+            showToast(`Transfer of ${rec.meta.filename} failed — ${rec.received}/${rec.total} chunks received`, "error");
+            return;
+        }
         let totalLen = 0;
         const parts = [];
         for (let i = 0; i < rec.total; i++) { const u8 = b64ToU8(rec.chunks[i] || ""); parts.push(u8); totalLen += u8.length; }

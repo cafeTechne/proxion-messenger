@@ -39,6 +39,27 @@ describe('handleFileOffer', () => {
     expect(calls[0].cmd).toBe('file_accept');
     expect(calls[0].payload.file_id).toBe('f2');
   });
+  it('rejects a nonsensical total_chunks (bad/huge offer)', () => {
+    for (const tc of [0, -1, 1e9, 2.5, undefined]) {
+      const { ft, calls } = makeFT();
+      ft.handleFileOffer({ file_id: 'fb', from_webid: 'did:x', filename: 'a', mime_type: 'x', size_bytes: 1000, total_chunks: tc });
+      expect(calls[0].cmd).toBe('file_reject');
+      expect(calls[0].payload.reason).toBe('bad_offer');
+    }
+  });
+});
+
+describe('handleFileComplete integrity', () => {
+  it('does NOT render a corrupt file when a chunk is missing', () => {
+    let rendered = null;
+    const { ft } = makeFT({ renderMessage: (m) => { rendered = m; } });
+    ft.handleFileOffer({ file_id: 'fm', from_webid: 'did:x', filename: 'a.bin', mime_type: 'x', size_bytes: 5, total_chunks: 3 });
+    // Only 2 of 3 chunks arrive (middle one dropped).
+    ft.handleFileChunk({ file_id: 'fm', seq: 0, data: 'AA==' });
+    ft.handleFileChunk({ file_id: 'fm', seq: 2, data: 'AA==' });
+    ft.handleFileComplete({ file_id: 'fm' });
+    expect(rendered).toBeNull(); // no silently-corrupt file rendered
+  });
 });
 
 describe('handleFileChunk + handleFileComplete reassembly', () => {
