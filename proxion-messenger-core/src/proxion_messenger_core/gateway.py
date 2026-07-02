@@ -316,6 +316,17 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             ms = room.get("disappear_after_ms", 0)
             if ms:
                 self._room_disappear_timers[room["room_id"]] = ms
+        # Restore per-DM disappear timers (persisted in the same KV table, keyed by
+        # cert_id) so DM disappearing messages survive a gateway restart.
+        try:
+            for _t in self._store.get_dm_threads():
+                _tid = _t.get("thread_id")
+                if _tid:
+                    _dms = self._store.get_room_disappear_timer(_tid)
+                    if _dms:
+                        self._dm_disappear_timers[_tid] = _dms
+        except Exception:
+            logger.debug("DM disappear-timer restore skipped", exc_info=True)
         # R12: load revoked DIDs into fast in-memory set
         if self._store:
             self._revoked_dids = self._store.get_revoked_dids()

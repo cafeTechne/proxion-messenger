@@ -1836,32 +1836,59 @@ class RoomHandlerMixin:
             await websocket.send(json.dumps(event))
 
     async def _handle_set_disappear_timer(self, websocket, data: dict) -> None:
-        room_id = data.get("room_id", "")
+        # thread_id is a room_id for rooms, or a DM cert_id for DMs — the client
+        # sends both under "room_id".
+        thread_id = data.get("room_id", "")
         ms = data.get("ms", 0)
-        if not self._check_room_permission(websocket, room_id, role="owner"):
-            await websocket.send(json.dumps({"type": "error", "message": "Only the room owner can set the disappear timer"}))
+        caller = self._client_webids.get(websocket, "")
+        if not caller:
+            await websocket.send(json.dumps({"type": "error", "message": "Not registered"}))
             return
         try:
             ms = max(0, int(ms))
         except (TypeError, ValueError):
             await websocket.send(json.dumps({"type": "error", "message": "Invalid timer value"}))
             return
-        self._room_disappear_timers[room_id] = ms
+
+        if thread_id in self._local_rooms:
+            # Room: only the owner may change it.
+            if not self._check_room_permission(websocket, thread_id, role="owner"):
+                await websocket.send(json.dumps({"type": "error", "message": "Only the room owner can set the disappear timer"}))
+                return
+            self._room_disappear_timers[thread_id] = ms
+            if self._store:
+                self._store.set_room_disappear_timer(thread_id, ms)
+            event = json.dumps({"type": "disappear_timer_updated", "room_id": thread_id, "ms": ms})
+            for ws in list(self._local_rooms.get(thread_id, {}).get("members", set())):
+                try:
+                    await ws.send(event)
+                except Exception:
+                    pass
+            return
+
+        # DM thread: either participant may set it. Verify the caller is in it,
+        # then wire it into the DM-expiry loop (this was previously unreachable —
+        # the room-owner check above rejected DMs, so DM timers never worked).
+        peer = None
         if self._store:
-            self._store.set_room_disappear_timer(room_id, ms)
-        for ws in list(self._local_rooms.get(room_id, {}).get("members", set())):
-            try:
-                await ws.send(json.dumps({
-                    "type": "disappear_timer_updated",
-                    "room_id": room_id,
-                    "ms": ms,
-                }))
-            except Exception:
-                pass
+            for _t in self._store.get_dm_threads(owner_webid=caller):
+                if _t.get("thread_id") == thread_id:
+                    peer = _t.get("peer_webid")
+                    break
+        if peer is None:
+            await websocket.send(json.dumps({"type": "error", "message": "Not a participant in this thread"}))
+            return
+        self._dm_disappear_timers[thread_id] = ms
+        if self._store:
+            self._store.set_room_disappear_timer(thread_id, ms)  # shared KV table, keyed by id
+        event = json.dumps({"type": "disappear_timer_updated", "room_id": thread_id, "ms": ms})
+        for _identity in {caller, peer}:
+            if _identity:
+                await self._send_to_identity(_identity, event)
 
     async def _handle_get_disappear_timer(self, websocket, data: dict) -> None:
         room_id = data.get("room_id", "")
-        ms = self._room_disappear_timers.get(room_id, 0)
+        ms = self._room_disappear_timers.get(room_id, 0) or self._dm_disappear_timers.get(room_id, 0)
         if not ms and self._store:
             ms = self._store.get_room_disappear_timer(room_id)
         await websocket.send(json.dumps({
