@@ -321,29 +321,41 @@ class SolidClient:
         try:
             _MAX_BODY = 524_288  # 512 KB — enforced by streaming, not by Content-Length
             import re as _re
-            req_headers = {
-                "Accept": "text/turtle",
-                **self._auth_headers,
-                **self._dynamic_headers("GET", url),
-            }
-            # Use streaming so a malicious Pod cannot exhaust RAM before the
-            # size check fires.  httpx buffers nothing until we call iter_bytes().
-            with self._session.stream("GET", url, headers=req_headers) as response:
-                if response.status_code < 200 or response.status_code >= 300:
-                    raise SolidError(
-                        f"LIST {stash_uri}: HTTP {response.status_code}",
-                        status_code=response.status_code,
-                    )
-                chunks: list[bytes] = []
-                received = 0
-                for chunk in response.iter_bytes(chunk_size=65_536):
-                    received += len(chunk)
-                    if received > _MAX_BODY:
+            # Retry once on 401 after refreshing auth — like get/put/delete. Without
+            # this an expired access token silently breaks pod room/message listing
+            # on long-running gateways. DPoP headers are recomputed each attempt.
+            body = None
+            for _attempt in range(2):
+                req_headers = {
+                    "Accept": "text/turtle",
+                    **self._auth_headers,
+                    **self._dynamic_headers("GET", url),
+                }
+                # Use streaming so a malicious Pod cannot exhaust RAM before the
+                # size check fires.  httpx buffers nothing until we call iter_bytes().
+                with self._session.stream("GET", url, headers=req_headers) as response:
+                    if response.status_code == 401 and _attempt == 0:
+                        response.read()  # drain before the connection is reused
+                        self._refresh_auth(response)
+                        continue
+                    if response.status_code < 200 or response.status_code >= 300:
                         raise SolidError(
-                            f"LIST {stash_uri}: response too large (>{_MAX_BODY // 1024} KB)"
+                            f"LIST {stash_uri}: HTTP {response.status_code}",
+                            status_code=response.status_code,
                         )
-                    chunks.append(chunk)
-                body = b"".join(chunks).decode("utf-8", errors="replace")
+                    chunks: list[bytes] = []
+                    received = 0
+                    for chunk in response.iter_bytes(chunk_size=65_536):
+                        received += len(chunk)
+                        if received > _MAX_BODY:
+                            raise SolidError(
+                                f"LIST {stash_uri}: response too large (>{_MAX_BODY // 1024} KB)"
+                            )
+                        chunks.append(chunk)
+                    body = b"".join(chunks).decode("utf-8", errors="replace")
+                    break
+            if body is None:
+                raise SolidError(f"LIST {stash_uri}: unauthorized after refresh", status_code=401)
 
             # Parse Turtle-like RDF to extract ldp:contains member URIs. CSS (and
             # most Solid servers) serialize a container's members as ONE

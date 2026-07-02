@@ -164,6 +164,28 @@ def test_solid_client_list_not_found(resolver, mock_session):
         client.list("stash://alice/missing/")
 
 
+def test_solid_client_list_retries_on_401(resolver, mock_session):
+    """list() must refresh auth and retry once on 401 (like get/put/delete),
+    otherwise an expired token silently breaks pod listing."""
+    turtle = (
+        "@prefix ldp: <http://www.w3.org/ns/ldp#> .\n"
+        "<x> ldp:contains <https://alice.pod.test/data/f1.txt> .\n"
+    )
+    r401 = MagicMock(); r401.status_code = 401; r401.read = MagicMock()
+    r200 = MagicMock(); r200.status_code = 200
+    r200.iter_bytes.return_value = iter([turtle.encode()])
+    mock_session.stream.side_effect = [_stream_ctx(r401), _stream_ctx(r200)]
+
+    client = SolidClient(resolver, session=mock_session)
+    refreshed = []
+    client._refresh_auth = lambda resp=None: refreshed.append(True)
+
+    members = client.list("stash://alice/data/")
+    assert refreshed == [True], "should have refreshed auth on 401"
+    assert mock_session.stream.call_count == 2, "should have retried after refresh"
+    assert any("f1.txt" in m for m in members)
+
+
 def test_solid_client_set_acl(resolver, mock_session):
     """set_acl() PUTs valid Turtle WAC to resource.acl URL."""
     mock_response = MagicMock()
