@@ -2444,12 +2444,15 @@ import { installFocusTrap } from './focus-trap.js';
         // Returns true if it handled the send, false → normal single send.
         async function _tryDmFanout(peerAccount, plaintext, clientMsgId, replyToId, threadId) {
             const peerDevs = _peerDeviceKeys[peerAccount] || [];
-            // Our own other devices (exclude the one we're sending from).
+            // Only fan out when the PEER actually has multiple devices — that's the
+            // case the normal single-send path can't handle. Keeping single-device
+            // peers on send_dm preserves DM history (save_message) + pod write-through
+            // and the existing echo-based sync to our own other devices.
+            if (peerDevs.length < 2) return false;
+            // Our own other devices (exclude the one we're sending from) ride along
+            // so a conversation with a multi-device peer stays in sync across ours.
             const ownDevs = (_peerDeviceKeys[selfWebId] || []).filter(
                 d => d.device_id && d.device_id !== clientDid);
-            // Single-device sender talking to a single-device peer: normal path.
-            if (peerDevs.length < 2 && ownDevs.length === 0) return false;
-            if (!peerDevs.length) return false; // no peer keys known → normal path
             const myPub = myX25519PubB64u();
             const fanout = [];
             const addEntry = async (account, dev) => {
