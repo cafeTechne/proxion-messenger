@@ -135,6 +135,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         self._checksum_mismatch: bool = False  # R9: set by checksum loop, cleared by ack_checksum_mismatch
         self._checksum_mismatch_tables: list = []  # R9: tables with mismatches
         self._client_webids = {}    # websocket -> identity str (did:key or pod webid)
+        # Multi-device: websocket -> the device_did this session physically is,
+        # when it authenticated as a delegated device (account_did lives in
+        # _client_webids). Absent for primary/single-device sessions.
+        self._session_device_did: dict = {}
         self._webid_sockets: dict = {}  # identity str -> set of websockets
         self._session_meta: dict = {}   # websocket -> {session_id, connected_at, ip_addr}
         self._did_pod_webids = {}   # did:key -> pod webid (set via link_pod)
@@ -621,6 +625,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             self._pending_auth.pop(websocket, None)
             self._auth_verified.discard(websocket)
             webid = self._client_webids.pop(websocket, None)
+            self._session_device_did.pop(websocket, None)
             self._session_meta.pop(websocket, None)
             self._rate_counters.pop(websocket, None)
             self._rate_auth_counters.pop(websocket, None)

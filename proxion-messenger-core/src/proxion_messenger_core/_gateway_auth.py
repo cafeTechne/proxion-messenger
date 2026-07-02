@@ -112,6 +112,7 @@ class AuthHandlerMixin:
             "webid": pending["webid"],
             "display_name": pending["display_name"],
             "gateway_url": pending["gateway_url"],
+            "delegation_cert": pending.get("delegation_cert"),
         })
 
     async def _handle_register(self, websocket, data: dict) -> None:
@@ -184,6 +185,7 @@ class AuthHandlerMixin:
                 "nonce": nonce,
                 "expires_at": time.time() + 30,
                 "auth_ctx": _auth_ctx,
+                "delegation_cert": data.get("delegation_cert"),
             }
             _ip_dbg2 = (self._session_meta.get(websocket) or {}).get("ip_addr", "?")
             logger.info("auth_challenge issued to %s for DID %s...", _ip_dbg2, identity[:20])
@@ -198,6 +200,33 @@ class AuthHandlerMixin:
             except Exception:
                 pass
             return
+
+        # Multi-device delegation: a secondary device authenticates with its own
+        # device_did (proven above via the auth challenge when auth is required)
+        # plus a delegation_cert the account signed. If the cert is valid, this
+        # connection acts AS the account_did — rooms/DMs/presence are shared
+        # across all of the account's devices. No cert = ordinary single-device
+        # session (backward compatible).
+        delegation_cert = data.get("delegation_cert")
+        if delegation_cert:
+            from .device_cert import verify_device_cert
+            account_did = verify_device_cert(delegation_cert, expected_device_did=identity)
+            if not account_did:
+                logger.warning(
+                    "register rejected — invalid delegation cert for device %s...",
+                    identity[:20] if identity else "<empty>",
+                )
+                await websocket.send(json.dumps({
+                    "type": "auth_failed", "reason": "invalid_delegation",
+                }))
+                return
+            if account_did in getattr(self, "_revoked_dids", set()):
+                await websocket.send(json.dumps({
+                    "type": "auth_failed", "reason": "identity_revoked",
+                }))
+                return
+            self._session_device_did[websocket] = identity
+            identity = account_did
 
         if identity:
             self._client_webids[websocket] = identity
