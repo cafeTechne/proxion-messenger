@@ -3291,7 +3291,8 @@ import { installFocusTrap } from './focus-trap.js';
             });
             attachListener('#device-link-approve', 'click', () => pairing.approve());
             attachListener('#device-link-deny', 'click', () => pairing.deny());
-            attachListener('#device-link-close', 'click', () => pairing.closeAll());
+            // Close must release the gateway pairing session, not just hide the UI.
+            attachListener('#device-link-close', 'click', () => pairing.deny());
             attachListener('#ob-link-device', 'click', (e) => {
                 e.preventDefault();
                 const ob = document.getElementById('onboarding-modal'); if (ob) ob.style.display = 'none';
@@ -3303,7 +3304,7 @@ import { installFocusTrap } from './focus-trap.js';
                 pairing.beginAsNewDevice((inp && inp.value.trim()) || '');
             });
             attachListener('#pair-device-cancel', 'click', () => {
-                const m = document.getElementById('pair-device-modal'); if (m) m.style.display = 'none';
+                pairing.deny(); // release the gateway session if we already submitted
                 const ob = document.getElementById('onboarding-modal'); if (ob) ob.style.display = 'flex';
             });
             // New device: scan the primary's pairing QR to fill the code field.

@@ -743,10 +743,11 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         """Process inbound commands from clients."""
         cmd = data.get("cmd", "")
         _RATE_EXEMPT = {"ping", "pong"}
-        # pair_submit is sent by a NOT-yet-registered new device (it has no
-        # account identity until it receives the delegation cert), so it must be
-        # reachable before register — like auth_response.
-        _AUTH_EXEMPT = {"ping", "pong", "auth_response", "register", "disconnect_pod", "pair_submit"}
+        # pair_submit / pair_cancel are sent by a NOT-yet-registered new device
+        # (it has no account identity until it receives the delegation cert), so
+        # they must be reachable before register — like auth_response.
+        _AUTH_EXEMPT = {"ping", "pong", "auth_response", "register", "disconnect_pod",
+                        "pair_submit", "pair_cancel"}
 
         if not cmd:
             return

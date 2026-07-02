@@ -80,9 +80,12 @@ export function createPairing({
         _hide('device-link-approve-row');
     }
 
+    // Cancel any in-progress pairing on the gateway, then close. Used by Deny,
+    // the primary's Close button, and the new device's Cancel — all must release
+    // the gateway session rather than leave it live until its TTL.
     function deny() {
         const socket = getSocket();
-        if (socket && state.active && state.active.code) {
+        if (socket && socket.readyState === WebSocket.OPEN && state.active && state.active.code) {
             socket.send(JSON.stringify({ cmd: 'pair_cancel', pairing_code: state.active.code }));
         }
         _closeAll();

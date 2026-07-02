@@ -191,3 +191,25 @@ async def test_expired_session_pruned(gateway, noauth_env):
         "cmd": "pair_submit", "pairing_code": code, "device_did": _did(Ed25519PrivateKey.generate())})
     assert _last(ws_device, "pairing_invalid") is not None
     assert code not in gateway._pairing_sessions
+
+
+@pytest.mark.asyncio
+async def test_unregistered_new_device_can_cancel(gateway, noauth_env):
+    """The new device is not yet registered when it backs out — pair_cancel must
+    still work (pre-auth exempt) and notify the waiting primary."""
+    account = Ed25519PrivateKey.generate()
+    ws_primary = _mock_ws()
+    await _register(gateway, ws_primary, _did(account))
+    await gateway.process_command(ws_primary, {"cmd": "pair_start"})
+    code = _last(ws_primary, "pairing_started")["pairing_code"]
+
+    ws_device = _mock_ws()  # never registered
+    await gateway.process_command(ws_device, {
+        "cmd": "pair_submit", "pairing_code": code, "device_did": _did(Ed25519PrivateKey.generate())})
+    ws_primary.send.reset_mock()
+    await gateway.process_command(ws_device, {"cmd": "pair_cancel", "pairing_code": code})
+
+    # Not rejected as "Not registered"; session gone; primary told it was cancelled.
+    assert _last(ws_device, "error") is None or _last(ws_device, "error").get("message") != "Not registered"
+    assert code not in gateway._pairing_sessions
+    assert _last(ws_primary, "pairing_cancelled") is not None
