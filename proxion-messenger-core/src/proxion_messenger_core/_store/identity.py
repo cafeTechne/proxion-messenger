@@ -96,6 +96,29 @@ class IdentityStoreMixin(object):
                 "SELECT pub_b64u FROM e2e_keys WHERE did = ?", (did,)
             ).fetchone()
         return row["pub_b64u"] if row else None
+
+    def save_device_e2e_key(self, account_did: str, device_id: str, pub_b64u: str) -> None:
+        """Persist one device's browser-level E2E x25519 pub under its account.
+
+        Used for multi-device DM fanout: the sender encrypts a separate copy to
+        each of a peer account's devices.
+        """
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO device_e2e_keys (account_did, device_id, pub_b64u, updated_at) "
+                "VALUES (?,?,?,?)",
+                (account_did, device_id, pub_b64u, int(time.time())),
+            )
+
+    def list_device_e2e_keys(self, account_did: str) -> list[dict]:
+        """Return [{device_id, pub_b64u}] for every device of an account."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT device_id, pub_b64u FROM device_e2e_keys WHERE account_did = ? "
+                "ORDER BY updated_at ASC",
+                (account_did,),
+            ).fetchall()
+        return [{"device_id": r["device_id"], "pub_b64u": r["pub_b64u"]} for r in rows]
     def save_relationship(
         self, cert_dict: dict, peer_did: Optional[str] = None, owner_webid: str = ""
     ) -> None:

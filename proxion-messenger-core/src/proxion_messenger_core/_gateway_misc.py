@@ -1623,6 +1623,22 @@ class MiscHandlerMixin:
             "type": "peer_devices", "peer_webid": peer_webid, "devices": result
         }))
 
+    async def _handle_get_peer_device_keys(self, websocket, data: dict) -> None:
+        """Return a peer account's per-device E2E x25519 keys for DM fanout.
+
+        Response: {type: peer_device_keys, peer_webid, devices:[{device_id, pub_b64u}]}.
+        """
+        peer_webid = data.get("peer_webid", "")
+        if not peer_webid or not self._store:
+            await websocket.send(json.dumps({
+                "type": "peer_device_keys", "peer_webid": peer_webid, "devices": [],
+            }))
+            return
+        devices = self._store.list_device_e2e_keys(peer_webid)
+        await websocket.send(json.dumps({
+            "type": "peer_device_keys", "peer_webid": peer_webid, "devices": devices,
+        }))
+
     async def _handle_sync_contact_verifications(self, websocket, data: dict) -> None:
         """Return contact verification records for the requesting user since a timestamp."""
         owner_webid = self._client_webids.get(websocket, "")

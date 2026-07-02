@@ -1043,6 +1043,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_catch_up_ack(websocket, data)
             elif cmd == "get_peer_devices":
                 await self._handle_get_peer_devices(websocket, data)
+            elif cmd == "get_peer_device_keys":
+                await self._handle_get_peer_device_keys(websocket, data)
             elif cmd == "send_dm_fanout":
                 await self._handle_send_dm_fanout(websocket, data)
             elif cmd == "sync_contact_verifications":

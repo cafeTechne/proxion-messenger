@@ -320,6 +320,11 @@ class AuthHandlerMixin:
                 x25519_pub = data.get("x25519_pub")
                 if x25519_pub:
                     self._store.save_x25519_pub(identity, x25519_pub)
+                    # Multi-device: also record this device's E2E key under the
+                    # account so peers can fan a DM out to every device. device_id
+                    # is the physical device's did (== account_did for the primary).
+                    _dev_id = self._session_device_did.get(websocket) or identity
+                    self._store.save_device_e2e_key(identity, _dev_id, x25519_pub)
 
                 # Write operator profile to pod (fire-and-forget)
                 _prof_dn = self._display_names.get(websocket, "")

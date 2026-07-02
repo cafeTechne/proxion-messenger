@@ -187,6 +187,19 @@ class _StoreBase(object):
                     updated_at INTEGER NOT NULL
                 );
 
+                -- Multi-device: browser-level E2E x25519 keys per DEVICE. An
+                -- account (account_did) may have several devices, each with its
+                -- own E2E key; e2e_keys above holds only one per account, so DM
+                -- fanout resolves per-device keys here. device_id is the device's
+                -- own did:key (== account_did for the primary device).
+                CREATE TABLE IF NOT EXISTS device_e2e_keys (
+                    account_did TEXT NOT NULL,
+                    device_id   TEXT NOT NULL,
+                    pub_b64u    TEXT NOT NULL,
+                    updated_at  INTEGER NOT NULL,
+                    PRIMARY KEY (account_did, device_id)
+                );
+
                 CREATE TABLE IF NOT EXISTS pending_relays (
                     id              TEXT PRIMARY KEY,
                     to_webid        TEXT NOT NULL,
