@@ -107,6 +107,13 @@ export function createConnection({
             if (_storedName) _regPayload.display_name = _storedName;
             const _e2ePub = myX25519PubB64u();
             if (_e2ePub) _regPayload.x25519_pub = _e2ePub;
+            // Multi-device: if this device was linked to an account, attach the
+            // delegation cert so the gateway admits it AS the account (the DID we
+            // register/sign with is still this device's own clientDid).
+            const _delegCert = localStorage.getItem("proxion_delegation_cert");
+            if (_delegCert) {
+                try { _regPayload.delegation_cert = JSON.parse(_delegCert); } catch (_) { /* corrupt — ignore */ }
+            }
             ws.send(JSON.stringify(_regPayload)); // clientDid always set after generateOrLoadIdentity()
             // All other init commands are deferred to the "registered" event handler so
             // they never race with the auth challenge-response cycle under require_auth mode.

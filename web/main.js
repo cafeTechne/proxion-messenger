@@ -42,6 +42,7 @@ import { createRendering } from './rendering.js';
 import { createView } from './view.js';
 import { createInvite } from './invite.js';
 import { createPush } from './push.js';
+import { createPairing } from './pairing.js';
 import { inlineNotice, feedEmptyState } from './states.js';
 import { installFocusTrap } from './focus-trap.js';
 
@@ -421,6 +422,16 @@ import { installFocusTrap } from './focus-trap.js';
         // WebPush subscription (D4): registered with the gateway on connect so
         // messages arrive with the window closed.
         const push = createPush({ getSocket: () => socket });
+        // Multi-device linking UX (delegation). Reads identity live; signs certs
+        // with the primary's clientDid key; new device stores the relayed cert.
+        const pairing = createPairing({
+            getSocket: () => socket,
+            getClientDid: () => clientDid,
+            getIdentityPrivKey: () => _identityPrivKey,
+            getGatewayUrl: () => localStorage.getItem('proxion_gateway_url') || WS_URL,
+            showToast,
+            refreshDevices: () => { if (socket) socket.send(JSON.stringify({ cmd: 'list_devices' })); },
+        });
         let roomCreatorOf = new Set(); // room_ids this user owns
         // Render-cursor state (date divider, scroll-unread counter, older-history
         // in-flight flag): moved to rendering.js (createRendering state). External
@@ -790,6 +801,11 @@ import { installFocusTrap } from './focus-trap.js';
         }
 
         function handleEvent(event) {
+            // Multi-device pairing events are handled by the pairing module.
+            if (typeof event.type === "string" && event.type.indexOf("pairing_") === 0) {
+                pairing.handleEvent(event);
+                return;
+            }
             switch (event.type) {
                 case "message": {
                     const msg = normalizeRelayThreadId(event);
@@ -3149,6 +3165,48 @@ import { installFocusTrap } from './focus-trap.js';
                         peerInput.value = address;
                         peerInput.focus();
                     }
+                });
+            }
+
+            // --- Multi-device linking (delegation pairing) ---
+            attachListener('#link-device-btn', 'click', () => {
+                document.getElementById('settings-modal').style.display = 'none';
+                pairing.startLinking();
+            });
+            attachListener('#device-link-approve', 'click', () => pairing.approve());
+            attachListener('#device-link-deny', 'click', () => pairing.deny());
+            attachListener('#device-link-close', 'click', () => pairing.closeAll());
+            attachListener('#ob-link-device', 'click', (e) => {
+                e.preventDefault();
+                const ob = document.getElementById('onboarding-modal'); if (ob) ob.style.display = 'none';
+                const m = document.getElementById('pair-device-modal'); if (m) m.style.display = 'flex';
+                const inp = document.getElementById('pair-code-input'); if (inp) inp.focus();
+            });
+            attachListener('#pair-device-submit', 'click', () => {
+                const inp = document.getElementById('pair-code-input');
+                pairing.beginAsNewDevice((inp && inp.value.trim()) || '');
+            });
+            attachListener('#pair-device-cancel', 'click', () => {
+                const m = document.getElementById('pair-device-modal'); if (m) m.style.display = 'none';
+                const ob = document.getElementById('onboarding-modal'); if (ob) ob.style.display = 'flex';
+            });
+            // New device: scan the primary's pairing QR to fill the code field.
+            const pairScan = document.getElementById('pair-scan-input');
+            if (pairScan) {
+                pairScan.addEventListener('change', async (e) => {
+                    const file = e.target.files[0]; if (!file) return;
+                    const bitmap = await createImageBitmap(file);
+                    const c = document.createElement('canvas'); c.width = bitmap.width; c.height = bitmap.height;
+                    const cx = c.getContext('2d'); cx.drawImage(bitmap, 0, 0);
+                    const img = cx.getImageData(0, 0, c.width, c.height);
+                    const res = typeof jsQR !== 'undefined' ? jsQR(img.data, img.width, img.height) : null;
+                    pairScan.value = '';
+                    if (!res) return;
+                    try {
+                        const obj = JSON.parse(res.data);
+                        const inp = document.getElementById('pair-code-input');
+                        if (obj && obj.code && inp) inp.value = obj.code;
+                    } catch (_) { /* not a pairing QR */ }
                 });
             }
 

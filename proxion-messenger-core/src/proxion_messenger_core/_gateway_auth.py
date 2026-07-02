@@ -210,11 +210,12 @@ class AuthHandlerMixin:
         delegation_cert = data.get("delegation_cert")
         if delegation_cert:
             from .device_cert import verify_device_cert
-            account_did = verify_device_cert(delegation_cert, expected_device_did=identity)
+            device_did = identity
+            account_did = verify_device_cert(delegation_cert, expected_device_did=device_did)
             if not account_did:
                 logger.warning(
                     "register rejected — invalid delegation cert for device %s...",
-                    identity[:20] if identity else "<empty>",
+                    device_did[:20] if device_did else "<empty>",
                 )
                 await websocket.send(json.dumps({
                     "type": "auth_failed", "reason": "invalid_delegation",
@@ -225,7 +226,20 @@ class AuthHandlerMixin:
                     "type": "auth_failed", "reason": "identity_revoked",
                 }))
                 return
-            self._session_device_did[websocket] = identity
+            self._session_device_did[websocket] = device_did
+            # Record the delegated device in the registry so the account's
+            # "Linked Devices" list (list_devices) shows it and it can be revoked.
+            if self._store:
+                try:
+                    import base64 as _b64d
+                    from .didkey import did_to_pub_key
+                    self._store.register_device(
+                        device_did, account_did,
+                        _b64d.b64encode(did_to_pub_key(device_did)).decode(),
+                        "delegation",
+                    )
+                except Exception:
+                    logger.debug("delegated device registry write failed", exc_info=True)
             identity = account_did
 
         if identity:

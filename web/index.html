@@ -1096,12 +1096,55 @@
         <hr style="border-color:var(--slate-700);margin:16px 0 12px;">
         <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;font-weight:600;">Linked Devices</p>
         <div id="settings-devices-list" style="font-size:0.85em;color:var(--text-secondary);min-height:24px;"></div>
+        <button id="link-device-btn"
+                style="background:var(--slate-800);border:1px solid var(--slate-600);color:var(--slate-50);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.82em;margin-top:8px;">
+          + Link a device
+        </button>
         </div><!-- /settings-advanced -->
         <div style="display:flex; gap:8px; justify-content:flex-end;">
           <button id="settings-cancel-btn"
                   style="background:var(--slate-700); border:none; color:var(--slate-50); padding:8px 16px; border-radius:4px; cursor:pointer;">Cancel</button>
           <button id="settings-save-btn"
                   style="background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer;">Save &amp; Reconnect</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Multi-device: primary shows a pairing QR/code, then approves the new device -->
+    <div id="device-link-modal" role="dialog" aria-modal="true" aria-label="Link a device" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1002; align-items:center; justify-content:center;">
+      <div style="background:var(--slate-800); border-radius:10px; padding:24px; max-width:360px; color:var(--slate-50); text-align:center;">
+        <h3 style="margin:0 0 12px;">Link a device</h3>
+        <div id="device-link-qr" style="width:200px;height:200px;border-radius:6px;background:#fff;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;overflow:hidden;"></div>
+        <p style="margin:0 0 4px;font-size:0.8em;color:var(--text-secondary);">Pairing code</p>
+        <p id="device-link-code" style="margin:0 0 12px;font-family:monospace;font-size:0.95em;word-break:break-all;"></p>
+        <p id="device-link-status" style="margin:0 0 12px;font-size:0.85em;color:var(--text-secondary);"></p>
+        <div id="device-link-approve-row" style="display:none;flex-direction:column;gap:8px;margin-bottom:12px;">
+          <p id="device-link-safety" style="margin:0;font-family:monospace;font-size:1.3em;letter-spacing:2px;color:var(--color-success-soft);"></p>
+          <div style="display:flex;gap:8px;justify-content:center;">
+            <button id="device-link-approve" style="background:var(--accent);border:none;color:#fff;padding:7px 16px;border-radius:4px;cursor:pointer;">Approve</button>
+            <button id="device-link-deny" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:7px 16px;border-radius:4px;cursor:pointer;">Deny</button>
+          </div>
+        </div>
+        <button id="device-link-close" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:7px 16px;border-radius:4px;cursor:pointer;">Close</button>
+      </div>
+    </div>
+
+    <!-- Multi-device: new device enters/scans a pairing code to join an account -->
+    <div id="pair-device-modal" role="dialog" aria-modal="true" aria-label="Link this device" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1002; align-items:center; justify-content:center;">
+      <div style="background:var(--slate-800); border-radius:10px; padding:24px; max-width:360px; color:var(--slate-50);">
+        <h3 style="margin:0 0 12px;">Link this device</h3>
+        <p style="margin:0 0 10px;font-size:0.85em;color:var(--text-secondary);">On your other device, open Settings &rarr; Link a device, then enter the code shown there (or scan its QR).</p>
+        <input id="pair-code-input" type="text" placeholder="Pairing code" autocomplete="off"
+               style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:8px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);font-family:monospace;">
+        <label id="pair-scan-label" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:0.82em;color:var(--text-secondary);margin-bottom:10px;">
+          Scan QR code
+          <input type="file" id="pair-scan-input" accept="image/*" capture="environment" style="display:none;">
+        </label>
+        <p id="pair-device-status" style="margin:8px 0;font-size:0.85em;color:var(--text-secondary);"></p>
+        <p id="pair-device-safety" style="margin:0 0 12px;font-family:monospace;font-size:1.3em;letter-spacing:2px;color:var(--color-success-soft);text-align:center;"></p>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="pair-device-cancel" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:7px 16px;border-radius:4px;cursor:pointer;">Cancel</button>
+          <button id="pair-device-submit" style="background:var(--accent);border:none;color:#fff;padding:7px 16px;border-radius:4px;cursor:pointer;">Link this device</button>
         </div>
       </div>
     </div>
@@ -1133,6 +1176,10 @@
             Connect a Solid Pod to sync across devices, or start locally right now.
           </p>
           <button id="ob-start-btn" style="background:var(--accent,var(--accent));border:none;color:#fff;padding:10px 24px;border-radius:4px;cursor:pointer;font-size:1em;">Get Started</button>
+          <p style="margin:14px 0 0;font-size:0.85em;color:var(--text-secondary);">
+            Already using Proxion elsewhere?
+            <a id="ob-link-device" href="#" style="color:var(--accent);">Link this device</a>
+          </p>
         </div>
         <div id="ob-step-2" style="display:none">
           <h2>What's your name?</h2>
