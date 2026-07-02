@@ -82,6 +82,11 @@ export function createView({
         if (socket && socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({cmd: "read_dm", cert_id: contact.certificate_id}));
             socket.send(JSON.stringify({cmd: "mark_read", thread_id: contact.certificate_id}));
+            // Multi-device: learn the peer's per-device E2E keys so a DM can be
+            // fanned out to each of their linked devices.
+            if (contact.peer_did) {
+                socket.send(JSON.stringify({cmd: "get_peer_device_keys", peer_webid: contact.peer_did}));
+            }
         }
         // Clear unread badge
         unreadCounts[contact.certificate_id] = 0;
@@ -115,6 +120,9 @@ export function createView({
         if (socket && socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({cmd: "mark_read", thread_id: id}));
             sendUpdateLastRead(id);
+            if (peerWebid) {
+                socket.send(JSON.stringify({cmd: "get_peer_device_keys", peer_webid: peerWebid}));
+            }
         }
         // Pod: persist read state
         const _lastMsgForRead = getAllMessages().filter(m => m.thread_id === id).at(-1);

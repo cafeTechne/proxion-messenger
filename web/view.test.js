@@ -81,6 +81,7 @@ describe('openContactThread', () => {
     expect(sent).toEqual([
       { cmd: 'read_dm', cert_id: 'cert-9' },
       { cmd: 'mark_read', thread_id: 'cert-9' },
+      { cmd: 'get_peer_device_keys', peer_webid: 'did:key:zBob' },
     ]);
     expect(host.unreadCounts['cert-9']).toBe(0);
     expect(calls.updateE2EStatus[0]).toEqual(['did:key:zBob']);

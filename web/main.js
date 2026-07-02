@@ -252,6 +252,21 @@ import { installFocusTrap } from './focus-trap.js';
         let mutedThreads = new Set(JSON.parse(localStorage.getItem("proxion_muted_threads") || "[]"));
         let currentDisappearMs = 0; // R11.1.3: active timer for current thread
         let selfWebId = clientDid; // set from localStorage immediately; updated after generateOrLoadIdentity
+        // Multi-device: if this device was linked to an account, its messaging
+        // identity is the ACCOUNT did (from the stored delegation cert). clientDid
+        // stays this device's own key — it signs the auth challenge and is this
+        // device's id for DM fanout. accountDid is null on a normal single device.
+        let accountDid = null;
+        try {
+            const _rawCert = localStorage.getItem('proxion_delegation_cert');
+            if (_rawCert) {
+                const _c = JSON.parse(_rawCert);
+                if (_c && _c.account_did) { accountDid = _c.account_did; selfWebId = accountDid; }
+            }
+        } catch (_) { /* corrupt cert — treat as unlinked */ }
+        // Multi-device: peerAccount -> [{device_id, pub_b64u}], fetched on DM open
+        // via get_peer_device_keys. Used to fan a DM out to each of a peer's devices.
+        let _peerDeviceKeys = {};
         let selfPubHex = null;
         let turnUrl = null;
         let turnSecret = null;
@@ -783,6 +798,37 @@ import { installFocusTrap } from './focus-trap.js';
                         event.e2e = false;
                     }
                 }
+            }
+            // Multi-device DM fanout: the gateway relays one envelope per device.
+            // Only the envelope addressed to THIS device (to_device_id === clientDid)
+            // is ours; decrypt it and convert to a normal message for rendering.
+            if (event.type === "dm_fanout") {
+                if (event.to_device_id !== clientDid) return; // not for this device
+                const p = event.payload || {};
+                const fromAcct = event.from_webid;
+                const senderDev = p.from_device_id || fromAcct;
+                const pid = fromAcct + '#' + senderDev;
+                if (p.x25519_pub) cachePeerPub(pid, p.x25519_pub);
+                let text = p.content;
+                if (p.e2e && p.nonce) {
+                    try {
+                        text = await ratchetDecrypt(pid, p.content, p.nonce,
+                            p.msg_num ?? 0, p.ratchet_pub ?? null, p.pn ?? 0);
+                    } catch (err) {
+                        text = err instanceof E2EDecryptError ? '[could not decrypt]' : '[decryption error]';
+                    }
+                }
+                handleEvent({
+                    type: "message",
+                    message_id: event.message_id,
+                    from_webid: fromAcct,
+                    thread_id: peerDidToCertId[fromAcct] || fromAcct,
+                    content: text,
+                    e2e: false,
+                    reply_to_id: p.reply_to_id || null,
+                    timestamp: new Date().toISOString(),
+                });
+                return;
             }
             handleEvent(event);
         }
@@ -1745,6 +1791,14 @@ import { installFocusTrap } from './focus-trap.js';
                     showToast("This session was revoked from another device.", "error");
                     setTimeout(() => { if (socket) socket.close(); }, 1500);
                     break;
+                case "peer_device_keys":
+                    // Multi-device: cache a peer's per-device E2E keys for DM fanout.
+                    _peerDeviceKeys[event.peer_webid] = event.devices || [];
+                    break;
+                case "send_dm_fanout_ack":
+                    // Fanout has no self-echo; clear the optimistic pending state on ack.
+                    document.getElementById('msg-' + event.message_id)?.classList.remove('msg-pending');
+                    break;
                 case "logout_all_complete":
                     showToast(`Logged out ${event.revoked_count || 0} other session(s).`);
                     break;
@@ -2369,6 +2423,37 @@ import { installFocusTrap } from './focus-trap.js';
             }
         });
 
+        // Multi-device DM fanout: encrypt a separate copy of `plaintext` to each of
+        // the peer account's devices and send them in one send_dm_fanout. Returns
+        // true if it handled the send, false to fall back to the normal single send.
+        async function _tryDmFanout(peerAccount, plaintext, clientMsgId, replyToId) {
+            const devs = _peerDeviceKeys[peerAccount];
+            if (!devs || devs.length < 2) return false; // single-device peer → normal path
+            const myPub = myX25519PubB64u();
+            const fanout = [];
+            for (const d of devs) {
+                if (!d.device_id || !d.pub_b64u) continue;
+                const pid = peerAccount + '#' + d.device_id;
+                cachePeerPub(pid, d.pub_b64u);
+                let entry;
+                try {
+                    const enc = await ratchetEncrypt(pid, plaintext);
+                    entry = { content: enc.ciphertext, e2e: true, nonce: enc.nonce,
+                              msg_num: enc.msgNum, pn: enc.pn, ratchet_pub: enc.ratchetPub };
+                } catch (err) {
+                    entry = { content: plaintext, e2e: false }; // best-effort to this device
+                }
+                entry.from_device_id = clientDid;
+                if (myPub) entry.x25519_pub = myPub;
+                if (replyToId) entry.reply_to_id = replyToId;
+                fanout.push({ to_webid: peerAccount, to_device_id: d.device_id, payload: entry });
+            }
+            if (!fanout.length) return false;
+            socketSendOrQueue({ cmd: 'send_dm_fanout', message_id: clientMsgId,
+                                from_webid: selfWebId, fanout });
+            return true;
+        }
+
         document.getElementById("message-form").onsubmit = async (e) => {
             e.preventDefault();
             const input = document.getElementById("message-input");
@@ -2439,7 +2524,16 @@ import { installFocusTrap } from './focus-trap.js';
                     payload.reply_to_id = replyingTo.id;
                     cancelReply();
                 }
-                socketSendOrQueue(payload);
+                // Multi-device: if the DM peer has >1 linked device, fan the message
+                // out to each device (separate ratchet per peer-device) instead of a
+                // single send. Single-device peers are unaffected (normal path).
+                const _dmPeer = (activeView.type === "dm" || activeView.type === "local_dm")
+                    ? (activeView.peerWebid || activeView.peerDid || activeView.id) : null;
+                let _sentViaFanout = false;
+                if (_dmPeer) {
+                    _sentViaFanout = await _tryDmFanout(_dmPeer, content, clientMsgId, payload.reply_to_id);
+                }
+                if (!_sentViaFanout) socketSendOrQueue(payload);
 
                 // Optimistic render: show the message instantly instead of waiting for
                 // the server echo. The echo carries the same message_id, so renderMessage
@@ -3604,7 +3698,9 @@ import { installFocusTrap } from './focus-trap.js';
             if (podWebId) await onPodLoggedIn(podWebId);
             else initPodSettingsPanel(); // re-sync now that auth state is known
             await generateOrLoadIdentity();
-            if (!podWebId) selfWebId = clientDid;
+            // Keep a linked device's account identity; only fall back to the
+            // device's own did when it is neither pod-backed nor account-linked.
+            if (!podWebId) selfWebId = accountDid || clientDid;
             await initE2E().catch(() => {});
 
             // R11.2.2: Safety number bar "Mark as verified" button
