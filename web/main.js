@@ -818,11 +818,19 @@ import { installFocusTrap } from './focus-trap.js';
                         text = err instanceof E2EDecryptError ? '[could not decrypt]' : '[decryption error]';
                     }
                 }
+                // Self-sync copy (sent from another of our own devices): the thread
+                // is keyed by the PEER, carried in the payload — from_webid would
+                // resolve to ourselves. Peer messages use our own cert mapping.
+                const isSelfCopy = fromAcct === selfWebId;
+                const threadId = isSelfCopy
+                    ? (p.thread_id || peerDidToCertId[p.thread_peer] || p.thread_peer)
+                    : (peerDidToCertId[fromAcct] || fromAcct);
                 handleEvent({
                     type: "message",
                     message_id: event.message_id,
                     from_webid: fromAcct,
-                    thread_id: peerDidToCertId[fromAcct] || fromAcct,
+                    from_display_name: isSelfCopy ? (localStorage.getItem('proxion_display_name') || '') : undefined,
+                    thread_id: threadId,
                     content: text,
                     e2e: false,
                     reply_to_id: p.reply_to_id || null,
@@ -962,6 +970,9 @@ import { installFocusTrap } from './focus-trap.js';
                         const _prvw = localStorage.getItem("proxion_link_previews_enabled") === "1";
                         socket.send(JSON.stringify({cmd: "set_link_previews_enabled", enabled: _prvw}));
                         socket.send(JSON.stringify({cmd: "pod_status"}));
+                        // Multi-device: learn our own device list so sends can be
+                        // fanned to our other linked devices (sender self-sync).
+                        socket.send(JSON.stringify({cmd: "get_peer_device_keys", peer_webid: selfWebId}));
                         // Defer discovery commands 150ms so a flapping connection dies first
                         setTimeout(() => {
                             if (!socket || socket.readyState !== WebSocket.OPEN) return;
@@ -1072,7 +1083,7 @@ import { installFocusTrap } from './focus-trap.js';
                     populateSidebar("room-list", event.rooms.filter(r => !r.local), "room");
                     event.rooms.filter(r => r.local).forEach(r => {
                         addRoomToSidebar(r.id, r.name, r.invite_url);
-                        if (r.creator_webid && r.creator_webid === clientDid) {
+                        if (r.creator_webid && r.creator_webid === selfWebId) {
                             roomCreatorOf.add(r.id);
                         }
                         // Request catch-up history (messages since last seen)
@@ -1305,7 +1316,7 @@ import { installFocusTrap } from './focus-trap.js';
                         }
                         const isOwner = roomCreatorOf.has(event.room_id);
                         list.innerHTML = event.members.map(m => {
-                            const isSelf = m.webid === clientDid;
+                            const isSelf = m.webid === selfWebId;
                             const kickBtn = isOwner && !isSelf
                                 ? `<button data-rm-action="kick" data-room-id="${event.room_id}" data-webid="${m.webid}"
                                           style="margin-left:4px;background:#7f1d1d;border:none;color:#fca5a5;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:0.75em;flex-shrink:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></svg></button>` : "";
@@ -1381,7 +1392,7 @@ import { installFocusTrap } from './focus-trap.js';
                     break;
                 }
                 case "ownership_transferred": {
-                    if (event.new_owner_did === clientDid) {
+                    if (event.new_owner_did === selfWebId) {
                         roomCreatorOf.add(event.room_id);
                         if (activeView && activeView.id === event.room_id) {
                             document.getElementById("delete-room-btn").style.display = "inline-block";
@@ -2424,17 +2435,23 @@ import { installFocusTrap } from './focus-trap.js';
         });
 
         // Multi-device DM fanout: encrypt a separate copy of `plaintext` to each of
-        // the peer account's devices and send them in one send_dm_fanout. Returns
-        // true if it handled the send, false to fall back to the normal single send.
-        async function _tryDmFanout(peerAccount, plaintext, clientMsgId, replyToId) {
-            const devs = _peerDeviceKeys[peerAccount];
-            if (!devs || devs.length < 2) return false; // single-device peer → normal path
+        // the peer account's devices — and to our OWN other devices (sender
+        // self-sync), so a conversation continued on one device appears on all.
+        // Returns true if it handled the send, false → normal single send.
+        async function _tryDmFanout(peerAccount, plaintext, clientMsgId, replyToId, threadId) {
+            const peerDevs = _peerDeviceKeys[peerAccount] || [];
+            // Our own other devices (exclude the one we're sending from).
+            const ownDevs = (_peerDeviceKeys[selfWebId] || []).filter(
+                d => d.device_id && d.device_id !== clientDid);
+            // Single-device sender talking to a single-device peer: normal path.
+            if (peerDevs.length < 2 && ownDevs.length === 0) return false;
+            if (!peerDevs.length) return false; // no peer keys known → normal path
             const myPub = myX25519PubB64u();
             const fanout = [];
-            for (const d of devs) {
-                if (!d.device_id || !d.pub_b64u) continue;
-                const pid = peerAccount + '#' + d.device_id;
-                cachePeerPub(pid, d.pub_b64u);
+            const addEntry = async (account, dev) => {
+                if (!dev.device_id || !dev.pub_b64u) return;
+                const pid = account + '#' + dev.device_id;
+                cachePeerPub(pid, dev.pub_b64u);
                 let entry;
                 try {
                     const enc = await ratchetEncrypt(pid, plaintext);
@@ -2444,13 +2461,18 @@ import { installFocusTrap } from './focus-trap.js';
                     entry = { content: plaintext, e2e: false }; // best-effort to this device
                 }
                 entry.from_device_id = clientDid;
+                // Self-sync copies need the thread: from_webid alone can't locate it
+                // (for our own devices the thread is keyed by the PEER, not by us).
+                entry.thread_id = threadId;
+                entry.thread_peer = peerAccount;
                 if (myPub) entry.x25519_pub = myPub;
                 if (replyToId) entry.reply_to_id = replyToId;
-                fanout.push({ to_webid: peerAccount, to_device_id: d.device_id, payload: entry });
-            }
+                fanout.push({ to_webid: account, to_device_id: dev.device_id, payload: entry });
+            };
+            for (const d of peerDevs) await addEntry(peerAccount, d);
+            for (const d of ownDevs) await addEntry(selfWebId, d);
             if (!fanout.length) return false;
-            socketSendOrQueue({ cmd: 'send_dm_fanout', message_id: clientMsgId,
-                                from_webid: selfWebId, fanout });
+            socketSendOrQueue({ cmd: 'send_dm_fanout', message_id: clientMsgId, fanout });
             return true;
         }
 
@@ -2531,7 +2553,7 @@ import { installFocusTrap } from './focus-trap.js';
                     ? (activeView.peerWebid || activeView.peerDid || activeView.id) : null;
                 let _sentViaFanout = false;
                 if (_dmPeer) {
-                    _sentViaFanout = await _tryDmFanout(_dmPeer, content, clientMsgId, payload.reply_to_id);
+                    _sentViaFanout = await _tryDmFanout(_dmPeer, content, clientMsgId, payload.reply_to_id, activeView.id);
                 }
                 if (!_sentViaFanout) socketSendOrQueue(payload);
 
