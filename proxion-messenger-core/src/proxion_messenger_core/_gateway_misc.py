@@ -132,15 +132,12 @@ class MiscHandlerMixin:
             "presence": filtered
         }, default=str))
 
-    async def _handle_join_voice_channel(self, websocket, data: dict) -> None:
-        room_id = data.get("room_id")
-        logger.info(f"Client joined voice channel: {room_id}")
-        await self.broadcast({
-            "type": "presence",
-            "room_id": room_id,
-            "status": "voice_active",
-            "from_webid": self.agent.identity_pub_bytes.hex()
-        })
+    # NOTE: the real _handle_join_voice_channel lives in VoiceHandlerMixin
+    # (_gateway_voice.py) and wins via MRO (VoiceHandlerMixin is first in the
+    # ProxionGateway bases). A duplicate stub used to sit here that broadcast a
+    # presence event with the GATEWAY's DID (not the joiner's) and tracked no
+    # membership — dead, shadowed, and a latent hazard if the mixin order ever
+    # changed. Removed.
 
     async def _handle_get_identity(self, websocket, data: dict) -> None:
         client_did = self._client_webids.get(websocket, "")
