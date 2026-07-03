@@ -353,6 +353,12 @@ class RoomHandlerMixin:
         if room:
             if role == "owner":
                 return room.get("creator_webid") == caller_webid
+            if role == "admin":
+                # Owner OR an explicitly-granted admin. Previously ANY member
+                # passed here, so any member could ban/mute/unban anyone.
+                if room.get("creator_webid") == caller_webid:
+                    return True
+                return bool(self._store and self._store.get_room_role(room_id, caller_webid) == "admin")
             return websocket in room.get("members", set())
 
         return False
@@ -1648,11 +1654,22 @@ class RoomHandlerMixin:
                     }))
                 except Exception:
                     pass
-            await websocket.send(json.dumps({
+            # Notify ALL remaining members (like ban) so their member list updates
+            # live — not just the kicker.
+            _kick_event = json.dumps({
                 "type": "member_kicked",
                 "room_id": room_id,
                 "webid": target_webid,
-            }))
+            })
+            _members_after = list(self._local_rooms.get(room_id, {}).get("members", set()))
+            if _members_after:
+                for ws in _members_after:
+                    try:
+                        await ws.send(_kick_event)
+                    except Exception:
+                        pass
+            else:
+                await websocket.send(_kick_event)
             # R17: re-key room so kicked member cannot decrypt future messages
             try:
                 from .room_rekey import rotate_room_key, build_room_key_update_event
