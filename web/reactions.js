@@ -76,6 +76,9 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         picker.style.display = "none";
 
         const activeView = getActiveView();
+        // Guard like removeReaction — the thread may have closed while the picker
+        // was open; without this activeView.type below throws.
+        if (!getSocket() || !activeView || !mid) return;
         const payload = {
             cmd: "add_reaction",
             message_id: mid,

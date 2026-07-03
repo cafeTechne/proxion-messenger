@@ -1058,6 +1058,24 @@ class RoomHandlerMixin:
             except Exception:
                 pass
 
+    def _reaction_recipients(self, sender_webid: str, cert, room_id: str) -> set:
+        """Local identities to deliver a cert/pod reaction to: the sender's own
+        sessions plus the DM peer (cert.subject is an ed25519 pub hex → did:key).
+        Used instead of a gateway-wide broadcast."""
+        recips = set()
+        if sender_webid:
+            recips.add(sender_webid)
+        _subj = getattr(cert, "subject", "") if cert else ""
+        if _subj and not str(_subj).startswith("did:key:"):
+            try:
+                from .didkey import pub_key_to_did as _p2d
+                _subj = _p2d(bytes.fromhex(_subj))
+            except Exception:
+                _subj = ""
+        if _subj:
+            recips.add(_subj)
+        return {r for r in recips if r}
+
     async def _handle_add_reaction(self, websocket, data: dict) -> None:
         cert_id = data.get("cert_id")
         room_id = data.get("room_id")
@@ -1122,6 +1140,7 @@ class RoomHandlerMixin:
                         }))
         elif cert_id and cert_id not in self.dm_clients:
             # Verify caller is a participant of this local DM thread
+            _owner_did = _peer_did = ""
             if self._store:
                 _cert_dict = self._store.get_relationship_by_cert_id(cert_id)
                 if _cert_dict:
@@ -1141,9 +1160,11 @@ class RoomHandlerMixin:
                 "message_id": message_id, "emoji": emoji, "from_webid": sender_webid,
             }
             await websocket.send(json.dumps(event))
-            peer_ws = self._any_socket(cert_id)
-            if peer_ws and peer_ws != websocket:
-                await peer_ws.send(json.dumps(event))
+            # In this branch cert_id IS the peer's DID (local DM thread key), so
+            # deliver to ALL of the peer's sessions (multi-device) rather than the
+            # single socket _any_socket(cert_id) returned.
+            if cert_id != sender_webid:
+                await self._send_to_identity(cert_id, json.dumps(event))
         else:
             cert, client = None, None
             id_to_use = cert_id or room_id
@@ -1155,7 +1176,7 @@ class RoomHandlerMixin:
             if cert and client:
                 from .reactions import add_reaction
                 react = add_reaction(cert, client, self.agent.identity_key, message_id, emoji)
-                await self.broadcast({
+                _react_event = json.dumps({
                     "type": "reaction_added",
                     "thread_id": id_to_use,
                     "message_id": message_id,
@@ -1163,6 +1184,9 @@ class RoomHandlerMixin:
                     "from_webid": sender_webid,
                     "reaction_message_id": react.reaction_message_id,
                 })
+                # Scope to participants, not every gateway client (broadcast).
+                for _r in self._reaction_recipients(sender_webid, cert, room_id):
+                    await self._send_to_identity(_r, _react_event)
             else:
                 await websocket.send(json.dumps({"type": "error", "message": f"Unknown target: {cert_id or room_id}"}))
 
@@ -1210,6 +1234,7 @@ class RoomHandlerMixin:
                         }))
         elif cert_id and cert_id not in self.dm_clients:
             # Verify caller is a participant of this local DM thread
+            _owner_did_r = _peer_did_r = ""
             if self._store:
                 _cert_dict_r = self._store.get_relationship_by_cert_id(cert_id)
                 if _cert_dict_r:
@@ -1226,9 +1251,9 @@ class RoomHandlerMixin:
                 "message_id": message_id, "emoji": emoji, "from_webid": sender_webid,
             }
             await websocket.send(json.dumps(event))
-            peer_ws = self._any_socket(cert_id)
-            if peer_ws and peer_ws != websocket:
-                await peer_ws.send(json.dumps(event))
+            # cert_id is the peer's DID here — deliver to all the peer's sessions.
+            if cert_id != sender_webid:
+                await self._send_to_identity(cert_id, json.dumps(event))
         else:
             id_to_use = cert_id or room_id
             cert, client = None, None
@@ -1240,11 +1265,17 @@ class RoomHandlerMixin:
             if cert and client:
                 from .reactions import remove_reaction
                 remove_reaction(cert, client, reaction_message_id)
-                await self.broadcast({
+                _rm_event = json.dumps({
                     "type": "reaction_removed",
                     "thread_id": id_to_use,
+                    "message_id": message_id,
+                    "emoji": emoji,
+                    "from_webid": sender_webid,
                     "reaction_message_id": reaction_message_id,
                 })
+                # Scope to participants, not every gateway client (broadcast).
+                for _r in self._reaction_recipients(sender_webid, cert, room_id):
+                    await self._send_to_identity(_r, _rm_event)
             else:
                 await websocket.send(json.dumps({"type": "error", "message": f"Unknown target: {id_to_use}"}))
 
