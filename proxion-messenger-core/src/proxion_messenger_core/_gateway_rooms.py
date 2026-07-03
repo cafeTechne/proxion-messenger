@@ -344,9 +344,17 @@ class RoomHandlerMixin:
         # For federated rooms (Solid Pod)
         if room_id in self.room_memberships:
             membership, _ = self.room_memberships[room_id]
+            _fed_owner = getattr(getattr(membership, "room", None), "owner_webid", None)
             if role == "owner":
-                return membership.room.owner_webid == caller_webid
-            return True # Any member in self.room_memberships is allowed
+                return _fed_owner == caller_webid
+            if role == "admin":
+                # Was 'any member' — same hole as local rooms (any federated
+                # member could ban/mute). Restrict to the owner or a granted
+                # admin until federated admin-role delegation is modeled.
+                if _fed_owner == caller_webid:
+                    return True
+                return bool(self._store and self._store.get_room_role(room_id, caller_webid) == "admin")
+            return True # non-privileged (member-level) actions: any member
 
         # For local (pod-free) rooms
         room = self._local_rooms.get(room_id)

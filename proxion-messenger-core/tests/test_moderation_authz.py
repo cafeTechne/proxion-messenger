@@ -101,6 +101,31 @@ async def test_owner_can_ban(gateway, noauth_env):
 
 
 @pytest.mark.asyncio
+async def test_federated_room_admin_permission(gateway, noauth_env):
+    """Federated (pod) rooms had the same hole: any member passed role='admin'.
+    Now only the owner or a granted admin does."""
+    import types
+    owner = _did(Ed25519PrivateKey.generate())
+    member = _did(Ed25519PrivateKey.generate())
+    admin = _did(Ed25519PrivateKey.generate())
+    ws_owner, ws_member, ws_admin = _mock_ws(), _mock_ws(), _mock_ws()
+    await _register(gateway, ws_owner, owner)
+    await _register(gateway, ws_member, member)
+    await _register(gateway, ws_admin, admin)
+
+    room_id = "fed-room-1"
+    membership = types.SimpleNamespace(room=types.SimpleNamespace(owner_webid=owner))
+    gateway.room_memberships[room_id] = (membership, object())
+    gateway._store.set_room_role(room_id, admin, "admin")
+
+    assert gateway._check_room_permission(ws_owner, room_id, "admin") is True
+    assert gateway._check_room_permission(ws_admin, room_id, "admin") is True
+    assert gateway._check_room_permission(ws_member, room_id, "admin") is False
+    # Member-level actions are still open to any member.
+    assert gateway._check_room_permission(ws_member, room_id, "member") is True
+
+
+@pytest.mark.asyncio
 async def test_granted_admin_can_ban(gateway, noauth_env):
     owner = Ed25519PrivateKey.generate()
     admin = Ed25519PrivateKey.generate()
