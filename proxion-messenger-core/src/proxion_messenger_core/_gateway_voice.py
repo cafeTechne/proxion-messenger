@@ -428,6 +428,15 @@ class VoiceHandlerMixin:
         if not channel_id or not joiner_webid:
             return
 
+        # Authz: a voice channel is scoped to its room. Joining a LOCAL room's
+        # channel requires membership — otherwise anyone who knows the room id
+        # could join its call and exchange voice with its members.
+        if channel_id in self._local_rooms and websocket not in self._local_rooms[channel_id].get("members", set()):
+            await websocket.send(json.dumps({
+                "type": "error", "message": "not_a_room_member", "channel_id": channel_id,
+            }))
+            return
+
         own_gw = self._gateway_http_url()
 
         # If the room is not local but is in room_federated_members, relay join to host gateway
