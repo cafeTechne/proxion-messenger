@@ -2060,6 +2060,15 @@ class RoomHandlerMixin:
         limit = min(int(data.get("limit") or 50), 100)
         offset = max(int(data.get("offset") or 0), 0)
 
+        # Authz: search_messages IGNORES the member-thread scope when a thread_id
+        # filter is given, so a client-supplied thread_id must be one the caller
+        # actually belongs to — otherwise search leaks any thread's messages.
+        if filter_thread_id and filter_thread_id not in member_threads:
+            await websocket.send(json.dumps({
+                "type": "search_results", "query": query, "results": [], "next_offset": 0,
+            }))
+            return
+
         results = []
         next_offset = offset
         if self._store:
