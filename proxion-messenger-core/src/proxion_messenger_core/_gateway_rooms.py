@@ -2129,22 +2129,32 @@ class RoomHandlerMixin:
                     except Exception:
                         pass
         elif cert_id:
+            # Resolve the DM peer. Bug: this used get_dm_threads() with NO
+            # owner_webid → 'WHERE owner_webid = ""' → always empty, so DM typing
+            # never reached the peer. Use the sender's threads; and for local DMs
+            # cert_id IS the peer's DID directly.
+            sender = self._client_webids.get(websocket, "")
+            peer_webid = ""
             if self._store:
-                threads = [t for t in self._store.get_dm_threads() if t["thread_id"] == cert_id]
-                if threads:
-                    peer_webid = threads[0].get("peer_webid", "")
-                    peer_ws = self._any_socket(peer_webid) if peer_webid else None
-                    if peer_ws and peer_ws != websocket:
-                        await peer_ws.send(json.dumps(typing_event))
-                    elif peer_webid:
-                        # Peer is on a different gateway — relay ephemeral typing event
-                        peer_gw = self._resolve_peer_gateway(peer_webid)
-                        if peer_gw:
-                            asyncio.create_task(self._relay_ephemeral(peer_gw, {
-                                "content_type": "typing",
-                                "from_webid": typing_event["from_webid"],
-                                "cert_id": cert_id,
-                            }))
+                for t in self._store.get_dm_threads(owner_webid=sender):
+                    if t.get("thread_id") == cert_id:
+                        peer_webid = t.get("peer_webid", "")
+                        break
+            if not peer_webid and str(cert_id).startswith("did:key:"):
+                peer_webid = cert_id
+            if peer_webid:
+                peer_ws = self._any_socket(peer_webid)
+                if peer_ws and peer_ws != websocket:
+                    await peer_ws.send(json.dumps(typing_event))
+                else:
+                    # Peer is on a different gateway — relay ephemeral typing event
+                    peer_gw = self._resolve_peer_gateway(peer_webid)
+                    if peer_gw:
+                        asyncio.create_task(self._relay_ephemeral(peer_gw, {
+                            "content_type": "typing",
+                            "from_webid": typing_event["from_webid"],
+                            "cert_id": cert_id,
+                        }))
         # no room_id and no cert_id — drop silently
 
     async def _handle_schedule_message(self, websocket, data: dict) -> None:
