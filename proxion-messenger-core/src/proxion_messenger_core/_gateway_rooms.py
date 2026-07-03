@@ -1834,7 +1834,17 @@ class RoomHandlerMixin:
                 _pin(client, thread_id, message_id)
             except Exception as exc:
                 logger.debug(f"pin_message failed: {exc}")
-        await websocket.send(json.dumps({"type": "message_pinned", "message_id": message_id, "thread_id": thread_id}))
+        # Notify ALL room members, not just the pinner — otherwise a pin doesn't
+        # appear live for anyone else (unpin already broadcasts; pin didn't).
+        event = json.dumps({"type": "message_pinned", "message_id": message_id, "thread_id": thread_id})
+        if room_id in self._local_rooms:
+            for ws in list(self._local_rooms[room_id]["members"]):
+                try:
+                    await ws.send(event)
+                except Exception:
+                    pass
+        else:
+            await websocket.send(event)
 
     async def _handle_get_pins(self, websocket, data: dict) -> None:
         thread_id = data.get("thread_id", "")
