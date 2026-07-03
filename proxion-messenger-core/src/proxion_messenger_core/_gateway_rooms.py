@@ -140,6 +140,23 @@ class RoomHandlerMixin:
         def __hash__(self): return id(self)
         def __eq__(self, other): return self is other
 
+    def _scheduled_delivery_command(self, thread_id: str, actor: str, content: str):
+        """Route a due scheduled message to the right send command for its thread
+        type (room / cert-DM / local-DM). Returns None if the thread is unknown.
+
+        Delivering everything as send_room silently dropped scheduled DMs, since a
+        DM cert_id / local-DM thread id is not a room.
+        """
+        if thread_id in self._local_rooms:
+            return {"cmd": "send_room", "room_id": thread_id, "content": content}
+        if thread_id in self.dm_clients:
+            return {"cmd": "send_dm", "cert_id": thread_id, "content": content}
+        if self._store:
+            for _t in self._store.get_dm_threads(owner_webid=actor):
+                if _t.get("thread_id") == thread_id and _t.get("peer_webid"):
+                    return {"cmd": "local_dm", "target_webid": _t["peer_webid"], "content": content}
+        return None
+
     async def _scheduler_loop(self):
         """Poll for due scheduled messages every 10 seconds."""
         _consecutive_failures = 0
@@ -150,6 +167,14 @@ class RoomHandlerMixin:
             try:
                 due = self._store.get_due_scheduled_messages(time.time())
                 for sched in due:
+                    _deliver = self._scheduled_delivery_command(
+                        sched["thread_id"], sched["from_webid"], sched["content"])
+                    if _deliver is None:
+                        logger.warning("scheduled message %s: unknown thread %s — dropping",
+                                       sched["id"], str(sched["thread_id"])[:24])
+                        self._store.mark_scheduled_sent(sched["id"])
+                        continue
+                    # Mark sent only once we know how to deliver it (at-most-once).
                     self._store.mark_scheduled_sent(sched["id"])
                     sender_ws = next(
                         (ws for ws, wid in self._client_webids.items()
@@ -163,14 +188,7 @@ class RoomHandlerMixin:
                         self._system_ws.add(null_ws)
                         sender_ws = null_ws
                     try:
-                        await self.process_command(
-                            sender_ws,
-                            {
-                                "cmd": "send_room",
-                                "room_id": sched["thread_id"],
-                                "content": sched["content"],
-                            }
-                        )
+                        await self.process_command(sender_ws, _deliver)
                     finally:
                         if null_ws is not None:
                             self._client_webids.pop(null_ws, None)
