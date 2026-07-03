@@ -156,6 +156,43 @@ async def test_relay_endpoint_delivers_to_connected_client(gateway, two_clients)
 
 
 @pytest.mark.asyncio
+async def test_relay_from_blocked_sender_is_dropped(gateway, two_clients, tmp_path):
+    """A blocked sender's relayed message must be silently accepted (200, so block
+    status isn't revealed) but NOT delivered. Previously the relay receive path
+    ignored the blocklist entirely."""
+    from datetime import datetime, timezone
+    from proxion_messenger_core.blocklist import Blocklist
+    _, bob = two_clients
+    # Isolate the blocklist to a temp file (don't touch ~/.proxion).
+    gateway.blocklist = Blocklist(str(tmp_path / "bl.json"))
+
+    alice_key = Ed25519PrivateKey.generate()
+    pub_bytes = alice_key.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw
+    )
+    alice_did = pub_key_to_did(pub_bytes)
+    bob_did = "did:key:bob"
+    gateway._webid_sockets[bob_did] = bob
+    gateway.blocklist.block(alice_did)
+
+    ts = datetime.now(timezone.utc).isoformat()
+    msg_id = "relay-blocked-001"
+    content = "you blocked me but here I am"
+    sig = sign_relay_message(alice_key, alice_did, bob_did, msg_id, content, ts)
+    body = json.dumps({
+        "from_webid": alice_did, "to_webid": bob_did, "message_id": msg_id,
+        "content": content, "timestamp": ts, "signature": sig,
+    }).encode()
+
+    bob.send.reset_mock()
+    status, _ = await gateway._handle_relay_post(body)
+    assert status.startswith("200")  # accepted, not 403 — don't reveal the block
+    delivered = [json.loads(c[0][0]) for c in bob.send.call_args_list]
+    assert not any(m.get("content") == content for m in delivered), \
+        "blocked sender's message must not be delivered"
+
+
+@pytest.mark.asyncio
 async def test_relay_endpoint_rejects_bad_signature(gateway, two_clients):
     _, bob = two_clients
     body = json.dumps({

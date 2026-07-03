@@ -370,6 +370,14 @@ class HttpEndpointsMixin:
                         details=f"gateway_url={_relay_gw}",
                     )
                 return "403 Forbidden", '{"error":"trust_revoked_gateway"}'
+        # Blocked sender: silently ACCEPT (200) but do not deliver anything —
+        # DMs, room messages, reactions, voice signals. Returning 200 (not 403)
+        # avoids revealing to the sender that they've been blocked. Previously the
+        # relay receive path never checked the blocklist, so a blocked user's
+        # messages still reached the recipient (block only worked on send + pod).
+        if _relay_from and self.blocklist.is_blocked(_relay_from):
+            logger.info("Dropped relay content from blocked sender %s", _relay_from[:24])
+            return "200 OK", '{"status":"received"}'
 
         now = time.time()
         bucket = self._relay_rate_limiter.setdefault(client_ip, deque())
