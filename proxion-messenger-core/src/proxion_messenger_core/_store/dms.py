@@ -48,6 +48,16 @@ class DmStoreMixin(object):
                 (owner_webid,)
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def get_all_dm_threads(self) -> list[dict]:
+        """Every DM thread regardless of owner. Callers that used
+        get_dm_threads() (no arg) to mean 'all threads' were silently getting
+        only owner_webid='' rows (i.e. nothing)."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM dm_threads ORDER BY created_at ASC"
+            ).fetchall()
+            return [dict(r) for r in rows]
     def get_thread_integrity_state(self, thread_id: str) -> Optional[dict]:
         with self._conn() as conn:
             row = conn.execute(

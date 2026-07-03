@@ -319,7 +319,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # Restore per-DM disappear timers (persisted in the same KV table, keyed by
         # cert_id) so DM disappearing messages survive a gateway restart.
         try:
-            for _t in self._store.get_dm_threads():
+            for _t in self._store.get_all_dm_threads():
                 _tid = _t.get("thread_id")
                 if _tid:
                     _dms = self._store.get_room_disappear_timer(_tid)
@@ -1995,9 +1995,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         cert_id = data.get("cert_id", "")
         if not from_webid:
             return "400 Bad Request", '{"error":"missing_from_webid"}'
-        # Find the local user who is in this DM thread
+        # Find the local user who is in this DM thread. (Was get_dm_threads() with
+        # no owner → always empty, so cross-gateway typing never delivered.)
         if self._store and cert_id:
-            threads = [t for t in (self._store.get_dm_threads() or []) if t["thread_id"] == cert_id]
+            threads = [t for t in self._store.get_all_dm_threads() if t["thread_id"] == cert_id]
             if threads:
                 local_webid = threads[0].get("peer_webid") or threads[0].get("owner_webid")
                 if local_webid:

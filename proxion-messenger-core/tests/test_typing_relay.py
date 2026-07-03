@@ -33,7 +33,9 @@ async def test_typing_relay_delivers_to_local_socket(gateway):
     gateway._webid_sockets[local_webid] = {ws}
 
     store = MagicMock()
-    store.get_dm_threads = MagicMock(return_value=[
+    # Must mock get_all_dm_threads: get_dm_threads(no-owner) queries
+    # WHERE owner_webid='' and is empty in production — mocking it hid the bug.
+    store.get_all_dm_threads = MagicMock(return_value=[
         {"thread_id": "cert-abc", "peer_webid": local_webid, "owner_webid": "did:key:zRemote"}
     ])
     gateway._store = store
