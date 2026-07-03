@@ -56,6 +56,19 @@ def _start_gateway(tmp_path, host="127.0.0.1"):
             ready.set()
 
     threading.Thread(target=_run, daemon=True).start()
+    # ready.set() fires right after create_task(_serve_http) — BEFORE the HTTP
+    # port actually binds. Callers that immediately POST then race a not-yet-
+    # listening server (flaky under full-suite load). Poll the port so we only
+    # return once it accepts connections.
+    ready.wait(timeout=5)
+    import time as _time
+    _deadline = _time.time() + 5
+    while _time.time() < _deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", http_port), timeout=0.5):
+                break
+        except OSError:
+            _time.sleep(0.05)
     return gw, http_port, ws_port, ready
 
 
