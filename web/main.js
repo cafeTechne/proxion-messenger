@@ -45,6 +45,7 @@ import { createPush } from './push.js';
 import { createPairing } from './pairing.js';
 import { inlineNotice, feedEmptyState } from './states.js';
 import { installFocusTrap } from './focus-trap.js';
+import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent } from './dmhistory.js';
 
         // Modal a11y: focus-restore + Tab-trap for every dialog (observer-based,
         // so it covers all ~20 modals without retrofitting their open/close sites).
@@ -791,6 +792,7 @@ import { installFocusTrap } from './focus-trap.js';
                             event.msg_num ?? 0, event.ratchet_pub ?? null,
                             event.pn ?? 0);
                         event.e2e = false; // mark decrypted
+                        event._persistDm = true; // decrypted E2E DM → cache plaintext for history
                     } catch (err) {
                         event.content = err instanceof E2EDecryptError
                             ? '[could not decrypt]'
@@ -835,6 +837,8 @@ import { installFocusTrap } from './focus-trap.js';
                     e2e: false,
                     reply_to_id: p.reply_to_id || null,
                     timestamp: new Date().toISOString(),
+                    // Persist plaintext locally unless decryption failed.
+                    _persistDm: text !== '[could not decrypt]' && text !== '[decryption error]',
                 });
                 return;
             }
@@ -864,6 +868,13 @@ import { installFocusTrap } from './focus-trap.js';
                 case "message": {
                     const msg = normalizeRelayThreadId(event);
                     const id = msg.thread_id;
+
+                    // Cache decrypted E2E DM plaintext locally so DM history survives
+                    // reopen — the server keeps only ciphertext, which the forward
+                    // ratchet can't re-decrypt. (dmHistorySave guards ciphertext.)
+                    if (msg._persistDm && msg.message_id) {
+                        dmHistorySave({ ...msg, thread_id: id });
+                    }
 
                     // If this is the server echo of an optimistically-rendered message,
                     // mark it confirmed (clear the pending state). renderMessage below
@@ -1034,6 +1045,9 @@ import { installFocusTrap } from './focus-trap.js';
                     break;
                 case "message_edited":
                     handleMessageEdited(event);
+                    if (event.message_id && event.new_content != null) {
+                        dmHistoryUpdateContent(event.message_id, event.new_content);
+                    }
                     break;
                 case "message_pinned":
                     showToast("Message pinned");
@@ -1451,6 +1465,7 @@ import { installFocusTrap } from './focus-trap.js';
                         unreadCounts[tid] = (unreadCounts[tid] || 0) + msgs.length;
                         updateSidebarBadge(tid);
                     }
+                    mergeDmLocalHistory(tid);
                     break;
                 }
                 case "local_history": {
@@ -1520,6 +1535,7 @@ import { installFocusTrap } from './focus-trap.js';
                             if (!seen.has(r.message_id)) { seen.add(r.message_id); renderReactions(r.message_id); }
                         });
                     }
+                    mergeDmLocalHistory(tid);
                     break;
                 }
                 case "message_deleted": {
@@ -1527,6 +1543,7 @@ import { installFocusTrap } from './focus-trap.js';
                     if (el) el.remove();
                     allMessages = allMessages.filter(m => m.message_id !== event.message_id);
                     delete messageMap[event.message_id];
+                    dmHistoryDelete(event.message_id);
                     if (event.message_id && event.thread_id) {
                         const _isRoom = !!(activeView && activeView.type === 'local_room');
                         podDeleteMessage(event.thread_id, event.message_id, _isRoom).catch(() => {});
@@ -2148,6 +2165,39 @@ import { installFocusTrap } from './focus-trap.js';
                 })
                 .catch(() => setPodSyncIndicator(false));
         }
+
+        // Merge locally-cached plaintext DM history over whatever the server/pod
+        // returned. E2E DMs are stored server-side as ciphertext the forward
+        // ratchet can't re-decrypt, so on reopen they render as ciphertext /
+        // "[could not decrypt]"; this replaces those with the plaintext this device
+        // cached when it sent/decrypted them. No-op for rooms (dmHistoryLoad → []).
+        async function mergeDmLocalHistory(threadId) {
+            if (!threadId || !activeView || activeView.id !== threadId) return;
+            let local;
+            try { local = await dmHistoryLoad(threadId); } catch (_) { return; }
+            if (!local || !local.length || !activeView || activeView.id !== threadId) return;
+            let changed = false;
+            for (const lm of local) {
+                const existing = messageMap[lm.message_id];
+                if (!existing) {
+                    const msg = { ...lm, local: true };
+                    messageMap[lm.message_id] = msg;
+                    allMessages.push(msg);
+                    changed = true;
+                } else if (existing.content !== lm.content) {
+                    // Local plaintext is authoritative: the server copy of an E2E DM
+                    // is ciphertext (stored as a plain string with no e2e flag), so
+                    // it can't be distinguished from plaintext — always prefer ours.
+                    existing.content = lm.content;
+                    existing.e2e = false;
+                    changed = true;
+                }
+            }
+            if (changed) {
+                allMessages.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+                renderMessages();
+            }
+        }
         function deleteMsg(msgId) {
             if (!activeView) return;
             showConfirm("Delete this message?", () => {
@@ -2580,6 +2630,17 @@ import { installFocusTrap } from './focus-trap.js';
                     local: true,
                 });
                 document.getElementById('msg-' + clientMsgId)?.classList.add('msg-pending');
+
+                // Cache the sent DM's plaintext locally so it survives reopen — for
+                // E2E DMs the server only stores ciphertext we can't re-decrypt.
+                if (activeView.type === 'dm' || activeView.type === 'local_dm') {
+                    dmHistorySave({
+                        message_id: clientMsgId, thread_id: activeView.id, from_webid: selfWebId,
+                        from_display_name: localStorage.getItem('proxion_display_name') || '',
+                        content: content, timestamp: new Date().toISOString(),
+                        reply_to_id: payload.reply_to_id || null,
+                    });
+                }
 
                 if (activeView?.type === 'local_room') {
                     podWriteMessageJsonLd(activeView.id, clientMsgId, {
