@@ -899,11 +899,14 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                             unreadCounts[id] = (unreadCounts[id] || 0) + 1;
                             updateSidebarBadge(id);
                         }
-                        // Check for @mention
+                        // Check for @mention. Muted threads stay SILENT — the sound
+                        // was previously played regardless of mute, so a muted thread
+                        // still pinged on mention (the badge + OS notification below
+                        // were already suppressed; the sound was the outlier).
                         const selfName = localStorage.getItem("proxion_display_name") || "";
                         const mentionsMe = (msg.mentions && selfWebId && msg.mentions.includes(selfWebId)) ||
                             (selfName && (msg.content || "").toLowerCase().includes("@" + selfName.toLowerCase()));
-                        if (mentionsMe) {
+                        if (mentionsMe && !mutedThreads.has(id)) {
                             playNotificationSound();
                         }
                         const sender = msg.from_display_name || (msg.from_webid || "").slice(0, 12);
