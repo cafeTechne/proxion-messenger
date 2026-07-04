@@ -45,7 +45,7 @@ import { createPush } from './push.js';
 import { createPairing } from './pairing.js';
 import { inlineNotice, feedEmptyState } from './states.js';
 import { installFocusTrap } from './focus-trap.js';
-import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent } from './dmhistory.js';
+import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread } from './dmhistory.js';
 
         // Modal a11y: focus-restore + Tab-trap for every dialog (observer-based,
         // so it covers all ~20 modals without retrofitting their open/close sites).
@@ -1688,6 +1688,12 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent }
                             if (inp) { inp.disabled = true; inp.placeholder = "This contact has been revoked."; }
                         }
                     })();
+                    // Purge this contact's locally-cached plaintext DMs so they
+                    // don't linger in IndexedDB after the relationship is severed.
+                    if (event.cert_id) {
+                        dmHistoryDeleteThread(event.cert_id);
+                        if (peerDidToCertId && event.peer_did) dmHistoryDeleteThread(event.peer_did);
+                    }
                     showToast("A contact has been revoked.");
                     break;
                 case "relationship_established":
