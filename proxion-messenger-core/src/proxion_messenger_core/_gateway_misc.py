@@ -164,6 +164,15 @@ class MiscHandlerMixin:
         self.blocklist.unblock(webid)
         logger.info(f"Unblocked WebID: {webid}")
 
+    async def _handle_set_thread_mute(self, websocket, data: dict) -> None:
+        """Record a thread mute server-side so OFFLINE push respects it. mute_key is
+        the peer's webid (DM) or room_id (room)."""
+        owner = self._client_webids.get(websocket, "")
+        mute_key = data.get("mute_key", "")
+        if not owner or not mute_key or not self._store:
+            return
+        self._store.set_thread_mute(owner, mute_key, bool(data.get("muted", False)))
+
     async def _handle_get_message(self, websocket, data: dict) -> None:
         message_id = data.get("message_id", "")
         if self._store and message_id:

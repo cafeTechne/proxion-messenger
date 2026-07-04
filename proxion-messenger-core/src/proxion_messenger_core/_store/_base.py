@@ -200,6 +200,17 @@ class _StoreBase(object):
                     PRIMARY KEY (account_did, device_id)
                 );
 
+                -- Server-side thread mute so OFFLINE push respects a muted thread
+                -- (mute is otherwise client-side localStorage the gateway can't see).
+                -- mute_key is the OTHER party's webid for DMs (symmetric across the
+                -- per-side cert_id asymmetry) or the room_id for rooms.
+                CREATE TABLE IF NOT EXISTS thread_mutes (
+                    owner_webid TEXT NOT NULL,
+                    mute_key    TEXT NOT NULL,
+                    updated_at  INTEGER NOT NULL,
+                    PRIMARY KEY (owner_webid, mute_key)
+                );
+
                 CREATE TABLE IF NOT EXISTS pending_relays (
                     id              TEXT PRIMARY KEY,
                     to_webid        TEXT NOT NULL,

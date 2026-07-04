@@ -2846,12 +2846,28 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
             menu.style.left = Math.min(e.clientX, vw - 170) + "px";
             menu.style.top  = Math.min(e.clientY, vh - 110) + "px";
         }
+        // The gateway keys mute by the PEER's webid (DMs) or room_id (rooms) so it
+        // can honor mute for OFFLINE push (client-side mutedThreads is invisible to
+        // it, and per-side cert_ids differ). Resolve that key from a sidebar id.
+        function _serverMuteKey(threadId) {
+            const dm = localDmPeers[threadId];
+            if (dm && dm.peer_webid) return dm.peer_webid;
+            for (const [peerDid, certId] of Object.entries(peerDidToCertId)) {
+                if (certId === threadId) return peerDid;
+            }
+            return threadId; // treat as a room_id
+        }
+        function _sendServerMute(threadId, muted) {
+            if (!socket || !threadId) return;
+            const key = _serverMuteKey(threadId);
+            if (key) socketSendOrQueue({ cmd: "set_thread_mute", mute_key: key, muted });
+        }
         document.getElementById("sctx-mute").onclick = () => {
-            if (_sctxTargetId) muteThread(_sctxTargetId);
+            if (_sctxTargetId) { muteThread(_sctxTargetId); _sendServerMute(_sctxTargetId, true); }
             document.getElementById("sidebar-ctx-menu").style.display = "none";
         };
         document.getElementById("sctx-unmute").onclick = () => {
-            if (_sctxTargetId) unmuteThread(_sctxTargetId);
+            if (_sctxTargetId) { unmuteThread(_sctxTargetId); _sendServerMute(_sctxTargetId, false); }
             document.getElementById("sidebar-ctx-menu").style.display = "none";
         };
         document.getElementById("sctx-mark-read").onclick = () => {

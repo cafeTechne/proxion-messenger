@@ -1099,6 +1099,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_add_reaction(websocket, data)
             elif cmd == "remove_reaction":
                 await self._handle_remove_reaction(websocket, data)
+            elif cmd == "set_thread_mute":
+                await self._handle_set_thread_mute(websocket, data)
             elif cmd == "block":
                 await self._handle_block(websocket, data)
             elif cmd == "unblock":
@@ -1807,6 +1809,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                     continue
                 if self._any_socket(_mid):
                     continue  # already delivered via WebSocket
+                if self._store.is_thread_muted(_mid, room_id):
+                    continue  # member muted this room — no push
                 _subs = self._store.get_push_subscriptions(_mid)
                 for _sub in (_subs or []):
                     try:

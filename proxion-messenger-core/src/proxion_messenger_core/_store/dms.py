@@ -49,6 +49,36 @@ class DmStoreMixin(object):
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def set_thread_mute(self, owner_webid: str, mute_key: str, muted: bool) -> None:
+        """Mute/unmute a thread for a user (server-side, so offline push honors it).
+        mute_key = the peer's webid (DM) or room_id (room)."""
+        with self._conn() as conn:
+            if muted:
+                conn.execute(
+                    "INSERT OR REPLACE INTO thread_mutes (owner_webid, mute_key, updated_at) VALUES (?,?,?)",
+                    (owner_webid, mute_key, int(time.time())),
+                )
+            else:
+                conn.execute(
+                    "DELETE FROM thread_mutes WHERE owner_webid = ? AND mute_key = ?",
+                    (owner_webid, mute_key),
+                )
+
+    def is_thread_muted(self, owner_webid: str, mute_key: str) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM thread_mutes WHERE owner_webid = ? AND mute_key = ?",
+                (owner_webid, mute_key),
+            ).fetchone()
+        return row is not None
+
+    def get_muted_keys(self, owner_webid: str) -> list[str]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT mute_key FROM thread_mutes WHERE owner_webid = ?", (owner_webid,)
+            ).fetchall()
+        return [r[0] for r in rows]
+
     def get_all_dm_threads(self) -> list[dict]:
         """Every DM thread regardless of owner. Callers that used
         get_dm_threads() (no arg) to mean 'all threads' were silently getting

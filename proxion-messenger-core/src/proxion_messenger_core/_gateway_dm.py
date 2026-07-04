@@ -542,8 +542,10 @@ class DmHandlerMixin:
                 except Exception as exc:
                     logger.warning(f"local_dm relay failed: {exc}")
         else:
-            # Attempt WebPush for offline recipients
-            if self._store and target_webid:
+            # Attempt WebPush for offline recipients — unless they muted this peer.
+            if self._store and target_webid and self._store.is_thread_muted(target_webid, sender_webid):
+                _subs = None
+            elif self._store and target_webid:
                 _subs = self._store.get_push_subscriptions(target_webid)
                 if _subs:
                     _vpk = getattr(self, "_vapid_private_pem", None)
