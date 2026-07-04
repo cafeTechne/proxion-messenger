@@ -1,4 +1,4 @@
-const CACHE = "proxion-shell-v67";
+const CACHE = "proxion-shell-v68";
 const SHELL = [
   "/",
   "/index.html",
@@ -108,24 +108,34 @@ self.addEventListener("fetch", (e) => {
 self.addEventListener("push", (event) => {
   let data = { title: "Proxion", body: "New message" };
   try { data = event.data ? event.data.json() : data; } catch (_) {}
+  const threadId = data.thread_id || "";
   event.waitUntil(
     self.registration.showNotification(data.title || "Proxion", {
       body: data.body || "",
-      icon: "/icons/icon-192.svg",
-      badge: "/icons/icon-192.svg",
-      tag: "proxion-msg",
+      // PNG, not SVG — several platforms ignore SVG notification icons.
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-192.png",
+      // Per-thread tag so different conversations don't collapse into one.
+      tag: threadId ? ("proxion-" + threadId) : "proxion-msg",
       renotify: true,
+      data: { thread_id: threadId },
     })
   );
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+  const threadId = (event.notification.data && event.notification.data.thread_id) || "";
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
       const c = clients.find((c) => c.url.includes(self.location.origin) && "focus" in c);
-      if (c) return c.focus();
-      if (self.clients.openWindow) return self.clients.openWindow("/");
+      if (c) {
+        // Focus the open app and tell it which conversation to open.
+        if (threadId) { try { c.postMessage({ type: "navigate-thread", thread_id: threadId }); } catch (_) {} }
+        return c.focus();
+      }
+      // Cold start: carry the thread in the URL so the app opens it on load.
+      if (self.clients.openWindow) return self.clients.openWindow(threadId ? ("/?thread=" + encodeURIComponent(threadId)) : "/");
     })
   );
 });

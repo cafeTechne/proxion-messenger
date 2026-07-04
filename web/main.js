@@ -3765,6 +3765,28 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
 
         showEmptyState();
         setupEventListeners();
+
+        // Web-push notification click → open that conversation. When the app is
+        // already open the SW postMessages us; on cold start it carries ?thread=.
+        if (navigator.serviceWorker) {
+            navigator.serviceWorker.addEventListener('message', (e) => {
+                if (e.data && e.data.type === 'navigate-thread' && e.data.thread_id) {
+                    _navigateToThread(e.data.thread_id);
+                }
+            });
+        }
+        (function _consumePushThreadParam() {
+            let t;
+            try { t = new URLSearchParams(location.search).get('thread'); } catch (_) { return; }
+            if (!t) return;
+            let tries = 0;
+            const tryNav = () => {
+                const sel = 'nav-' + (window.CSS && CSS.escape ? CSS.escape(t) : t);
+                if (document.getElementById(sel)) { _navigateToThread(t); return; }
+                if (++tries < 20) setTimeout(tryNav, 500); // wait for the sidebar to populate
+            };
+            setTimeout(tryNav, 1000);
+        })();
         if (window.__TAURI__?.event?.listen) {
             window.__TAURI__.event.listen("gateway-crashed", () => {
                 showToast("Gateway crashed - please restart the app", "error");
