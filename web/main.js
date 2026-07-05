@@ -276,7 +276,10 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
         // the DI deps below keep working unchanged. soundEnabled (declared later) is
         // read live via the getter — only invoked at notify-time, so no TDZ.
         const { showToast, playNotificationSound, requestNotifPermission, showOsNotification } =
-            createNotifications({ getSoundEnabled: () => soundEnabled });
+            createNotifications({
+                getSoundEnabled: () => soundEnabled,
+                navigateToThread: (id) => _navigateToThread(id),
+            });
         // Media capture (voice messages + screen share). Created before the voice
         // instance because voice's deps reference media.stopScreenShare and
         // media.state.isSharing; media's getVoiceState is a deferred getter, so the

@@ -5,7 +5,7 @@
 // snapshot. The returned object is destructured into same-named bindings in
 // main.js, so existing call sites (showToast(...), playNotificationSound(), ...)
 // keep working unchanged.
-export function createNotifications({ getSoundEnabled }) {
+export function createNotifications({ getSoundEnabled, navigateToThread }) {
 
     // --------------- Toast ---------------
     function showToast(message, type) {
@@ -71,7 +71,12 @@ export function createNotifications({ getSoundEnabled }) {
             body: safeBody,
             tag: threadId,
         });
-        n.onclick = () => { window.focus(); n.close(); };
+        n.onclick = () => {
+            window.focus();
+            // Open the conversation the notification was about (was: focus only).
+            if (threadId && typeof navigateToThread === "function") navigateToThread(threadId);
+            n.close();
+        };
         setTimeout(() => n.close(), 6000);
     }
 
