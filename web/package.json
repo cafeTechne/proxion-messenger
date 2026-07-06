@@ -13,7 +13,8 @@
     "smoke:journey": "node smoke_journey.mjs",
     "smoke:federation": "node smoke_federation.mjs",
     "smoke:pairing": "node smoke_pairing.mjs",
-    "smoke:dmhistory": "node smoke_dm_history.mjs"
+    "smoke:dmhistory": "node smoke_dm_history.mjs",
+    "smoke:multidevice": "node smoke_multidevice_dm.mjs"
   },
   "keywords": [],
   "author": "",

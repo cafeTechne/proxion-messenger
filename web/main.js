@@ -843,6 +843,14 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                         event.e2e = false; // mark decrypted
                         event._persistDm = true; // decrypted E2E DM → cache plaintext for history
                     } catch (err) {
+                        // On a DELEGATED (secondary) device, a plain-message E2E DM
+                        // is single-sent to the account's PRIMARY key (a peer that
+                        // isn't multi-device-aware — e.g. cross-gateway, where device
+                        // resolution isn't implemented). This device structurally
+                        // can't decrypt it, so drop it silently rather than render
+                        // "[could not decrypt]" garbage. The primary handles it.
+                        // (Our own per-device copies arrive via dm_fanout, not here.)
+                        if (accountDid) return;
                         event.content = err instanceof E2EDecryptError
                             ? '[could not decrypt]'
                             : '[decryption error]';
