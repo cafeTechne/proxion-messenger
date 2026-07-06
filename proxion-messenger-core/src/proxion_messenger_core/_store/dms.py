@@ -79,6 +79,46 @@ class DmStoreMixin(object):
             ).fetchall()
         return [r[0] for r in rows]
 
+    # ── Per-owner blocklist (send-path isolation; see PLAN_ROUND_51 §E4) ──
+    def set_block(self, owner_webid: str, blocked_webid: str, blocked: bool) -> None:
+        """Record/clear that owner_webid blocks blocked_webid."""
+        with self._conn() as conn:
+            if blocked:
+                conn.execute(
+                    "INSERT OR REPLACE INTO blocks (owner_webid, blocked_webid, created_at) VALUES (?,?,?)",
+                    (owner_webid, blocked_webid, int(time.time())),
+                )
+            else:
+                conn.execute(
+                    "DELETE FROM blocks WHERE owner_webid = ? AND blocked_webid = ?",
+                    (owner_webid, blocked_webid),
+                )
+
+    def is_blocked_by(self, owner_webid: str, blocked_webid: str) -> bool:
+        """True if owner_webid has blocked blocked_webid."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM blocks WHERE owner_webid = ? AND blocked_webid = ?",
+                (owner_webid, blocked_webid),
+            ).fetchone()
+        return row is not None
+
+    def is_blocked_by_anyone(self, blocked_webid: str) -> bool:
+        """True if ANY owner blocks blocked_webid (keeps the global-file union
+        accurate when one owner unblocks a target another still blocks)."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM blocks WHERE blocked_webid = ? LIMIT 1", (blocked_webid,)
+            ).fetchone()
+        return row is not None
+
+    def get_blocked_by(self, owner_webid: str) -> list[str]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT blocked_webid FROM blocks WHERE owner_webid = ?", (owner_webid,)
+            ).fetchall()
+        return [r[0] for r in rows]
+
     def get_all_dm_threads(self) -> list[dict]:
         """Every DM thread regardless of owner. Callers that used
         get_dm_threads() (no arg) to mean 'all threads' were silently getting

@@ -156,12 +156,27 @@ class MiscHandlerMixin:
 
     async def _handle_block(self, websocket, data: dict) -> None:
         webid = data.get("webid")
+        if not webid:
+            return
+        owner = self._client_webids.get(websocket, "")
+        # Per-owner (send-path isolation) + mirror into the global file so the
+        # not-yet-scoped receive path keeps enforcing (union of all owners).
+        if owner and self._store:
+            self._store.set_block(owner, webid, True)
         self.blocklist.block(webid)
         logger.info(f"Blocked WebID: {webid}")
 
     async def _handle_unblock(self, websocket, data: dict) -> None:
         webid = data.get("webid")
-        self.blocklist.unblock(webid)
+        if not webid:
+            return
+        owner = self._client_webids.get(websocket, "")
+        if owner and self._store:
+            self._store.set_block(owner, webid, False)
+        # Drop from the global file only if no other owner still blocks them,
+        # so the file stays the exact union used by the receive path.
+        if not (self._store and self._store.is_blocked_by_anyone(webid)):
+            self.blocklist.unblock(webid)
         logger.info(f"Unblocked WebID: {webid}")
 
     async def _handle_set_thread_mute(self, websocket, data: dict) -> None:

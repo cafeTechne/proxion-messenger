@@ -211,6 +211,18 @@ class _StoreBase(object):
                     PRIMARY KEY (owner_webid, mute_key)
                 );
 
+                -- Per-owner blocklist: which user (owner_webid) blocked which
+                -- peer (blocked_webid). Replaces the gateway-global file for the
+                -- send path so one user's block no longer silences a peer for
+                -- everyone. The legacy ~/.proxion/blocklist.json is kept as the
+                -- union (receive path) until that path is scoped per-recipient.
+                CREATE TABLE IF NOT EXISTS blocks (
+                    owner_webid   TEXT NOT NULL,
+                    blocked_webid TEXT NOT NULL,
+                    created_at    INTEGER NOT NULL,
+                    PRIMARY KEY (owner_webid, blocked_webid)
+                );
+
                 CREATE TABLE IF NOT EXISTS pending_relays (
                     id              TEXT PRIMARY KEY,
                     to_webid        TEXT NOT NULL,

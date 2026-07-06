@@ -40,8 +40,16 @@ class DmHandlerMixin:
         if cert_id in self.dm_clients:
             cert, client = self.dm_clients[cert_id]
 
-            # Safety Catch: Blocked Recipients
-            if self.blocklist.is_blocked(cert.subject):
+            # Safety Catch: Blocked Recipients. Per-owner (this sender's own
+            # block list) so one user's block doesn't stop another from messaging
+            # the same peer; falls back to the global file when there's no store.
+            _sender_wid = self._client_webids.get(websocket, "")
+            _recipient_blocked = (
+                self._store.is_blocked_by(_sender_wid, cert.subject)
+                if (self._store and _sender_wid)
+                else self.blocklist.is_blocked(cert.subject)
+            )
+            if _recipient_blocked:
                 await websocket.send(json.dumps({"type": "error", "message": "Recipient is blocked"}))
                 return
 
