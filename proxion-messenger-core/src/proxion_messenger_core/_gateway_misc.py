@@ -1869,12 +1869,23 @@ class MiscHandlerMixin:
         device_ws = sess.get("device_ws")
         self._pairing_sessions.pop(code, None)  # single-use
         if device_ws is not None:
+            approved = {
+                "type": "pairing_approved",
+                "delegation_cert": cert,
+                "account_did": owner_webid,
+            }
+            # E5 slice 1: relay the primary's recent DM-history bundle so the new
+            # device starts populated. It rides this authenticated channel; drop
+            # it if oversized (WS max is 4 MiB) so the cert always gets through.
+            _bundle = data.get("history_bundle")
+            if _bundle is not None:
+                try:
+                    if len(json.dumps(_bundle)) <= 1_048_576:
+                        approved["history_bundle"] = _bundle
+                except Exception:
+                    pass
             try:
-                await device_ws.send(json.dumps({
-                    "type": "pairing_approved",
-                    "delegation_cert": cert,
-                    "account_did": owner_webid,
-                }))
+                await device_ws.send(json.dumps(approved))
             except Exception:
                 pass
         await websocket.send(json.dumps({"type": "pairing_approve_ack", "pairing_code": code}))

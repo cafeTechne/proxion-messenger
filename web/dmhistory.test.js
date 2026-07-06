@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   dmHistorySave, dmHistoryLoad, dmHistoryClearAll,
   dmHistorySetEnabled, dmHistoryEnabled, planEviction,
+  dmHistoryExportRecent, dmHistoryImport,
 } from './dmhistory.js';
 
 beforeEach(async () => {
@@ -64,6 +65,50 @@ describe('per-thread retention cap', () => {
     expect(ids.has('m00002')).toBe(false);
     expect(ids.has('m02002')).toBe(true);
   }, 60000);
+});
+
+describe('dmHistoryExportRecent / dmHistoryImport (pairing handoff)', () => {
+  async function seed(thread, n) {
+    for (let i = 0; i < n; i++) {
+      await dmHistorySave({
+        message_id: `${thread}-${i}`, thread_id: thread, content: `${thread} ${i}`,
+        timestamp: new Date(1700000000000 + i * 1000).toISOString(),
+      });
+    }
+  }
+
+  it('caps per thread and keeps the newest', async () => {
+    await seed('t1', 5);
+    const out = await dmHistoryExportRecent(2, 100);
+    const t1 = out.filter((r) => r.thread_id === 't1');
+    expect(t1).toHaveLength(2);
+    expect(t1.map((r) => r.message_id).sort()).toEqual(['t1-3', 't1-4']); // newest two
+  });
+
+  it('caps the total across threads', async () => {
+    await seed('a', 4);
+    await seed('b', 4);
+    const out = await dmHistoryExportRecent(40, 3);
+    expect(out).toHaveLength(3);
+  });
+
+  it('round-trips through export -> clear -> import', async () => {
+    await seed('t', 3);
+    const bundle = await dmHistoryExportRecent(40, 400);
+    await dmHistoryClearAll();
+    expect(await dmHistoryLoad('t')).toHaveLength(0);
+    const n = await dmHistoryImport(bundle);
+    expect(n).toBe(3);
+    const rows = await dmHistoryLoad('t');
+    expect(rows.map((r) => r.content)).toEqual(['t 0', 't 1', 't 2']);
+  });
+
+  it('import is a no-op when history saving is disabled', async () => {
+    const bundle = [{ message_id: 'x', thread_id: 't', content: 'c', timestamp: '2024' }];
+    dmHistorySetEnabled(false);
+    expect(await dmHistoryImport(bundle)).toBe(0);
+    expect(await dmHistoryLoad('t')).toHaveLength(0);
+  });
 });
 
 describe('dmHistoryClearAll', () => {

@@ -102,6 +102,49 @@ async def test_full_pairing_flow_then_delegated_register(gateway, noauth_env):
     assert gateway._session_device_did.get(ws_device) == device_did
 
 
+async def _run_to_approve(gateway, ws_primary, ws_device, account, device_did, extra_approve=None):
+    await gateway.process_command(ws_primary, {"cmd": "pair_start"})
+    code = _last(ws_primary, "pairing_started")["pairing_code"]
+    await gateway.process_command(ws_device, {
+        "cmd": "pair_submit", "pairing_code": code, "device_did": device_did})
+    cert = issue_device_cert(account, device_did)
+    cmd = {"cmd": "pair_approve", "pairing_code": code, "delegation_cert": cert}
+    if extra_approve:
+        cmd.update(extra_approve)
+    await gateway.process_command(ws_primary, cmd)
+    return _last(ws_device, "pairing_approved")
+
+
+@pytest.mark.asyncio
+async def test_pair_approve_relays_history_bundle(gateway, noauth_env):
+    """E5 slice 1: the primary's DM-history bundle rides the pairing_approved."""
+    account = Ed25519PrivateKey.generate()
+    device = Ed25519PrivateKey.generate()
+    ws_primary, ws_device = _mock_ws(), _mock_ws()
+    await _register(gateway, ws_primary, _did(account))
+    bundle = [{"message_id": "m1", "thread_id": "t1", "content": "hi", "timestamp": "2024-01-01"}]
+    approved = await _run_to_approve(gateway, ws_primary, ws_device, account, _did(device),
+                                     extra_approve={"history_bundle": bundle})
+    assert approved is not None
+    assert approved.get("history_bundle") == bundle
+
+
+@pytest.mark.asyncio
+async def test_pair_approve_drops_oversized_history_bundle(gateway, noauth_env):
+    """An oversized bundle must be dropped so the cert still gets through."""
+    account = Ed25519PrivateKey.generate()
+    device = Ed25519PrivateKey.generate()
+    ws_primary, ws_device = _mock_ws(), _mock_ws()
+    await _register(gateway, ws_primary, _did(account))
+    huge = [{"message_id": f"m{i}", "thread_id": "t", "content": "x" * 1024,
+             "timestamp": "2024"} for i in range(2000)]  # > 1 MiB
+    approved = await _run_to_approve(gateway, ws_primary, ws_device, account, _did(device),
+                                     extra_approve={"history_bundle": huge})
+    assert approved is not None
+    assert approved["delegation_cert"] is not None      # cert still delivered
+    assert "history_bundle" not in approved             # oversized bundle dropped
+
+
 @pytest.mark.asyncio
 async def test_pair_submit_unknown_code(gateway, noauth_env):
     ws_device = _mock_ws()

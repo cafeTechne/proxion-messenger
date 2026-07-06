@@ -15,6 +15,10 @@ import { issueDeviceCert } from './device-cert.js';
 export function createPairing({
     getSocket, getClientDid, getIdentityPrivKey, getGatewayUrl,
     showToast, refreshDevices,
+    // E5 slice 1: hand recent DM history to the new device over the pairing
+    // channel. getHistoryBundle (primary) returns an array of plaintext records;
+    // importHistoryBundle (new device) stores them before reload. Both optional.
+    getHistoryBundle, importHistoryBundle,
 }) {
     // active pairing context: primary {code, deviceDid} | new device {asNew, code}
     const state = { active: null };
@@ -73,8 +77,17 @@ export function createPairing({
             showToast('Could not sign device cert.', 'error');
             return;
         }
+        // Bundle recent DM history (best-effort, bounded) so the new device
+        // starts populated. The gateway relays it on the same authenticated
+        // channel as the cert; oversized bundles are dropped server-side so the
+        // cert always gets through.
+        let historyBundle = null;
+        if (getHistoryBundle) {
+            try { historyBundle = await getHistoryBundle(); } catch (e) { historyBundle = null; }
+        }
         socket.send(JSON.stringify({
             cmd: 'pair_approve', pairing_code: state.active.code, delegation_cert: cert,
+            history_bundle: historyBundle || undefined,
         }));
         _text('device-link-status', 'Approving…');
         _hide('device-link-approve-row');
@@ -113,10 +126,15 @@ export function createPairing({
         _text('pair-device-safety', ev.safety_code || '');
     }
 
-    function _onApproved(ev) {
+    async function _onApproved(ev) {
         try {
             localStorage.setItem('proxion_delegation_cert', JSON.stringify(ev.delegation_cert));
         } catch (e) { /* storage full — cert lost, user retries */ }
+        // Import the handed-over DM history (if any) BEFORE reload — it persists
+        // in IndexedDB across the reload. Best-effort; never blocks linking.
+        if (ev.history_bundle && importHistoryBundle) {
+            try { await importHistoryBundle(ev.history_bundle); } catch (e) { /* ignore */ }
+        }
         _text('pair-device-status', 'Linked! Reloading…');
         _text('pair-device-safety', '');
         showToast('This device is now linked.', 'success');

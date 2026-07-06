@@ -183,6 +183,51 @@ export async function dmHistoryDeleteThread(threadId) {
     } catch (_) { /* ignore */ }
 }
 
+// Export the most recent messages across all threads, for handing to a newly
+// paired device over the (safety-code-authenticated) pairing channel so it
+// starts with history instead of a blank slate. Bounded so it fits one relay
+// message. Returns a plain array of records (newest-biased, chronological).
+export async function dmHistoryExportRecent(maxPerThread = 40, maxTotal = 400) {
+    try {
+        const db = await _open();
+        const rows = await new Promise((resolve) => {
+            const out = [];
+            const tx = db.transaction(STORE, 'readonly');
+            const req = tx.objectStore(STORE).openCursor();
+            req.onsuccess = (e) => { const c = e.target.result; if (c) { out.push(c.value); c.continue(); } else resolve(out); };
+            req.onerror = () => resolve(out);
+        });
+        const byThread = new Map();
+        for (const r of rows) {
+            const arr = byThread.get(r.thread_id) || [];
+            arr.push(r); byThread.set(r.thread_id, arr);
+        }
+        let picked = [];
+        for (const arr of byThread.values()) {
+            arr.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+            picked = picked.concat(arr.slice(-maxPerThread));  // newest per thread
+        }
+        picked.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+        return picked.slice(-maxTotal);  // newest overall if still over budget
+    } catch (_) {
+        return [];
+    }
+}
+
+// Import records handed over at pairing time. Honors the enable switch and the
+// per-thread cap (reuses dmHistorySave). Returns the count imported.
+export async function dmHistoryImport(records) {
+    if (!_enabled) return 0;
+    if (!Array.isArray(records) || !records.length) return 0;
+    let n = 0;
+    for (const r of records) {
+        if (!r || !r.message_id || !r.thread_id) continue;
+        await dmHistorySave({ ...r, e2e: false });
+        n++;
+    }
+    return n;
+}
+
 // Update stored content (on edit).
 export async function dmHistoryUpdateContent(messageId, newContent) {
     if (!messageId) return;

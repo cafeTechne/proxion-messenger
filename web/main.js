@@ -45,7 +45,7 @@ import { createPush } from './push.js';
 import { createPairing } from './pairing.js';
 import { inlineNotice, feedEmptyState } from './states.js';
 import { installFocusTrap } from './focus-trap.js';
-import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread, dmHistorySetEnabled, dmHistoryClearAll } from './dmhistory.js';
+import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport } from './dmhistory.js';
 
         // Modal a11y: focus-restore + Tab-trap for every dialog (observer-based,
         // so it covers all ~20 modals without retrofitting their open/close sites).
@@ -451,6 +451,8 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
             getGatewayUrl: () => localStorage.getItem('proxion_gateway_url') || WS_URL,
             showToast,
             refreshDevices: () => { if (socket) socket.send(JSON.stringify({ cmd: 'list_devices' })); },
+            getHistoryBundle: () => dmHistoryExportRecent(),
+            importHistoryBundle: (records) => dmHistoryImport(records),
         });
         let roomCreatorOf = new Set(); // room_ids this user owns
         // Render-cursor state (date divider, scroll-unread counter, older-history
