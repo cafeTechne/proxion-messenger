@@ -330,6 +330,18 @@ class AuthHandlerMixin:
                         # peers on the single-send path would then encrypt to the
                         # last-registered device — the primary couldn't decrypt.
                         self._store.save_device_e2e_key(identity, _dev_id, x25519_pub)
+                        # A newly-linked device changes the account's device roster.
+                        # Tell the account's OTHER live sessions so they refresh
+                        # their fanout key cache and self-sync to this device (E5
+                        # slice 2) — otherwise the primary keeps the roster it
+                        # fetched on connect, before this device existed.
+                        _roster_evt = json.dumps({"type": "device_roster_changed"})
+                        for _peer_ws in list(self._sockets_for(identity)):
+                            if _peer_ws is not websocket:
+                                try:
+                                    await _peer_ws.send(_roster_evt)
+                                except Exception:
+                                    pass
 
                 # Write operator profile to pod (fire-and-forget). A delegated
                 # device must not publish its device key as the account's profile

@@ -450,7 +450,15 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
             getIdentityPrivKey: () => _identityPrivKey,
             getGatewayUrl: () => localStorage.getItem('proxion_gateway_url') || WS_URL,
             showToast,
-            refreshDevices: () => { if (socket) socket.send(JSON.stringify({ cmd: 'list_devices' })); },
+            refreshDevices: () => {
+                if (!socket) return;
+                socket.send(JSON.stringify({ cmd: 'list_devices' }));   // Linked-Devices UI
+                // Refresh our own device-key cache so a JUST-linked device is
+                // included in sender self-sync fanout (E5 slice 2). Without this
+                // the primary keeps the stale list it fetched on connect (before
+                // the new device existed) and never self-syncs to it.
+                socket.send(JSON.stringify({ cmd: 'get_peer_device_keys', peer_webid: selfWebId }));
+            },
             getHistoryBundle: () => dmHistoryExportRecent(),
             importHistoryBundle: (records) => dmHistoryImport(records),
         });
@@ -1893,6 +1901,11 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                     // Multi-device: cache a peer's per-device E2E keys for DM fanout.
                     _peerDeviceKeys[event.peer_webid] = event.devices || [];
                     break;
+                case "device_roster_changed":
+                    // A device just linked/unlinked to our account — refresh our own
+                    // device-key cache so sends self-sync to it (E5 slice 2).
+                    if (socket) socket.send(JSON.stringify({ cmd: 'get_peer_device_keys', peer_webid: selfWebId }));
+                    break;
                 case "send_dm_fanout_ack":
                     // Fanout has no self-echo; clear the optimistic pending state on ack.
                     document.getElementById('msg-' + event.message_id)?.classList.remove('msg-pending');
@@ -2560,13 +2573,10 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
         // Returns true if it handled the send, false → normal single send.
         async function _tryDmFanout(peerAccount, plaintext, clientMsgId, replyToId, threadId) {
             const peerDevs = _peerDeviceKeys[peerAccount] || [];
-            // Only fan out when the PEER actually has multiple devices — that's the
-            // case the normal single-send path can't handle. Keeping single-device
-            // peers on send_dm preserves DM history (save_message) + pod write-through
-            // and the existing echo-based sync to our own other devices.
-            if (peerDevs.length < 2) return false;
-            // Our own other devices (exclude the one we're sending from) ride along
-            // so a conversation with a multi-device peer stays in sync across ours.
+            // Our own other devices (exclude the one we're sending from) — a copy
+            // rides along so a conversation stays in sync across all of our devices
+            // (E5 slice 2). These are always same-gateway (our own account), so the
+            // device-key resolution works even when the peer is on another gateway.
             const ownDevs = (_peerDeviceKeys[selfWebId] || []).filter(
                 d => d.device_id && d.device_id !== clientDid);
             const myPub = myX25519PubB64u();
@@ -2592,11 +2602,24 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                 if (replyToId) entry.reply_to_id = replyToId;
                 fanout.push({ to_webid: account, to_device_id: dev.device_id, payload: entry });
             };
-            for (const d of peerDevs) await addEntry(peerAccount, d);
-            for (const d of ownDevs) await addEntry(selfWebId, d);
-            if (!fanout.length) return false;
-            socketSendOrQueue({ cmd: 'send_dm_fanout', message_id: clientMsgId, fanout });
-            return true;
+            // Multi-device PEER: the single-send path can't reach every peer device,
+            // so fan out to the peer's devices AND ours in one go, and we're done.
+            if (peerDevs.length >= 2) {
+                for (const d of peerDevs) await addEntry(peerAccount, d);
+                for (const d of ownDevs) await addEntry(selfWebId, d);
+                if (!fanout.length) return false;
+                socketSendOrQueue({ cmd: 'send_dm_fanout', message_id: clientMsgId, fanout });
+                return true;
+            }
+            // Single-device peer: keep the normal send (send_dm/local_dm handles the
+            // peer + DM history + pod write-through — caller sends it when we return
+            // false), but STILL mirror a copy to our own other devices so what we
+            // just sent shows up there too.
+            if (ownDevs.length) {
+                for (const d of ownDevs) await addEntry(selfWebId, d);
+                if (fanout.length) socketSendOrQueue({ cmd: 'send_dm_fanout', message_id: clientMsgId, fanout });
+            }
+            return false;
         }
 
         document.getElementById("message-form").onsubmit = async (e) => {

@@ -7,7 +7,9 @@
 //   1. Pairing links A-device to account A (delegation cert for A's account).
 //   2. The cross-gateway E2E DM from B reaches AND decrypts on A-primary.
 //   3. A-device DEGRADES GRACEFULLY: it does NOT render "[could not decrypt]".
-//   4. After reloading, the DM is still readable plaintext on A-primary (dmhistory).
+//   4. SENDER SELF-SYNC (E5 slice 2): a message A-primary SENDS also appears on
+//      A-device (same-gateway self-fanout, so it works even though B is remote).
+//   5. After reloading, the DM is still readable plaintext on A-primary (dmhistory).
 //
 // Scope note: CROSS-GATEWAY multi-device fanout is not implemented — a peer on
 // another gateway can't resolve A's per-device keys, so it single-sends to the
@@ -40,7 +42,8 @@ if (!CHROME) { console.error('No Chrome/Edge found; set PROXION_CHROME.'); proce
 
 const REPO = resolve(process.cwd(), '..');
 const WEB = resolve(REPO, 'web');
-const MSG = 'mddm-' + Math.random().toString(36).slice(2, 7);
+const MSG = 'mddm-' + Math.random().toString(36).slice(2, 7);   // B -> A
+const REPLY = 'mdrep-' + Math.random().toString(36).slice(2, 7); // A-primary -> B (self-syncs to A-device)
 
 const freePort = () => new Promise((res, rej) => {
   const s = createServer();
@@ -224,6 +227,47 @@ try {
   }
   if (process.exitCode) throw new Error('stop');
 
+  // ── E5 slice 2: A-primary SENDS a DM to B; it must self-sync to A-device ──
+  // (Self-sync targets our own account on our own gateway, so it works even
+  // though B — the peer — is single-device on another gateway.)
+  step = 'a-primary-send-reply';
+  await ap.focus('#message-input');
+  await ap.type('#message-input', REPLY);
+  await ap.keyboard.press('Enter');
+
+  // Informational: whether the reply reaches B depends on the thread the inbound
+  // DM was filed under (a pre-existing cross-gateway receive-then-reply quirk,
+  // separate from self-sync). Note it but don't gate E5 slice 2 on it.
+  await sleep(3000);
+  const bGotReply = await b.evaluate((t) => (document.getElementById('message-feed')?.textContent || '').includes(t), REPLY);
+  if (!bGotReply) console.error(`  · note: A-primary's reply did not reach B (cross-gateway receive-then-reply thread quirk; separate finding)`);
+
+  // ── E5 slice 2 assertion: A-primary's SENT message self-synced to A-device.
+  // Check A-device's local plaintext store (robust to which thread is active).
+  step = 'a-device-self-sync';
+  const adGotReply = await ad.evaluate(async (t) => {
+    const openIdb = () => new Promise((res) => {
+      const r = indexedDB.open('proxion-dm-history', 1);
+      r.onsuccess = (e) => res(e.target.result); r.onerror = () => res(null);
+    });
+    const db = await openIdb();
+    if (!db || !db.objectStoreNames.contains('messages')) return false;
+    const rows = await new Promise((res) => {
+      const out = []; const tx = db.transaction('messages', 'readonly');
+      const req = tx.objectStore('messages').openCursor();
+      req.onsuccess = (e) => { const c = e.target.result; if (c) { out.push(c.value); c.continue(); } else res(out); };
+      req.onerror = () => res(out);
+    });
+    return rows.some((r) => (r.content || '').includes(t));
+  }, REPLY).catch(() => false);
+  // Also accept it if it rendered in the active feed.
+  const adFeedReply = await ad.evaluate((t) => (document.getElementById('message-feed')?.textContent || '').includes(t), REPLY);
+  if (!adGotReply && !adFeedReply) {
+    fail('A-device did NOT receive A-primary\'s sent message via self-sync (not in feed or local store)');
+    console.error(`  · A-device console tail:\n${ad._console.slice(-8).map(l => '    ' + l).join('\n')}`);
+  }
+  if (process.exitCode) throw new Error('stop');
+
   // ── Reload A-primary; the DM must remain readable plaintext (dmhistory) ──
   step = 'reload-a-primary';
   await ap.reload({ waitUntil: 'load', timeout: 20000 });
@@ -246,7 +290,7 @@ try {
   if (!process.exitCode) {
     console.log(`  ✓ multi-device DM OK — A-device paired to account A; B's cross-gateway E2E DM`);
     console.log(`    decrypted on A-primary + survived reload; A-device degraded gracefully`);
-    console.log(`    (no "[could not decrypt]") for the cross-gateway copy it can't read.`);
+    console.log(`    (no "[could not decrypt]"); and A-primary's SENT message self-synced to A-device.`);
   }
 } catch (e) {
   if (e.message !== 'stop') console.error(`  ✗ [${step}] threw: ${e.message}`);

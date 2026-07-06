@@ -116,6 +116,34 @@ async def _run_to_approve(gateway, ws_primary, ws_device, account, device_did, e
 
 
 @pytest.mark.asyncio
+async def test_delegated_register_notifies_account_of_roster_change(gateway, noauth_env):
+    """When a delegated device registers with its E2E key, the account's OTHER
+    sessions get device_roster_changed so they refresh their fanout cache and
+    self-sync to the new device (E5 slice 2)."""
+    account = Ed25519PrivateKey.generate()
+    device = Ed25519PrivateKey.generate()
+    account_did, device_did = _did(account), _did(device)
+
+    ws_primary, ws_device = _mock_ws(), _mock_ws()
+    await _register(gateway, ws_primary, account_did)  # primary session live
+    cert = issue_device_cert(account, device_did)
+
+    ws_primary.send.reset_mock()
+    # Delegated device registers AS the account, publishing its own E2E key.
+    gateway.clients.add(ws_device)
+    await gateway.process_command(ws_device, {
+        "cmd": "register", "did": device_did, "delegation_cert": cert,
+        "display_name": "Phone", "x25519_pub": "BdeviceKeyB64u",
+    })
+    assert gateway._client_webids.get(ws_device) == account_did
+    assert _last(ws_primary, "device_roster_changed") is not None, \
+        "the primary must be told the roster changed so it self-syncs to the new device"
+    # The new device's key is now discoverable for the account.
+    ids = [d.get("device_id") for d in gateway._store.list_device_e2e_keys(account_did)]
+    assert device_did in ids
+
+
+@pytest.mark.asyncio
 async def test_pair_approve_relays_history_bundle(gateway, noauth_env):
     """E5 slice 1: the primary's DM-history bundle rides the pairing_approved."""
     account = Ed25519PrivateKey.generate()
