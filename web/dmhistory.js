@@ -16,6 +16,18 @@ const DB_NAME = 'proxion-dm-history';
 const STORE = 'messages';
 let _dbPromise = null;
 
+// Retention: keep at most this many messages per thread on this device. Oldest
+// beyond the cap are evicted on write so a long-lived device can't grow without
+// bound. High enough that normal history is fully retained.
+const MAX_PER_THREAD = 2000;
+
+// User switch: "save DM history on this device". Default on; when off,
+// dmHistorySave no-ops (nothing new is cached) but existing history still loads
+// until explicitly cleared. main.js sets this from localStorage at startup.
+let _enabled = true;
+export function dmHistorySetEnabled(v) { _enabled = !!v; }
+export function dmHistoryEnabled() { return _enabled; }
+
 function _open() {
     if (_dbPromise) return _dbPromise;
     _dbPromise = new Promise((resolve, reject) => {
@@ -38,6 +50,7 @@ function _open() {
 // content (plaintext), from_webid, timestamp; reply_to_id/from_display_name
 // optional. Silently no-ops if the record isn't a usable DM message or IDB fails.
 export async function dmHistorySave(msg) {
+    if (!_enabled) return;
     if (!msg || !msg.message_id || !msg.thread_id) return;
     // Never persist ciphertext or undecryptable placeholders.
     if (msg.e2e) return;
@@ -58,7 +71,58 @@ export async function dmHistorySave(msg) {
             tx.oncomplete = resolve;
             tx.onerror = () => reject(tx.error);
         });
+        await _enforceCap(db, msg.thread_id);
     } catch (_) { /* best-effort cache */ }
+}
+
+// Given all rows for a thread and a cap, return the message_ids to evict
+// (the oldest, keeping the newest `cap`). Pure — unit-tested directly.
+export function planEviction(rows, cap = MAX_PER_THREAD) {
+    if (!Array.isArray(rows) || rows.length <= cap) return [];
+    const sorted = rows.slice().sort((a, b) =>
+        (a.timestamp || '').localeCompare(b.timestamp || ''));
+    return sorted.slice(0, rows.length - cap).map((r) => r.message_id);
+}
+
+// Trim a thread to MAX_PER_THREAD. Uses a cheap index count first so the O(n)
+// scan+delete only runs when actually over the cap.
+async function _enforceCap(db, threadId) {
+    const count = await new Promise((resolve) => {
+        const tx = db.transaction(STORE, 'readonly');
+        const req = tx.objectStore(STORE).index('thread_id').count(IDBKeyRange.only(threadId));
+        req.onsuccess = () => resolve(req.result || 0);
+        req.onerror = () => resolve(0);
+    });
+    if (count <= MAX_PER_THREAD) return;
+    const rows = await new Promise((resolve) => {
+        const out = [];
+        const tx = db.transaction(STORE, 'readonly');
+        const req = tx.objectStore(STORE).index('thread_id').openCursor(IDBKeyRange.only(threadId));
+        req.onsuccess = (e) => { const c = e.target.result; if (c) { out.push(c.value); c.continue(); } else resolve(out); };
+        req.onerror = () => resolve(out);
+    });
+    const doomed = planEviction(rows, MAX_PER_THREAD);
+    if (!doomed.length) return;
+    await new Promise((resolve) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        const os = tx.objectStore(STORE);
+        doomed.forEach((id) => os.delete(id));
+        tx.oncomplete = resolve;
+        tx.onerror = resolve;
+    });
+}
+
+// Wipe the entire local DM-history store (Settings → "Clear DM history").
+export async function dmHistoryClearAll() {
+    try {
+        const db = await _open();
+        await new Promise((resolve) => {
+            const tx = db.transaction(STORE, 'readwrite');
+            tx.objectStore(STORE).clear();
+            tx.oncomplete = resolve;
+            tx.onerror = resolve;
+        });
+    } catch (_) { /* ignore */ }
 }
 
 // Return stored plaintext messages for a thread, oldest-first. [] on any failure.

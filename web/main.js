@@ -45,7 +45,7 @@ import { createPush } from './push.js';
 import { createPairing } from './pairing.js';
 import { inlineNotice, feedEmptyState } from './states.js';
 import { installFocusTrap } from './focus-trap.js';
-import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread } from './dmhistory.js';
+import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread, dmHistorySetEnabled, dmHistoryClearAll } from './dmhistory.js';
 
         // Modal a11y: focus-restore + Tab-trap for every dialog (observer-based,
         // so it covers all ~20 modals without retrofitting their open/close sites).
@@ -278,6 +278,7 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
         const { showToast, playNotificationSound, requestNotifPermission, showOsNotification } =
             createNotifications({
                 getSoundEnabled: () => soundEnabled,
+                getDesktopNotifEnabled: () => desktopNotifEnabled,
                 navigateToThread: (id) => _navigateToThread(id),
             });
         // Media capture (voice messages + screen share). Created before the voice
@@ -472,6 +473,9 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
 
         const _SVG_BELL = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"/></svg>';
         const _SVG_BELL_SLASH = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M9.143 17.082a24.248 24.248 0 0 0 3.844.148m-3.844-.148a23.856 23.856 0 0 1-5.455-1.31 8.964 8.964 0 0 0 2.3-5.542m3.155 6.852a3 3 0 0 0 5.667 1.97m1.965-2.277L21 21m-4.225-4.225a23.81 23.81 0 0 0 3.536-1.003A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6.53 6.53m10.245 10.245L6.53 6.53M3 3l3.53 3.53"/></svg>';
+        // Desktop-notification toggle icons (a monitor; slashed when disabled).
+        const _SVG_DESKTOP = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25"/></svg>';
+        const _SVG_DESKTOP_SLASH = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M3 3l18 18M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-.53 1.44M18.75 17.25H5.25A2.25 2.25 0 0 1 3 15V5.25c0-.35.08-.682.22-.978"/></svg>';
         let soundEnabled = localStorage.getItem("soundEnabled") === "true";
         const soundBtn = document.getElementById("sound-toggle");
         soundBtn.innerHTML = soundEnabled ? _SVG_BELL : _SVG_BELL_SLASH;
@@ -480,6 +484,46 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
             localStorage.setItem("soundEnabled", soundEnabled);
             soundBtn.innerHTML = soundEnabled ? _SVG_BELL : _SVG_BELL_SLASH;
         };
+
+        // Desktop/OS notifications are INDEPENDENT of the sound chime (was
+        // conflated: muting the chime also silenced visible/push notifications).
+        // Default on so first-run users still see notifications.
+        let desktopNotifEnabled = localStorage.getItem("desktopNotifEnabled") !== "false";
+        const desktopNotifBtn = document.getElementById("desktop-notif-toggle");
+        if (desktopNotifBtn) {
+            const _renderDesktopBtn = () => {
+                desktopNotifBtn.innerHTML = desktopNotifEnabled ? _SVG_DESKTOP : _SVG_DESKTOP_SLASH;
+                desktopNotifBtn.setAttribute("aria-pressed", String(desktopNotifEnabled));
+            };
+            _renderDesktopBtn();
+            desktopNotifBtn.onclick = () => {
+                desktopNotifEnabled = !desktopNotifEnabled;
+                localStorage.setItem("desktopNotifEnabled", desktopNotifEnabled);
+                _renderDesktopBtn();
+                if (desktopNotifEnabled) requestNotifPermission();
+            };
+        }
+
+        // DM history is stored locally (see dmhistory.js). Honor the user's
+        // "save DM history" preference and expose a "clear now" control.
+        const _dmHistoryPref = localStorage.getItem("dmHistoryEnabled") !== "false";
+        dmHistorySetEnabled(_dmHistoryPref);
+        const _dmHistToggle = document.getElementById("settings-dm-history-toggle");
+        if (_dmHistToggle) {
+            _dmHistToggle.checked = _dmHistoryPref;
+            _dmHistToggle.onchange = () => {
+                localStorage.setItem("dmHistoryEnabled", _dmHistToggle.checked);
+                dmHistorySetEnabled(_dmHistToggle.checked);
+            };
+        }
+        const _clearDmHistBtn = document.getElementById("settings-clear-dm-history-btn");
+        if (_clearDmHistBtn) {
+            _clearDmHistBtn.onclick = async () => {
+                if (!confirm("Clear all locally-saved DM history on this device? Encrypted DMs will no longer reload after this.")) return;
+                await dmHistoryClearAll();
+                showToast("DM history cleared on this device", "success");
+            };
+        }
 
         // playNotificationSound / requestNotifPermission / showOsNotification:
         // moved to notifications.js (createNotifications).

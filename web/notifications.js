@@ -5,7 +5,11 @@
 // snapshot. The returned object is destructured into same-named bindings in
 // main.js, so existing call sites (showToast(...), playNotificationSound(), ...)
 // keep working unchanged.
-export function createNotifications({ getSoundEnabled, navigateToThread }) {
+export function createNotifications({ getSoundEnabled, getDesktopNotifEnabled, navigateToThread }) {
+    // Desktop notifications default to enabled if the host doesn't inject a
+    // getter (keeps older call sites / tests working). They are INDEPENDENT of
+    // the sound chime — muting sound must not silence visible notifications.
+    const desktopOn = () => (typeof getDesktopNotifEnabled === "function" ? getDesktopNotifEnabled() : true);
 
     // --------------- Toast ---------------
     function showToast(message, type) {
@@ -59,6 +63,7 @@ export function createNotifications({ getSoundEnabled, navigateToThread }) {
     function showOsNotification(title, body, threadId) {
         const safeTitle = String(title || "").slice(0, 80);
         const safeBody = String(body || "").slice(0, 80);
+        if (!desktopOn()) return;
         if (window.__TAURI__?.invoke) {
             window.__TAURI__.invoke("show_notification", { title: safeTitle, body: safeBody }).catch(() => {});
             return;
@@ -66,7 +71,6 @@ export function createNotifications({ getSoundEnabled, navigateToThread }) {
         if (!("Notification" in window)) return;
         if (Notification.permission !== "granted") return;
         if (document.hasFocus()) return;
-        if (!getSoundEnabled()) return;
         const n = new Notification(safeTitle, {
             body: safeBody,
             tag: threadId,

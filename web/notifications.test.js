@@ -18,8 +18,11 @@ beforeEach(() => {
   vi.useFakeTimers();
 });
 
-function make(soundEnabled = true) {
-  return createNotifications({ getSoundEnabled: () => soundEnabled });
+function make(soundEnabled = true, desktopNotifEnabled = true) {
+  return createNotifications({
+    getSoundEnabled: () => soundEnabled,
+    getDesktopNotifEnabled: () => desktopNotifEnabled,
+  });
 }
 
 describe('showToast', () => {
@@ -49,13 +52,28 @@ describe('showOsNotification', () => {
     const { showOsNotification } = make();
     expect(() => showOsNotification('a', 'b', 'c')).not.toThrow();
   });
-  it('respects the soundEnabled gate for web notifications', () => {
+  it('shows a web notification when sound is OFF but desktop notifications are ON', () => {
+    const ctor = vi.fn(function () { this.close = () => {}; });
+    global.Notification = Object.assign(ctor, { permission: 'granted' });
+    global.window = { Notification: global.Notification };
+    const { showOsNotification } = make(false, true); // sound off, desktop on
+    showOsNotification('a', 'b', 'c');
+    expect(ctor).toHaveBeenCalled(); // no longer conflated with the sound setting
+  });
+  it('suppresses web notifications when desktop notifications are OFF', () => {
     const ctor = vi.fn();
     global.Notification = Object.assign(ctor, { permission: 'granted' });
     global.window = { Notification: global.Notification };
-    const { showOsNotification } = make(false); // sound off → suppressed
+    const { showOsNotification } = make(true, false); // sound on, desktop off
     showOsNotification('a', 'b', 'c');
     expect(ctor).not.toHaveBeenCalled();
+  });
+  it('suppresses the Tauri bridge when desktop notifications are OFF', () => {
+    const invoke = vi.fn(() => Promise.resolve());
+    global.window = { __TAURI__: { invoke } };
+    const { showOsNotification } = make(true, false);
+    showOsNotification('Title', 'Body', 't1');
+    expect(invoke).not.toHaveBeenCalled();
   });
 });
 

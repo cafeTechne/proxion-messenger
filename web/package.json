@@ -30,6 +30,7 @@
     "@inrupt/solid-client-access-grants": "^4.0.0",
     "@inrupt/solid-client-authn-node": "^2.0.0",
     "eslint": "^9.39.4",
+    "fake-indexeddb": "^6.2.5",
     "globals": "^17.6.0",
     "pixelmatch": "^7.2.0",
     "pngjs": "^7.0.0",
