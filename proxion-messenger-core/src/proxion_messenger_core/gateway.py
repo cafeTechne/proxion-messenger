@@ -1601,11 +1601,20 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         peer_did = cert_dict.get("peer_did", "")
         self._store.mark_revoked(cert_id, peer_did)
         self._revoked_dids.add(peer_did)
-        await self.broadcast({
+        # Scope to the revoker's OWN identity (all their devices, so each purges
+        # the contact + cached DM plaintext) rather than telling every session on
+        # the gateway that this user revoked this peer (a relationship-metadata
+        # leak on a shared gateway). Fall back to broadcast if the caller isn't
+        # identified — single-user-safe (their own sessions only).
+        _revoke_event = {
             "type": "contact_revoked",
             "cert_id": cert_id,
             "peer_did": peer_did,
-        })
+        }
+        if caller_webid:
+            await self._send_to_identity(caller_webid, json.dumps(_revoke_event))
+        else:
+            await self.broadcast(_revoke_event)
 
     def _build_discovery_data(self) -> dict:
         """Build the /.well-known/proxion discovery payload."""

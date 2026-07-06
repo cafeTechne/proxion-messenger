@@ -305,7 +305,10 @@ class HttpEndpointsMixin:
             from .federation import RelationshipCertificate as RC
             self.dm_clients[cert.certificate_id] = (cert, pod_client)
 
-        await self.broadcast({
+        # Scope contact_added to the INVITER (the local user whose invite was
+        # accepted) rather than broadcasting the new cert + peer E2E key to every
+        # session on the gateway. The pending invite's issuer.did is that user.
+        _contact_event = {
             "type": "contact_added",
             "certificate": cert.to_dict(),
             "peer_did": acceptor_did,
@@ -314,7 +317,26 @@ class HttpEndpointsMixin:
             # right key for the first outgoing DM, overriding the gateway key cached at
             # discover time. (The sealed-relay layer still uses the gateway store key.)
             "x25519_pub": data.get("from_e2e_key") or None,
-        })
+        }
+        _inviter_did = ""
+        if invitation_id and self._store:
+            _pend = self._store.get_pending_invite(invitation_id)
+            if _pend:
+                _inviter_did = (_pend.get("issuer") or {}).get("did") or ""
+        # Only narrow when the inviter is confidently matched to live sockets;
+        # otherwise fall back to broadcast so the "new contact" event is never
+        # silently dropped (e.g. inviter offline, or an identity/delegation
+        # mismatch we can't resolve here). Broadcast is single-user-safe.
+        _targets = self._sockets_for(_inviter_did) if _inviter_did else []
+        if _targets:
+            _payload = json.dumps(_contact_event)
+            for _ws in _targets:
+                try:
+                    await _ws.send(_payload)
+                except Exception:
+                    pass
+        else:
+            await self.broadcast(_contact_event)
         # Persist the acceptor's browser E2E key (separate from the gateway store key)
         # so it survives a contacts-list refresh and isn't clobbered by the store key.
         _acc_e2e = data.get("from_e2e_key")
