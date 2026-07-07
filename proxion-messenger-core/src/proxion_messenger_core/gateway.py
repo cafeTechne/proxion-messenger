@@ -1850,6 +1850,37 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
         return "200 OK", '{"status":"delivered"}' if delivered else '{"status":"offline"}'
 
+    async def _handle_dm_delete_relay(self, data: dict) -> tuple[str, str]:
+        """Inbound relayed DM delete-for-everyone from a peer gateway. Remove our
+        stored copy (only if the peer authored it) and deliver message_deleted to
+        the local recipient, keyed by OUR cert_id for the relationship."""
+        from_webid = data.get("from_webid", "")
+        to_webid   = data.get("to_webid", "")
+        message_id = data.get("message_id", "")
+        if not all([from_webid, to_webid, message_id]):
+            return "400 Bad Request", '{"error":"missing_delete_fields"}'
+        cert_dict = self._store.get_relationship_by_did(from_webid) if self._store else None
+        if not cert_dict:
+            return "200 OK", '{"status":"received"}'
+        if from_webid in getattr(self, "_revoked_dids", set()) or self.blocklist.is_blocked(from_webid):
+            return "200 OK", '{"status":"received"}'
+        our_cert_id = cert_dict.get("certificate_id") or cert_dict.get("id") or ""
+        # Only let a peer delete a message THEY authored (if we have it stored).
+        if self._store:
+            try:
+                _sender = self._store.get_message_sender(message_id)
+                if _sender and _sender != from_webid:
+                    return "200 OK", '{"status":"received"}'
+                self._store.delete_message(message_id)
+            except Exception:
+                pass
+        await self._send_to_identity(to_webid, json.dumps({
+            "type": "message_deleted",
+            "thread_id": our_cert_id,
+            "message_id": message_id,
+        }))
+        return "200 OK", '{"status":"received"}'
+
     async def _handle_dm_edit_relay(self, data: dict) -> tuple[str, str]:
         """Inbound relayed DM edit from a peer gateway. Update our stored copy
         and deliver message_edited to the local recipient, keyed by OUR cert_id

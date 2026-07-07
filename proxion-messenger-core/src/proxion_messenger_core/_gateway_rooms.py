@@ -741,16 +741,31 @@ class RoomHandlerMixin:
                             "from_webid": caller_webid or "",
                         }))
         else:
-            # DM thread: deliver only to the two participants
-            participants: set = {caller_webid}
+            # DM thread: deliver to the two participants — locally OR, for a
+            # cross-gateway peer, RELAY the delete (was _send_to_identity(peer)
+            # only, so a federated peer never saw the deletion).
+            peer = ""
             if self._store:
                 dm_threads = [t for t in self._store.get_dm_threads(owner_webid=caller_webid)
                               if t["thread_id"] == thread_id]
                 if dm_threads:
-                    participants.add(dm_threads[0]["peer_webid"])
+                    peer = dm_threads[0]["peer_webid"]
+            if not peer and str(thread_id).startswith("did:key:"):
+                peer = thread_id
             payload = json.dumps(event)
-            for identity in participants:
-                await self._send_to_identity(identity, payload)
+            await self._send_to_identity(caller_webid, payload)
+            if peer and peer != caller_webid:
+                if self._sockets_for(peer):
+                    await self._send_to_identity(peer, payload)
+                else:
+                    _pg = self._resolve_peer_gateway(peer)
+                    if _pg:
+                        asyncio.create_task(self._relay_ephemeral(_pg, {
+                            "content_type": "dm_delete",
+                            "from_webid": caller_webid,
+                            "to_webid": peer,
+                            "message_id": message_id,
+                        }))
 
     async def _handle_edit_local_message(self, websocket, data: dict) -> None:
         message_id = data.get("message_id", "")

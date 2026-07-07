@@ -529,6 +529,10 @@ class HttpEndpointsMixin:
         if data.get("content_type") == "dm_edit":
             return await self._handle_dm_edit_relay(data)
 
+        # ── DM delete relay — deliver message_deleted to a local peer ──
+        if data.get("content_type") == "dm_delete":
+            return await self._handle_dm_delete_relay(data)
+
         # ── Room edit relay — update store and deliver to local members ──
         if data.get("content_type") == "room_edit":
             return await self._handle_room_edit_relay(data)
