@@ -324,6 +324,16 @@ class VoiceHandlerMixin:
         target_webid = data.get("target_webid")
         if target_webid:
             sender_wid = self._client_webids.get(websocket, "")
+            # Gate on co-membership of a voice channel: without this any
+            # registered user could push ICE signaling at any webid (spam /
+            # probing vector). The 1:1 session path below already checks
+            # session membership; this is the group-path equivalent.
+            _shares_channel = any(
+                sender_wid in ch.get("members", {}) and target_webid in ch.get("members", {})
+                for ch in self._voice_channels.values()
+            )
+            if not _shares_channel:
+                return
             event["from_webid"] = sender_wid
             target_ws = self._any_socket(target_webid)
             if target_ws and target_ws in self.clients:

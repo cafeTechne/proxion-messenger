@@ -148,3 +148,90 @@ async def test_voice_message_persisted_to_store(gateway):
         "duration_ms": 2000,
     })
     assert mock_store.save_voice_message.called
+
+
+# ── DM voice notes (were never delivered: built, saved, dropped) ──────────────
+
+@pytest.fixture
+def store_gateway(agent, tmp_path):
+    """The module fixture has no store; DM thread resolution needs one."""
+    return ProxionGateway(agent=agent, dm_clients={}, room_memberships={},
+                          config=GatewayConfig(db_path=str(tmp_path / "vm.db")))
+
+
+async def _register_full(gw, ws, webid):
+    """Register with _webid_sockets populated so _send_to_identity works."""
+    gw.clients.add(ws)
+    gw._client_webids[ws] = webid
+    gw._display_names[ws] = webid[-8:]
+    gw._webid_sockets.setdefault(webid, set()).add(ws)
+
+
+def _audio_events(ws):
+    return [json.loads(c[0][0]) for c in ws.send.call_args_list
+            if json.loads(c[0][0]).get("content_type") == "audio"]
+
+
+@pytest.mark.asyncio
+async def test_dm_voice_note_reaches_peer_and_echoes_sender(store_gateway):
+    gateway = store_gateway
+    """Regression: the DM branch built + saved the event but delivered to NOBODY
+    — the peer never heard it live and the sender saw nothing after recording."""
+    ws_a, ws_b = _mock_ws(), _mock_ws()
+    await _register_full(gateway, ws_a, "did:key:zAlice")
+    await _register_full(gateway, ws_b, "did:key:zBob")
+    gateway._store.save_dm_thread("thread-ab", "did:key:zBob", None, owner_webid="did:key:zAlice")
+
+    await gateway.process_command(ws_a, {
+        "cmd": "send_voice_message", "thread_id": "thread-ab",
+        "audio_b64": _SMALL_AUDIO, "duration_ms": 3000,
+    })
+    assert _audio_events(ws_b), "the DM peer must receive the voice note live"
+    assert _audio_events(ws_a), "the sender must get an echo (their UI renders from it)"
+
+
+@pytest.mark.asyncio
+async def test_dm_voice_note_did_keyed_thread_falls_back_to_peer(gateway):
+    """Local DM threads are keyed by the peer's did directly."""
+    ws_a, ws_b = _mock_ws(), _mock_ws()
+    await _register_full(gateway, ws_a, "did:key:zAlice")
+    await _register_full(gateway, ws_b, "did:key:zBob")
+    await gateway.process_command(ws_a, {
+        "cmd": "send_voice_message", "thread_id": "did:key:zBob",
+        "audio_b64": _SMALL_AUDIO, "duration_ms": 3000,
+    })
+    assert _audio_events(ws_b), "did-keyed thread must resolve to the peer"
+
+
+@pytest.mark.asyncio
+async def test_dm_voice_note_to_remote_peer_errors_explicitly(store_gateway):
+    gateway = store_gateway
+    """Cross-gateway voice notes aren't supported (audio can exceed the relay
+    cap) — the sender must be TOLD, not left believing it delivered."""
+    ws_a = _mock_ws()
+    await _register_full(gateway, ws_a, "did:key:zAlice")
+    gateway._store.save_dm_thread("thread-ar", "did:key:zRemote", None, owner_webid="did:key:zAlice")
+    gateway._peer_gateway_urls["did:key:zRemote"] = "http://remote-gw.test"
+    await gateway.process_command(ws_a, {
+        "cmd": "send_voice_message", "thread_id": "thread-ar",
+        "audio_b64": _SMALL_AUDIO, "duration_ms": 3000,
+    })
+    errs = [json.loads(c[0][0]) for c in ws_a.send.call_args_list
+            if json.loads(c[0][0]).get("code") == "voice_note_remote_unsupported"]
+    assert errs, "sender must get an explicit unsupported-remote error"
+
+
+@pytest.mark.asyncio
+async def test_voice_message_honors_client_message_id(gateway):
+    """The client uploads the pod audio copy keyed by ITS message_id; minting a
+    fresh uuid server-side orphaned that upload from the stored message."""
+    ws_a, ws_b = _mock_ws(), _mock_ws()
+    await _register_full(gateway, ws_a, "did:key:zAlice")
+    await _register_full(gateway, ws_b, "did:key:zBob")
+    await gateway.process_command(ws_a, {
+        "cmd": "send_voice_message", "thread_id": "did:key:zBob",
+        "audio_b64": _SMALL_AUDIO, "duration_ms": 3000,
+        "message_id": "client-chosen-id-123",
+    })
+    evs = _audio_events(ws_b)
+    assert evs and evs[0]["message_id"] == "client-chosen-id-123"

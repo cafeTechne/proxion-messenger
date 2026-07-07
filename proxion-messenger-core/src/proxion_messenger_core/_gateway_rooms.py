@@ -2017,7 +2017,15 @@ class RoomHandlerMixin:
             await websocket.send(json.dumps({"type": "error", "message": "invalid_voice_payload"}))
             return
         import uuid as _uuid_voice
-        message_id = str(_uuid_voice.uuid4())
+        import re as _re_voice
+        # Honor the client's message_id: the client uploads the pod audio copy
+        # keyed by ITS id, so minting a fresh uuid here orphaned that upload
+        # from the stored/rendered message.
+        _client_mid = str(data.get("message_id") or "")
+        if _client_mid and _re_voice.match(r"^[A-Za-z0-9:_-]{1,128}$", _client_mid):
+            message_id = _client_mid
+        else:
+            message_id = str(_uuid_voice.uuid4())
         display_name = self._display_names.get(websocket, "")
         ts = datetime.now(timezone.utc).isoformat()
         event = {
@@ -2040,6 +2048,36 @@ class RoomHandlerMixin:
                     await ws.send(json.dumps(event))
                 except Exception:
                     pass
+        else:
+            # DM voice note. This branch previously delivered to NOBODY — the
+            # event was built, saved, and dropped: the sender saw nothing after
+            # recording (no echo) and the peer only found it in history after a
+            # reload. Deliver: echo to the sender's sessions/devices, then to
+            # the peer (typing-pattern resolution: the sender's DM thread, or a
+            # did:key thread id IS the peer).
+            _vpayload = json.dumps(event)
+            await self._send_to_identity(sender, _vpayload)
+            peer_webid = ""
+            if self._store:
+                for t in self._store.get_dm_threads(owner_webid=sender):
+                    if t.get("thread_id") == thread_id:
+                        peer_webid = t.get("peer_webid", "")
+                        break
+            if not peer_webid and str(thread_id).startswith("did:key:"):
+                peer_webid = thread_id
+            if peer_webid and peer_webid != sender:
+                if self._sockets_for(peer_webid):
+                    await self._send_to_identity(peer_webid, _vpayload)
+                elif self._resolve_peer_gateway(peer_webid):
+                    # Cross-gateway voice notes need chunked transport (audio can
+                    # exceed the 128 KiB relay cap) — not built yet. Tell the
+                    # sender instead of silently pretending it delivered.
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "code": "voice_note_remote_unsupported",
+                        "message": "Voice messages to contacts on another gateway aren't supported yet.",
+                        "message_id": message_id,
+                    }))
         if self._store:
             self._store.save_voice_message(
                 message_id, thread_id,

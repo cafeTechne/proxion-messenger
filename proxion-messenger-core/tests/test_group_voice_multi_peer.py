@@ -34,7 +34,8 @@ def _ws():
 
 @pytest.mark.asyncio
 async def test_ice_candidate_routes_by_target_webid(gateway):
-    """ICE candidate with target_webid goes to that peer's socket, not via session."""
+    """ICE candidate with target_webid goes to that peer's socket, not via
+    session — gated on the two sharing a voice channel."""
     sender_ws = _ws()
     target_ws = _ws()
     sender_webid = "did:key:zAlice"
@@ -44,6 +45,10 @@ async def test_ice_candidate_routes_by_target_webid(gateway):
     gateway._webid_sockets[target_webid] = {target_ws}
     gateway.clients.add(sender_ws)
     gateway.clients.add(target_ws)
+    gateway._voice_channels["ch-1"] = {"members": {
+        sender_webid: {"ws": sender_ws, "gateway_url": None},
+        target_webid: {"ws": target_ws, "gateway_url": None},
+    }}
 
     await gateway._handle_ice_candidate(sender_ws, {
         "target_webid": target_webid,
@@ -58,6 +63,28 @@ async def test_ice_candidate_routes_by_target_webid(gateway):
     assert sent["type"] == "ice_candidate"
     assert sent["from_webid"] == sender_webid
     assert sent["candidate"].startswith("candidate:")
+
+
+@pytest.mark.asyncio
+async def test_ice_candidate_dropped_without_shared_channel(gateway):
+    """Regression: any registered user could push ICE signaling at any webid
+    (spam/probing vector). Without a shared voice channel it must be dropped."""
+    sender_ws = _ws()
+    target_ws = _ws()
+    gateway._client_webids[sender_ws] = "did:key:zMallory"
+    gateway._client_webids[target_ws] = "did:key:zVictim"
+    gateway._webid_sockets["did:key:zVictim"] = {target_ws}
+    gateway.clients.add(sender_ws)
+    gateway.clients.add(target_ws)
+
+    await gateway._handle_ice_candidate(sender_ws, {
+        "target_webid": "did:key:zVictim",
+        "session_id": "sess-x",
+        "candidate": "candidate:1 1 UDP ...",
+        "sdp_mid": "0",
+        "sdp_mline_index": 0,
+    })
+    target_ws.send.assert_not_called()
 
 
 @pytest.mark.asyncio
