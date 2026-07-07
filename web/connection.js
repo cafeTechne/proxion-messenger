@@ -49,6 +49,12 @@ export function createConnection({
                 statusEl.innerHTML = 'Still connecting… <span style="color:#fbbf24">Is the gateway running?</span>';
             }
         }, 8000);
+        // Cap the queue (drop-oldest) so a long outage doesn't accumulate an
+        // unbounded flood that all fires at once on reconnect.
+        if (state._pendingOnConnect.length >= 200) {
+            const dropped = state._pendingOnConnect.shift();
+            if (dropped && dropped.nudgeTimer) clearTimeout(dropped.nudgeTimer);
+        }
         state._pendingOnConnect.push({ payload, statusEl, nudgeTimer });
     }
 

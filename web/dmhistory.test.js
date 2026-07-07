@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   dmHistorySave, dmHistoryLoad, dmHistoryClearAll,
   dmHistorySetEnabled, dmHistoryEnabled, planEviction,
-  dmHistoryExportRecent, dmHistoryImport,
+  dmHistoryExportRecent, dmHistoryImport, dmHistoryDeleteBefore,
 } from './dmhistory.js';
 
 beforeEach(async () => {
@@ -108,6 +108,19 @@ describe('dmHistoryExportRecent / dmHistoryImport (pairing handoff)', () => {
     dmHistorySetEnabled(false);
     expect(await dmHistoryImport(bundle)).toBe(0);
     expect(await dmHistoryLoad('t')).toHaveLength(0);
+  });
+});
+
+describe('dmHistoryDeleteBefore (disappearing-message expiry)', () => {
+  it('purges only messages older than the cutoff, only in that thread', async () => {
+    // Regression: "disappeared" DMs lived on in the local plaintext cache and,
+    // because the merge is local-always-wins, re-rendered on the next open.
+    await dmHistorySave({ message_id: 'old', thread_id: 't', content: 'old', timestamp: '2024-01-01T00:00:00Z' });
+    await dmHistorySave({ message_id: 'new', thread_id: 't', content: 'new', timestamp: '2024-06-01T00:00:00Z' });
+    await dmHistorySave({ message_id: 'other', thread_id: 'u', content: 'x', timestamp: '2024-01-01T00:00:00Z' });
+    await dmHistoryDeleteBefore('t', '2024-03-01T00:00:00Z');
+    expect((await dmHistoryLoad('t')).map((r) => r.message_id)).toEqual(['new']);
+    expect(await dmHistoryLoad('u')).toHaveLength(1); // other threads untouched
   });
 });
 

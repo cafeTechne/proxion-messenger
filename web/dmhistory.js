@@ -163,6 +163,30 @@ export async function dmHistoryDelete(messageId) {
     } catch (_) { /* ignore */ }
 }
 
+// Remove a thread's cached messages older than a cutoff — disappearing-message
+// expiry. Without this, "disappeared" DMs lived on in the local plaintext cache
+// and re-rendered on the next open (the merge is local-always-wins).
+export async function dmHistoryDeleteBefore(threadId, beforeIso) {
+    if (!threadId || !beforeIso) return;
+    try {
+        const db = await _open();
+        await new Promise((resolve) => {
+            const tx = db.transaction(STORE, 'readwrite');
+            const os = tx.objectStore(STORE);
+            const req = os.index('thread_id').openCursor(IDBKeyRange.only(threadId));
+            req.onsuccess = (e) => {
+                const cur = e.target.result;
+                if (cur) {
+                    if ((cur.value.timestamp || '') < beforeIso) os.delete(cur.primaryKey);
+                    cur.continue();
+                }
+            };
+            tx.oncomplete = resolve;
+            tx.onerror = resolve;
+        });
+    } catch (_) { /* ignore */ }
+}
+
 // Remove ALL cached messages for a thread — on contact removal/revoke/block, so
 // a removed contact's plaintext DMs don't linger locally.
 export async function dmHistoryDeleteThread(threadId) {

@@ -45,7 +45,7 @@ import { createPush } from './push.js';
 import { createPairing } from './pairing.js';
 import { inlineNotice, feedEmptyState } from './states.js';
 import { installFocusTrap } from './focus-trap.js';
-import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport } from './dmhistory.js';
+import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport } from './dmhistory.js';
 
         // Modal a11y: focus-restore + Tab-trap for every dialog (observer-based,
         // so it covers all ~20 modals without retrofitting their open/close sites).
@@ -1923,6 +1923,18 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                 }
                 case "dm_messages_expired": {
                     const expBefore = event.before_timestamp;
+                    // Purge the LOCAL plaintext cache first, and unconditionally
+                    // (not just for the active view) — otherwise "disappeared"
+                    // messages lived on in IndexedDB and, because the history
+                    // merge is local-always-wins, RE-RENDERED on the next open.
+                    if (expBefore) {
+                        dmHistoryDeleteBefore(event.thread_id, expBefore);
+                        // The cache may key this thread by the peer's DID rather
+                        // than the cert id — purge that alias too.
+                        const _expPeer = Object.keys(peerDidToCertId)
+                            .find(d => peerDidToCertId[d] === event.thread_id);
+                        if (_expPeer) dmHistoryDeleteBefore(_expPeer, expBefore);
+                    }
                     if (activeView && (activeView.certId === event.thread_id || activeView.id === event.thread_id) && expBefore) {
                         document.querySelectorAll('#message-feed .message').forEach(el => {
                             const msgId = el.dataset.messageId;
@@ -2286,6 +2298,18 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                     thread_id: activeView.id,
                 }));
             });
+        }
+
+        // "Delete for me": remove this message from THIS device only — DOM +
+        // in-memory maps + the local plaintext cache. No server command, so the
+        // peer keeps their copy. (Deleting from dmhistory means it also won't
+        // re-appear via the history merge on the next open.)
+        function deleteForMeLocal(msgId) {
+            if (!msgId) return;
+            document.getElementById(`msg-${msgId}`)?.remove();
+            allMessages = allMessages.filter(m => m.message_id !== msgId);
+            delete messageMap[msgId];
+            dmHistoryDelete(msgId);
         }
 
         function toggleSidebar() {
@@ -3320,11 +3344,22 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                 const sub = document.getElementById('delete-submenu');
                 if (sub && !sub.contains(e.target)) sub.style.display = 'none';
                 if (e.target.id === 'delete-for-me-btn') {
-                    deleteMsg(e.target.dataset.msgId);
+                    // LOCAL-only removal (this device). Was wired to deleteMsg,
+                    // which sends delete_local_message — a store-delete that
+                    // broadcasts to ALL participants, i.e. it deleted for
+                    // everyone. "Delete for me" must not touch the peer.
+                    deleteForMeLocal(e.target.dataset.msgId);
                     sub.style.display = 'none';
                 } else if (e.target.id === 'delete-for-everyone-btn') {
+                    // Was: cmd 'delete_message' — a command the gateway has NO
+                    // handler for, so it only cleared local DOM and never
+                    // reached the store or the peer. Use the real delete path.
                     const mid = e.target.dataset.msgId;
-                    if (socket && mid) socket.send(JSON.stringify({cmd:'delete_message', message_id:mid, for_everyone:true}));
+                    if (socket && mid && activeView) {
+                        socket.send(JSON.stringify({
+                            cmd: 'delete_local_message', message_id: mid, thread_id: activeView.id,
+                        }));
+                    }
                     document.getElementById(`msg-${mid}`)?.remove();
                     sub.style.display = 'none';
                 }
