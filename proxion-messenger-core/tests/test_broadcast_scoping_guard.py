@@ -25,9 +25,10 @@ SENTINEL_KEYS = ("message_id", "thread_id", "cert_id")
 # Event "type" values whose literal broadcast payload legitimately names a
 # per-thread key. Each entry needs a documented reason.
 ALLOWLIST = {
-    # Deferred: only fires on the pod-poll path and shares the message_id->thread
-    # ->recipients lookup as the pod-poll message broadcast; scoped together in a
-    # future round with a live CSS pod test (PLAN_ROUND_51 §E3).
+    # SCOPED (R53 pod round): previews now deliver to the message's recipients;
+    # this literal broadcast is only the unattributable FALLBACK (older
+    # ownerless relationship rows — single-user-safe, same fallback the polled
+    # message itself uses).
     "link_preview",
 }
 

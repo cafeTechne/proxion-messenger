@@ -279,19 +279,28 @@ class RoomHandlerMixin:
                 except Exception:
                     pass
 
-    async def process_link_previews(self, content: str, source: str, message_id: str):
-        """Fetch and broadcast previews for URLs in a message."""
+    async def process_link_previews(self, content: str, source: str, message_id: str,
+                                    recipients: Optional[list] = None):
+        """Fetch previews for URLs in a message and deliver them to the message's
+        recipients (same scoping as the message itself); broadcast only as the
+        unattributable fallback (single-user-safe)."""
         from .linkpreview import extract_urls, fetch_link_preview
         urls = extract_urls(content)
         for url in urls[:3]:
             preview = await fetch_link_preview(url)
             if preview:
-                await self.broadcast({
+                event = {
                     "type": "link_preview",
                     "source": source,
                     "message_id": message_id,
                     "preview": preview
-                })
+                }
+                if recipients:
+                    payload = json.dumps(event)
+                    for r in set(recipients):
+                        await self._send_to_identity(r, payload)
+                else:
+                    await self.broadcast(event)
 
     async def _check_room_enforcement(self, websocket, room_id: str, membership: RoomMembership) -> Optional[str]:
         """Verify room safety rules (rate limits, read-only, cert expiry). Returns error string or None."""

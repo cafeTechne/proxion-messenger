@@ -669,6 +669,31 @@ class PodSyncMixin:
         """Trigger an immediate poll (used by push notifications)."""
         await self.do_poll()
 
+    def _pod_entry_recipients(self, entry) -> list:
+        """The local identities a polled pod entry belongs to.
+
+        dm  -> the account owning the relationship cert (R53's owner column).
+        room-> the room's member identities (offline ones are a no-op send;
+               remote members are served by their own gateways' polls).
+        []  -> caller falls back to broadcast — single-user-safe (older
+               relationship rows lack an owner), and the one case where
+               broadcast == correct delivery.
+        """
+        try:
+            if not self._store:
+                return []
+            source = getattr(entry, "source", "")
+            if source == "dm":
+                cert_id = getattr(entry.cert, "certificate_id", "") or ""
+                owner = self._store.get_relationship_owner_by_cert_id(cert_id) if cert_id else ""
+                return [owner] if owner else []
+            if source == "room":
+                room_id = getattr(entry, "thread_id", "") or ""
+                return self._store.get_room_members(room_id) if room_id else []
+        except Exception:
+            pass
+        return []
+
     async def do_poll(self):
         """Internal polling logic."""
         try:
@@ -720,11 +745,24 @@ class PodSyncMixin:
                     except Exception as exc:
                         logger.debug(f"Could not persist pod DM message: {exc}")
 
-                await self.broadcast(self._entry_to_event(entry, entry.source, known_names))
+                # Scope polled entries to their participants (a DM's owner, a
+                # room's members) instead of every session on the gateway; fall
+                # back to broadcast only when the entry can't be attributed
+                # (older ownerless relationship rows — single-user-safe).
+                _event = self._entry_to_event(entry, entry.source, known_names)
+                _recips = self._pod_entry_recipients(entry)
+                if _recips:
+                    _payload = json.dumps(_event)
+                    for _r in set(_recips):
+                        await self._send_to_identity(_r, _payload)
+                else:
+                    await self.broadcast(_event)
 
                 from .linkpreview import extract_urls
                 if self._link_previews_enabled and extract_urls(entry.message.content):
-                    asyncio.create_task(self.process_link_previews(entry.message.content, entry.source, entry.message.message_id))
+                    asyncio.create_task(self.process_link_previews(
+                        entry.message.content, entry.source,
+                        entry.message.message_id, recipients=_recips))
 
             if new_entries and self.read_state:
                 latest_ts = max(e.message.timestamp for e in new_entries)

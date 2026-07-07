@@ -142,6 +142,17 @@ class IdentityStoreMixin(object):
         return [{"account_did": r["account_did"], "device_id": r["device_id"],
                  "pub_b64u": r["pub_b64u"]} for r in rows]
 
+    def get_relationship_owner_by_cert_id(self, certificate_id: str) -> str:
+        """The LOCAL account (owner_webid) holding this relationship cert — ''
+        when unknown (older rows saved without an owner). Used to scope
+        pod-polled DM entries to the user the conversation belongs to."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT owner_webid FROM relationships WHERE certificate_id = ? LIMIT 1",
+                (certificate_id,),
+            ).fetchone()
+        return (row["owner_webid"] or "") if row else ""
+
     def get_relationship_owner(self, peer_did: str) -> str:
         """The LOCAL account (owner_webid) that holds the newest non-expired
         relationship with peer_did — '' when unknown (older rows saved without
