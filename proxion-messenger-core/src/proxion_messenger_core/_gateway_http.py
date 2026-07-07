@@ -497,6 +497,8 @@ class HttpEndpointsMixin:
             "emoji",
             # dm_edit relay
             "new_content",
+            # dm_disappear_timer relay
+            "ms",
         })
         _unknown = set(data.keys()) - _ALLOWED_RELAY_KEYS
         if _unknown:
@@ -536,6 +538,10 @@ class HttpEndpointsMixin:
         # ── DM pin relay — deliver message_pinned/unpinned to a local peer ──
         if data.get("content_type") == "dm_pin":
             return await self._handle_dm_pin_relay(data)
+
+        # ── DM disappear-timer relay — mutual disappearing messages ──
+        if data.get("content_type") == "dm_disappear_timer":
+            return await self._handle_dm_disappear_relay(data)
 
         # ── Room edit relay — update store and deliver to local members ──
         if data.get("content_type") == "room_edit":

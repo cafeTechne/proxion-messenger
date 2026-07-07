@@ -119,6 +119,29 @@ class DmStoreMixin(object):
             ).fetchall()
         return [r[0] for r in rows]
 
+    # ── Per-DM disappearing-message timers (DM thread ids aren't rooms) ──
+    def set_dm_disappear_timer(self, thread_id: str, ms: int) -> None:
+        with self._conn() as conn:
+            if ms and ms > 0:
+                conn.execute(
+                    "INSERT OR REPLACE INTO dm_disappear_timers (thread_id, ms) VALUES (?,?)",
+                    (thread_id, int(ms)),
+                )
+            else:
+                conn.execute("DELETE FROM dm_disappear_timers WHERE thread_id = ?", (thread_id,))
+
+    def get_dm_disappear_timer(self, thread_id: str) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT ms FROM dm_disappear_timers WHERE thread_id = ?", (thread_id,)
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def get_all_dm_disappear_timers(self) -> dict:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT thread_id, ms FROM dm_disappear_timers").fetchall()
+        return {r[0]: int(r[1]) for r in rows}
+
     def get_all_dm_threads(self) -> list[dict]:
         """Every DM thread regardless of owner. Callers that used
         get_dm_threads() (no arg) to mean 'all threads' were silently getting

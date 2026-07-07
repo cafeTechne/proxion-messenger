@@ -321,15 +321,13 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             ms = room.get("disappear_after_ms", 0)
             if ms:
                 self._room_disappear_timers[room["room_id"]] = ms
-        # Restore per-DM disappear timers (persisted in the same KV table, keyed by
-        # cert_id) so DM disappearing messages survive a gateway restart.
+        # Restore per-DM disappear timers (dedicated dm_disappear_timers table)
+        # so DM disappearing messages survive a gateway restart. The prior
+        # UPDATE-rooms persistence was a no-op for DM ids, so this never worked.
         try:
-            for _t in self._store.get_all_dm_threads():
-                _tid = _t.get("thread_id")
-                if _tid:
-                    _dms = self._store.get_room_disappear_timer(_tid)
-                    if _dms:
-                        self._dm_disappear_timers[_tid] = _dms
+            for _tid, _dms in self._store.get_all_dm_disappear_timers().items():
+                if _dms:
+                    self._dm_disappear_timers[_tid] = _dms
         except Exception:
             logger.debug("DM disappear-timer restore skipped", exc_info=True)
         # R12: load revoked DIDs into fast in-memory set
@@ -1849,6 +1847,35 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                         pass
 
         return "200 OK", '{"status":"delivered"}' if delivered else '{"status":"offline"}'
+
+    async def _handle_dm_disappear_relay(self, data: dict) -> tuple[str, str]:
+        """Inbound relayed DM disappear-timer from a peer gateway. Set the timer
+        on OUR cert_id so our expiry loop deletes the shared messages too."""
+        from_webid = data.get("from_webid", "")
+        to_webid   = data.get("to_webid", "")
+        try:
+            ms = max(0, int(data.get("ms", 0)))
+        except (TypeError, ValueError):
+            return "400 Bad Request", '{"error":"invalid_ms"}'
+        if not from_webid or not to_webid:
+            return "400 Bad Request", '{"error":"missing_fields"}'
+        cert_dict = self._store.get_relationship_by_did(from_webid) if self._store else None
+        if not cert_dict:
+            return "200 OK", '{"status":"received"}'
+        if from_webid in getattr(self, "_revoked_dids", set()) or self.blocklist.is_blocked(from_webid):
+            return "200 OK", '{"status":"received"}'
+        our_cert_id = cert_dict.get("certificate_id") or cert_dict.get("id") or ""
+        if our_cert_id:
+            self._dm_disappear_timers[our_cert_id] = ms
+            if self._store:
+                try:
+                    self._store.set_dm_disappear_timer(our_cert_id, ms)
+                except Exception:
+                    pass
+            await self._send_to_identity(to_webid, json.dumps({
+                "type": "disappear_timer_updated", "room_id": our_cert_id, "ms": ms,
+            }))
+        return "200 OK", '{"status":"received"}'
 
     async def _handle_dm_pin_relay(self, data: dict) -> tuple[str, str]:
         """Inbound relayed DM pin/unpin from a peer gateway. Persist keyed by OUR

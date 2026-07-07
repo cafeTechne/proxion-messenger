@@ -223,6 +223,14 @@ class _StoreBase(object):
                     PRIMARY KEY (owner_webid, blocked_webid)
                 );
 
+                -- Per-DM disappearing-message timer (ms). DM thread ids aren't
+                -- in the rooms table, so set_room_disappear_timer's UPDATE rooms
+                -- was a silent no-op for DMs (timers never survived restart).
+                CREATE TABLE IF NOT EXISTS dm_disappear_timers (
+                    thread_id TEXT PRIMARY KEY,
+                    ms        INTEGER NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS pending_relays (
                     id              TEXT PRIMARY KEY,
                     to_webid        TEXT NOT NULL,

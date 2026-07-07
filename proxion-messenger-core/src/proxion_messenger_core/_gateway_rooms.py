@@ -2095,17 +2095,31 @@ class RoomHandlerMixin:
             return
         self._dm_disappear_timers[thread_id] = ms
         if self._store:
-            self._store.set_room_disappear_timer(thread_id, ms)  # shared KV table, keyed by id
+            self._store.set_dm_disappear_timer(thread_id, ms)  # dedicated DM table (survives restart)
         event = json.dumps({"type": "disappear_timer_updated", "room_id": thread_id, "ms": ms})
-        for _identity in {caller, peer}:
-            if _identity:
-                await self._send_to_identity(_identity, event)
+        await self._send_to_identity(caller, event)
+        # Deliver to the peer — and for a cross-gateway peer, RELAY the timer so
+        # THEIR gateway also expires the shared messages (disappearing messages
+        # are mutual, like Signal). Without this the timer applied only on the
+        # setter's side and the peer's copy never disappeared.
+        if peer and peer != caller:
+            if self._sockets_for(peer):
+                await self._send_to_identity(peer, event)
+            else:
+                _pg = self._resolve_peer_gateway(peer)
+                if _pg:
+                    asyncio.create_task(self._relay_ephemeral(_pg, {
+                        "content_type": "dm_disappear_timer",
+                        "from_webid": caller,
+                        "to_webid": peer,
+                        "ms": ms,
+                    }))
 
     async def _handle_get_disappear_timer(self, websocket, data: dict) -> None:
         room_id = data.get("room_id", "")
         ms = self._room_disappear_timers.get(room_id, 0) or self._dm_disappear_timers.get(room_id, 0)
         if not ms and self._store:
-            ms = self._store.get_room_disappear_timer(room_id)
+            ms = self._store.get_room_disappear_timer(room_id) or self._store.get_dm_disappear_timer(room_id)
         await websocket.send(json.dumps({
             "type": "disappear_timer",
             "room_id": room_id,
