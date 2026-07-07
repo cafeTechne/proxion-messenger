@@ -846,6 +846,7 @@ class DmHandlerMixin:
             return
 
         delivered = []
+        _pushed_accounts: set = set()  # one push per account per logical message
         for entry in fanout:
             to_webid = entry.get("to_webid", "")
             to_device_id = entry.get("to_device_id", "")
@@ -853,7 +854,10 @@ class DmHandlerMixin:
                 continue
             if self._store:
                 self._store.record_dm_delivery(message_id, to_webid, to_device_id)
-            target_sockets = self._sockets_for(to_webid) or []
+            # Deliver to the addressed DEVICE's sockets (per-account delivery hid
+            # offline devices: an online sibling made the list non-empty and the
+            # offline device's envelope was silently lost).
+            dev_sockets = self._device_sockets(to_webid, to_device_id)
             event = json.dumps({
                 "type": "dm_fanout",
                 "message_id": message_id,
@@ -861,20 +865,31 @@ class DmHandlerMixin:
                 "to_device_id": to_device_id,
                 "payload": entry.get("payload"),
             })
-            for ws in target_sockets:
+            for ws in dev_sockets:
                 try:
                     await ws.send(event)
                     if self._store:
                         self._store.mark_dm_delivered(message_id, to_webid, to_device_id)
                 except Exception as exc:
                     logger.warning("dm_fanout relay failed to %s/%s: %s", to_webid, to_device_id, exc)
-            # Cross-gateway device: no local socket — relay the envelope to the
-            # peer's gateway (the payload is already E2E ciphertext for that
-            # device). This is what lets a multi-device peer on ANOTHER gateway
-            # receive per-device copies instead of falling back to primary-only.
-            if not target_sockets:
-                await self._relay_dm_fanout_entry(message_id, to_webid, to_device_id,
-                                                  entry.get("payload"))
+            # Device has no live socket:
+            #  - account is fully remote (no local sessions) -> relay the
+            #    envelope to their gateway (device-addressed E2E ciphertext);
+            #  - local device OFFLINE -> queue for redelivery on register, and
+            #    web-push the account once IF no device at all is online (was:
+            #    silently dropped — fanout has no server history to recover from).
+            if not dev_sockets:
+                account_sockets = self._sockets_for(to_webid) or []
+                if not account_sockets and self._resolve_peer_gateway(to_webid):
+                    await self._relay_dm_fanout_entry(message_id, to_webid, to_device_id,
+                                                      entry.get("payload"))
+                else:
+                    self._queue_fanout_envelope(message_id, from_webid, to_webid,
+                                                to_device_id, entry.get("payload"))
+                    if not account_sockets and to_webid not in _pushed_accounts:
+                        _pushed_accounts.add(to_webid)
+                        self._push_offline_dm(to_webid, from_webid,
+                                              self._name_for(websocket, from_webid))
             delivered.append({"to_webid": to_webid, "to_device_id": to_device_id})
 
         await websocket.send(json.dumps({
@@ -882,6 +897,66 @@ class DmHandlerMixin:
             "message_id": message_id,
             "delivered": delivered,
         }))
+
+    def _device_sockets(self, to_webid: str, to_device_id: str) -> list:
+        """The specific DEVICE's live sockets within an account's sessions.
+        A fanout envelope is device-addressed; delivering per-account hid
+        offline devices (any online sibling made target_sockets non-empty, so
+        the offline device's envelope was neither queued nor pushed). The
+        primary's device id is the account did itself (no _session_device_did)."""
+        out = []
+        for ws in self._sockets_for(to_webid) or []:
+            dev = self._session_device_did.get(ws) or self._client_webids.get(ws, "")
+            if dev == to_device_id:
+                out.append(ws)
+        return out
+
+    def _queue_fanout_envelope(self, message_id: str, from_webid: str,
+                               to_webid: str, to_device_id: str, payload) -> None:
+        """Hold a fanout envelope for an OFFLINE device until it re-registers
+        (drained in _gateway_auth, mirroring _relay_queue). Capped like the
+        relay queue so an attacker can't balloon memory."""
+        if payload is None:
+            return
+        key = (to_webid, to_device_id)
+        if key not in self._fanout_queue and len(self._fanout_queue) >= 500:
+            return
+        q = self._fanout_queue.setdefault(key, [])
+        if len(q) >= 100:
+            q.pop(0)  # drop-oldest
+        q.append({"message_id": message_id, "from_webid": from_webid, "payload": payload})
+
+    def _push_offline_dm(self, to_webid: str, from_webid: str, display_name: str = "") -> None:
+        """Web-push an offline account about a DM, honoring server-side mutes.
+        Mirrors the plain local_dm push block — the fanout path never pushed,
+        so a phone with the app closed missed multi-device DMs entirely."""
+        if not self._store or not to_webid:
+            return
+        if from_webid and self._store.is_thread_muted(to_webid, from_webid):
+            return
+        _subs = self._store.get_push_subscriptions(to_webid)
+        _vpk = getattr(self, "_vapid_private_pem", None)
+        _vsub = getattr(self, "_vapid_subject", None)
+        if not (_subs and _vpk and _vsub):
+            return
+        from .webpush import send_web_push
+        for _sub in _subs:
+            try:
+                send_web_push(
+                    subscription={
+                        "endpoint": _sub["endpoint"],
+                        "keys": {"p256dh": _sub["p256dh_b64"], "auth": _sub["auth_b64"]},
+                    },
+                    payload={
+                        "type": "message",
+                        "thread_id": from_webid,
+                        "display_name": display_name or from_webid[:12],
+                    },
+                    vapid_private_pem=_vpk,
+                    vapid_subject=_vsub,
+                )
+            except Exception:
+                pass
 
     async def _relay_dm_fanout_entry(self, message_id: str, to_webid: str,
                                      to_device_id: str, payload) -> None:
@@ -1004,11 +1079,20 @@ class DmHandlerMixin:
             "to_device_id": to_device_id,
             "payload": payload,
         })
-        for ws in self._sockets_for(to_webid):
+        dev_sockets = self._device_sockets(to_webid, to_device_id)
+        for ws in dev_sockets:
             try:
                 await ws.send(event)
             except Exception:
                 pass
+        # Addressed device offline: queue for redelivery on register + push the
+        # account if nothing at all is online. (Was: zero sends and a 200 back —
+        # the sending gateway marked it delivered and the message was lost.)
+        if not dev_sockets:
+            self._queue_fanout_envelope(message_id, from_webid, to_webid,
+                                        to_device_id, payload)
+            if not (self._sockets_for(to_webid) or []):
+                self._push_offline_dm(to_webid, from_webid)
         return "200 OK", '{"status":"received"}'
 
     async def _handle_dm_decrypt_failed(self, websocket, data: dict) -> None:

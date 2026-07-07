@@ -84,13 +84,14 @@ async def test_fanout_reaches_all_devices_of_the_account(gateway, noauth_env):
         ],
     })
 
-    # The gateway fans each envelope to every socket of the account; each device
-    # filters by to_device_id client-side. Both A sockets must see both envelopes.
-    for ws in (ws_a1, ws_a2):
-        evs = _events(ws, "dm_fanout")
-        device_ids = {e["to_device_id"] for e in evs}
-        assert device_ids == {account_did, device_did}, f"{ws} missing an envelope"
-        assert all(e["message_id"] == "m-1" for e in evs)
+    # Delivery is DEVICE-addressed: each device receives exactly its own
+    # envelope. (Was per-account — every socket got every envelope and filtered
+    # client-side — which hid offline devices from the queue/push logic.)
+    evs_a1 = _events(ws_a1, "dm_fanout")
+    evs_a2 = _events(ws_a2, "dm_fanout")
+    assert {e["to_device_id"] for e in evs_a1} == {account_did}, "primary must get ONLY its envelope"
+    assert {e["to_device_id"] for e in evs_a2} == {device_did}, "delegated device must get ONLY its envelope"
+    assert all(e["message_id"] == "m-1" for e in evs_a1 + evs_a2)
 
     # Sender gets an ack listing both deliveries.
     ack = _events(ws_b, "send_dm_fanout_ack")

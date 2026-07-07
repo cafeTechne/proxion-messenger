@@ -284,6 +284,23 @@ class AuthHandlerMixin:
                     await websocket.send(json.dumps(event))
                 except Exception:
                     pass
+            # Drain per-device fanout envelopes queued while THIS device was
+            # offline (fanout has no server history — without this drain those
+            # DMs were lost). The primary's device id is the account did.
+            _dev_id = self._session_device_did.get(websocket) or identity
+            for _env in self._fanout_queue.pop((identity, _dev_id), []):
+                try:
+                    await websocket.send(json.dumps({
+                        "type": "dm_fanout",
+                        "message_id": _env["message_id"],
+                        "from_webid": _env["from_webid"],
+                        "to_device_id": _dev_id,
+                        "payload": _env["payload"],
+                    }))
+                    if self._store:
+                        self._store.mark_dm_delivered(_env["message_id"], identity, _dev_id)
+                except Exception:
+                    pass
             if gateway_url:
                 self._peer_gateway_urls[identity] = gateway_url
 

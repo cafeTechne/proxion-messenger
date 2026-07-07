@@ -155,6 +155,11 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # Cross-gateway relay: maps peer webid -> their gateway HTTP base URL
         self._peer_gateway_urls: dict = {}
         self._relay_queue: dict[str, list[dict]] = {}
+        # Per-device fanout envelopes held for OFFLINE devices until they
+        # re-register (mirrors _relay_queue). Keyed (to_webid, to_device_id).
+        # Without this, a fanout DM to an offline device was silently lost —
+        # fanout has no server-side history to recover from.
+        self._fanout_queue: dict[tuple, list[dict]] = {}
         self._relay_rate_limiter: dict[str, deque] = {}
         self._seen_relay_ids: deque = deque(maxlen=1000)  # LRU dedup for relay posts (R9)
         self._seen_relay_nonces: deque = deque(maxlen=1000)  # auto-evicting nonce dedup
