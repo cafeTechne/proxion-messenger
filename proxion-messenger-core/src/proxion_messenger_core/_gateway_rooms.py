@@ -1901,11 +1901,19 @@ class RoomHandlerMixin:
         message_id = data.get("message_id", "")
         thread_id = data.get("thread_id", "")
         room_id = self._strip_thread_prefix(thread_id)
+        pinner_webid = self._client_webids.get(websocket, "")
+        # DM pin: pinning a DM used to ALWAYS error ("Only the room owner can
+        # pin") — _check_room_permission returns False for a non-room — AND was
+        # never persisted or sent to the peer. A DM has no owner; either
+        # participant may pin. Persist + deliver/relay like the other DM ops.
+        if room_id not in self._local_rooms and thread_id not in self.room_memberships:
+            await self._pin_dm(websocket, pinner_webid, thread_id, message_id,
+                               data.get("content", ""), pin=True)
+            return
         if not self._check_room_permission(websocket, room_id, role="owner"):
             await websocket.send(json.dumps({"type": "error", "message": "Only the room owner can pin messages"}))
             return
         if room_id in self._local_rooms and self._store:
-            pinner_webid = self._client_webids.get(websocket, "")
             msg_row = self._store.get_messages_by_ids([message_id])
             content = (msg_row[0].get("content", "") if msg_row else data.get("content", ""))
             self._store.save_pin(room_id, message_id, pinner_webid, content)
@@ -1933,12 +1941,68 @@ class RoomHandlerMixin:
         else:
             await websocket.send(event)
 
+    async def _pin_dm(self, websocket, pinner_webid: str, thread_id: str,
+                      message_id: str, content: str, pin: bool) -> None:
+        """Pin/unpin a message in a DM thread. Either participant may pin; the
+        pin persists keyed by the thread_id and is delivered to the peer (local
+        or cross-gateway relay)."""
+        if not pinner_webid or not thread_id or not message_id:
+            return
+        # Participant check: the relationship owner or the peer.
+        peer = ""
+        if self._store:
+            _cd = self._store.get_relationship_by_cert_id(thread_id)
+            if _cd:
+                _owner = self._store.get_relationship_owner_by_cert_id(thread_id)
+                peer = _cd.get("peer_did", "")
+                if _owner and pinner_webid not in (_owner, peer):
+                    await websocket.send(json.dumps({"type": "error", "message": "Not a participant of this DM thread"}))
+                    return
+        if not peer:
+            # Local DM keyed by the peer's did.
+            peer = thread_id if str(thread_id).startswith("did:key:") else ""
+        if self._store:
+            try:
+                if pin:
+                    _mr = self._store.get_messages_by_ids([message_id])
+                    _c = (_mr[0].get("content", "") if _mr else content)
+                    self._store.save_pin(thread_id, message_id, pinner_webid, _c)
+                else:
+                    self._store.remove_pin(thread_id, message_id)
+            except Exception:
+                pass
+        event = json.dumps({
+            "type": "message_pinned" if pin else "unpinned",
+            "message_id": message_id, "thread_id": thread_id,
+        })
+        await websocket.send(event)
+        if peer and peer != pinner_webid:
+            if self._sockets_for(peer):
+                await self._send_to_identity(peer, event)
+            else:
+                _pg = self._resolve_peer_gateway(peer)
+                if _pg:
+                    asyncio.create_task(self._relay_ephemeral(_pg, {
+                        "content_type": "dm_pin",
+                        "from_webid": pinner_webid,
+                        "to_webid": peer,
+                        "message_id": message_id,
+                        "action": "pin" if pin else "unpin",
+                    }))
+
     async def _handle_get_pins(self, websocket, data: dict) -> None:
         thread_id = data.get("thread_id", "")
         room_id = self._strip_thread_prefix(thread_id)
         pins = []
         if room_id in self._local_rooms and self._store:
             stored = self._store.get_pins(room_id)
+            pins = [{"message_id": p["message_id"], "pinned_by": p["pinned_by"],
+                     "pinned_at": p["pinned_at"], "content": p.get("content", "")}
+                    for p in stored]
+        elif thread_id not in self.dm_clients and thread_id not in self.room_memberships and self._store:
+            # DM pins are persisted in the store keyed by thread_id (were never
+            # read back — get_pins for a DM returned []).
+            stored = self._store.get_pins(thread_id)
             pins = [{"message_id": p["message_id"], "pinned_by": p["pinned_by"],
                      "pinned_at": p["pinned_at"], "content": p.get("content", "")}
                     for p in stored]
@@ -1963,6 +2027,11 @@ class RoomHandlerMixin:
         thread_id = data.get("thread_id", "")
         message_id = data.get("message_id", "")
         room_id = self._strip_thread_prefix(thread_id)
+        # DM unpin: same as pin — participant-authz'd, persisted, relayed.
+        if room_id not in self._local_rooms and thread_id not in self.room_memberships:
+            await self._pin_dm(websocket, self._client_webids.get(websocket, ""),
+                               thread_id, message_id, "", pin=False)
+            return
         if room_id in self._local_rooms:
             if not self._check_room_permission(websocket, room_id, role="owner"):
                 await websocket.send(json.dumps({"type": "error", "message": "Only the room owner can unpin messages"}))

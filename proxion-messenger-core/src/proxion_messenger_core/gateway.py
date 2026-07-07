@@ -1850,6 +1850,38 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
         return "200 OK", '{"status":"delivered"}' if delivered else '{"status":"offline"}'
 
+    async def _handle_dm_pin_relay(self, data: dict) -> tuple[str, str]:
+        """Inbound relayed DM pin/unpin from a peer gateway. Persist keyed by OUR
+        cert_id and deliver message_pinned/unpinned to the local recipient."""
+        from_webid = data.get("from_webid", "")
+        to_webid   = data.get("to_webid", "")
+        message_id = data.get("message_id", "")
+        action     = data.get("action", "pin")
+        if not all([from_webid, to_webid, message_id]):
+            return "400 Bad Request", '{"error":"missing_pin_fields"}'
+        cert_dict = self._store.get_relationship_by_did(from_webid) if self._store else None
+        if not cert_dict:
+            return "200 OK", '{"status":"received"}'
+        if from_webid in getattr(self, "_revoked_dids", set()) or self.blocklist.is_blocked(from_webid):
+            return "200 OK", '{"status":"received"}'
+        our_cert_id = cert_dict.get("certificate_id") or cert_dict.get("id") or ""
+        if self._store and our_cert_id:
+            try:
+                if action == "unpin":
+                    self._store.remove_pin(our_cert_id, message_id)
+                else:
+                    _mr = self._store.get_messages_by_ids([message_id])
+                    _c = (_mr[0].get("content", "") if _mr else "")
+                    self._store.save_pin(our_cert_id, message_id, from_webid, _c)
+            except Exception:
+                pass
+        await self._send_to_identity(to_webid, json.dumps({
+            "type": "unpinned" if action == "unpin" else "message_pinned",
+            "thread_id": our_cert_id,
+            "message_id": message_id,
+        }))
+        return "200 OK", '{"status":"received"}'
+
     async def _handle_dm_delete_relay(self, data: dict) -> tuple[str, str]:
         """Inbound relayed DM delete-for-everyone from a peer gateway. Remove our
         stored copy (only if the peer authored it) and deliver message_deleted to
