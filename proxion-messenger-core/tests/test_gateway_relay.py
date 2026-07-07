@@ -156,6 +156,43 @@ async def test_relay_endpoint_delivers_to_connected_client(gateway, two_clients)
 
 
 @pytest.mark.asyncio
+async def test_inbound_relay_does_not_clobber_sender_gateway_seal_key(gateway, two_clients):
+    """An inbound relay carrying the sender's BROWSER x25519 must not overwrite
+    their GATEWAY seal key (save_x25519_pub), which _resolve_peer_x25519_pub uses
+    to seal outbound relays. The clobber made every reply-after-receiving seal to
+    the wrong key -> recipient gateway 400 -> reply silently lost. The browser key
+    belongs in the e2e_key store instead.
+    """
+    from datetime import datetime, timezone
+    alice, bob = two_clients
+    alice_key = Ed25519PrivateKey.generate()
+    pub_bytes = alice_key.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw
+    )
+    alice_did = pub_key_to_did(pub_bytes)
+
+    # Discovery already stored Alice's GATEWAY seal key.
+    gateway._store.save_x25519_pub(alice_did, "ALICE_GATEWAY_SEAL_KEY")
+
+    ts = datetime.now(timezone.utc).isoformat()
+    msg_id = "relay-clobber-1"
+    content = "hi"
+    sig = sign_relay_message(alice_key, alice_did, "did:key:bob", msg_id, content, ts)
+    body = json.dumps({
+        "from_webid": alice_did, "to_webid": "did:key:bob",
+        "message_id": msg_id, "content": content, "timestamp": ts,
+        "display_name": "Alice", "signature": sig,
+        "x25519_pub": "ALICE_BROWSER_KEY",   # rides on the DM's E2E fields
+    }).encode()
+
+    status, _ = await gateway._handle_relay_post(body)
+    assert status.startswith("200")
+    # Seal key preserved; browser key cached separately.
+    assert gateway._store.get_x25519_pub(alice_did) == "ALICE_GATEWAY_SEAL_KEY"
+    assert gateway._store.get_e2e_key(alice_did) == "ALICE_BROWSER_KEY"
+
+
+@pytest.mark.asyncio
 async def test_relay_from_blocked_sender_is_dropped(gateway, two_clients, tmp_path):
     """A blocked sender's relayed message must be silently accepted (200, so block
     status isn't revealed) but NOT delivered. Previously the relay receive path
@@ -541,7 +578,9 @@ async def test_register_pushes_relationships_with_unread(gateway, two_clients):
 
 @pytest.mark.asyncio
 async def test_relay_post_stores_x25519_pub(gateway, two_clients):
-    """Incoming relay carrying x25519_pub persists it in SQLite."""
+    """Incoming relay carrying the sender's BROWSER x25519 persists it in the
+    e2e_key store (NOT the gateway seal-key store — see the clobber regression
+    test above)."""
     _, bob = two_clients
     alice_key = Ed25519PrivateKey.generate()
     pub_bytes = alice_key.public_key().public_bytes(
@@ -556,7 +595,9 @@ async def test_relay_post_stores_x25519_pub(gateway, two_clients):
                             extra={"x25519_pub": "alice_x25519_from_relay="})
     status, _ = await gateway._handle_relay_post(body)
     assert status.startswith("200")
-    assert gateway._store.get_x25519_pub(alice_did) == "alice_x25519_from_relay="
+    assert gateway._store.get_e2e_key(alice_did) == "alice_x25519_from_relay="
+    # Seal key store untouched by the relay's browser key.
+    assert gateway._store.get_x25519_pub(alice_did) is None
 
 
 @pytest.mark.asyncio

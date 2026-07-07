@@ -7,9 +7,11 @@
 //   1. Pairing links A-device to account A (delegation cert for A's account).
 //   2. The cross-gateway E2E DM from B reaches AND decrypts on A-primary.
 //   3. A-device DEGRADES GRACEFULLY: it does NOT render "[could not decrypt]".
-//   4. SENDER SELF-SYNC (E5 slice 2): a message A-primary SENDS also appears on
+//   4. A-primary's REPLY reaches B cross-gateway (regression guard for the
+//      sealed-relay seal-key clobber — reply-after-receiving used to be dropped).
+//   5. SENDER SELF-SYNC (E5 slice 2): a message A-primary SENDS also appears on
 //      A-device (same-gateway self-fanout, so it works even though B is remote).
-//   5. After reloading, the DM is still readable plaintext on A-primary (dmhistory).
+//   6. After reloading, the DM is still readable plaintext on A-primary (dmhistory).
 //
 // Scope note: CROSS-GATEWAY multi-device fanout is not implemented — a peer on
 // another gateway can't resolve A's per-device keys, so it single-sends to the
@@ -235,32 +237,27 @@ try {
   await ap.type('#message-input', REPLY);
   await ap.keyboard.press('Enter');
 
-  // Informational: whether the reply reaches B depends on the thread the inbound
-  // DM was filed under (a pre-existing cross-gateway receive-then-reply quirk,
-  // separate from self-sync). Note it but don't gate E5 slice 2 on it.
-  await sleep(3000);
-  const bGotReply = await b.evaluate((t) => (document.getElementById('message-feed')?.textContent || '').includes(t), REPLY);
-  if (!bGotReply) console.error(`  · note: A-primary's reply did not reach B (cross-gateway receive-then-reply thread quirk; separate finding)`);
+  // The reply must reach B cross-gateway (regression guard for the sealed-relay
+  // seal-key clobber: receiving a DM used to overwrite the peer's gateway seal
+  // key with their browser key, so every reply sealed to the wrong key and was
+  // dropped with a 400 the sender never saw).
+  step = 'b-receives-reply';
+  await b.waitForFunction((t) => document.getElementById('message-feed')?.textContent.includes(t), { timeout: 15000 }, REPLY)
+    .catch(() => fail(`A-primary's cross-gateway reply "${REPLY}" never reached B (reply-after-receive relay delivery)`));
+  if (process.exitCode) throw new Error('stop');
 
-  // ── E5 slice 2 assertion: A-primary's SENT message self-synced to A-device.
-  // Check A-device's local plaintext store (robust to which thread is active).
+  // E5 slice 2: A-primary's SENT message self-synced to A-device. Check A-device's
+  // local plaintext store (robust to which thread is active).
   step = 'a-device-self-sync';
   const adGotReply = await ad.evaluate(async (t) => {
-    const openIdb = () => new Promise((res) => {
-      const r = indexedDB.open('proxion-dm-history', 1);
-      r.onsuccess = (e) => res(e.target.result); r.onerror = () => res(null);
-    });
-    const db = await openIdb();
+    const db = await new Promise((res) => { const r = indexedDB.open('proxion-dm-history', 1); r.onsuccess = e => res(e.target.result); r.onerror = () => res(null); });
     if (!db || !db.objectStoreNames.contains('messages')) return false;
-    const rows = await new Promise((res) => {
-      const out = []; const tx = db.transaction('messages', 'readonly');
-      const req = tx.objectStore('messages').openCursor();
-      req.onsuccess = (e) => { const c = e.target.result; if (c) { out.push(c.value); c.continue(); } else res(out); };
-      req.onerror = () => res(out);
+    return await new Promise((res) => {
+      const tx = db.transaction('messages', 'readonly'); const req = tx.objectStore('messages').openCursor(); let found = false;
+      req.onsuccess = (e) => { const c = e.target.result; if (c) { if ((c.value.content || '').includes(t)) found = true; c.continue(); } else res(found); };
+      req.onerror = () => res(false);
     });
-    return rows.some((r) => (r.content || '').includes(t));
   }, REPLY).catch(() => false);
-  // Also accept it if it rendered in the active feed.
   const adFeedReply = await ad.evaluate((t) => (document.getElementById('message-feed')?.textContent || '').includes(t), REPLY);
   if (!adGotReply && !adFeedReply) {
     fail('A-device did NOT receive A-primary\'s sent message via self-sync (not in feed or local store)');
@@ -289,8 +286,8 @@ try {
   step = 'done';
   if (!process.exitCode) {
     console.log(`  ✓ multi-device DM OK — A-device paired to account A; B's cross-gateway E2E DM`);
-    console.log(`    decrypted on A-primary + survived reload; A-device degraded gracefully`);
-    console.log(`    (no "[could not decrypt]"); and A-primary's SENT message self-synced to A-device.`);
+    console.log(`    decrypted on A-primary + survived reload; A-device degraded gracefully;`);
+    console.log(`    A-primary's REPLY reached B cross-gateway; and it self-synced to A-device.`);
   }
 } catch (e) {
   if (e.message !== 'stop') console.error(`  ✗ [${step}] threw: ${e.message}`);

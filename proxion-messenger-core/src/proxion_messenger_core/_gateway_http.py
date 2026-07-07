@@ -611,9 +611,14 @@ class HttpEndpointsMixin:
             cert_dict = self._store.get_relationship_by_did(from_webid)
             if cert_dict:
                 cert_id = cert_dict.get("certificate_id")
-            # Cache sender's X25519 pub key for future E2E bootstrap
+            # Cache sender's BROWSER X25519 pub for E2E bootstrap — into the
+            # e2e_key store, NOT save_x25519_pub. save_x25519_pub is the GATEWAY
+            # seal key used by _resolve_peer_x25519_pub for sealed-sender relay;
+            # overwriting it with the peer's browser key made every reply seal to
+            # the wrong key (recipient gateway can't unseal -> 400 -> reply lost).
+            # Discovery already stored the peer's gateway seal key; keep it.
             if "x25519_pub" in data:
-                self._store.save_x25519_pub(from_webid, data["x25519_pub"])
+                self._store.save_e2e_key(from_webid, data["x25519_pub"])
 
         _E2E_KEYS = ("e2e", "nonce", "msg_num", "key_header", "ratchet_pub", "pn", "x25519_pub", "file")
         # Deliver to all connected sockets of the target identity. _sockets_for now
