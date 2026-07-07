@@ -42,3 +42,6 @@ proxion-core/.claude/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local test-pod credentials (provision_test_pod.py output) — never commit
+web/.env.test
