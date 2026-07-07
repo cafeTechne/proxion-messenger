@@ -345,6 +345,66 @@ class HttpEndpointsMixin:
 
         return "200 OK", '{"status":"ok"}'
 
+    async def _handle_devices_post(self, body: bytes) -> tuple[str, str]:
+        """POST /devices — a RELATED peer gateway fetches this user's device E2E
+        roster for cross-gateway multi-device DM fanout.
+
+        Gated so strangers cannot enumerate devices: the request is signed with
+        the requester's did:key Ed25519 over f"{requester}|{target}|{ts}|{nonce}"
+        AND the requester must already hold a (non-revoked) relationship with
+        this gateway's user. Returns [{device_id, pub_b64u}] — public keys only.
+        Replay of a fresh request is harmless (read-only, same response), so
+        freshness is a timestamp window rather than a nonce ledger.
+        """
+        try:
+            data = json.loads(body)
+        except Exception:
+            return "400 Bad Request", '{"error":"invalid JSON"}'
+        requester = data.get("requester_did", "")
+        target = data.get("target_did", "")
+        ts = data.get("ts", "")
+        nonce = data.get("nonce", "")
+        sig_b64 = data.get("signature", "")
+        if not all([requester, target, ts, nonce, sig_b64]):
+            return "400 Bad Request", '{"error":"missing fields"}'
+        # Freshness: +-5 min.
+        try:
+            _t = datetime.fromisoformat(ts)
+            if _t.tzinfo is None:
+                return "400 Bad Request", '{"error":"invalid_ts"}'
+            if abs((datetime.now(timezone.utc) - _t).total_seconds()) > 300:
+                return "400 Bad Request", '{"error":"stale_request"}'
+        except (ValueError, TypeError):
+            return "400 Bad Request", '{"error":"invalid_ts"}'
+        # Only answer for OUR user (no directory service).
+        from .didkey import pub_key_to_did, did_to_pub_key
+        own_did = pub_key_to_did(self.agent.identity_pub_bytes)
+        if target != own_did:
+            return "404 Not Found", '{"error":"unknown_target"}'
+        # Signature by the requester's did:key.
+        try:
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+            pub = Ed25519PublicKey.from_public_bytes(did_to_pub_key(requester))
+            import base64 as _b64
+            raw_sig = _b64.urlsafe_b64decode(sig_b64 + "=" * (-len(sig_b64) % 4))
+            pub.verify(raw_sig, f"{requester}|{target}|{ts}|{nonce}".encode())
+        except Exception:
+            return "401 Unauthorized", '{"error":"invalid signature"}'
+        # Relationship gate: only contacts may fetch the roster.
+        if not self._store or requester in getattr(self, "_revoked_dids", set()):
+            return "403 Forbidden", '{"error":"not_related"}'
+        if not self._store.get_relationship_by_did(requester):
+            return "403 Forbidden", '{"error":"not_related"}'
+        # Roster: prefer the account that owns the relationship with the
+        # requester; fall back to the one-gateway-per-user union (older rows
+        # were saved without an owner) — mirrors the _sockets_for fallback.
+        owner = self._store.get_relationship_owner(requester)
+        devices = self._store.list_device_e2e_keys(owner) if owner else []
+        if not devices:
+            devices = [{"device_id": d["device_id"], "pub_b64u": d["pub_b64u"]}
+                       for d in self._store.list_all_device_e2e_keys()]
+        return "200 OK", json.dumps({"devices": devices[:16]})
+
     async def _handle_relay_post(self, body: bytes, client_ip: str = "unknown") -> tuple[str, str]:
         """Handle POST /relay — verify signature, deliver to connected client."""
         try:
@@ -491,6 +551,13 @@ class HttpEndpointsMixin:
         # ── Typing relay — deliver to local DM peer ──
         if data.get("content_type") == "typing":
             return await self._handle_typing_relay(data)
+
+        # ── Multi-device DM fanout relay — per-device E2E envelope from a peer
+        # gateway. Verified + deduped here (it bypasses the plain-DM path), then
+        # emitted as the same dm_fanout event local fanout uses; each device
+        # picks the envelope addressed to it.
+        if data.get("content_type") == "dm_fanout":
+            return await self._handle_dm_fanout_relay(data)
 
         # ── Sealed DM relay — decrypt before processing ──
         if data.get("content_type") == "sealed_dm":
@@ -871,6 +938,7 @@ class HttpEndpointsMixin:
                     "/relay":         128 * 1024,        # 128 KiB
                     "/invite":        128 * 1024,        # 128 KiB
                     "/invite/accept": 128 * 1024,        # 128 KiB
+                    "/devices":       8 * 1024,          # 8 KiB (signed roster request)
                     "/restore":       5 * 1024 * 1024,   # 5 MiB
                     "/import":        20 * 1024 * 1024,  # 20 MiB
                 }
@@ -888,7 +956,7 @@ class HttpEndpointsMixin:
                         return
 
                 # Content-Type enforcement for JSON POST endpoints
-                _JSON_POST_PATHS = {"/relay", "/invite", "/invite/accept", "/restore", "/import"}
+                _JSON_POST_PATHS = {"/relay", "/invite", "/invite/accept", "/devices", "/restore", "/import"}
                 if method == "POST" and path in _JSON_POST_PATHS:
                     _ct = headers_raw.get(b"content-type", b"").decode("utf-8", errors="replace").lower()
                     _ct_base = _ct.split(";")[0].strip()
@@ -936,6 +1004,26 @@ class HttpEndpointsMixin:
                         f"HTTP/1.1 {status}\r\nContent-Type: application/json\r\n".encode()
                         + _SEC_HDR + _NO_STORE_HDR
                         + f"Content-Length: {len(resp_bytes)}\r\nAccess-Control-Allow-Origin: *\r\n\r\n".encode()
+                        + resp_bytes
+                    )
+                    await writer.drain()
+                    return
+
+                # ── POST /devices — related peer gateway fetches the device roster ──
+                if method == "POST" and path == "/devices":
+                    if _check_http_rate(peer_ip, "devices"):
+                        await _write_429(writer)
+                        await writer.drain()
+                        return
+                    body = b""
+                    if content_length > 0:
+                        body = await _read_http_body(reader, min(content_length, 8192), 10.0)
+                    status, response = await self._handle_devices_post(body)
+                    resp_bytes = response.encode()
+                    writer.write(
+                        f"HTTP/1.1 {status}\r\nContent-Type: application/json\r\n".encode()
+                        + _SEC_HDR + _NO_STORE_HDR
+                        + f"Content-Length: {len(resp_bytes)}\r\n\r\n".encode()
                         + resp_bytes
                     )
                     await writer.drain()

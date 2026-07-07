@@ -6,20 +6,15 @@
 // B and A friend across gateways, then B sends A a DM. Assertions:
 //   1. Pairing links A-device to account A (delegation cert for A's account).
 //   2. The cross-gateway E2E DM from B reaches AND decrypts on A-primary.
-//   3. A-device DEGRADES GRACEFULLY: it does NOT render "[could not decrypt]".
-//   4. A-primary's REPLY reaches B cross-gateway (regression guard for the
-//      sealed-relay seal-key clobber — reply-after-receiving used to be dropped).
+//   3. R53 CROSS-GATEWAY DEVICE FANOUT: the same DM ALSO decrypts on A-device —
+//      B's gateway fetched A's device roster (signed POST /devices) and relayed
+//      a device-addressed E2E envelope; no "[could not decrypt]" anywhere.
+//   4. A-primary's REPLY reaches B cross-gateway (regression guards for the
+//      sealed-relay seal-key clobber AND the discarded-fanout-encrypt ratchet
+//      poisoning — both used to silently kill reply-after-receiving).
 //   5. SENDER SELF-SYNC (E5 slice 2): a message A-primary SENDS also appears on
 //      A-device (same-gateway self-fanout, so it works even though B is remote).
 //   6. After reloading, the DM is still readable plaintext on A-primary (dmhistory).
-//
-// Scope note: CROSS-GATEWAY multi-device fanout is not implemented — a peer on
-// another gateway can't resolve A's per-device keys, so it single-sends to the
-// primary. So A-device does NOT receive a decryptable copy of a cross-gateway
-// DM (and thus has no history for it). This smoke guards the SUPPORTED flow
-// (pairing + cross-gateway DM to the primary + primary history) plus the graceful
-// degradation on the secondary device. The full "cross-account N-device live
-// decrypt + history" is the deferred cross-gateway-device-resolution round.
 //
 //   node web/smoke_multidevice_dm.mjs     (spawns two gateways; needs python + chrome)
 //
@@ -205,7 +200,10 @@ try {
 
   // ── B sends the DM; BOTH of A's devices must receive + decrypt it ──
   step = 'b-send-dm';
-  await sleep(400);
+  // Give B's client time to complete the async cross-gateway device-roster
+  // fetch (get_peer_device_keys -> gw B -> POST /devices on gw A) that DM-open
+  // triggered — fanout needs the roster before the first send.
+  await sleep(1800);
   await b.focus('#message-input');
   await b.type('#message-input', MSG);
   await b.keyboard.press('Enter');
@@ -219,13 +217,24 @@ try {
     });
   if (process.exitCode) throw new Error('stop');
 
-  step = 'a-device-graceful';  // cross-gateway 2nd device: no decryptable copy —
-  // must degrade gracefully (drop it), NOT render "[could not decrypt]" garbage.
-  await sleep(2500);           // give any relayed copy time to (not) render
+  step = 'a-device-receive';   // R53: cross-gateway per-device fanout — A's
+  // SECOND device must also receive AND decrypt B's DM (B's gateway fetched A's
+  // device roster via POST /devices and relayed a device-addressed envelope).
+  await ad.waitForFunction((t) => document.getElementById('message-feed')?.textContent.includes(t), { timeout: 15000 }, MSG)
+    .catch(async () => {
+      const feed = await ad.evaluate(() => document.getElementById('message-feed')?.textContent || '');
+      fail(/could not decrypt|decryption error/i.test(feed)
+        ? `B's DM reached A-device but failed to DECRYPT (wrong per-device key?)`
+        : `B's DM did NOT fan out to A-device cross-gateway (roster fetch or envelope relay)`);
+      console.error(`  · A-device console tail:\n${ad._console.slice(-8).map(l => '    ' + l).join('\n')}`);
+      const gwB2 = (procs[1]._log() || '').split('\n').filter(l => /devices|fanout|relay|400|403/i.test(l)).slice(-8);
+      console.error(`  · gateway-B log:\n${gwB2.map(l => '      ' + l).join('\n') || '      (none)'}`);
+    });
+  if (process.exitCode) throw new Error('stop');
+  // And no decrypt-failure garbage anywhere on A-device.
   const adFeed = await ad.evaluate(() => document.getElementById('message-feed')?.textContent || '');
   if (/could not decrypt|decryption error/i.test(adFeed)) {
-    fail('A-device rendered "[could not decrypt]" for a cross-gateway DM it structurally cannot read (should drop silently)');
-    console.error(`  · A-device feed tail: "${adFeed.slice(-120)}"`);
+    fail('A-device rendered "[could not decrypt]" garbage');
   }
   if (process.exitCode) throw new Error('stop');
 
@@ -243,7 +252,13 @@ try {
   // dropped with a 400 the sender never saw).
   step = 'b-receives-reply';
   await b.waitForFunction((t) => document.getElementById('message-feed')?.textContent.includes(t), { timeout: 15000 }, REPLY)
-    .catch(() => fail(`A-primary's cross-gateway reply "${REPLY}" never reached B (reply-after-receive relay delivery)`));
+    .catch(async () => {
+      fail(`A-primary's cross-gateway reply "${REPLY}" never reached B (reply-after-receive relay delivery)`);
+      const gwA2 = (procs[0]._log() || '').split('\n').filter(l => /relay|devices|Relayed|400|403/i.test(l)).slice(-8);
+      console.error(`  · gateway-A relay log:\n${gwA2.map(l => '      ' + l).join('\n') || '      (none)'}`);
+      const bFeed = await b.evaluate(() => (document.getElementById('message-feed')?.textContent || '').slice(-140));
+      console.error(`  · B feed tail: "${bFeed}"`);
+    });
   if (process.exitCode) throw new Error('stop');
 
   // E5 slice 2: A-primary's SENT message self-synced to A-device. Check A-device's
@@ -286,8 +301,8 @@ try {
   step = 'done';
   if (!process.exitCode) {
     console.log(`  ✓ multi-device DM OK — A-device paired to account A; B's cross-gateway E2E DM`);
-    console.log(`    decrypted on A-primary + survived reload; A-device degraded gracefully;`);
-    console.log(`    A-primary's REPLY reached B cross-gateway; and it self-synced to A-device.`);
+    console.log(`    decrypted on BOTH A-primary AND A-device (cross-gateway device fanout);`);
+    console.log(`    A-primary's REPLY reached B; self-synced to A-device; history survived reload.`);
   }
 } catch (e) {
   if (e.message !== 'stop') console.error(`  ✗ [${step}] threw: ${e.message}`);

@@ -112,6 +112,54 @@ class PodSyncMixin:
                 return url
         return None
 
+    async def _fetch_remote_device_keys(self, peer_did: str) -> list:
+        """Fetch a REMOTE peer's device E2E roster from their gateway's signed,
+        relationship-gated POST /devices (cross-gateway multi-device fanout).
+
+        Returns [{device_id, pub_b64u}] or [] on any failure. Results are cached
+        60s in memory so a DM open doesn't hammer the peer gateway.
+        """
+        peer_gw = self._resolve_peer_gateway(peer_did)
+        if not peer_gw:
+            return []
+        cache = getattr(self, "_remote_device_cache", None)
+        if cache is None:
+            cache = self._remote_device_cache = {}
+        hit = cache.get(peer_did)
+        now = time.monotonic()
+        if hit and now - hit[1] < 60:
+            return hit[0]
+        try:
+            import base64 as _b64
+            import secrets as _sec
+            from datetime import datetime as _dt, timezone as _tz
+            from .didkey import pub_key_to_did as _p2d
+            from .network import async_safe_post_content as _post
+            own_did = _p2d(self.agent.identity_pub_bytes)
+            ts = _dt.now(_tz.utc).isoformat()
+            nonce = _sec.token_hex(8)
+            sig = _b64.urlsafe_b64encode(
+                self.agent.identity_key.sign(f"{own_did}|{peer_did}|{ts}|{nonce}".encode())
+            ).rstrip(b"=").decode()
+            url = (peer_gw.replace("wss://", "https://").replace("ws://", "http://")
+                   .rstrip("/") + "/devices")
+            raw = await _post(url, {
+                "requester_did": own_did, "target_did": peer_did,
+                "ts": ts, "nonce": nonce, "signature": sig,
+            }, timeout=8.0)
+            devices = json.loads(raw).get("devices") or []
+            devices = [
+                {"device_id": d.get("device_id", ""), "pub_b64u": d.get("pub_b64u", "")}
+                for d in devices[:16]
+                if isinstance(d, dict) and d.get("device_id") and d.get("pub_b64u")
+            ]
+            cache[peer_did] = (devices, now)
+            return devices
+        except Exception as exc:
+            logger.debug("remote device-key fetch failed for %s: %s", peer_did[:24], exc)
+            cache[peer_did] = ([], now)  # negative-cache failures too
+            return []
+
     def _record_peer_gateway(self, did: str, gateway_url: str) -> None:
         """Store a peer gateway URL in memory and (if available) SQLite.
 

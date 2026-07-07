@@ -128,6 +128,34 @@ class IdentityStoreMixin(object):
                 (account_did,),
             ).fetchall()
         return [{"device_id": r["device_id"], "pub_b64u": r["pub_b64u"]} for r in rows]
+
+    def list_all_device_e2e_keys(self) -> list[dict]:
+        """Every device E2E key regardless of account — the one-gateway-per-user
+        fallback for the /devices roster when a request addresses the GATEWAY
+        identity did (which no account row is keyed under). Mirrors the
+        _sockets_for own-gateway-did fallback semantics."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT account_did, device_id, pub_b64u FROM device_e2e_keys "
+                "ORDER BY updated_at ASC",
+            ).fetchall()
+        return [{"account_did": r["account_did"], "device_id": r["device_id"],
+                 "pub_b64u": r["pub_b64u"]} for r in rows]
+
+    def get_relationship_owner(self, peer_did: str) -> str:
+        """The LOCAL account (owner_webid) that holds the newest non-expired
+        relationship with peer_did — '' when unknown (older rows saved without
+        an owner). Used to normalize 'this gateway's did' -> the local account
+        whose device roster a related peer may fetch."""
+        now = int(time.time())
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT owner_webid FROM relationships "
+                "WHERE peer_did = ? AND expires_at > ? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (peer_did, now),
+            ).fetchone()
+        return (row["owner_webid"] or "") if row else ""
     def save_relationship(
         self, cert_dict: dict, peer_did: Optional[str] = None, owner_webid: str = ""
     ) -> None:

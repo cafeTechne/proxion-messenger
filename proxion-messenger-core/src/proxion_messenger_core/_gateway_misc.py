@@ -1656,6 +1656,12 @@ class MiscHandlerMixin:
             }))
             return
         devices = self._store.list_device_e2e_keys(peer_webid)
+        # Cross-gateway peer: their devices aren't in OUR store — fetch the
+        # roster from their gateway (signed, relationship-gated /devices) so a
+        # multi-device peer gets per-device fanout across gateways too. Own
+        # account and local peers never hit this (they resolve locally above).
+        if not devices and peer_webid != self._client_webids.get(websocket, ""):
+            devices = await self._fetch_remote_device_keys(peer_webid)
         await websocket.send(json.dumps({
             "type": "peer_device_keys", "peer_webid": peer_webid, "devices": devices,
         }))

@@ -2630,6 +2630,7 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
 
             if (content) {
                 let payload;
+                let _e2ePlainTarget = null; // peer to ratchet-encrypt for, ONLY if the plain path actually sends
                 const clientMsgId = (typeof crypto !== 'undefined' && crypto.randomUUID)
                     ? crypto.randomUUID()
                     : Math.random().toString(36).slice(2);
@@ -2645,20 +2646,12 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                     };
                     // Track new DM threads in pod index so they survive restarts
                     _podUpdateDmIndex(activeView.id, true).catch(() => {});
-                    // Attempt E2E encryption if peer pubkey is known
-                    if (isE2EEnabled(peerWebid)) {
-                        try {
-                            const enc = await ratchetEncrypt(peerWebid, content);
-                            payload.content     = enc.ciphertext;
-                            payload.e2e         = true;
-                            payload.nonce       = enc.nonce;
-                            payload.msg_num     = enc.msgNum;
-                            payload.pn          = enc.pn;
-                            payload.ratchet_pub = enc.ratchetPub;
-                        } catch (err) {
-                            console.warn('[e2e] encrypt failed, sending plaintext:', err);
-                        }
-                    }
+                    // E2E encryption is DEFERRED until after the fanout decision
+                    // (below): running ratchetEncrypt for a payload that fanout then
+                    // discards still persists a fresh sender session on the PLAIN
+                    // peer id — a poisoned root that later mangles the peer's real
+                    // plain-path messages ("[could not decrypt]" on both sides).
+                    if (isE2EEnabled(peerWebid)) _e2ePlainTarget = peerWebid;
                     // Always announce our X25519 pub key so peer can learn it
                     const myPub = myX25519PubB64u();
                     if (myPub) payload.x25519_pub = myPub;
@@ -2668,19 +2661,8 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                     if (activeView.type === "dm") {
                         payload.cert_id = activeView.id;
                         const peerWebid = activeView.peerWebid;
-                        if (peerWebid && isE2EEnabled(peerWebid)) {
-                            try {
-                                const enc = await ratchetEncrypt(peerWebid, content);
-                                payload.content     = enc.ciphertext;
-                                payload.e2e         = true;
-                                payload.nonce       = enc.nonce;
-                                payload.msg_num     = enc.msgNum;
-                                payload.pn          = enc.pn;
-                                payload.ratchet_pub = enc.ratchetPub;
-                            } catch (err) {
-                                console.warn('[e2e] encrypt failed for send_dm, sending plaintext:', err);
-                            }
-                        }
+                        // Deferred for the same reason as local_dm above.
+                        if (peerWebid && isE2EEnabled(peerWebid)) _e2ePlainTarget = peerWebid;
                         const myPub = myX25519PubB64u();
                         if (myPub) payload.x25519_pub = myPub;
                     } else {
@@ -2701,7 +2683,24 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                 if (_dmPeer) {
                     _sentViaFanout = await _tryDmFanout(_dmPeer, content, clientMsgId, payload.reply_to_id, activeView.id);
                 }
-                if (!_sentViaFanout) socketSendOrQueue(payload);
+                if (!_sentViaFanout) {
+                    // Deferred plain-path E2E: only mutate the plain-pid ratchet
+                    // when this payload is actually going out (see note above).
+                    if (_e2ePlainTarget) {
+                        try {
+                            const enc = await ratchetEncrypt(_e2ePlainTarget, content);
+                            payload.content     = enc.ciphertext;
+                            payload.e2e         = true;
+                            payload.nonce       = enc.nonce;
+                            payload.msg_num     = enc.msgNum;
+                            payload.pn          = enc.pn;
+                            payload.ratchet_pub = enc.ratchetPub;
+                        } catch (err) {
+                            console.warn('[e2e] encrypt failed, sending plaintext:', err);
+                        }
+                    }
+                    socketSendOrQueue(payload);
+                }
 
                 // Optimistic render: show the message instantly instead of waiting for
                 // the server echo. The echo carries the same message_id, so renderMessage

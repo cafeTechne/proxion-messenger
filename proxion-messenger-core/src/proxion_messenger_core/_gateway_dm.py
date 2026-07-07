@@ -868,6 +868,13 @@ class DmHandlerMixin:
                         self._store.mark_dm_delivered(message_id, to_webid, to_device_id)
                 except Exception as exc:
                     logger.warning("dm_fanout relay failed to %s/%s: %s", to_webid, to_device_id, exc)
+            # Cross-gateway device: no local socket — relay the envelope to the
+            # peer's gateway (the payload is already E2E ciphertext for that
+            # device). This is what lets a multi-device peer on ANOTHER gateway
+            # receive per-device copies instead of falling back to primary-only.
+            if not target_sockets:
+                await self._relay_dm_fanout_entry(message_id, to_webid, to_device_id,
+                                                  entry.get("payload"))
             delivered.append({"to_webid": to_webid, "to_device_id": to_device_id})
 
         await websocket.send(json.dumps({
@@ -875,6 +882,114 @@ class DmHandlerMixin:
             "message_id": message_id,
             "delivered": delivered,
         }))
+
+    async def _relay_dm_fanout_entry(self, message_id: str, to_webid: str,
+                                     to_device_id: str, payload) -> None:
+        """Relay one per-device E2E fanout envelope to a remote peer's gateway.
+
+        The envelope content is already device-addressed ciphertext. Signed with
+        the standard relay signature over a canonical JSON body, scope-bound to
+        "dm-fanout" so it can't be replayed as an ordinary DM. The transport
+        message_id is `{logical}:{device}` so per-device envelopes of one logical
+        message don't collapse in the receiver's relay dedup; the logical id
+        rides inside the signed content. Best-effort: failures are queued for
+        the standard relay retry.
+        """
+        peer_gw = self._resolve_peer_gateway(to_webid)
+        if not peer_gw or payload is None:
+            return
+        try:
+            from .relay import sign_relay_message, post_relay
+            from .didkey import pub_key_to_did
+            import secrets as _sec
+            gateway_did = pub_key_to_did(self.agent.identity_pub_bytes)
+            ts = datetime.now(timezone.utc).isoformat()
+            relay_nonce = _sec.token_hex(8)
+            transport_id = f"{message_id}:{to_device_id}"[:128]
+            content = json.dumps(
+                {"message_id": message_id, "to_device_id": to_device_id, "payload": payload},
+                sort_keys=True, separators=(",", ":"),
+            )
+            sig = sign_relay_message(
+                self.agent.identity_key, gateway_did, to_webid,
+                transport_id, content, ts, relay_nonce, message_scope="dm-fanout",
+            )
+            relay_payload = {
+                "content_type": "dm_fanout",
+                "from_webid": gateway_did,
+                "to_webid": to_webid,
+                "message_id": transport_id,
+                "content": content,
+                "timestamp": ts,
+                "relay_nonce": relay_nonce,
+                "signature": sig,
+                "message_scope": "dm-fanout",
+                "origin_gateway_url": self._gateway_http_url(),
+            }
+            http_base = peer_gw.replace("wss://", "https://").replace("ws://", "http://")
+            delivered = await post_relay(http_base.rstrip("/") + "/relay", relay_payload)
+            if not delivered and self._store:
+                self._store.enqueue_relay(transport_id, to_webid, http_base, relay_payload)
+        except Exception as exc:
+            logger.warning("dm_fanout cross-gateway relay failed: %s", exc)
+
+    async def _handle_dm_fanout_relay(self, data: dict) -> tuple:
+        """Inbound relayed per-device DM fanout envelope from a peer gateway.
+
+        Verifies the scope-bound relay signature, dedups on the transport id,
+        then emits the standard dm_fanout event to the target identity's local
+        sockets (each device filters by to_device_id). The payload stays opaque
+        E2E ciphertext end to end.
+        """
+        from .relay import verify_relay_message
+        from_webid = data.get("from_webid", "")
+        to_webid = data.get("to_webid", "")
+        transport_id = data.get("message_id", "")
+        content = data.get("content", "")
+        timestamp = data.get("timestamp", "")
+        relay_nonce = data.get("relay_nonce", "")
+        signature = data.get("signature", "")
+        if not all([from_webid, to_webid, transport_id, content, timestamp, signature]):
+            return "400 Bad Request", '{"error":"missing fields"}'
+        if len(content) > 65536:
+            return "400 Bad Request", '{"error":"content_too_large"}'
+        if not verify_relay_message(
+            from_webid, to_webid, transport_id, content, timestamp, signature,
+            relay_nonce, message_scope="dm-fanout",
+        ):
+            return "400 Bad Request", '{"error":"invalid signature"}'
+        # Blocked sender: silently accept but don't deliver (no block-reveal),
+        # matching the plain-DM relay path.
+        if self.blocklist.is_blocked(from_webid):
+            return "200 OK", '{"status":"received"}'
+        # Dedup per transport id (one per device-envelope).
+        if self._store:
+            _key = f"{from_webid}:{transport_id}"
+            if self._store.has_seen_relay_id(_key, ttl_seconds=600):
+                return "200 OK", '{"status":"duplicate"}'
+            self._store.record_relay_id(_key)
+        try:
+            inner = json.loads(content)
+            message_id = str(inner.get("message_id") or "")
+            to_device_id = str(inner.get("to_device_id") or "")
+            payload = inner.get("payload")
+        except Exception:
+            return "400 Bad Request", '{"error":"invalid fanout content"}'
+        if not message_id or not to_device_id or not isinstance(payload, dict):
+            return "400 Bad Request", '{"error":"invalid fanout content"}'
+        event = json.dumps({
+            "type": "dm_fanout",
+            "message_id": message_id,
+            "from_webid": from_webid,
+            "to_device_id": to_device_id,
+            "payload": payload,
+        })
+        for ws in self._sockets_for(to_webid):
+            try:
+                await ws.send(event)
+            except Exception:
+                pass
+        return "200 OK", '{"status":"received"}'
 
     async def _handle_dm_decrypt_failed(self, websocket, data: dict) -> None:
         """Client reports it could not decrypt a DM — initiate session recovery.
