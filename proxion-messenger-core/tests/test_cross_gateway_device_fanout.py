@@ -210,6 +210,53 @@ async def test_fanout_entry_relays_to_remote_and_delivers(tmp_path, monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_fanout_relay_is_sealed_when_peer_key_known(tmp_path, monkeypatch):
+    """When the peer gateway's seal key is known, the fanout envelope goes out
+    SEALED (from_webid/signature hidden from intermediaries) — and the receiving
+    gateway unseals + re-dispatches it to the fanout handler."""
+    monkeypatch.setenv("PROXION_REQUIRE_AUTH", "0")
+    gw_b = _gw(tmp_path, "b")
+    gw_a = _gw(tmp_path, "a")
+    a_gw_did = pub_key_to_did(gw_a.agent.identity_pub_bytes)
+
+    gw_b._peer_gateway_urls[a_gw_did] = "http://peer-a.test"
+    # B knows A's gateway SEAL key (as discovery would record it).
+    gw_b._store.save_x25519_pub(a_gw_did, gw_a._own_x25519_pub_b64)
+
+    posted = {}
+    async def _fake_post(url, payload):
+        posted.update(payload)
+        status, _ = await gw_a._handle_relay_post(json.dumps(payload).encode())
+        return status.startswith("200")
+    monkeypatch.setattr("proxion_messenger_core.relay.post_relay", _fake_post)
+
+    ws_dev = _mock_ws()
+    gw_a.clients.add(ws_dev)
+    gw_a._client_webids[ws_dev] = "did:key:zADevice"
+
+    sender = Ed25519PrivateKey.generate()
+    ws_b = _mock_ws()
+    gw_b.clients.add(ws_b)
+    await gw_b.process_command(ws_b, {"cmd": "register", "did": _did(sender)})
+    await gw_b.process_command(ws_b, {
+        "cmd": "send_dm_fanout", "message_id": "logical-sealed-1",
+        "fanout": [{"to_webid": a_gw_did, "to_device_id": "did:key:zADevice",
+                    "payload": {"content": "SEALEDCIPHER", "e2e": True,
+                                "from_device_id": _did(sender)}}],
+    })
+
+    # On the wire: sealed — no sender identity or signature visible.
+    assert posted.get("content_type") == "sealed_dm"
+    assert "sealed_payload" in posted
+    assert "from_webid" not in posted
+    assert "signature" not in posted
+    # And it still delivered end-to-end after unseal + re-dispatch.
+    evt = _got(ws_dev, "dm_fanout")
+    assert evt is not None and evt["message_id"] == "logical-sealed-1"
+    assert evt["payload"]["content"] == "SEALEDCIPHER"
+
+
+@pytest.mark.asyncio
 async def test_dm_fanout_relay_rejects_bad_signature(tmp_path):
     gw = _gw(tmp_path, "a")
     body = json.dumps({

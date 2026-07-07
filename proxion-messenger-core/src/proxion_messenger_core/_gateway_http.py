@@ -569,6 +569,10 @@ class HttpEndpointsMixin:
                 data = _unseal(sealed, self._own_x25519_priv)
             except Exception as _ue:
                 return "400 Bad Request", '{"error":"sealed_relay_decrypt_failed"}'
+            # Re-dispatch sealed content types: a sealed dm_fanout envelope must
+            # route to the fanout handler, not fall through to the plain-DM path.
+            if isinstance(data, dict) and data.get("content_type") == "dm_fanout":
+                return await self._handle_dm_fanout_relay(data)
 
         from_webid  = data.get("from_webid", "")
         to_webid    = data.get("to_webid", "")

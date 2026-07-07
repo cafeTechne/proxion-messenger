@@ -926,6 +926,26 @@ class DmHandlerMixin:
                 "message_scope": "dm-fanout",
                 "origin_gateway_url": self._gateway_http_url(),
             }
+            # Sealed sender (same model as the plain-DM relay): when the peer
+            # gateway's seal key is known, wrap the whole signed envelope so
+            # from_webid/signature aren't visible to HTTP intermediaries — only
+            # the receiving gateway can unseal (it re-dispatches the inner
+            # dm_fanout after unsealing). Fall back to the signed-plaintext
+            # relay when the seal key is unknown.
+            _peer_seal_pub = self._resolve_peer_x25519_pub(to_webid)
+            if _peer_seal_pub:
+                try:
+                    from .sealed_relay import seal_relay_payload as _seal
+                    relay_payload = {
+                        "content_type": "sealed_dm",
+                        "to_webid": to_webid,
+                        "message_id": transport_id,
+                        "timestamp": ts,
+                        "relay_nonce": relay_nonce,
+                        "sealed_payload": _seal(relay_payload, _peer_seal_pub),
+                    }
+                except Exception as _se:
+                    logger.debug("dm_fanout seal failed, relaying signed-plaintext: %s", _se)
             http_base = peer_gw.replace("wss://", "https://").replace("ws://", "http://")
             delivered = await post_relay(http_base.rstrip("/") + "/relay", relay_payload)
             if not delivered and self._store:
