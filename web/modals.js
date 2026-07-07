@@ -8,7 +8,7 @@
 import { escHtml } from './util.js';
 import { inlineNotice } from './states.js';
 
-export function createModals({ getSocket, getActiveView, sendCmd, showToast, renderMessage }) {
+export function createModals({ getSocket, getActiveView, sendCmd, showToast, renderMessage, getMessageContent }) {
     const state = { forwardingMsgId: null };
 
     function openForwardModal(msgId) {
@@ -31,7 +31,13 @@ export function createModals({ getSocket, getActiveView, sendCmd, showToast, ren
                 item.textContent = t.name;
                 item.addEventListener('click', () => {
                     if (socket && state.forwardingMsgId) {
-                        socket.send(JSON.stringify({ cmd: 'forward_message', message_id: state.forwardingMsgId, target_thread_id: t.id }));
+                        // Send the PLAINTEXT we rendered — the gateway only has
+                        // ciphertext for E2E DMs and would forward garbage.
+                        const _content = getMessageContent ? getMessageContent(state.forwardingMsgId) : '';
+                        socket.send(JSON.stringify({
+                            cmd: 'forward_message', message_id: state.forwardingMsgId,
+                            target_thread_id: t.id, content: _content || '',
+                        }));
                     }
                     modal.style.display = 'none';
                 });

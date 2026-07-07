@@ -1850,6 +1850,79 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
         return "200 OK", '{"status":"delivered"}' if delivered else '{"status":"offline"}'
 
+    async def _handle_dm_edit_relay(self, data: dict) -> tuple[str, str]:
+        """Inbound relayed DM edit from a peer gateway. Update our stored copy
+        and deliver message_edited to the local recipient, keyed by OUR cert_id
+        for the relationship (cert_id asymmetry)."""
+        from_webid  = data.get("from_webid", "")
+        to_webid    = data.get("to_webid", "")
+        message_id  = data.get("message_id", "")
+        new_content = data.get("new_content", "")
+        if not all([from_webid, to_webid, message_id]) or not isinstance(new_content, str):
+            return "400 Bad Request", '{"error":"missing_edit_fields"}'
+        if len(new_content.encode("utf-8")) > 16_384:
+            return "400 Bad Request", '{"error":"content_too_large"}'
+        cert_dict = self._store.get_relationship_by_did(from_webid) if self._store else None
+        if not cert_dict:
+            return "200 OK", '{"status":"received"}'   # no relationship, no reveal
+        if from_webid in getattr(self, "_revoked_dids", set()) or self.blocklist.is_blocked(from_webid):
+            return "200 OK", '{"status":"received"}'
+        our_cert_id = cert_dict.get("certificate_id") or cert_dict.get("id") or ""
+        if self._store:
+            try:
+                self._store.update_message(message_id, new_content,
+                                           edited_at=datetime.now(timezone.utc).isoformat())
+            except Exception:
+                pass
+        await self._send_to_identity(to_webid, json.dumps({
+            "type": "message_edited",
+            "thread_id": our_cert_id,
+            "message_id": message_id,
+            "new_content": new_content,
+        }))
+        return "200 OK", '{"status":"received"}'
+
+    async def _handle_dm_reaction_relay(self, data: dict) -> tuple[str, str]:
+        """Inbound relayed DM reaction add/remove from a peer gateway. Deliver a
+        reaction_added/removed to the local recipient, keyed by OUR cert_id for
+        the relationship (the sender's thread_id is their cert_id — the cert_id
+        asymmetry — so we map from_webid -> our cert via get_relationship_by_did)."""
+        from_webid = data.get("from_webid", "")
+        to_webid   = data.get("to_webid", "")
+        message_id = data.get("message_id", "")
+        emoji      = data.get("emoji", "")
+        action     = data.get("action", "add")
+        if not all([from_webid, to_webid, message_id, emoji]):
+            return "400 Bad Request", '{"error":"missing_reaction_fields"}'
+        # Anti-spoof: only accept reactions from a peer we hold a relationship
+        # with. Unknown senders are silently accepted (200, no block-reveal) but
+        # not delivered — matching the relay block-enforcement model.
+        cert_dict = self._store.get_relationship_by_did(from_webid) if self._store else None
+        if not cert_dict:
+            return "200 OK", '{"status":"received"}'
+        if from_webid in getattr(self, "_revoked_dids", set()):
+            return "200 OK", '{"status":"received"}'
+        if self.blocklist.is_blocked(from_webid):
+            return "200 OK", '{"status":"received"}'
+        our_cert_id = cert_dict.get("certificate_id") or cert_dict.get("id") or ""
+        if self._store and our_cert_id:
+            try:
+                if action == "remove":
+                    self._store.remove_reaction(our_cert_id, message_id, emoji, from_webid)
+                else:
+                    self._store.save_reaction(our_cert_id, message_id, emoji, from_webid)
+            except Exception:
+                pass
+        event = json.dumps({
+            "type": "reaction_removed" if action == "remove" else "reaction_added",
+            "thread_id": our_cert_id,
+            "message_id": message_id,
+            "emoji": emoji,
+            "from_webid": from_webid,
+        })
+        await self._send_to_identity(to_webid, event)
+        return "200 OK", '{"status":"received"}'
+
     async def _handle_room_reaction_relay(self, data: dict) -> tuple[str, str]:
         """Inbound relayed reaction add/remove — deliver to local room members."""
         room_id    = data.get("room_id", "")

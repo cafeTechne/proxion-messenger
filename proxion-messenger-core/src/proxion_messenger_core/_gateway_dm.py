@@ -131,7 +131,44 @@ class DmHandlerMixin:
                 self.outbox.enqueue(msg, target_cert_id=cert_id)
                 await websocket.send(json.dumps({"type": "info", "message": "Edit queued (offline)"}))
         else:
-            await websocket.send(json.dumps({"type": "error", "message": f"Unknown DM recipient: {cert_id}"}))
+            # Relay-only cross-gateway DM (no pod client): edit_message used to
+            # return "Unknown DM recipient" — editing a federated DM did nothing.
+            # Update our store, echo to the editor's sessions, and relay the edit
+            # to the peer's gateway (parallels the reaction relay).
+            _cd = self._store.get_relationship_by_cert_id(cert_id) if self._store else None
+            _peer = _cd.get("peer_did", "") if _cd else ""
+            if not _cd or not _peer:
+                await websocket.send(json.dumps({"type": "error", "message": f"Unknown DM recipient: {cert_id}"}))
+                return
+            _caller = self._client_webids.get(websocket, "")
+            _owner = (self._store.get_relationship_owner_by_cert_id(cert_id) or "")
+            if _owner and _caller and _caller != _owner:
+                await websocket.send(json.dumps({"type": "error", "message": "Not a participant of this DM thread"}))
+                return
+            if self._store:
+                try:
+                    self._store.update_message(message_id, content,
+                                               edited_at=datetime.now(timezone.utc).isoformat(),
+                                               editor_webid=_caller)
+                except Exception:
+                    pass
+            _edited_event = json.dumps({
+                "type": "message_edited", "thread_id": cert_id,
+                "message_id": message_id, "new_content": content,
+            })
+            await self._send_to_identity(_caller, _edited_event)
+            if self._sockets_for(_peer):
+                await self._send_to_identity(_peer, _edited_event)
+            else:
+                _pg = self._resolve_peer_gateway(_peer)
+                if _pg:
+                    asyncio.create_task(self._relay_ephemeral(_pg, {
+                        "content_type": "dm_edit",
+                        "from_webid": _caller,
+                        "to_webid": _peer,
+                        "message_id": message_id,
+                        "new_content": content,
+                    }))
 
     async def _handle_get_dms(self, websocket, data: dict) -> None:
         dms = []

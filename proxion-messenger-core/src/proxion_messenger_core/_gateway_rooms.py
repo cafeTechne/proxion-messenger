@@ -838,6 +838,18 @@ class RoomHandlerMixin:
             await websocket.send(json.dumps({"type": "error", "message": "Not a member of target thread"}))
             return
 
+        # The forwarded content: the store holds only CIPHERTEXT for an E2E DM,
+        # so forwarding one used to post an undecryptable blob. The forwarder's
+        # client has the plaintext (it rendered it); prefer that. The actor is
+        # attributed as the author of the forwarded copy, so trusting their text
+        # is no different from them sending a normal message.
+        _client_content = data.get("content")
+        content = (_client_content if isinstance(_client_content, str) and _client_content
+                   else source_row.get("content", ""))
+        if len(content.encode("utf-8")) > 16_384:
+            await websocket.send(json.dumps({"type": "error", "code": "E_SCHEMA", "message": "content_too_large"}))
+            return
+
         import uuid as _uuid_fwd
         new_msg_id = str(_uuid_fwd.uuid4())
         display_name = self._display_names.get(websocket, "")
@@ -849,7 +861,7 @@ class RoomHandlerMixin:
             "message_id": new_msg_id,
             "from_webid": actor,
             "from_display_name": display_name,
-            "content": source_row.get("content", ""),
+            "content": content,
             "content_type": "text",
             "forwarded": True,
             "forwarded_from_name": source_row.get("from_display_name", ""),
@@ -1099,6 +1111,30 @@ class RoomHandlerMixin:
             recips.add(_subj)
         return {r for r in recips if r}
 
+    async def _deliver_dm_reaction(self, sender_webid: str, cert_id: str, peer_did: str,
+                                   event: dict, action: str, message_id: str, emoji: str) -> None:
+        """Deliver a DM reaction to the peer: local sessions if here, else RELAY
+        to their gateway. Federated DM reactions were silently lost — branch 2
+        did _send_to_identity(cert_id) where cert_id is a UUID (federated) that
+        matches no socket, with no relay. target = the cert's peer_did (federated)
+        or cert_id itself (local DM threads are keyed by the peer's did)."""
+        target = peer_did or (cert_id if str(cert_id).startswith("did:key:") else "")
+        if not target or target == sender_webid:
+            return
+        if self._sockets_for(target):
+            await self._send_to_identity(target, json.dumps(event))
+            return
+        peer_gw = self._resolve_peer_gateway(target)
+        if peer_gw:
+            asyncio.create_task(self._relay_ephemeral(peer_gw, {
+                "content_type": "dm_reaction",
+                "from_webid": sender_webid,
+                "to_webid": target,
+                "message_id": message_id,
+                "emoji": emoji,
+                "action": action,
+            }))
+
     async def _handle_add_reaction(self, websocket, data: dict) -> None:
         cert_id = data.get("cert_id")
         room_id = data.get("room_id")
@@ -1168,7 +1204,11 @@ class RoomHandlerMixin:
                 _cert_dict = self._store.get_relationship_by_cert_id(cert_id)
                 if _cert_dict:
                     from .didkey import pub_key_to_did as _p2d_react
-                    _owner_did = _p2d_react(self.agent.identity_pub_bytes)
+                    # The relationship's actual owner (the local user), not the
+                    # gateway agent did — the browser registers with its own did,
+                    # so comparing against the agent did rejected the real user.
+                    _owner_did = (self._store.get_relationship_owner_by_cert_id(cert_id)
+                                  or _p2d_react(self.agent.identity_pub_bytes))
                     _peer_did = _cert_dict.get("peer_did", "")
                     if sender_webid not in (_owner_did, _peer_did):
                         await websocket.send(json.dumps({"type": "error", "message": "Not a participant of this DM thread"}))
@@ -1183,11 +1223,10 @@ class RoomHandlerMixin:
                 "message_id": message_id, "emoji": emoji, "from_webid": sender_webid,
             }
             await websocket.send(json.dumps(event))
-            # In this branch cert_id IS the peer's DID (local DM thread key), so
-            # deliver to ALL of the peer's sessions (multi-device) rather than the
-            # single socket _any_socket(cert_id) returned.
-            if cert_id != sender_webid:
-                await self._send_to_identity(cert_id, json.dumps(event))
+            # Deliver to the peer — local sessions OR cross-gateway relay (was
+            # _send_to_identity(cert_id), which silently dropped federated DM
+            # reactions since cert_id is a UUID there).
+            await self._deliver_dm_reaction(sender_webid, cert_id, _peer_did, event, "add", message_id, emoji)
         else:
             cert, client = None, None
             id_to_use = cert_id or room_id
@@ -1262,7 +1301,8 @@ class RoomHandlerMixin:
                 _cert_dict_r = self._store.get_relationship_by_cert_id(cert_id)
                 if _cert_dict_r:
                     from .didkey import pub_key_to_did as _p2d_rmreact
-                    _owner_did_r = _p2d_rmreact(self.agent.identity_pub_bytes)
+                    _owner_did_r = (self._store.get_relationship_owner_by_cert_id(cert_id)
+                                    or _p2d_rmreact(self.agent.identity_pub_bytes))
                     _peer_did_r = _cert_dict_r.get("peer_did", "")
                     if sender_webid not in (_owner_did_r, _peer_did_r):
                         await websocket.send(json.dumps({"type": "error", "message": "Not a participant of this DM thread"}))
@@ -1274,9 +1314,7 @@ class RoomHandlerMixin:
                 "message_id": message_id, "emoji": emoji, "from_webid": sender_webid,
             }
             await websocket.send(json.dumps(event))
-            # cert_id is the peer's DID here — deliver to all the peer's sessions.
-            if cert_id != sender_webid:
-                await self._send_to_identity(cert_id, json.dumps(event))
+            await self._deliver_dm_reaction(sender_webid, cert_id, _peer_did_r, event, "remove", message_id, emoji)
         else:
             id_to_use = cert_id or room_id
             cert, client = None, None

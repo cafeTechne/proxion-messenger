@@ -492,6 +492,11 @@ class HttpEndpointsMixin:
             "file_id", "filename", "mime_type", "size_bytes", "total_chunks", "seq", "data", "reason",
             # room moderation federation (R-C1)
             "webid", "expires_at",
+            # reaction relay (room_reaction had emoji un-whitelisted -> 400 in
+            # production; masked because tests call the handler directly) + dm_reaction
+            "emoji",
+            # dm_edit relay
+            "new_content",
         })
         _unknown = set(data.keys()) - _ALLOWED_RELAY_KEYS
         if _unknown:
@@ -515,6 +520,14 @@ class HttpEndpointsMixin:
         # ── Room reaction relay — deliver to local members ──
         if data.get("content_type") == "room_reaction":
             return await self._handle_room_reaction_relay(data)
+
+        # ── DM reaction relay — deliver reaction_added/removed to a local peer ──
+        if data.get("content_type") == "dm_reaction":
+            return await self._handle_dm_reaction_relay(data)
+
+        # ── DM edit relay — deliver message_edited to a local peer ──
+        if data.get("content_type") == "dm_edit":
+            return await self._handle_dm_edit_relay(data)
 
         # ── Room edit relay — update store and deliver to local members ──
         if data.get("content_type") == "room_edit":

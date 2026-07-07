@@ -181,3 +181,49 @@ async def test_forward_missing_fields_is_noop(gateway):
     await _register(gateway, ws)
     # No crash
     await gateway.process_command(ws, {"cmd": "forward_message"})
+
+
+@pytest.mark.asyncio
+async def test_forward_prefers_client_plaintext_over_store_ciphertext(gateway):
+    """The store holds only ciphertext for an E2E DM; forwarding must use the
+    client-supplied plaintext, not post the undecryptable blob."""
+    ws = _mock_ws()
+    await _register(gateway, ws)
+    room_id = "room-e2e-fwd"
+    gateway._local_rooms[room_id] = {"members": {ws}, "messages": [], "history_mode": "none"}
+    import uuid
+    msg_id = str(uuid.uuid4())
+    # Simulate a stored E2E DM: the persisted content is ciphertext.
+    gateway._store.save_message(
+        msg_id, "dm-thread", "dm", gateway._client_webids[ws], "Alice",
+        "AAAA_ciphertext_blob_==", "2026-01-01T00:00:00Z",
+    )
+    ws.send.reset_mock()
+    await gateway.process_command(ws, {
+        "cmd": "forward_message", "message_id": msg_id,
+        "target_thread_id": room_id, "content": "the real plaintext",
+    })
+    fwd = [json.loads(c[0][0]) for c in ws.send.call_args_list
+           if json.loads(c[0][0]).get("forwarded")]
+    assert fwd and fwd[0]["content"] == "the real plaintext"
+    assert "ciphertext" not in fwd[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_forward_content_too_large_rejected(gateway):
+    ws = _mock_ws()
+    await _register(gateway, ws)
+    room_id = "room-big"
+    gateway._local_rooms[room_id] = {"members": {ws}, "messages": [], "history_mode": "none"}
+    import uuid
+    msg_id = str(uuid.uuid4())
+    gateway._store.save_message(msg_id, room_id, "local_room",
+                                gateway._client_webids[ws], "Alice", "orig", "2026-01-01T00:00:00Z")
+    ws.send.reset_mock()
+    await gateway.process_command(ws, {
+        "cmd": "forward_message", "message_id": msg_id,
+        "target_thread_id": room_id, "content": "x" * 20000,
+    })
+    errs = [json.loads(c[0][0]) for c in ws.send.call_args_list
+            if json.loads(c[0][0]).get("code") == "E_SCHEMA"]
+    assert errs

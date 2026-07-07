@@ -341,6 +341,7 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
             createModals({
                 getSocket: () => socket, getActiveView: () => activeView,
                 sendCmd, showToast, renderMessage,
+                getMessageContent: (id) => (messageMap[id] && messageMap[id].content) || '',
             });
         // Pinned messages: destructured into same-named bindings.
         const { pinMsg, showPinPanel, renderPins, unpinMsg, jumpToMsg } =
