@@ -2150,6 +2150,16 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if not from_webid or status not in ("online", "away", "busy", "offline"):
             return "400 Bad Request", '{"error":"invalid_presence"}'
 
+        # Anti-spoof: only accept presence for a peer we hold a relationship
+        # with. Without this, any friended gateway could inject presence for ANY
+        # webid (fake a stranger online, or a contact offline). Unknown senders
+        # get 200 (no reveal) but are ignored. Also skip revoked/blocked peers.
+        rel = self._store.get_relationship_by_did(from_webid) if self._store else None
+        if not rel:
+            return "200 OK", '{"status":"received"}'
+        if from_webid in getattr(self, "_revoked_dids", set()) or self.blocklist.is_blocked(from_webid):
+            return "200 OK", '{"status":"received"}'
+
         self._user_presence[from_webid] = {
             "status": status,
             "status_message": status_message,
@@ -2163,11 +2173,18 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             "status_message": status_message,
             "updated_at": updated_at,
         })
-        for ws in list(self.clients):
-            try:
-                await ws.send(presence_event)
-            except Exception:
-                pass
+        # Deliver to the local user(s) who actually have this peer as a contact,
+        # not every session on the gateway (a multi-user leak). Fall back to
+        # broadcast only when the owner is unknown — single-user-safe.
+        _owner = self._store.get_relationship_owner(from_webid) if self._store else ""
+        if _owner:
+            await self._send_to_identity(_owner, presence_event)
+        else:
+            for ws in list(self.clients):
+                try:
+                    await ws.send(presence_event)
+                except Exception:
+                    pass
         return "200 OK", '{"status":"ok"}'
 
     async def _handle_typing_relay(self, data: dict) -> tuple[str, str]:
@@ -2176,6 +2193,14 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         cert_id = data.get("cert_id", "")
         if not from_webid:
             return "400 Bad Request", '{"error":"missing_from_webid"}'
+        # Anti-spoof: only accept typing from a peer we hold a relationship with,
+        # so a gateway can't inject "X is typing" for arbitrary webids. Unknown
+        # senders are ignored (200, no reveal). (Delivery logic below unchanged.)
+        if self._store:
+            if not self._store.get_relationship_by_did(from_webid):
+                return "200 OK", '{"status":"received"}'
+            if from_webid in getattr(self, "_revoked_dids", set()) or self.blocklist.is_blocked(from_webid):
+                return "200 OK", '{"status":"received"}'
         # Find the local user who is in this DM thread. (Was get_dm_threads() with
         # no owner → always empty, so cross-gateway typing never delivered.)
         if self._store and cert_id:
