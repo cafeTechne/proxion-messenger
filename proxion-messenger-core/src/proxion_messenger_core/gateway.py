@@ -1821,12 +1821,17 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             return "400 Bad Request", '{"error":"missing voice signal fields"}'
 
         # Anti-spoof: only accept a voice signal from a peer the recipient has a
-        # relationship with, or a co-member of a voice channel. Otherwise any
-        # gateway could spam voice invites at any webid and spoof the caller.
+        # relationship with, or one destined for a member of a voice channel whose
+        # participants include the SIGNING gateway. from_webid here is the sending
+        # GATEWAY did (voice_signal is self-signed, envelope-verified at dispatch),
+        # so the channel check compares it against the channel's participant gateway
+        # dids (recorded from signed joins) — this authorizes group-call signaling
+        # between co-members who aren't direct friends. Otherwise any gateway could
+        # spam voice invites at any webid and spoof the caller.
         if self._store and from_webid:
             _related = bool(self._store.get_relationship_by_did(from_webid))
             _co_channel = any(
-                from_webid in ch.get("members", {}) and to_webid in ch.get("members", {})
+                to_webid in ch.get("members", {}) and from_webid in ch.get("gateway_dids", set())
                 for ch in self._voice_channels.values()
             )
             if not (_related or _co_channel):

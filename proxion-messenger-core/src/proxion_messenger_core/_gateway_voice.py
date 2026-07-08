@@ -59,6 +59,19 @@ class VoiceHandlerMixin:
                     if not ch.get("members"):
                         self._voice_channels.pop(ch_id, None)
 
+    def _voice_channel_peer_gateway(self, target_webid: str) -> "str | None":
+        """Channel-scoped gateway lookup: find target's gateway_url from any voice
+        channel it belongs to. Lets voice signaling reach a call co-member who is
+        not a direct friend (hence absent from _peer_gateway_urls) WITHOUT writing
+        into the global peer-gateway routing table (which a channel notification
+        must never poison)."""
+        for ch in getattr(self, "_voice_channels", {}).values():
+            info = ch.get("members", {}).get(target_webid)
+            gw = info.get("gateway_url") if isinstance(info, dict) else None
+            if gw:
+                return gw
+        return None
+
     async def _relay_voice_signal(
         self,
         target_webid: str,
@@ -76,7 +89,7 @@ class VoiceHandlerMixin:
         from .relay import sign_relay_envelope, post_relay
         from .didkey import pub_key_to_did
 
-        gateway_url = self._resolve_peer_gateway(target_webid)
+        gateway_url = self._resolve_peer_gateway(target_webid) or self._voice_channel_peer_gateway(target_webid)
         if not gateway_url:
             return False
 
@@ -152,6 +165,16 @@ class VoiceHandlerMixin:
                     for room in self._local_rooms.values()
                 )
                 _is_contact = _shared_room
+            if not _is_contact:
+                # Group call: the caller and target are co-members of a voice
+                # channel (the target may be a remote peer with no local socket and
+                # no direct relationship, so the room/relationship checks miss).
+                _is_contact = any(
+                    target_webid in ch.get("members", {})
+                    and any((m.get("ws") if isinstance(m, dict) else m) is websocket
+                            for m in ch.get("members", {}).values())
+                    for ch in self._voice_channels.values()
+                )
             if not _is_contact:
                 await websocket.send(json.dumps({
                     "type": "error",
@@ -252,12 +275,15 @@ class VoiceHandlerMixin:
             if target_ws and target_ws in self.clients:
                 await target_ws.send(json.dumps(answer_event))
             else:
-                peer_gw = self._resolve_peer_gateway(target_webid)
-                if peer_gw:
-                    asyncio.create_task(self._relay_voice_signal(
-                        target_webid, "answer",
-                        {"session_id": session_id, "sdp_answer": sdp_answer},
-                    ))
+                # Relay to the target's gateway. Let _relay_voice_signal resolve it
+                # (it falls back to the channel-scoped gateway for a group-call
+                # co-member who isn't a direct friend, so _resolve_peer_gateway
+                # alone would return None and drop the answer).
+                asyncio.create_task(self._relay_voice_signal(
+                    target_webid, "answer",
+                    {"session_id": session_id, "sdp_answer": sdp_answer,
+                     "caller_webid": sender_wid},
+                ))
             return
 
         sess = self._voice_sessions.get(session_id)
@@ -338,13 +364,15 @@ class VoiceHandlerMixin:
             if target_ws and target_ws in self.clients:
                 await target_ws.send(json.dumps(event))
             else:
-                peer_gw = self._resolve_peer_gateway(target_webid)
-                if peer_gw:
-                    asyncio.create_task(self._relay_voice_signal(
-                        target_webid, "ice_candidate",
-                        {"session_id": session_id, "candidate": candidate,
-                         "sdp_mid": sdp_mid, "sdp_mline_index": sdp_mline_index},
-                    ))
+                # _relay_voice_signal resolves the target's gateway with a
+                # channel-scoped fallback (a group co-member isn't necessarily a
+                # friend, so _resolve_peer_gateway alone would return None).
+                asyncio.create_task(self._relay_voice_signal(
+                    target_webid, "ice_candidate",
+                    {"session_id": session_id, "candidate": candidate,
+                     "sdp_mid": sdp_mid, "sdp_mline_index": sdp_mline_index,
+                     "caller_webid": sender_wid},
+                ))
             return
 
         sess = self._voice_sessions.get(session_id)
@@ -459,6 +487,16 @@ class VoiceHandlerMixin:
                         _host_gw = _gw
                         break
             if _host_gw and _host_gw != own_gw:
+                # Register the joiner in a LOCAL channel entry so the host's
+                # inbound voice_channel_peer_present / peer_joined notifications
+                # can be delivered to this client's socket. Previously we returned
+                # early with no local channel, so those notifications hit
+                # `if channel_id in self._voice_channels` = False and were dropped —
+                # the joiner never learned who else was present and the mesh never
+                # formed for cross-gateway group calls.
+                channel = self._voice_channels.setdefault(channel_id, {"members": {}})
+                channel["members"][joiner_webid] = {"ws": websocket, "gateway_url": None}
+                channel["host_gateway_url"] = _host_gw
                 asyncio.create_task(self._relay_ephemeral(_host_gw, {
                     "content_type": "voice_channel_join",
                     "channel_id": channel_id,
@@ -608,6 +646,14 @@ class VoiceHandlerMixin:
         channel_id   = data.get("channel_id", "")
         peer_webid   = data.get("peer_webid", "")
         peer_gw      = data.get("peer_gateway_url", "")
+        # Record the peer + its gateway in the local channel roster so voice_signal
+        # to that peer can resolve a gateway (channel-scoped, not global routing)
+        # even when the two users aren't direct friends.
+        if channel_id in self._voice_channels and peer_webid:
+            _ch = self._voice_channels[channel_id]
+            _existing = _ch["members"].get(peer_webid)
+            if not (isinstance(_existing, dict) and _existing.get("ws")):
+                _ch["members"][peer_webid] = {"ws": None, "gateway_url": peer_gw or None}
         # Deliver to all sockets of the target (or broadcast to channel members)
         sockets = self._sockets_for(target_webid) if target_webid else []
         event = json.dumps({
@@ -640,7 +686,14 @@ class VoiceHandlerMixin:
             "gateway_url": peer_gw,
         })
         if channel_id in self._voice_channels:
-            for info in self._voice_channels[channel_id]["members"].values():
+            _ch = self._voice_channels[channel_id]
+            # Record the existing peer + its gateway in the local roster so this
+            # joiner can route voice_signal back to it (channel-scoped resolution).
+            if peer_webid:
+                _existing = _ch["members"].get(peer_webid)
+                if not (isinstance(_existing, dict) and _existing.get("ws")):
+                    _ch["members"][peer_webid] = {"ws": None, "gateway_url": peer_gw or None}
+            for info in list(_ch["members"].values()):
                 ws = info.get("ws") if isinstance(info, dict) else info
                 if ws:
                     try:
