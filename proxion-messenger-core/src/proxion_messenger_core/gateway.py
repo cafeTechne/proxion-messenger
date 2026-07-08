@@ -395,6 +395,42 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # Only genuine loopback skips auth; wildcard (0.0.0.0/::) is routable → auth.
         return _host not in ("127.0.0.1", "localhost", "::1")
 
+    def _relay_sender_gateway_ok(self, from_webid: str, relay_sig_did: str) -> bool:
+        """TOFU continuity binding for ephemeral room/voice/file relays.
+
+        The envelope signature only proves *some* gateway (relay_sig_did) signed the
+        payload — not that ``from_webid`` legitimately lives on that gateway. Without
+        binding the two, a peer gateway could sign with its OWN key while setting
+        ``from_webid`` to another member's did (membership check passes → forgery).
+
+        A member's relays must consistently arrive signed by the SAME gateway key.
+        The first sighting of a (from_webid → signing-gateway-key) pair is trusted
+        (trust-on-first-use, matching the R10 HTTPS-WebID key-continuity model); a
+        later relay claiming the same ``from_webid`` but signed by a DIFFERENT
+        gateway key is rejected. When ``from_webid`` IS the signer (DM-style actors
+        whose from_webid is their own gateway did) there is nothing to bind.
+        """
+        if not self._store or not from_webid or not relay_sig_did:
+            return False
+        if from_webid == relay_sig_did:
+            return True
+        try:
+            from .didkey import did_to_pub_key
+            gw_pub_hex = did_to_pub_key(relay_sig_did).hex()
+        except Exception:
+            return False
+        _key = "relaygw:" + from_webid
+        try:
+            _hist = self._store.get_identity_key_history(_key)
+            if not _hist:
+                self._store.record_identity_key_seen(_key, gw_pub_hex, trusted=True)
+                return True
+            if any(h.get("pubkey_hex") == gw_pub_hex for h in _hist):
+                return True
+        except Exception:
+            return False
+        return False
+
     def _sockets_for(self, identity: str) -> list:
         """Return all connected sockets for identity (handles set and single-socket values).
 

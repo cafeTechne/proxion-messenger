@@ -161,3 +161,83 @@ async def test_signed_dm_reaction_relay_deduped_on_replay(tmp_path, noauth_env):
     s2, r2 = await gw._handle_relay_post(json.dumps(copy.deepcopy(payload)).encode())
     assert s1.startswith("200")
     assert "duplicate" in r2
+
+
+# ── Room relays: TOFU member→gateway binding ────────────────────────────────────
+
+def test_room_sender_gateway_binding_tofu_then_conflict(tmp_path):
+    """A member's relays must consistently come from the SAME signing gateway.
+    First sighting is trusted (TOFU); the same member relayed by a DIFFERENT
+    gateway key is rejected — closing from_webid forgery by a related peer."""
+    gw = _gw(tmp_path, "bind")
+    member = pub_key_to_did(Ed25519PrivateKey.generate().public_key().public_bytes_raw())
+    gw_a = pub_key_to_did(Ed25519PrivateKey.generate().public_key().public_bytes_raw())
+    gw_b = pub_key_to_did(Ed25519PrivateKey.generate().public_key().public_bytes_raw())
+    assert gw._relay_sender_gateway_ok(member, gw_a) is True    # TOFU: first sighting
+    assert gw._relay_sender_gateway_ok(member, gw_a) is True    # same gateway → ok
+    assert gw._relay_sender_gateway_ok(member, gw_b) is False   # different gateway → forgery
+    # A member whose from_webid IS its own gateway did needs no binding.
+    assert gw._relay_sender_gateway_ok(gw_a, gw_a) is True
+
+
+def _signed_room_message(signer_key, signer_did, room_id, member_did, mid="rm-1"):
+    payload = {
+        "content_type": "room_message", "room_id": room_id, "thread_id": room_id,
+        "from_webid": member_did, "from_display_name": "M", "content": "hello",
+        "message_id": mid, "timestamp": datetime.now(timezone.utc).isoformat(),
+        "relay_sig_did": signer_did,
+        "relay_ts": datetime.now(timezone.utc).isoformat(),
+        "relay_nonce": "rn-" + mid,
+    }
+    payload["signature"] = sign_relay_envelope(signer_key, payload)
+    return payload
+
+
+@pytest.mark.asyncio
+async def test_signed_room_message_delivered_then_forgery_dropped(tmp_path, noauth_env):
+    from unittest.mock import AsyncMock
+    gw = _gw(tmp_path, "rm")
+    room_id = "room-X"
+    member = pub_key_to_did(Ed25519PrivateKey.generate().public_key().public_bytes_raw())
+    gw_a_key = Ed25519PrivateKey.generate()
+    gw_a_did = pub_key_to_did(gw_a_key.public_key().public_bytes_raw())
+    gw_b_key = Ed25519PrivateKey.generate()   # a DIFFERENT (attacker) gateway
+    gw_b_did = pub_key_to_did(gw_b_key.public_key().public_bytes_raw())
+    # A local room with one live member + the remote member registered as federated.
+    ws = AsyncMock(); ws.send = AsyncMock()
+    ws.__hash__ = lambda s: id(s); ws.__eq__ = lambda s, o: s is o
+    gw._local_rooms[room_id] = {"name": "R", "members": {ws}}
+    gw._store.add_federated_room_member(room_id, member, "https://a.example")
+
+    # 1) Legit: signed by member's gateway (gw_a) → delivered + binds member→gw_a.
+    ok = _signed_room_message(gw_a_key, gw_a_did, room_id, member, mid="m1")
+    s1, _ = await gw._handle_relay_post(json.dumps(ok).encode())
+    assert s1.startswith("200")
+    assert ws.send.await_count == 1
+
+    # 2) Forgery: attacker gateway (gw_b) signs a message claiming the SAME member.
+    #    Signature is valid for gw_b, membership passes, but the binding rejects it.
+    ws.send.reset_mock()
+    forged = _signed_room_message(gw_b_key, gw_b_did, room_id, member, mid="m2")
+    s2, _ = await gw._handle_relay_post(json.dumps(forged).encode())
+    assert s2.startswith("200")            # no-reveal
+    assert ws.send.await_count == 0        # …but never delivered
+    assert gw._store.get_message("m2") is None
+
+
+@pytest.mark.asyncio
+async def test_unsigned_room_message_dropped(tmp_path, noauth_env):
+    from unittest.mock import AsyncMock
+    gw = _gw(tmp_path, "rmu")
+    room_id = "room-U"
+    member = pub_key_to_did(Ed25519PrivateKey.generate().public_key().public_bytes_raw())
+    ws = AsyncMock(); ws.send = AsyncMock()
+    ws.__hash__ = lambda s: id(s); ws.__eq__ = lambda s, o: s is o
+    gw._local_rooms[room_id] = {"name": "R", "members": {ws}}
+    gw._store.add_federated_room_member(room_id, member, "https://a.example")
+    status, _ = await gw._handle_relay_post(json.dumps({
+        "content_type": "room_message", "room_id": room_id, "from_webid": member,
+        "content": "x", "message_id": "u1", "timestamp": datetime.now(timezone.utc).isoformat(),
+    }).encode())
+    assert status.startswith("200")
+    assert ws.send.await_count == 0

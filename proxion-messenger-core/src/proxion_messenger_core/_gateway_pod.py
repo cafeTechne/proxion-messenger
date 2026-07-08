@@ -2103,25 +2103,24 @@ class PodSyncMixin:
         }
 
     async def _relay_room_message(self, gateway_url: str, room_id: str, event: dict) -> None:
-        """Relay a room message to a federated peer gateway."""
-        from .relay import sign_relay_message, post_relay
-        from .didkey import pub_key_to_did
+        """Relay a room message to a federated peer gateway.
+
+        Envelope-signed (R55): the full payload is bound to this gateway's identity
+        key via ``relay_sig_did`` so the receiver can verify it wasn't tampered and
+        bind ``from_webid`` to the signing gateway (see _relay_sender_gateway_ok)."""
+        from .relay import sign_relay_envelope, post_relay
         import secrets as _sec
-        gw_did = pub_key_to_did(self.agent.identity_pub_bytes)
-        relay_nonce = _sec.token_hex(8)
         ts = event.get("timestamp", datetime.now(timezone.utc).isoformat())
-        sig = sign_relay_message(
-            self.agent.identity_key, gw_did, room_id,
-            event.get("message_id", ""), event.get("content", ""), ts, relay_nonce,
-        )
         payload = {
             **{k: v for k, v in event.items() if k not in ("own",)},
             "content_type": "room_message",
             "room_id": room_id,
-            "relay_nonce": relay_nonce,
-            "signature": sig,
+            "relay_nonce": _sec.token_hex(8),
+            "relay_sig_did": self._own_gateway_did(),
+            "relay_ts": ts,
             "origin_gateway_url": self._gateway_http_url(),
         }
+        payload["signature"] = sign_relay_envelope(self.agent.identity_key, payload)
         http_base = gateway_url.replace("wss://", "https://").replace("ws://", "http://")
         try:
             await post_relay(http_base.rstrip("/") + "/relay", payload)
