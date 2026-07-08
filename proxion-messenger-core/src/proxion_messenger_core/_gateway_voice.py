@@ -73,7 +73,7 @@ class VoiceHandlerMixin:
         """
         import secrets as _sec
         import time as _time
-        from .relay import sign_relay_message, post_relay
+        from .relay import sign_relay_envelope, post_relay
         from .didkey import pub_key_to_did
 
         gateway_url = self._resolve_peer_gateway(target_webid)
@@ -87,31 +87,30 @@ class VoiceHandlerMixin:
         message_id = f"vs:{signal_type}:{session_id}:{relay_nonce}"
         ts = _time.strftime("%Y-%m-%dT%H:%M:%S+00:00", _time.gmtime())
 
-        try:
-            sig = sign_relay_message(
-                self.agent.identity_key,
-                gateway_did, target_webid,
-                message_id, signal_type, ts, relay_nonce,
-            )
-        except Exception as exc:
-            logger.debug("_relay_voice_signal sign failed: %s", exc)
-            return False
-
         my_http = self._gateway_http_url() if hasattr(self, "_gateway_http_url") else ""
+        # from_webid IS this gateway's did (the voice actor is the gateway), so the
+        # envelope signature both authenticates the payload and self-binds the
+        # sender (relay_sig_did == from_webid) — DM-style. (R55)
         payload = {
             "from_webid": gateway_did,
             "to_webid": target_webid,
             "message_id": message_id,
-            "content": signal_type,          # used by signature; receiver ignores
+            "content": signal_type,
             "timestamp": ts,
             "relay_nonce": relay_nonce,
-            "signature": sig,
             "origin_gateway_url": my_http,
             "content_type": "voice_signal",
             "signal_type": signal_type,
             "signal_data": signal_data,
             "session_id": session_id,
+            "relay_sig_did": gateway_did,
+            "relay_ts": ts,
         }
+        try:
+            payload["signature"] = sign_relay_envelope(self.agent.identity_key, payload)
+        except Exception as exc:
+            logger.debug("_relay_voice_signal sign failed: %s", exc)
+            return False
         http_base = gateway_url.replace("wss://", "https://").replace("ws://", "http://")
         try:
             return await post_relay(http_base.rstrip("/") + "/relay", payload)

@@ -520,20 +520,24 @@ class HttpEndpointsMixin:
         # new_content, not just the fixed set) and bind from_webid to the signing
         # gateway so a peer gateway can't forge another's from_webid. Unknown/
         # invalid/forged → 200 no-reveal (don't act).
-        #   DM secondary ops: the actor IS its own gateway → from_webid == signer.
-        #   Room ops: from_webid is a MEMBER did → TOFU continuity binding.
-        # (voice_signal / voice_channel_* / file_* still use the legacy fixed-field
-        #  signature; their send paths are converted in a follow-up slice.)
-        _DM_SIGNED_TYPES = (
-            "dm_reaction", "dm_edit", "dm_delete", "dm_pin", "dm_disappear_timer")
-        _ROOM_SIGNED_TYPES = (
-            "room_message", "room_reaction", "room_edit", "room_delete", "room_moderation")
+        #   Self-signed (from_webid IS the signing gateway → from_webid == signer):
+        #     DM secondary ops + voice_signal.
+        #   Member-signed (from_webid is a MEMBER did → TOFU continuity binding):
+        #     room ops + file transfer.
+        # (voice_channel_* still use the legacy fixed-field signature; converted in
+        #  a follow-up slice.)
+        _SELF_SIGNED_TYPES = (
+            "dm_reaction", "dm_edit", "dm_delete", "dm_pin", "dm_disappear_timer",
+            "voice_signal")
+        _MEMBER_SIGNED_TYPES = (
+            "room_message", "room_reaction", "room_edit", "room_delete", "room_moderation",
+            "file_offer", "file_accept", "file_reject", "file_chunk", "file_complete")
         _ct = data.get("content_type")
-        if _ct in _DM_SIGNED_TYPES or _ct in _ROOM_SIGNED_TYPES:
+        if _ct in _SELF_SIGNED_TYPES or _ct in _MEMBER_SIGNED_TYPES:
             from .relay import verify_relay_envelope
             _from = data.get("from_webid", "")
             _signer = data.get("relay_sig_did", "")
-            if _ct in _DM_SIGNED_TYPES:
+            if _ct in _SELF_SIGNED_TYPES:
                 _bound = (_signer == _from)
             else:
                 _bound = self._relay_sender_gateway_ok(_from, _signer)

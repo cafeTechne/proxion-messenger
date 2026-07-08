@@ -40,7 +40,7 @@ async def test_relay_voice_signal_calls_post_relay_when_gateway_known(gateway):
     gateway._peer_gateway_urls["did:key:zBob"] = "https://bob.example.com"
     gateway._store.save_peer_gateway("did:key:zBob", "https://bob.example.com")
 
-    with patch("proxion_messenger_core.relay.sign_relay_message", return_value="sig"), \
+    with patch("proxion_messenger_core.relay.sign_relay_envelope", return_value="sig"), \
          patch("proxion_messenger_core.relay.post_relay", new_callable=AsyncMock, return_value=True) as mock_post:
         result = await gateway._relay_voice_signal("did:key:zBob", "ice_candidate", {"session_id": "s1", "candidate": "a=..."})
 

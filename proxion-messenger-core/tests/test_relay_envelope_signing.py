@@ -241,3 +241,69 @@ async def test_unsigned_room_message_dropped(tmp_path, noauth_env):
     }).encode())
     assert status.startswith("200")
     assert ws.send.await_count == 0
+
+
+# ── Voice + file: the new content types are gated too ───────────────────────────
+
+@pytest.mark.asyncio
+async def test_voice_signal_signed_delivered_unsigned_dropped(tmp_path, noauth_env):
+    """voice_signal is self-signed (from_webid == the caller's gateway == signer).
+    A signed signal from a related peer is delivered; an unsigned one is dropped."""
+    from unittest.mock import AsyncMock
+    gw = _gw(tmp_path, "vs")
+    caller_key = Ed25519PrivateKey.generate()
+    caller_did = pub_key_to_did(caller_key.public_key().public_bytes_raw())
+    target = pub_key_to_did(Ed25519PrivateKey.generate().public_key().public_bytes_raw())
+    _seed_rel(gw, "cert-V", caller_did, owner="")          # recipient knows the caller
+    ws = AsyncMock(); ws.send = AsyncMock()
+    ws.__hash__ = lambda s: id(s); ws.__eq__ = lambda s, o: s is o
+    gw.clients.add(ws); gw._client_webids[ws] = target
+    gw._webid_sockets[target] = {ws}
+
+    base = {"content_type": "voice_signal", "from_webid": caller_did, "to_webid": target,
+            "signal_type": "offer", "signal_data": {"sdp": "x"}, "session_id": "s1",
+            "message_id": "vs1", "content": "offer"}
+    # Unsigned → dropped at the gate.
+    await gw._handle_relay_post(json.dumps(dict(base)).encode())
+    assert ws.send.await_count == 0
+    # Signed (self-signed: relay_sig_did == from_webid) → delivered.
+    signed = dict(base, relay_sig_did=caller_did,
+                  relay_ts=datetime.now(timezone.utc).isoformat(), relay_nonce="vn1")
+    signed["signature"] = sign_relay_envelope(caller_key, signed)
+    await gw._handle_relay_post(json.dumps(signed).encode())
+    assert ws.send.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_file_chunk_forged_sender_dropped(tmp_path, noauth_env):
+    """file_* is member-signed (TOFU binding). A file chunk whose from_webid is
+    bound to gateway A cannot later be relayed by attacker gateway B."""
+    from unittest.mock import AsyncMock
+    gw = _gw(tmp_path, "fc")
+    member = pub_key_to_did(Ed25519PrivateKey.generate().public_key().public_bytes_raw())
+    gw_a_key = Ed25519PrivateKey.generate()
+    gw_a_did = pub_key_to_did(gw_a_key.public_key().public_bytes_raw())
+    gw_b_key = Ed25519PrivateKey.generate()
+    gw_b_did = pub_key_to_did(gw_b_key.public_key().public_bytes_raw())
+    target = pub_key_to_did(Ed25519PrivateKey.generate().public_key().public_bytes_raw())
+    _seed_rel(gw, "cert-FC", member, owner="")
+    ws = AsyncMock(); ws.send = AsyncMock()
+    ws.__hash__ = lambda s: id(s); ws.__eq__ = lambda s, o: s is o
+    gw.clients.add(ws); gw._client_webids[ws] = target
+    gw._webid_sockets[target] = {ws}
+
+    def _chunk(signer_key, signer_did, fid):
+        p = {"content_type": "file_chunk", "from_webid": member, "to_webid": target,
+             "file_id": fid, "seq": 0, "data": "AAAA",
+             "relay_sig_did": signer_did, "relay_ts": datetime.now(timezone.utc).isoformat(),
+             "relay_nonce": "fn-" + fid}
+        p["signature"] = sign_relay_envelope(signer_key, p)
+        return p
+
+    # 1) Legit: signed by member's gateway A → delivered + binds member→A.
+    await gw._handle_relay_post(json.dumps(_chunk(gw_a_key, gw_a_did, "f1")).encode())
+    assert ws.send.await_count == 1
+    # 2) Forgery: attacker gateway B signs a chunk claiming the same member → dropped.
+    ws.send.reset_mock()
+    await gw._handle_relay_post(json.dumps(_chunk(gw_b_key, gw_b_did, "f2")).encode())
+    assert ws.send.await_count == 0
