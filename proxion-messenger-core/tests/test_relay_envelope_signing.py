@@ -307,3 +307,17 @@ async def test_file_chunk_forged_sender_dropped(tmp_path, noauth_env):
     ws.send.reset_mock()
     await gw._handle_relay_post(json.dumps(_chunk(gw_b_key, gw_b_did, "f2")).encode())
     assert ws.send.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_unsigned_voice_channel_join_dropped(tmp_path, noauth_env):
+    """voice_channel_join is now gated: an unsigned one never reaches the handler
+    (which would otherwise register the remote member into the channel)."""
+    gw = _gw(tmp_path, "vcj")
+    joiner = pub_key_to_did(Ed25519PrivateKey.generate().public_key().public_bytes_raw())
+    status, _ = await gw._handle_relay_post(json.dumps({
+        "content_type": "voice_channel_join", "channel_id": "chan-1",
+        "from_webid": joiner, "origin_gateway_url": "https://a.example",
+    }).encode())
+    assert status.startswith("200")
+    assert "chan-1" not in gw._voice_channels   # never registered
