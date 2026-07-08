@@ -119,6 +119,9 @@ async def test_file_chunk_relay_to_gateway_identity_reaches_local_client(gateway
     gateway._webid_sockets["did:key:zBrowserClient"] = {ws}
 
     gateway_did = pub_key_to_did(gateway.agent.identity_pub_bytes)
+    gateway._store.save_relationship(
+        {"certificate_id": "cf-al", "subject": "ab" * 32, "created_at": 0,
+         "expires_at": 2**31 - 1}, peer_did="did:key:zAlice", owner_webid="")
     status, _ = await gateway._handle_file_relay({
         "content_type": "file_chunk",
         "to_webid": gateway_did,

@@ -107,8 +107,17 @@ class FileTransferMixin:
         """Inbound relayed file-transfer message → deliver to the local target."""
         content_type = data.get("content_type", "")
         to_webid = data.get("to_webid", "")
+        from_webid = data.get("from_webid", "")
         if not to_webid or not content_type:
             return "400 Bad Request", '{"error":"missing_file_relay_fields"}'
+        # Anti-spoof: only accept a file transfer from a peer the recipient has a
+        # relationship with — otherwise any gateway could spam file offers at any
+        # webid and spoof the sender. Unknown senders are ignored (no reveal).
+        if self._store and from_webid:
+            if not self._store.get_relationship_by_did(from_webid):
+                return "202 Accepted", '{"status":"ignored"}'
+            if from_webid in getattr(self, "_revoked_dids", set()) or self.blocklist.is_blocked(from_webid):
+                return "202 Accepted", '{"status":"ignored"}'
         if content_type == "file_chunk":
             _c = data.get("data", "")
             if not isinstance(_c, str) or len(_c) > MAX_CHUNK_B64_LEN:

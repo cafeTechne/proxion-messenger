@@ -8,6 +8,10 @@ from proxion_messenger_core.gateway import ProxionGateway, GatewayConfig
 from proxion_messenger_core.persist import AgentState
 from proxion_messenger_core.readstate import ReadState
 from proxion_messenger_core.local_store import LocalStore
+
+
+def _seed_rel_file(gw, peer_did):
+    gw._store.save_relationship({"certificate_id": "cf-"+peer_did[-4:], "subject": "ab"*32, "created_at": 0, "expires_at": 2**31-1}, peer_did=peer_did, owner_webid="")
 from proxion_messenger_core.file_transfer import chunk_count, CHUNK_SIZE, TIER1_MAX_BYTES, FileOffer
 from proxion_messenger_core._gateway_files import MAX_FILE_BYTES, MAX_CHUNK_B64_LEN
 
@@ -149,6 +153,7 @@ async def test_file_relay_inbound_delivers_to_local(gateway):
     gateway._webid_sockets["did:key:zBob"] = {recipient}
     gateway.clients.add(recipient)
 
+    _seed_rel_file(gateway, "did:key:zAlice")
     status, _ = await gateway._handle_file_relay({
         "content_type": "file_chunk", "to_webid": "did:key:zBob",
         "from_webid": "did:key:zAlice", "file_id": "f6", "seq": 2,
@@ -162,9 +167,27 @@ async def test_file_relay_inbound_delivers_to_local(gateway):
 
 @pytest.mark.asyncio
 async def test_file_relay_offline_returns_202(gateway):
+    _seed_rel_file(gateway, "did:key:zAlice")
     status, body = await gateway._handle_file_relay({
         "content_type": "file_offer", "to_webid": "did:key:zOffline",
         "from_webid": "did:key:zAlice", "file_id": "f7",
     })
     assert status.startswith("202")
     assert "offline" in body
+
+
+@pytest.mark.asyncio
+async def test_file_relay_rejects_stranger(gateway):
+    """A file offer/chunk from a webid the recipient has no relationship with is
+    ignored — no file spam / sender spoofing from arbitrary gateways."""
+    ws = AsyncMock(); ws.send = AsyncMock(); ws.__hash__ = lambda s: id(s)
+    gateway.clients.add(ws)
+    gateway._client_webids[ws] = "did:key:zBob"
+    gateway._webid_sockets["did:key:zBob"] = {ws}
+    status, _ = await gateway._handle_file_relay({
+        "content_type": "file_offer", "to_webid": "did:key:zBob",
+        "from_webid": "did:key:zStranger", "file_id": "fx",
+        "filename": "x.png", "mime_type": "image/png", "size_bytes": 10, "total_chunks": 1,
+    })
+    assert status.startswith("202")
+    ws.send.assert_not_called()
