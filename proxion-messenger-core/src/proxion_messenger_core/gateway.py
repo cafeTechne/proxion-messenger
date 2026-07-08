@@ -2099,7 +2099,13 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         room = self._local_rooms.get(room_id)
         if not room:
             return "404 Not Found", '{"error":"room_not_found"}'
+        # Authz: only the message's author (or the room owner) may edit it — the
+        # relay path used to edit ANY message by id, letting a federated member's
+        # gateway rewrite other members' messages. Mirrors the local edit check.
         if self._store:
+            _sender = self._store.get_message_sender(message_id)
+            if _sender and _sender != from_webid and room.get("creator_webid") != from_webid:
+                return "403 Forbidden", '{"error":"not_message_author"}'
             self._store.update_message(message_id, new_content, edited_at,
                                        editor_webid=from_webid)
         event = json.dumps({
@@ -2121,11 +2127,19 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         """Inbound relayed message delete — remove from local store and deliver to room members."""
         room_id    = data.get("room_id", "")
         message_id = data.get("message_id", "")
+        from_webid = data.get("from_webid", "")
         if not room_id or not message_id:
             return "400 Bad Request", '{"error":"missing_delete_fields"}'
         room = self._local_rooms.get(room_id)
         if not room:
             return "404 Not Found", '{"error":"room_not_found"}'
+        # Authz: only the message's author (or the room owner) may delete it —
+        # the relay path used to delete ANY message by id (no from_webid at all),
+        # letting a federated member's gateway delete others' messages.
+        if self._store and from_webid:
+            _sender = self._store.get_message_sender(message_id)
+            if _sender and _sender != from_webid and room.get("creator_webid") != from_webid:
+                return "403 Forbidden", '{"error":"not_message_author"}'
         if self._store:
             self._store.delete_message(message_id)
         event = json.dumps({
