@@ -66,8 +66,13 @@ class FileTransferMixin:
 
         peer_gw = self._resolve_peer_gateway(to_webid)
         if peer_gw:
+            # from_webid MUST be this gateway's did — the federation identity the
+            # peer keys the relationship by. Using the browser/session did (which
+            # differs from the gateway did when auth is off) made the receiver's
+            # get_relationship_by_did miss → the whole transfer was silently
+            # dropped cross-gateway. Same identity model as DM/voice/file-DM relays.
             relay_payload = {"content_type": content_type, "to_webid": to_webid,
-                             "from_webid": sender_webid}
+                             "from_webid": self._own_gateway_did()}
             for f in fields:
                 if f in data:
                     relay_payload[f] = data[f]
