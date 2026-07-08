@@ -1740,6 +1740,20 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if not to_webid or not signal_type:
             return "400 Bad Request", '{"error":"missing voice signal fields"}'
 
+        # Anti-spoof: only accept a voice signal from a peer the recipient has a
+        # relationship with, or a co-member of a voice channel. Otherwise any
+        # gateway could spam voice invites at any webid and spoof the caller.
+        if self._store and from_webid:
+            _related = bool(self._store.get_relationship_by_did(from_webid))
+            _co_channel = any(
+                from_webid in ch.get("members", {}) and to_webid in ch.get("members", {})
+                for ch in self._voice_channels.values()
+            )
+            if not (_related or _co_channel):
+                return "202 Accepted", '{"status":"ignored"}'
+            if from_webid in getattr(self, "_revoked_dids", set()) or self.blocklist.is_blocked(from_webid):
+                return "202 Accepted", '{"status":"ignored"}'
+
         target_sockets = self._sockets_for(to_webid)  # _sockets_for handles the own-identity fallback
         if not target_sockets:
             return "202 Accepted", '{"status":"offline"}'

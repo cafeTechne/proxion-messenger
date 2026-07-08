@@ -9,6 +9,10 @@ from proxion_messenger_core.persist import AgentState
 from proxion_messenger_core.readstate import ReadState
 from proxion_messenger_core.local_store import LocalStore
 
+
+def _seed_rel_voice(gw, peer_did, owner=""):
+    gw._store.save_relationship({"certificate_id": "c-" + peer_did[-4:], "subject": "ab"*32, "created_at": 0, "expires_at": 2**31-1}, peer_did=peer_did, owner_webid=owner)
+
 @pytest.fixture
 def gateway(tmp_path):
     agent = MagicMock(spec=AgentState)
@@ -59,6 +63,7 @@ async def test_voice_signal_relay_delivered_to_connected_socket(gateway):
     target_webid = "did:key:zAlice"
     gateway._client_webids[ws] = target_webid
     gateway._webid_sockets[target_webid] = {ws}
+    _seed_rel_voice(gateway, "did:key:zBob")
 
     status, body = await gateway._handle_voice_signal_relay({
         "to_webid": target_webid,
@@ -88,6 +93,7 @@ async def test_voice_signal_relay_to_gateway_identity_reaches_local_client(gatew
     gateway._webid_sockets["did:key:zBrowserClient"] = {ws}
 
     gateway_did = pub_key_to_did(gateway.agent.identity_pub_bytes)  # the address DID peers use
+    _seed_rel_voice(gateway, "did:key:zAlice")
     status, body = await gateway._handle_voice_signal_relay({
         "to_webid": gateway_did,
         "from_webid": "did:key:zAlice",
@@ -103,6 +109,7 @@ async def test_voice_signal_relay_to_gateway_identity_reaches_local_client(gatew
 @pytest.mark.asyncio
 async def test_voice_signal_relay_offline_returns_202(gateway):
     """Voice signal for offline target returns 202 without queuing."""
+    _seed_rel_voice(gateway, "did:key:zBob")
     status, body = await gateway._handle_voice_signal_relay({
         "to_webid": "did:key:zOffline",
         "from_webid": "did:key:zBob",
@@ -127,3 +134,34 @@ async def test_voice_signal_not_added_to_relay_queue(gateway):
         "signal_data": {},
     })
     assert gateway._relay_queue == before  # no new queue entry
+
+
+@pytest.mark.asyncio
+async def test_voice_signal_relay_rejects_stranger(gateway):
+    """A voice signal from a webid the recipient has no relationship with is
+    ignored — a peer gateway can't spam voice invites / spoof the caller."""
+    ws = _ws()
+    gateway.clients.add(ws)
+    gateway._client_webids[ws] = "did:key:zAlice"
+    gateway._webid_sockets["did:key:zAlice"] = {ws}
+    # No relationship for zStranger.
+    status, _ = await gateway._handle_voice_signal_relay({
+        "to_webid": "did:key:zAlice", "from_webid": "did:key:zStranger",
+        "signal_type": "offer", "session_id": "s", "signal_data": {"sdp": "x"},
+    })
+    assert status.startswith("202")
+    ws.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_voice_channel_join_relay_rejects_non_member(gateway):
+    """A remote join to a room's voice channel must come from a room member."""
+    room_id = "voice-room"
+    gateway._local_rooms[room_id] = {"members": set(), "creator_webid": "did:key:zOwner"}
+    gateway._store.add_room_member(room_id, "did:key:zMember")
+    status, _ = await gateway._handle_voice_channel_join_relay({
+        "channel_id": room_id, "from_webid": "did:key:zOutsider",
+        "origin_gateway_url": "https://evil.test",
+    })
+    assert status.startswith("403")
+    assert "did:key:zOutsider" not in gateway._voice_channels.get(room_id, {}).get("members", {})

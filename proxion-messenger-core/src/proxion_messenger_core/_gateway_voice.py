@@ -527,6 +527,17 @@ class VoiceHandlerMixin:
         if not channel_id or not from_webid or not origin_gw:
             return "400 Bad Request", '{"error":"missing_voice_channel_join_fields"}'
 
+        # Authz: a voice channel is scoped to its room. A remote join must come
+        # from a room member — otherwise anyone who knows the channel/room id
+        # could join the call, join the ICE mesh, and see who's present. The
+        # LOCAL join path checks this (e913357); the relay path didn't.
+        if channel_id in self._local_rooms and self._store:
+            _members = set(self._store.get_room_members(channel_id))
+            _members |= {m.get("member_did") for m in self._store.get_federated_room_members(channel_id)}
+            _members.discard("")
+            if _members and from_webid not in _members:
+                return "403 Forbidden", '{"error":"not_a_room_member"}'
+
         channel = self._voice_channels.setdefault(channel_id, {"members": {}})
         existing = dict(channel["members"])
         channel["members"][from_webid] = {"ws": None, "gateway_url": origin_gw}
