@@ -245,6 +245,83 @@ def verify_relay_message(
         return False
 
 
+# ── Full-payload envelope signature (ephemeral content_type relays) ─────────────
+#
+# sign_relay_message() above binds only a FIXED field set (from/to/msg/content/
+# ts). The ephemeral relays (room/voice/file/dm secondary ops) carry op-specific
+# fields (emoji, action, ms, room_id, channel_id, …) that must ALSO be bound, or
+# a relaying gateway could tamper with them. The envelope signs the whole payload.
+# The signer is the RELAYING GATEWAY (relay_sig_did), not necessarily from_webid,
+# so room relays (from_webid = a member did) can be signed by the member's gateway
+# and the receiver can bind the two separately.
+
+def _envelope_canonical(payload: dict) -> bytes:
+    """Deterministic bytes over every field except ``signature``."""
+    import json as _json
+    body = {k: v for k, v in payload.items() if k != "signature"}
+    return _json.dumps(body, sort_keys=True, separators=(",", ":"),
+                       ensure_ascii=False).encode("utf-8")
+
+
+def sign_relay_envelope(identity_key: "Ed25519PrivateKey", payload: dict) -> str:
+    """Sign the full ephemeral relay *payload* with the gateway identity key.
+
+    The payload MUST already carry ``relay_sig_did`` (the signing gateway's
+    did:key) and ``relay_ts`` (ISO-8601) — they are part of the signed bytes.
+    Returns a base64url-encoded Ed25519 signature.
+    """
+    raw = identity_key.sign(_envelope_canonical(payload))
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+
+def verify_relay_envelope(payload: dict,
+                          clock_skew_window: Optional[timedelta] = None) -> bool:
+    """Verify a full-payload envelope signature. Never raises → False on failure.
+
+    The signer's key is derived from ``relay_sig_did`` (a did:key). Verifies the
+    Ed25519 signature over every field except ``signature`` and enforces a
+    clock-skew window (default ±5 min, hard cap 15) on ``relay_ts``.
+    """
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+        sig    = payload.get("signature", "")
+        signer = payload.get("relay_sig_did", "")
+        ts     = payload.get("relay_ts", "")
+        if not sig or not signer or not ts or not signer.startswith("did:key:"):
+            return False
+
+        from .didkey import did_to_pub_key
+        pub_bytes = did_to_pub_key(signer)
+        if len(pub_bytes) != 32:
+            return False
+        try:
+            from .crypto_policy import validate_signature_policy
+            validate_signature_policy(alg="EdDSA", key_meta={"crv": "Ed25519"}, context="relay")
+        except Exception:
+            return False
+
+        pub_key = Ed25519PublicKey.from_public_bytes(pub_bytes)
+        padded = sig + "=" * (-len(sig) % 4)
+        raw_sig = base64.urlsafe_b64decode(padded)
+        pub_key.verify(raw_sig, _envelope_canonical(payload))
+
+        _window = timedelta(minutes=5) if clock_skew_window is None else clock_skew_window
+        if _window > timedelta(minutes=15):
+            _window = timedelta(minutes=15)
+        try:
+            msg_ts = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        except Exception:
+            return False
+        if msg_ts.tzinfo is None:
+            return False
+        if abs(datetime.now(timezone.utc) - msg_ts) > _window:
+            return False
+        return True
+    except Exception:
+        return False
+
+
 # ── HTTP relay delivery ───────────────────────────────────────────────────────
 
 async def post_relay(target_url: str, payload: dict, timeout: float = 10.0) -> bool:

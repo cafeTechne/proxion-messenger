@@ -499,6 +499,9 @@ class HttpEndpointsMixin:
             "new_content",
             # dm_disappear_timer relay
             "ms",
+            # ephemeral relay envelope signature (R55): full-payload Ed25519 sig by
+            # the relaying gateway, verified against relay_sig_did over relay_ts.
+            "relay_sig_did", "relay_ts",
         })
         _unknown = set(data.keys()) - _ALLOWED_RELAY_KEYS
         if _unknown:
@@ -522,6 +525,32 @@ class HttpEndpointsMixin:
         # ── Room reaction relay — deliver to local members ──
         if data.get("content_type") == "room_reaction":
             return await self._handle_room_reaction_relay(data)
+
+        # ── R55: signed-envelope enforcement for DM secondary-op relays ──
+        # These are all originated by the peer's GATEWAY acting as the DM actor, so
+        # from_webid == the signing gateway did. Require a valid full-payload
+        # envelope signature (binds emoji/action/ms/new_content, not just the fixed
+        # fields) AND relay_sig_did == from_webid, so a peer gateway can't forge
+        # another gateway's from_webid. Unknown/invalid signature → 200 no-reveal.
+        _DM_SIGNED_TYPES = (
+            "dm_reaction", "dm_edit", "dm_delete", "dm_pin", "dm_disappear_timer")
+        if data.get("content_type") in _DM_SIGNED_TYPES:
+            from .relay import verify_relay_envelope
+            if data.get("relay_sig_did") != data.get("from_webid") or not verify_relay_envelope(data):
+                return "200 OK", '{"status":"received"}'
+            # Replay guard: dedup on the signed nonce (partitioned by signer).
+            _env_nonce = data.get("relay_nonce", "")
+            if _env_nonce:
+                import hashlib as _h_env
+                _ek = _h_env.sha256(
+                    f"{data.get('relay_sig_did','')}:{_env_nonce}".encode()).hexdigest()
+                if self._store and self._store.seen_relay_nonce(_ek, ttl_seconds=600):
+                    return "200 OK", '{"status":"duplicate"}'
+                if _ek in self._seen_relay_nonces:
+                    return "200 OK", '{"status":"duplicate"}'
+                if self._store:
+                    self._store.record_relay_nonce(_ek)
+                self._seen_relay_nonces.append(_ek)
 
         # ── DM reaction relay — deliver reaction_added/removed to a local peer ──
         if data.get("content_type") == "dm_reaction":

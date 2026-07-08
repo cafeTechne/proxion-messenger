@@ -2129,9 +2129,24 @@ class PodSyncMixin:
             logger.debug("room relay to %s failed: %s", gateway_url, exc)
 
     async def _relay_ephemeral(self, gateway_url: str, payload: dict) -> None:
-        """POST a lightweight ephemeral event (presence/typing) to a peer gateway.
-        No signature required — advisory only, fire-and-forget."""
-        from .relay import post_relay
+        """POST an ephemeral content_type event to a peer gateway, fire-and-forget.
+
+        Signs the payload with this gateway's identity key (envelope signature over
+        every field) so the receiver can prove which gateway originated it. Without
+        this, a peer gateway could forge another gateway's ``from_webid`` on the
+        unsigned ephemeral relays (the membership/relationship checks stop non-member
+        injection but don't cryptographically bind the sender). Idempotent: skips
+        re-signing if a ``signature`` is already present (e.g. relay retry)."""
+        from .relay import post_relay, sign_relay_envelope
+        try:
+            if "signature" not in payload and getattr(self, "agent", None) is not None:
+                import secrets as _sec
+                payload.setdefault("relay_sig_did", self._own_gateway_did())
+                payload.setdefault("relay_ts", datetime.now(timezone.utc).isoformat())
+                payload.setdefault("relay_nonce", _sec.token_hex(8))
+                payload["signature"] = sign_relay_envelope(self.agent.identity_key, payload)
+        except Exception:
+            logger.debug("relay envelope signing failed", exc_info=True)
         http_base = gateway_url.replace("wss://", "https://").replace("ws://", "http://")
         try:
             await post_relay(http_base.rstrip("/") + "/relay", payload)
