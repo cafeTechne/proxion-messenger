@@ -2071,6 +2071,15 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         caller  = data.get("from_webid", "")
         if not room_id or not action or not target or not self._store:
             return "400 Bad Request", '{"error":"missing_moderation_fields"}'
+        # Authz: the moderation action must come from the room's owner or an
+        # admin. Without this ANY gateway reaching /relay could ban legit members
+        # or UNBAN a banned user (defeating moderation) in a room you host. The
+        # local mod path checks admin before relaying; the receiver must re-verify.
+        _room = self._local_rooms.get(room_id)
+        _owner = _room.get("creator_webid") if _room else None
+        _is_admin = bool(caller) and self._store.get_room_role(room_id, caller) == "admin"
+        if not caller or (caller != _owner and not _is_admin):
+            return "403 Forbidden", '{"error":"not_authorized_to_moderate"}'
         if action == "ban":
             self._store.ban_room_member(room_id, target, caller, str(data.get("reason", "")))
             evt = {"type": "member_banned", "room_id": room_id, "webid": target,

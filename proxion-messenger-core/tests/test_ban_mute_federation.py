@@ -122,7 +122,7 @@ async def test_ban_relays_to_federated_gateways(gateway):
 async def test_moderation_relay_applies_ban_and_notifies(gateway):
     ws = _ws()
     room_id = "room-6"
-    gateway._local_rooms[room_id] = {"name": "T", "members": {ws}}
+    gateway._local_rooms[room_id] = {"name": "T", "members": {ws}, "creator_webid": "did:key:zOwner"}
     status, _ = await gateway._handle_room_moderation_relay({
         "room_id": room_id, "action": "ban", "webid": "did:key:zTarget",
         "from_webid": "did:key:zOwner", "reason": "abuse",
@@ -137,7 +137,7 @@ async def test_moderation_relay_applies_ban_and_notifies(gateway):
 @pytest.mark.asyncio
 async def test_moderation_relay_unmute(gateway):
     room_id = "room-7"
-    gateway._local_rooms[room_id] = {"name": "T", "members": set()}
+    gateway._local_rooms[room_id] = {"name": "T", "members": set(), "creator_webid": "did:key:zOwner"}
     gateway._store.mute_room_member(room_id, "did:key:zT", "did:key:zOwner")
     status, _ = await gateway._handle_room_moderation_relay({
         "room_id": room_id, "action": "unmute", "webid": "did:key:zT",
@@ -145,3 +145,19 @@ async def test_moderation_relay_unmute(gateway):
     })
     assert status.startswith("200")
     assert gateway._store.is_room_muted(room_id, "did:key:zT") is False
+
+
+@pytest.mark.asyncio
+async def test_moderation_relay_rejects_non_owner(gateway):
+    """A relayed moderation action from someone who isn't the room owner/admin
+    is rejected — a peer gateway can't ban legit members or unban a banned user."""
+    room_id = "room-mod-authz"
+    gateway._local_rooms[room_id] = {"name": "T", "members": set(), "creator_webid": "did:key:zOwner"}
+    gateway._store.ban_room_member(room_id, "did:key:zBanned", "did:key:zOwner", "")
+    # An attacker tries to UNBAN themselves (or ban a member) — not the owner.
+    status, _ = await gateway._handle_room_moderation_relay({
+        "room_id": room_id, "action": "unban", "webid": "did:key:zBanned",
+        "from_webid": "did:key:zAttacker",
+    })
+    assert status.startswith("403")
+    assert gateway._store.is_room_banned(room_id, "did:key:zBanned"), "ban must stand"
