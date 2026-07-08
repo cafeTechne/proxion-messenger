@@ -321,3 +321,50 @@ async def test_unsigned_voice_channel_join_dropped(tmp_path, noauth_env):
     }).encode())
     assert status.startswith("200")
     assert "chan-1" not in gw._voice_channels   # never registered
+
+
+def test_voice_channel_gateway_tofu_binding(tmp_path):
+    """Per-channel participant-gateway continuity: first signer TOFU-trusted,
+    a different gateway then rejected; unknown channel rejected."""
+    gw = _gw(tmp_path, "vcg")
+    assert gw._voice_channel_gateway_ok("c", "did:key:za") is False   # no local channel
+    gw._voice_channels["c"] = {"members": {}}
+    assert gw._voice_channel_gateway_ok("c", "did:key:za") is True    # TOFU: first
+    assert gw._voice_channel_gateway_ok("c", "did:key:za") is True    # same → ok
+    assert gw._voice_channel_gateway_ok("c", "did:key:zb") is False   # different → reject
+
+
+@pytest.mark.asyncio
+async def test_voice_channel_peer_present_requires_participant_gateway(tmp_path, noauth_env):
+    """A peer_present must be signed by a gateway that participates in the channel;
+    a non-participant gateway can't inject a fake peer into the local mesh view."""
+    from unittest.mock import AsyncMock
+    gw = _gw(tmp_path, "vcp")
+    cid = "chan-P"
+    gw_a_key = Ed25519PrivateKey.generate()
+    gw_a_did = pub_key_to_did(gw_a_key.public_key().public_bytes_raw())
+    gw_x_key = Ed25519PrivateKey.generate()   # a non-participant (attacker) gateway
+    gw_x_did = pub_key_to_did(gw_x_key.public_key().public_bytes_raw())
+    ws = AsyncMock(); ws.send = AsyncMock()
+    ws.__hash__ = lambda s: id(s); ws.__eq__ = lambda s, o: s is o
+    # Local channel with a live member and GA as a known participant gateway.
+    gw._voice_channels[cid] = {
+        "members": {"did:key:zLocal": {"ws": ws, "gateway_url": None}},
+        "gateway_dids": {gw_a_did},
+    }
+
+    def _pp(key, did):
+        p = {"content_type": "voice_channel_peer_present", "channel_id": cid,
+             "peer_webid": "did:key:zGhost", "peer_gateway_url": "https://x.example",
+             "relay_sig_did": did, "relay_ts": datetime.now(timezone.utc).isoformat(),
+             "relay_nonce": "pn-" + did[-6:]}
+        p["signature"] = sign_relay_envelope(key, p)
+        return p
+
+    # Participant GA → delivered.
+    await gw._handle_relay_post(json.dumps(_pp(gw_a_key, gw_a_did)).encode())
+    assert ws.send.await_count == 1
+    # Non-participant GX (valid signature, but not in the channel) → dropped.
+    ws.send.reset_mock()
+    await gw._handle_relay_post(json.dumps(_pp(gw_x_key, gw_x_did)).encode())
+    assert ws.send.await_count == 0

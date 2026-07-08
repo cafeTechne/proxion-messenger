@@ -524,8 +524,9 @@ class HttpEndpointsMixin:
         #     DM secondary ops + voice_signal.
         #   Member-signed (from_webid is a MEMBER did → TOFU continuity binding):
         #     room ops + file transfer + voice channel join/leave.
-        #   No-bind (channel-scoped notifications with no from_webid to bind):
-        #     voice_channel_peer_joined/peer_present — signature + replay only.
+        #   Channel-bound (no from_webid; bind the SIGNER to a channel participant):
+        #     voice_channel_peer_joined/peer_present — the signing gateway must
+        #     participate in the channel, else it could inject a fake peer.
         _SELF_SIGNED_TYPES = (
             "dm_reaction", "dm_edit", "dm_delete", "dm_pin", "dm_disappear_timer",
             "voice_signal")
@@ -533,10 +534,10 @@ class HttpEndpointsMixin:
             "room_message", "room_reaction", "room_edit", "room_delete", "room_moderation",
             "file_offer", "file_accept", "file_reject", "file_chunk", "file_complete",
             "voice_channel_join", "voice_channel_leave")
-        _NOBIND_SIGNED_TYPES = (
+        _CHANNEL_SIGNED_TYPES = (
             "voice_channel_peer_joined", "voice_channel_peer_present")
         _ct = data.get("content_type")
-        if _ct in _SELF_SIGNED_TYPES or _ct in _MEMBER_SIGNED_TYPES or _ct in _NOBIND_SIGNED_TYPES:
+        if _ct in _SELF_SIGNED_TYPES or _ct in _MEMBER_SIGNED_TYPES or _ct in _CHANNEL_SIGNED_TYPES:
             from .relay import verify_relay_envelope
             _from = data.get("from_webid", "")
             _signer = data.get("relay_sig_did", "")
@@ -544,8 +545,8 @@ class HttpEndpointsMixin:
                 _bound = (_signer == _from)
             elif _ct in _MEMBER_SIGNED_TYPES:
                 _bound = self._relay_sender_gateway_ok(_from, _signer)
-            else:
-                _bound = True  # no from_webid to bind; signature + replay only
+            else:  # _CHANNEL_SIGNED_TYPES — bind the signer to a channel participant
+                _bound = self._voice_channel_gateway_ok(data.get("channel_id", ""), _signer)
             if not _bound or not verify_relay_envelope(data):
                 return "200 OK", '{"status":"received"}'
             # Replay guard: dedup on the signed nonce (partitioned by signer).

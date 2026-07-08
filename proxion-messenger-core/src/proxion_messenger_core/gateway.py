@@ -431,6 +431,31 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             return False
         return False
 
+    def _voice_channel_gateway_ok(self, channel_id: str, signer_did: str) -> bool:
+        """Whether ``signer_did`` may relay a peer notification for this channel.
+
+        voice_channel_peer_joined/peer_present carry no from_webid to bind, so a
+        valid signature alone would let ANY gateway inject a fake peer into a local
+        user's mesh view (the client then tries to open WebRTC to an attacker-chosen
+        peer/gateway). We instead require the signer to be a gateway that
+        participates in the channel. Participant gateway dids are learned from the
+        signed, room-membership-authorized voice_channel_join relays; the first
+        gateway seen for a channel is trusted (per-channel TOFU) to bootstrap the
+        joiner→host direction, where the joiner cannot know the host's did a priori.
+        """
+        if not channel_id or not signer_did:
+            return False
+        ch = getattr(self, "_voice_channels", {}).get(channel_id)
+        if not ch:
+            return False  # no local channel → nothing to inject into
+        gws = ch.setdefault("gateway_dids", set())
+        if signer_did in gws:
+            return True
+        if not gws:
+            gws.add(signer_did)   # TOFU: first participant gateway for this channel
+            return True
+        return False
+
     def _sockets_for(self, identity: str) -> list:
         """Return all connected sockets for identity (handles set and single-socket values).
 

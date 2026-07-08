@@ -540,6 +540,12 @@ class VoiceHandlerMixin:
         channel = self._voice_channels.setdefault(channel_id, {"members": {}})
         existing = dict(channel["members"])
         channel["members"][from_webid] = {"ws": None, "gateway_url": origin_gw}
+        # Record the joiner's gateway (proven by the envelope signature verified at
+        # the /relay dispatch) as a channel participant, so its later
+        # peer_joined/peer_present notifications are authorized (R55).
+        _sig_did = data.get("relay_sig_did", "")
+        if _sig_did:
+            channel.setdefault("gateway_dids", set()).add(_sig_did)
 
         own_gw = self._gateway_http_url()
 
