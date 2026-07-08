@@ -75,7 +75,7 @@ async def test_dm_reaction_relays_cross_gateway_and_maps_cert_id(tmp_path, noaut
     _seed_rel(gw_a, "cert-A", b_did, owner=a_did)
     gw_a._peer_gateway_urls[b_did] = "http://gw-b.test"
     # B holds the SAME relationship under a DIFFERENT cert id (cert_id asymmetry).
-    _seed_rel(gw_b, "cert-B-side", a_did, owner=b_did)
+    _seed_rel(gw_b, "cert-B-side", pub_key_to_did(gw_a.agent.identity_pub_bytes), owner=b_did)
 
     # Route A's ephemeral relay into B's /relay handler in-process.
     async def _fake_post(url, payload):
@@ -103,7 +103,7 @@ async def test_dm_reaction_relays_cross_gateway_and_maps_cert_id(tmp_path, noaut
     assert evs[0]["message_id"] == "m-42"
     assert evs[0]["emoji"] == "🔥"
     assert evs[0]["thread_id"] == "cert-B-side", "reaction must attach to B's cert id"
-    assert evs[0]["from_webid"] == a_did
+    assert evs[0]["from_webid"] == pub_key_to_did(gw_a.agent.identity_pub_bytes)
 
 
 @pytest.mark.asyncio
@@ -114,7 +114,7 @@ async def test_dm_reaction_removal_relays(tmp_path, noauth_env, monkeypatch):
     a_did = _did(Ed25519PrivateKey.generate())
     _seed_rel(gw_a, "cert-A2", b_did, owner=a_did)
     gw_a._peer_gateway_urls[b_did] = "http://gw-b2.test"
-    _seed_rel(gw_b, "cert-B2", a_did, owner=b_did)
+    _seed_rel(gw_b, "cert-B2", pub_key_to_did(gw_a.agent.identity_pub_bytes), owner=b_did)
     async def _fake_post(url, payload):
         status, _ = await gw_b._handle_relay_post(json.dumps(payload).encode())
         return status.startswith("200")

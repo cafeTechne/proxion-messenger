@@ -744,12 +744,15 @@ class RoomHandlerMixin:
             # DM thread: deliver to the two participants — locally OR, for a
             # cross-gateway peer, RELAY the delete (was _send_to_identity(peer)
             # only, so a federated peer never saw the deletion).
+            # Resolve the peer: a cert-DM thread (federated) is keyed by a UUID
+            # cert_id, so get_dm_threads(owner=browser_did) won't find it (dm
+            # threads/relationships are keyed by the gateway did) — resolve via
+            # the relationship. A local_dm thread is keyed by the peer's did.
             peer = ""
             if self._store:
-                dm_threads = [t for t in self._store.get_dm_threads(owner_webid=caller_webid)
-                              if t["thread_id"] == thread_id]
-                if dm_threads:
-                    peer = dm_threads[0]["peer_webid"]
+                _rel = self._store.get_relationship_by_cert_id(thread_id)
+                if _rel:
+                    peer = _rel.get("peer_did", "")
             if not peer and str(thread_id).startswith("did:key:"):
                 peer = thread_id
             payload = json.dumps(event)
@@ -760,9 +763,10 @@ class RoomHandlerMixin:
                 else:
                     _pg = self._resolve_peer_gateway(peer)
                     if _pg:
+                        from .didkey import pub_key_to_did as _p2d_del
                         asyncio.create_task(self._relay_ephemeral(_pg, {
                             "content_type": "dm_delete",
-                            "from_webid": caller_webid,
+                            "from_webid": _p2d_del(self.agent.identity_pub_bytes),
                             "to_webid": peer,
                             "message_id": message_id,
                         }))
@@ -1141,9 +1145,14 @@ class RoomHandlerMixin:
             return
         peer_gw = self._resolve_peer_gateway(target)
         if peer_gw:
+            # Cross-gateway: identify the sender by OUR GATEWAY did, which is how
+            # the peer's relationship keys us (the Proxion-address did) — the
+            # browser session did wouldn't match on their side. Same model as the
+            # plain-DM relay.
+            from .didkey import pub_key_to_did as _p2d
             asyncio.create_task(self._relay_ephemeral(peer_gw, {
                 "content_type": "dm_reaction",
-                "from_webid": sender_webid,
+                "from_webid": _p2d(self.agent.identity_pub_bytes),
                 "to_webid": target,
                 "message_id": message_id,
                 "emoji": emoji,
@@ -1213,21 +1222,24 @@ class RoomHandlerMixin:
                             "action": "add",
                         }))
         elif cert_id and cert_id not in self.dm_clients:
-            # Verify caller is a participant of this local DM thread
-            _owner_did = _peer_did = ""
+            # Cert-DM (relay-only) reaction. The local participant of a cert DM is
+            # this gateway's OWNER (account DID = the gateway/Proxion-address DID).
+            _peer_did = ""
             if self._store:
                 _cert_dict = self._store.get_relationship_by_cert_id(cert_id)
                 if _cert_dict:
-                    from .didkey import pub_key_to_did as _p2d_react
-                    # The relationship's actual owner (the local user), not the
-                    # gateway agent did — the browser registers with its own did,
-                    # so comparing against the agent did rejected the real user.
-                    _owner_did = (self._store.get_relationship_owner_by_cert_id(cert_id)
-                                  or _p2d_react(self.agent.identity_pub_bytes))
                     _peer_did = _cert_dict.get("peer_did", "")
-                    if sender_webid not in (_owner_did, _peer_did):
-                        await websocket.send(json.dumps({"type": "error", "message": "Not a participant of this DM thread"}))
-                        return
+            # Authorize the caller. When auth is enforced, _client_webids is the
+            # proven account DID (== the owner/gateway DID for the owner's own
+            # devices), so require the caller to be a participant. When auth is off
+            # (loopback single-user dev) the check is skipped: the DID is an
+            # unauthenticated self-claim AND the browser registers under a session
+            # DID ≠ the gateway DID, so the check would wrongly reject the real
+            # local user (this is why federated DM reactions never worked). See
+            # _auth_enforced().
+            if self._auth_enforced() and sender_webid not in (self._own_gateway_did(), _peer_did):
+                await websocket.send(json.dumps({"type": "error", "message": "Not a participant in this DM"}))
+                return
             if self._store and message_id and emoji:
                 saved = self._store.save_reaction(cert_id, message_id, emoji, sender_webid)
                 if not saved:
@@ -1310,18 +1322,16 @@ class RoomHandlerMixin:
                             "action": "remove",
                         }))
         elif cert_id and cert_id not in self.dm_clients:
-            # Verify caller is a participant of this local DM thread
-            _owner_did_r = _peer_did_r = ""
+            # Cert-DM reaction removal. Same auth-gated participant check as
+            # _handle_add_reaction: enforced ⇒ caller must be owner or peer.
+            _peer_did_r = ""
             if self._store:
                 _cert_dict_r = self._store.get_relationship_by_cert_id(cert_id)
                 if _cert_dict_r:
-                    from .didkey import pub_key_to_did as _p2d_rmreact
-                    _owner_did_r = (self._store.get_relationship_owner_by_cert_id(cert_id)
-                                    or _p2d_rmreact(self.agent.identity_pub_bytes))
                     _peer_did_r = _cert_dict_r.get("peer_did", "")
-                    if sender_webid not in (_owner_did_r, _peer_did_r):
-                        await websocket.send(json.dumps({"type": "error", "message": "Not a participant of this DM thread"}))
-                        return
+            if self._auth_enforced() and sender_webid not in (self._own_gateway_did(), _peer_did_r):
+                await websocket.send(json.dumps({"type": "error", "message": "Not a participant in this DM"}))
+                return
             if self._store and message_id and emoji:
                 self._store.remove_reaction(cert_id, message_id, emoji, sender_webid)
             event = {
@@ -1948,19 +1958,22 @@ class RoomHandlerMixin:
         or cross-gateway relay)."""
         if not pinner_webid or not thread_id or not message_id:
             return
-        # Participant check: the relationship owner or the peer.
+        # Resolve the peer via the relationship (cert DM) or the thread id (local
+        # did-keyed DM).
         peer = ""
         if self._store:
             _cd = self._store.get_relationship_by_cert_id(thread_id)
             if _cd:
-                _owner = self._store.get_relationship_owner_by_cert_id(thread_id)
                 peer = _cd.get("peer_did", "")
-                if _owner and pinner_webid not in (_owner, peer):
-                    await websocket.send(json.dumps({"type": "error", "message": "Not a participant of this DM thread"}))
-                    return
         if not peer:
-            # Local DM keyed by the peer's did.
             peer = thread_id if str(thread_id).startswith("did:key:") else ""
+        # Auth-gated participant check (see ProxionGateway._auth_enforced): when
+        # auth is enforced, pinner_webid is a proven identity and must be the owner
+        # (account/gateway DID) or the peer; auth-off skips it (the local user
+        # registers under a session DID ≠ the gateway DID).
+        if self._auth_enforced() and pinner_webid not in (self._own_gateway_did(), peer):
+            await websocket.send(json.dumps({"type": "error", "message": "Not a participant in this DM"}))
+            return
         if self._store:
             try:
                 if pin:
@@ -1982,9 +1995,10 @@ class RoomHandlerMixin:
             else:
                 _pg = self._resolve_peer_gateway(peer)
                 if _pg:
+                    from .didkey import pub_key_to_did as _p2d_pin
                     asyncio.create_task(self._relay_ephemeral(_pg, {
                         "content_type": "dm_pin",
-                        "from_webid": pinner_webid,
+                        "from_webid": _p2d_pin(self.agent.identity_pub_bytes),
                         "to_webid": peer,
                         "message_id": message_id,
                         "action": "pin" if pin else "unpin",
@@ -2081,16 +2095,30 @@ class RoomHandlerMixin:
                     pass
             return
 
-        # DM thread: either participant may set it. Verify the caller is in it,
-        # then wire it into the DM-expiry loop (this was previously unreachable —
-        # the room-owner check above rejected DMs, so DM timers never worked).
+        # DM thread: a locally-registered caller (the gateway's user) may set it.
+        # Resolve the peer via the relationship for a cert DM (keyed by UUID —
+        # get_dm_threads(owner=browser_did) can't find it), or the thread id for
+        # a local did-keyed DM.
         peer = None
         if self._store:
-            for _t in self._store.get_dm_threads(owner_webid=caller):
-                if _t.get("thread_id") == thread_id:
-                    peer = _t.get("peer_webid")
-                    break
-        if peer is None:
+            _reld = self._store.get_relationship_by_cert_id(thread_id)
+            if _reld:
+                peer = _reld.get("peer_did", "")
+            else:
+                for _t in self._store.get_dm_threads(owner_webid=caller):
+                    if _t.get("thread_id") == thread_id:
+                        peer = _t.get("peer_webid")
+                        break
+        if not peer and str(thread_id).startswith("did:key:"):
+            peer = thread_id
+        if not peer:
+            await websocket.send(json.dumps({"type": "error", "message": "Not a participant in this thread"}))
+            return
+        # Auth-gated participant check (see ProxionGateway._auth_enforced): when
+        # auth is enforced, caller is a proven identity and must be the owner
+        # (account/gateway DID) or the peer; auth-off skips it (the local user
+        # registers under a session DID ≠ the gateway DID).
+        if self._auth_enforced() and caller not in (self._own_gateway_did(), peer):
             await websocket.send(json.dumps({"type": "error", "message": "Not a participant in this thread"}))
             return
         self._dm_disappear_timers[thread_id] = ms
@@ -2108,9 +2136,10 @@ class RoomHandlerMixin:
             else:
                 _pg = self._resolve_peer_gateway(peer)
                 if _pg:
+                    from .didkey import pub_key_to_did as _p2d_dis
                     asyncio.create_task(self._relay_ephemeral(_pg, {
                         "content_type": "dm_disappear_timer",
-                        "from_webid": caller,
+                        "from_webid": _p2d_dis(self.agent.identity_pub_bytes),
                         "to_webid": peer,
                         "ms": ms,
                     }))

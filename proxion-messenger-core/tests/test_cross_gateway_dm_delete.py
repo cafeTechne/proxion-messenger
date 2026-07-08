@@ -68,12 +68,14 @@ async def test_cross_gateway_dm_delete_relays(tmp_path, noauth_env, monkeypatch)
     a_did = _did(Ed25519PrivateKey.generate())
     _seed_rel(gw_a, "cert-A", b_did, owner=a_did)
     gw_a._peer_gateway_urls[b_did] = "http://gw-b.test"
-    _seed_rel(gw_b, "cert-B", a_did, owner=b_did)
+    _seed_rel(gw_b, "cert-B", pub_key_to_did(gw_a.agent.identity_pub_bytes), owner=b_did)
     # A's DM thread with B (keyed by A's cert id) + a message A authored.
     gw_a._store.save_dm_thread("cert-A", b_did, None, owner_webid=a_did)
     gw_a._store.save_message("m-1", "cert-A", "dm", a_did, "A", "hi", "2026-01-01T00:00:00Z")
-    # B has the same message stored (received), authored by A.
-    gw_b._store.save_message("m-1", "cert-B", "dm", a_did, "A", "hi", "2026-01-01T00:00:00Z")
+    # B has the same message stored (received). The DM relay stores the author as
+    # the SENDER GATEWAY did (federation identity), which is what the delete relay
+    # then carries as from_webid — so the author check matches.
+    gw_b._store.save_message("m-1", "cert-B", "dm", pub_key_to_did(gw_a.agent.identity_pub_bytes), "A", "hi", "2026-01-01T00:00:00Z")
 
     async def _fake_post(url, payload):
         status, _ = await gw_b._handle_relay_post(json.dumps(payload).encode())

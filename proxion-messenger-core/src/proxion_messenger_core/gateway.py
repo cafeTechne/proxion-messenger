@@ -376,6 +376,25 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             self._own_gateway_did_cache = d
         return d
 
+    def _auth_enforced(self) -> bool:
+        """Whether registration actually required proof of identity, mirroring the
+        register handler (_gateway_auth.py). When True, ``_client_webids[ws]`` is a
+        cryptographically proven identity (auth challenge and/or delegation cert),
+        so a participant/owner check on it is meaningful and secure. When False
+        (loopback single-user dev, PROXION_REQUIRE_AUTH=0), the registered DID is an
+        unauthenticated self-claim: the check is unenforceable (an attacker could
+        just claim the owner DID) AND wrongly rejects the real local user, whose
+        browser registers under its own session DID (≠ the gateway/account DID).
+        So auth-scoped local participant checks must be gated on this."""
+        _env = os.environ.get("PROXION_REQUIRE_AUTH", "")
+        if _env == "1":
+            return True
+        if _env == "0":
+            return False
+        _host = (getattr(self, "config", None) and self.config.host) or ""
+        # Only genuine loopback skips auth; wildcard (0.0.0.0/::) is routable → auth.
+        return _host not in ("127.0.0.1", "localhost", "::1")
+
     def _sockets_for(self, identity: str) -> list:
         """Return all connected sockets for identity (handles set and single-socket values).
 

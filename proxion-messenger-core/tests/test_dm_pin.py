@@ -94,7 +94,7 @@ async def test_dm_pin_relays_cross_gateway(tmp_path, noauth_env, monkeypatch):
     a_did = _did(Ed25519PrivateKey.generate())
     _seed_rel(gw_a, "cert-A", b_did, owner=a_did)
     gw_a._peer_gateway_urls[b_did] = "http://gw-b.test"
-    _seed_rel(gw_b, "cert-B", a_did, owner=b_did)
+    _seed_rel(gw_b, "cert-B", pub_key_to_did(gw_a.agent.identity_pub_bytes), owner=b_did)
     async def _fake_post(url, payload):
         status, _ = await gw_b._handle_relay_post(json.dumps(payload).encode())
         return status.startswith("200")
@@ -114,11 +114,16 @@ async def test_dm_pin_relays_cross_gateway(tmp_path, noauth_env, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_dm_pin_rejects_non_participant(tmp_path, noauth_env):
+async def test_dm_pin_accepts_local_caller(tmp_path, noauth_env):
+    """Cert DMs are gateway-scoped: federation identity is the gateway did, not the
+    browser session did, so a locally-registered caller is the gateway's user and
+    authorized. There is no owner==caller check to reject on for a cert DM."""
     gw = _gw(tmp_path, "c")
-    _seed_rel(gw, "cert-C", _did(Ed25519PrivateKey.generate()), owner=_did(Ed25519PrivateKey.generate()))
+    _seed_rel(gw, "cert-C", _did(Ed25519PrivateKey.generate()), owner="")
+    gw._store.save_message("m", "cert-C", "dm", "did:key:zSomeone", "S", "hi", "2026-01-01T00:00:00Z")
     ws = _mock_ws()
-    await _register(gw, ws, _did(Ed25519PrivateKey.generate()))  # neither owner nor peer
+    await _register(gw, ws, _did(Ed25519PrivateKey.generate()))
     ws.send.reset_mock()
     await gw.process_command(ws, {"cmd": "pin_message", "message_id": "m", "thread_id": "cert-C"})
-    assert any("participant" in (e.get("message") or "").lower() for e in _events(ws, "error"))
+    assert not any("participant" in (e.get("message") or "").lower() for e in _events(ws, "error"))
+    assert _events(ws, "message_pinned")

@@ -141,9 +141,12 @@ class DmHandlerMixin:
                 await websocket.send(json.dumps({"type": "error", "message": f"Unknown DM recipient: {cert_id}"}))
                 return
             _caller = self._client_webids.get(websocket, "")
-            _owner = (self._store.get_relationship_owner_by_cert_id(cert_id) or "")
-            if _owner and _caller and _caller != _owner:
-                await websocket.send(json.dumps({"type": "error", "message": "Not a participant of this DM thread"}))
+            # Auth-gated participant check (see ProxionGateway._auth_enforced): when
+            # auth is enforced, _caller is a proven identity and must be the owner
+            # (account/gateway DID) or the peer; auth-off skips it (the local user
+            # registers under a session DID ≠ the gateway DID).
+            if self._auth_enforced() and _caller not in (self._own_gateway_did(), _peer):
+                await websocket.send(json.dumps({"type": "error", "message": "Not a participant in this DM"}))
                 return
             if self._store:
                 try:
@@ -162,9 +165,10 @@ class DmHandlerMixin:
             else:
                 _pg = self._resolve_peer_gateway(_peer)
                 if _pg:
+                    from .didkey import pub_key_to_did as _p2d_edit
                     asyncio.create_task(self._relay_ephemeral(_pg, {
                         "content_type": "dm_edit",
-                        "from_webid": _caller,
+                        "from_webid": _p2d_edit(self.agent.identity_pub_bytes),
                         "to_webid": _peer,
                         "message_id": message_id,
                         "new_content": content,
@@ -352,7 +356,14 @@ class DmHandlerMixin:
                                 gw_did, peer_webid, message_id, summary, ts, relay_nonce,
                             )
                             relay_payload = {
-                                "from_webid": sender_webid,
+                                # from_webid MUST be the gateway did (federation
+                                # identity) — it's what the signature was computed
+                                # over (gw_did) and how the peer keys the
+                                # relationship. Using the browser session did here
+                                # made the signature fail to verify and the peer's
+                                # get_relationship_by_did miss. (Same identity model
+                                # as the DM/reaction/edit relays.)
+                                "from_webid": gw_did,
                                 "to_webid": peer_webid,
                                 "message_id": message_id,
                                 "content": summary,

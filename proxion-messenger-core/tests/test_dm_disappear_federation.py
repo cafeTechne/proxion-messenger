@@ -70,7 +70,7 @@ async def test_dm_disappear_timer_federates(tmp_path, noauth_env, monkeypatch):
     _seed_rel(gw_a, "cert-A", b_did, owner=a_did)
     gw_a._peer_gateway_urls[b_did] = "http://gw-b.test"
     gw_a._store.save_dm_thread("cert-A", b_did, None, owner_webid=a_did)
-    _seed_rel(gw_b, "cert-B", a_did, owner=b_did)
+    _seed_rel(gw_b, "cert-B", pub_key_to_did(gw_a.agent.identity_pub_bytes), owner=b_did)
 
     async def _fake_post(url, payload):
         status, _ = await gw_b._handle_relay_post(json.dumps(payload).encode())

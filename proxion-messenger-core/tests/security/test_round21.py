@@ -153,10 +153,19 @@ class TestDMReactionAuthorization:
             gw._store.save_relationship(cert.to_dict(), peer_did=peer_did)
         return cert.certificate_id, peer_did
 
+    # The non-participant invariant is only meaningful (and enforceable) when auth
+    # is enforced: then _client_webids is a PROVEN identity (auth challenge /
+    # delegation cert), so a caller whose DID is neither the owner/account DID nor
+    # the peer is a genuine outsider. Under auth-off loopback the DID is an
+    # unauthenticated self-claim — an "attacker" could just claim the owner DID,
+    # and the real local user registers under a session DID ≠ the gateway DID — so
+    # the check is gated off (see ProxionGateway._auth_enforced). These tests pin
+    # the enforced-auth scenario (a network-exposed / multi-identity gateway).
     @pytest.mark.asyncio
-    async def test_dm_reaction_unauthorized_attacker_blocked(self, tmp_path):
-        """Attacker who is not a DM participant cannot add reactions."""
+    async def test_dm_reaction_unauthorized_attacker_blocked(self, tmp_path, monkeypatch):
+        """Attacker who is not a DM participant cannot add reactions (auth enforced)."""
         from proxion_messenger_core.didkey import pub_key_to_did
+        monkeypatch.setenv("PROXION_REQUIRE_AUTH", "1")
         gw = _make_gateway(tmp_path)
         cert_id, peer_did = self._make_cert_and_rel(gw)
 
@@ -171,8 +180,9 @@ class TestDMReactionAuthorization:
         assert any(r.get("type") == "error" and "participant" in r.get("message", "") for r in responses)
 
     @pytest.mark.asyncio
-    async def test_dm_reaction_remove_unauthorized_attacker_blocked(self, tmp_path):
-        """Attacker cannot remove reactions from a DM they don't participate in."""
+    async def test_dm_reaction_remove_unauthorized_attacker_blocked(self, tmp_path, monkeypatch):
+        """Attacker cannot remove reactions from a DM they don't participate in (auth enforced)."""
+        monkeypatch.setenv("PROXION_REQUIRE_AUTH", "1")
         gw = _make_gateway(tmp_path)
         cert_id, peer_did = self._make_cert_and_rel(gw)
 
@@ -186,9 +196,11 @@ class TestDMReactionAuthorization:
         assert any(r.get("type") == "error" and "participant" in r.get("message", "") for r in responses)
 
     @pytest.mark.asyncio
-    async def test_dm_reaction_authorized_owner_allowed(self, tmp_path):
-        """The gateway owner (DM participant) can add reactions."""
+    async def test_dm_reaction_authorized_owner_allowed(self, tmp_path, monkeypatch):
+        """The gateway owner (DM participant) can add reactions (even with auth enforced,
+        the owner's account DID == the gateway DID, so the participant check passes)."""
         from proxion_messenger_core.didkey import pub_key_to_did
+        monkeypatch.setenv("PROXION_REQUIRE_AUTH", "1")
         gw = _make_gateway(tmp_path)
         cert_id, peer_did = self._make_cert_and_rel(gw)
         owner_did = pub_key_to_did(gw.agent.identity_pub_bytes)

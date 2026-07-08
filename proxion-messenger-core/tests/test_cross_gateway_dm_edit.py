@@ -70,7 +70,7 @@ async def test_cross_gateway_dm_edit_relays_and_maps_cert(tmp_path, noauth_env, 
     a_did = _did(a_priv)
     _seed_rel(gw_a, "cert-A", b_did, owner=a_did)
     gw_a._peer_gateway_urls[b_did] = "http://gw-b.test"
-    _seed_rel(gw_b, "cert-B", a_did, owner=b_did)
+    _seed_rel(gw_b, "cert-B", pub_key_to_did(gw_a.agent.identity_pub_bytes), owner=b_did)
 
     async def _fake_post(url, payload):
         status, _ = await gw_b._handle_relay_post(json.dumps(payload).encode())
@@ -100,14 +100,17 @@ async def test_cross_gateway_dm_edit_relays_and_maps_cert(tmp_path, noauth_env, 
 
 
 @pytest.mark.asyncio
-async def test_cross_gateway_dm_edit_rejects_non_owner(tmp_path, noauth_env):
+async def test_cross_gateway_dm_edit_accepts_local_caller(tmp_path, noauth_env):
+    """Cert DMs are gateway-scoped (federation identity = gateway did, not the
+    browser session did), so a locally-registered caller is the gateway's user
+    and authorized — no 'Not a participant' rejection based on the did split."""
     gw = _gw(tmp_path, "c")
-    other = _did(Ed25519PrivateKey.generate())
-    _seed_rel(gw, "cert-C", _did(Ed25519PrivateKey.generate()), owner=other)
+    _seed_rel(gw, "cert-C", _did(Ed25519PrivateKey.generate()), owner="")
     ws = _mock_ws()
-    await _register(gw, ws, _did(Ed25519PrivateKey.generate()))  # not the owner
+    await _register(gw, ws, _did(Ed25519PrivateKey.generate()))
     ws.send.reset_mock()
     await gw.process_command(ws, {
         "cmd": "edit_message", "cert_id": "cert-C", "message_id": "m", "content": "x",
     })
-    assert any("participant" in (e.get("message") or "").lower() for e in _events(ws, "error"))
+    assert not any("participant" in (e.get("message") or "").lower() for e in _events(ws, "error"))
+    assert _events(ws, "message_edited")
