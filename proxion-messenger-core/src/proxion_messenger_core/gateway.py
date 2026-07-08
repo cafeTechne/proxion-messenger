@@ -1784,6 +1784,16 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 return "403 Forbidden", '{"error":"sender_banned"}'
             if self._store.is_room_muted(room_id, from_webid):
                 return "403 Forbidden", '{"error":"sender_muted"}'
+            # Sender verification: from_webid must be a known member (local or
+            # federated) of the room. Without this a peer gateway could inject a
+            # message appearing "from" an arbitrary non-banned webid into a room
+            # you host. Fail-open only when we have NO membership records at all
+            # (avoid breaking a legit member whose federation join wasn't tracked).
+            _known = set(self._store.get_room_members(room_id))
+            _known |= {m.get("member_did") for m in self._store.get_federated_room_members(room_id)}
+            _known.discard("")
+            if _known and from_webid not in _known:
+                return "403 Forbidden", '{"error":"sender_not_member"}'
 
         event = {
             "type": "message",

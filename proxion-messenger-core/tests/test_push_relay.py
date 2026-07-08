@@ -32,6 +32,7 @@ async def test_room_relay_fires_push_for_offline_member(gateway):
     from_did = "did:key:zOnline"
     gateway._local_rooms[room_id] = {"name": "T", "members": set()}
     gateway._store.add_room_member(room_id, member_did)
+    gateway._store.add_federated_room_member(room_id, from_did, "https://gw.example.com")
     gateway._store.save_push_subscription(
         "sub-1", member_did, "https://push.example.com/abc", "p256dhkey", "authkey"
     )
@@ -58,6 +59,7 @@ async def test_room_relay_skips_push_for_connected_member(gateway):
     gateway._client_webids[ws] = member_did
     gateway._webid_sockets[member_did] = {ws}
     gateway._store.add_room_member(room_id, member_did)
+    gateway._store.add_federated_room_member(room_id, "did:key:zSender", "https://gw.example.com")
     gateway._store.save_push_subscription(
         "sub-2", member_did, "https://push.example.com/xyz", "p256dh", "auth"
     )

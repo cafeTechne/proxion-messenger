@@ -84,3 +84,31 @@ async def test_room_delete_relay_owner_can_delete_any(gateway):
     })
     assert status.startswith("200")
     assert gateway._store.get_message("m4") is None
+
+
+@pytest.mark.asyncio
+async def test_room_message_relay_rejects_non_member_sender(gateway):
+    """A relayed room message from a webid that isn't a known member (local or
+    federated) is rejected — a peer gateway can't inject messages 'from' an
+    arbitrary webid into a room you host."""
+    room_id = "r-spoof"
+    gateway._local_rooms[room_id] = {"members": set(), "creator_webid": "did:key:zOwner"}
+    gateway._store.add_room_member(room_id, "did:key:zRealMember")
+    # zEvil is not a member.
+    status, _ = await gateway._handle_room_relay({
+        "room_id": room_id, "from_webid": "did:key:zEvil",
+        "message_id": "m-spoof", "content": "injected", "timestamp": "2026-01-01T00:00:00Z",
+    })
+    assert status.startswith("403")
+
+
+@pytest.mark.asyncio
+async def test_room_message_relay_allows_federated_member(gateway):
+    room_id = "r-ok"
+    gateway._local_rooms[room_id] = {"members": set(), "creator_webid": "did:key:zOwner"}
+    gateway._store.add_federated_room_member(room_id, "did:key:zFedMember", "https://gw.test")
+    status, _ = await gateway._handle_room_relay({
+        "room_id": room_id, "from_webid": "did:key:zFedMember",
+        "message_id": "m-ok", "content": "hi", "timestamp": "2026-01-01T00:00:00Z",
+    })
+    assert status.startswith("200")
