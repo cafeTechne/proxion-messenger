@@ -416,7 +416,14 @@
         .msg-meta { display: inline; }
 
         /* Round 60: Read Receipts */
-        .read-receipt { font-size: 0.72em; color: var(--slate-500); margin-left: 6px; user-select: none; }
+        /* Delivery tick: pinned to the message's bottom-right corner. It used to
+           be an inline span after the (block) content, so every own message paid
+           a whole extra line just for a "✓". msg-content reserves padding-right
+           so the last text line can't run under it. */
+        .read-receipt {
+            position: absolute; right: 8px; bottom: 2px;
+            font-size: 0.68em; color: var(--slate-600); user-select: none;
+        }
         .read-receipt.read { color: var(--color-success-soft); }
 
         /* Round 62: Voice Messages */

@@ -326,7 +326,7 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
             finishOnboarding, obSkipPod, obSelectProvider, obPodTestConnection,
             copyObInviteUrl, obStep4Create, obStep4Join,
         } = createOnboarding({
-            getSocket: () => socket, setPodBanner, showToast, showCopyModal,
+            getSocket: () => socket, setPodBanner, showToast, showCopyModal, showConfirm,
         });
         // Reactions / emoji picker: destructured into same-named bindings.
         // messageReactions stays host-owned (the message loader populates it);
@@ -529,10 +529,11 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
         }
         const _clearDmHistBtn = document.getElementById("settings-clear-dm-history-btn");
         if (_clearDmHistBtn) {
-            _clearDmHistBtn.onclick = async () => {
-                if (!confirm("Clear all locally-saved DM history on this device? Encrypted DMs will no longer reload after this.")) return;
-                await dmHistoryClearAll();
-                showToast("DM history cleared on this device", "success");
+            _clearDmHistBtn.onclick = () => {
+                showConfirm("Clear all locally-saved DM history on this device? Encrypted DMs will no longer reload after this.", async () => {
+                    await dmHistoryClearAll();
+                    showToast("DM history cleared on this device", "success");
+                });
             };
         }
 
@@ -2210,6 +2211,45 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
             modal.style.display = "flex";
         }
 
+        // Styled replacement for window.prompt() — resolves the entered string, or
+        // null on cancel/Escape. type:"password" masks input (the native prompt
+        // showed backup passphrases in cleartext).
+        function showPromptModal(message, { type = "text", placeholder = "" } = {}) {
+            return new Promise((resolve) => {
+                let modal = document.getElementById("prompt-modal");
+                if (!modal) {
+                    modal = document.createElement("div");
+                    modal.id = "prompt-modal";
+                    modal.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;" +
+                        "display:flex;align-items:center;justify-content:center";
+                    modal.innerHTML =
+                        '<div style="background:#1e293b;padding:clamp(12px,4vw,24px);border-radius:12px;width:min(360px,95vw)">' +
+                        '<p id="prompt-msg" style="color:#f8fafc;margin:0 0 12px;font-size:0.95rem"></p>' +
+                        '<input id="prompt-input" style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;' +
+                        'border-radius:6px;color:#f1f5f9;padding:8px 10px;font-size:0.95rem;margin-bottom:16px">' +
+                        '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+                        '<button id="prompt-cancel" style="background:#334155;color:#94a3b8;border:none;' +
+                        'border-radius:6px;padding:6px 16px;cursor:pointer">Cancel</button>' +
+                        '<button id="prompt-ok" style="background:var(--accent,#e94560);color:#fff;border:none;' +
+                        'border-radius:6px;padding:6px 16px;cursor:pointer">OK</button>' +
+                        '</div></div>';
+                    document.body.appendChild(modal);
+                }
+                const input = document.getElementById("prompt-input");
+                document.getElementById("prompt-msg").textContent = message;
+                input.type = type; input.placeholder = placeholder; input.value = "";
+                const done = (val) => { modal.style.display = "none"; input.onkeydown = null; resolve(val); };
+                document.getElementById("prompt-cancel").onclick = () => done(null);
+                document.getElementById("prompt-ok").onclick = () => done(input.value);
+                input.onkeydown = (e) => {
+                    if (e.key === "Enter") done(input.value);
+                    else if (e.key === "Escape") { e.stopPropagation(); done(null); }
+                };
+                modal.style.display = "flex";
+                setTimeout(() => input.focus(), 50);
+            });
+        }
+
         /* Profile Card (B2) — Show user profile popover on avatar click */
         // showProfileCard / profileCardOpenDM / hideProfileCard: moved to profile.js.
 
@@ -3119,9 +3159,9 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
         };
         document.getElementById("ctx-delete").onclick = () => {
             if (!_ctxTarget) return;
-            if (!confirm("Delete this message?")) return;
-            deleteMsg(_ctxTarget.msgId);
+            const _delId = _ctxTarget.msgId;
             closeCtxMenu();
+            showConfirm("Delete this message?", () => deleteMsg(_delId));
         };
 
         // Long-press for mobile (touch)
@@ -3610,11 +3650,6 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
             // Room invite URL click to copy
             attachListener('#room-invite-url', 'click', copyRoomInviteFromModal);
 
-            // Room members modal close
-            attachListener('#room-members-close-btn', 'click', () => {
-                document.getElementById('room-members-modal').style.display = 'none';
-            });
-
             // R32: Room bans panel
             attachListener('#room-bans-close', 'click', () => {
                 document.getElementById('room-bans-panel').style.display = 'none';
@@ -3648,7 +3683,7 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
             attachListener('#settings-solid-inrupt', 'click', () => solidLogin('https://inrupt.net'));
             attachListener('#settings-solid-custom-btn', 'click', () => {
                 const url = (document.getElementById('settings-solid-custom-url')?.value || '').trim();
-                if (!url.startsWith('https://')) { alert('Pod server URL must start with https://'); return; }
+                if (!url.startsWith('https://')) { showToast('Pod server URL must start with https://', 'error'); return; }
                 solidLogin(url);
             });
             // Disconnect from the CSS/Solid pod without touching the local identity key or
@@ -3718,9 +3753,9 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                     window.open(url, '_blank', 'noopener');
                 }
             });
-            attachListener('#settings-reset-identity-btn', 'click', async () => {
-                if (!confirm('This will permanently delete your local identity key, all rooms, messages, and pod credentials. You cannot undo this. Continue?')) return;
-                await _resetIdentity();
+            attachListener('#settings-reset-identity-btn', 'click', () => {
+                showConfirm('This will permanently delete your local identity key, all rooms, messages, and pod credentials. You cannot undo this. Continue?',
+                    () => { _resetIdentity(); });
             });
 
             // R14.3: Export/Import
@@ -3841,34 +3876,10 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                 }
             });
 
-            // Event delegation: #room-members-list — kick/transfer/ban/mute
-            document.getElementById('room-members-list')?.addEventListener('click', e => {
-                const btn = e.target.closest('[data-rm-action]');
-                if (btn) {
-                    const { rmAction, roomId, webid } = btn.dataset;
-                    if (rmAction === 'kick') kickMember(roomId, webid);
-                    else if (rmAction === 'transfer') transferOwnership(roomId, webid);
-                    else if (rmAction === 'ban') {
-                        showConfirm(`Ban this member?`, () => {
-                            const reason = prompt("Reason (optional):") || "";
-                            socket.send(JSON.stringify({cmd: "ban_member", room_id: roomId, webid, reason}));
-                        });
-                    } else if (rmAction === 'mute') {
-                        const dur = prompt("Mute duration: 5m / 1h / 24h / blank=indefinite") || "";
-                        const secs = dur === "5m" ? 300 : dur === "1h" ? 3600 : dur === "24h" ? 86400 : null;
-                        socket.send(JSON.stringify({
-                            cmd: "mute_member", room_id: roomId, webid,
-                            ...(secs !== null ? {duration_seconds: secs} : {}),
-                        }));
-                    }
-                    return;
-                }
-                const item = e.target.closest('[data-msg-action="profile"]');
-                if (item) {
-                    showProfileCard(item.dataset.webid, item.dataset.name, e.clientX, e.clientY);
-                    showContactProfile(item.dataset.webid);
-                }
-            });
+            // (The old #room-members-list delegation was removed: that element was
+            // replaced by the members PANEL, so the block was dead code — and it
+            // held the last native prompt() calls. Moderation lives in the member
+            // context menu on #members-list below.)
 
             // Event delegation: #contacts-list — member-item profile cards
             document.getElementById('contacts-list')?.addEventListener('click', e => {
@@ -4094,7 +4105,7 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
 
             // R12.1.3: Download identity backup
             document.getElementById('settings-backup-btn')?.addEventListener('click', async () => {
-                const pp = prompt('Enter a passphrase to protect your backup:');
+                const pp = await showPromptModal('Choose a passphrase to protect your backup:', { type: 'password' });
                 if (!pp) return;
                 try {
                     const apiToken = document.querySelector('meta[name="x-api-token"]')?.content || '';
@@ -4119,7 +4130,7 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
             document.getElementById('settings-restore-input')?.addEventListener('change', async (e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
-                const pp = prompt('Enter the passphrase for this backup:');
+                const pp = await showPromptModal('Enter the passphrase for this backup:', { type: 'password' });
                 if (!pp) return;
                 try {
                     const data = await file.arrayBuffer();

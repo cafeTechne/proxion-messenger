@@ -8,7 +8,7 @@
 // the existing setupEventListeners wiring keeps working unchanged.
 import { podWriteProfile } from './pod.js';
 
-export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyModal }) {
+export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyModal, showConfirm }) {
 
     function openSettingsToPod() {
         document.getElementById("settings-btn").click();
@@ -100,12 +100,17 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
     }
 
     function obSkipPod() {
-        const msg = "Without a pod, your messages won't sync across devices and won't be backed up.\n\nAre you sure you want to continue without a pod?";
-        if (!window.confirm(msg)) return;
-        localStorage.setItem("proxion_pod_setup_skipped", "1");
-        localStorage.removeItem("proxion_pod_banner_dismissed");
-        setPodBanner(true);
-        obGoto(5);
+        const msg = "Without a pod, your messages won't sync across devices and won't be backed up. Continue without a pod?";
+        const proceed = () => {
+            localStorage.setItem("proxion_pod_setup_skipped", "1");
+            localStorage.removeItem("proxion_pod_banner_dismissed");
+            setPodBanner(true);
+            obGoto(5);
+        };
+        // Styled in-app confirm (native window.confirm looked out of place at the
+        // wizard's key decision point); fall back if the host didn't inject it.
+        if (showConfirm) showConfirm(msg, proceed);
+        else if (window.confirm(msg)) proceed();
     }
 
     // R16: pod credential form logic

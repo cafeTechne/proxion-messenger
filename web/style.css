@@ -49,6 +49,27 @@ body {
     display: flex;
 }
 
+/* ── Desktop chrome polish ──
+   Windows' default wide light scrollbars are the loudest "unstyled app" tell in
+   a dark theme; use thin dark ones everywhere. */
+* { scrollbar-width: thin; scrollbar-color: var(--slate-700) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: var(--slate-700);
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--slate-600); background-clip: padding-box; }
+
+/* Keyboard-visible focus: one consistent accent ring app-wide (mouse clicks
+   don't trigger :focus-visible, so pointer UX is unchanged). */
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
 #app {
     display: flex;
     width: 100%;
@@ -112,6 +133,18 @@ nav li {
 
 nav li:hover { background: rgba(255,255,255,0.05); }
 nav li.active { background: var(--bg-accent); color: var(--text-primary); }
+
+/* Sidebar conversation rows: the last-message preview clamps to ONE line with an
+   ellipsis (it used to hard-wrap onto multiple lines, cut mid-word). */
+.room-item-body, .dm-item-body { flex: 1; min-width: 0; overflow: hidden; }
+.room-item-preview, .dm-item-preview {
+    font-size: 0.8em;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+}
 
 #chat-area {
     flex: 1;
@@ -184,8 +217,9 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
 }
 .message:hover .msg-compact-ts { color: var(--text-secondary, #94a3b8); }
 
-/* Body column: grows, wraps long words */
-.msg-body { flex: 1; min-width: 0; }
+/* Body column: grows, wraps long words. position:relative anchors the
+   bottom-right delivery tick (.read-receipt). */
+.msg-body { flex: 1; min-width: 0; position: relative; }
 
 /* Name + timestamp on the first message in each group */
 .msg-header {
@@ -197,13 +231,14 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
 .msg-sender { font-weight: 600; font-size: 0.95em; }
 .msg-ts-header { font-size: 0.72em; color: var(--text-secondary, #94a3b8); }
 
-/* Message text */
+/* Message text. padding-right keeps the last line clear of the corner tick. */
 .msg-content {
     color: var(--text-primary, #e1e1e1);
     font-size: 0.95em;
     line-height: 1.5;
     word-break: break-word;
     overflow-wrap: break-word;
+    padding-right: 22px;
 }
 
 /* Hover action bar (react / reply / edit / delete / pin) */

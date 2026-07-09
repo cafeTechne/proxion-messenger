@@ -77,6 +77,10 @@ export function createRendering({
         // Only append DOM element if within the render window
         if (allMessages.length <= RENDER_WINDOW || allMessages.indexOf(msg) >= allMessages.length - RENDER_WINDOW) {
             const feed = document.getElementById("message-feed");
+            // The "No messages yet." hero is added when a thread opens empty;
+            // clear it the moment real content arrives, or it floats above the
+            // messages forever (same stale-empty-state class as the sidebar CTA).
+            feed.querySelector(".empty-state")?.remove();
             const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
             if (msg.reply_to_id) {
                 _insertReplyInFeed(msg, feed);
