@@ -25,7 +25,7 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
     }
 
     function obPodMode(mode) {
-        const customInput = document.getElementById("ob-solid-custom-url");
+        const customInput = document.getElementById("ob-pod-css-url");
         if (mode === "docker") {
             // Pre-fill with the injected CSS URL if available, else local default
             const defaultCss = document.querySelector('meta[name="x-css-default-url"]')?.content || localStorage.getItem("proxion_css_default_url") || "";
@@ -41,7 +41,7 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         const defaultCss = document.querySelector('meta[name="x-css-default-url"]')?.content || localStorage.getItem("proxion_css_default_url") || "";
         if (defaultCss && !defaultCss.includes("localhost") && !defaultCss.includes("127.0.0.1")) {
             // External CSS: pre-fill the custom URL input for easy sign-in
-            const customInput = document.getElementById("ob-solid-custom-url");
+            const customInput = document.getElementById("ob-pod-css-url");
             if (customInput && !customInput.value) customInput.value = defaultCss;
         } else if (defaultCss) {
             // Localhost CSS (Docker self-hosted)
