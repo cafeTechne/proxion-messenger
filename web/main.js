@@ -3871,6 +3871,16 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                 menu.style.top = Math.max(4, Math.min(e.clientY, window.innerHeight - _mr.height - 8)) + 'px';
             });
 
+            // Mobile: dismiss the members drawer by tapping outside it. The toggle
+            // that opens the drawer sits UNDER it (static header vs. z-indexed
+            // drawer), so without this there was no way to close it on a phone.
+            document.addEventListener('click', e => {
+                const panel = document.getElementById('members-panel');
+                if (!panel || !panel.classList.contains('mobile-open')) return;
+                if (e.target.closest('#members-panel') || e.target.closest('#members-toggle')) return;
+                panel.classList.remove('mobile-open');
+            });
+
             document.getElementById('member-context-menu')?.addEventListener('click', e => {
                 const btn = e.target.closest('[data-role-action]');
                 if (!btn) return;
