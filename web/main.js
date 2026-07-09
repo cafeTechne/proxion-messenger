@@ -3846,9 +3846,17 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                 const item = e.target.closest('.member-item');
                 if (!item) return;
                 e.preventDefault();
+                // The menu is entirely owner-only moderation (roles / kick / ban /
+                // mute / transfer). Only open it if the current user OWNS the active
+                // room, and never on yourself. The client can't see its own admin/
+                // mod role (room_roles is a no-op), so gate on ownership — matching
+                // the old members-modal, which hid these buttons for non-owners.
+                const targetWebid = item.dataset.webid || '';
+                const isOwner = !!(activeView && roomCreatorOf.has(activeView.id));
+                if (!isOwner || !targetWebid || targetWebid === selfWebId) return;
                 const menu = document.getElementById('member-context-menu');
                 if (!menu) return;
-                menu.dataset.targetWebid = item.dataset.webid || '';
+                menu.dataset.targetWebid = targetWebid;
                 menu.style.display = 'block';
                 menu.style.left = e.clientX + 'px';
                 menu.style.top = e.clientY + 'px';
