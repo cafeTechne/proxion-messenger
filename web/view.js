@@ -140,6 +140,10 @@ export function createView({
         const hint = document.getElementById("room-list-empty-hint");
         if (hint) hint.remove();
         const list = document.getElementById("room-list");
+        // The "No rooms yet / Create a room" CTA (class sidebar-empty, no id) is
+        // added by the list rebuild; this incremental append path must clear it
+        // too, or the CTA sits above the freshly created room forever.
+        list.querySelectorAll(".sidebar-empty").forEach(el => el.remove());
         const li = document.createElement("li");
         li.id = `nav-${roomId}`;
         li.setAttribute("data-name", name);

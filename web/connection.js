@@ -121,7 +121,15 @@ export function createConnection({
             ws.send(JSON.stringify(_regPayload)); // clientDid always set after generateOrLoadIdentity()
             // All other init commands are deferred to the "registered" event handler so
             // they never race with the auth challenge-response cycle under require_auth mode.
-            document.getElementById("message-feed").innerHTML += '<div class="system-msg">Connected to gateway.</div>';
+            // Welcome-screen feedback: REPLACE the static "Connect to the gateway…"
+            // hint instead of appending below it (the two lines contradicted each
+            // other), and never inject into an open conversation — the old
+            // unconditional append stacked a duplicate "Connected to gateway." into
+            // whatever thread was on screen after every reconnect.
+            const _feed = document.getElementById("message-feed");
+            const _hint = Array.from(_feed?.querySelectorAll?.(".system-msg") || [])
+                .find(el => /connect to the gateway/i.test(el.textContent));
+            if (_hint) _hint.textContent = "Connected. Pick a conversation, or create a room to get started.";
         };
 
         ws.onmessage = (event) => {

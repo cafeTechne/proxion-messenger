@@ -369,6 +369,38 @@ button:hover { background: var(--accent-hover); }
        (still available on desktop) and tightening the Send button. */
     #schedule-btn { display: none; }
     #message-form > button[type="submit"] { padding-left: 14px; padding-right: 14px; }
+    /* Phone chat header: the room title wrapped onto two lines and the Leave/
+       Delete/Call text buttons overflowed the row. Icons only on mobile (each
+       keeps its title tooltip + aria-label); the title truncates with an
+       ellipsis instead of wrapping. */
+    #chat-header {
+        flex-wrap: nowrap;
+        /* Desktop's 25px side padding is too rich when every action icon is
+           showing — reclaim it for the action row. */
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+    #chat-header .btn-label { display: none; }
+    /* If a view still shows more action icons than fit (owner room + voice),
+       the action strip scrolls sideways instead of clipping or wrapping.
+       flex-shrink/min-width override the inline flex-shrink:0 so the strip
+       yields to the title's floor and scrolls internally. */
+    #chat-header-actions {
+        overflow-x: auto;
+        scrollbar-width: none;
+        flex-shrink: 1 !important;
+        min-width: 0;
+    }
+    #chat-header-actions::-webkit-scrollbar { display: none; }
+    #chat-header-name {
+        /* flex:1 (inline) has flex-basis 0, so with a full row of action icons
+           the title collapsed to nothing — keep a readable floor and ellipsize. */
+        min-width: 72px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 1.1em;
+    }
     .mobile-overlay {
         display: none;
         position: absolute;

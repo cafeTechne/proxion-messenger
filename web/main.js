@@ -1868,7 +1868,33 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                         if (_errEl) _errEl.textContent = _friendRequestErrors[event.message] || (event.detail || event.message);
                         break;
                     }
-                    showToast("Gateway Error: " + event.message, "error");
+                    // Friendly text for the errors a user can actually trigger;
+                    // fall back to the raw gateway message for the rest.
+                    const _errNice = {
+                        "empty_content": "Message is empty.",
+                        "content_too_large": "Message is too long.",
+                        "invalid_sequence": "Message rejected — please try again.",
+                        "file_too_large": "File is too large.",
+                        "chunk_too_large": "File chunk too large — try a smaller file.",
+                        "not_a_room_member": "You're not a member of this room.",
+                        "banned_from_room": "You've been banned from this room.",
+                        "invalid_code": "That invite code isn't valid.",
+                        "room_not_found": "Room not found — it may have been deleted.",
+                        "call_too_frequent": "Please wait a moment before calling again.",
+                        "voice_invite_not_allowed": "You can only call people in your contacts or rooms.",
+                        "voice_sessions_full": "The gateway can't take more calls right now.",
+                        "voice_note_remote_unsupported": "Voice notes can't be sent to contacts on other gateways yet.",
+                        "reaction_limit_reached": "Reaction limit reached for this message.",
+                        "contact_revoked": "This contact has been revoked.",
+                        "Not registered": "Not connected yet — give it a second and retry.",
+                        "send_at must be in the future": "Pick a time in the future.",
+                        "Cannot delete another user's message": "You can only delete your own messages.",
+                        "Cannot edit another user's message": "You can only edit your own messages.",
+                    };
+                    const _raw = event.message || "";
+                    const _nice = _errNice[_raw]
+                        || (_raw.startsWith("file_type_not_allowed") ? "That file type isn't allowed." : null);
+                    showToast(_nice || ("Gateway error: " + _raw), "error");
                     break;
                 }
                 case "message_fetched": {
@@ -2593,6 +2619,12 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
             this.style.height = "auto";
             this.style.height = Math.min(this.scrollHeight, 120) + "px";
         });
+
+        // Phone: the full placeholder ("… (Shift+Enter for newline)") wraps to two
+        // lines in the narrow composer; the hint is desktop-keyboard advice anyway.
+        if (window.innerWidth <= 768) {
+            document.getElementById("message-input").placeholder = "Type a message…";
+        }
 
         // Send on Enter (not Shift+Enter)
         document.getElementById("message-input").addEventListener("keydown", function(e) {
@@ -3862,6 +3894,10 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                 if (!isOwner || !targetWebid || targetWebid === selfWebId) return;
                 const menu = document.getElementById('member-context-menu');
                 if (!menu) return;
+                // Restore the default items — a previous "Mute…" click swaps the
+                // menu body for duration options.
+                if (menu.dataset.defaultHtml) menu.innerHTML = menu.dataset.defaultHtml;
+                else menu.dataset.defaultHtml = menu.innerHTML;
                 menu.dataset.targetWebid = targetWebid;
                 menu.style.display = 'block';
                 // Clamp to the viewport so the menu never opens off-screen on a
@@ -3894,17 +3930,28 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                 } else if (action === 'transfer') {
                     transferOwnership(_rid, targetWebid);
                 } else if (action === 'ban') {
-                    showConfirm('Ban this member?', () => {
-                        const reason = prompt('Reason (optional):') || '';
-                        socket.send(JSON.stringify({cmd: 'ban_member', room_id: _rid, webid: targetWebid, reason}));
+                    showConfirm("Ban this member? They'll be removed and can't rejoin.", () => {
+                        socket.send(JSON.stringify({cmd: 'ban_member', room_id: _rid, webid: targetWebid, reason: ''}));
                     });
                 } else if (action === 'mute') {
-                    const dur = prompt('Mute duration: 5m / 1h / 24h / blank=indefinite') || '';
-                    const secs = dur === '5m' ? 300 : dur === '1h' ? 3600 : dur === '24h' ? 86400 : null;
-                    socket.send(JSON.stringify({
-                        cmd: 'mute_member', room_id: _rid, webid: targetWebid,
-                        ...(secs !== null ? {duration_seconds: secs} : {}),
-                    }));
+                    // Second-stage menu: swap in duration choices instead of the old
+                    // native prompt() that made the user TYPE "5m"/"1h"/"24h".
+                    menu.innerHTML =
+                        '<button data-role-action="mute-300">Mute for 5 minutes</button>' +
+                        '<button data-role-action="mute-3600">Mute for 1 hour</button>' +
+                        '<button data-role-action="mute-86400">Mute for 24 hours</button>' +
+                        '<button data-role-action="mute-0">Mute until unmuted</button>' +
+                        '<hr><button data-role-action="mute-cancel">Cancel</button>';
+                    return; // keep the menu open on the duration choices
+                } else if (action.startsWith('mute-')) {
+                    const secs = parseInt(action.slice(5), 10);
+                    if (!Number.isNaN(secs)) {
+                        socket.send(JSON.stringify({
+                            cmd: 'mute_member', room_id: _rid, webid: targetWebid,
+                            ...(secs > 0 ? {duration_seconds: secs} : {}),
+                        }));
+                        showToast('Member muted');
+                    } // "mute-cancel" parses NaN → just close
                 } else {
                     socket.send(JSON.stringify({cmd: 'set_member_role', room_id: _rid, webid: targetWebid, role: action}));
                 }
