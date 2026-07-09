@@ -226,8 +226,12 @@ class RoomHandlerMixin:
                         if msg.get("timestamp", "") < cutoff:
                             expired.append(msg.get("message_id"))
                     room["messages"] = [m for m in room.get("messages", []) if m.get("timestamp", "") >= cutoff]
-                    if self._store and expired:
-                        self._store.delete_messages_before(room_id, cutoff)
+                    # Purge the STORE unconditionally by cutoff. This was gated on
+                    # the in-memory `expired` list, but a room only keeps messages
+                    # in memory when history_mode=="all" — so for normal rooms
+                    # `expired` was always empty and disappearing messages were
+                    # NEVER deleted from persistence (they reappeared on reload).
+                    store_deleted = self._store.delete_messages_before(room_id, cutoff) if self._store else 0
                     for mid in expired:
                         for ws in list(room.get("members", set())):
                             try:
@@ -235,6 +239,18 @@ class RoomHandlerMixin:
                                     "type": "message_deleted",
                                     "message_id": mid,
                                     "thread_id": room_id,
+                                }))
+                            except Exception:
+                                pass
+                    # Store-only rooms (no in-memory copies to name individually):
+                    # tell members to purge by cutoff so the feed/cache clears too.
+                    if store_deleted and not expired:
+                        for ws in list(room.get("members", set())):
+                            try:
+                                await ws.send(json.dumps({
+                                    "type": "dm_messages_expired",
+                                    "thread_id": room_id,
+                                    "before_timestamp": cutoff,
                                 }))
                             except Exception:
                                 pass
