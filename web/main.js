@@ -3775,7 +3775,13 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                             sub.querySelector('#delete-for-me-btn').dataset.msgId = msgId;
                             sub.querySelector('#delete-for-everyone-btn').dataset.msgId = msgId;
                             sub.querySelector('#delete-for-everyone-btn').style.display = isSender ? '' : 'none';
-                            sub.style.cssText = `display:block;top:${e.clientY}px;left:${e.clientX}px;`;
+                            sub.style.cssText = 'display:block;visibility:hidden;';
+                            // Clamp to the viewport so the submenu doesn't open
+                            // off-screen when deleting a message near a phone edge.
+                            const _dr = sub.getBoundingClientRect();
+                            const _dx = Math.max(4, Math.min(e.clientX, window.innerWidth - _dr.width - 8));
+                            const _dy = Math.max(4, Math.min(e.clientY, window.innerHeight - _dr.height - 8));
+                            sub.style.cssText = `display:block;top:${_dy}px;left:${_dx}px;`;
                         } else { deleteMsg(msgId); }
                         break;
                     }
@@ -3858,8 +3864,11 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                 if (!menu) return;
                 menu.dataset.targetWebid = targetWebid;
                 menu.style.display = 'block';
-                menu.style.left = e.clientX + 'px';
-                menu.style.top = e.clientY + 'px';
+                // Clamp to the viewport so the menu never opens off-screen on a
+                // phone (measured after display:block; leave an 8px gutter).
+                const _mr = menu.getBoundingClientRect();
+                menu.style.left = Math.max(4, Math.min(e.clientX, window.innerWidth - _mr.width - 8)) + 'px';
+                menu.style.top = Math.max(4, Math.min(e.clientY, window.innerHeight - _mr.height - 8)) + 'px';
             });
 
             document.getElementById('member-context-menu')?.addEventListener('click', e => {

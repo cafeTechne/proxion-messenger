@@ -344,6 +344,26 @@ button:hover { background: var(--accent-hover); }
     #sidebar.active {
         transform: translateX(0);
     }
+    /* Members panel becomes a right-side off-canvas drawer on mobile. The desktop
+       show/hide path sets inline display:block/none, so the drawer needs
+       display:block !important to beat a lingering inline display:none — its
+       visibility is driven by the .mobile-open class toggleMembersPanel sets.
+       Without this rule the panel never opened on phones (the class had no CSS). */
+    #members-panel {
+        display: block !important;
+        position: absolute;
+        top: 0;
+        right: 0;
+        height: 100%;
+        width: 80%;
+        max-width: 320px;
+        z-index: 100;
+        transform: translateX(100%);
+        transition: transform var(--transition-base);
+    }
+    #members-panel.mobile-open {
+        transform: translateX(0);
+    }
     /* Phone composer: the message input was squeezed to ~37% width by four buttons.
        Reclaim room for the primary input by dropping the secondary schedule action
        (still available on desktop) and tightening the Send button. */
