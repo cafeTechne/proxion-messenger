@@ -794,8 +794,18 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
         let _membersRoomId = null;
         function showRoomMembers(roomId) {
             _membersRoomId = roomId;
-            document.getElementById("room-members-list").innerHTML = inlineNotice("Loading members…", "loading");
-            document.getElementById("room-members-modal").style.display = "flex";
+            // Open the members PANEL. The old room-members-modal was replaced by the
+            // sidebar panel and its ids (room-members-modal / room-members-list) no
+            // longer exist — so this used to throw on the first line and the sidebar
+            // "Members" button did nothing. renderMembersPanel fills #members-list
+            // from the get_room_members response.
+            const panel = document.getElementById("members-panel");
+            if (panel) {
+                if (window.innerWidth <= 768) panel.classList.add("mobile-open");
+                else panel.style.display = "block";
+            }
+            const list = document.getElementById("members-list");
+            if (list) list.innerHTML = inlineNotice("Loading members…", "loading");
             if (socket) socket.send(JSON.stringify({cmd: "get_room_members", room_id: roomId}));
         }
         // kickMember: moved to rooms.js (createRooms).
@@ -2924,6 +2934,27 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
         document.getElementById("join-room-input").addEventListener("keydown", e => {
             if (e.key === "Enter") submitJoinRoom();
         });
+        // Several modal buttons had NO click handler — only the input's Enter key
+        // worked (the "Join" button did nothing), and the copy-modal fallback
+        // (shown when the Clipboard API fails) couldn't be dismissed OR copied at
+        // all. Wire each button to the obvious action.
+        document.getElementById("join-room-submit-btn").addEventListener("click", submitJoinRoom);
+        document.getElementById("join-room-cancel-btn").addEventListener("click", () => {
+            document.getElementById("join-room-modal").style.display = "none";
+        });
+        document.getElementById("add-peer-cancel-btn").addEventListener("click", () => {
+            document.getElementById("add-peer-modal").style.display = "none";
+        });
+        document.getElementById("copy-modal-close-btn").addEventListener("click", () => {
+            document.getElementById("copy-modal").style.display = "none";
+        });
+        document.getElementById("copy-modal-copy-btn").addEventListener("click", () => {
+            const ta = document.getElementById("copy-modal-text");
+            ta.focus(); ta.select();
+            let ok = false;
+            try { ok = document.execCommand("copy"); } catch (_) {}
+            showToast(ok ? "Copied" : "Press Ctrl+C to copy");
+        });
         document.getElementById("ob-name").addEventListener("keydown", e => {
             if (e.key === "Enter") obStep2();
         });
@@ -3830,10 +3861,25 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                 const targetWebid = menu?.dataset.targetWebid;
                 if (!targetWebid || !activeView || !socket) { menu.style.display = 'none'; return; }
                 const action = btn.dataset.roleAction;
+                const _rid = activeView.id;
                 if (action === 'kick') {
-                    kickMember(activeView.id, targetWebid);
+                    kickMember(_rid, targetWebid);
+                } else if (action === 'transfer') {
+                    transferOwnership(_rid, targetWebid);
+                } else if (action === 'ban') {
+                    showConfirm('Ban this member?', () => {
+                        const reason = prompt('Reason (optional):') || '';
+                        socket.send(JSON.stringify({cmd: 'ban_member', room_id: _rid, webid: targetWebid, reason}));
+                    });
+                } else if (action === 'mute') {
+                    const dur = prompt('Mute duration: 5m / 1h / 24h / blank=indefinite') || '';
+                    const secs = dur === '5m' ? 300 : dur === '1h' ? 3600 : dur === '24h' ? 86400 : null;
+                    socket.send(JSON.stringify({
+                        cmd: 'mute_member', room_id: _rid, webid: targetWebid,
+                        ...(secs !== null ? {duration_seconds: secs} : {}),
+                    }));
                 } else {
-                    socket.send(JSON.stringify({cmd: 'set_member_role', room_id: activeView.id, webid: targetWebid, role: action}));
+                    socket.send(JSON.stringify({cmd: 'set_member_role', room_id: _rid, webid: targetWebid, role: action}));
                 }
                 menu.style.display = 'none';
             });
