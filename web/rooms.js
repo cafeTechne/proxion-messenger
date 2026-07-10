@@ -12,6 +12,8 @@
 // shared state — read/written across the dispatch and renderer — injected by
 // reference and never reassigned. showConfirm / showCopyModal are injected.
 // Returned functions are destructured into same-named bindings in main.js.
+import { t } from './i18n.js';
+
 export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoomInviteUrls, showConfirm, showCopyModal }) {
 
     function requestRoomMembers(roomId) {
@@ -36,7 +38,7 @@ export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoo
     function deleteRoom() {
         const activeView = getActiveView();
         if (!activeView || !getRoomCreatorOf().has(activeView.id)) return;
-        showConfirm("Delete this room permanently? All messages and history will be lost for all members.", () => {
+        showConfirm(t('confirm.deleteRoom'), () => {
             getSocket().send(JSON.stringify({ cmd: "delete_room", room_id: activeView.id }));
         });
     }
@@ -81,7 +83,7 @@ export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoo
     }
 
     function kickMember(roomId, webid) {
-        showConfirm("Kick this member?", () => {
+        showConfirm(t('confirm.kickMember'), () => {
             const socket = getSocket();
             if (socket) socket.send(JSON.stringify({ cmd: "kick_member", room_id: roomId, webid: webid }));
         });

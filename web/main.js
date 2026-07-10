@@ -47,7 +47,7 @@ import { inlineNotice, feedEmptyState } from './states.js';
 import { installFocusTrap } from './focus-trap.js';
 import { makeListNavigable, announce } from './a11y.js';
 import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport } from './dmhistory.js';
-import { initI18n, applyStaticI18n } from './i18n.js';
+import { initI18n, applyStaticI18n, t, tn } from './i18n.js';
 
         // Load the active locale BEFORE any translated UI paints, then apply the
         // static index.html translations (the English text stays in the markup as
@@ -567,9 +567,9 @@ import { initI18n, applyStaticI18n } from './i18n.js';
         const _clearDmHistBtn = document.getElementById("settings-clear-dm-history-btn");
         if (_clearDmHistBtn) {
             _clearDmHistBtn.onclick = () => {
-                showConfirm("Clear all locally-saved DM history on this device? Encrypted DMs will no longer reload after this.", async () => {
+                showConfirm(t('confirm.clearDmHistory'), async () => {
                     await dmHistoryClearAll();
-                    showToast("DM history cleared on this device", "success");
+                    showToast(t('dm.historyCleared'), "success");
                 });
             };
         }
@@ -843,7 +843,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                 else panel.style.display = "block";
             }
             const list = document.getElementById("members-list");
-            if (list) list.innerHTML = inlineNotice("Loading members…", "loading");
+            if (list) list.innerHTML = inlineNotice(t('members.loading'), "loading");
             if (socket) socket.send(JSON.stringify({cmd: "get_room_members", room_id: roomId}));
         }
         // kickMember: moved to rooms.js (createRooms).
@@ -1177,13 +1177,13 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                     }
                     break;
                 case "message_pinned":
-                    showToast("Message pinned");
+                    showToast(t('pin.pinned'));
                     if (document.getElementById("pin-panel").style.display !== "none") {
                         showPinPanel();
                     }
                     break;
                 case "unpinned":
-                    showToast("Message unpinned");
+                    showToast(t('pin.unpinned'));
                     if (document.getElementById("pin-panel").style.display !== "none") {
                         showPinPanel();
                     }
@@ -1520,13 +1520,13 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                         if (activeView && activeView.id === event.room_id) {
                             document.getElementById("delete-room-btn").style.display = "inline-block";
                         }
-                        showToast(`You are now the owner of this room.`);
+                        showToast(t('room.youAreOwner'));
                     } else {
                         roomCreatorOf.delete(event.room_id);
                         if (activeView && activeView.id === event.room_id) {
                             document.getElementById("delete-room-btn").style.display = "none";
                         }
-                        showToast(`Room ownership transferred to ${event.new_owner_name}.`);
+                        showToast(t('room.ownershipTransferred', { name: event.new_owner_name }));
                     }
                     break;
                 }
@@ -1716,7 +1716,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                         const discDiv = document.getElementById("settings-pod-disconnected");
                         if (connDiv) connDiv.style.display = "none";
                         if (discDiv) discDiv.style.display = "block";
-                        if (event.message) showToast("Pod connection failed: " + event.message, "error");
+                        if (event.message) showToast(t('pod.connectionFailed', { message: event.message }), "error");
                         // If the browser has a live Solid session but the gateway lost its
                         // credentials (e.g. after sign-out cleared pod_creds.json), drop the
                         // user onto the pod-credentials step so they can reconnect.
@@ -1737,7 +1737,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                     if (_sb) { _sb.disabled = false; _sb.textContent = "Send Request"; }
                     const _addr = event.target_address || event.target_did || "";
                     const _short = _addr.includes("@") ? _addr.split("@").pop() : _addr.slice(0, 16) + "…";
-                    showToast("Request sent to " + _short);
+                    showToast(t('contact.requestSent', { name: _short }));
                     break;
                 }
                 case "friend_request_received":
@@ -1757,7 +1757,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                         const certId = cert.certificate_id;
                         if (certId) podWriteContact(certId, cert).catch(() => {});
                         if (event.invitation_id) podDeleteInvite(event.invitation_id).catch(() => {});
-                        showToast("Contact added!");
+                        showToast(t('contact.added'));
                         if (socket?.readyState === WebSocket.OPEN)
                             socket.send(JSON.stringify({ cmd: 'get_relationships' }));
                         // Store cert for auto-open after relationships reload
@@ -1765,7 +1765,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                             sessionStorage.setItem("proxion_open_cert_after_load", cert.certificate_id);
                         }
                     } else {
-                        showToast("Friend request accepted — waiting for certificate…");
+                        showToast(t('contact.requestAccepted'));
                     }
                     break;
                 }
@@ -1777,7 +1777,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                         if (event.invitation_id) podDeleteInvite(event.invitation_id).catch(() => {});
                     }
                     if (event.peer_did && event.x25519_pub) cachePeerPub(event.peer_did, event.x25519_pub);
-                    showToast("Contact connected: " + (event.peer_did || "peer").slice(8, 22) + "…");
+                    showToast(t('contact.connected', { peer: (event.peer_did || "peer").slice(8, 22) + "…" }));
                     if (socket?.readyState === WebSocket.OPEN)
                         socket.send(JSON.stringify({ cmd: 'get_relationships' }));
                     break;
@@ -1805,13 +1805,13 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                         dmHistoryDeleteThread(event.cert_id);
                         if (peerDidToCertId && event.peer_did) dmHistoryDeleteThread(event.peer_did);
                     }
-                    showToast("A contact has been revoked.");
+                    showToast(t('contact.revoked'));
                     break;
                 case "relationship_established":
                     document.querySelectorAll("[data-peer-did='" + (event.peer_did || "") + "']")
                         .forEach(el => el.remove());
                     refreshFriendRequestsBadge();
-                    showToast("Connected with " + (event.peer_did || "peer").slice(8, 22) + "…");
+                    showToast(t('contact.connectedWith', { peer: (event.peer_did || "peer").slice(8, 22) + "…" }));
                     if (socket && socket.readyState === WebSocket.OPEN)
                         socket.send(JSON.stringify({cmd: "get_relationships"}));
                     break;
@@ -1839,7 +1839,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                     if (sessionStorage.getItem(warnKey)) break;
                     sessionStorage.setItem(warnKey, "1");
                     const days = Math.ceil((event.expires_at - Date.now() / 1000) / 86400);
-                    showToast("Your connection with " + (event.peer_did || "a contact").slice(8, 18) + "… expires in " + days + " day" + (days === 1 ? "" : "s") + ".");
+                    showToast(tn('contact.expiresInDays', days, { peer: (event.peer_did || "a contact").slice(8, 18) + "…" }));
                     break;
                 }
                 case "pod_status": {
@@ -1860,9 +1860,9 @@ import { initI18n, applyStaticI18n } from './i18n.js';
 
                     // Watchdog reachability events (available field, no connected field)
                     if (isConnected === undefined && isAvailable === false) {
-                        showToast("Pod unreachable — messages may be delayed", "warning");
+                        showToast(t('pod.unreachable'), "warning");
                     } else if (isConnected === undefined && isAvailable === true) {
-                        showToast("Pod reconnected");
+                        showToast(t('pod.reconnected'));
                     }
 
                     const connDiv = document.getElementById("settings-pod-connected");
@@ -1897,36 +1897,38 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                         const _sb2 = document.getElementById("add-peer-submit-btn");
                         if (_sb2) { _sb2.disabled = false; _sb2.textContent = "Send Request"; }
                         const _errEl = document.getElementById("add-peer-error");
-                        if (_errEl) _errEl.textContent = _friendRequestErrors[event.message] || (event.detail || event.message);
+                        if (_errEl) _errEl.textContent = _friendRequestErrors[event.message] ? t(_friendRequestErrors[event.message]) : (event.detail || event.message);
                         break;
                     }
                     // Friendly text for the errors a user can actually trigger;
                     // fall back to the raw gateway message for the rest.
+                    // Backend error code -> i18n key (keep the indirection so raw
+                    // backend strings never render untranslated).
                     const _errNice = {
-                        "empty_content": "Message is empty.",
-                        "content_too_large": "Message is too long.",
-                        "invalid_sequence": "Message rejected — please try again.",
-                        "file_too_large": "File is too large.",
-                        "chunk_too_large": "File chunk too large — try a smaller file.",
-                        "not_a_room_member": "You're not a member of this room.",
-                        "banned_from_room": "You've been banned from this room.",
-                        "invalid_code": "That invite code isn't valid.",
-                        "room_not_found": "Room not found — it may have been deleted.",
-                        "call_too_frequent": "Please wait a moment before calling again.",
-                        "voice_invite_not_allowed": "You can only call people in your contacts or rooms.",
-                        "voice_sessions_full": "The gateway can't take more calls right now.",
-                        "voice_note_remote_unsupported": "Voice notes can't be sent to contacts on other gateways yet.",
-                        "reaction_limit_reached": "Reaction limit reached for this message.",
-                        "contact_revoked": "This contact has been revoked.",
-                        "Not registered": "Not connected yet — give it a second and retry.",
-                        "send_at must be in the future": "Pick a time in the future.",
-                        "Cannot delete another user's message": "You can only delete your own messages.",
-                        "Cannot edit another user's message": "You can only edit your own messages.",
+                        "empty_content": "error.empty_content",
+                        "content_too_large": "error.content_too_large",
+                        "invalid_sequence": "error.invalid_sequence",
+                        "file_too_large": "error.file_too_large",
+                        "chunk_too_large": "error.chunk_too_large",
+                        "not_a_room_member": "error.not_a_room_member",
+                        "banned_from_room": "error.banned_from_room",
+                        "invalid_code": "error.invalid_code",
+                        "room_not_found": "error.room_not_found",
+                        "call_too_frequent": "error.call_too_frequent",
+                        "voice_invite_not_allowed": "error.voice_invite_not_allowed",
+                        "voice_sessions_full": "error.voice_sessions_full",
+                        "voice_note_remote_unsupported": "error.voice_note_remote_unsupported",
+                        "reaction_limit_reached": "error.reaction_limit_reached",
+                        "contact_revoked": "error.contact_revoked",
+                        "Not registered": "error.not_registered",
+                        "send_at must be in the future": "error.send_at_future",
+                        "Cannot delete another user's message": "error.cannot_delete_others",
+                        "Cannot edit another user's message": "error.cannot_edit_others",
                     };
                     const _raw = event.message || "";
-                    const _nice = _errNice[_raw]
-                        || (_raw.startsWith("file_type_not_allowed") ? "That file type isn't allowed." : null);
-                    showToast(_nice || ("Gateway error: " + _raw), "error");
+                    const _key = _errNice[_raw]
+                        || (_raw.startsWith("file_type_not_allowed") ? "error.file_type_not_allowed" : null);
+                    showToast(_key ? t(_key) : t('error.gatewayGeneric', { raw: _raw }), "error");
                     break;
                 }
                 case "message_fetched": {
@@ -1963,7 +1965,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                     break;
                 }
                 case "session_revoked":
-                    showToast("This session was revoked from another device.", "error");
+                    showToast(t('session.revoked'), "error");
                     setTimeout(() => { if (socket) socket.close(); }, 1500);
                     break;
                 case "peer_device_keys":
@@ -1980,14 +1982,14 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                     document.getElementById('msg-' + event.message_id)?.classList.remove('msg-pending');
                     break;
                 case "logout_all_complete":
-                    showToast(`Logged out ${event.revoked_count || 0} other session(s).`);
+                    showToast(tn('session.loggedOutOthers', event.revoked_count || 0));
                     break;
                 case "pod_auth_error": {
                     showToast((event.message || "Pod credentials expired") + " — re-enter in Settings", "warning");
                     break;
                 }
                 case "pod_auth_restored": {
-                    showToast("Pod credentials refreshed successfully.", "success");
+                    showToast(t('pod.credentialsRefreshed'), "success");
                     break;
                 }
                 case "dm_messages_expired": {
@@ -2023,8 +2025,8 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                         const wm = document.getElementById("webhook-created-modal");
                         if (wm) { wm.style.display = "flex"; }
                     } else {
-                        showToast("Outgoing webhook created. Copy the secret now — it won't be shown again.");
-                        if (event.secret) { showToast("Secret: " + event.secret, "info"); }
+                        showToast(t('webhook.createdCopySecret'));
+                        if (event.secret) { showToast(t('webhook.secret', { secret: event.secret }), "info"); }
                     }
                     podWriteWebhook(event.id, {
                         direction: event.direction, bot_name: event.bot_name || "Bot",
@@ -2033,7 +2035,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                     }).catch(() => {});
                     break;
                 case "webhook_deleted":
-                    showToast("Webhook deleted.");
+                    showToast(t('webhook.deleted'));
                     if (event.id) podDeleteWebhook(event.id).catch(() => {});
                     break;
                 case "webhook_list": {
@@ -2067,7 +2069,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                 }
                 case "member_role_updated": {
                     if (event.room_id && event.webid) {
-                        showToast(`Role updated: ${escHtml(event.webid.slice(0,20))} → ${event.role}`);
+                        showToast(t('room.roleUpdated', { webid: escHtml(event.webid.slice(0,20)), role: event.role }));
                         if (activeView && activeView.id === event.room_id) {
                             socket && socket.send(JSON.stringify({cmd:"get_room_members", room_id: event.room_id}));
                         }
@@ -2091,13 +2093,13 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                 }
                 case "message_scheduled":
                 case "scheduled_created":
-                    showToast("Message scheduled.");
+                    showToast(t('schedule.scheduled'));
                     if (event.id && event.thread_id) {
                         podWriteScheduled(event.id, event.thread_id, event.send_at || '', event.content_preview || '').catch(() => {});
                     }
                     break;
                 case "scheduled_cancelled":
-                    showToast("Scheduled message cancelled.");
+                    showToast(t('schedule.cancelled'));
                     if (event.id) podDeleteScheduled(event.id).catch(() => {});
                     break;
                 case "devices": {
@@ -2120,7 +2122,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                     container.querySelectorAll("[data-device-id]").forEach(btn => {
                         btn.addEventListener("click", () => {
                             const id = btn.dataset.deviceId;
-                            showConfirm(`Revoke device "${id.slice(0, 16)}"?`, () => {
+                            showConfirm(t('confirm.revokeDevice', { id: id.slice(0, 16) }), () => {
                                 socket.send(JSON.stringify({cmd: "unregister_device", device_id: id}));
                                 btn.closest("div").remove();
                             });
@@ -2181,7 +2183,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                     break;
                 }
                 case "import_complete":
-                    showToast(`Import complete: ${event.counts?.messages || 0} messages imported.`);
+                    showToast(t('import.completeEvent', { count: event.counts?.messages || 0 }));
                     // Reload relationships and rooms
                     socket.send(JSON.stringify({cmd: 'get_relationships'}));
                     break;
@@ -2399,7 +2401,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
         }
         function deleteMsg(msgId) {
             if (!activeView) return;
-            showConfirm("Delete this message?", () => {
+            showConfirm(t('confirm.deleteMessage'), () => {
                 socket.send(JSON.stringify({
                     cmd: "delete_local_message",
                     message_id: msgId,
@@ -2462,7 +2464,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
         function maybeShowEmptyState() {
             const feed = document.getElementById("message-feed");
             if (allMessages.length === 0 && !feed.querySelector(".empty-state, .system-msg")) {
-                feed.appendChild(feedEmptyState({ title: "No messages yet.", hint: "Be the first to say hello." }));
+                feed.appendChild(feedEmptyState({ title: t('feed.noMessages'), hint: t('feed.beFirst') }));
             }
         }
 
@@ -2623,7 +2625,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
         document.getElementById("mute-btn").onclick = () => {
             if (!voice.state.localStream) return;
             voice.state.isMuted = !voice.state.isMuted;
-            voice.state.localStream.getAudioTracks().forEach(t => { t.enabled = !voice.state.isMuted; });
+            voice.state.localStream.getAudioTracks().forEach(track => { track.enabled = !voice.state.isMuted; });
             document.getElementById("mute-btn").classList.toggle("vw-muted", voice.state.isMuted);
         };
 
@@ -2905,18 +2907,18 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                 const isDm = activeView.type === "dm" || activeView.type === "local_dm";
                 const peerWebid = activeView.peerWebid || "";
                 if (file.size > 25 * 1024 * 1024) {
-                    showToast("File too large — max 25 MB");
+                    showToast(t('file.tooLarge'));
                     e.target.value = "";
                     return;
                 }
                 if (!isDm || !peerWebid) {
-                    showToast("Large files can only be sent in direct messages");
+                    showToast(t('file.largeDmOnly'));
                     e.target.value = "";
                     return;
                 }
                 fileTransfer.sendFileChunked(file, peerWebid).catch(err => {
                     console.warn("chunked send failed", err);
-                    showToast("File send failed");
+                    showToast(t('file.sendFailed'));
                 });
                 e.target.value = "";
                 return;
@@ -2969,19 +2971,19 @@ import { initI18n, applyStaticI18n } from './i18n.js';
 
         // --------------- Add Contact modal ---------------
         const _friendRequestErrors = {
-            "invalid_address": "Invalid address — use the format did:key:…@wss://gateway.",
-            "delivery_failed": "Could not reach that gateway — check the address and try again.",
-            "invalid_signature": "That invite has expired or is invalid.",
-            "expired": "That invite has expired.",
-            "invite_not_found": "Invite not found — it may have already been used.",
-            "contact_revoked": "This contact has been revoked. You can no longer send messages.",
+            "invalid_address": "error.fr.invalid_address",
+            "delivery_failed": "error.fr.delivery_failed",
+            "invalid_signature": "error.fr.invalid_signature",
+            "expired": "error.fr.expired",
+            "invite_not_found": "error.fr.invite_not_found",
+            "contact_revoked": "error.fr.contact_revoked",
         };
 
         async function submitAddPeer() {
             let raw = document.getElementById("add-peer-input").value.trim();
             const errEl = document.getElementById("add-peer-error");
             const submitBtn = document.getElementById("add-peer-submit-btn");
-            if (!raw) { errEl.textContent = "Please enter an address."; return; }
+            if (!raw) { errEl.textContent = t('contact.enterAddress'); return; }
             if (!socket || socket.readyState !== WebSocket.OPEN) {
                 errEl.textContent = "Not connected to gateway."; return;
             }
@@ -3210,7 +3212,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
             if (!_ctxTarget) return;
             const _delId = _ctxTarget.msgId;
             closeCtxMenu();
-            showConfirm("Delete this message?", () => deleteMsg(_delId));
+            showConfirm(t('confirm.deleteMessage'), () => deleteMsg(_delId));
         };
 
         // Long-press for mobile (touch)
@@ -3488,7 +3490,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
             });
             attachListener('#copy-webhook-url-btn', 'click', () => {
                 const url = document.getElementById('webhook-url-display').textContent;
-                navigator.clipboard.writeText(url).then(() => showToast('Webhook URL copied'));
+                navigator.clipboard.writeText(url).then(() => showToast(t('webhook.urlCopied')));
             });
             attachListener('#integrations-btn', 'click', openIntegrationsPanel);
 
@@ -3600,12 +3602,12 @@ import { initI18n, applyStaticI18n } from './i18n.js';
             attachListener('#qr-copy-invite-btn', 'click', () => {
                 const link = window.proxionInviteLink || '';
                 if (!link) return;
-                navigator.clipboard.writeText(link).then(() => showToast('Invite link copied!'));
+                navigator.clipboard.writeText(link).then(() => showToast(t('onboarding.inviteCopied')));
             });
             attachListener('#qr-copy-short-btn', 'click', () => {
                 const link = window.proxionShortInviteUrl || window.proxionInviteLink || '';
                 if (!link) return;
-                navigator.clipboard.writeText(link).then(() => showToast('Short link copied!'));
+                navigator.clipboard.writeText(link).then(() => showToast(t('invite.shortLinkCopied')));
             });
 
             // R17.2: QR scan — decode image and pre-fill add-peer input
@@ -3732,7 +3734,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
             attachListener('#settings-solid-inrupt', 'click', () => solidLogin('https://inrupt.net'));
             attachListener('#settings-solid-custom-btn', 'click', () => {
                 const url = (document.getElementById('settings-solid-custom-url')?.value || '').trim();
-                if (!url.startsWith('https://')) { showToast('Pod server URL must start with https://', 'error'); return; }
+                if (!url.startsWith('https://')) { showToast(t('pod.urlMustHttps'), 'error'); return; }
                 solidLogin(url);
             });
             // Disconnect from the CSS/Solid pod without touching the local identity key or
@@ -3803,7 +3805,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                 }
             });
             attachListener('#settings-reset-identity-btn', 'click', () => {
-                showConfirm('This will permanently delete your local identity key, all rooms, messages, and pod credentials. You cannot undo this. Continue?',
+                showConfirm(t('confirm.deleteIdentity'),
                     () => { _resetIdentity(); });
             });
 
@@ -3819,12 +3821,12 @@ import { initI18n, applyStaticI18n } from './i18n.js';
             if (importInput) importInput.onchange = async (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
-                showToast('Importing…');
+                showToast(t('import.importing'));
                 const text = await file.text();
                 const resp = await fetch('/import', { method: 'POST', body: text, headers: {'Content-Type':'application/json'} });
                 const result = await resp.json();
-                if (result.status === 'ok') showToast(`Import complete: ${result.counts?.messages || 0} messages`);
-                else showToast('Import failed: ' + (result.error || 'unknown error'));
+                if (result.status === 'ok') showToast(t('import.complete', { count: result.counts?.messages || 0 }));
+                else showToast(t('import.failed', { error: result.error || t('common.unknownError') }));
                 importInput.value = '';
             };
 
@@ -3990,7 +3992,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                 } else if (action === 'transfer') {
                     transferOwnership(_rid, targetWebid);
                 } else if (action === 'ban') {
-                    showConfirm("Ban this member? They'll be removed and can't rejoin.", () => {
+                    showConfirm(t('confirm.banMember'), () => {
                         socket.send(JSON.stringify({cmd: 'ban_member', room_id: _rid, webid: targetWebid, reason: ''}));
                     });
                 } else if (action === 'mute') {
@@ -4010,7 +4012,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                             cmd: 'mute_member', room_id: _rid, webid: targetWebid,
                             ...(secs > 0 ? {duration_seconds: secs} : {}),
                         }));
-                        showToast('Member muted');
+                        showToast(t('members.muted'));
                     } // "mute-cancel" parses NaN → just close
                 } else {
                     socket.send(JSON.stringify({cmd: 'set_member_role', room_id: _rid, webid: targetWebid, role: action}));
@@ -4087,20 +4089,20 @@ import { initI18n, applyStaticI18n } from './i18n.js';
             });
         }
         (function _consumePushThreadParam() {
-            let t;
-            try { t = new URLSearchParams(location.search).get('thread'); } catch (_) { return; }
-            if (!t) return;
+            let thread;
+            try { thread = new URLSearchParams(location.search).get('thread'); } catch (_) { return; }
+            if (!thread) return;
             let tries = 0;
             const tryNav = () => {
-                const sel = 'nav-' + (window.CSS && CSS.escape ? CSS.escape(t) : t);
-                if (document.getElementById(sel)) { _navigateToThread(t); return; }
+                const sel = 'nav-' + (window.CSS && CSS.escape ? CSS.escape(thread) : thread);
+                if (document.getElementById(sel)) { _navigateToThread(thread); return; }
                 if (++tries < 20) setTimeout(tryNav, 500); // wait for the sidebar to populate
             };
             setTimeout(tryNav, 1000);
         })();
         if (window.__TAURI__?.event?.listen) {
             window.__TAURI__.event.listen("gateway-crashed", () => {
-                showToast("Gateway crashed - please restart the app", "error");
+                showToast(t('app.gatewayCrashed'), "error");
             });
             // R17.4.3: deep link from OS protocol handler (cold-start)
             window.__TAURI__.event.listen("deep-link-invoke", ({ payload }) => {
@@ -4154,22 +4156,22 @@ import { initI18n, applyStaticI18n } from './i18n.js';
 
             // R12.1.3: Download identity backup
             document.getElementById('settings-backup-btn')?.addEventListener('click', async () => {
-                const pp = await showPromptModal('Choose a passphrase to protect your backup:', { type: 'password' });
+                const pp = await showPromptModal(t('prompt.choosePassphrase'), { type: 'password' });
                 if (!pp) return;
                 try {
                     const apiToken = document.querySelector('meta[name="x-api-token"]')?.content || '';
                     const headers = {};
                     if (apiToken) headers['Authorization'] = 'Bearer ' + apiToken;
                     const resp = await fetch('/backup?passphrase=' + encodeURIComponent(pp), { headers });
-                    if (!resp.ok) { showToast('Backup failed: ' + resp.status); return; }
+                    if (!resp.ok) { showToast(t('backup.failed', { status: resp.status })); return; }
                     const blob = await resp.blob();
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url; a.download = 'proxion-backup.json'; a.click();
                     URL.revokeObjectURL(url);
                     localStorage.setItem('proxion_backup_downloaded', Date.now().toString());
-                    showToast('Identity backup downloaded.');
-                } catch (e) { showToast('Backup error: ' + e.message); }
+                    showToast(t('backup.downloaded'));
+                } catch (e) { showToast(t('backup.error', { error: e.message })); }
             });
 
             // R12.1.3: Restore from backup
@@ -4179,7 +4181,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
             document.getElementById('settings-restore-input')?.addEventListener('change', async (e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
-                const pp = await showPromptModal('Enter the passphrase for this backup:', { type: 'password' });
+                const pp = await showPromptModal(t('prompt.enterPassphrase'), { type: 'password' });
                 if (!pp) return;
                 try {
                     const data = await file.arrayBuffer();
@@ -4189,10 +4191,10 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                     const resp = await fetch('/restore?passphrase=' + encodeURIComponent(pp), {
                         method: 'POST', headers, body: data,
                     });
-                    if (!resp.ok) { showToast('Restore failed: ' + resp.status); return; }
-                    showToast('Identity restored. Reconnecting…');
+                    if (!resp.ok) { showToast(t('restore.failed', { status: resp.status })); return; }
+                    showToast(t('restore.done'));
                     setTimeout(() => { if (socket) socket.close(); }, 1000);
-                } catch (err) { showToast('Restore error: ' + err.message); }
+                } catch (err) { showToast(t('restore.error', { error: err.message })); }
                 e.target.value = '';
             });
 
@@ -4270,7 +4272,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                         } catch (e) {
                             btn.disabled = false;
                             btn.textContent = "Retry";
-                            showToast("Update failed — try again");
+                            showToast(t('common.updateFailed'));
                         }
                     };
                 }, 8000);
@@ -4306,13 +4308,13 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                     if (!msgId) return;
                     const popover = document.createElement("div");
                     popover.className = "edit-history-popover";
-                    popover.innerHTML = inlineNotice("Loading…", "loading");
+                    popover.innerHTML = inlineNotice(t('common.loadingEllipsis'), "loading");
                     badge.style.position = "relative";
                     badge.appendChild(popover);
                     fetch(`/message-edits?message_id=${encodeURIComponent(msgId)}`)
                         .then(r => r.json())
                         .then(edits => {
-                            if (!edits.length) { popover.innerHTML = inlineNotice("No history available."); return; }
+                            if (!edits.length) { popover.innerHTML = inlineNotice(t('edit.noHistory')); return; }
                             popover.innerHTML = edits.map(ed =>
                                 `<div class="edit-history-entry">
                                   <div class="edit-history-meta">${escHtml(new Date(ed.edited_at).toLocaleString())} — ${escHtml(ed.edited_by)}</div>
@@ -4320,7 +4322,7 @@ import { initI18n, applyStaticI18n } from './i18n.js';
                                 </div>`
                             ).join("");
                         })
-                        .catch(() => { popover.innerHTML = inlineNotice("Could not load history.", "error"); });
+                        .catch(() => { popover.innerHTML = inlineNotice(t('edit.historyLoadFailed'), "error"); });
                     return;
                 }
                 // Close popover on outside click

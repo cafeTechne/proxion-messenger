@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // address.js — the user's own Proxion address bar + invite sharing: copy
 // address, render the QR code, open the QR share panel, and update the address
 // bar from a gateway event.
@@ -11,7 +12,7 @@ export function createAddress({ showToast, showCopyModal }) {
         const addr = localStorage.getItem("proxion_my_address") || "";
         if (!addr) return;
         navigator.clipboard.writeText(addr).then(() => {
-            showToast("Address copied!");
+            showToast(t('address.copied'));
             const btn = document.getElementById("copy-addr-btn");
             if (btn) {
                 const orig = btn.textContent;
@@ -40,7 +41,7 @@ export function createAddress({ showToast, showCopyModal }) {
     // R17.1: Open QR share panel anchored near the button
     function shareInviteLink() {
         const link = window.proxionInviteLink;
-        if (!link) { showToast('No invite link available yet — wait for connection.'); return; }
+        if (!link) { showToast(t('address.noInviteLink')); return; }
         const panel = document.getElementById('qr-share-panel');
         if (!panel) return;
         // R17.4.5: encode proxion:// deep-link so scanning on a device with the app installed

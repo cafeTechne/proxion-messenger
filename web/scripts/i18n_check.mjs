@@ -67,19 +67,32 @@ for (const m of html.matchAll(/data-i18n-attr="([^"]+)"/g)) {
 const jsFiles = readdirSync(WEB).filter(f => f.endsWith('.js') && !f.endsWith('.test.js'));
 const T_RE = /\bt\(\s*['"]([^'"]+)['"]/g;
 const TN_RE = /\btn\(\s*['"]([^'"]+)['"]/g;
-for (const f of jsFiles) {
-  const src = readFileSync(join(WEB, f), 'utf8');
+const pluralBases = new Set();
+const allSource = jsFiles.map(f => readFileSync(join(WEB, f), 'utf8')).join('\n');
+for (const src of [allSource]) {
   for (const m of src.matchAll(T_RE)) referenced.add(m[1]);
   for (const m of src.matchAll(TN_RE)) {
-    // tn keys are stored as key.one/.other — the base key is what's referenced.
-    referenced.add(m[1]); referenced.add(`${m[1]}.other`); referenced.add(`${m[1]}.one`);
+    // tn keys live under key.one/.other; the base is referenced (for dead-key
+    // detection) but completeness requires the plural VARIANTS, not the base.
+    pluralBases.add(m[1]);
+    referenced.add(`${m[1]}.other`); referenced.add(`${m[1]}.one`);
   }
+}
+// Indirect references: a key looked up through a code→key map (e.g. _errNice,
+// _friendRequestErrors, _SIDEBAR_EMPTY) appears verbatim as a quoted string but
+// not inside a t()/tn() call. Count any en.json key that shows up as a literal.
+for (const key of enKeys) {
+  if (allSource.includes(`"${key}"`) || allSource.includes(`'${key}'`)) referenced.add(key);
 }
 
 // ── (a) referenced-but-missing → FAIL ───────────────────────────────────────
+for (const base of pluralBases) {
+  if (!enKeys.has(`${base}.other`)) fail(`plural key "${base}" has no "${base}.other" in en.json`);
+}
 for (const key of referenced) {
-  // tn's speculative .one/.other: only require that at least .other exists.
+  // plural variants are validated via their base above; only require .other.
   if (/\.(one|two|few|many|zero)$/.test(key)) continue;
+  if (/\.other$/.test(key) && pluralBases.has(key.replace(/\.other$/, ''))) continue;
   if (!enKeys.has(key)) fail(`referenced key not in en.json: "${key}"`);
 }
 

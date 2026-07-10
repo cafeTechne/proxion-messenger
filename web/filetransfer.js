@@ -4,6 +4,7 @@
 // live here; cross-cutting concerns (sendCmd, showToast, renderMessage, the
 // current view) are injected so this module stays decoupled from main.js.
 
+import { t } from './i18n.js';
 import { u8ToB64, b64ToU8 } from './util.js';
 
 const CHUNK_BYTES = 64 * 1024;
@@ -63,7 +64,7 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
             size_bytes: buf.length, total_chunks: total,
         });
         showToast(`Offering ${file.name}…`);
-        try { await acceptP; } catch (e) { delete _outgoingFiles[fileId]; _clearTransferProgress(fileId); showToast("File not accepted"); return; }
+        try { await acceptP; } catch (e) { delete _outgoingFiles[fileId]; _clearTransferProgress(fileId); showToast(t('file.notAccepted')); return; }
         for (let seq = 0; seq < total; seq++) {
             const slice = buf.subarray(seq * CHUNK_BYTES, (seq + 1) * CHUNK_BYTES);
             sendCmd("file_chunk", { to_webid: toWebid, file_id: fileId, seq, data: u8ToB64(slice) });
@@ -115,7 +116,7 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         // producing a corrupt file the user can't tell apart from a good one.
         if (rec.received < rec.total) {
             delete _incomingFiles[event.file_id];
-            showToast(`Transfer of ${rec.meta.filename} failed — ${rec.received}/${rec.total} chunks received`, "error");
+            showToast(t('file.transferFailed', { filename: rec.meta.filename, received: rec.received, total: rec.total }), "error");
             return;
         }
         let totalLen = 0;
@@ -145,13 +146,13 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         const rec = _outgoingFiles[event.file_id];
         if (rec && rec.reject) rec.reject(new Error(event.reason || "rejected"));
         _clearTransferProgress(event.file_id);
-        showToast("File declined");
+        showToast(t('file.declined'));
     }
     function handleFileUnreachable(event) {
         const rec = _outgoingFiles[event.file_id];
         if (rec && rec.reject) rec.reject(new Error("unreachable"));
         _clearTransferProgress(event.file_id);
-        showToast("Recipient is offline — large files need both people online");
+        showToast(t('file.recipientOffline'));
     }
 
     return {

@@ -1,6 +1,7 @@
 // Voice + WebRTC subsystem (1:1 calls + group voice channels), extracted from
 // main.js (R40). createVoice(deps) owns voice state in `state` and returns the
 // handlers main.js wires into the WS dispatch and call/mute/leave buttons.
+import { t } from './i18n.js';
 import { escHtml } from './util.js';
 
 export const CALL_TIMEOUT_MS = 30000;
@@ -78,11 +79,11 @@ export function createVoice(deps) {
             state._channelSessionIds = {};
             // Release the microphone — otherwise the OS/browser recording
             // indicator stays lit after leaving the channel.
-            if (state.localStream) { state.localStream.getTracks().forEach(t => t.stop()); state.localStream = null; }
+            if (state.localStream) { state.localStream.getTracks().forEach(tr => tr.stop()); state.localStream = null; }
             state._mediaDenied = false;
             _speaking.stopAll();
             _hideChannelPanel();
-            showToast("Left voice channel");
+            showToast(t('voice.left'));
         }
 
         function _callerDisplayName(webid) {
@@ -125,7 +126,7 @@ export function createVoice(deps) {
                 });
             } catch (err) {
                 state._mediaDenied = true;
-                showToast("Could not access microphone: " + (err && err.name ? err.name : err), "error");
+                showToast(t('voice.micError', { error: (err && err.name ? err.name : err) }), "error");
             }
             return state.localStream;
         }
@@ -176,7 +177,7 @@ export function createVoice(deps) {
             if (state._callTimeoutId) clearTimeout(state._callTimeoutId);
             state._callTimeoutId = setTimeout(() => {
                 if (state._callState === CallState.CALLING) {
-                    showToast("Call not answered");
+                    showToast(t('voice.callNotAnswered'));
                     _doHangup();
                 }
             }, CALL_TIMEOUT_MS);
@@ -235,7 +236,7 @@ export function createVoice(deps) {
             if (sessionId) state._channelSessionIds[targetWebid] = sessionId;
 
             const stream = await getMedia();
-            if (stream) stream.getTracks().forEach(t => peerPc.addTrack(t, stream));
+            if (stream) stream.getTracks().forEach(tr => peerPc.addTrack(tr, stream));
 
             peerPc.ontrack = (event) => {
                 let audio = state.peerAudioElements[targetWebid];
@@ -271,7 +272,7 @@ export function createVoice(deps) {
                     // doesn't spam. restartIce attempts automatic recovery.
                     if (!peerPc._proxionFailToasted) {
                         peerPc._proxionFailToasted = true;
-                        showToast("Voice connection trouble with " + targetWebid.slice(0, 20) + " — reconnecting…", "error");
+                        showToast(t('voice.connectionTrouble', { peer: targetWebid.slice(0, 20) }), "error");
                     }
                     try { peerPc.restartIce(); } catch (_) {}
                 } else if (_st === "connected" || _st === "completed") {
@@ -423,7 +424,7 @@ export function createVoice(deps) {
             // A caller with no microphone would start a call the other side can't
             // hear — abort cleanly instead of silently establishing a dead call.
             if (isCaller && !stream) {
-                showToast("Microphone is required to start a call.", "error");
+                showToast(t('voice.micRequired'), "error");
                 hangupCleanup();
                 return;
             }
@@ -527,7 +528,7 @@ export function createVoice(deps) {
         function hangupCleanup() {
             if (state.pc) { state.pc.close(); state.pc = null; }
             if (state._remoteAudio) { try { state._remoteAudio.pause(); state._remoteAudio.srcObject = null; } catch (_) {} state._remoteAudio = null; }
-            if (state.localStream) { state.localStream.getTracks().forEach(t => t.stop()); state.localStream = null; }
+            if (state.localStream) { state.localStream.getTracks().forEach(tr => tr.stop()); state.localStream = null; }
             state._mediaDenied = false;
             stopCallTimer();
             stopRingTone();
@@ -574,19 +575,19 @@ export function createVoice(deps) {
         }
 
         function handleVoicePeerPresent(event) {
-            showToast(`${event.peer_webid.slice(0, 20)} is in the voice channel`, "info");
+            showToast(t('voice.peerPresent', { peer: event.peer_webid.slice(0, 20) }), "info");
             _addChannelParticipant(event.peer_webid);
         }
 
         function handleVoicePeerJoined(event) {
-            showToast(`${event.peer_webid.slice(0, 20)} joined the voice channel`, "info");
+            showToast(t('voice.peerJoined', { peer: event.peer_webid.slice(0, 20) }), "info");
             _addChannelParticipant(event.peer_webid);
             // We are an existing member; call the new joiner (one offer per pair).
             initWebRTCForPeer(event.peer_webid, null, true).catch(console.warn);
         }
 
         function handleVoicePeerLeft(event) {
-            showToast(`${event.peer_webid.slice(0, 20)} left the voice channel`, "info");
+            showToast(t('voice.peerLeft', { peer: event.peer_webid.slice(0, 20) }), "info");
             const peerPc = state.peerConnections[event.peer_webid];
             if (peerPc) { try { peerPc.close(); } catch (_) {} delete state.peerConnections[event.peer_webid]; }
             const audio = state.peerAudioElements[event.peer_webid];

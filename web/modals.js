@@ -5,6 +5,7 @@
 // getters; sendCmd / showToast / renderMessage are injected. escHtml is
 // imported directly. _forwardingMsgId is cluster-owned and lives in `state`.
 // The returned functions are destructured into same-named bindings in main.js.
+import { t } from './i18n.js';
 import { escHtml } from './util.js';
 import { inlineNotice } from './states.js';
 
@@ -22,13 +23,13 @@ export function createModals({ getSocket, getActiveView, sendCmd, showToast, ren
             const name = el.querySelector('.room-name')?.textContent || el.dataset.roomId;
             threads.push({ id: el.dataset.roomId, name });
         });
-        if (!threads.length) { list.innerHTML = inlineNotice("No rooms to forward to."); }
+        if (!threads.length) { list.innerHTML = inlineNotice(t('modal.noRoomsToForward')); }
         else {
             list.innerHTML = '';
-            threads.forEach(t => {
+            threads.forEach(thr => {
                 const item = document.createElement('div');
                 item.className = 'forward-thread-item';
-                item.textContent = t.name;
+                item.textContent = thr.name;
                 item.addEventListener('click', () => {
                     if (socket && state.forwardingMsgId) {
                         // Send the PLAINTEXT we rendered — the gateway only has
@@ -36,7 +37,7 @@ export function createModals({ getSocket, getActiveView, sendCmd, showToast, ren
                         const _content = getMessageContent ? getMessageContent(state.forwardingMsgId) : '';
                         socket.send(JSON.stringify({
                             cmd: 'forward_message', message_id: state.forwardingMsgId,
-                            target_thread_id: t.id, content: _content || '',
+                            target_thread_id: thr.id, content: _content || '',
                         }));
                     }
                     modal.style.display = 'none';
@@ -82,7 +83,7 @@ export function createModals({ getSocket, getActiveView, sendCmd, showToast, ren
         });
         box.querySelector('#ci-outgoing-btn').addEventListener('click', () => {
             const url = prompt('Target HTTPS URL:');
-            if (!url || !url.startsWith('https://')) { showToast('Must be HTTPS', 'error'); return; }
+            if (!url || !url.startsWith('https://')) { showToast(t('modal.mustBeHttps'), 'error'); return; }
             sendCmd('create_webhook', { thread_id: activeView.id, direction: 'outgoing', url, bot_name: 'Bot' });
             modal.remove();
         });

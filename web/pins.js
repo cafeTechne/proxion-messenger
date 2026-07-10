@@ -5,6 +5,7 @@
 // into same-named bindings in main.js so the dispatch and listener wiring keep
 // working unchanged.
 import { inlineNotice } from './states.js';
+import { t } from './i18n.js';
 
 export function createPins({ getSocket, getActiveView }) {
 
@@ -29,7 +30,7 @@ export function createPins({ getSocket, getActiveView }) {
         const list = document.getElementById("pin-list");
         list.innerHTML = "";
         if (!pins || pins.length === 0) {
-            list.innerHTML = inlineNotice("No pinned messages.");
+            list.innerHTML = inlineNotice(t('pin.noneP'));
             return;
         }
         const activeView = getActiveView();

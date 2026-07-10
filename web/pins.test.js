@@ -60,7 +60,7 @@ describe('renderPins', () => {
   it('shows an empty-state message when there are no pins', () => {
     const { pins } = make();
     pins.renderPins([]);
-    expect(document.getElementById('pin-list').innerHTML).toContain('No pinned messages');
+    expect(document.getElementById('pin-list').innerHTML).toContain('pin.noneP');
   });
   it('renders a row per pin', () => {
     const { pins } = make();

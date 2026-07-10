@@ -10,6 +10,7 @@
 //
 // A factory in the main.js idiom. Reassignable host state (socket, identity key)
 // is read live via getters; issueDeviceCert is imported directly.
+import { t } from './i18n.js';
 import { issueDeviceCert } from './device-cert.js';
 
 export function createPairing({
@@ -26,12 +27,12 @@ export function createPairing({
     const $ = (id) => document.getElementById(id);
     function _show(id) { const el = $(id); if (el) el.style.display = 'flex'; }
     function _hide(id) { const el = $(id); if (el) el.style.display = 'none'; }
-    function _text(id, t) { const el = $(id); if (el) el.textContent = t; }
+    function _text(id, text) { const el = $(id); if (el) el.textContent = text; }
 
     // ---- Primary side --------------------------------------------------------
     function startLinking() {
         const socket = getSocket();
-        if (!socket) { showToast('Not connected.', 'error'); return; }
+        if (!socket) { showToast(t('pairing.notConnected'), 'error'); return; }
         state.active = { code: null, deviceDid: null };
         _show('device-link-modal');
         _text('device-link-status', 'Generating a pairing code…');
@@ -74,7 +75,7 @@ export function createPairing({
         try {
             cert = await issueDeviceCert(priv, accountDid, state.active.deviceDid);
         } catch (e) {
-            showToast('Could not sign device cert.', 'error');
+            showToast(t('pairing.certSignFailed'), 'error');
             return;
         }
         // Bundle recent DM history (best-effort, bounded) so the new device
@@ -105,7 +106,7 @@ export function createPairing({
     }
 
     function _onApproveAck() {
-        showToast('Device linked.', 'success');
+        showToast(t('pairing.deviceLinked'), 'success');
         _closeAll();
         if (refreshDevices) refreshDevices();
     }
@@ -114,8 +115,8 @@ export function createPairing({
     function beginAsNewDevice(code) {
         const socket = getSocket();
         const deviceDid = getClientDid();
-        if (!socket || !deviceDid) { showToast('Not connected yet — try again in a moment.', 'error'); return; }
-        if (!code) { showToast('Enter a pairing code.', 'error'); return; }
+        if (!socket || !deviceDid) { showToast(t('pairing.notConnectedYet'), 'error'); return; }
+        if (!code) { showToast(t('pairing.enterCode'), 'error'); return; }
         state.active = { asNew: true, code };
         _text('pair-device-status', 'Contacting the other device…');
         socket.send(JSON.stringify({ cmd: 'pair_submit', pairing_code: code, device_did: deviceDid }));
@@ -137,7 +138,7 @@ export function createPairing({
         }
         _text('pair-device-status', 'Linked! Reloading…');
         _text('pair-device-safety', '');
-        showToast('This device is now linked.', 'success');
+        showToast(t('pairing.thisDeviceLinked'), 'success');
         setTimeout(() => { location.reload(); }, 1200);
     }
 

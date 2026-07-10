@@ -47,7 +47,7 @@ describe('openForwardModal', () => {
   it('shows an empty-state when there are no rooms', () => {
     const { modals } = make();
     modals.openForwardModal('m1');
-    expect(els['forward-thread-list'].innerHTML).toContain('No rooms to forward to');
+    expect(els['forward-thread-list'].innerHTML).toContain('modal.noRoomsToForward');
   });
 });
 

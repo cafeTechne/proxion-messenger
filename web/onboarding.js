@@ -6,6 +6,7 @@
 // showCopyModal) are injected. podWriteProfile is imported directly. The
 // returned functions are destructured into same-named bindings in main.js, so
 // the existing setupEventListeners wiring keeps working unchanged.
+import { t } from './i18n.js';
 import { podWriteProfile } from './pod.js';
 
 export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyModal, showConfirm }) {
@@ -191,7 +192,7 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         const el = document.getElementById("ob-room-invite-url");
         const url = el?.textContent || "";
         if (!url) return;
-        navigator.clipboard.writeText(url).then(() => showToast("Invite link copied!")).catch(() => {
+        navigator.clipboard.writeText(url).then(() => showToast(t('onboarding.inviteCopied'))).catch(() => {
             showCopyModal(url);
         });
     }

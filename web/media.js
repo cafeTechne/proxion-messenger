@@ -8,6 +8,7 @@
 // before voice (voice's deps in turn reference media.stopScreenShare and
 // media.state.isSharing). All cluster state lives in `state`, so the host can
 // read media.state.isSharing for the screenshare toggle.
+import { t } from './i18n.js';
 import { podUploadVoiceAudio } from './pod.js';
 
 export function createMedia({ getSocket, getActiveView, showToast, getVoiceState }) {
@@ -31,11 +32,11 @@ export function createMedia({ getSocket, getActiveView, showToast, getVoiceState
             document.getElementById('voice-record-btn')?.classList.add('recording');
             state.recordingTimerInterval = setInterval(() => {
                 state.recordingSeconds++;
-                const t = document.getElementById('recording-timer');
-                if (t) t.textContent = Math.floor(state.recordingSeconds / 60) + ':' + String(state.recordingSeconds % 60).padStart(2, '0');
+                const timerEl = document.getElementById('recording-timer');
+                if (timerEl) timerEl.textContent = Math.floor(state.recordingSeconds / 60) + ':' + String(state.recordingSeconds % 60).padStart(2, '0');
                 if (state.recordingSeconds >= 60) stopVoiceRecording(false);
             }, 1000);
-        }).catch(() => showToast('Microphone access denied', 'error'));
+        }).catch(() => showToast(t('media.micDenied'), 'error'));
     }
 
     function stopVoiceRecording(send = true) {
@@ -74,7 +75,7 @@ export function createMedia({ getSocket, getActiveView, showToast, getVoiceState
         if (state.isSharing || !voiceState.pc) return;
         try {
             state.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: false });
-        } catch { showToast('Screen share cancelled'); return; }
+        } catch { showToast(t('media.screenShareCancelled')); return; }
         state.isSharing = true;
         const screenTrack = state.screenStream.getVideoTracks()[0];
         const sender = voiceState.pc.getSenders().find(s => s.track?.kind === 'video');
@@ -89,7 +90,7 @@ export function createMedia({ getSocket, getActiveView, showToast, getVoiceState
 
     function stopScreenShare() {
         state.isSharing = false;
-        state.screenStream?.getTracks().forEach(t => t.stop());
+        state.screenStream?.getTracks().forEach(tr => tr.stop());
         state.screenStream = null;
         const sBtn = document.getElementById('screenshare-btn');
         if (sBtn) sBtn.classList.remove('vw-sharing');

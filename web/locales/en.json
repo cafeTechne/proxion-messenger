@@ -14,5 +14,157 @@
   "kbd.title": "Keyboard Shortcuts",
 
   "push.newMessage": "New message",
-  "push.newMessageFrom": "New message from {name}"
+  "push.newMessageFrom": "New message from {name}",
+
+  "pairing.notConnected": "Not connected.",
+  "pairing.certSignFailed": "Could not sign device cert.",
+  "pairing.deviceLinked": "Device linked.",
+  "pairing.notConnectedYet": "Not connected yet — try again in a moment.",
+  "pairing.enterCode": "Enter a pairing code.",
+  "pairing.thisDeviceLinked": "This device is now linked.",
+
+  "voice.left": "Left voice channel",
+  "voice.micError": "Could not access microphone: {error}",
+  "voice.callNotAnswered": "Call not answered",
+  "voice.connectionTrouble": "Voice connection trouble with {peer} — reconnecting…",
+  "voice.micRequired": "Microphone is required to start a call.",
+  "voice.peerPresent": "{peer} is in the voice channel",
+  "voice.peerJoined": "{peer} joined the voice channel",
+  "voice.peerLeft": "{peer} left the voice channel",
+
+  "file.notAccepted": "File not accepted",
+  "file.transferFailed": "Transfer of {filename} failed — {received}/{total} chunks received",
+  "file.declined": "File declined",
+  "file.recipientOffline": "Recipient is offline — large files need both people online",
+
+  "media.micDenied": "Microphone access denied",
+  "media.screenShareCancelled": "Screen share cancelled",
+
+  "address.copied": "Address copied!",
+  "address.noInviteLink": "No invite link available yet — wait for connection.",
+
+  "profile.didCopied": "DID copied",
+
+  "onboarding.inviteCopied": "Invite link copied!",
+
+  "modal.noRoomsToForward": "No rooms to forward to.",
+  "modal.mustBeHttps": "Must be HTTPS",
+
+  "common.updateFailed": "Update failed — try again",
+  "common.loadingEllipsis": "Loading…",
+  "common.unknownError": "unknown error",
+
+  "dm.historyCleared": "DM history cleared on this device",
+
+  "members.loading": "Loading members…",
+  "members.muted": "Member muted",
+
+  "pin.pinned": "Message pinned",
+  "pin.unpinned": "Message unpinned",
+  "pin.noneP": "No pinned messages.",
+
+  "room.youAreOwner": "You are now the owner of this room.",
+  "room.ownershipTransferred": "Room ownership transferred to {name}.",
+  "room.roleUpdated": "Role updated: {webid} → {role}",
+
+  "pod.connectionFailed": "Pod connection failed: {message}",
+  "pod.unreachable": "Pod unreachable — messages may be delayed",
+  "pod.reconnected": "Pod reconnected",
+  "pod.credentialsRefreshed": "Pod credentials refreshed successfully.",
+  "pod.urlMustHttps": "Pod server URL must start with https://",
+
+  "contact.requestSent": "Request sent to {name}",
+  "contact.added": "Contact added!",
+  "contact.requestAccepted": "Friend request accepted — waiting for certificate…",
+  "contact.connected": "Contact connected: {peer}",
+  "contact.revoked": "A contact has been revoked.",
+  "contact.connectedWith": "Connected with {peer}",
+  "contact.expiresInDays.one": "Your connection with {peer} expires in {count} day.",
+  "contact.expiresInDays.other": "Your connection with {peer} expires in {count} days.",
+
+  "session.revoked": "This session was revoked from another device.",
+  "session.loggedOutOthers.one": "Logged out {count} other session.",
+  "session.loggedOutOthers.other": "Logged out {count} other sessions.",
+
+  "webhook.createdCopySecret": "Outgoing webhook created. Copy the secret now — it won't be shown again.",
+  "webhook.secret": "Secret: {secret}",
+  "webhook.deleted": "Webhook deleted.",
+  "webhook.urlCopied": "Webhook URL copied",
+
+  "schedule.scheduled": "Message scheduled.",
+  "schedule.cancelled": "Scheduled message cancelled.",
+
+  "import.completeEvent": "Import complete: {count} messages imported.",
+  "import.complete": "Import complete: {count} messages",
+  "import.importing": "Importing…",
+  "import.failed": "Import failed: {error}",
+
+  "file.tooLarge": "File too large — max 25 MB",
+  "file.largeDmOnly": "Large files can only be sent in direct messages",
+  "file.sendFailed": "File send failed",
+
+  "invite.shortLinkCopied": "Short link copied!",
+
+  "app.gatewayCrashed": "Gateway crashed - please restart the app",
+
+  "backup.failed": "Backup failed: {status}",
+  "backup.downloaded": "Identity backup downloaded.",
+  "backup.error": "Backup error: {error}",
+
+  "restore.failed": "Restore failed: {status}",
+  "restore.done": "Identity restored. Reconnecting…",
+  "restore.error": "Restore error: {error}",
+
+  "edit.noHistory": "No history available.",
+  "edit.historyLoadFailed": "Could not load history.",
+
+  "contact.enterAddress": "Please enter an address.",
+
+  "sidebar.empty.rooms": "No rooms yet.",
+  "sidebar.empty.createRoom": "Create a room",
+  "sidebar.empty.dms": "No direct messages yet.",
+  "sidebar.empty.addSomeone": "Add someone",
+
+  "feed.noMessages": "No messages yet.",
+  "feed.beFirst": "Be the first to say hello.",
+
+  "confirm.clearDmHistory": "Clear all locally-saved DM history on this device? Encrypted DMs will no longer reload after this.",
+  "confirm.revokeDevice": "Revoke device \"{id}\"?",
+  "confirm.deleteMessage": "Delete this message?",
+  "confirm.deleteIdentity": "This will permanently delete your local identity key, all rooms, messages, and pod credentials. You cannot undo this. Continue?",
+  "confirm.banMember": "Ban this member? They'll be removed and can't rejoin.",
+  "confirm.deleteRoom": "Delete this room permanently? All messages and history will be lost for all members.",
+  "confirm.kickMember": "Kick this member?",
+
+  "prompt.choosePassphrase": "Choose a passphrase to protect your backup:",
+  "prompt.enterPassphrase": "Enter the passphrase for this backup:",
+
+  "error.gatewayGeneric": "Gateway error: {raw}",
+  "error.empty_content": "Message is empty.",
+  "error.content_too_large": "Message is too long.",
+  "error.invalid_sequence": "Message rejected — please try again.",
+  "error.file_too_large": "File is too large.",
+  "error.chunk_too_large": "File chunk too large — try a smaller file.",
+  "error.not_a_room_member": "You're not a member of this room.",
+  "error.banned_from_room": "You've been banned from this room.",
+  "error.invalid_code": "That invite code isn't valid.",
+  "error.room_not_found": "Room not found — it may have been deleted.",
+  "error.call_too_frequent": "Please wait a moment before calling again.",
+  "error.voice_invite_not_allowed": "You can only call people in your contacts or rooms.",
+  "error.voice_sessions_full": "The gateway can't take more calls right now.",
+  "error.voice_note_remote_unsupported": "Voice notes can't be sent to contacts on other gateways yet.",
+  "error.reaction_limit_reached": "Reaction limit reached for this message.",
+  "error.contact_revoked": "This contact has been revoked.",
+  "error.not_registered": "Not connected yet — give it a second and retry.",
+  "error.send_at_future": "Pick a time in the future.",
+  "error.cannot_delete_others": "You can only delete your own messages.",
+  "error.cannot_edit_others": "You can only edit your own messages.",
+  "error.file_type_not_allowed": "That file type isn't allowed.",
+
+  "error.fr.invalid_address": "Invalid address — use the format did:key:…@wss://gateway.",
+  "error.fr.delivery_failed": "Could not reach that gateway — check the address and try again.",
+  "error.fr.invalid_signature": "That invite has expired or is invalid.",
+  "error.fr.expired": "That invite has expired.",
+  "error.fr.invite_not_found": "Invite not found — it may have already been used.",
+  "error.fr.contact_revoked": "This contact has been revoked. You can no longer send messages."
 }

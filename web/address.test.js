@@ -58,7 +58,7 @@ describe('copyMyAddress', () => {
     const addr = make();
     addr.copyMyAddress();
     await Promise.resolve();
-    expect(toasts).toContain('Address copied!');
+    expect(toasts).toContain('address.copied');
   });
 });
 
@@ -67,7 +67,7 @@ describe('shareInviteLink', () => {
     global.window = {};
     const addr = make();
     addr.shareInviteLink();
-    expect(toasts[0]).toContain('No invite link available');
+    expect(toasts[0]).toContain('address.noInviteLink');
   });
   it('opens the QR panel when an invite link exists', () => {
     global.window = { proxionInviteLink: 'https://gw.example/?join=ABC', proxionAddress: 'did:key:zAbc@https://gw.example' };

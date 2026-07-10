@@ -12,6 +12,8 @@
 import { escHtml } from './util.js';
 import { podWriteReadState } from './pod.js';
 
+import { t } from './i18n.js';
+
 export function createView({
     getSocket,
     setActiveView, setMessageMap, setAllMessages, setCurrentRoomMembers, getAllMessages,
@@ -275,8 +277,8 @@ export function createView({
             if (cta) {
                 const li = document.createElement("li");
                 li.className = "sidebar-empty";
-                li.innerHTML = `<p class="state-msg state-empty">${cta.msg}</p>` +
-                    `<button type="button" class="state-cta">${cta.label}</button>`;
+                li.innerHTML = `<p class="state-msg state-empty">${t(cta.msg)}</p>` +
+                    `<button type="button" class="state-cta">${t(cta.label)}</button>`;
                 li.querySelector("button").onclick = () => document.getElementById(cta.btn)?.click();
                 list.appendChild(li);
             }
@@ -285,8 +287,8 @@ export function createView({
 
     // Sidebar empty-state CTAs, keyed by list id (G3/G4).
     const _SIDEBAR_EMPTY = {
-        "room-list": { msg: "No rooms yet.", label: "Create a room", btn: "create-room-btn" },
-        "dm-list":   { msg: "No direct messages yet.", label: "Add someone", btn: "add-peer-btn" },
+        "room-list": { msg: "sidebar.empty.rooms", label: "sidebar.empty.createRoom", btn: "create-room-btn" },
+        "dm-list":   { msg: "sidebar.empty.dms", label: "sidebar.empty.addSomeone", btn: "add-peer-btn" },
     };
 
     // R18.2.2: navigate to a thread from tray unread click (clicks the nav item,

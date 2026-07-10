@@ -156,7 +156,7 @@ describe('populateSidebar + its click', () => {
     global.document.createElement = () => (li = mkEl({ querySelector: () => ctaBtn }));
     v.populateSidebar('room-list', [], 'room');
     expect(li.className).toBe('sidebar-empty');
-    expect(li.innerHTML).toContain('Create a room');
+    expect(li.innerHTML).toContain('sidebar.empty.createRoom');
     ctaBtn.onclick();                       // user taps the CTA
     expect(createRoomClick).toHaveBeenCalled();
   });

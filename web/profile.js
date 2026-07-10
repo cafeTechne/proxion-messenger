@@ -7,6 +7,7 @@
 // lives in `state`. socket is read live via a getter; showToast is injected;
 // webidColor is imported. Returned functions are destructured into same-named
 // bindings in main.js so the dispatch and listener wiring keep working.
+import { t } from './i18n.js';
 import { webidColor } from './util.js';
 
 export function createProfile({ getSocket, showToast, getUserPresence, getMessageMap }) {
@@ -151,7 +152,7 @@ export function createProfile({ getSocket, showToast, getUserPresence, getMessag
         if (dmBtn) dmBtn.dataset.webid = d.did || '';
         const didEl = document.getElementById('contact-profile-did');
         if (didEl) {
-            didEl.onclick = () => navigator.clipboard.writeText(d.did || '').then(() => showToast('DID copied'));
+            didEl.onclick = () => navigator.clipboard.writeText(d.did || '').then(() => showToast(t('profile.didCopied')));
         }
     }
 
