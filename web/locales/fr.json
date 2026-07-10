@@ -1,0 +1,18 @@
+{
+  "_meta": { "locale": "fr", "name": "Français", "draft": true },
+
+  "sidebar.rooms": "Salons",
+  "sidebar.voiceChannels": "Canaux vocaux",
+  "sidebar.friendRequests": "Demandes d'ami",
+  "sidebar.contacts": "Contacts",
+  "sidebar.dms": "Messages privés",
+
+  "control.search.placeholder": "Rechercher des messages...",
+  "control.createRoom": "Créer un salon",
+  "control.settings": "Paramètres",
+
+  "kbd.title": "Raccourcis clavier",
+
+  "push.newMessage": "Nouveau message",
+  "push.newMessageFrom": "Nouveau message de {name}"
+}

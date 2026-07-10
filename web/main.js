@@ -47,6 +47,15 @@ import { inlineNotice, feedEmptyState } from './states.js';
 import { installFocusTrap } from './focus-trap.js';
 import { makeListNavigable, announce } from './a11y.js';
 import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport } from './dmhistory.js';
+import { initI18n, applyStaticI18n } from './i18n.js';
+
+        // Load the active locale BEFORE any translated UI paints, then apply the
+        // static index.html translations (the English text stays in the markup as
+        // per-key fallback, so a fetch failure — or `en` — renders unchanged).
+        // Top-level await is safe: main.js is a deferred ES module, so the DOM is
+        // already parsed. (PLAN_ROUND_56 F1/F3)
+        await initI18n();
+        applyStaticI18n();
 
         // Modal a11y: focus-restore + Tab-trap for every dialog (observer-based,
         // so it covers all ~20 modals without retrofitting their open/close sites).

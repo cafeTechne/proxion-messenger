@@ -1,0 +1,18 @@
+{
+  "_meta": { "locale": "es", "name": "Español", "draft": true },
+
+  "sidebar.rooms": "Salas",
+  "sidebar.voiceChannels": "Canales de voz",
+  "sidebar.friendRequests": "Solicitudes de amistad",
+  "sidebar.contacts": "Contactos",
+  "sidebar.dms": "Mensajes directos",
+
+  "control.search.placeholder": "Buscar mensajes...",
+  "control.createRoom": "Crear sala",
+  "control.settings": "Ajustes",
+
+  "kbd.title": "Atajos de teclado",
+
+  "push.newMessage": "Nuevo mensaje",
+  "push.newMessageFrom": "Nuevo mensaje de {name}"
+}

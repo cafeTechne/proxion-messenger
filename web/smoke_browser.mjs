@@ -78,6 +78,13 @@ try {
   // there's no jsdom here).
   const focusTrap = await page.evaluate(async () => {
     const raf = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    // Dismiss the first-run onboarding modal first: while it's open it is the
+    // base trapped modal, so a shortcut modal stacked over it and closed via the
+    // global Escape (which hides BOTH) would restore focus to the pre-onboarding
+    // element, not our opener. A real user isn't mid-onboarding when using Ctrl+/.
+    const onboarding = document.getElementById('onboarding-modal');
+    if (onboarding) onboarding.style.display = 'none';
+    await raf();
     const opener = document.getElementById('search-input') || document.body;
     opener.focus?.();
     const before = document.activeElement;

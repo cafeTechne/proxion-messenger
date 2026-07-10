@@ -1,0 +1,19 @@
+{
+  "_meta": {
+    "locale": "qps",
+    "name": "Pseudo (test)",
+    "generated": true,
+    "source": "en.json"
+  },
+  "sidebar.rooms": "⟦Ŕóóɱš áé⟧",
+  "sidebar.voiceChannels": "⟦Ṽóíçé Çĥáññéĺš áéíóúá⟧",
+  "sidebar.friendRequests": "⟦Ƒŕíéñð Ŕéǫúéšţš áéíóúá⟧",
+  "sidebar.contacts": "⟦Çóñţáçţš áéí⟧",
+  "sidebar.dms": "⟦ÐṀš á⟧",
+  "control.search.placeholder": "⟦Šéáŕçĥ ɱéššáǧéš... áéíóúáé⟧",
+  "control.createRoom": "⟦Çŕéáţé ŕóóɱ áéíó⟧",
+  "control.settings": "⟦Šéţţíñǧš áéí⟧",
+  "kbd.title": "⟦Ķéýḅóáŕð Šĥóŕţçúţš áéíóúáé⟧",
+  "push.newMessage": "⟦Ñéŵ ɱéššáǧé áéíó⟧",
+  "push.newMessageFrom": "⟦Ñéŵ ɱéššáǧé ƒŕóɱ {name} áéíóúáé⟧"
+}

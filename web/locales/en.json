@@ -1,0 +1,18 @@
+{
+  "_meta": { "locale": "en", "name": "English", "canonical": true },
+
+  "sidebar.rooms": "Rooms",
+  "sidebar.voiceChannels": "Voice Channels",
+  "sidebar.friendRequests": "Friend Requests",
+  "sidebar.contacts": "Contacts",
+  "sidebar.dms": "DMs",
+
+  "control.search.placeholder": "Search messages...",
+  "control.createRoom": "Create room",
+  "control.settings": "Settings",
+
+  "kbd.title": "Keyboard Shortcuts",
+
+  "push.newMessage": "New message",
+  "push.newMessageFrom": "New message from {name}"
+}
