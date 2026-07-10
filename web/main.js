@@ -502,6 +502,7 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
         let localDmPeers = {};         // thread_id -> { display_name, peer_webid }
         let peerDidToCertId = {};      // peer DID -> certificate_id (populated by renderContacts)
         let _threadNames = {};         // thread_id -> display_name (for tray unread menu)
+        const _announceThrottle = {};  // thread_id -> last SR-announce time (ms)
         let _pendingFriendRequest = false;
         let hiddenDms = new Set(JSON.parse(localStorage.getItem("proxion_hidden_dms") || "[]"));
         localStorage.removeItem("theme"); // stale key from removed light-mode feature
@@ -1016,6 +1017,16 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                         const sender = msg.from_display_name || (msg.from_webid || "").slice(0, 12);
                         if (!mutedThreads.has(id)) {
                             showOsNotification(`${sender}`, msg.content || "", id);
+                            // Screen readers: announce a message in a thread you're
+                            // not viewing (the open thread is covered by role="log").
+                            // Throttle to one announcement per thread per 10s so a
+                            // burst doesn't flood the SR.
+                            const _now = Date.now();
+                            if (_now - (_announceThrottle[id] || 0) > 10000) {
+                                _announceThrottle[id] = _now;
+                                const _threadName = _threadNames[id] || sender;
+                                announce(`New message from ${sender} in ${_threadName}`);
+                            }
                         }
                     }
                     // Track last message for DM/room preview

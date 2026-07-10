@@ -16,6 +16,8 @@ const MAX_FILE_BYTES = 25 * 1024 * 1024;
  * @param {(msg:object)=>void} deps.renderMessage
  * @param {()=>object|null} deps.getActiveView
  */
+import { announce } from './a11y.js';
+
 export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiveView }) {
     const _outgoingFiles = {};   // file_id -> {resolve, reject}
     const _incomingFiles = {};   // file_id -> {meta, chunks[], received, total, fromWebid}
@@ -25,10 +27,22 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         if (!el) {
             el = document.createElement("div");
             el.id = "xfer-" + fileId;
+            // progressbar semantics (aria-valuenow updated below). NOT aria-live —
+            // per-% updates would flood a screen reader; instead announce() below
+            // speaks the state only at quarter marks.
+            if (el.setAttribute) {   // real DOM only (vitest stubs createElement)
+                el.setAttribute("role", "progressbar");
+                el.setAttribute("aria-label", `${verb} ${name}`);
+                el.setAttribute("aria-valuemin", "0");
+                el.setAttribute("aria-valuemax", "100");
+            }
             el.style.cssText = "position:fixed;bottom:8px;right:8px;z-index:1500;background:#1e293b;color:#f1f5f9;padding:6px 12px;border-radius:6px;font-size:0.8em;box-shadow:0 2px 8px rgba(0,0,0,.4);";
             document.body.appendChild(el);
         }
-        el.textContent = `${verb} ${name} — ${pct}%`;
+        if (el.setAttribute) el.setAttribute("aria-valuenow", String(pct));
+        el.textContent = `${verb} ${name} — ${pct}%`;   // visible: smooth updates
+        const _step = Math.floor(pct / 25);
+        if (el._lastStep !== _step) { el._lastStep = _step; announce(`${verb} ${name}, ${pct} percent`); }
     }
     function _clearTransferProgress(fileId) {
         const el = document.getElementById("xfer-" + fileId);

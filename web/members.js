@@ -37,6 +37,7 @@ export function createMembers({ getActiveView, requestRoomMembers }) {
                     <div class="avatar-presence ${presenceClass}" title="${escHtml(m.status || '')}"></div>
                 </div>
                 <span>${escHtml(m.display_name || m.webid.slice(0, 12))}${fedBadge}</span>
+                <span class="sr-only">, ${escHtml(m.status || "offline")}${m.federated ? ", federated" : ""}</span>
             </div>`;
     }
 

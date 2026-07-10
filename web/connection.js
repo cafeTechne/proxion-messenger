@@ -14,6 +14,7 @@
 // })
 
 import { myX25519PubB64u } from './e2e.js';
+import { announce } from './a11y.js';
 
 export function createConnection({
     wsUrl, getSocket, setSocket, getClientDid, generateOrLoadIdentity, handleEventAsync,
@@ -22,6 +23,7 @@ export function createConnection({
         _reconnectTimer: null,  // "Server unreachable" banner escalation
         _reconnectDelay: 3000,  // exponential backoff; resets to 3000 on successful connect
         _pendingOnConnect: [],  // commands queued while socket is still connecting
+        _wasConnected: false,   // for one-shot SR announcements on state change
     };
 
     // Send payload now if socket is open; otherwise queue it and send on next onopen.
@@ -92,6 +94,10 @@ export function createConnection({
             await generateOrLoadIdentity();
             if (getSocket() !== ws) return; // socket superseded while we were loading identity
             console.log("Connected to gateway");
+            // Announce a reconnect (once) to screen readers — but not the very
+            // first connect (that's the expected startup state, not news).
+            if (state._wasConnected) announce("Reconnected to the gateway.");
+            state._wasConnected = true;
             state._reconnectDelay = 3000;
             document.querySelector(".dot").className = "dot online";
             const _connName = localStorage.getItem("proxion_display_name");
@@ -146,6 +152,10 @@ export function createConnection({
             clearTimeout(_connectTimeout);
             if (getSocket() !== ws) return; // superseded — don't clobber state or schedule reconnect
             console.log("Disconnected from gateway");
+            // Announce the drop once (the per-second countdown stays silent — it
+            // would otherwise announce every second).
+            if (state._wasConnected) announce("Connection lost. Reconnecting…", true);
+            state._wasConnected = false;
             document.querySelector(".dot").className = "dot offline";
             const banner = document.getElementById("conn-banner");
             // First attempt: retry immediately. Subsequent attempts: exponential backoff.

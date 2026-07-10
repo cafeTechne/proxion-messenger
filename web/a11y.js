@@ -84,22 +84,22 @@ export function makeListNavigable(listEl, { onActivate, onDelete, onContextMenu,
 let _politeRegion = null;
 let _assertiveRegion = null;
 
+function _makeRegion(role, live) {
+    const el = document.createElement('div');
+    // The vitest env stubs createElement with a minimal object — bail if it
+    // isn't a real element so announce() is a harmless no-op under test.
+    if (!el || typeof el.setAttribute !== 'function') return null;
+    el.setAttribute('role', role);
+    el.setAttribute('aria-live', live);
+    el.className = 'sr-only';
+    document.body.appendChild(el);
+    return el;
+}
+
 function ensureRegions() {
-    if (typeof document === 'undefined') return;
-    if (!_politeRegion) {
-        _politeRegion = document.createElement('div');
-        _politeRegion.setAttribute('role', 'status');
-        _politeRegion.setAttribute('aria-live', 'polite');
-        _politeRegion.className = 'sr-only';
-        document.body.appendChild(_politeRegion);
-    }
-    if (!_assertiveRegion) {
-        _assertiveRegion = document.createElement('div');
-        _assertiveRegion.setAttribute('role', 'alert');
-        _assertiveRegion.setAttribute('aria-live', 'assertive');
-        _assertiveRegion.className = 'sr-only';
-        document.body.appendChild(_assertiveRegion);
-    }
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return;
+    if (!_politeRegion) _politeRegion = _makeRegion('status', 'polite');
+    if (!_assertiveRegion) _assertiveRegion = _makeRegion('alert', 'assertive');
 }
 
 export function announce(message, assertive = false) {
@@ -110,5 +110,7 @@ export function announce(message, assertive = false) {
     // Clear then set on the next frame so identical consecutive messages are
     // re-announced (a live region that receives the same text twice is silent).
     region.textContent = '';
-    requestAnimationFrame(() => { region.textContent = String(message); });
+    const raf = (typeof requestAnimationFrame !== 'undefined')
+        ? requestAnimationFrame : ((cb) => setTimeout(cb, 0));
+    raf(() => { region.textContent = String(message); });
 }

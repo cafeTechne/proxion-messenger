@@ -5,6 +5,8 @@
 // snapshot. The returned object is destructured into same-named bindings in
 // main.js, so existing call sites (showToast(...), playNotificationSound(), ...)
 // keep working unchanged.
+import { announce } from './a11y.js';
+
 export function createNotifications({ getSoundEnabled, getDesktopNotifEnabled, navigateToThread }) {
     // Desktop notifications default to enabled if the host doesn't inject a
     // getter (keeps older call sites / tests working). They are INDEPENDENT of
@@ -22,6 +24,9 @@ export function createNotifications({ getSoundEnabled, getDesktopNotifEnabled, n
             `pointer-events:auto;opacity:1;transition:opacity 0.3s`;
         el.textContent = message;
         container.appendChild(el);
+        // Screen readers: the toast is a visual popup, so mirror it to a live
+        // region (assertive for errors so they interrupt, polite otherwise).
+        announce(message, type === "error");
         setTimeout(() => {
             el.style.opacity = "0";
             setTimeout(() => el.remove(), 300);
