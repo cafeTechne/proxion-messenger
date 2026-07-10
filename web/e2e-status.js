@@ -8,6 +8,7 @@
 // button handler in main.js reads it back via e2eStatus.state.
 
 import { e2eSupported, isE2EEnabled, myX25519PubB64u, safetyNumber } from './e2e.js';
+import { t } from './i18n.js';
 
 export function createE2EStatus() {
     const state = {
@@ -47,7 +48,7 @@ export function createE2EStatus() {
         }
         state._fingerprintBarDid = peerDid;
         bar.style.display = "flex";
-        wordsEl.textContent = "loading…";
+        wordsEl.textContent = t('e2e.loading');
         try {
             const resp = await fetch(`/fingerprint/${encodeURIComponent(peerDid)}`);
             if (!resp.ok) { bar.style.display = "none"; return; }
@@ -56,12 +57,12 @@ export function createE2EStatus() {
             wordsEl.textContent = words.slice(0,3).join(" ") + "  " + words.slice(3).join(" ");
             const verified = localStorage.getItem("proxion_verified_" + peerDid) === "1";
             if (verified) {
-                verifyBtn.textContent = "✓ Verified";
+                verifyBtn.textContent = '✓ ' + t('e2e.verified');
                 verifyBtn.style.background = "#134e26";
                 verifyBtn.style.color = "#4ade80";
                 verifyBtn.disabled = true;
             } else {
-                verifyBtn.textContent = "Mark as verified";
+                verifyBtn.textContent = t('e2e.markVerified');
                 verifyBtn.style.background = "#1e293b";
                 verifyBtn.style.color = "#94a3b8";
                 verifyBtn.disabled = false;

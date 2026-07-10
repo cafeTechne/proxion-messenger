@@ -4,6 +4,9 @@
 //
 // createStatusBanners() — no deps.
 
+import { t } from './i18n.js';
+import { escHtml } from './util.js';
+
 export function createStatusBanners() {
     // R16.4.2: pod status dot in the settings modal header
     function _updateSettingsPodDot(state) {
@@ -11,13 +14,13 @@ export function createStatusBanners() {
         if (!dot) return;
         if (state === 'connected') {
             dot.style.color = '#4ade80';
-            dot.textContent = '● Pod connected';
+            dot.textContent = '● ' + t('pod.dot.connected');
         } else if (state === 'unreachable') {
             dot.style.color = '#fb923c';
-            dot.textContent = '● Pod unreachable';
+            dot.textContent = '● ' + t('pod.dot.unreachable');
         } else {
             dot.style.color = '#8091a7';
-            dot.textContent = '● No pod';
+            dot.textContent = '● ' + t('pod.dot.none');
         }
     }
 
@@ -49,27 +52,32 @@ export function createStatusBanners() {
             const triedUpnp = c.upnp_mapped === false;
             let guide;
             if (triedUpnp) {
-                guide = `<strong>Your gateway isn’t reachable from the internet.</strong>
-                    Friends on other gateways can’t message or call you yet.
+                // Vetted t()+static-markup composition (PLAN_ROUND_56 G3): the
+                // markup skeleton lives HERE, never inside a locale value. Text
+                // fragments come from t(); dynamic server values (port/ip) are
+                // escaped before being wrapped in the styled <code> spans.
+                const cs = "background:#451a03;padding:1px 4px;border-radius:3px;";
+                const code = (x) => `<code style="${cs}">${escHtml(String(x))}</code>`;
+                const envLine = `PROXION_PUBLIC_URL=http://YOUR_EXTERNAL_IP:${port}`;
+                guide = `<strong>${t('nat.title')}</strong>
+                    ${t('nat.subtitle')}
                     <details style="margin-top:6px;cursor:pointer;">
-                      <summary><strong>How to fix this ▾</strong></summary>
+                      <summary><strong>${t('nat.howToFix')} ▾</strong></summary>
                       <div style="margin-top:8px;line-height:1.9;padding:0 4px;">
-                        <strong>Option 1 — Port forward your router</strong> (most reliable)<br>
-                        Forward port <code style="background:#451a03;padding:1px 4px;border-radius:3px;">${port}</code> (TCP)
-                        to <code style="background:#451a03;padding:1px 4px;border-radius:3px;">${localIp}</code> in your router admin page,
-                        then set <code style="background:#451a03;padding:1px 4px;border-radius:3px;">PROXION_PUBLIC_URL=http://YOUR_EXTERNAL_IP:${port}</code> in your <code>.env</code>.
-                        &nbsp;<a href="https://portforward.com" target="_blank" rel="noopener" style="color:#fcd34d;">portforward.com</a> has guides for every router.<br><br>
-                        <strong>Option 2 — Cloudflare Tunnel</strong> (free, no router changes needed)<br>
-                        Run: <code style="background:#451a03;padding:1px 4px;border-radius:3px;">cloudflared tunnel --url http://localhost:${port}</code><br>
-                        Copy the <code>https://xxxx.trycloudflare.com</code> URL it gives you and set it as <code>PROXION_PUBLIC_URL</code>.
+                        <strong>${t('nat.opt1Title')}</strong> ${t('nat.opt1Note')}<br>
+                        ${t('nat.opt1Body', { port: code(port), ip: code(localIp), env: code(envLine) })}
+                        &nbsp;<a href="https://portforward.com" target="_blank" rel="noopener" style="color:#fcd34d;">portforward.com</a> ${t('nat.opt1Guides')}<br><br>
+                        <strong>${t('nat.opt2Title')}</strong> ${t('nat.opt2Note')}<br>
+                        ${t('nat.opt2Run')} ${code('cloudflared tunnel --url http://localhost:' + port)}<br>
+                        ${t('nat.opt2Copy', { url: code('https://xxxx.trycloudflare.com'), env: code('PROXION_PUBLIC_URL') })}
                       </div>
                     </details>`;
             } else {
-                guide = `Your gateway isn’t publicly reachable. Friends on other gateways won’t be able to message or call you. Open Settings → Federation for setup guidance.`;
+                guide = t('nat.simpleGuide');
             }
             banner.innerHTML = `<div style="display:flex;gap:12px;align-items:flex-start;max-width:900px;margin:0 auto;">
                 <span style="flex:1;">${guide}</span>
-                <button style="background:transparent;border:none;color:#fef3c7;cursor:pointer;font-size:1.2em;flex-shrink:0;padding:0 4px;line-height:1;" aria-label="Dismiss">×</button>
+                <button style="background:transparent;border:none;color:#fef3c7;cursor:pointer;font-size:1.2em;flex-shrink:0;padding:0 4px;line-height:1;" aria-label="${t('common.dismiss')}">×</button>
             </div>`;
             banner.querySelector("button").onclick = () => {
                 banner.remove();
@@ -81,7 +89,7 @@ export function createStatusBanners() {
             const banner = document.createElement("div");
             banner.id = "nat-warning-banner";
             banner.style.cssText = "flex-shrink:0;background:#78350f;color:#fef3c7;padding:8px 16px;font-size:0.85em;display:flex;gap:8px;";
-            banner.innerHTML = `<span style="flex:1">Federation limited — gateway not publicly reachable. Set <code>PROXION_PUBLIC_URL</code> in <code>.env</code>.</span><button onclick="this.closest('#nat-warning-banner').remove()" style="background:transparent;border:none;color:#fef3c7;cursor:pointer;">×</button>`;
+            banner.innerHTML = `<span style="flex:1">${t('nat.fallback', { env: '<code>PROXION_PUBLIC_URL</code>', file: '<code>.env</code>' })}</span><button onclick="this.closest('#nat-warning-banner').remove()" style="background:transparent;border:none;color:#fef3c7;cursor:pointer;" aria-label="${t('common.dismiss')}">×</button>`;
             document.body.prepend(banner);
         });
     }

@@ -76,7 +76,7 @@ describe('_updateIdentityFingerprint', () => {
     const e = createE2EStatus();
     await e._updateIdentityFingerprint('did:key:zCarol');
     expect(els['fingerprint-verify-btn'].disabled).toBe(true);
-    expect(els['fingerprint-verify-btn'].textContent).toContain('Verified');
+    expect(els['fingerprint-verify-btn'].textContent).toContain('e2e.verified');
   });
 });
 

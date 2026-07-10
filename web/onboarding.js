@@ -101,7 +101,7 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
     }
 
     function obSkipPod() {
-        const msg = "Without a pod, your messages won't sync across devices and won't be backed up. Continue without a pod?";
+        const msg = t('onboarding.noPodConfirm');
         const proceed = () => {
             localStorage.setItem("proxion_pod_setup_skipped", "1");
             localStorage.removeItem("proxion_pod_banner_dismissed");
@@ -124,11 +124,11 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         const label = document.getElementById("ob-pod-provider-label");
         const urlInput = document.getElementById("ob-pod-css-url");
         if (cssUrl === "custom") {
-            label.textContent = "Enter your Community Solid Server URL, email, and password.";
+            label.textContent = t('onboarding.enterCssManual');
             urlInput.style.display = "block";
             urlInput.value = "";
         } else {
-            label.textContent = `Enter your ${cssUrl} account email and password.`;
+            label.textContent = t('onboarding.enterCssAccount', { url: cssUrl });
             urlInput.style.display = "none";
             urlInput.value = cssUrl;
         }
@@ -151,11 +151,11 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         const testBtn = document.getElementById("ob-pod-test-btn");
         const contBtn = document.getElementById("ob-pod-continue-btn");
         if (!cssUrl || !email || !password) {
-            statusEl.textContent = "Please fill in all fields.";
+            statusEl.textContent = t('onboarding.fillAllFields');
             statusEl.style.color = "#f87171";
             return;
         }
-        testBtn.textContent = "Testing…";
+        testBtn.textContent = t('onboarding.testing');
         testBtn.disabled = true;
         statusEl.textContent = "";
         try {
@@ -167,7 +167,7 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
             });
             const data = await resp.json();
             if (data.status === "ok") {
-                statusEl.textContent = "✓ Connected!";
+                statusEl.textContent = '✓ ' + t('onboarding.connected');
                 statusEl.style.color = "#4ade80";
                 contBtn.disabled = false;
                 contBtn.style.opacity = "1";
@@ -177,14 +177,14 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
                     window.__TAURI__.invoke('store_pod_credentials', { cssUrl, email, password }).catch(() => {});
                 }
             } else {
-                statusEl.textContent = data.message || "Connection failed.";
+                statusEl.textContent = data.message || t('onboarding.connectionFailed');
                 statusEl.style.color = "#f87171";
             }
         } catch (e) {
-            statusEl.textContent = "Couldn't connect. Is Proxion running?";
+            statusEl.textContent = t('onboarding.cantConnect');
             statusEl.style.color = "#f87171";
         }
-        testBtn.textContent = "Test connection";
+        testBtn.textContent = t('onboarding.testConnection');
         testBtn.disabled = false;
     }
 

@@ -34,7 +34,7 @@ describe('_updateSettingsPodDot', () => {
     s._updateSettingsPodDot('unreachable');
     expect(els['settings-pod-status-dot'].textContent).toContain('unreachable');
     s._updateSettingsPodDot('none');
-    expect(els['settings-pod-status-dot'].textContent).toContain('No pod');
+    expect(els['settings-pod-status-dot'].textContent).toContain('pod.dot.none');
   });
 });
 

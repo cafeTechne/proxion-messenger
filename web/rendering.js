@@ -20,6 +20,7 @@
 // })
 
 import { didSuffix, escHtml, webidColor, renderMarkdown, timeAgo, expireLabel as _expireLabel } from './util.js';
+import { t } from './i18n.js';
 
 export function createRendering({
     getActiveView, getSocket, getSelfWebId, getSelfPubHex,
@@ -308,7 +309,7 @@ export function createRendering({
         const deleteBtn = isOwn && (msg.local || activeView?.local)
             ? `<button data-msg-action="delete" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg></button>`
             : "";
-        const forwardBtn = `<button data-msg-action="forward" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="Forward">&#8599;</button>`;
+        const forwardBtn = `<button data-msg-action="forward" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="${t('msg.forward')}">&#8599;</button>`;
 
         // --- Avatar column ---
         const avatarCol = document.createElement("div");
@@ -333,7 +334,7 @@ export function createRendering({
                 const placeholder = document.createElement("div");
                 placeholder.className = "reply-context reply-context-loading";
                 placeholder.dataset.replyTarget = msg.reply_to_id;
-                placeholder.innerHTML = `<span class="reply-connector"></span><em style="color:#8091a7">Loading reply context…</em>`;
+                placeholder.innerHTML = `<span class="reply-connector"></span><em style="color:#8091a7">${t('msg.loadingReply')}</em>`;
                 body.appendChild(placeholder);
                 if (socket && socket.readyState === WebSocket.OPEN) {
                     socket.send(JSON.stringify({ cmd: "get_message", message_id: msg.reply_to_id }));
@@ -343,7 +344,7 @@ export function createRendering({
 
         // Round 68: forwarded banner
         if (msg.forwarded) {
-            body.innerHTML += `<div class="forwarded-banner">↗ Forwarded from ${escHtml(msg.forwarded_from_name || '')}</div>`;
+            body.innerHTML += `<div class="forwarded-banner">↗ ${t('msg.forwardedFrom', { name: escHtml(msg.forwarded_from_name || '') })}</div>`;
         }
 
         // Header: name + timestamp (first in group only)
@@ -355,20 +356,20 @@ export function createRendering({
             const isVerified = !msg.from_webid || msg.from_webid === selfWebId ||
                 localStorage.getItem("proxion_verified_" + msg.from_webid) === "1";
             const shieldHtml = (!isVerified && msg.from_webid && msg.from_webid.startsWith("did:key:"))
-                ? `<span title="Identity not verified — check safety number" style="color:#8091a7;margin-left:4px;font-size:0.85em;">&#x1F6E1;</span>`
+                ? `<span title="${t('msg.identityUnverified')}" style="color:#8091a7;margin-left:4px;font-size:0.85em;">&#x1F6E1;</span>`
                 : "";
             // R11.1.3: expiry countdown label
             let expireHtml = "";
             if (currentDisappearMs > 0 && msg.timestamp) {
                 const expiresAt = new Date(msg.timestamp).getTime() + currentDisappearMs;
-                expireHtml = `<span class="msg-expire-countdown" style="font-size:0.7em;color:#8091a7;margin-left:6px;" title="Expires">⏱ ${_expireLabel(expiresAt - Date.now())}</span>`;
+                expireHtml = `<span class="msg-expire-countdown" style="font-size:0.7em;color:#8091a7;margin-left:6px;" title="${t('msg.expires')}">⏱ ${_expireLabel(expiresAt - Date.now())}</span>`;
             }
             body.innerHTML += `<div class="msg-header"><span class="msg-sender" style="color:${avatarColor}">${escHtml(name)}${botBadge}${suffixHtml}${shieldHtml}</span><span class="msg-ts-header" title="${exactTs}">${timeAgo(msg.timestamp)}${importedBadge}${expireHtml}</span></div>`;
         }
 
         // Content
         const editedHtml = msg.edited_at
-            ? `<span class="edited-badge" role="button" tabindex="0" data-msg-id="${msgId}" title="Show edit history">(edited)</span>`
+            ? `<span class="edited-badge" role="button" tabindex="0" data-msg-id="${msgId}" title="${t('msg.editHistory')}">${t('msg.edited')}</span>`
             : "";
         // Delivery tick rides inline at the end of the content's last line —
         // as a block-level sibling it used to cost every own message a whole
@@ -377,7 +378,7 @@ export function createRendering({
         if (msg.content_type === "audio" && msg.audio_b64) {
             const _durSecs = msg.duration_ms ? Math.round(msg.duration_ms / 1000) : 0;
             const dur = _durSecs ? `<span class="audio-duration">${_durSecs}s</span>` : "";
-            const _audioLabel = escHtml(`Voice message from ${name}${_durSecs ? `, ${_durSecs} seconds` : ""}`);
+            const _audioLabel = escHtml(t('msg.voiceFrom', { name }) + (_durSecs ? t('msg.voiceDuration', { secs: _durSecs }) : ""));
             body.innerHTML += `<div class="audio-message"><audio controls aria-label="${_audioLabel}" src="data:audio/webm;base64,${msg.audio_b64}"></audio>${dur}${receiptHtml}</div>`;
         } else {
             body.innerHTML += `<div class="msg-content"><span class="msg-text">${renderedText}</span>${editedHtml}${receiptHtml}</div>`;
@@ -388,10 +389,10 @@ export function createRendering({
 
         // Hover action bar
         body.innerHTML += `<div class="msg-actions">
-            <button data-msg-action="react" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.8rem;" title="React">+</button>
-            <button data-msg-action="reply" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.85rem;" title="Reply"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3"/></svg></button>
+            <button data-msg-action="react" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.8rem;" title="${t('msg.react')}">+</button>
+            <button data-msg-action="reply" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.85rem;" title="${t('msg.reply')}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3"/></svg></button>
             ${editBtn}${deleteBtn}${forwardBtn}
-            <button data-msg-action="pin" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="Pin"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z"/></svg></button>
+            <button data-msg-action="pin" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="${t('msg.pin')}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z"/></svg></button>
         </div>`;
 
         div.appendChild(avatarCol);
