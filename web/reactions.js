@@ -68,12 +68,46 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         const clampedTop = Math.max(8, y - ph - 8);
         picker.style.left = `${clampedLeft}px`;
         picker.style.top = `${clampedTop}px`;
+        // Keyboard: remember the opener to restore focus to, move focus into the
+        // grid, and wire arrow-key navigation + Escape once.
+        state._emojiOpener = (typeof document !== "undefined" && document.activeElement) || null;
+        if (!picker._kbdWired && typeof picker.addEventListener === "function") {
+            picker._kbdWired = true;
+            picker.addEventListener("keydown", (e) => {
+                const btns = [...picker.querySelectorAll("button")];
+                const i = btns.indexOf(document.activeElement);
+                const COLS = 4;
+                let next = -1;
+                if (e.key === "ArrowRight") next = i + 1;
+                else if (e.key === "ArrowLeft") next = i - 1;
+                else if (e.key === "ArrowDown") next = i + COLS;
+                else if (e.key === "ArrowUp") next = i - COLS;
+                else if (e.key === "Home") next = 0;
+                else if (e.key === "End") next = btns.length - 1;
+                else if (e.key === "Escape") {
+                    e.preventDefault();
+                    picker.style.display = "none";
+                    const opener = state._emojiOpener;
+                    if (opener && document.contains(opener)) { try { opener.focus(); } catch { /* gone */ } }
+                    return;
+                } else return;
+                if (next >= 0 && next < btns.length) { e.preventDefault(); btns[next].focus(); }
+            });
+        }
+        if (typeof requestAnimationFrame !== "undefined" && typeof picker.querySelector === "function") {
+            requestAnimationFrame(() => { picker.querySelector("button")?.focus(); });
+        }
     }
 
     function addEmoji(emoji, msgId = null) {
         const mid = msgId || state.lastEmojiMsgId;
         const picker = document.getElementById("emoji-picker");
+        const _pickerWasOpen = picker.style.display !== "none";
         picker.style.display = "none";
+        // Return focus to the message the picker was opened from (keyboard flow).
+        if (_pickerWasOpen && state._emojiOpener && document.contains(state._emojiOpener)) {
+            try { state._emojiOpener.focus(); } catch { /* gone */ }
+        }
 
         const activeView = getActiveView();
         // Guard like removeReaction — the thread may have closed while the picker

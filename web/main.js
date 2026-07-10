@@ -45,11 +45,38 @@ import { createPush } from './push.js';
 import { createPairing } from './pairing.js';
 import { inlineNotice, feedEmptyState } from './states.js';
 import { installFocusTrap } from './focus-trap.js';
+import { makeListNavigable, announce } from './a11y.js';
 import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport } from './dmhistory.js';
 
         // Modal a11y: focus-restore + Tab-trap for every dialog (observer-based,
         // so it covers all ~20 modals without retrofitting their open/close sites).
         installFocusTrap();
+
+        // Keyboard nav for the sidebar conversation lists: their rows are <li>s
+        // with click handlers but no tabindex, so without this a keyboard user
+        // cannot open any conversation (WCAG 2.1.1). Roving tabindex → one tab
+        // stop per list, arrows to move, Enter/Space to open. Delete on a DM row
+        // hides it (its × button is otherwise made non-tabbable by the helper).
+        makeListNavigable(document.getElementById("room-list"));
+        makeListNavigable(document.getElementById("dm-list"), {
+            onDelete: (li) => li.querySelector(".dm-close-btn")?.click(),
+        });
+        makeListNavigable(document.getElementById("contacts-list"));
+        // Message feed: one tab stop, arrows move between messages, Enter or the
+        // ContextMenu/Shift+F10 key opens that message's actions (react / reply /
+        // edit / delete / pin) — the hover action bar is otherwise mouse-only.
+        {
+            const _openMsgMenu = (msgEl) => {
+                const r = msgEl.getBoundingClientRect();
+                openCtxMenu({ clientX: r.left + 24, clientY: r.top + 24,
+                    preventDefault() {}, stopPropagation() {} }, msgEl.dataset.messageId);
+            };
+            makeListNavigable(document.getElementById("message-feed"), {
+                itemSelector: ".message",
+                onActivate: _openMsgMenu,
+                onContextMenu: _openMsgMenu,
+            });
+        }
 
         const WS_URL = (() => {
             const metaUrl = document.querySelector('meta[name="x-gateway-url"]')?.content;
@@ -3102,11 +3129,29 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
             const mw = 200, mh = 180;
             menu.style.left = Math.min(e.clientX, vw - mw) + "px";
             menu.style.top  = Math.min(e.clientY, vh - mh) + "px";
+            // Keyboard access: when opened from a focused message (Enter / F10 /
+            // ContextMenu key), move focus into the menu so it's operable, and
+            // remember the message to restore focus to on close.
+            const opener = document.activeElement && document.activeElement.closest(".message");
+            _ctxOpener = opener || null;
+            if (opener) {
+                requestAnimationFrame(() => {
+                    const firstBtn = [...menu.querySelectorAll("button")].find(b => b.style.display !== "none");
+                    if (firstBtn) firstBtn.focus();
+                });
+            }
         }
+        let _ctxOpener = null;
 
         function closeCtxMenu() {
-            document.getElementById("ctx-menu").style.display = "none";
+            const menu = document.getElementById("ctx-menu");
+            const wasOpen = menu.style.display !== "none";
+            menu.style.display = "none";
             _ctxTarget = null;
+            if (wasOpen && _ctxOpener && document.contains(_ctxOpener)) {
+                try { _ctxOpener.focus(); } catch { /* gone */ }
+            }
+            _ctxOpener = null;
         }
 
         document.addEventListener("click", closeCtxMenu);

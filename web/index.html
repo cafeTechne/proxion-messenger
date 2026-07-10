@@ -160,13 +160,18 @@
             gap: 5px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.5);
         }
-        .emoji-picker span {
+        .emoji-picker button {
             cursor: pointer;
             font-size: 1.2em;
             padding: 4px;
             border-radius: 4px;
+            background: transparent;
+            border: none;
+            color: inherit;
+            line-height: 1;
         }
-        .emoji-picker span:hover { background: rgba(255,255,255,0.1); }
+        .emoji-picker button:hover,
+        .emoji-picker button:focus-visible { background: rgba(255,255,255,0.1); }
         .mention { background: rgba(88,101,242,0.3); border-radius: 3px; padding: 0 2px; }
         .link-preview {
             border-left: 3px solid var(--accent);
@@ -487,13 +492,14 @@
     </style>
 </head>
 <body>
-    <div id="emoji-picker" class="emoji-picker">
-        <span data-emoji="👍">👍</span> <span data-emoji="❤️">❤️</span>
-        <span data-emoji="😂">😂</span> <span data-emoji="😮">😮</span>
-        <span data-emoji="😢">😢</span> <span data-emoji="😡">😡</span>
-        <span data-emoji="🎉">🎉</span> <span data-emoji="🔥">🔥</span>
-        <span data-emoji="👀">👀</span> <span data-emoji="✅">✅</span>
-        <span data-emoji="❌">❌</span> <span data-emoji="🤔">🤔</span>
+    <a href="#message-input" class="skip-nav">Skip to conversation</a>
+    <div id="emoji-picker" class="emoji-picker" role="menu" aria-label="React with emoji">
+        <button type="button" role="menuitem" data-emoji="👍" aria-label="thumbs up">👍</button> <button type="button" role="menuitem" data-emoji="❤️" aria-label="heart">❤️</button>
+        <button type="button" role="menuitem" data-emoji="😂" aria-label="laughing">😂</button> <button type="button" role="menuitem" data-emoji="😮" aria-label="surprised">😮</button>
+        <button type="button" role="menuitem" data-emoji="😢" aria-label="crying">😢</button> <button type="button" role="menuitem" data-emoji="😡" aria-label="angry">😡</button>
+        <button type="button" role="menuitem" data-emoji="🎉" aria-label="party">🎉</button> <button type="button" role="menuitem" data-emoji="🔥" aria-label="fire">🔥</button>
+        <button type="button" role="menuitem" data-emoji="👀" aria-label="eyes">👀</button> <button type="button" role="menuitem" data-emoji="✅" aria-label="check mark">✅</button>
+        <button type="button" role="menuitem" data-emoji="❌" aria-label="cross mark">❌</button> <button type="button" role="menuitem" data-emoji="🤔" aria-label="thinking">🤔</button>
     </div>
 
     <!-- Profile Card Popover (B2) -->
@@ -1175,9 +1181,14 @@
           <tr><td><kbd>Ctrl+K</kbd></td><td>Focus search</td></tr>
           <tr><td><kbd>Ctrl+/</kbd></td><td>Show this help</td></tr>
           <tr><td><kbd>Alt+↑ / ↓</kbd></td><td>Previous / next thread</td></tr>
+          <tr><td><kbd>Tab</kbd></td><td>Skip link → conversation, then between controls</td></tr>
+          <tr><td><kbd>↑ / ↓</kbd></td><td>Move within a list or the message feed</td></tr>
+          <tr><td><kbd>Enter</kbd> / <kbd>Space</kbd></td><td>Open the focused conversation / message actions</td></tr>
+          <tr><td><kbd>Shift+F10</kbd> / <kbd>≣</kbd></td><td>Message actions (react, reply, edit, delete, pin)</td></tr>
+          <tr><td><kbd>Delete</kbd></td><td>Hide the focused DM</td></tr>
           <tr><td><kbd>Shift+Enter</kbd></td><td>New line in message</td></tr>
           <tr><td><kbd>Enter</kbd></td><td>Send message</td></tr>
-          <tr><td><kbd>Escape</kbd></td><td>Cancel reply / edit / close modal</td></tr>
+          <tr><td><kbd>Escape</kbd></td><td>Cancel reply / edit / close modal or menu</td></tr>
         </table>
         <button id="shortcut-close-btn"
                 style="margin-top:16px; background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer;">Close</button>
