@@ -39,6 +39,9 @@
 }
 
 * { box-sizing: border-box; }
+/* Column layout so top-level banners (NAT warning) sit ABOVE the app in normal
+   flow and push it down, instead of position:fixed overlaying the sidebar
+   header. #app is the sidebar+chat row and takes the remaining height. */
 body {
     margin: 0;
     padding: 0;
@@ -47,6 +50,7 @@ body {
     color: var(--text-primary);
     height: 100vh;
     display: flex;
+    flex-direction: column;
 }
 
 /* ── Desktop chrome polish ──
@@ -73,6 +77,8 @@ body {
 #app {
     display: flex;
     width: 100%;
+    flex: 1;
+    min-height: 0;
 }
 
 #sidebar {
@@ -217,9 +223,8 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
 }
 .message:hover .msg-compact-ts { color: var(--text-secondary, #94a3b8); }
 
-/* Body column: grows, wraps long words. position:relative anchors the
-   bottom-right delivery tick (.read-receipt). */
-.msg-body { flex: 1; min-width: 0; position: relative; }
+/* Body column: grows, wraps long words */
+.msg-body { flex: 1; min-width: 0; }
 
 /* Name + timestamp on the first message in each group */
 .msg-header {
@@ -231,14 +236,13 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
 .msg-sender { font-weight: 600; font-size: 0.95em; }
 .msg-ts-header { font-size: 0.72em; color: var(--text-secondary, #94a3b8); }
 
-/* Message text. padding-right keeps the last line clear of the corner tick. */
+/* Message text */
 .msg-content {
     color: var(--text-primary, #e1e1e1);
     font-size: 0.95em;
     line-height: 1.5;
     word-break: break-word;
     overflow-wrap: break-word;
-    padding-right: 22px;
 }
 
 /* Hover action bar (react / reply / edit / delete / pin) */

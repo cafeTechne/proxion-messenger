@@ -1405,38 +1405,13 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                 case "room_members": {
                     currentRoomMembers = event.members || [];
                     renderMembersPanel(event.members);
-                    // Also populate room members modal if it's open
-                    const list = document.getElementById("room-members-list");
-                    if (list && _membersRoomId) {
-                        if (!event.members || event.members.length === 0) {
-                            list.innerHTML = inlineNotice("No members found.");
-                            break;
-                        }
-                        const isOwner = roomCreatorOf.has(event.room_id);
-                        list.innerHTML = event.members.map(m => {
-                            const isSelf = m.webid === selfWebId;
-                            const kickBtn = isOwner && !isSelf
-                                ? `<button data-rm-action="kick" data-room-id="${event.room_id}" data-webid="${m.webid}"
-                                          style="margin-left:4px;background:#7f1d1d;border:none;color:#fca5a5;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:0.75em;flex-shrink:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></svg></button>` : "";
-                            const banBtn = isOwner && !isSelf
-                                ? `<button data-rm-action="ban" data-room-id="${event.room_id}" data-webid="${m.webid}" style="margin-left:4px;background:#451a03;border:none;color:#fed7aa;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:0.75em;">Ban</button>` : "";
-                            const muteBtn = isOwner && !isSelf
-                                ? `<button data-rm-action="mute" data-room-id="${event.room_id}" data-webid="${m.webid}" style="margin-left:4px;background:#1c1917;border:none;color:#a8a29e;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:0.75em;">Mute</button>` : "";
-                            const ownerBtn = isOwner && !isSelf
-                                ? `<button data-rm-action="transfer" data-room-id="${event.room_id}" data-webid="${m.webid}"
-                                          style="margin-left:4px;background:#1e3a5f;border:none;color:#7dd3fc;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:0.75em;flex-shrink:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></svg></button>` : "";
-                            const displayName = m.display_name || m.webid.slice(0, 20);
-                            const label = isSelf ? `${displayName} (you)` : displayName;
-                            return `<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #334155;">
-                                <span style="font-size:0.8em;color:#cbd5e1;word-break:break-all;flex:1;">${label}</span>
-                                ${ownerBtn}${kickBtn}${banBtn}${muteBtn}
-                            </div>`;
-                        }).join("");
-                    }
+                    // (The old room-members-modal populate block was removed with
+                    // the modal itself — the members PANEL above is the only
+                    // surface; moderation lives in its right-click context menu.)
                     break;
                 }
                 case "member_kicked":
-                    // Refresh members list if modal is open for this room
+                    // Refresh the members panel if it's open for this room
                     if (event.room_id === _membersRoomId) {
                         showRoomMembers(event.room_id);
                     }

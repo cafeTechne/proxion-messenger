@@ -364,16 +364,19 @@ export function createRendering({
         const editedHtml = msg.edited_at
             ? `<span class="edited-badge" role="button" tabindex="0" data-msg-id="${msgId}" title="Show edit history">(edited)</span>`
             : "";
+        // Delivery tick rides inline at the end of the content's last line —
+        // as a block-level sibling it used to cost every own message a whole
+        // extra line just for a "✓".
+        const receiptHtml = isOwn ? `<span class="read-receipt" data-msg-id="${msgId}">&#10003;</span>` : "";
         if (msg.content_type === "audio" && msg.audio_b64) {
             const dur = msg.duration_ms ? `<span class="audio-duration">${Math.round(msg.duration_ms/1000)}s</span>` : "";
-            body.innerHTML += `<div class="audio-message"><audio controls src="data:audio/webm;base64,${msg.audio_b64}"></audio>${dur}</div>`;
+            body.innerHTML += `<div class="audio-message"><audio controls src="data:audio/webm;base64,${msg.audio_b64}"></audio>${dur}${receiptHtml}</div>`;
         } else {
-            body.innerHTML += `<div class="msg-content"><span class="msg-text">${renderedText}</span>${editedHtml}</div>`;
+            body.innerHTML += `<div class="msg-content"><span class="msg-text">${renderedText}</span>${editedHtml}${receiptHtml}</div>`;
         }
 
         if (fileHtml) body.innerHTML += fileHtml;
         body.innerHTML += `<div id="reactions-${msgId}" class="reactions"></div>`;
-        if (isOwn) body.innerHTML += `<span class="read-receipt" data-msg-id="${msgId}">&#10003;</span>`;
 
         // Hover action bar
         body.innerHTML += `<div class="msg-actions">

@@ -40,7 +40,10 @@ export function createStatusBanners() {
             if (c.public_url_set || c.relay_fallback_active) return;
             const banner = document.createElement("div");
             banner.id = "nat-warning-banner";
-            banner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:2000;background:#78350f;color:#fef3c7;padding:10px 16px;font-size:0.85em;line-height:1.5;";
+            // Normal-flow block prepended to <body> (a column flex): it pushes the
+            // app down rather than overlaying the sidebar header (position:fixed
+            // used to cover the logo and nothing repositioned around it).
+            banner.style.cssText = "flex-shrink:0;background:#78350f;color:#fef3c7;padding:10px 16px;font-size:0.85em;line-height:1.5;";
             const port = c.local_port || 8080;
             const localIp = c.local_ip || "192.168.x.x";
             const triedUpnp = c.upnp_mapped === false;
@@ -77,7 +80,7 @@ export function createStatusBanners() {
             // Fallback: minimal banner if /connectivity unreachable
             const banner = document.createElement("div");
             banner.id = "nat-warning-banner";
-            banner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:2000;background:#78350f;color:#fef3c7;padding:8px 16px;font-size:0.85em;display:flex;gap:8px;";
+            banner.style.cssText = "flex-shrink:0;background:#78350f;color:#fef3c7;padding:8px 16px;font-size:0.85em;display:flex;gap:8px;";
             banner.innerHTML = `<span style="flex:1">Federation limited — gateway not publicly reachable. Set <code>PROXION_PUBLIC_URL</code> in <code>.env</code>.</span><button onclick="this.closest('#nat-warning-banner').remove()" style="background:transparent;border:none;color:#fef3c7;cursor:pointer;">×</button>`;
             document.body.prepend(banner);
         });

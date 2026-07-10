@@ -416,14 +416,11 @@
         .msg-meta { display: inline; }
 
         /* Round 60: Read Receipts */
-        /* Delivery tick: pinned to the message's bottom-right corner. It used to
-           be an inline span after the (block) content, so every own message paid
-           a whole extra line just for a "✓". msg-content reserves padding-right
-           so the last text line can't run under it. */
-        .read-receipt {
-            position: absolute; right: 8px; bottom: 2px;
-            font-size: 0.68em; color: var(--slate-600); user-select: none;
-        }
+        /* Delivery tick: inline at the end of the message's last text line
+           (rendering.js places it inside .msg-content), WhatsApp-style — close
+           to the content instead of floating at the feed's far edge, and never
+           costing its own line. */
+        .read-receipt { margin-left: 6px; font-size: 0.68em; color: var(--slate-600); user-select: none; }
         .read-receipt.read { color: var(--color-success-soft); }
 
         /* Round 62: Voice Messages */

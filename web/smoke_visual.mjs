@@ -62,7 +62,11 @@ try {
     // mere presence (and shimmer phase) at the 3 s capture mark is nondeterministic.
     await page.addStyleTag({ content:
       '*, *::before, *::after { animation: none !important; transition: none !important; caret-color: transparent !important; }' +
-      '#history-skeleton { display: none !important; }' });
+      '#history-skeleton { display: none !important; }' +
+      // The NAT banner depends on an async /connectivity fetch that races the
+      // capture, and it now shifts layout (pushes the app down) — so a CSS kill
+      // is the only ordering-proof suppression (a DOM remove loses the race).
+      '#nat-warning-banner { display: none !important; }' });
     // Normalize per-session-volatile content (a fresh headless launch mints a new
     // did:key identity and the pod/address status resolves live) so the diff
     // reflects layout/colour, not values that legitimately change every run.
