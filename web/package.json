@@ -15,7 +15,8 @@
     "smoke:pairing": "node smoke_pairing.mjs",
     "smoke:dmhistory": "node smoke_dm_history.mjs",
     "smoke:dmreaction": "node smoke_dm_reaction.mjs",
-    "smoke:multidevice": "node smoke_multidevice_dm.mjs"
+    "smoke:multidevice": "node smoke_multidevice_dm.mjs",
+    "smoke:a11y": "node smoke_a11y.mjs"
   },
   "keywords": [],
   "author": "",
@@ -31,6 +32,7 @@
   "devDependencies": {
     "@inrupt/solid-client-access-grants": "^4.0.0",
     "@inrupt/solid-client-authn-node": "^2.0.0",
+    "axe-core": "^4.12.1",
     "eslint": "^9.39.4",
     "fake-indexeddb": "^6.2.5",
     "globals": "^17.6.0",

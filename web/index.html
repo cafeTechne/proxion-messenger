@@ -720,10 +720,10 @@
     </div>
 
     <div id="app">
-        <aside id="sidebar" role="navigation" aria-label="Sidebar">
+        <aside id="sidebar" aria-label="Sidebar">
             <header>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <h2>Proxion</h2>
+                    <h1 class="app-title">Proxion</h1>
                     <div style="display: flex; gap: 5px;">
                         <button id="sound-toggle" aria-label="Toggle notification sound" title="Toggle Sound" style="padding: 5px 10px; background: transparent; border: none; cursor: pointer; color: inherit; line-height: 0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"/></svg></button>
                         <button id="desktop-notif-toggle" aria-label="Toggle desktop notifications" aria-pressed="true" title="Toggle Desktop Notifications" style="padding: 5px 10px; background: transparent; border: none; cursor: pointer; color: inherit; line-height: 0;"></button>
@@ -745,13 +745,13 @@
                   <button id="share-invite-btn" title="Share invite link" style="background:transparent;border:none;color:var(--slate-600);cursor:pointer;padding:2px 6px;">🔗</button>
                 </div>
             </header>
-            <nav>
+            <nav aria-label="Conversations">
                 <div id="search-box">
                     <input type="text" id="search-input" placeholder="Search messages..." autocomplete="off">
                 </div>
                 <section>
                     <div style="display:flex;align-items:center;justify-content:space-between;">
-                        <h3 style="margin:0;">Rooms</h3>
+                        <h2 style="margin:0;">Rooms</h2>
                         <div style="display:flex;gap:2px;">
                             <button id="join-room-btn" title="Join room with invite link or code"
                                     style="background:transparent;border:none;color:var(--text-secondary,var(--text-secondary));cursor:pointer;font-size:0.95em;padding:2px 6px;">Join</button>
@@ -761,16 +761,16 @@
                     <ul id="room-list"></ul>
                 </section>
                 <section id="voice-section" style="display:none;">
-                    <h3>Voice Channels</h3>
+                    <h2>Voice Channels</h2>
                     <ul id="voice-list"></ul>
                 </section>
                 <section id="friend-requests-section" style="display:none;">
-                    <h3 style="margin:0;">Friend Requests</h3>
+                    <h2 style="margin:0;">Friend Requests</h2>
                     <ul id="friend-request-list"></ul>
                 </section>
                 <section id="contacts-section" style="display:none;">
                     <div style="display:flex;align-items:center;justify-content:space-between;">
-                        <h3 style="margin:0;">Contacts</h3>
+                        <h2 style="margin:0;">Contacts</h2>
                     </div>
                     <ul id="contacts-list"></ul>
                     <div id="empty-state" style="display:none;">
@@ -780,7 +780,7 @@
                 </section>
                 <section>
                     <div style="display:flex;align-items:center;justify-content:space-between;">
-                        <h3 style="margin:0;">DMs</h3>
+                        <h2 style="margin:0;">DMs</h2>
                         <button id="add-peer-btn" aria-label="Add contact by address" title="Add peer by DID" style="background:transparent;border:none;color:var(--text-secondary,var(--text-secondary));cursor:pointer;padding:2px 6px;line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
                     </div>
                     <ul id="dm-list"></ul>
@@ -866,7 +866,7 @@
             <div id="disappear-banner" class="disappear-banner">
                 <span><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg> Messages disappear after <strong id="disappear-label"></strong></span>
             </div>
-            <div id="message-feed">
+            <div id="message-feed" role="log" aria-label="Messages" aria-live="polite" aria-relevant="additions">
                 <div class="system-msg">Connect to the gateway to start chatting.</div>
             </div>
             <button id="scroll-bottom-btn" aria-label="Scroll to latest messages"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg> <span id="scroll-bottom-count"></span></button>

@@ -239,6 +239,12 @@ export function createRendering({
 
         const name = msg.from_display_name || (msg.from_webid || "").slice(0, 12) || (msg.from_pub_hex || "").slice(0, 12);
         const suffix = didSuffix(msg.from_webid || msg.from_pub_hex || "");
+        // A11y: each message is an article with an accessible name of
+        // "«sender», «time»" so a screen reader announces who/when before the
+        // body content that follows (grouped messages hide the visual header but
+        // keep this label so they're never anonymous under SR).
+        div.setAttribute("role", "article");
+        div.setAttribute("aria-label", msg.timestamp ? `${name}, ${timeAgo(msg.timestamp)}` : name);
         const avatarColor = webidColor(msg.from_webid);
 
         const presenceData = userPresence[msg.from_webid] || { status: "offline" };
@@ -247,7 +253,7 @@ export function createRendering({
                               presenceData.status === "busy" ? "busy" : "";
 
         const avatarBase = msg.from_avatar_b64
-            ? `<img src="data:image/png;base64,${msg.from_avatar_b64}" class="avatar" style="width:40px;height:40px;border-radius:50%;">`
+            ? `<img src="data:image/png;base64,${msg.from_avatar_b64}" class="avatar" alt="" style="width:40px;height:40px;border-radius:50%;">`
             : `<div class="avatar placeholder" style="background:${avatarColor};width:40px;height:40px;line-height:40px;font-size:16px;font-weight:bold;text-align:center;border-radius:50%;">${(name[0] || "?").toUpperCase()}</div>`;
         const presenceDot = `<div class="avatar-presence ${presenceClass}" title="${presenceData.status}" style="bottom:-1px;right:-1px;"></div>`;
         const avatarHtml = `<div style="position:relative;display:inline-block;cursor:pointer;" data-profile-avatar data-msg-action="profile" data-webid="${msg.from_webid}" data-name="${name.replace(/"/g,'&quot;')}">${avatarBase}${presenceDot}</div>`;
@@ -369,8 +375,10 @@ export function createRendering({
         // extra line just for a "✓".
         const receiptHtml = isOwn ? `<span class="read-receipt" data-msg-id="${msgId}">&#10003;</span>` : "";
         if (msg.content_type === "audio" && msg.audio_b64) {
-            const dur = msg.duration_ms ? `<span class="audio-duration">${Math.round(msg.duration_ms/1000)}s</span>` : "";
-            body.innerHTML += `<div class="audio-message"><audio controls src="data:audio/webm;base64,${msg.audio_b64}"></audio>${dur}${receiptHtml}</div>`;
+            const _durSecs = msg.duration_ms ? Math.round(msg.duration_ms / 1000) : 0;
+            const dur = _durSecs ? `<span class="audio-duration">${_durSecs}s</span>` : "";
+            const _audioLabel = escHtml(`Voice message from ${name}${_durSecs ? `, ${_durSecs} seconds` : ""}`);
+            body.innerHTML += `<div class="audio-message"><audio controls aria-label="${_audioLabel}" src="data:audio/webm;base64,${msg.audio_b64}"></audio>${dur}${receiptHtml}</div>`;
         } else {
             body.innerHTML += `<div class="msg-content"><span class="msg-text">${renderedText}</span>${editedHtml}${receiptHtml}</div>`;
         }

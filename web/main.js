@@ -1274,6 +1274,8 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                     break;
                 case "room_history":
                     if (activeView && activeView.id === event.room_id) {
+                        const _rhFeed = document.getElementById("message-feed");
+                        _rhFeed.setAttribute("aria-busy", "true");
                         const _existingIds = new Set(allMessages.map(m => m.message_id));
                         const _newMsgs = (event.messages || []).filter(m => !_existingIds.has(m.message_id));
                         if (_newMsgs.length > 0) {
@@ -1281,6 +1283,7 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                             _newMsgs.forEach(m => { messageMap[m.message_id] = m; });
                             renderMessages();
                         }
+                        _rhFeed.removeAttribute("aria-busy");
                     }
                     break;
                 case "room_member_joined":
@@ -1493,6 +1496,9 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                     const tid = event.thread_id;
                     const isActive = activeView && activeView.id === tid;
                     const feed = document.getElementById("message-feed");
+                    // A11y: mark the log busy during a bulk restore so screen
+                    // readers don't announce every one of the loaded messages.
+                    feed.setAttribute("aria-busy", "true");
                     const isPagination = msgs.length > 0 && isActive && allMessages.length > 0
                         && msgs[msgs.length - 1].timestamp < allMessages[0].timestamp;
 
@@ -1521,6 +1527,7 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                         updateSidebarBadge(tid);
                     }
                     mergeDmLocalHistory(tid);
+                    feed.removeAttribute("aria-busy");
                     break;
                 }
                 case "local_history": {
@@ -1528,6 +1535,7 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                     const tid = event.thread_id;
                     const lastReadTs = event.last_read_ts || 0;
                     const feed = document.getElementById("message-feed");
+                    feed.setAttribute("aria-busy", "true");
                     // Remove loading skeleton
                     const skel = document.getElementById("history-skeleton");
                     if (skel) skel.remove();
@@ -1591,6 +1599,7 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                         });
                     }
                     mergeDmLocalHistory(tid);
+                    feed.removeAttribute("aria-busy");
                     break;
                 }
                 case "message_deleted": {
