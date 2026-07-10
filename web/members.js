@@ -29,7 +29,7 @@ export function createMembers({ getActiveView, requestRoomMembers }) {
         const initial = escHtml(displayName[0].toUpperCase());
         const presenceClass = m.status === "online" ? "online" : m.status === "away" ? "away" : m.status === "busy" ? "busy" : "";
         const fedBadge = m.federated
-            ? `<span title="Federated member (${escHtml(m.gateway || 'remote gateway')})" style="font-size:0.65em;color:#64748b;margin-left:4px;vertical-align:middle;">&#x1F517;</span>`
+            ? `<span title="Federated member (${escHtml(m.gateway || 'remote gateway')})" style="font-size:0.65em;color:#8091a7;margin-left:4px;vertical-align:middle;">&#x1F517;</span>`
             : "";
         return `<div class="member-item" data-msg-action="profile" data-webid="${escHtml(m.webid)}" data-name="${escHtml(displayName)}">
                 <div style="position:relative;display:inline-block;margin-right:8px;">

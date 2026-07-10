@@ -16,7 +16,7 @@ export function createStatusBanners() {
             dot.style.color = '#fb923c';
             dot.textContent = '● Pod unreachable';
         } else {
-            dot.style.color = '#64748b';
+            dot.style.color = '#8091a7';
             dot.textContent = '● No pod';
         }
     }

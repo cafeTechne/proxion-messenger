@@ -593,7 +593,7 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                 const body = document.createElement("div");
                 body.className = "dm-item-body";
                 const ts = last ? timeAgo(last.timestamp) : "";
-                body.innerHTML = `<div class="dm-item-name">${escHtml(name)}${ts ? `<span style="color:#64748b;font-size:0.75em;float:right;margin-left:4px">${ts}</span>` : ""}</div>
+                body.innerHTML = `<div class="dm-item-name">${escHtml(name)}${ts ? `<span style="color:#8091a7;font-size:0.75em;float:right;margin-left:4px">${ts}</span>` : ""}</div>
                     ${last ? `<div class="dm-item-preview">${last.snippet.replace(/</g,"&lt;")}</div>` : ""}`;
                 const closeBtn = document.createElement("button");
                 closeBtn.className = "dm-close-btn";
@@ -608,7 +608,7 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                 const muteIcon = document.createElement("span");
                 muteIcon.className = "mute-icon";
                 muteIcon.title = "Muted";
-                muteIcon.style.cssText = `display:${mutedThreads.has(id) ? "" : "none"};font-size:0.75em;color:#64748b;margin-left:4px;flex-shrink:0;`;
+                muteIcon.style.cssText = `display:${mutedThreads.has(id) ? "" : "none"};font-size:0.75em;color:#8091a7;margin-left:4px;flex-shrink:0;`;
                 muteIcon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M9.143 17.082a24.248 24.248 0 0 0 3.844.148m-3.844-.148a23.856 23.856 0 0 1-5.455-1.31 8.964 8.964 0 0 0 2.3-5.542m3.155 6.852a3 3 0 0 0 5.667 1.97m1.965-2.277L21 21m-4.225-4.225a23.81 23.81 0 0 0 3.536-1.003 8.967 8.967 0 0 1-2.312-6.022V9A6 6 0 0 0 9.239 3.477L3 3m6.239.477A5.965 5.965 0 0 0 6 9v.75a8.966 8.966 0 0 1-2.312 6.022"/></svg>';
                 li.appendChild(muteIcon);
                 list.appendChild(li);
@@ -616,7 +616,7 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
             });
             if (!dmCount) {
                 const hint = document.createElement("li");
-                hint.style.cssText = "padding:6px 10px;color:#475569;font-size:0.78em;cursor:default;pointer-events:none;";
+                hint.style.cssText = "padding:6px 10px;color:#8091a7;font-size:0.78em;cursor:default;pointer-events:none;";
                 hint.textContent = "Add a contact to start a DM";
                 list.appendChild(hint);
             }
@@ -666,7 +666,7 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
             const _myName = localStorage.getItem("proxion_display_name") || "";
             const _mySuffix = didSuffix(_myDid);
             document.getElementById("settings-did").innerHTML = _myDid
-                ? `<span style="color:#f1f5f9">${_myName || "(no name set)"}</span><span style="color:#475569;margin-left:4px;">Â·${_mySuffix}</span><br><span style="font-size:0.85em;color:#64748b;">${_myDid}</span>`
+                ? `<span style="color:#f1f5f9">${_myName || "(no name set)"}</span><span style="color:#8091a7;margin-left:4px;">Â·${_mySuffix}</span><br><span style="font-size:0.85em;color:#8091a7;">${_myDid}</span>`
                 : "(generating…)";
             document.getElementById("settings-proxion-address").textContent =
                 localStorage.getItem("proxion_my_address") || "(not connected)";
@@ -690,9 +690,9 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                 const tick = ok => ok ? '<span style="color:#4ade80">&#x2713;</span>' : '<span style="color:#f87171">&#x2717;</span>';
                 const reachable = c.public_url_set || c.relay_capable || c.relay_fallback_active;
                 const reachHow = reachable
-                    ? (c.upnp_mapped ? ' <span style="color:#64748b;font-size:0.85em;">(via UPnP)</span>'
-                       : c.relay_fallback_active && !c.public_url_set ? ' <span style="color:#64748b;font-size:0.85em;">(via relay)</span>'
-                       : ' <span style="color:#64748b;font-size:0.85em;">(manual)</span>')
+                    ? (c.upnp_mapped ? ' <span style="color:#8091a7;font-size:0.85em;">(via UPnP)</span>'
+                       : c.relay_fallback_active && !c.public_url_set ? ' <span style="color:#8091a7;font-size:0.85em;">(via relay)</span>'
+                       : ' <span style="color:#8091a7;font-size:0.85em;">(manual)</span>')
                     : ` <span style="color:#fbbf24">not reachable — <a href="#" id="fix-conn-link" style="color:#fbbf24;text-decoration:underline;">fix this</a></span>`;
                 el.innerHTML = [
                     `${tick(reachable)} Internet reachable:${reachHow}`,
@@ -2096,7 +2096,7 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                     if (!container) break;
                     const devs = event.devices || [];
                     if (devs.length === 0) {
-                        container.innerHTML = '<span style="color:#475569;">No linked devices.</span>';
+                        container.innerHTML = '<span style="color:#8091a7;">No linked devices.</span>';
                         break;
                     }
                     container.innerHTML = devs.map(d => {
@@ -2104,7 +2104,7 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
                         const since = d.registered_at
                             ? new Date(d.registered_at * 1000).toLocaleDateString() : "";
                         return `<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid #1e293b;gap:8px;">
-                            <span style="flex:1">${label}<br><span style="color:#475569;font-size:0.8em;">${since}</span></span>
+                            <span style="flex:1">${label}<br><span style="color:#8091a7;font-size:0.8em;">${since}</span></span>
                             <button data-device-id="${escHtml(d.device_id)}" style="background:transparent;border:none;color:#f87171;font-size:0.8em;cursor:pointer;padding:2px 6px;">Revoke</button>
                         </div>`;
                     }).join("");

@@ -10,9 +10,14 @@
     /* Text */
     --text-primary: #e1e1e1;
     --text-secondary: #94a3b8;
-    /* Brand accent */
-    --accent: #e94560;
-    --accent-hover: #ff4d6d;
+    /* Brand accent — darkened from #e94560 so white button text meets WCAG
+       4.5:1 (was 3.8:1). See scripts/contrast_audit.mjs. */
+    --accent: #d61f52;
+    --accent-hover: #ec4468;
+    /* Accent used as TEXT on dark surfaces (links) — lightened so it clears
+       WCAG 4.5:1; the button accent (#d61f52) is tuned for white text ON it and
+       is too dark to BE text. (scripts/contrast_audit.mjs) */
+    --accent-text: #f06a8a;
     --border: #0f3460;
 
     /* Status */
@@ -31,8 +36,13 @@
     --slate-50: #f1f5f9;
     --slate-300: #cbd5e1;
     --slate-400: #94a3b8;
-    --slate-500: #64748b;
-    --slate-600: #475569;
+    /* --slate-500 lightened from #64748b — used as small body text that failed
+       contrast on the dark surfaces. (contrast_audit.mjs) */
+    --slate-500: #8598ae;
+    /* --slate-600 lightened from #475569: it was used for subtle TEXT that
+       failed WCAG contrast on the dark surfaces. Borders that use it just get
+       marginally lighter. (contrast_audit.mjs) */
+    --slate-600: #8091a7;
     --slate-700: #334155;
     --slate-800: #1e293b;
     --slate-900: #0f172a;
@@ -394,6 +404,12 @@ button:hover { background: var(--accent-hover); }
        display:block !important to beat a lingering inline display:none — its
        visibility is driven by the .mobile-open class toggleMembersPanel sets.
        Without this rule the panel never opened on phones (the class had no CSS). */
+    /* The off-canvas members drawer parks at translateX(100%) — off the right
+       edge — which otherwise contributes to the document scroll width and breaks
+       WCAG 1.4.10 reflow (a horizontal scrollbar at ≤320px). Make #app the
+       drawer's containing block and clip its overflow, so the parked drawer is
+       hidden and animates in from the clip region on .mobile-open. */
+    #app { position: relative; overflow-x: hidden; }
     #members-panel {
         display: block !important;
         position: absolute;
@@ -601,3 +617,30 @@ button:hover { background: var(--accent-hover); }
 .contact-search-item:hover { background: rgba(255,255,255,0.06); }
 .contact-search-name { font-size: 0.9em; color: var(--text-primary, #f1f5f9); }
 .contact-search-did { font-size: 0.75em; color: var(--text-secondary); font-family: monospace; }
+
+/* ── PLAN_ROUND_56 D2/D3: high-contrast & forced-colors support ── */
+
+/* D2 — users who ask for more contrast get promoted secondary text, stronger
+   borders, and a thicker focus ring. */
+@media (prefers-contrast: more) {
+    :root {
+        --text-secondary: #cbd5e1;
+        --slate-500: #cbd5e1;
+        --slate-600: #cbd5e1;
+        --border: #3b5a8a;
+    }
+    :focus-visible { outline-width: 3px; outline-offset: 2px; }
+    .msg-actions, nav li.active { border: 1px solid var(--border); }
+}
+
+/* D3 — Windows High Contrast / forced-colors strips custom colors. Keep focus
+   visible (outline survives), and don't let presence/status be color-only:
+   preserve the dots as shapes and lean on the system palette elsewhere. */
+@media (forced-colors: active) {
+    :focus-visible { outline: 2px solid CanvasText; }
+    .dot, .avatar-presence { forced-color-adjust: none; }
+    .skip-nav { forced-color-adjust: none; }
+    /* Ensure interactive rows have a perceivable active state without relying on
+       a custom background the UA may drop. */
+    nav li.active { outline: 2px solid Highlight; outline-offset: -2px; }
+}

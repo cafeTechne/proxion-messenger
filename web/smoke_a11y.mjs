@@ -44,10 +44,7 @@ const AA_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
 
 // Rules we knowingly accept (each MUST carry a justification). Empty = strict.
 const ALLOWLIST = {
-  // Palette-token contrast failures (Send button on brand accent, secondary
-  // slate text, per-user sender colors) are fixed wholesale in Phase D (D1
-  // contrast audit + token adjustments). REMOVE this entry when Phase D lands.
-  'color-contrast': 'pending Phase D (D1) palette-token contrast fixes',
+  // (Phase D fixed the palette-token contrast failures; gate is now strict.)
 };
 
 const freePort = () => new Promise((res, rej) => {

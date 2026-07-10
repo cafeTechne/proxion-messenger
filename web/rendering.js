@@ -333,7 +333,7 @@ export function createRendering({
                 const placeholder = document.createElement("div");
                 placeholder.className = "reply-context reply-context-loading";
                 placeholder.dataset.replyTarget = msg.reply_to_id;
-                placeholder.innerHTML = `<span class="reply-connector"></span><em style="color:#64748b">Loading reply context…</em>`;
+                placeholder.innerHTML = `<span class="reply-connector"></span><em style="color:#8091a7">Loading reply context…</em>`;
                 body.appendChild(placeholder);
                 if (socket && socket.readyState === WebSocket.OPEN) {
                     socket.send(JSON.stringify({ cmd: "get_message", message_id: msg.reply_to_id }));
@@ -348,20 +348,20 @@ export function createRendering({
 
         // Header: name + timestamp (first in group only)
         if (!isGrouped) {
-            const suffixHtml = suffix ? `<span style="font-size:0.72em;color:#475569;margin-left:4px;font-weight:400;">·${suffix}</span>` : "";
+            const suffixHtml = suffix ? `<span style="font-size:0.72em;color:#8091a7;margin-left:4px;font-weight:400;">·${suffix}</span>` : "";
             const botBadge = msg.is_bot ? `<span class="bot-badge">BOT</span>` : "";
             const importedBadge = msg.imported ? `<span style="font-size:0.7em;color:#94a3b8;background:#1e293b;border:1px solid #334155;border-radius:3px;padding:1px 5px;margin-left:6px;vertical-align:middle;">Imported</span>` : "";
             // R11.2.3: unverified shield for DID contacts not yet verified
             const isVerified = !msg.from_webid || msg.from_webid === selfWebId ||
                 localStorage.getItem("proxion_verified_" + msg.from_webid) === "1";
             const shieldHtml = (!isVerified && msg.from_webid && msg.from_webid.startsWith("did:key:"))
-                ? `<span title="Identity not verified — check safety number" style="color:#475569;margin-left:4px;font-size:0.85em;">&#x1F6E1;</span>`
+                ? `<span title="Identity not verified — check safety number" style="color:#8091a7;margin-left:4px;font-size:0.85em;">&#x1F6E1;</span>`
                 : "";
             // R11.1.3: expiry countdown label
             let expireHtml = "";
             if (currentDisappearMs > 0 && msg.timestamp) {
                 const expiresAt = new Date(msg.timestamp).getTime() + currentDisappearMs;
-                expireHtml = `<span class="msg-expire-countdown" style="font-size:0.7em;color:#475569;margin-left:6px;" title="Expires">⏱ ${_expireLabel(expiresAt - Date.now())}</span>`;
+                expireHtml = `<span class="msg-expire-countdown" style="font-size:0.7em;color:#8091a7;margin-left:6px;" title="Expires">⏱ ${_expireLabel(expiresAt - Date.now())}</span>`;
             }
             body.innerHTML += `<div class="msg-header"><span class="msg-sender" style="color:${avatarColor}">${escHtml(name)}${botBadge}${suffixHtml}${shieldHtml}</span><span class="msg-ts-header" title="${exactTs}">${timeAgo(msg.timestamp)}${importedBadge}${expireHtml}</span></div>`;
         }

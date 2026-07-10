@@ -27,7 +27,9 @@ export function webidColor(webid) {
     for (let i = 0; i < (webid || "").length; i++)
         hash = (Math.imul(hash, 31) + webid.charCodeAt(i)) | 0;
     const hue = Math.abs(hash) % 360;
-    return `hsl(${hue}, 55%, 42%)`;
+    // 68% lightness so the darkest hue (blue) still meets WCAG 4.5:1 on the dark
+    // message feed — see scripts/contrast_audit.mjs (worst hue ≈ 4.9:1).
+    return `hsl(${hue}, 55%, 68%)`;
 }
 
 // Lightweight Markdown renderer (no external deps). Escapes HTML first.
