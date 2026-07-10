@@ -17,7 +17,8 @@
     "smoke:dmhistory": "node smoke_dm_history.mjs",
     "smoke:dmreaction": "node smoke_dm_reaction.mjs",
     "smoke:multidevice": "node smoke_multidevice_dm.mjs",
-    "smoke:a11y": "node smoke_a11y.mjs"
+    "smoke:a11y": "node smoke_a11y.mjs",
+    "smoke:keyboard": "node smoke_keyboard.mjs"
   },
   "keywords": [],
   "author": "",

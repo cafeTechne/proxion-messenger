@@ -5,7 +5,7 @@ import globals from "globals";
 
 export default [
   {
-    files: ["main.js", "util.js", "filetransfer.js", "voice.js", "notifications.js", "onboarding.js", "reactions.js", "pins.js", "media.js", "modals.js", "profile.js", "edit.js", "mute.js", "mentions.js", "rooms.js", "address.js", "typing.js", "members.js", "friend-requests.js", "e2e-status.js", "status-banners.js", "connection.js", "rendering.js", "view.js", "invite.js", "push.js", "states.js", "auth.js", "e2e.js", "pod.js", "focus-trap.js", "device-cert.js", "pairing.js", "dmhistory.js"],
+    files: ["main.js", "util.js", "filetransfer.js", "voice.js", "notifications.js", "onboarding.js", "reactions.js", "pins.js", "media.js", "modals.js", "profile.js", "edit.js", "mute.js", "mentions.js", "rooms.js", "address.js", "typing.js", "members.js", "friend-requests.js", "e2e-status.js", "status-banners.js", "connection.js", "rendering.js", "view.js", "invite.js", "push.js", "states.js", "auth.js", "e2e.js", "pod.js", "focus-trap.js", "device-cert.js", "pairing.js", "dmhistory.js", "a11y.js"],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "module",
