@@ -26,7 +26,7 @@ export function createE2EStatus() {
             el.style.display = 'inline';
             if (btn) btn.style.display = 'inline';
         } else if (peerId && e2eSupported) {
-            el.textContent = 'No E2E';
+            el.textContent = t('e2e.none');
             el.title = 'E2E key not yet exchanged — send a message first';
             el.style.display = 'inline';
             if (btn) btn.style.display = 'none';

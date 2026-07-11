@@ -164,18 +164,18 @@ export function createConnection({
             state._reconnectDelay = Math.min(state._reconnectDelay * 2, 30000);
             if (retryMs === 0) {
                 // Instant retry — don't flash "Offline" for a transient hiccup
-                document.getElementById("username").innerText = "Connecting…";
+                document.getElementById("username").innerText = t('conn.connectingShort');
                 banner.style.display = "none";
                 setTimeout(connect, 0);
             } else {
                 document.getElementById("username").innerText = localStorage.getItem("proxion_display_name") ? t('conn.offline') : t('conn.gatewayOffline');
-                banner.textContent = `Reconnecting in ${Math.round(retryMs / 1000)}s…`;
+                banner.textContent = t('conn.reconnectingIn', { secs: Math.round(retryMs / 1000) });
                 banner.style.display = "block";
                 let remaining = Math.round(retryMs / 1000);
                 state._reconnectTimer = setInterval(() => {
                     remaining--;
                     if (remaining > 0) {
-                        banner.textContent = `Reconnecting in ${remaining}s…`;
+                        banner.textContent = t('conn.reconnectingIn', { secs: remaining });
                     } else {
                         clearInterval(state._reconnectTimer);
                         state._reconnectTimer = null;

@@ -128,6 +128,24 @@ try {
     await page.close();
   }
 
+  // ── D5/D6: reflow + text-spacing pass (en) ──────────────────────────────
+  // WCAG 1.4.10 (reflow at 320 CSS px ≙ 400% zoom of 1280) and 1.4.12 (the
+  // standard text-spacing override) must not force horizontal scrolling.
+  console.log('en (reflow/text-spacing):');
+  {
+    const { page, errs } = await loadWithLocale(browser, url, 'en');
+    await page.setViewport({ width: 320, height: 640 });
+    await sleep(300);
+    const reflow = await page.evaluate(() => ({ s: document.documentElement.scrollWidth, c: document.documentElement.clientWidth }));
+    check('reflow: no horizontal scroll at 320px', reflow.s <= reflow.c + 1, `${reflow.s}>${reflow.c}`);
+    await page.addStyleTag({ content: '*{line-height:1.5 !important;letter-spacing:0.12em !important;word-spacing:0.16em !important;} p{margin-bottom:2em !important;}' });
+    await sleep(300);
+    const spaced = await page.evaluate(() => ({ s: document.documentElement.scrollWidth, c: document.documentElement.clientWidth }));
+    check('text-spacing override: no horizontal scroll', spaced.s <= spaced.c + 1, `${spaced.s}>${spaced.c}`);
+    check('no page errors (reflow)', errs.length === 0, errs.slice(0, 2).join(' | '));
+    await page.close();
+  }
+
   // ── I3: RTL pass (ar) ────────────────────────────────────────────────────
   console.log('ar (RTL):');
   {

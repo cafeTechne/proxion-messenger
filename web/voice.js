@@ -498,7 +498,7 @@ export function createVoice(deps) {
                 const mm = String(Math.floor(s / 60)).padStart(2, "0");
                 const ss = String(s % 60).padStart(2, "0");
                 const statusEl = document.getElementById("vw-status");
-                if (statusEl) statusEl.textContent = `In Call ${mm}:${ss}`;
+                if (statusEl) statusEl.textContent = t('voice.inCallTimer', { time: `${mm}:${ss}` });
             }, 1000);
         }
 
@@ -543,7 +543,7 @@ export function createVoice(deps) {
             const vwPeer = document.getElementById("vw-peer-name");
             if (vwPeer) vwPeer.textContent = "";
             const vwStatus = document.getElementById("vw-status");
-            if (vwStatus) vwStatus.textContent = "In Call";
+            if (vwStatus) vwStatus.textContent = t('voice.inCall');
         }
 
         function handleVoiceHangup(event) {

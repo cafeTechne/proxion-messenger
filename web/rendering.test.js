@@ -109,11 +109,11 @@ describe('_dateLabelForTimestamp', () => {
     const r = make();
     const now = new Date();
     const yest = new Date(now); yest.setDate(now.getDate() - 1);
-    expect(r._dateLabelForTimestamp(now.toISOString())).toBe('Today');
-    expect(r._dateLabelForTimestamp(yest.toISOString())).toBe('Yesterday');
+    expect(r._dateLabelForTimestamp(now.toISOString())).toBe('time.today');
+    expect(r._dateLabelForTimestamp(yest.toISOString())).toBe('time.yesterday');
     const old = r._dateLabelForTimestamp('2020-03-05T12:00:00Z');
-    expect(old).not.toBe('Today');
-    expect(old).not.toBe('Yesterday');
+    expect(old).not.toBe('time.today');
+    expect(old).not.toBe('time.yesterday');
   });
 });
 

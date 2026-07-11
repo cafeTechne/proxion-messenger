@@ -20,7 +20,7 @@
 // })
 
 import { didSuffix, escHtml, webidColor, renderMarkdown, timeAgo, expireLabel as _expireLabel } from './util.js';
-import { t } from './i18n.js';
+import { t, getLocale } from './i18n.js';
 
 export function createRendering({
     getActiveView, getSocket, getSelfWebId, getSelfPubHex,
@@ -49,9 +49,9 @@ export function createRendering({
         const d = new Date(ts);
         const today = new Date();
         const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
-        if (d.toDateString() === today.toDateString()) return "Today";
-        if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
-        return d.toLocaleDateString(undefined, {month:"long", day:"numeric"});
+        if (d.toDateString() === today.toDateString()) return t('time.today');
+        if (d.toDateString() === yesterday.toDateString()) return t('time.yesterday');
+        return d.toLocaleDateString(getLocale(), {month:"long", day:"numeric"});
     }
 
     function renderMessages() {

@@ -39,7 +39,7 @@ describe('_updateE2EStatus', () => {
   it('shows "No E2E" when supported but key not exchanged', () => {
     els['dm-e2e-status'] = mkEl();
     createE2EStatus()._updateE2EStatus('did:key:zBob');
-    expect(els['dm-e2e-status'].textContent).toBe('No E2E');
+    expect(els['dm-e2e-status'].textContent).toBe('e2e.none');
   });
   it('hides the badge entirely with no peer', () => {
     els['dm-e2e-status'] = mkEl({ style: { display: 'inline' } });

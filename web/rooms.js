@@ -52,7 +52,7 @@ export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoo
     function copyRoomInviteFromModal() {
         const url = document.getElementById("room-invite-url").textContent;
         navigator.clipboard.writeText(url).then(() => {
-            document.getElementById("room-invite-url").textContent = "Copied!";
+            document.getElementById("room-invite-url").textContent = t('common.copied');
             setTimeout(() => { document.getElementById("room-invite-url").textContent = url; }, 1500);
         }).catch(() => {
             showCopyModal(url);
@@ -77,7 +77,7 @@ export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoo
     function _copyInviteText(text, btn) {
         navigator.clipboard.writeText(text).then(() => {
             const orig = btn.textContent;
-            btn.textContent = "Copied!";
+            btn.textContent = t('common.copied');
             setTimeout(() => { btn.textContent = orig; }, 1500);
         }).catch(() => { showCopyModal(text); });
     }
@@ -94,9 +94,9 @@ export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoo
         const errEl = document.getElementById("join-room-error");
         const socket = getSocket();
         if (!socket || socket.readyState !== WebSocket.OPEN) {
-            errEl.textContent = "Not connected to gateway."; return;
+            errEl.textContent = t('conn.notConnectedGateway'); return;
         }
-        if (!raw) { errEl.textContent = "Please enter a link or code."; return; }
+        if (!raw) { errEl.textContent = t('room.enterLinkOrCode'); return; }
         if (raw.startsWith("http://") || raw.startsWith("https://")) {
             try {
                 const url = new URL(raw);
@@ -108,9 +108,9 @@ export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoo
                     window.location.href = raw;
                     return;
                 } else {
-                    errEl.textContent = "Link has no join code."; return;
+                    errEl.textContent = t('room.linkNoCode'); return;
                 }
-            } catch (e) { errEl.textContent = "Invalid URL: " + e.message; return; }
+            } catch (e) { errEl.textContent = t('room.invalidUrl', { error: e.message }); return; }
         } else {
             socket.send(JSON.stringify({ cmd: "join_room", code: raw }));
         }

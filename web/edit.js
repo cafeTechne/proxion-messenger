@@ -6,6 +6,8 @@
 // (the renderer and dispatch also touch it). editingMsgId is cluster-owned and
 // lives in `state` — main.js's Escape-key handler reads edit.state.editingMsgId.
 // Returned functions are destructured into same-named bindings in main.js.
+import { getLocale } from './i18n.js';
+
 export function createEdit({ getSocket, getActiveView, getClientDid, getMessageMap }) {
     const state = { editingMsgId: null };
 
@@ -96,7 +98,7 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
             tag.style.cssText = "font-size:0.75em;color:#94a3b8;margin-left:4px;";
             textEl.after(tag);
         }
-        const editedTime = event.edited_at ? new Date(event.edited_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+        const editedTime = event.edited_at ? new Date(event.edited_at).toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit" }) : "";
         tag.innerText = editedTime ? `(edited ${editedTime})` : "(edited)";
         const messageMap = getMessageMap();
         if (messageMap[event.message_id]) {

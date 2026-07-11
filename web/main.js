@@ -645,7 +645,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             if (!dmCount) {
                 const hint = document.createElement("li");
                 hint.style.cssText = "padding:6px 10px;color:#8091a7;font-size:0.78em;cursor:default;pointer-events:none;";
-                hint.textContent = "Add a contact to start a DM";
+                hint.textContent = t('dm.addContactHint');
                 list.appendChild(hint);
             }
         }
@@ -1366,7 +1366,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                         const feed = document.getElementById("message-feed");
                         const el = document.createElement("div");
                         el.className = "system-msg";
-                        el.textContent = "Someone joined the room.";
+                        el.textContent = t('room.someoneJoined');
                         feed.appendChild(el);
                         feed.scrollTop = feed.scrollHeight;
                     }
@@ -1753,7 +1753,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     const _modal = document.getElementById("add-peer-modal");
                     if (_modal) _modal.style.display = "none";
                     const _sb = document.getElementById("add-peer-submit-btn");
-                    if (_sb) { _sb.disabled = false; _sb.textContent = "Send Request"; }
+                    if (_sb) { _sb.disabled = false; _sb.textContent = t('contact.sendRequest'); }
                     const _addr = event.target_address || event.target_did || "";
                     const _short = _addr.includes("@") ? _addr.split("@").pop() : _addr.slice(0, 16) + "…";
                     showToast(t('contact.requestSent', { name: _short }));
@@ -1914,7 +1914,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     if (_pendingFriendRequest && (event.message in _friendRequestErrors || event.message === "delivery_failed" || event.message === "invalid_address")) {
                         _pendingFriendRequest = false;
                         const _sb2 = document.getElementById("add-peer-submit-btn");
-                        if (_sb2) { _sb2.disabled = false; _sb2.textContent = "Send Request"; }
+                        if (_sb2) { _sb2.disabled = false; _sb2.textContent = t('contact.sendRequest'); }
                         const _errEl = document.getElementById("add-peer-error");
                         if (_errEl) _errEl.textContent = _friendRequestErrors[event.message] ? t(_friendRequestErrors[event.message]) : (event.detail || event.message);
                         break;
@@ -2334,7 +2334,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             };
             const bar = document.getElementById("reply-bar");
             const text = document.getElementById("reply-text");
-            text.innerText = `Replying to ${replyingTo.name}: ${replyingTo.content}`;
+            text.innerText = t('msg.replyingTo', { name: replyingTo.name, content: replyingTo.content });
             bar.style.display = "flex";
             document.getElementById("message-input").focus();
         }
@@ -3004,7 +3004,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             const submitBtn = document.getElementById("add-peer-submit-btn");
             if (!raw) { errEl.textContent = t('contact.enterAddress'); return; }
             if (!socket || socket.readyState !== WebSocket.OPEN) {
-                errEl.textContent = "Not connected to gateway."; return;
+                errEl.textContent = t('conn.notConnectedGateway'); return;
             }
             // R8.3.3: if value starts with http, extract the ?from= param
             if (raw.startsWith('http')) {
@@ -3018,24 +3018,24 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
 
             // If address looks like a cross-gateway Proxion address, discover peer first
             if (raw.includes("@") && (raw.includes("http") || raw.startsWith("did:"))) {
-                if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = "Looking up…"; }
+                if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = t('contact.lookingUp'); }
                 const discovered = await new Promise(resolve => {
                     _peerDiscoveredResolve = resolve;
                     socket.send(JSON.stringify({ cmd: "discover_peer", address: raw }));
                     setTimeout(() => { _peerDiscoveredResolve = null; resolve(null); }, 8000);
                 });
-                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Send Request"; }
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = t('contact.sendRequest'); }
                 if (!discovered) {
-                    errEl.textContent = "Could not reach that gateway — check the address and try again.";
+                    errEl.textContent = t('error.fr.delivery_failed');
                     return;
                 }
                 // Show discovered info briefly, then send friend request
                 errEl.style.color = "#4ade80";
-                errEl.textContent = `Found: ${discovered.display_name || discovered.did.slice(0, 20)} · ${discovered.fingerprint || ""}`;
+                errEl.textContent = t('contact.found', { name: discovered.display_name || discovered.did.slice(0, 20), fingerprint: discovered.fingerprint || "" });
                 setTimeout(() => { errEl.textContent = ""; errEl.style.color = ""; }, 3000);
             }
 
-            if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = "Sending…"; }
+            if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = t('contact.sending'); }
             _pendingFriendRequest = true;
             if (raw.includes("@")) {
                 socket.send(JSON.stringify({cmd: "send_friend_request", target_address: raw}));
@@ -3044,7 +3044,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                 // resolve_did doesn't use the friend-request flow; close immediately
                 _pendingFriendRequest = false;
                 document.getElementById("add-peer-modal").style.display = "none";
-                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Send Request"; }
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = t('contact.sendRequest'); }
             }
         }
         document.getElementById("add-peer-input").addEventListener("keydown", e => {
@@ -4143,7 +4143,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             window.__TAURI__.invoke('is_autostart_launch').then(isAutostart => {
                 if (isAutostart && !localStorage.getItem('proxion_autostart_notified')) {
                     localStorage.setItem('proxion_autostart_notified', '1');
-                    sendNotification('Proxion is running', 'Click the tray icon to open it.');
+                    sendNotification(t('app.runningTitle'), t('app.runningBody'));
                 }
             }).catch(() => {});
         }
@@ -4280,17 +4280,17 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     document.getElementById("update-dismiss-btn").onclick = () => banner.remove();
                     document.getElementById("update-install-btn").onclick = async () => {
                         const btn = document.getElementById("update-install-btn");
-                        btn.disabled = true; btn.textContent = "Updating…";
+                        btn.disabled = true; btn.textContent = t('update.updating');
                         try {
                             await updater.installUpdate();
                             if (window.__TAURI__.process && window.__TAURI__.process.relaunch) {
                                 await window.__TAURI__.process.relaunch();
                             } else {
-                                btn.textContent = "Please restart Proxion";
+                                btn.textContent = t('update.restart');
                             }
                         } catch (e) {
                             btn.disabled = false;
-                            btn.textContent = "Retry";
+                            btn.textContent = t('update.retry');
                             showToast(t('common.updateFailed'));
                         }
                     };
