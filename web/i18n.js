@@ -19,8 +19,16 @@
 // injection path.
 
 // Shippable locales (qps is a test-only generated pseudo-locale, never listed
-// here so it's not auto-selected from navigator.languages).
-export const SUPPORTED_LOCALES = ['en', 'es', 'de', 'fr', 'ar'];
+// here so it's not auto-selected from navigator.languages). Each carries its
+// endonym (name in its own language) and a draft flag for the picker.
+export const LOCALE_META = {
+    en: { name: 'English', draft: false },
+    es: { name: 'Español', draft: true },
+    de: { name: 'Deutsch', draft: true },
+    fr: { name: 'Français', draft: true },
+    ar: { name: 'العربية', draft: true },
+};
+export const SUPPORTED_LOCALES = Object.keys(LOCALE_META);
 const RTL_LANGS = ['ar', 'he', 'fa', 'ur'];
 
 let _locale = 'en';

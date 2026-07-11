@@ -358,5 +358,7 @@
   "members.online.one": "Online — {count}",
   "members.online.other": "Online — {count}",
   "members.offline.one": "Offline — {count}",
-  "members.offline.other": "Offline — {count}"
+  "members.offline.other": "Offline — {count}",
+  "label.language": "Language",
+  "label.draft": "draft"
 }

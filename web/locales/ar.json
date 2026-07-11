@@ -1,18 +1,21 @@
 {
-  "_meta": { "locale": "ar", "name": "العربية", "draft": true, "rtl": true },
-
+  "_meta": {
+    "locale": "ar",
+    "name": "العربية",
+    "draft": true,
+    "rtl": true
+  },
   "sidebar.rooms": "الغرف",
   "sidebar.voiceChannels": "القنوات الصوتية",
   "sidebar.friendRequests": "طلبات الصداقة",
   "sidebar.contacts": "جهات الاتصال",
   "sidebar.dms": "الرسائل المباشرة",
-
   "control.search.placeholder": "البحث في الرسائل...",
   "control.createRoom": "إنشاء غرفة",
   "control.settings": "الإعدادات",
-
   "kbd.title": "اختصارات لوحة المفاتيح",
-
   "push.newMessage": "رسالة جديدة",
-  "push.newMessageFrom": "رسالة جديدة من {name}"
+  "push.newMessageFrom": "رسالة جديدة من {name}",
+  "label.language": "اللغة",
+  "label.draft": "مسودة"
 }

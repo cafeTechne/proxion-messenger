@@ -1,18 +1,20 @@
 {
-  "_meta": { "locale": "de", "name": "Deutsch", "draft": true },
-
+  "_meta": {
+    "locale": "de",
+    "name": "Deutsch",
+    "draft": true
+  },
   "sidebar.rooms": "Räume",
   "sidebar.voiceChannels": "Sprachkanäle",
   "sidebar.friendRequests": "Freundschaftsanfragen",
   "sidebar.contacts": "Kontakte",
   "sidebar.dms": "Direktnachrichten",
-
   "control.search.placeholder": "Nachrichten suchen...",
   "control.createRoom": "Raum erstellen",
   "control.settings": "Einstellungen",
-
   "kbd.title": "Tastenkürzel",
-
   "push.newMessage": "Neue Nachricht",
-  "push.newMessageFrom": "Neue Nachricht von {name}"
+  "push.newMessageFrom": "Neue Nachricht von {name}",
+  "label.language": "Sprache",
+  "label.draft": "Entwurf"
 }

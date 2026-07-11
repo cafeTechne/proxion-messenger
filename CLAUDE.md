@@ -50,6 +50,12 @@ pytest tests/e2e/               # E2E (real WebSocket connections)
 pytest -m "not integration"     # skip tests that need a running CSS pod
 ```
 
+Web client gates (`cd web`): `npm test` (vitest) plus the smokes —
+`smoke:a11y` (axe-core WCAG 2.2 AA), `smoke:keyboard` (mouse-free journey),
+`smoke:pseudo` (pseudo-locale + RTL), `check:i18n`, `check:contrast`. See
+[`web/locales/README.md`](web/locales/README.md) for the i18n workflow (adding
+a locale, the no-markup rule, pseudo-locale regeneration).
+
 ## Deployment target
 
 Native executables via PyInstaller + Tauri. No Docker dependency. Supports Windows x64/ARM64, macOS Intel/Apple Silicon, Linux x64/ARM64.

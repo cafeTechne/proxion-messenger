@@ -47,7 +47,25 @@ import { inlineNotice, feedEmptyState } from './states.js';
 import { installFocusTrap } from './focus-trap.js';
 import { makeListNavigable, announce } from './a11y.js';
 import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport } from './dmhistory.js';
-import { initI18n, applyStaticI18n, t, tn, getLocale } from './i18n.js';
+import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } from './i18n.js';
+
+        // Populate the settings language picker from the locale manifest, mark the
+        // active one, and reload on change (J1). Endonyms so each language reads
+        // in its own script; drafts flagged. Runs after initI18n resolves _locale.
+        function _initLanguagePicker() {
+            const sel = document.getElementById('settings-locale');
+            if (!sel) return;
+            const cur = getLocale();
+            sel.innerHTML = '';
+            for (const [code, meta] of Object.entries(LOCALE_META)) {
+                const opt = document.createElement('option');
+                opt.value = code;
+                opt.textContent = meta.name + (meta.draft ? ` (${t('label.draft')})` : '');
+                if (code === cur) opt.selected = true;
+                sel.appendChild(opt);
+            }
+            sel.onchange = () => { if (sel.value && sel.value !== cur) setLocale(sel.value); };
+        }
 
         // Load the active locale BEFORE any translated UI paints, then apply the
         // static index.html translations (the English text stays in the markup as
@@ -56,6 +74,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale } from './i18n.js';
         // already parsed. (PLAN_ROUND_56 F1/F3)
         await initI18n();
         applyStaticI18n();
+        _initLanguagePicker();
 
         // Modal a11y: focus-restore + Tab-trap for every dialog (observer-based,
         // so it covers all ~20 modals without retrofitting their open/close sites).

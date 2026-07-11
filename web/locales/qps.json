@@ -359,5 +359,7 @@
   "members.online.one": "⟦Óñĺíñé — {count} áéíó⟧",
   "members.online.other": "⟦Óñĺíñé — {count} áéíó⟧",
   "members.offline.one": "⟦Óƒƒĺíñé — {count} áéíó⟧",
-  "members.offline.other": "⟦Óƒƒĺíñé — {count} áéíó⟧"
+  "members.offline.other": "⟦Óƒƒĺíñé — {count} áéíó⟧",
+  "label.language": "⟦Ĺáñǧúáǧé áéí⟧",
+  "label.draft": "⟦ðŕáƒţ áé⟧"
 }
