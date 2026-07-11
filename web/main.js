@@ -602,8 +602,8 @@ import { initI18n, applyStaticI18n, t, tn, getLocale } from './i18n.js';
                 const body = document.createElement("div");
                 body.className = "dm-item-body";
                 const ts = last ? timeAgo(last.timestamp) : "";
-                body.innerHTML = `<div class="dm-item-name">${escHtml(name)}${ts ? `<span style="color:#8091a7;font-size:0.75em;float:right;margin-left:4px">${ts}</span>` : ""}</div>
-                    ${last ? `<div class="dm-item-preview">${last.snippet.replace(/</g,"&lt;")}</div>` : ""}`;
+                body.innerHTML = `<div class="dm-item-name" dir="auto">${escHtml(name)}${ts ? `<span style="color:#8091a7;font-size:0.75em;float:inline-end;margin-inline-start:4px">${ts}</span>` : ""}</div>
+                    ${last ? `<div class="dm-item-preview" dir="auto">${last.snippet.replace(/</g,"&lt;")}</div>` : ""}`;
                 const closeBtn = document.createElement("button");
                 closeBtn.className = "dm-close-btn";
                 closeBtn.innerText = "×";

@@ -20,7 +20,8 @@
     "smoke:dmreaction": "node smoke_dm_reaction.mjs",
     "smoke:multidevice": "node smoke_multidevice_dm.mjs",
     "smoke:a11y": "node smoke_a11y.mjs",
-    "smoke:keyboard": "node smoke_keyboard.mjs"
+    "smoke:keyboard": "node smoke_keyboard.mjs",
+    "smoke:pseudo": "node smoke_pseudo.mjs"
   },
   "keywords": [],
   "author": "",

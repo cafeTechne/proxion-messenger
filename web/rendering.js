@@ -381,7 +381,7 @@ export function createRendering({
             const _audioLabel = escHtml(t('msg.voiceFrom', { name }) + (_durSecs ? t('msg.voiceDuration', { secs: _durSecs }) : ""));
             body.innerHTML += `<div class="audio-message"><audio controls aria-label="${_audioLabel}" src="data:audio/webm;base64,${msg.audio_b64}"></audio>${dur}${receiptHtml}</div>`;
         } else {
-            body.innerHTML += `<div class="msg-content"><span class="msg-text">${renderedText}</span>${editedHtml}${receiptHtml}</div>`;
+            body.innerHTML += `<div class="msg-content"><span class="msg-text" dir="auto">${renderedText}</span>${editedHtml}${receiptHtml}</div>`;
         }
 
         if (fileHtml) body.innerHTML += fileHtml;

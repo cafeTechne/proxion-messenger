@@ -94,7 +94,7 @@ body {
 #sidebar {
     width: 260px;
     background: var(--bg-secondary);
-    border-right: 1px solid var(--border);
+    border-inline-end: 1px solid var(--border);
     display: flex;
     flex-direction: column;
 }
@@ -265,7 +265,7 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
 .msg-actions {
     display: none;
     position: absolute;
-    right: 12px;
+    inset-inline-end: 12px;
     top: -14px;
     background: var(--bg-secondary, #16213e);
     border: 1px solid var(--border, #0f3460);
@@ -297,7 +297,7 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
 .time {
     font-size: 0.75em;
     color: var(--text-secondary);
-    margin-right: 8px;
+    margin-inline-end: 8px;
 }
 
 .system-msg {
@@ -392,13 +392,17 @@ button:hover { background: var(--accent-hover); }
         z-index: 100;
         height: 100%;
         width: 80%;
-        left: 0;
+        inset-inline-start: 0;
         transition: transform var(--transition-base);
         transform: translateX(-100%);
     }
-    #sidebar.active {
-        transform: translateX(0);
-    }
+    /* RTL: the sidebar is anchored to the (flipped) inline-start, so it must
+       hide toward the opposite side — transforms aren't direction-aware. The
+       open rule is repeated under the same selector prefix so it keeps winning
+       on specificity over the RTL hide rule. */
+    :root[dir="rtl"] #sidebar { transform: translateX(100%); }
+    #sidebar.active,
+    :root[dir="rtl"] #sidebar.active { transform: translateX(0); }
     /* Members panel becomes a right-side off-canvas drawer on mobile. The desktop
        show/hide path sets inline display:block/none, so the drawer needs
        display:block !important to beat a lingering inline display:none — its
@@ -414,7 +418,7 @@ button:hover { background: var(--accent-hover); }
         display: block !important;
         position: absolute;
         top: 0;
-        right: 0;
+        inset-inline-end: 0;
         height: 100%;
         width: 80%;
         max-width: 320px;
@@ -422,14 +426,16 @@ button:hover { background: var(--accent-hover); }
         transform: translateX(100%);
         transition: transform var(--transition-base);
     }
-    #members-panel.mobile-open {
-        transform: translateX(0);
-    }
+    /* RTL: anchored to the flipped inline-end, so hide toward the other side.
+       Repeat the open rule under the RTL prefix so it wins on specificity. */
+    :root[dir="rtl"] #members-panel { transform: translateX(-100%); }
+    #members-panel.mobile-open,
+    :root[dir="rtl"] #members-panel.mobile-open { transform: translateX(0); }
     /* Phone composer: the message input was squeezed to ~37% width by four buttons.
        Reclaim room for the primary input by dropping the secondary schedule action
        (still available on desktop) and tightening the Send button. */
     #schedule-btn { display: none; }
-    #message-form > button[type="submit"] { padding-left: 14px; padding-right: 14px; }
+    #message-form > button[type="submit"] { padding-inline-start: 14px; padding-inline-end: 14px; }
     /* Phone chat header: the room title wrapped onto two lines and the Leave/
        Delete/Call text buttons overflowed the row. Icons only on mobile (each
        keeps its title tooltip + aria-label); the title truncates with an
@@ -438,8 +444,8 @@ button:hover { background: var(--accent-hover); }
         flex-wrap: nowrap;
         /* Desktop's 25px side padding is too rich when every action icon is
            showing — reclaim it for the action row. */
-        padding-left: 12px;
-        padding-right: 12px;
+        padding-inline-start: 12px;
+        padding-inline-end: 12px;
     }
     #chat-header .btn-label { display: none; }
     /* If a view still shows more action icons than fit (owner room + voice),
@@ -536,7 +542,7 @@ button:hover { background: var(--accent-hover); }
     color: var(--color-danger) !important;
 }
 
-.relay-pending-badge { margin-left: 4px; font-size: 0.75em; opacity: 0.7; vertical-align: middle; }
+.relay-pending-badge { margin-inline-start: 4px; font-size: 0.75em; opacity: 0.7; vertical-align: middle; }
 
 /* ── R13: Round 13 additions ── */
 
@@ -547,7 +553,7 @@ button:hover { background: var(--accent-hover); }
     white-space: nowrap; border: 0;
 }
 .skip-nav {
-    position: absolute; top: -40px; left: 0;
+    position: absolute; top: -40px; inset-inline-start: 0;
     background: var(--accent, #e94560); color: #fff;
     padding: 8px 16px; z-index: 9999; text-decoration: none;
     border-radius: 0 0 4px 0;
@@ -580,7 +586,7 @@ button:hover { background: var(--accent-hover); }
 .edited-badge {
     font-size: 0.75em; color: var(--text-secondary);
     text-decoration: underline dotted; cursor: pointer;
-    margin-left: 4px; vertical-align: middle;
+    margin-inline-start: 4px; vertical-align: middle;
 }
 .edited-badge:hover { color: var(--slate-300); }
 .edit-history-popover {
@@ -598,7 +604,7 @@ button:hover { background: var(--accent-hover); }
 .unread-count-badge {
     background: var(--accent, #e94560); color: #fff;
     border-radius: 10px; padding: 1px 7px; font-size: 0.75em;
-    margin-left: auto; flex-shrink: 0;
+    margin-inline-start: auto; flex-shrink: 0;
 }
 
 /* 13.14: Contact search dropdown */
@@ -608,7 +614,7 @@ button:hover { background: var(--accent-hover); }
     border: 1px solid var(--border, #334155); border-radius: 6px;
     max-height: 200px; overflow-y: auto;
     box-shadow: 0 4px 12px rgba(0,0,0,.4);
-    top: 100%; left: 0;
+    top: 100%; inset-inline-start: 0;
 }
 .contact-search-item {
     padding: 8px 12px; cursor: pointer; display: flex;
