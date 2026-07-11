@@ -354,5 +354,10 @@
   "conn.connectedHint": "⟦Çóññéçţéð. Ρíçķ á çóñṽéŕšáţíóñ, óŕ çŕéáţé á ŕóóɱ ţó ǧéţ šţáŕţéð. áéíóúáéíóúáéíóúáéíóúáéíóúá⟧",
   "conn.lost": "⟦Çóññéçţíóñ ĺóšţ. Ŕéçóññéçţíñǧ… áéíóúáéíóúáé⟧",
   "conn.offline": "⟦Óƒƒĺíñé áéí⟧",
-  "conn.gatewayOffline": "⟦Ǧáţéŵáý óƒƒĺíñé áéíóúá⟧"
+  "conn.gatewayOffline": "⟦Ǧáţéŵáý óƒƒĺíñé áéíóúá⟧",
+  "time.justNow": "⟦Ĵúšţ ñóŵ áéí⟧",
+  "members.online.one": "⟦Óñĺíñé — {count} áéíó⟧",
+  "members.online.other": "⟦Óñĺíñé — {count} áéíó⟧",
+  "members.offline.one": "⟦Óƒƒĺíñé — {count} áéíó⟧",
+  "members.offline.other": "⟦Óƒƒĺíñé — {count} áéíó⟧"
 }

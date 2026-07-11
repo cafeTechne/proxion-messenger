@@ -353,5 +353,10 @@
   "conn.connectedHint": "Connected. Pick a conversation, or create a room to get started.",
   "conn.lost": "Connection lost. Reconnecting…",
   "conn.offline": "Offline",
-  "conn.gatewayOffline": "Gateway offline"
+  "conn.gatewayOffline": "Gateway offline",
+  "time.justNow": "Just now",
+  "members.online.one": "Online — {count}",
+  "members.online.other": "Online — {count}",
+  "members.offline.one": "Offline — {count}",
+  "members.offline.other": "Offline — {count}"
 }

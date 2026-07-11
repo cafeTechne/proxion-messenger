@@ -72,7 +72,7 @@ describe('expireLabel', () => {
 
 describe('timeAgo', () => {
   it('returns "Just now" for the present', () => {
-    expect(timeAgo(new Date())).toBe('Just now');
+    expect(timeAgo(new Date())).toBe('time.justNow');
   });
   it('returns minutes for a few minutes ago', () => {
     expect(timeAgo(new Date(Date.now() - 5 * 60_000))).toBe('5m ago');

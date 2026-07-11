@@ -50,8 +50,8 @@ describe('renderMembersPanel', () => {
       { webid: 'did:key:zB', display_name: 'Bob', status: 'offline' },
     ]);
     const html = els['members-list'].innerHTML;
-    expect(html).toContain('Online — 1');
-    expect(html).toContain('Offline — 1');
+    expect(html).toContain('members.online');
+    expect(html).toContain('members.offline');
     expect(html).toContain('Alice');
     expect(html).toContain('Bob');
   });

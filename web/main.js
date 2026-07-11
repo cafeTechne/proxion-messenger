@@ -47,7 +47,7 @@ import { inlineNotice, feedEmptyState } from './states.js';
 import { installFocusTrap } from './focus-trap.js';
 import { makeListNavigable, announce } from './a11y.js';
 import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport } from './dmhistory.js';
-import { initI18n, applyStaticI18n, t, tn } from './i18n.js';
+import { initI18n, applyStaticI18n, t, tn, getLocale } from './i18n.js';
 
         // Load the active locale BEFORE any translated UI paints, then apply the
         // static index.html translations (the English text stays in the markup as
@@ -2083,7 +2083,7 @@ import { initI18n, applyStaticI18n, t, tn } from './i18n.js';
                     if (!sp) break;
                     if (!event.scheduled || !event.scheduled.length) { sp.innerHTML = '<em style="color:#94a3b8">None scheduled.</em>'; break; }
                     sp.innerHTML = event.scheduled.map(s => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:0.85em;">
-                        <span style="flex:1">${escHtml((s.content||'').slice(0,40))} <em style="color:#94a3b8">(${new Date(s.send_at*1000).toLocaleString()})</em></span>
+                        <span style="flex:1">${escHtml((s.content||'').slice(0,40))} <em style="color:#94a3b8">(${new Date(s.send_at*1000).toLocaleString(getLocale())})</em></span>
                         <button data-cancel-sched="${s.id}" style="background:#334155;border:none;color:#f1f5f9;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:0.8em;">Cancel</button>
                     </div>`).join('');
                     sp.querySelectorAll('[data-cancel-sched]').forEach(btn => {
@@ -2113,7 +2113,7 @@ import { initI18n, applyStaticI18n, t, tn } from './i18n.js';
                     container.innerHTML = devs.map(d => {
                         const label = escHtml(d.display_name || d.device_id.slice(0, 16));
                         const since = d.registered_at
-                            ? new Date(d.registered_at * 1000).toLocaleDateString() : "";
+                            ? new Date(d.registered_at * 1000).toLocaleDateString(getLocale()) : "";
                         return `<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid #1e293b;gap:8px;">
                             <span style="flex:1">${label}<br><span style="color:#8091a7;font-size:0.8em;">${since}</span></span>
                             <button data-device-id="${escHtml(d.device_id)}" style="background:transparent;border:none;color:#f87171;font-size:0.8em;cursor:pointer;padding:2px 6px;">Revoke</button>
@@ -2139,7 +2139,7 @@ import { initI18n, applyStaticI18n, t, tn } from './i18n.js';
                     break;
                 case "member_muted":
                     _appendSystemMsg(`${event.webid.slice(-12)} was muted` +
-                        (event.expires_at ? ` until ${new Date(event.expires_at * 1000).toLocaleTimeString()}` : ''));
+                        (event.expires_at ? ` until ${new Date(event.expires_at * 1000).toLocaleTimeString(getLocale())}` : ''));
                     break;
                 case "member_unmuted":
                     _appendSystemMsg(`${event.webid.slice(-12)} was unmuted`);
@@ -4317,7 +4317,7 @@ import { initI18n, applyStaticI18n, t, tn } from './i18n.js';
                             if (!edits.length) { popover.innerHTML = inlineNotice(t('edit.noHistory')); return; }
                             popover.innerHTML = edits.map(ed =>
                                 `<div class="edit-history-entry">
-                                  <div class="edit-history-meta">${escHtml(new Date(ed.edited_at).toLocaleString())} — ${escHtml(ed.edited_by)}</div>
+                                  <div class="edit-history-meta">${escHtml(new Date(ed.edited_at).toLocaleString(getLocale()))} — ${escHtml(ed.edited_by)}</div>
                                   <div>${escHtml(ed.prev_content)}</div>
                                 </div>`
                             ).join("");

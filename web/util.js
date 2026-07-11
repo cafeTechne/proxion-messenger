@@ -1,5 +1,9 @@
 // Pure, dependency-free helpers extracted from main.js (R40).
 // No DOM access, no shared mutable state — safe to unit-test in isolation.
+//
+// (H) Locale-aware date/number formatting threads the active locale from
+// i18n.js. This import is cycle-free: i18n.js imports nothing from the app.
+import { getLocale, t } from './i18n.js';
 
 export function didSuffix(id) {
     if (!id || id.length < 5) return "";
@@ -19,7 +23,7 @@ export function formatTimestamp(ts) {
     if (!ts) return '';
     const d = new Date(typeof ts === 'number' ? ts * 1000 : ts);
     if (isNaN(d)) return String(ts);
-    return d.toLocaleString();
+    return d.toLocaleString(getLocale());
 }
 
 export function webidColor(webid) {
@@ -67,12 +71,16 @@ export function expireLabel(msRemaining) {
 
 export function timeAgo(date) {
     const seconds = Math.floor((new Date() - new Date(date)) / 1000);
-    if (seconds < 60) return "Just now";
+    // RelativeTimeFormat has no sub-minute idiom in every locale, so "just now"
+    // is a translated string of its own.
+    if (seconds < 60) return t('time.justNow');
+    const locale = getLocale();
+    const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'always', style: 'narrow' });
     const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
+    if (minutes < 60) return rtf.format(-minutes, 'minute');
     const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    return new Date(date).toLocaleDateString();
+    if (hours < 24) return rtf.format(-hours, 'hour');
+    return new Date(date).toLocaleDateString(locale);
 }
 
 // Uint8Array <-> base64 (used by chunked file transfer)

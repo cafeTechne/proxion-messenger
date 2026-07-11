@@ -6,6 +6,7 @@
 // current roster (lives in rooms.js).
 
 import { escHtml, webidColor } from './util.js';
+import { tn } from './i18n.js';
 
 export function createMembers({ getActiveView, requestRoomMembers }) {
     function toggleMembersPanel() {
@@ -47,11 +48,11 @@ export function createMembers({ getActiveView, requestRoomMembers }) {
         const offline = members.filter(m => m.status !== "online");
         list.innerHTML = "";
         if (online.length) {
-            list.innerHTML += `<div class="members-section-header">Online — ${online.length}</div>`;
+            list.innerHTML += `<div class="members-section-header">${tn('members.online', online.length)}</div>`;
             online.forEach(m => list.innerHTML += memberHtml(m));
         }
         if (offline.length) {
-            list.innerHTML += `<div class="members-section-header">Offline — ${offline.length}</div>`;
+            list.innerHTML += `<div class="members-section-header">${tn('members.offline', offline.length)}</div>`;
             offline.forEach(m => list.innerHTML += memberHtml(m));
         }
     }
