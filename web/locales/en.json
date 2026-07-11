@@ -347,5 +347,11 @@
   "msg.reply": "Reply",
   "msg.pin": "Pin",
   "msg.voiceFrom": "Voice message from {name}",
-  "msg.voiceDuration": ", {secs} seconds"
+  "msg.voiceDuration": ", {secs} seconds",
+  "conn.connecting": "Connecting to gateway…",
+  "conn.reconnected": "Reconnected to the gateway.",
+  "conn.connectedHint": "Connected. Pick a conversation, or create a room to get started.",
+  "conn.lost": "Connection lost. Reconnecting…",
+  "conn.offline": "Offline",
+  "conn.gatewayOffline": "Gateway offline"
 }

@@ -143,14 +143,26 @@ export function setLocale(code) {
     try { location.reload(); } catch { /* non-browser */ }
 }
 
-// The service worker can't import this module, so mirror the locale + the tiny
-// push string set into localStorage; sw.js reads it at push time (G4).
+// The service worker can't import this module — and can't read localStorage
+// (unavailable in the SW scope) — so mirror the locale + the tiny push string
+// set into IndexedDB, which the SW push handler CAN read at notify time (G4).
+// A localStorage copy is kept too for any same-context reader.
 function _mirrorForServiceWorker() {
+    const payload = {
+        locale: _locale,
+        newMessage: _lookup('push.newMessage') || 'New message',
+        newMessageFrom: _lookup('push.newMessageFrom') || 'New message from {name}',
+    };
+    try { localStorage.setItem('proxion_i18n_push', JSON.stringify(payload)); } catch { /* ignore */ }
     try {
-        localStorage.setItem('proxion_i18n_push', JSON.stringify({
-            locale: _locale,
-            newMessage: _lookup('push.newMessage') || 'New message',
-            newMessageFrom: _lookup('push.newMessageFrom') || 'New message from {name}',
-        }));
+        if (typeof indexedDB === 'undefined') return;
+        const req = indexedDB.open('proxion-i18n', 1);
+        req.onupgradeneeded = () => { try { req.result.createObjectStore('kv'); } catch { /* exists */ } };
+        req.onsuccess = () => {
+            try {
+                const tx = req.result.transaction('kv', 'readwrite');
+                tx.objectStore('kv').put(payload, 'push');
+            } catch { /* ignore */ }
+        };
     } catch { /* ignore */ }
 }

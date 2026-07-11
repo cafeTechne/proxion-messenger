@@ -1,4 +1,4 @@
-const CACHE = "proxion-shell-v93";
+const CACHE = "proxion-shell-v94";
 const SHELL = [
   "/",
   "/index.html",
@@ -107,23 +107,48 @@ self.addEventListener("fetch", (e) => {
   );
 });
 
+// i18n mirror (G4): the SW can't import i18n.js or read localStorage, so read
+// the locale's push strings from the IndexedDB copy i18n.js writes on boot.
+// Falls back to English if the app has never run since install.
+function _i18nPush() {
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open("proxion-i18n", 1);
+      req.onupgradeneeded = () => { try { req.result.createObjectStore("kv"); } catch (_) {} };
+      req.onsuccess = () => {
+        try {
+          const g = req.result.transaction("kv", "readonly").objectStore("kv").get("push");
+          g.onsuccess = () => resolve(g.result || null);
+          g.onerror = () => resolve(null);
+        } catch (_) { resolve(null); }
+      };
+      req.onerror = () => resolve(null);
+    } catch (_) { resolve(null); }
+  });
+}
+
 // R13.9: Web Push notification support
 self.addEventListener("push", (event) => {
-  let data = { title: "Proxion", body: "New message" };
-  try { data = event.data ? event.data.json() : data; } catch (_) {}
-  const threadId = data.thread_id || "";
-  event.waitUntil(
-    self.registration.showNotification(data.title || "Proxion", {
-      body: data.body || "",
-      // PNG, not SVG — several platforms ignore SVG notification icons.
-      icon: "/icons/icon-192.png",
-      badge: "/icons/icon-192.png",
-      // Per-thread tag so different conversations don't collapse into one.
-      tag: threadId ? ("proxion-" + threadId) : "proxion-msg",
-      renotify: true,
-      data: { thread_id: threadId },
-    })
-  );
+  event.waitUntil((async () => {
+    let data = {};
+    try { data = event.data ? event.data.json() : {}; } catch (_) {}
+    const i18n = await _i18nPush();
+    const threadId = data.thread_id || "";
+    await self.registration.showNotification(
+      data.title || "Proxion",
+      {
+        // Server-provided body wins; otherwise the localized default.
+        body: data.body || (i18n && i18n.newMessage) || "New message",
+        // PNG, not SVG — several platforms ignore SVG notification icons.
+        icon: "/icons/icon-192.png",
+        badge: "/icons/icon-192.png",
+        // Per-thread tag so different conversations don't collapse into one.
+        tag: threadId ? ("proxion-" + threadId) : "proxion-msg",
+        renotify: true,
+        data: { thread_id: threadId },
+      }
+    );
+  })());
 });
 
 self.addEventListener("notificationclick", (event) => {

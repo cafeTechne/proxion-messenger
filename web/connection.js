@@ -15,6 +15,7 @@
 
 import { myX25519PubB64u } from './e2e.js';
 import { announce } from './a11y.js';
+import { t } from './i18n.js';
 
 export function createConnection({
     wsUrl, getSocket, setSocket, getClientDid, generateOrLoadIdentity, handleEventAsync,
@@ -36,7 +37,7 @@ export function createConnection({
             socket.send(JSON.stringify(payload));
             return;
         }
-        if (statusEl) { statusEl.textContent = "Connecting to gateway…"; statusEl.style.color = "#94a3b8"; }
+        if (statusEl) { statusEl.textContent = t('conn.connecting'); statusEl.style.color = "#94a3b8"; }
         // If socket is closed (not just still connecting), restart immediately — don't wait
         // for the exponential-backoff timer which may be up to 60s.
         if (!socket || socket.readyState === WebSocket.CLOSED) {
@@ -96,7 +97,7 @@ export function createConnection({
             console.log("Connected to gateway");
             // Announce a reconnect (once) to screen readers — but not the very
             // first connect (that's the expected startup state, not news).
-            if (state._wasConnected) announce("Reconnected to the gateway.");
+            if (state._wasConnected) announce(t('conn.reconnected'));
             state._wasConnected = true;
             state._reconnectDelay = 3000;
             document.querySelector(".dot").className = "dot online";
@@ -135,7 +136,7 @@ export function createConnection({
             const _feed = document.getElementById("message-feed");
             const _hint = Array.from(_feed?.querySelectorAll?.(".system-msg") || [])
                 .find(el => /connect to the gateway/i.test(el.textContent));
-            if (_hint) _hint.textContent = "Connected. Pick a conversation, or create a room to get started.";
+            if (_hint) _hint.textContent = t('conn.connectedHint');
         };
 
         ws.onmessage = (event) => {
@@ -154,7 +155,7 @@ export function createConnection({
             console.log("Disconnected from gateway");
             // Announce the drop once (the per-second countdown stays silent — it
             // would otherwise announce every second).
-            if (state._wasConnected) announce("Connection lost. Reconnecting…", true);
+            if (state._wasConnected) announce(t('conn.lost'), true);
             state._wasConnected = false;
             document.querySelector(".dot").className = "dot offline";
             const banner = document.getElementById("conn-banner");
@@ -167,7 +168,7 @@ export function createConnection({
                 banner.style.display = "none";
                 setTimeout(connect, 0);
             } else {
-                document.getElementById("username").innerText = localStorage.getItem("proxion_display_name") ? "Offline" : "Gateway offline";
+                document.getElementById("username").innerText = localStorage.getItem("proxion_display_name") ? t('conn.offline') : t('conn.gatewayOffline');
                 banner.textContent = `Reconnecting in ${Math.round(retryMs / 1000)}s…`;
                 banner.style.display = "block";
                 let remaining = Math.round(retryMs / 1000);
