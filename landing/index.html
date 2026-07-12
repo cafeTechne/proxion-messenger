@@ -3,70 +3,328 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Proxion — sovereign messaging</title>
+<title>Proxion — the messenger that keeps your data yours. Built on Solid.</title>
+<meta name="description" content="Proxion is a free, open-source, end-to-end encrypted messenger built on the Solid Protocol. Your messages live in your own Solid pod, on hardware you control. No account, no phone number, no company in the middle.">
+<link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+
+<!-- Social cards. og:image must be an ABSOLUTE URL — set it once the GitHub
+     Pages URL is known (https://<owner>.github.io/<repo>/assets/screenshot-chat.png). -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="Proxion — the messenger that keeps your data yours">
+<meta property="og:description" content="End-to-end encrypted messaging and voice, built on the Solid Protocol. Your history lives in your own Solid pod — not in a company's data center.">
+<meta name="twitter:card" content="summary_large_image">
+
 <style>
-  :root { --bg:#0f172a; --bg2:#1e293b; --fg:#f1f5f9; --muted:#94a3b8; --dim:#64748b; --accent:#e94560; --ok:#4ade80; --line:#334155; }
-  * { box-sizing: border-box; }
-  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-         background: radial-gradient(1200px 600px at 50% -10%, #15233f, var(--bg)); color: var(--fg);
-         min-height:100vh; line-height:1.5; }
-  .wrap { max-width: 760px; margin: 0 auto; padding: 64px 20px 80px; }
-  h1 { font-size: 2.6rem; margin: 0 0 8px; letter-spacing:-0.02em; }
-  .tag { color: var(--muted); font-size: 1.1rem; margin: 0 0 36px; }
-  .card { background: var(--bg2); border: 1px solid var(--line); border-radius: 14px; padding: 24px; margin: 0 0 20px; }
-  .dl-primary { display:inline-flex; align-items:center; gap:10px; background: var(--accent); color:#fff;
-                text-decoration:none; font-weight:600; font-size:1.05rem; padding: 14px 24px; border-radius:10px; }
-  .dl-primary:hover { filter: brightness(1.08); }
-  .dl-sub { margin-top: 14px; font-size:0.9em; }
-  .dl-sub a { color: var(--muted); text-decoration: none; margin-right: 14px; }
+  :root {
+    --bg: #0d1424; --bg-soft: #111a2e; --card: #16203a; --card-2: #1a2542;
+    --line: #263450; --line-soft: #1e2a45;
+    --fg: #eef2f8; --muted: #a9b6ca; --dim: #7c8ba3;
+    --accent: #e94560; --accent-soft: #f06a8a; --ok: #4ade80;
+    --solid: #7c4dff; --solid-soft: #b39dff;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--fg); line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent-soft); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 3px; border-radius: 4px; }
+  img { max-width: 100%; height: auto; display: block; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+  section { padding: 72px 0; }
+  h2 { font-size: clamp(1.6rem, 3.5vw, 2.2rem); letter-spacing: -0.02em; line-height: 1.2; margin-bottom: 12px; }
+  .lead { color: var(--muted); font-size: 1.08rem; max-width: 640px; }
+
+  /* ── nav ── */
+  nav { display: flex; align-items: center; gap: 24px; padding: 20px 0; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.15rem; color: var(--fg); text-decoration: none; }
+  .brand img { width: 28px; height: 28px; border-radius: 7px; }
+  nav .links { margin-left: auto; display: flex; gap: 22px; }
+  nav .links a { color: var(--muted); text-decoration: none; font-size: 0.95rem; }
+  nav .links a:hover { color: var(--fg); }
+  @media (max-width: 560px) { nav .links a.hide-sm { display: none; } }
+
+  /* ── hero ── */
+  .hero { padding: 56px 0 0; text-align: center;
+          background: radial-gradient(900px 480px at 50% -120px, #1b2a4d, transparent); }
+  .eyebrow { display: inline-flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 4px 8px;
+             font-size: 0.85rem; color: var(--solid-soft); max-width: 92%;
+             border: 1px solid #3a2f6b; background: #1a1836; padding: 6px 14px; border-radius: 999px; }
+  .eyebrow b { color: #d6ccff; font-weight: 600; }
+  h1 { font-size: clamp(2.2rem, 5.5vw, 3.4rem); letter-spacing: -0.03em; line-height: 1.1; margin: 22px auto 18px; max-width: 780px; }
+  h1 .accent { color: var(--accent-soft); }
+  .hero .lead { margin: 0 auto 34px; max-width: 680px; }
+  .cta-row { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; align-items: center; }
+  .btn { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 600;
+         padding: 14px 26px; border-radius: 10px; font-size: 1.05rem; }
+  .btn.primary { background: var(--accent); color: #fff; box-shadow: 0 8px 28px rgba(233, 69, 96, 0.28); }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.ghost { color: var(--fg); border: 1px solid var(--line); background: rgba(255,255,255,0.03); }
+  .btn.ghost:hover { border-color: var(--dim); }
+  .dl-sub { margin-top: 16px; font-size: 0.9rem; color: var(--dim); }
+  .dl-sub a { color: var(--muted); text-decoration: none; margin: 0 8px; }
   .dl-sub a:hover { color: var(--fg); text-decoration: underline; }
-  .ver { color: var(--dim); font-size:0.85em; margin-top:10px; }
-  .steps { font-size:0.92em; color: var(--muted); }
-  .steps code { background:#0b1220; padding:1px 6px; border-radius:4px; color:#cbd5e1; }
-  .steps h3 { color: var(--fg); font-size:1rem; margin: 18px 0 6px; }
-  .badge { display:inline-block; font-size:0.72em; color:var(--ok); border:1px solid #14532d; background:#052e16;
-           padding:2px 8px; border-radius:999px; margin-left:8px; vertical-align:middle; }
-  .why { color: var(--dim); font-size:0.88em; }
-  .why strong { color: var(--muted); }
-  footer { color: var(--dim); font-size:0.82em; margin-top:30px; }
-  a.link { color: var(--muted); }
+  .ver { color: var(--dim); font-size: 0.85rem; margin-top: 8px; }
+  .platforms { margin-top: 10px; font-size: 0.82rem; color: var(--dim); }
+
+  .shot { margin: 56px auto -90px; max-width: 960px; position: relative; z-index: 1; }
+  .shot .frame { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
+                 box-shadow: 0 24px 80px rgba(0,0,0,0.55); background: #0f1729; }
+  .shot .bar { display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); }
+  .shot .bar i { width: 10px; height: 10px; border-radius: 50%; background: #2c3a5c; }
+  .after-shot { padding-top: 150px; }
+
+  /* ── pillars ── */
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 36px; }
+  @media (max-width: 820px) { .grid3 { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 26px; }
+  .card h3 { font-size: 1.12rem; margin-bottom: 8px; }
+  .card p { color: var(--muted); font-size: 0.95rem; }
+  .glyph { font-size: 1.5rem; margin-bottom: 14px; display: block; }
+
+  /* ── solid section ── */
+  .solid-band { background: linear-gradient(180deg, var(--bg-soft), var(--bg));
+                border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+  .solid-flex { display: flex; gap: 48px; align-items: flex-start; margin-top: 10px; }
+  @media (max-width: 860px) { .solid-flex { flex-direction: column; } }
+  .solid-flex > div { flex: 1; }
+  .solid-badge { color: var(--solid-soft); font-weight: 600; font-size: 0.9rem; letter-spacing: 0.06em; text-transform: uppercase; }
+  .pods { list-style: none; padding: 0; margin-top: 18px; display: grid; gap: 12px; }
+  .pods li { background: var(--card); border: 1px solid var(--line-soft); border-radius: 10px; padding: 14px 18px; }
+  .pods b { display: block; }
+  .pods span { color: var(--dim); font-size: 0.88rem; }
+  .solid-points { display: grid; gap: 18px; }
+  .solid-points h3 { font-size: 1.05rem; }
+  .solid-points p { color: var(--muted); font-size: 0.95rem; }
+
+  /* ── features ── */
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 36px; }
+  @media (max-width: 980px) { .grid4 { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { .grid4 { grid-template-columns: 1fr; } }
+  .feat { background: var(--card); border: 1px solid var(--line-soft); border-radius: 12px; padding: 20px; }
+  .feat h3 { font-size: 1rem; margin-bottom: 6px; }
+  .feat p { color: var(--muted); font-size: 0.88rem; }
+
+  /* ── how it works ── */
+  .steps-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 36px; counter-reset: step; }
+  @media (max-width: 820px) { .steps-grid { grid-template-columns: 1fr; } }
+  .step { background: var(--card); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 26px; }
+  .step::before { counter-increment: step; content: counter(step);
+                  display: inline-flex; width: 34px; height: 34px; align-items: center; justify-content: center;
+                  border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; margin-bottom: 14px; }
+  .step h3 { font-size: 1.05rem; margin-bottom: 8px; }
+  .step p { color: var(--muted); font-size: 0.93rem; }
+  .step code { background: #0b1220; padding: 1px 7px; border-radius: 4px; color: #cbd5e1; font-size: 0.86em; }
+
+  /* ── first-run / honesty ── */
+  .honest { background: var(--card); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 30px; margin-top: 28px; }
+  .honest h3 { margin-bottom: 8px; font-size: 1.05rem; }
+  .honest p, .honest li { color: var(--muted); font-size: 0.93rem; }
+  .honest code { background: #0b1220; padding: 1px 7px; border-radius: 4px; color: #cbd5e1; }
+  .honest .os-steps { margin-top: 14px; }
+
+  footer { border-top: 1px solid var(--line-soft); padding: 40px 0 56px; color: var(--dim); font-size: 0.88rem; }
+  footer .cols { display: flex; gap: 40px; flex-wrap: wrap; justify-content: space-between; }
+  footer a { color: var(--muted); text-decoration: none; }
+  footer a:hover { color: var(--fg); text-decoration: underline; }
+  footer ul { list-style: none; padding: 0; display: grid; gap: 8px; }
+  footer h4 { color: var(--fg); font-size: 0.9rem; margin-bottom: 12px; }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>Proxion</h1>
-  <p class="tag">Sovereign messaging &amp; voice for small groups. No company in the middle. No account. Your data, your machine.</p>
 
-  <div class="card">
-    <a id="dl" class="dl-primary" href="#">Detecting your system…</a>
-    <div id="dl-sub" class="dl-sub"></div>
-    <div id="ver" class="ver"></div>
+<header class="wrap">
+  <nav aria-label="Main">
+    <a class="brand" href="#"><img src="assets/icon.svg" alt="" width="28" height="28"> Proxion</a>
+    <div class="links">
+      <a href="#solid" class="hide-sm">Why Solid</a>
+      <a href="#features" class="hide-sm">Features</a>
+      <a href="#how">How it works</a>
+      <a id="nav-github" href="#">GitHub</a>
+    </div>
+  </nav>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="wrap">
+      <p class="eyebrow">Built on the <b>Solid Protocol</b> · free &amp; open source</p>
+      <h1>The messenger that keeps your data <span class="accent">yours</span>.</h1>
+      <p class="lead">Proxion is an end-to-end encrypted messenger where everything — your messages,
+      files, and call history — lives in your own <strong>Solid pod</strong>, on hardware you control.
+      No account. No phone number. No company in the middle.</p>
+
+      <div class="cta-row">
+        <a id="dl" class="btn primary" href="#">Detecting your system…</a>
+        <a id="gh-btn" class="btn ghost" href="#">View on GitHub</a>
+      </div>
+      <div id="dl-sub" class="dl-sub"></div>
+      <div id="ver" class="ver"></div>
+      <p class="platforms">Windows x64 / ARM64 · macOS Intel / Apple Silicon · Linux x64 / ARM64 · or any browser (PWA)</p>
+
+      <div class="shot">
+        <div class="frame">
+          <div class="bar" aria-hidden="true"><i></i><i></i><i></i></div>
+          <img src="assets/screenshot-chat.png" width="1280" height="800"
+               alt="Proxion desktop app: an end-to-end encrypted, verified conversation between Alice and Sam, with rooms and contacts in the sidebar.">
+        </div>
+      </div>
+    </div>
   </div>
 
-  <div class="card steps" id="steps"></div>
+  <section class="after-shot wrap" aria-labelledby="pillars-h">
+    <h2 id="pillars-h">Chat apps made you the product. This one makes you the owner.</h2>
+    <p class="lead">Every mainstream messenger stores your conversations in someone else's data center,
+    under someone else's terms. Proxion inverts that.</p>
+    <div class="grid3">
+      <div class="card">
+        <span class="glyph" aria-hidden="true">🗄️</span>
+        <h3>Your data, in your pod</h3>
+        <p>Message history is written to a <a href="https://solidproject.org" rel="noopener">Solid</a> pod
+        that <em>you</em> choose — a free community provider, Inrupt's PodSpaces, or a server in your closet.
+        Leave any time and the data goes with you.</p>
+      </div>
+      <div class="card">
+        <span class="glyph" aria-hidden="true">🔐</span>
+        <h3>Actually private</h3>
+        <p>End-to-end encryption with per-contact safety numbers you can verify out loud.
+        Your identity is a cryptographic key generated on your machine — there is no signup,
+        so there is nothing to leak.</p>
+      </div>
+      <div class="card">
+        <span class="glyph" aria-hidden="true">🔓</span>
+        <h3>No lock-in, by design</h3>
+        <p>Open source, open protocol, standard data. Gateways federate peer-to-peer, so friends
+        on their own servers can reach you without any central registry. Nobody can shut it off.</p>
+      </div>
+    </div>
+  </section>
 
-  <div class="card">
-    <p class="why"><strong>Why a one-time "are you sure?" on Windows/macOS?</strong><br>
-    Proxion ships free and unsigned-by-a-vendor on purpose — no Apple or Microsoft
-    gatekeeping, no certificate fees, no middleman. Updates are still cryptographically
-    verified with Proxion's own signing key. The OS just shows a caution prompt the first
-    time because it can't phone home to a paid certificate authority. Linux has no prompt.</p>
+  <div class="solid-band">
+    <section class="wrap" id="solid" aria-labelledby="solid-h">
+      <p class="solid-badge">The main event</p>
+      <h2 id="solid-h">Built on Solid — the web's plan to give your data back</h2>
+      <p class="lead"><a href="https://solidproject.org" rel="noopener">Solid</a> is the
+      re-decentralization project started by Sir Tim Berners-Lee, the inventor of the web:
+      your data lives in a personal online datastore (a <em>pod</em>) that applications visit
+      with your permission, instead of keeping it for themselves.</p>
+
+      <div class="solid-flex">
+        <div class="solid-points">
+          <div>
+            <h3>Standards-compliant pod storage</h3>
+            <p>Proxion speaks the Solid Protocol directly — WebID identity, DPoP-bound tokens,
+            authenticated reads and writes to any spec-compliant pod server. It is a Solid app,
+            not a silo with an export button.</p>
+          </div>
+          <div>
+            <h3>Portable by construction</h3>
+            <p>Your conversations are resources in your pod. Point another Solid app at them,
+            migrate providers, or self-host — no vendor's permission required, ever.</p>
+          </div>
+          <div>
+            <h3>Or run with no pod at all</h3>
+            <p>Pod-less mode keeps everything in a local database on your machine. Connect a pod
+            later and Proxion syncs your history across devices through it.</p>
+          </div>
+        </div>
+        <div>
+          <p class="solid-badge" style="color: var(--dim)">Works with</p>
+          <ul class="pods">
+            <li><b>Inrupt PodSpaces</b><span>Enterprise Solid Server from Inrupt, the company founded by Tim Berners-Lee. Free tier.</span></li>
+            <li><b>solidcommunity.net</b><span>Free pods run by the Solid community.</span></li>
+            <li><b>Your own server</b><span>Self-hosted Community Solid Server — full sovereignty, one command to start.</span></li>
+          </ul>
+        </div>
+      </div>
+    </section>
   </div>
 
-  <footer>
-    Open source · <a class="link" id="repo-link" href="#">View on GitHub</a> ·
-    <a class="link" id="all-releases" href="#">All downloads</a>
-  </footer>
-</div>
+  <section class="wrap" id="features" aria-labelledby="feat-h">
+    <h2 id="feat-h">A complete messenger, not a compromise</h2>
+    <p class="lead">Sovereignty doesn't mean settling for less.</p>
+    <div class="grid4">
+      <div class="feat"><h3>End-to-end encryption</h3><p>Modern ratcheting encryption for DMs, with verifiable per-contact safety numbers.</p></div>
+      <div class="feat"><h3>Voice calls</h3><p>Peer-to-peer WebRTC voice — your calls never transit a company server.</p></div>
+      <div class="feat"><h3>Rooms &amp; DMs</h3><p>Group rooms with moderation, pins, and mentions alongside private one-to-one threads.</p></div>
+      <div class="feat"><h3>Files &amp; media</h3><p>Attachments, image previews, reactions, edits, and message search.</p></div>
+      <div class="feat"><h3>Disappearing messages</h3><p>Per-thread timers, plus scheduled send for messages that should arrive later.</p></div>
+      <div class="feat"><h3>Federation</h3><p>Add friends by their Proxion address — gateways talk directly, no central registry.</p></div>
+      <div class="feat"><h3>Multi-device</h3><p>Link your phone and laptop; encrypted messages fan out to every device you've approved.</p></div>
+      <div class="feat"><h3>Accessible &amp; multilingual</h3><p>WCAG 2.2 AA, full keyboard support, six languages including right-to-left Arabic.</p></div>
+    </div>
+  </section>
+
+  <section class="wrap" id="how" aria-labelledby="how-h">
+    <h2 id="how-h">Running in two minutes</h2>
+    <div class="steps-grid">
+      <div class="step">
+        <h3>Download and run</h3>
+        <p>One native executable — no Docker, no database to install, no config required.
+        It's your personal gateway: the app and the server are the same download.</p>
+      </div>
+      <div class="step">
+        <h3>Choose where your data lives</h3>
+        <p>On first launch, pick a free Solid pod provider, connect your own server,
+        or skip pods entirely and stay local. You can change your mind later.</p>
+      </div>
+      <div class="step">
+        <h3>Share your address</h3>
+        <p>You get a Proxion address instead of a phone number. Friends add it from their own
+        gateway; a verified, end-to-end encrypted thread opens between you.</p>
+      </div>
+    </div>
+
+    <div class="honest">
+      <h3>Why does my OS show a caution prompt on first launch?</h3>
+      <p>Proxion ships free and unsigned-by-a-vendor on purpose — no Apple or Microsoft gatekeeping,
+      no certificate fees, no middleman. Updates are still cryptographically verified against
+      Proxion's own signing key; the OS just can't phone home to a paid certificate authority,
+      so it asks once. Linux shows no prompt at all.</p>
+      <div id="steps" class="os-steps"></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap cols">
+    <div>
+      <h4>Proxion</h4>
+      <p>Free &amp; open-source sovereign messaging.<br>Your data, your machine, your rules.</p>
+    </div>
+    <div>
+      <h4>Project</h4>
+      <ul>
+        <li><a id="repo-link" href="#">Source on GitHub</a></li>
+        <li><a id="all-releases" href="#">All downloads</a></li>
+        <li><a id="selfhost-link" href="#">Self-hosting guide</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Solid</h4>
+      <ul>
+        <li><a href="https://solidproject.org" rel="noopener">solidproject.org</a></li>
+        <li><a href="https://www.inrupt.com" rel="noopener">Inrupt</a></li>
+        <li><a href="https://solidcommunity.net" rel="noopener">Get a free pod</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>
 
 <script>
 // ── Configure once: set this to your GitHub "owner/repo" ──
-const REPO = "ORG/proxion";
+const REPO = "ORG/proxion-messenger";
 // ─────────────────────────────────────────────────────────
 
 const $ = (id) => document.getElementById(id);
-$("repo-link").href = `https://github.com/${REPO}`;
-$("all-releases").href = `https://github.com/${REPO}/releases/latest`;
+const REPO_URL = `https://github.com/${REPO}`;
+for (const id of ["repo-link", "nav-github", "gh-btn"]) $(id).href = REPO_URL;
+$("all-releases").href = `${REPO_URL}/releases/latest`;
+$("selfhost-link").href = `${REPO_URL}/blob/main/docs/SELF_HOSTING.md`;
 
 function detectOS() {
   const p = (navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || "").toLowerCase();
@@ -90,15 +348,15 @@ const OS_LABEL = { windows: "Windows", macos: "macOS", linux: "Linux", unknown: 
 
 const STEPS = {
   windows: `<h3>First launch on Windows</h3>
-    If SmartScreen shows <em>"Windows protected your PC"</em>, click
-    <code>More info</code> → <code>Run anyway</code>. You only do this once.`,
+    <p>If SmartScreen shows <em>"Windows protected your PC"</em>, click
+    <code>More info</code> → <code>Run anyway</code>. You only do this once.</p>`,
   macos: `<h3>First launch on macOS</h3>
-    Right-click (or Control-click) the app → <code>Open</code> → <code>Open</code> in the prompt.
-    You only do this once. (Gatekeeper blocks a normal double-click for apps not notarized by Apple.)`,
+    <p>Right-click (or Control-click) the app → <code>Open</code> → <code>Open</code> in the prompt.
+    You only do this once. (Gatekeeper blocks a normal double-click for apps not notarized by Apple.)</p>`,
   linux: `<h3>First launch on Linux</h3>
-    AppImage: make it executable (<code>chmod +x Proxion*.AppImage</code>) and run it.
-    Or install the <code>.deb</code>/<code>.rpm</code> with your package manager. No prompts.`,
-  unknown: `<h3>Pick your platform</h3> Choose the right download for your operating system above.`,
+    <p>AppImage: make it executable (<code>chmod +x Proxion*.AppImage</code>) and run it.
+    Or install the <code>.deb</code>/<code>.rpm</code> with your package manager. No prompts.</p>`,
+  unknown: `<h3>Pick your platform</h3><p>Choose the right download for your operating system above.</p>`,
 };
 
 async function init() {
@@ -115,27 +373,22 @@ async function init() {
 
     const primary = pickAsset(assets, os);
     const dl = $("dl");
-    if (primary) {
-      dl.href = primary.browser_download_url;
-      dl.textContent = `Download for ${OS_LABEL[os]}`;
-    } else {
-      dl.href = `https://github.com/${REPO}/releases/latest`;
-      dl.textContent = `Download for ${OS_LABEL[os]}`;
-    }
+    dl.href = primary ? primary.browser_download_url : `${REPO_URL}/releases/latest`;
+    dl.textContent = `Download for ${OS_LABEL[os]} — free`;
 
     // Alternate-platform links
     const others = ["windows", "macos", "linux"].filter(o => o !== os);
     const sub = others.map(o => {
       const a = pickAsset(assets, o);
-      const href = a ? a.browser_download_url : `https://github.com/${REPO}/releases/latest`;
+      const href = a ? a.browser_download_url : `${REPO_URL}/releases/latest`;
       return `<a href="${href}">${OS_LABEL[o]}</a>`;
     }).join("");
-    $("dl-sub").innerHTML = sub ? ("Other systems: " + sub) : "";
+    $("dl-sub").innerHTML = sub ? ("Also for: " + sub) : "";
   } catch (e) {
     const dl = $("dl");
-    dl.href = `https://github.com/${REPO}/releases/latest`;
-    dl.textContent = "Download from GitHub";
-    $("ver").textContent = "Could not load release info — opening GitHub releases.";
+    dl.href = `${REPO_URL}/releases/latest`;
+    dl.textContent = `Download for ${OS_LABEL[os]} — free`;
+    $("ver").textContent = "";
   }
 }
 init();
