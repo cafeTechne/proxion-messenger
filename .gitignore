@@ -24,6 +24,12 @@ env/
 .pytest_cache/
 .coverage
 htmlcov/
+artifacts/
+
+# Built binaries (regenerate with build_sidecar.py / cargo tauri build)
+tauri-app/src-tauri/sidecar/*
+!tauri-app/src-tauri/sidecar/.gitkeep
+tauri-app/src-tauri/target/
 
 # Runtime storage (pod stash mirror)
 proxion-core/storage/
