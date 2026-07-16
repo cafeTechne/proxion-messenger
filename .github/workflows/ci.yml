@@ -64,7 +64,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: proxion-messenger-core
-        run: pip install -e ".[gateway,test]"
+        run: pip install -e ".[gateway,cli,test]"
 
       - name: Cold-path undefined-name gate (H1)
         run: python scripts/check_cold_paths.py
