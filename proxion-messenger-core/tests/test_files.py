@@ -40,8 +40,12 @@ def test_guess_mime_type_pdf():
 
 
 def test_guess_mime_type_unknown():
-    """Test MIME type falls back to octet-stream."""
-    assert _guess_mime_type("unknown.xyz") == "application/octet-stream"
+    """Test MIME type falls back to octet-stream.
+
+    Deliberately nonsense extension: real-but-obscure ones (e.g. ``.xyz``)
+    are registered in some OS mime databases (Ubuntu maps it to chemical/x-xyz).
+    """
+    assert _guess_mime_type("unknown.zq3vx") == "application/octet-stream"
 
 
 def test_send_file_puts_and_sends(mock_pod_client, mock_cert, tmp_path):
