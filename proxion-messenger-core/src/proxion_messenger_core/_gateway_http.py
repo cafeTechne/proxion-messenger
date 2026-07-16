@@ -43,7 +43,7 @@ async def _read_http_body(reader, n: int, timeout: float = 10.0) -> bytes:
     return bytes(buf)
 
 
-_INVITE_DOWNLOAD_URL = "https://github.com/proxion-messenger"
+_INVITE_DOWNLOAD_URL = "https://github.com/cafeTechne/proxion-messenger"
 
 
 class HttpEndpointsMixin:

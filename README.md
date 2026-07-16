@@ -8,6 +8,7 @@ End-to-end encrypted messaging and voice, built on the [Solid Protocol](https://
 Your messages live in your own Solid pod, on hardware you control —
 no account, no phone number, no company in the middle.
 
+![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Solid Protocol](https://img.shields.io/badge/built%20on-Solid%20Protocol-7c4dff)
 ![E2E encrypted](https://img.shields.io/badge/encryption-end--to--end-e94560)
 ![WCAG 2.2 AA](https://img.shields.io/badge/accessibility-WCAG%202.2%20AA-4ade80)
@@ -46,8 +47,8 @@ including RTL Arabic · WCAG 2.2 AA accessible.
 ## Download
 
 Grab the latest native build for **Windows (x64/ARM64), macOS (Intel/Apple Silicon), or
-Linux (x64/ARM64)** from the [releases page](../../releases/latest), or use the
-[install page](landing/index.html) once GitHub Pages is enabled for this repo.
+Linux (x64/ARM64)** from the [install page](https://cafetechne.github.io/proxion-messenger/)
+or the [releases page](../../releases/latest).
 
 The executables are intentionally not vendor-signed (no Apple/Microsoft gatekeeping;
 updates are verified against Proxion's own signing key), so the OS shows a one-time
@@ -93,3 +94,9 @@ cd web && npm test                     # frontend units
 
 Browser-level gates live in `web/` (`smoke:a11y`, `smoke:keyboard`, `smoke:pseudo`,
 `smoke:federation`, …) — see [TESTING.md](TESTING.md).
+
+## License
+
+[AGPL-3.0](LICENSE) — free to use, self-host, fork, and contribute to. If you run a
+modified Proxion as a service for others, you must publish your changes. That's the
+point: nobody gets to turn this back into a silo.

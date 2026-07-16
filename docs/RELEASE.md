@@ -78,5 +78,7 @@ entries. `proxion-messenger-core/tests/test_updater_manifest.py` validates the s
 
 - ✅ Wired: landing page + Pages deploy, release CI (unsigned builds succeed),
   updater config (default-off), manifest validation test.
-- ⏳ One-line edits for you: set `REPO` in the landing page + the updater
-  endpoint; enable Pages; optionally generate the updater key.
+- ✅ `REPO` set to `cafeTechne/proxion-messenger` in the landing page and the
+  updater endpoint; repo pushed; Pages enabled.
+- ⏳ Optional: generate the updater key (`tauri signer generate`) and flip
+  `updater.active` to true to enable auto-update.
