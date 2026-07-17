@@ -26,6 +26,9 @@ on:
       - "v*"
   workflow_dispatch:
 
+permissions:
+  contents: write   # tauri-action creates the draft release + uploads assets
+
 jobs:
   release:
     name: Build installers (${{ matrix.os }})
@@ -70,19 +73,16 @@ jobs:
       - name: Build + sign Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
+          # Required for creating the release and uploading assets.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Updater signing (empty until provisioned → unsigned, no auto-update)
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-          # Windows Authenticode
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          # macOS signing + notarization
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # NOTE: when provisioning OS code-signing later, add the secret env
+          # lines back HERE (WINDOWS_CERTIFICATE*, APPLE_*). They must be
+          # OMITTED while unset: GitHub passes undefined secrets as empty
+          # strings, and tauri-action treats a set-but-empty APPLE_CERTIFICATE
+          # as "signing configured" and fails importing the empty cert.
         with:
           projectPath: tauri-app
           tagName: ${{ github.ref_name }}
