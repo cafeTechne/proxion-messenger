@@ -231,19 +231,21 @@ fn main() {
                     eprintln!("[gateway] sidecar not found: {e}");
                     app_handle.emit_all("gateway-missing", ()).ok();
                 }
-                Ok(mut cmd) => {
-                    cmd = cmd
-                        .env("PROXION_HTTP_PORT", "8080")
-                        .env("PROXION_HOST", "127.0.0.1")
-                        .env("PROXION_WS_PORT", "7474")
-                        .env(
-                            "PROXION_DATA_DIR",
-                            app_data_dir.to_string_lossy().to_string(),
-                        );
-
-                    if let Some(v) = pod_css   { cmd = cmd.env("PROXION_CSS_URL",      v); }
-                    if let Some(v) = pod_email  { cmd = cmd.env("PROXION_CSS_EMAIL",    v); }
-                    if let Some(v) = pod_pw     { cmd = cmd.env("PROXION_CSS_PASSWORD", v); }
+                Ok(cmd) => {
+                    // tauri 1.x Command has no per-var .env(); only .envs(HashMap).
+                    let mut env: std::collections::HashMap<String, String> =
+                        std::collections::HashMap::new();
+                    env.insert("PROXION_HTTP_PORT".into(), "8080".into());
+                    env.insert("PROXION_HOST".into(), "127.0.0.1".into());
+                    env.insert("PROXION_WS_PORT".into(), "7474".into());
+                    env.insert(
+                        "PROXION_DATA_DIR".into(),
+                        app_data_dir.to_string_lossy().to_string(),
+                    );
+                    if let Some(v) = pod_css   { env.insert("PROXION_CSS_URL".into(),      v); }
+                    if let Some(v) = pod_email  { env.insert("PROXION_CSS_EMAIL".into(),    v); }
+                    if let Some(v) = pod_pw     { env.insert("PROXION_CSS_PASSWORD".into(), v); }
+                    let cmd = cmd.envs(env);
 
                     let (mut rx, child) = cmd.spawn().expect("failed to spawn sidecar");
                     *app.state::<GatewayChild>().0.lock().unwrap() = Some(child);
