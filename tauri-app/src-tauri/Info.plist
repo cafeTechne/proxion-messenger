@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into the app bundle's Info.plist by Tauri v1 at build time.
+     (Tauri v1 has no bundle>macOS>infoPlist config key — that's v2.) -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>dev.proxion.app</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>proxion</string>
+      </array>
+    </dict>
+  </array>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Proxion needs microphone access for voice messages.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>Proxion needs camera access for QR code scanning.</string>
+</dict>
+</plist>

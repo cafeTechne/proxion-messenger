@@ -52,19 +52,7 @@
         "allowDowngrades": false
       },
       "macOS": {
-        "entitlements": "entitlements.plist",
-        "infoPlist": {
-          "CFBundleURLTypes": [
-            {
-              "CFBundleURLName": "dev.proxion.app",
-              "CFBundleURLSchemes": [
-                "proxion"
-              ]
-            }
-          ],
-          "NSMicrophoneUsageDescription": "Proxion needs microphone access for voice messages.",
-          "NSCameraUsageDescription": "Proxion needs camera access for QR code scanning."
-        }
+        "entitlements": "entitlements.plist"
       }
     },
     "updater": {
@@ -74,15 +62,6 @@
       ],
       "dialog": false,
       "pubkey": ""
-    },
-    "plugins": {
-      "autostart": {
-        "windows": {
-          "args": [
-            "--autostart"
-          ]
-        }
-      }
     },
     "security": {
       "csp": "default-src 'self'; script-src 'self'; connect-src 'self' ws://127.0.0.1:* wss://127.0.0.1:* https:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none';"
