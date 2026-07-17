@@ -36,7 +36,6 @@ proxion-core/storage/
 
 # Node
 node_modules/
-web/package-lock.json
 
 # Claude Code agent settings (machine-local)
 .claude/

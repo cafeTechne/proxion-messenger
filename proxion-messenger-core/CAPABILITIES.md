@@ -1,6 +1,7 @@
 # Proxion Core Capabilities
 
-`proxion-messenger-core` (EI₀) is the reference logic for the Proxion Universal Architecture. It provides the cryptographic and logical primitives that power the entire ecosystem.
+The cryptographic and logical security primitives provided by
+`proxion-messenger-core`.
 
 ## 1. Capability Tokens (ZCAP-LD)
 The core of Proxion security is the **Capability Token**. Unlike traditional Bearer tokens (JWTs), Proxion tokens are attenuated and cryptographically delegated.

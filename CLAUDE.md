@@ -64,8 +64,3 @@ Native executables via PyInstaller + Tauri. No Docker dependency. Supports Windo
 
 Gateway connects to a Community Solid Server (CSS) instance. Configure `PROXION_CSS_URL`, `PROXION_CSS_EMAIL`, `PROXION_CSS_PASSWORD` in `.env`. Leave blank to run without pod backing (local rooms only).
 
-## What lives elsewhere
-
-The parent repo (`../`) contains the legacy homelab infrastructure (proxion-keyring Citadel control plane, *arr integrations, ingest daemon, WireGuard/DNS scripts). That code is intentionally separate — do not mix concerns.
-
-The Gemini architectural analysis (`C:\Users\hobo\.gemini\...proxion_keyring_analysis.md.resolved`) identified primitives from proxion-keyring potentially worth extracting into proxion-messenger-core: `vault.py` (AES-256-GCM storage), `require_capability`/`require_approval` middleware from `rs/server.py`. Evaluate against actual messenger needs before extracting.

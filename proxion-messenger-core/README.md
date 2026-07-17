@@ -1,120 +1,50 @@
-# Proxion Core (EI₀)
+# proxion-messenger-core
 
-> **Reference Implementation (Witness)**
+The Python backend for [Proxion Messenger](../README.md): a library plus the
+WebSocket/HTTP **gateway server** that powers the app. The gateway holds the
+user's identity keys, persists messages locally, talks the Solid Protocol to
+the user's pod, and federates directly with other gateways.
 
-This repository contains the **Existential Instantiation Zero (EI₀)** for Proxion.
+## Install
 
-## Purpose
-
-This EI₀ reference implementation is a **frozen witness** for the Universal Architecture.
-
-Status: EI₀ is frozen as of v0.1.0. Architectural changes must occur at the UI level or via separate EI repositories.
-
-The purpose of `proxion-messenger-core` is to prove that the Universal Architecture defined in `proxion-spec` is implementable. It serves as a **witness** to the specification.
-
-**It is explicitly NOT:**
-*   A product.
-*   The only way to implement Proxion.
-*   Optimized for high performance or specific application constraints.
-*   Production-ready.
-
-## Constraints & Assumptions (EI)
-
-As a reference implementation, this codebase is intentionally minimal and "boring":
-
-*   **No Network Stack**: Core logic is pure functions or local state transitions; transport is abstracted.
-*   **No UI**: No user interface or interactive flows are implemented.
-*   **No Identity Provider**: Keys are generated locally; no dependence on external OIDC/DID resolvers.
-*   **In-Memory/Simple Storage**: No database requirements.
-
-## Scope
-
-This repository implements:
-*   Capability Issuance (signing).
-*   Capability Verification (checking signatures and chains).
-*   Caveat Evaluation (attenuation logic).
-*   Redemption (proof-of-possession).
-*   Expiry Checks.
-
-## Relationship to Other Instantiations
-
-Other implementations (EI₁, EI₂, ...) may use:
-*   WireGuard or WebRTC for transport.
-*   Solid Pods for storage.
-*   Hardware Security Modules (HSMs) for key management.
-*   VS Code or Browser extensions for UI.
-
-This repository (`EI₀`) avoids those dependencies to remain a pure logic reference.
-
-## Optional Revocation
-
-## Caveat Examples
-
-These examples show typed caveats that operate on `RequestContext` without any DSL.
-
-IP allowlist:
-
-```python
-from proxion_core import ip_allowlist, issue_token, validate_request, RequestContext
-
-caveat = ip_allowlist({"127.0.0.1"})
-token = issue_token(
-    permissions={("read", "resource")},
-    exp=exp,
-    aud="aud1",
-    caveats=[caveat],
-    holder_key_fingerprint="fp1",
-    signing_key=signing_key,
-    now=now,
-)
-
-ok_ctx = RequestContext("read", "resource", "aud1", now, ip="127.0.0.1")
-fail_ctx = RequestContext("read", "resource", "aud1", now, ip="10.0.0.1")
-
-assert validate_request(token, ok_ctx, {"holder_key_fingerprint": "fp1"}, signing_key).allowed
-assert not validate_request(token, fail_ctx, {"holder_key_fingerprint": "fp1"}, signing_key).allowed
+```bash
+pip install -e .[gateway]        # gateway server (websockets)
+pip install -e .[gateway,cli]    # + the `proxion` command-line tool
+pip install -e .[gateway,cli,test]  # + test dependencies
 ```
 
-Time window (epoch seconds):
+Python ≥ 3.12.
 
-```python
-from proxion_core import time_window
+## Module map
 
-caveat = time_window(not_before=now.timestamp(), not_after=(now.timestamp() + 30))
+| Module | Responsibility |
+|---|---|
+| `gateway.py` | `ProxionGateway` — WebSocket routing, HTTP serving, room/DM/voice logic (composed from the `_gateway_*` mixins) |
+| `persist.py` | `AgentState` — Ed25519 identity + X25519 store-key management |
+| `local_store.py`, `_store/` | SQLite persistence: rooms, messages, relationships, devices, security state |
+| `solid_client.py` | DPoP-authenticated Solid pod I/O (Community Solid Server oriented) |
+| `messaging.py` | Signed message format, canonical serialization, hash chaining |
+| `relay.py` | Cross-gateway federation: signed relay messages + full-payload envelope signatures |
+| `certtoken.py` | Capability certificates: issuance, attenuation/caveats, revocation, proof-of-possession |
+| `cli.py` | The `proxion` CLI (identity, certs, pod, doctor, …) |
+
+See [CAPABILITIES.md](CAPABILITIES.md) for the security-primitive details and
+[docs/PROTOCOL.md](docs/PROTOCOL.md) for the wire protocol.
+
+## Running the gateway
+
+Usually via the repo root (`python run_gateway.py`) or the desktop app, which
+bundles this package as a PyInstaller sidecar. For development instances see
+`../scripts/run_test_gateway.py` and `../scripts/run_local_pair.py`.
+
+## Tests
+
+```bash
+pytest                        # unit tests
+pytest tests/e2e/             # end-to-end (real WebSocket connections)
+pytest -m "not integration"   # skip tests that need a running CSS pod
 ```
 
-Nonce match:
+## License
 
-```python
-from proxion_core import nonce_matches
-
-caveat = nonce_matches("nonce-123")
-```
-
-
-Revocation is supported via an in-memory list with TTL entries. The validator
-denies if a token is revoked, and fails closed on revocation errors.
-
-Example:
-
-```python
-from datetime import datetime, timezone
-from proxion_core import RevocationList, validate_request
-
-revocations = RevocationList()
-now = datetime.now(timezone.utc)
-revocations.revoke(token, now)
-
-decision = validate_request(
-    token,
-    ctx,
-    {"holder_key_fingerprint": token.holder_key_fingerprint},
-    signing_key,
-    revocation_list=revocations,
-)
-```
-
-
-## Licensing
-
-Licensed under the Apache License, Version 2.0.
+[AGPL-3.0](LICENSE), same as the rest of the repository.

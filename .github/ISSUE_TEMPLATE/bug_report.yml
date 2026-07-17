@@ -1,0 +1,47 @@
+name: Bug report
+description: Something broken in the app, gateway, or install
+labels: [bug]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Web client (browser UI)
+        - Desktop app (Tauri)
+        - Gateway / backend
+        - Federation (cross-gateway)
+        - Solid pod integration
+        - Voice / WebRTC
+        - Install / packaging
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead?
+      placeholder: Steps to reproduce are gold.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Proxion version
+      placeholder: e.g. v0.1.0, or a commit hash if running from source
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / browser
+      placeholder: e.g. Windows 11 / Firefox 128, macOS 15 / desktop app
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >-
+        Gateway console output and/or browser devtools errors, if relevant.
+        Please redact identity keys and addresses you consider private.
+      render: text

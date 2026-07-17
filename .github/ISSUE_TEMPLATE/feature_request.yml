@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest an improvement or new capability
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the situation where you miss this feature.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How do you imagine it working? Sketches welcome.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: markdown
+    attributes:
+      value: >-
+        Heads-up on scope: Proxion deliberately avoids central services
+        (directories, SFUs, telemetry) and stays framework-free — see
+        CONTRIBUTING.md. Feature ideas that fit the self-hosted,
+        data-sovereign model have the best odds.

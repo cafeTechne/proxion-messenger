@@ -8,6 +8,7 @@ End-to-end encrypted messaging and voice, built on the [Solid Protocol](https://
 Your messages live in your own Solid pod, on hardware you control —
 no account, no phone number, no company in the middle.
 
+[![CI](https://github.com/cafeTechne/proxion-messenger/actions/workflows/ci.yml/badge.svg)](https://github.com/cafeTechne/proxion-messenger/actions/workflows/ci.yml)
 ![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Solid Protocol](https://img.shields.io/badge/built%20on-Solid%20Protocol-7c4dff)
 ![E2E encrypted](https://img.shields.io/badge/encryption-end--to--end-e94560)

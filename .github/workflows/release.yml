@@ -65,7 +65,7 @@ jobs:
 
       - name: Install Tauri CLI deps
         working-directory: tauri-app
-        run: npm install
+        run: npm ci
 
       - name: Build + sign Tauri app
         uses: tauri-apps/tauri-action@v0
