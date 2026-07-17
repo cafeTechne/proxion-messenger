@@ -337,10 +337,18 @@ function detectOS() {
 
 // Match a release asset to an OS by file extension.
 function pickAsset(assets, os) {
-  const by = (exts) => assets.find(a => exts.some(e => a.name.toLowerCase().endsWith(e)));
-  if (os === "windows") return by([".msi", ".exe"]);
-  if (os === "macos")   return by([".dmg", ".app.tar.gz"]);
-  if (os === "linux")   return by([".appimage"]) || by([".deb"]) || by([".rpm"]);
+  // Extensions in priority order (earlier wins regardless of asset order).
+  const by = (...exts) => {
+    for (const e of exts) {
+      const hit = assets.find(a => a.name.toLowerCase().endsWith(e));
+      if (hit) return hit;
+    }
+    return null;
+  };
+  // NSIS -setup.exe first: per-user install, no admin prompt.
+  if (os === "windows") return by("-setup.exe", ".msi", ".exe");
+  if (os === "macos")   return by(".dmg", ".app.tar.gz");
+  if (os === "linux")   return by(".appimage", ".deb", ".rpm");
   return null;
 }
 
