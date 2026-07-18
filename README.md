@@ -56,6 +56,12 @@ updates are verified against Proxion's own signing key), so the OS shows a one-t
 caution prompt — on Windows: *More info → Run anyway*; on macOS: *right-click → Open*.
 Linux has no prompt.
 
+On macOS you can also install via [Homebrew](https://brew.sh):
+
+```sh
+brew install cafeTechne/proxion/proxion
+```
+
 Every release ships `SHA256SUMS.txt` and signed build-provenance attestations
 proving each installer was built by CI from this repository's public source —
 see [docs/VERIFYING.md](docs/VERIFYING.md).

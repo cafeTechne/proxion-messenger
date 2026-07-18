@@ -69,6 +69,18 @@ building the PyInstaller gateway sidecar), generates `latest.json` if the
 updater key is set, and creates a **draft** Release with the assets. Review
 and publish; the landing page picks it up automatically.
 
+## Homebrew tap (macOS)
+
+`brew install cafeTechne/proxion/proxion` installs the .dmg from the tap repo
+[`cafeTechne/homebrew-proxion`](https://github.com/cafeTechne/homebrew-proxion).
+`.github/workflows/homebrew.yml` regenerates the cask (version + per-arch
+sha256) whenever a release is **published**. One-time setup: create a
+fine-grained PAT with **Contents: write** on the tap repo and save it as the
+`TAP_GITHUB_TOKEN` secret here; until then the job no-ops with a notice and
+the cask can be bumped by hand. Graduating to the official `homebrew-cask`
+repo is possible later once the project meets their notability bar
+(★75/30 forks); the cask file carries over as-is.
+
 ## Verifiable builds (E4)
 
 After the three OS builds upload their assets, the `verify` job in
