@@ -1108,11 +1108,16 @@
                 style="background:var(--slate-800);border:1px solid var(--slate-600);color:var(--text-secondary);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:6px;width:100%;text-align:left;" data-i18n="btn.downloadIdentityBackup">
           Download identity backup
         </button>
+        <button id="settings-verify-btn"
+                style="background:var(--slate-800);border:1px solid var(--slate-600);color:var(--text-secondary);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:6px;width:100%;text-align:left;" data-i18n="btn.verifyRecoveryKit">
+          Verify a recovery kit
+        </button>
         <button id="settings-restore-btn"
                 style="background:var(--slate-800);border:1px solid var(--slate-600);color:var(--text-secondary);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:12px;width:100%;text-align:left;" data-i18n="btn.restoreFromBackup">
           Restore from backup
         </button>
         <input type="file" id="settings-restore-input" accept=".json" style="display:none">
+        <input type="file" id="settings-verify-input" accept=".json" style="display:none">
         <hr style="border-color:var(--slate-700);margin:16px 0 12px;">
         <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Active Sessions</p>
         <div id="sessions-list" style="margin-bottom:8px;color:var(--text-secondary);font-size:0.85em;">Loading…</div>
@@ -1133,6 +1138,29 @@
                   style="background:var(--slate-700); border:none; color:var(--slate-50); padding:8px 16px; border-radius:4px; cursor:pointer;" data-i18n="btn.cancel">Cancel</button>
           <button id="settings-save-btn"
                   style="background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer;" data-i18n="btn.saveReconnect">Save &amp; Reconnect</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- E1: recovery-kit modal — shows the generated recovery code once, then
+         downloads the encrypted kit after the user confirms they stored it -->
+    <div id="recovery-kit-modal" role="dialog" aria-modal="true" aria-label="Your recovery code" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1002; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.recoveryCode">
+      <div style="background:var(--slate-800); border-radius:10px; padding:24px; max-width:420px; color:var(--slate-50);">
+        <h3 style="margin:0 0 10px;" data-i18n="heading.recoveryCode">Your recovery code</h3>
+        <p style="margin:0 0 12px;font-size:0.85em;color:var(--text-secondary);" data-i18n="recovery.explain">
+          This code encrypts your recovery kit. Write it down and keep it somewhere
+          safe — you will need it to restore your identity, and it is shown only once.
+        </p>
+        <p id="recovery-code-display" style="margin:0 0 10px;font-family:monospace;font-size:1.15em;letter-spacing:1px;text-align:center;padding:12px 8px;background:var(--slate-900);border:1px solid var(--slate-600);border-radius:6px;user-select:all;"></p>
+        <button id="recovery-copy-btn" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:14px;" data-i18n="btn.copyCode">Copy code</button>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:0.88em;margin-bottom:14px;">
+          <input type="checkbox" id="recovery-confirm-saved" style="margin-top:2px;">
+          <span data-i18n="recovery.confirmSaved">I have written down my recovery code</span>
+        </label>
+        <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;">
+          <a id="recovery-custom-pp" href="#" style="margin-right:auto;font-size:0.8em;color:var(--text-secondary);text-decoration:underline;" data-i18n="recovery.useCustom">Use my own passphrase instead</a>
+          <button id="recovery-cancel-btn" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:7px 16px;border-radius:4px;cursor:pointer;" data-i18n="btn.cancel">Cancel</button>
+          <button id="recovery-download-btn" disabled style="background:var(--accent);border:none;color:#fff;padding:7px 16px;border-radius:4px;cursor:not-allowed;opacity:0.45;" data-i18n="btn.downloadRecoveryKit">Download recovery kit</button>
         </div>
       </div>
     </div>
@@ -1211,6 +1239,10 @@
           <p style="margin:14px 0 0;font-size:0.85em;color:var(--text-secondary);">
             Already using Proxion elsewhere?
             <a id="ob-link-device" href="#" style="color:var(--accent-text);">Link this device</a>
+          </p>
+          <p style="margin:6px 0 0;font-size:0.85em;color:var(--text-secondary);">
+            <span data-i18n="onboarding.haveKit">Have a recovery kit from a previous install?</span>
+            <a id="ob-restore-kit" href="#" style="color:var(--accent-text);" data-i18n="onboarding.restoreKit">Restore your identity</a>
           </p>
         </div>
         <div id="ob-step-2" style="display:none">
@@ -1339,6 +1371,16 @@
                     style="background:var(--slate-700); border:none; color:var(--slate-50); padding:6px 14px;
                            border-radius:4px; cursor:pointer; font-size:0.85em;" data-i18n="btn.copyInviteLink">
               Copy invite link
+            </button>
+          </div>
+          <!-- E1: identity is device-local until backed up — offer the kit before the wizard closes -->
+          <div style="margin-bottom:14px;padding:10px;background:var(--slate-900);border-radius:6px;border:1px solid var(--slate-700);">
+            <p style="margin:0 0 6px;font-size:0.82em;color:var(--text-secondary);" data-i18n="onboarding.saveKitHint">
+              Your identity lives only on this device. If you lose it without a
+              recovery kit, your identity is gone with it.
+            </p>
+            <button id="ob-save-kit-btn" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;" data-i18n="onboarding.saveKit">
+              Download your recovery kit
             </button>
           </div>
           <button id="ob-finish-btn" style="background:var(--accent,var(--accent));border:none;color:#fff;padding:10px 24px;border-radius:4px;cursor:pointer;font-size:1em;" data-i18n="btn.openProxion">Open Proxion</button>

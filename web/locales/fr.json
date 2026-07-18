@@ -1,5 +1,9 @@
 {
-  "_meta": { "locale": "fr", "name": "Français", "draft": true },
+  "_meta": {
+    "locale": "fr",
+    "name": "Français",
+    "draft": true
+  },
   "sidebar.rooms": "Salons",
   "sidebar.voiceChannels": "Canaux vocaux",
   "sidebar.friendRequests": "Demandes d'ami",
@@ -103,7 +107,6 @@
   "confirm.deleteRoom": "Supprimer ce salon définitivement ? Tous les messages et l'historique seront perdus pour tous les membres.",
   "confirm.kickMember": "Expulser ce membre ?",
   "prompt.choosePassphrase": "Choisissez une phrase secrète pour protéger votre sauvegarde :",
-  "prompt.enterPassphrase": "Saisissez la phrase secrète de cette sauvegarde :",
   "error.gatewayGeneric": "Erreur de la passerelle : {raw}",
   "error.empty_content": "Le message est vide.",
   "error.content_too_large": "Le message est trop long.",
@@ -380,5 +383,22 @@
   "voice.inCallTimer": "En appel {time}",
   "voice.inCall": "En appel",
   "time.today": "Aujourd'hui",
-  "time.yesterday": "Hier"
+  "time.yesterday": "Hier",
+  "recovery.explain": "Ce code chiffre votre kit de récupération. Notez-le et conservez-le en lieu sûr — vous en aurez besoin pour restaurer votre identité, et il n'est affiché qu'une seule fois.",
+  "recovery.confirmSaved": "J'ai noté mon code de récupération",
+  "recovery.useCustom": "Utiliser ma propre phrase secrète",
+  "recovery.copied": "Code de récupération copié.",
+  "recovery.verifyPrompt": "Saisissez le code de récupération (ou la phrase secrète) de ce kit :",
+  "recovery.verifyOk": "Kit vérifié — il peut restaurer votre identité.",
+  "recovery.verifyFail": "Échec de la vérification : {error}",
+  "recovery.restorePrompt": "Saisissez votre code de récupération (ou phrase secrète) :",
+  "ui.recoveryCode": "Votre code de récupération",
+  "heading.recoveryCode": "Votre code de récupération",
+  "btn.verifyRecoveryKit": "Vérifier un kit de récupération",
+  "btn.copyCode": "Copier le code",
+  "btn.downloadRecoveryKit": "Télécharger le kit de récupération",
+  "onboarding.haveKit": "Vous avez un kit de récupération d'une installation précédente ?",
+  "onboarding.restoreKit": "Restaurer votre identité",
+  "onboarding.saveKit": "Téléchargez votre kit de récupération",
+  "onboarding.saveKitHint": "Votre identité n'existe que sur cet appareil. Si vous le perdez sans kit de récupération, votre identité disparaît avec lui."
 }

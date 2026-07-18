@@ -1,5 +1,9 @@
 {
-  "_meta": { "locale": "de", "name": "Deutsch", "draft": true },
+  "_meta": {
+    "locale": "de",
+    "name": "Deutsch",
+    "draft": true
+  },
   "sidebar.rooms": "Räume",
   "sidebar.voiceChannels": "Sprachkanäle",
   "sidebar.friendRequests": "Freundschaftsanfragen",
@@ -103,7 +107,6 @@
   "confirm.deleteRoom": "Diesen Raum dauerhaft löschen? Alle Nachrichten und der Verlauf gehen für alle Mitglieder verloren.",
   "confirm.kickMember": "Dieses Mitglied entfernen?",
   "prompt.choosePassphrase": "Wähle eine Passphrase zum Schutz deiner Sicherung:",
-  "prompt.enterPassphrase": "Gib die Passphrase für diese Sicherung ein:",
   "error.gatewayGeneric": "Gateway-Fehler: {raw}",
   "error.empty_content": "Die Nachricht ist leer.",
   "error.content_too_large": "Die Nachricht ist zu lang.",
@@ -380,5 +383,22 @@
   "voice.inCallTimer": "Im Anruf {time}",
   "voice.inCall": "Im Anruf",
   "time.today": "Heute",
-  "time.yesterday": "Gestern"
+  "time.yesterday": "Gestern",
+  "recovery.explain": "Dieser Code verschlüsselt dein Wiederherstellungskit. Schreibe ihn auf und bewahre ihn sicher auf — du brauchst ihn, um deine Identität wiederherzustellen, und er wird nur einmal angezeigt.",
+  "recovery.confirmSaved": "Ich habe meinen Wiederherstellungscode notiert",
+  "recovery.useCustom": "Stattdessen eigene Passphrase verwenden",
+  "recovery.copied": "Wiederherstellungscode kopiert.",
+  "recovery.verifyPrompt": "Gib den Wiederherstellungscode (oder die Passphrase) für dieses Kit ein:",
+  "recovery.verifyOk": "Kit verifiziert — es kann deine Identität wiederherstellen.",
+  "recovery.verifyFail": "Verifizierung fehlgeschlagen: {error}",
+  "recovery.restorePrompt": "Gib deinen Wiederherstellungscode (oder deine Passphrase) ein:",
+  "ui.recoveryCode": "Dein Wiederherstellungscode",
+  "heading.recoveryCode": "Dein Wiederherstellungscode",
+  "btn.verifyRecoveryKit": "Wiederherstellungskit prüfen",
+  "btn.copyCode": "Code kopieren",
+  "btn.downloadRecoveryKit": "Wiederherstellungskit herunterladen",
+  "onboarding.haveKit": "Hast du ein Wiederherstellungskit von einer früheren Installation?",
+  "onboarding.restoreKit": "Identität wiederherstellen",
+  "onboarding.saveKit": "Wiederherstellungskit herunterladen",
+  "onboarding.saveKitHint": "Deine Identität existiert nur auf diesem Gerät. Verlierst du es ohne Wiederherstellungskit, ist deine Identität verloren."
 }

@@ -1162,6 +1162,86 @@ def agent_export_identity(
 
 
 # ---------------------------------------------------------------------------
+# agent backup / agent restore-identity (E1)
+# ---------------------------------------------------------------------------
+
+@agent_app.command("backup")
+def agent_backup(
+    state: Optional[str] = _STATE_OPTION,
+    passphrase: Optional[str] = _PASSPHRASE_OPTION,
+    output: str = typer.Option(
+        "proxion-recovery-kit.json", "--output", "-o",
+        help="File to write the encrypted recovery kit to.",
+    ),
+    backup_passphrase: Optional[str] = typer.Option(
+        None, "--backup-passphrase",
+        help="Recovery code / passphrase that encrypts the kit (prompted if omitted).",
+    ),
+):
+    """Export an encrypted recovery kit (both private keys) to a file.
+
+    The kit is the same format the web client downloads from Settings and can
+    be restored with `proxion agent restore-identity` or the web UI.
+    """
+    state_path = _resolve_state(state)
+    pw = _get_passphrase(passphrase)
+    agent = _load_state(state_path, pw)
+
+    bp = _get_passphrase(backup_passphrase, prompt="Recovery code / backup passphrase")
+    blob = agent.export_backup(passphrase=bp)
+    out_path = Path(output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(blob)
+    console.print(f"[green]Recovery kit written to[/green] {out_path}")
+    console.print("[yellow]Store the recovery code safely — the kit is useless without it.[/yellow]")
+
+
+@agent_app.command("restore-identity")
+def agent_restore_identity(
+    input: str = typer.Argument(..., help="Path to a recovery kit (proxion-recovery-kit*.json)."),
+    state: Optional[str] = _STATE_OPTION,
+    passphrase: Optional[str] = _PASSPHRASE_OPTION,
+    backup_passphrase: Optional[str] = typer.Option(
+        None, "--backup-passphrase",
+        help="Recovery code / passphrase the kit was encrypted with (prompted if omitted).",
+    ),
+    force: bool = typer.Option(
+        False, "--force",
+        help="Overwrite an existing state file without asking.",
+    ),
+):
+    """Restore identity keys from a recovery kit into the agent state file."""
+    from .persist import AgentState, PersistError
+
+    kit_path = Path(input)
+    if not kit_path.is_file():
+        console.print(f"[red]Error:[/red] no such file: {kit_path}")
+        raise typer.Exit(1)
+
+    state_path = _resolve_state(state)
+    if state_path.exists() and not force:
+        overwrite = typer.confirm(
+            f"State file {state_path} already exists — overwrite its identity keys?"
+        )
+        if not overwrite:
+            raise typer.Exit(1)
+
+    bp = _get_passphrase(backup_passphrase, prompt="Recovery code / backup passphrase")
+    try:
+        agent = AgentState.import_backup(kit_path.read_bytes(), passphrase=bp)
+    except PersistError as exc:
+        console.print(f"[red]Restore failed:[/red] {exc}")
+        raise typer.Exit(1)
+
+    pw = _get_passphrase(passphrase)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    agent.save(state_path, pw)
+    console.print(f"[green]Identity restored to[/green] {state_path}")
+    console.print(f"  Identity pubkey : [cyan]{agent.identity_pub_bytes.hex()}[/cyan]")
+    console.print(f"  Store pubkey    : [cyan]{agent.store_pub_bytes.hex()}[/cyan]")
+
+
+# ---------------------------------------------------------------------------
 # agent status
 # ---------------------------------------------------------------------------
 

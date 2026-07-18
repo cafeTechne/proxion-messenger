@@ -43,6 +43,7 @@ import { createView } from './view.js';
 import { createInvite } from './invite.js';
 import { createPush } from './push.js';
 import { createPairing } from './pairing.js';
+import { createRecovery } from './recovery.js';
 import { inlineNotice, feedEmptyState } from './states.js';
 import { installFocusTrap } from './focus-trap.js';
 import { makeListNavigable, announce } from './a11y.js';
@@ -4173,49 +4174,10 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                 }
             });
 
-            // R12.1.3: Download identity backup
-            document.getElementById('settings-backup-btn')?.addEventListener('click', async () => {
-                const pp = await showPromptModal(t('prompt.choosePassphrase'), { type: 'password' });
-                if (!pp) return;
-                try {
-                    const apiToken = document.querySelector('meta[name="x-api-token"]')?.content || '';
-                    const headers = {};
-                    if (apiToken) headers['Authorization'] = 'Bearer ' + apiToken;
-                    const resp = await fetch('/backup?passphrase=' + encodeURIComponent(pp), { headers });
-                    if (!resp.ok) { showToast(t('backup.failed', { status: resp.status })); return; }
-                    const blob = await resp.blob();
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url; a.download = 'proxion-backup.json'; a.click();
-                    URL.revokeObjectURL(url);
-                    localStorage.setItem('proxion_backup_downloaded', Date.now().toString());
-                    showToast(t('backup.downloaded'));
-                } catch (e) { showToast(t('backup.error', { error: e.message })); }
-            });
-
-            // R12.1.3: Restore from backup
-            document.getElementById('settings-restore-btn')?.addEventListener('click', () => {
-                document.getElementById('settings-restore-input')?.click();
-            });
-            document.getElementById('settings-restore-input')?.addEventListener('change', async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                const pp = await showPromptModal(t('prompt.enterPassphrase'), { type: 'password' });
-                if (!pp) return;
-                try {
-                    const data = await file.arrayBuffer();
-                    const apiToken = document.querySelector('meta[name="x-api-token"]')?.content || '';
-                    const headers = { 'Content-Type': 'application/json' };
-                    if (apiToken) headers['Authorization'] = 'Bearer ' + apiToken;
-                    const resp = await fetch('/restore?passphrase=' + encodeURIComponent(pp), {
-                        method: 'POST', headers, body: data,
-                    });
-                    if (!resp.ok) { showToast(t('restore.failed', { status: resp.status })); return; }
-                    showToast(t('restore.done'));
-                    setTimeout(() => { if (socket) socket.close(); }, 1000);
-                } catch (err) { showToast(t('restore.error', { error: err.message })); }
-                e.target.value = '';
-            });
+            // E1: recovery-kit UX (generated code download / verify / restore,
+            // settings + onboarding entry points) — moved to recovery.js.
+            const recovery = createRecovery({ showToast, showPromptModal });
+            recovery.wireRecovery({ getSocket: () => socket });
 
             // Wire up E2E verify modal buttons
             document.getElementById('dm-e2e-verify-btn')?.addEventListener('click', () => {

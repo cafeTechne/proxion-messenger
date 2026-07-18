@@ -1,5 +1,9 @@
 {
-  "_meta": { "locale": "es", "name": "Español", "draft": true },
+  "_meta": {
+    "locale": "es",
+    "name": "Español",
+    "draft": true
+  },
   "sidebar.rooms": "Salas",
   "sidebar.voiceChannels": "Canales de voz",
   "sidebar.friendRequests": "Solicitudes de amistad",
@@ -103,7 +107,6 @@
   "confirm.deleteRoom": "¿Eliminar esta sala permanentemente? Todos los mensajes y el historial se perderán para todos los miembros.",
   "confirm.kickMember": "¿Expulsar a este miembro?",
   "prompt.choosePassphrase": "Elige una frase de contraseña para proteger tu copia de seguridad:",
-  "prompt.enterPassphrase": "Introduce la frase de contraseña de esta copia de seguridad:",
   "error.gatewayGeneric": "Error del gateway: {raw}",
   "error.empty_content": "El mensaje está vacío.",
   "error.content_too_large": "El mensaje es demasiado largo.",
@@ -380,5 +383,22 @@
   "voice.inCallTimer": "En llamada {time}",
   "voice.inCall": "En llamada",
   "time.today": "Hoy",
-  "time.yesterday": "Ayer"
+  "time.yesterday": "Ayer",
+  "recovery.explain": "Este código cifra tu kit de recuperación. Anótalo y guárdalo en un lugar seguro: lo necesitarás para restaurar tu identidad y solo se muestra una vez.",
+  "recovery.confirmSaved": "He anotado mi código de recuperación",
+  "recovery.useCustom": "Usar mi propia frase de contraseña",
+  "recovery.copied": "Código de recuperación copiado.",
+  "recovery.verifyPrompt": "Introduce el código de recuperación (o frase de contraseña) de este kit:",
+  "recovery.verifyOk": "Kit verificado: puede restaurar tu identidad.",
+  "recovery.verifyFail": "Verificación fallida: {error}",
+  "recovery.restorePrompt": "Introduce tu código de recuperación (o frase de contraseña):",
+  "ui.recoveryCode": "Tu código de recuperación",
+  "heading.recoveryCode": "Tu código de recuperación",
+  "btn.verifyRecoveryKit": "Verificar un kit de recuperación",
+  "btn.copyCode": "Copiar código",
+  "btn.downloadRecoveryKit": "Descargar kit de recuperación",
+  "onboarding.haveKit": "¿Tienes un kit de recuperación de una instalación anterior?",
+  "onboarding.restoreKit": "Restaura tu identidad",
+  "onboarding.saveKit": "Descarga tu kit de recuperación",
+  "onboarding.saveKitHint": "Tu identidad vive solo en este dispositivo. Si lo pierdes sin un kit de recuperación, tu identidad se pierde con él."
 }

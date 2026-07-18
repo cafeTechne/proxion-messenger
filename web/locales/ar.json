@@ -1,5 +1,10 @@
 {
-  "_meta": { "locale": "ar", "name": "العربية", "draft": true, "rtl": true },
+  "_meta": {
+    "locale": "ar",
+    "name": "العربية",
+    "draft": true,
+    "rtl": true
+  },
   "sidebar.rooms": "الغرف",
   "sidebar.voiceChannels": "القنوات الصوتية",
   "sidebar.friendRequests": "طلبات الصداقة",
@@ -109,7 +114,6 @@
   "confirm.deleteRoom": "حذف هذه الغرفة نهائيًا؟ ستُفقد كل الرسائل والسجل لجميع الأعضاء.",
   "confirm.kickMember": "طرد هذا العضو؟",
   "prompt.choosePassphrase": "اختر عبارة مرور لحماية نسختك الاحتياطية:",
-  "prompt.enterPassphrase": "أدخل عبارة المرور لهذه النسخة الاحتياطية:",
   "error.gatewayGeneric": "خطأ في البوابة: {raw}",
   "error.empty_content": "الرسالة فارغة.",
   "error.content_too_large": "الرسالة طويلة جدًا.",
@@ -392,5 +396,22 @@
   "voice.inCallTimer": "في مكالمة {time}",
   "voice.inCall": "في مكالمة",
   "time.today": "اليوم",
-  "time.yesterday": "أمس"
+  "time.yesterday": "أمس",
+  "recovery.explain": "هذا الرمز يشفّر حزمة الاسترداد الخاصة بك. اكتبه واحفظه في مكان آمن — ستحتاجه لاستعادة هويتك، ويظهر مرة واحدة فقط.",
+  "recovery.confirmSaved": "لقد دوّنت رمز الاسترداد الخاص بي",
+  "recovery.useCustom": "استخدام عبارة مرور خاصة بي بدلاً من ذلك",
+  "recovery.copied": "تم نسخ رمز الاسترداد.",
+  "recovery.verifyPrompt": "أدخل رمز الاسترداد (أو عبارة المرور) لهذه الحزمة:",
+  "recovery.verifyOk": "تم التحقق من الحزمة — يمكنها استعادة هويتك.",
+  "recovery.verifyFail": "فشل التحقق: {error}",
+  "recovery.restorePrompt": "أدخل رمز الاسترداد (أو عبارة المرور):",
+  "ui.recoveryCode": "رمز الاسترداد الخاص بك",
+  "heading.recoveryCode": "رمز الاسترداد الخاص بك",
+  "btn.verifyRecoveryKit": "التحقق من حزمة استرداد",
+  "btn.copyCode": "نسخ الرمز",
+  "btn.downloadRecoveryKit": "تنزيل حزمة الاسترداد",
+  "onboarding.haveKit": "هل لديك حزمة استرداد من تثبيت سابق؟",
+  "onboarding.restoreKit": "استعادة هويتك",
+  "onboarding.saveKit": "نزّل حزمة الاسترداد الخاصة بك",
+  "onboarding.saveKitHint": "هويتك موجودة على هذا الجهاز فقط. إذا فقدته دون حزمة استرداد، فستفقد هويتك معه."
 }
