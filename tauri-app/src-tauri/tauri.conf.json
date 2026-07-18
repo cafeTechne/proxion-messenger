@@ -52,7 +52,8 @@
         "allowDowngrades": false
       },
       "macOS": {
-        "entitlements": "entitlements.plist"
+        "entitlements": "entitlements.plist",
+        "minimumSystemVersion": "10.15"
       }
     },
     "updater": {

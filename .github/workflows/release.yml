@@ -46,14 +46,37 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Python 3.12
+        if: matrix.os != 'macos-15-intel'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
 
+      # Intel leg targets old Macs (2012-era hardware maxes out at Catalina
+      # 10.15). Two things make that work: MACOSX_DEPLOYMENT_TARGET=10.15 for
+      # everything compiled in this job (Rust/Tauri included), and the
+      # python.org framework Python — built for macOS 10.13+, so the sidecar
+      # AND every wheel pip selects (platform tag macosx_10_13) run on
+      # Catalina. actions/setup-python builds target the runner's macOS and
+      # would quietly produce an 11.0+-only sidecar.
+      - name: Set up Python 3.12 (python.org, Catalina-compatible)
+        if: matrix.os == 'macos-15-intel'
+        run: |
+          curl -sSLo python.pkg https://www.python.org/ftp/python/3.12.8/python-3.12.8-macos11.pkg
+          sudo installer -pkg python.pkg -target /
+          echo "/Library/Frameworks/Python.framework/Versions/3.12/bin" >> "$GITHUB_PATH"
+          echo "MACOSX_DEPLOYMENT_TARGET=10.15" >> "$GITHUB_ENV"
+
       - name: Build gateway sidecar
+        if: matrix.os != 'macos-15-intel'
         # Bounded PyInstaller for build consistency across the matrix (E4).
         run: pip install "pyinstaller>=6.10,<7" && pip install -e "./proxion-messenger-core[gateway]" && python build_sidecar.py
+
+      - name: Build gateway sidecar (Catalina-compatible)
+        if: matrix.os == 'macos-15-intel'
+        # python3 -m pip: the python.org framework install ships python3/pip3
+        # only (no bare `python`), unlike actions/setup-python.
+        run: python3 -m pip install "pyinstaller>=6.10,<7" && python3 -m pip install -e "./proxion-messenger-core[gateway]" && python3 build_sidecar.py
 
       - name: Set up Node
         uses: actions/setup-node@v4
