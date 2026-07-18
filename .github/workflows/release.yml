@@ -50,7 +50,8 @@ jobs:
           cache: pip
 
       - name: Build gateway sidecar
-        run: pip install pyinstaller && pip install -e "./proxion-messenger-core[gateway]" && python build_sidecar.py
+        # Bounded PyInstaller for build consistency across the matrix (E4).
+        run: pip install "pyinstaller>=6.10,<7" && pip install -e "./proxion-messenger-core[gateway]" && python build_sidecar.py
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -93,3 +94,40 @@ jobs:
           # tauri-action generates latest.json (the updater manifest) automatically
           # when updater signing is configured, and uploads it to the release.
           includeUpdaterJson: true
+
+  # E4 (verifiable builds): once all three OS builds have uploaded their
+  # assets, publish a SHA256SUMS.txt and sign build-provenance attestations
+  # binding each asset digest to this workflow run. Users verify with
+  #   sha256sum -c SHA256SUMS.txt          (or certutil/shasum, see docs/VERIFYING.md)
+  #   gh attestation verify <file> --repo <owner>/<repo>
+  verify:
+    name: Checksums + provenance
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # upload SHA256SUMS.txt to the (draft) release
+      id-token: write      # sign the attestation via GitHub OIDC
+      attestations: write  # store the attestation
+    steps:
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --dir assets
+          ls -l assets
+
+      - name: Generate SHA256SUMS.txt
+        run: |
+          cd assets
+          sha256sum * | tee ../SHA256SUMS.txt
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: assets/*
+
+      - name: Upload SHA256SUMS.txt to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" SHA256SUMS.txt --repo "${{ github.repository }}" --clobber

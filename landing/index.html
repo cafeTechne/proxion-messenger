@@ -302,6 +302,7 @@
         <li><a id="repo-link" href="#">Source on GitHub</a></li>
         <li><a id="all-releases" href="#">All downloads</a></li>
         <li><a id="selfhost-link" href="#">Self-hosting guide</a></li>
+        <li><a id="verify-link" href="#">Verify your download</a></li>
       </ul>
     </div>
     <div>
@@ -325,6 +326,7 @@ const REPO_URL = `https://github.com/${REPO}`;
 for (const id of ["repo-link", "nav-github", "gh-btn"]) $(id).href = REPO_URL;
 $("all-releases").href = `${REPO_URL}/releases/latest`;
 $("selfhost-link").href = `${REPO_URL}/blob/main/docs/SELF_HOSTING.md`;
+$("verify-link").href = `${REPO_URL}/blob/main/docs/VERIFYING.md`;
 
 function detectOS() {
   const p = (navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || "").toLowerCase();

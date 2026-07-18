@@ -69,6 +69,15 @@ building the PyInstaller gateway sidecar), generates `latest.json` if the
 updater key is set, and creates a **draft** Release with the assets. Review
 and publish; the landing page picks it up automatically.
 
+## Verifiable builds (E4)
+
+After the three OS builds upload their assets, the `verify` job in
+`release.yml` publishes a `SHA256SUMS.txt` to the release and signs a
+[build-provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations)
+for every asset. End-user verification steps live in
+[`docs/VERIFYING.md`](VERIFYING.md). Nothing to provision — attestations use
+GitHub's OIDC identity, no secrets involved.
+
 ## Verifying the updater manifest
 
 `latest.json` must carry a `version` and per-platform `url`+`signature`
