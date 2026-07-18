@@ -349,9 +349,16 @@ function pickAsset(assets, os) {
   };
   // NSIS -setup.exe first: per-user install, no admin prompt.
   if (os === "windows") return by("-setup.exe", ".msi", ".exe");
-  if (os === "macos")   return by(".dmg", ".app.tar.gz");
+  // Apple Silicon .dmg first: browsers can't detect Mac architecture (Safari
+  // on ARM reports Intel), so default to the modern chip; findMacIntel() gives
+  // Intel users an explicit link.
+  if (os === "macos")   return by("aarch64.dmg", ".dmg", ".app.tar.gz");
   if (os === "linux")   return by(".appimage", ".deb", ".rpm");
   return null;
+}
+
+function findMacIntel(assets) {
+  return assets.find(a => /x(86_)?64\.dmg$/.test(a.name.toLowerCase())) || null;
 }
 
 const OS_LABEL = { windows: "Windows", macos: "macOS", linux: "Linux", unknown: "your system" };
@@ -388,11 +395,17 @@ async function init() {
 
     // Alternate-platform links
     const others = ["windows", "macos", "linux"].filter(o => o !== os);
-    const sub = others.map(o => {
+    let sub = others.map(o => {
       const a = pickAsset(assets, o);
       const href = a ? a.browser_download_url : `${REPO_URL}/releases/latest`;
       return `<a href="${href}">${OS_LABEL[o]}</a>`;
     }).join("");
+    // On a Mac the primary button is the Apple Silicon build; surface the
+    // Intel .dmg explicitly when the release carries one.
+    if (os === "macos") {
+      const intel = findMacIntel(assets);
+      if (intel) sub = `<a href="${intel.browser_download_url}">Intel Mac</a>` + sub;
+    }
     $("dl-sub").innerHTML = sub ? ("Also for: " + sub) : "";
   } catch (e) {
     const dl = $("dl");

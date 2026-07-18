@@ -38,7 +38,9 @@ jobs:
       matrix:
         # ubuntu-22.04, not -latest: Tauri v1 needs libwebkit2gtk-4.0, which
         # Ubuntu 24.04 no longer ships.
-        os: [ubuntu-22.04, windows-latest, macos-latest]
+        # macos-latest = Apple Silicon; macos-15-intel = the last free x86_64
+        # image (available until Aug 2027) so Intel Macs get a native .dmg too.
+        os: [ubuntu-22.04, windows-latest, macos-latest, macos-15-intel]
 
     steps:
       - uses: actions/checkout@v4
