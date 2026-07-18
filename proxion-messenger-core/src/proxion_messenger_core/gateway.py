@@ -1378,8 +1378,18 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await websocket.send(json.dumps({"type": "error", "message": f"Unknown command: {cmd}"}))
 
         except Exception as exc:
+            # A client closing its tab mid-command is not a gateway error: the
+            # handler's send raises ConnectionClosed{OK,Error} — log quietly and
+            # don't try to reply on the dead socket.
+            from websockets.exceptions import ConnectionClosed
+            if isinstance(exc, ConnectionClosed):
+                logger.debug("Client disconnected during command %s (close code %s)", cmd, exc.rcvd.code if exc.rcvd else None)
+                return
             logger.error("Error executing command %s: %s", cmd, exc, exc_info=True)
-            await websocket.send(json.dumps({"type": "error", "code": "E_INTERNAL", "message": "internal error"}))
+            try:
+                await websocket.send(json.dumps({"type": "error", "code": "E_INTERNAL", "message": "internal error"}))
+            except Exception:
+                pass  # socket may have died between the failure and the reply
 
     async def _handle_send_friend_request(self, websocket, data: dict):
         """Handle send_friend_request command."""
