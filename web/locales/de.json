@@ -400,5 +400,14 @@
   "onboarding.haveKit": "Hast du ein Wiederherstellungskit von einer früheren Installation?",
   "onboarding.restoreKit": "Identität wiederherstellen",
   "onboarding.saveKit": "Wiederherstellungskit herunterladen",
-  "onboarding.saveKitHint": "Deine Identität existiert nur auf diesem Gerät. Verlierst du es ohne Wiederherstellungskit, ist deine Identität verloren."
+  "onboarding.saveKitHint": "Deine Identität existiert nur auf diesem Gerät. Verlierst du es ohne Wiederherstellungskit, ist deine Identität verloren.",
+  "file.confirmSend": "{filename} senden?",
+  "gif.trayTitle": "Deine GIF-Ablage",
+  "gif.empty": "Noch nichts gespeichert — markiere ein Bild im Chat mit einem Stern, um es hier zu behalten.",
+  "gif.saved": "In deiner GIF-Ablage gespeichert.",
+  "gif.alreadySaved": "Bereits in deiner GIF-Ablage.",
+  "gif.saveAction": "In GIF-Ablage speichern",
+  "gif.sendNamed": "{name} senden",
+  "gif.removeNamed": "{name} aus der Ablage entfernen",
+  "ui.gifTray": "GIF-Ablage"
 }

@@ -400,5 +400,14 @@
   "onboarding.haveKit": "¿Tienes un kit de recuperación de una instalación anterior?",
   "onboarding.restoreKit": "Restaura tu identidad",
   "onboarding.saveKit": "Descarga tu kit de recuperación",
-  "onboarding.saveKitHint": "Tu identidad vive solo en este dispositivo. Si lo pierdes sin un kit de recuperación, tu identidad se pierde con él."
+  "onboarding.saveKitHint": "Tu identidad vive solo en este dispositivo. Si lo pierdes sin un kit de recuperación, tu identidad se pierde con él.",
+  "file.confirmSend": "¿Enviar {filename}?",
+  "gif.trayTitle": "Tu bandeja de GIF",
+  "gif.empty": "Nada guardado aún: marca con una estrella una imagen del chat para conservarla aquí.",
+  "gif.saved": "Guardado en tu bandeja de GIF.",
+  "gif.alreadySaved": "Ya está en tu bandeja de GIF.",
+  "gif.saveAction": "Guardar en la bandeja de GIF",
+  "gif.sendNamed": "Enviar {name}",
+  "gif.removeNamed": "Quitar {name} de la bandeja",
+  "ui.gifTray": "Bandeja de GIF"
 }

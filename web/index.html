@@ -172,6 +172,42 @@
         }
         .emoji-picker button:hover,
         .emoji-picker button:focus-visible { background: rgba(255,255,255,0.1); }
+        /* R58: GIF tray — composer popover of starred images */
+        .gif-tray-btn {
+            background: transparent; border: 1px solid var(--slate-600);
+            color: var(--text-secondary); border-radius: 4px; cursor: pointer;
+            font-size: 0.68rem; font-weight: 700; letter-spacing: 0.03em;
+            padding: 4px 6px; min-width: 36px; min-height: 28px; flex-shrink: 0;
+        }
+        .gif-tray-btn:hover, .gif-tray-btn:focus-visible { color: var(--slate-50); border-color: var(--slate-500); }
+        #gif-tray {
+            position: absolute; bottom: 62px; left: 8px; right: 8px;
+            max-width: 420px; max-height: 300px; overflow-y: auto;
+            background: var(--slate-800); border: 1px solid var(--slate-600);
+            border-radius: 8px; padding: 10px; z-index: 1000;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+        .gif-tray-title {
+            margin: 0 0 8px; font-size: 0.72em; color: var(--text-secondary);
+            text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;
+        }
+        .gif-tray-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; }
+        .gif-tray-empty { margin: 4px 0; font-size: 0.85em; color: var(--text-secondary); grid-column: 1 / -1; }
+        .gif-cell { position: relative; }
+        .gif-send {
+            display: block; width: 100%; padding: 0; border: 1px solid var(--slate-700);
+            border-radius: 6px; background: var(--slate-900); cursor: pointer; overflow: hidden;
+        }
+        .gif-send img { display: block; width: 100%; height: 76px; object-fit: cover; }
+        .gif-send:hover, .gif-send:focus-visible { border-color: var(--accent); }
+        .gif-remove {
+            position: absolute; top: 2px; inset-inline-end: 2px; min-width: 22px; min-height: 22px;
+            border: none; border-radius: 4px; background: rgba(0,0,0,0.65);
+            color: var(--slate-50); cursor: pointer; font-size: 0.9em; line-height: 1;
+        }
+        .gif-remove:hover, .gif-remove:focus-visible { background: var(--color-danger, #b91c1c); }
+        /* R58: drag-drop target highlight */
+        .drop-active { outline: 2px dashed var(--accent); outline-offset: -6px; }
         .mention { background: rgba(88,101,242,0.3); border-radius: 3px; padding: 0 2px; }
         .link-preview {
             border-left: 3px solid var(--accent);
@@ -899,6 +935,7 @@
             <form id="message-form">
                 <label for="file-input" class="paperclip"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13"/></svg></label>
                 <input type="file" id="file-input">
+                <button type="button" id="gif-tray-btn" class="gif-tray-btn" aria-expanded="false" aria-label="GIF tray" title="GIF tray" data-i18n-attr="aria-label:ui.gifTray;title:ui.gifTray">GIF</button>
                 <label for="message-input" class="sr-only" data-i18n="label.message">Message</label>
                 <textarea id="message-input" dir="auto" placeholder="Type a message… (Shift+Enter for newline)" rows="1" autocomplete="off" data-i18n-attr="placeholder:ui.typeMessageShiftEnter"></textarea>
                 <!-- Round 62: Voice record button -->
@@ -907,6 +944,11 @@
                 <button type="button" id="schedule-btn" aria-label="Schedule message" class="schedule-btn" title="Schedule message" data-i18n-attr="title:ui.scheduleMessage;aria-label:ui.scheduleMessage"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg></button>
                 <button type="submit" data-i18n="btn.send">Send</button>
             </form>
+            <!-- R58: personal GIF/meme tray — starred image attachments, local-only -->
+            <div id="gif-tray" role="group" aria-label="GIF tray" style="display:none;" data-i18n-attr="aria-label:ui.gifTray">
+              <p class="gif-tray-title" data-i18n="gif.trayTitle">Your GIF tray</p>
+              <div id="gif-tray-grid" class="gif-tray-grid"></div>
+            </div>
         </main>
 
         <!-- Members panel (right sidebar for room member list) -->

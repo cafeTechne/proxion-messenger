@@ -44,6 +44,7 @@ import { createInvite } from './invite.js';
 import { createPush } from './push.js';
 import { createPairing } from './pairing.js';
 import { createRecovery } from './recovery.js';
+import { createGifTray, saveFavorite } from './gifs.js';
 import { inlineNotice, feedEmptyState } from './states.js';
 import { installFocusTrap } from './focus-trap.js';
 import { makeListNavigable, announce } from './a11y.js';
@@ -2919,28 +2920,20 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             getActiveView: () => activeView,
         });
 
-        document.getElementById("file-input").onchange = (e) => {
-            const file = e.target.files[0];
+        // Single attachment entry point — used by the file picker, clipboard
+        // paste, drag-drop, and the GIF tray (R58). Routes small files inline
+        // and large ones (>512 KB) through the chunked DM-only path.
+        function sendAttachmentFile(file) {
             if (!file || !socket || !activeView) return;
-            // Large files (>512 KB) use the chunked transfer path — DMs only.
             if (file.size > 524288) {
                 const isDm = activeView.type === "dm" || activeView.type === "local_dm";
                 const peerWebid = activeView.peerWebid || "";
-                if (file.size > 25 * 1024 * 1024) {
-                    showToast(t('file.tooLarge'));
-                    e.target.value = "";
-                    return;
-                }
-                if (!isDm || !peerWebid) {
-                    showToast(t('file.largeDmOnly'));
-                    e.target.value = "";
-                    return;
-                }
+                if (file.size > 25 * 1024 * 1024) { showToast(t('file.tooLarge')); return; }
+                if (!isDm || !peerWebid) { showToast(t('file.largeDmOnly')); return; }
                 fileTransfer.sendFileChunked(file, peerWebid).catch(err => {
                     console.warn("chunked send failed", err);
                     showToast(t('file.sendFailed'));
                 });
-                e.target.value = "";
                 return;
             }
             const reader = new FileReader();
@@ -2958,10 +2951,52 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                 if (activeView.type === 'local_room') {
                     podUploadFile(activeView.id, fileMsgId, file.name, file).catch(() => {});
                 }
-                e.target.value = "";
             };
             reader.readAsDataURL(file);
+        }
+
+        document.getElementById("file-input").onchange = (e) => {
+            const file = e.target.files[0];
+            if (file) sendAttachmentFile(file);
+            e.target.value = "";
         };
+
+        // R58: GIF/meme tray — starred images, re-sent through the normal path.
+        const gifTray = createGifTray({ showToast, sendAttachmentFile });
+        gifTray.wireGifTray();
+
+        // R58: paste an image into the composer → confirm → send as attachment.
+        document.getElementById("message-input")?.addEventListener("paste", (e) => {
+            const items = e.clipboardData?.items || [];
+            for (const item of items) {
+                if (item.kind === "file" && item.type.startsWith("image/")) {
+                    const file = item.getAsFile();
+                    if (!file) continue;
+                    e.preventDefault();
+                    const name = file.name || "image";
+                    showConfirm(t('file.confirmSend', { filename: name }), () => sendAttachmentFile(file));
+                    return;
+                }
+            }
+        });
+
+        // R58: drag-drop onto the conversation → confirm → send. Document-level
+        // guards stop the browser from navigating away on a stray drop.
+        {
+            const _dropTargets = ["message-feed", "message-form"].map(id => document.getElementById(id)).filter(Boolean);
+            document.addEventListener("dragover", (e) => e.preventDefault());
+            document.addEventListener("drop", (e) => e.preventDefault());
+            for (const el of _dropTargets) {
+                el.addEventListener("dragover", () => el.classList.add("drop-active"));
+                el.addEventListener("dragleave", () => el.classList.remove("drop-active"));
+                el.addEventListener("drop", (e) => {
+                    el.classList.remove("drop-active");
+                    const file = e.dataTransfer?.files?.[0];
+                    if (!file) return;
+                    showConfirm(t('file.confirmSend', { filename: file.name || "file" }), () => sendAttachmentFile(file));
+                });
+            }
+        }
 
         // --------------- System messages ---------------
         function _appendSystemMsg(text) {
@@ -3932,6 +3967,16 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                         showContactProfile(webid);
                         break;
                     case 'scroll-reply': document.getElementById(`msg-${replyId}`)?.scrollIntoView({ behavior: 'smooth' }); break;
+                    case 'save-gif': {
+                        const m = messageMap[msgId];
+                        if (m?.file?.data_b64) {
+                            saveFavorite({
+                                filename: m.file.filename, mime: m.file.mime_type, data_b64: m.file.data_b64,
+                            }).then((r) => showToast(t(r === 'exists' ? 'gif.alreadySaved' : 'gif.saved')))
+                              .catch(() => showToast(t('common.updateFailed')));
+                        }
+                        break;
+                    }
                 }
             });
 

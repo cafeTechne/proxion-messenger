@@ -400,5 +400,14 @@
   "onboarding.haveKit": "Vous avez un kit de récupération d'une installation précédente ?",
   "onboarding.restoreKit": "Restaurer votre identité",
   "onboarding.saveKit": "Téléchargez votre kit de récupération",
-  "onboarding.saveKitHint": "Votre identité n'existe que sur cet appareil. Si vous le perdez sans kit de récupération, votre identité disparaît avec lui."
+  "onboarding.saveKitHint": "Votre identité n'existe que sur cet appareil. Si vous le perdez sans kit de récupération, votre identité disparaît avec lui.",
+  "file.confirmSend": "Envoyer {filename} ?",
+  "gif.trayTitle": "Votre tiroir à GIF",
+  "gif.empty": "Rien d'enregistré pour l'instant — étoilez une image du chat pour la garder ici.",
+  "gif.saved": "Enregistré dans votre tiroir à GIF.",
+  "gif.alreadySaved": "Déjà dans votre tiroir à GIF.",
+  "gif.saveAction": "Enregistrer dans le tiroir à GIF",
+  "gif.sendNamed": "Envoyer {name}",
+  "gif.removeNamed": "Retirer {name} du tiroir",
+  "ui.gifTray": "Tiroir à GIF"
 }
