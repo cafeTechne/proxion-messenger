@@ -410,5 +410,6 @@
   "gif.sendNamed": "Envoyer {name}",
   "gif.removeNamed": "Retirer {name} du tiroir",
   "ui.gifTray": "Tiroir à GIF",
-  "file.reduced": "L'image a été redimensionnée pour respecter la limite de pièces jointes du salon."
+  "file.reduced": "L'image a été redimensionnée pour respecter la limite de pièces jointes du salon.",
+  "ui.insertEmoji": "Insérer un émoji"
 }

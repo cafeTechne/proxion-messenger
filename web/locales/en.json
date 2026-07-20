@@ -410,5 +410,6 @@
   "voice.inCallTimer": "In Call {time}",
   "voice.inCall": "In Call",
   "time.today": "Today",
-  "time.yesterday": "Yesterday"
+  "time.yesterday": "Yesterday",
+  "ui.insertEmoji": "Insert emoji"
 }
