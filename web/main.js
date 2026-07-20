@@ -13,7 +13,8 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podWriteContact, podReadContacts, podDeleteContact,
          podWriteInvite, podReadInvites, podDeleteInvite,
          podReadRoomIndex, _podUpdateRoomIndex, podReadRoomMeta,
-         podReadDmIndex, _podUpdateDmIndex } from './pod.js';
+         podReadDmIndex, _podUpdateDmIndex,
+         podArchiveDmMessage, podArchiveDeleteDmMessage, podReadDmMessages } from './pod.js';
 import {
     didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, timeAgo,
     expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8,
@@ -602,6 +603,14 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                 dmHistorySetEnabled(_dmHistToggle.checked);
             };
         }
+        // R61: opt-in DM archive to the pod (default OFF).
+        const _dmPodArchiveToggle = document.getElementById("settings-dm-pod-archive-toggle");
+        if (_dmPodArchiveToggle) {
+            _dmPodArchiveToggle.checked = localStorage.getItem("proxion_dm_pod_archive") === "1";
+            _dmPodArchiveToggle.onchange = () => {
+                localStorage.setItem("proxion_dm_pod_archive", _dmPodArchiveToggle.checked ? "1" : "0");
+            };
+        }
         const _clearDmHistBtn = document.getElementById("settings-clear-dm-history-btn");
         if (_clearDmHistBtn) {
             _clearDmHistBtn.onclick = () => {
@@ -1027,6 +1036,8 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     // ratchet can't re-decrypt. (dmHistorySave guards ciphertext.)
                     if (msg._persistDm && msg.message_id) {
                         dmHistorySave({ ...msg, thread_id: id });
+                        // R61: opt-in archive of decrypted DM history to the pod
+                        podArchiveDmMessage(id, { ...msg, thread_id: id }).catch(() => {});
                     }
 
                     // If this is the server echo of an optimistically-rendered message,
@@ -1700,7 +1711,12 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     dmHistoryDelete(event.message_id);
                     if (event.message_id && event.thread_id) {
                         const _isRoom = !!(activeView && activeView.type === 'local_room');
-                        podDeleteMessage(event.thread_id, event.message_id, _isRoom).catch(() => {});
+                        if (_isRoom) {
+                            podDeleteMessage(event.thread_id, event.message_id, true).catch(() => {});
+                        } else {
+                            // R61: remove from the DM archive AND its per-thread index
+                            podArchiveDeleteDmMessage(event.thread_id, event.message_id).catch(() => {});
+                        }
                     }
                     break;
                 }
@@ -2441,6 +2457,37 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                 allMessages.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
                 renderMessages();
             }
+            // R61: also restore DM history archived to the pod (from any of your
+            // devices). Reading your own archive is fine regardless of the write
+            // toggle; dedup by message_id against what's already shown.
+            mergeDmPodHistory(threadId).catch(() => {});
+        }
+
+        // Merge pod-archived DM plaintext into the feed (cross-device restore).
+        async function mergeDmPodHistory(threadId) {
+            if (!threadId || !solidSession.info.isLoggedIn) return;
+            if (!activeView || activeView.id !== threadId) return;
+            const now = Date.now();
+            const last = _podReadLastFetch['dm:' + threadId] || 0;
+            if ((now - last) < POD_READ_DEBOUNCE_MS) return;
+            _podReadLastFetch['dm:' + threadId] = now;
+            let podMsgs;
+            try { podMsgs = await podReadDmMessages(threadId); } catch (_) { return; }
+            if (!podMsgs || !podMsgs.length) return;
+            if (!activeView || activeView.id !== threadId) return;
+            let changed = false;
+            for (const pm of podMsgs) {
+                if (!messageMap[pm.message_id]) {
+                    const msg = { ...pm, local: true };
+                    messageMap[pm.message_id] = msg;
+                    allMessages.push(msg);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                allMessages.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+                renderMessages();
+            }
         }
         function deleteMsg(msgId) {
             if (!activeView) return;
@@ -2905,12 +2952,15 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                 // Cache the sent DM's plaintext locally so it survives reopen — for
                 // E2E DMs the server only stores ciphertext we can't re-decrypt.
                 if (activeView.type === 'dm' || activeView.type === 'local_dm') {
-                    dmHistorySave({
+                    const _dmRecord = {
                         message_id: clientMsgId, thread_id: activeView.id, from_webid: selfWebId,
                         from_display_name: localStorage.getItem('proxion_display_name') || '',
                         content: content, timestamp: new Date().toISOString(),
                         reply_to_id: payload.reply_to_id || null,
-                    });
+                    };
+                    dmHistorySave(_dmRecord);
+                    // R61: opt-in archive of the sent DM's plaintext to the pod
+                    podArchiveDmMessage(activeView.id, _dmRecord).catch(() => {});
                 }
 
                 if (activeView?.type === 'local_room') {

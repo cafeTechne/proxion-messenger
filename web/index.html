@@ -1143,6 +1143,13 @@
           <span style="color:var(--slate-300);">Save DM history on this device<br><span style="font-size:0.78em;color:var(--slate-500);">Encrypted DMs can't be re-read from the server; kept locally so they reload</span></span>
           <input type="checkbox" id="settings-dm-history-toggle" checked style="width:18px;height:18px;cursor:pointer;">
         </label>
+        <!-- R61: opt-in DM archive to the pod (off by default). Plain-English
+             label like its siblings above: the inline <br>/<span> markup can't
+             live in an i18n textContent value. -->
+        <label style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:0.9em;cursor:pointer;">
+          <span style="color:var(--slate-300);">Archive DM history to my pod<br><span style="font-size:0.78em;color:var(--slate-500);">Off by default. Stores your decrypted DM history on your own pod (private, only you can read it) so it syncs across your devices.</span></span>
+          <input type="checkbox" id="settings-dm-pod-archive-toggle" style="width:18px;height:18px;cursor:pointer;">
+        </label>
         <button id="settings-clear-dm-history-btn"
                 style="background:var(--slate-800);border:1px solid var(--slate-600);color:var(--color-danger-soft);
                        padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.82em;

@@ -693,3 +693,81 @@ export async function _podUpdateDmIndex(threadId, add = true) {
     if (add) await _addToIndex(indexUrl, threadId);
     else await _removeFromIndex(indexUrl, threadId);
 }
+
+// --- Opt-in DM archive (R61) ---
+//
+// Off by default. When enabled AND a pod is connected, decrypted DM history is
+// written to your own pod as open px:Message JSON-LD, so it syncs across your
+// devices and any Solid app you authorize can read it. It stays owner-only: DM
+// resources inherit the proxion/ container's owner-only ACL, and we never grant
+// member read here (the other party keeps their own copy on their own pod).
+
+export function dmPodArchiveEnabled() {
+    try {
+        return typeof localStorage !== 'undefined' &&
+            localStorage.getItem('proxion_dm_pod_archive') === '1';
+    } catch {
+        return false;
+    }
+}
+
+// Write a single DM message to the pod archive (no-op unless enabled + logged
+// in). Reuses the canonical JSON-LD writer and maintains a per-thread message
+// index so read-back can enumerate without a container LIST.
+export async function podArchiveDmMessage(threadId, msg) {
+    if (!dmPodArchiveEnabled()) return;
+    const root = podStorageRoot();
+    if (!root || !solidSession.info.isLoggedIn) return;
+    if (!SAFE_ID_RE.test(threadId) || !SAFE_ID_RE.test(msg?.message_id || '')) return;
+    await podWriteMessageJsonLd(threadId, msg.message_id, msg, false);
+    await _addToIndex(`${root}proxion/dm/${threadId}/messages/index.jsonld`, msg.message_id);
+    await _podUpdateDmIndex(threadId, true);
+}
+
+// Remove a DM message from the pod archive (best-effort; only when logged in).
+export async function podArchiveDeleteDmMessage(threadId, messageId) {
+    const root = podStorageRoot();
+    if (!root || !solidSession.info.isLoggedIn) return;
+    if (!SAFE_ID_RE.test(threadId) || !SAFE_ID_RE.test(messageId)) return;
+    await podDeleteMessage(threadId, messageId, false);
+    await _removeFromIndex(`${root}proxion/dm/${threadId}/messages/index.jsonld`, messageId);
+}
+
+// Read archived DM history for a thread back into the message shape the client
+// renders. Reading your own archive is always fine (independent of the write
+// toggle), so enabling archiving on one device restores history on another.
+export async function podReadDmMessages(threadId) {
+    if (!SAFE_ID_RE.test(threadId)) return [];
+    const root = podStorageRoot();
+    if (!root || !solidSession.info.isLoggedIn) return [];
+    const base = `${root}proxion/dm/${threadId}/messages/`;
+    const ids = (await _readIndex(`${base}index.jsonld`)).slice(-200);
+    if (!ids.length) return [];
+    const results = await Promise.allSettled(
+        ids.map((id) => solidSession.fetch(`${base}${id}.jsonld`)
+            .then((r) => (r.ok ? r.text() : null))
+            .then((text) => {
+                if (!text || text.length > 65536) return null;
+                const doc = JSON.parse(text);
+                if (doc?.['@type'] !== 'px:Message') return null;
+                const mid = doc['px:messageId'];
+                if (typeof mid !== 'string' || !SAFE_ID_RE.test(mid)) return null;
+                return {
+                    message_id: mid,
+                    thread_id: threadId,
+                    content: doc['px:content'] || '',
+                    content_type: doc['px:contentType'] || 'text',
+                    from_webid: doc['px:fromWebid'] || '',
+                    from_display_name: doc['px:fromName'] || '',
+                    timestamp: doc['px:timestamp'] || '',
+                    reply_to_id: doc['px:replyToId'] || null,
+                };
+            })
+            .catch(() => null))
+    );
+    const msgs = results
+        .filter((r) => r.status === 'fulfilled' && r.value)
+        .map((r) => r.value);
+    msgs.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+    return msgs;
+}

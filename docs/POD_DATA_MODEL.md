@@ -55,10 +55,11 @@ Everything lives under a single container, `{pod}/proxion/`:
 │       └── files/
 │           ├── {messageId}.webm   (binary voice note)
 │           └── {messageId}/{name} (binary attachment)
-├── dm/
+├── dm/                            (only when DM pod archive is enabled; opt-in)
 │   ├── index.jsonld               px:Index (thread ids)
 │   └── {threadId}/
 │       └── messages/
+│           ├── index.jsonld       px:Index (message ids)
 │           └── {messageId}.jsonld px:Message
 ├── contacts/
 │   ├── index.jsonld               px:Index (cert ids)
@@ -83,7 +84,9 @@ Identifiers (`roomId`, `threadId`, `messageId`, `certId`) match
 
 A single message in a room or DM thread. Path:
 `proxion/rooms/{roomId}/messages/{messageId}.jsonld` or
-`proxion/dm/{threadId}/messages/{messageId}.jsonld`.
+`proxion/dm/{threadId}/messages/{messageId}.jsonld`. Room messages are archived
+automatically when a pod is connected; **DM messages only when you turn on the
+opt-in DM pod archive** (see "What is deliberately NOT on the pod" below).
 
 ```json
 {
@@ -294,12 +297,19 @@ An example room ACL:
 
 Being honest about the boundary matters more than a tidy story:
 
-- **End-to-end encrypted DM content.** Because 1:1 DMs are E2E encrypted in
-  transit, their plaintext currently lives only in local device storage, not as
-  RDF on your pod. So a DM archive is not yet pod-interoperable the way rooms are.
-  Making an opt-in, plaintext-on-your-own-pod DM archive (which is safe, since it
-  is your pod and you can already read your own messages) is a roadmap item, not a
-  settled preference.
+- **End-to-end encrypted DM content, unless you opt in.** 1:1 DMs are E2E
+  encrypted in transit, so by default their plaintext lives only in local device
+  storage, not on your pod. There is an **opt-in DM pod archive** (Settings, off
+  by default): when you turn it on, your decrypted DM history is written to your
+  own pod as `px:Message` JSON-LD under `proxion/dm/`, exactly like room history,
+  so it syncs across your devices and any Solid app you authorize can read it.
+  This is safe because it is *your* pod holding *your* messages, which you can
+  already read; the E2E-in-transit property is unchanged (relays and gateways
+  still never see plaintext). The archive is **owner-only**: DM resources inherit
+  the `proxion/` container's owner-only ACL, and Proxion never grants member read
+  on them (your contact keeps their own copy on their own pod). It stays off
+  unless you choose it, because some people do not want conversations on their
+  pod at all.
 - **Private keys.** Your Ed25519 identity key and message keys never leave the
   device except through the explicit, passphrase-protected recovery kit.
 

@@ -34,8 +34,9 @@ someone else's terms. Proxion inverts that:
 - **Actually private** — end-to-end encrypted DMs with per-contact safety numbers you can verify
   out loud. The encryption is *on the wire*, between you and your contact, so no relay or gateway
   in the middle can read your messages — it is **not** a lock-box that hides your own data from
-  your own apps. Your identity is an Ed25519 key generated on your machine; no signup, nothing
-  to leak.
+  your own apps. DM history stays on-device by default; an **opt-in** archive (off by default)
+  can mirror it to your own pod as open RDF for cross-device sync. Your identity is an Ed25519
+  key generated on your machine; no signup, nothing to leak.
 - **No lock-in** — open source, open protocol, standard data. Gateways federate
   peer-to-peer by Proxion address, with no central registry to shut down.
 
