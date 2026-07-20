@@ -577,6 +577,14 @@ button:hover { background: var(--accent-hover); }
     object-fit: cover;
 }
 .msg-image-preview:hover { opacity: 0.9; }
+/* R59A: inline media players — same footprint discipline as image previews */
+.msg-video-preview {
+    display: block; max-width: min(420px, 100%); max-height: 320px;
+    border-radius: 6px; margin-top: 6px;
+    border: 1px solid var(--border, #334155);
+    background: #000;
+}
+.msg-audio-preview { display: block; max-width: min(420px, 100%); margin-top: 6px; }
 #lightbox { display: none; }
 #lightbox.visible {
     display: flex !important;

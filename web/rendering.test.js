@@ -149,3 +149,21 @@ describe('renderMessage (buffer tracking)', () => {
     expect(host.allMessages).toHaveLength(0);
   });
 });
+
+describe('attachmentKind (R59A pure)', () => {
+  it('classifies image, video, audio, and unknown mimes', async () => {
+    const { attachmentKind } = await import('./rendering.js');
+    expect(attachmentKind('image/png')).toBe('image');
+    expect(attachmentKind('image/GIF')).toBe('image');
+    expect(attachmentKind('video/mp4')).toBe('video');
+    expect(attachmentKind('video/webm')).toBe('video');
+    expect(attachmentKind('video/quicktime')).toBe('video');
+    expect(attachmentKind('audio/mpeg')).toBe('audio');
+    expect(attachmentKind('audio/flac')).toBe('audio');
+    expect(attachmentKind('application/pdf')).toBe('file');
+    expect(attachmentKind('')).toBe('file');
+    expect(attachmentKind(undefined)).toBe('file');
+    // SVG stays OUT of inline types (scriptable) — download row only.
+    expect(attachmentKind('image/svg+xml')).toBe('file');
+  });
+});

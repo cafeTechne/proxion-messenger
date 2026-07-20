@@ -22,6 +22,20 @@
 import { didSuffix, escHtml, webidColor, renderMarkdown, timeAgo, expireLabel as _expireLabel } from './util.js';
 import { t, getLocale } from './i18n.js';
 
+// R59A: attachment kind by mime — pure, exported for tests. Video/audio get
+// inline players (CSP already allows media-src data:), everything else falls
+// through to the generic download row.
+const _IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif']);
+const _VIDEO_TYPES = new Set(['video/mp4', 'video/webm', 'video/quicktime', 'video/ogg']);
+const _AUDIO_TYPES = new Set(['audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/mp4', 'audio/flac']);
+export function attachmentKind(mime) {
+    const m = (mime || '').toLowerCase();
+    if (_IMAGE_TYPES.has(m)) return 'image';
+    if (_VIDEO_TYPES.has(m)) return 'video';
+    if (_AUDIO_TYPES.has(m)) return 'audio';
+    return 'file';
+}
+
 export function createRendering({
     getActiveView, getSocket, getSelfWebId, getSelfPubHex,
     getCurrentDisappearMs, getMessageMap, getAllMessages, getUserPresence,
@@ -280,14 +294,28 @@ export function createRendering({
                 .trim() || 'file';
             const safeFilename = escHtml(_rawFilename);
             const _mime = (msg.file.mime_type || '').toLowerCase();
-            const _IMAGE_TYPES = new Set(['image/jpeg','image/png','image/gif','image/webp','image/avif']);
-            if (_IMAGE_TYPES.has(_mime) && msg.file.data_b64) {
+            const _kind = attachmentKind(_mime);
+            const _dlLink = `<a href="data:application/octet-stream;base64,${msg.file.data_b64}" download="${safeFilename}"
+                       style="color:#e94560;font-size:0.8em;display:block;margin-top:3px;">Download ${safeFilename}</a>`;
+            if (_kind === 'image' && msg.file.data_b64) {
                 // R13.7: inline image preview
                 const _imgSrc = `data:${_mime};base64,${msg.file.data_b64}`;
                 fileHtml = `<div class="attachment">
                     <img class="msg-image-preview" src="${_imgSrc}" alt="${safeFilename}" loading="lazy">
-                    <a href="data:application/octet-stream;base64,${msg.file.data_b64}" download="${safeFilename}"
-                       style="color:#e94560;font-size:0.8em;display:block;margin-top:3px;">Download ${safeFilename}</a></div>`;
+                    ${_dlLink}</div>`;
+            } else if (_kind === 'video' && msg.file.data_b64) {
+                // R59A: inline video player (short clips are the modern GIF)
+                fileHtml = `<div class="attachment">
+                    <video controls preload="metadata" class="msg-video-preview" aria-label="${safeFilename}"
+                           src="data:${_mime};base64,${msg.file.data_b64}"></video>
+                    ${_dlLink}</div>`;
+            } else if (_kind === 'audio' && msg.file.data_b64) {
+                // R59A: inline audio player for music/sound attachments
+                fileHtml = `<div class="attachment">
+                    <audio controls class="msg-audio-preview" aria-label="${safeFilename}"
+                           src="data:${_mime};base64,${msg.file.data_b64}"></audio>
+                    <span style="font-size:0.8em;color:#8091a7;display:block;margin-top:2px;">${safeFilename}</span>
+                    ${_dlLink}</div>`;
             } else {
                 // Force octet-stream to prevent data URI MIME injection
                 fileHtml = `<div class="attachment"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13"/></svg> ${safeFilename} (${Math.round(msg.file.size/1024)} KB)
