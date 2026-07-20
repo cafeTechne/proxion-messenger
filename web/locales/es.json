@@ -411,5 +411,6 @@
   "gif.removeNamed": "Quitar {name} de la bandeja",
   "ui.gifTray": "Bandeja de GIF",
   "file.reduced": "La imagen se redimensionó para ajustarse al límite de adjuntos de la sala.",
-  "ui.insertEmoji": "Insertar emoji"
+  "ui.insertEmoji": "Insertar emoji",
+  "msg.spoilerReveal": "Mostrar spoiler"
 }

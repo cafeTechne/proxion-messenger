@@ -3945,6 +3945,18 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             attachListener('#empty-create-room-btn', 'click', () => document.getElementById('create-room-btn').click());
             attachListener('#empty-add-contact-btn', 'click', () => document.getElementById('add-peer-btn').click());
 
+            // R59D: spoiler reveal (click; Enter/Space via keydown below).
+            // Reveal is one-way — no re-hide, matching every other messenger.
+            document.getElementById('message-feed')?.addEventListener('click', e => {
+                const sp = e.target.closest('.spoiler:not(.revealed)');
+                if (sp) { sp.classList.add('revealed'); sp.removeAttribute('role'); sp.removeAttribute('tabindex'); }
+            });
+            document.getElementById('message-feed')?.addEventListener('keydown', e => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                const sp = e.target.closest?.('.spoiler:not(.revealed)');
+                if (sp) { e.preventDefault(); sp.classList.add('revealed'); sp.removeAttribute('role'); sp.removeAttribute('tabindex'); }
+            });
+
             // Event delegation: #messages — message action buttons
             document.getElementById('message-feed')?.addEventListener('click', e => {
                 const el = e.target.closest('[data-msg-action]');

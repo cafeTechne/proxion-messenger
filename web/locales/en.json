@@ -411,5 +411,6 @@
   "voice.inCall": "In Call",
   "time.today": "Today",
   "time.yesterday": "Yesterday",
-  "ui.insertEmoji": "Insert emoji"
+  "ui.insertEmoji": "Insert emoji",
+  "msg.spoilerReveal": "Reveal spoiler"
 }

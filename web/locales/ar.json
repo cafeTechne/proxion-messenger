@@ -424,5 +424,6 @@
   "gif.removeNamed": "إزالة {name} من الدرج",
   "ui.gifTray": "درج الصور المتحركة",
   "file.reduced": "تم تغيير حجم الصورة لتناسب حد المرفقات في الغرفة.",
-  "ui.insertEmoji": "إدراج رمز تعبيري"
+  "ui.insertEmoji": "إدراج رمز تعبيري",
+  "msg.spoilerReveal": "كشف المحتوى المخفي"
 }

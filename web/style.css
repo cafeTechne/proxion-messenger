@@ -585,6 +585,22 @@ button:hover { background: var(--accent-hover); }
     background: #000;
 }
 .msg-audio-preview { display: block; max-width: min(420px, 100%); margin-top: 6px; }
+/* R59D: ||spoiler|| — text hidden until activated, one-way reveal */
+.spoiler {
+    background: var(--slate-700);
+    color: transparent;
+    border-radius: 3px;
+    padding: 0 3px;
+    cursor: pointer;
+    user-select: none;
+}
+.spoiler:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.spoiler.revealed {
+    background: rgba(255, 255, 255, 0.08);
+    color: inherit;
+    cursor: auto;
+    user-select: auto;
+}
 #lightbox { display: none; }
 #lightbox.visible {
     display: flex !important;

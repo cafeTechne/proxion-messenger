@@ -99,3 +99,31 @@ describe('formatTimestamp', () => {
     expect(formatTimestamp('not-a-date')).toBe('not-a-date');
   });
 });
+
+describe('renderMarkdown spoilers (R59D)', () => {
+  it('wraps ||text|| in an activatable spoiler span', async () => {
+    const { renderMarkdown } = await import('./util.js');
+    const html = renderMarkdown('the killer is ||the butler||!');
+    expect(html).toContain('class="spoiler"');
+    expect(html).toContain('role="button"');
+    expect(html).toContain('tabindex="0"');
+    expect(html).toContain('the butler');
+    expect(html.startsWith('the killer is ')).toBe(true);
+  });
+  it('keeps markup inside spoilers escaped', async () => {
+    const { renderMarkdown } = await import('./util.js');
+    const html = renderMarkdown('||<img src=x onerror=alert(1)>||');
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;img');
+  });
+  it('does not match single pipes or spanning newlines', async () => {
+    const { renderMarkdown } = await import('./util.js');
+    expect(renderMarkdown('a | b | c')).not.toContain('spoiler');
+    expect(renderMarkdown('||a\nb||')).not.toContain('class="spoiler"');
+  });
+  it('supports multiple spoilers in one message', async () => {
+    const { renderMarkdown } = await import('./util.js');
+    const html = renderMarkdown('||one|| and ||two||');
+    expect(html.match(/class="spoiler"/g)).toHaveLength(2);
+  });
+});

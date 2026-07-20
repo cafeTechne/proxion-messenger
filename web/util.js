@@ -53,6 +53,10 @@ export function renderMarkdown(text) {
     s = s.replace(/_([^_\n]+)_/g, '<i>$1</i>');
     // Strikethrough
     s = s.replace(/~~(.+?)~~/g, '<s>$1</s>');
+    // R59D: spoilers — ||text|| hidden until activated (click/Enter/Space via
+    // the feed's delegated handler). No nesting; content is already escaped.
+    s = s.replace(/\|\|([^|\n]+)\|\|/g, (_, inner) =>
+        `<span class="spoiler" role="button" tabindex="0" aria-label="${t('msg.spoilerReveal')}">${inner}</span>`);
     // Newlines (not inside pre blocks)
     s = s.replace(/\n/g, '<br>');
     return s;
