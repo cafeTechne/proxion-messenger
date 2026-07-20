@@ -45,6 +45,7 @@ import { createPush } from './push.js';
 import { createPairing } from './pairing.js';
 import { createRecovery } from './recovery.js';
 import { createGifTray, saveFavorite } from './gifs.js';
+import { needsDownscale, downscaleImage } from './media-resize.js';
 import { inlineNotice, feedEmptyState } from './states.js';
 import { installFocusTrap } from './focus-trap.js';
 import { makeListNavigable, announce } from './a11y.js';
@@ -2923,8 +2924,16 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         // Single attachment entry point — used by the file picker, clipboard
         // paste, drag-drop, and the GIF tray (R58). Routes small files inline
         // and large ones (>512 KB) through the chunked DM-only path.
-        function sendAttachmentFile(file) {
+        // R59B: oversized still images headed to a ROOM are downscaled to fit
+        // the 512 KB inline cap instead of being refused outright.
+        async function sendAttachmentFile(file) {
             if (!file || !socket || !activeView) return;
+            if (needsDownscale(file, activeView.type)) {
+                try {
+                    file = await downscaleImage(file);
+                    showToast(t('file.reduced'));
+                } catch (_) { /* fall through to the existing size toasts */ }
+            }
             if (file.size > 524288) {
                 const isDm = activeView.type === "dm" || activeView.type === "local_dm";
                 const peerWebid = activeView.peerWebid || "";

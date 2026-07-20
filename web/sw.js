@@ -1,4 +1,4 @@
-const CACHE = "proxion-shell-v99";
+const CACHE = "proxion-shell-v101";
 const SHELL = [
   "/",
   "/index.html",
@@ -40,6 +40,7 @@ const SHELL = [
   "/pairing.js",
   "/recovery.js",
   "/gifs.js",
+  "/media-resize.js",
   "/dmhistory.js",
   "/push.js",
   "/states.js",

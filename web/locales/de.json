@@ -409,5 +409,6 @@
   "gif.saveAction": "In GIF-Ablage speichern",
   "gif.sendNamed": "{name} senden",
   "gif.removeNamed": "{name} aus der Ablage entfernen",
-  "ui.gifTray": "GIF-Ablage"
+  "ui.gifTray": "GIF-Ablage",
+  "file.reduced": "Das Bild wurde verkleinert, um in das Anhang-Limit des Raums zu passen."
 }

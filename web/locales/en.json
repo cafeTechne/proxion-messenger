@@ -80,6 +80,7 @@
   "import.importing": "Importing…",
   "import.failed": "Import failed: {error}",
   "file.confirmSend": "Send {filename}?",
+  "file.reduced": "Image was resized to fit the room's attachment limit.",
   "gif.trayTitle": "Your GIF tray",
   "gif.empty": "Nothing saved yet — star an image in the chat to keep it here.",
   "gif.saved": "Saved to your GIF tray.",

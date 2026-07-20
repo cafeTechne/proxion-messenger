@@ -422,5 +422,6 @@
   "gif.saveAction": "حفظ في درج الصور المتحركة",
   "gif.sendNamed": "إرسال {name}",
   "gif.removeNamed": "إزالة {name} من الدرج",
-  "ui.gifTray": "درج الصور المتحركة"
+  "ui.gifTray": "درج الصور المتحركة",
+  "file.reduced": "تم تغيير حجم الصورة لتناسب حد المرفقات في الغرفة."
 }
