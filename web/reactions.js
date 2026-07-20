@@ -8,8 +8,18 @@
 // The returned functions are destructured into same-named bindings in main.js.
 import { podWriteReactions } from './pod.js';
 
-export function createReactions({ getSocket, getActiveView, getSelfWebId, getMessageReactions }) {
+export function createReactions({ getSocket, getActiveView, getSelfWebId, getMessageReactions, getRoomEmojiMap }) {
     const state = { lastEmojiMsgId: null };
+
+    // R60A: a reaction key like ":name:" refers to the room's custom emoji.
+    // Returns the map entry or null. Safe by construction: the key must match
+    // the strict name charset AND exist in the server-validated room map.
+    function _customEntryFor(key) {
+        const m = /^:([a-z0-9_]{2,32}):$/.exec(key || '');
+        if (!m) return null;
+        const map = getRoomEmojiMap?.() || {};
+        return map[m[1]] || null;
+    }
 
     function handleReactionEvent(event, action) {
         const { message_id, emoji, from_webid } = event;
@@ -47,7 +57,20 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
             const span = document.createElement("span");
             span.className = "reaction" + (alreadyReacted ? " active" : "") +
                 (emoji === animateEmoji ? " reaction-anim" : "");
-            span.innerText = `${emoji} ${count}`;
+            // R60A: ":name:" keys render the room's custom emoji image (safe:
+            // createElement + server-validated map, no innerHTML). Members
+            // whose map lacks the name see the literal key — still readable.
+            const _custom = _customEntryFor(emoji);
+            if (_custom) {
+                const img = document.createElement("img");
+                img.className = "custom-emoji";
+                img.src = `data:${_custom.mime};base64,${_custom.data_b64}`;
+                img.alt = emoji;
+                span.appendChild(img);
+                span.appendChild(document.createTextNode(` ${count}`));
+            } else {
+                span.innerText = `${emoji} ${count}`;
+            }
             span.onclick = () => alreadyReacted ? removeReaction(emoji, mid) : addEmoji(emoji, mid);
             container.appendChild(span);
         });
@@ -60,6 +83,24 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
             return;
         }
         state.lastEmojiMsgId = msgId;
+        // R60A: rebuild the active room's custom emoji entries on each open.
+        if (typeof picker.querySelectorAll === "function") {
+            picker.querySelectorAll(".custom-entry").forEach(el => el.remove());
+            const map = getRoomEmojiMap?.() || {};
+            for (const name of Object.keys(map).sort().reverse()) {   // prepend keeps a→z
+                const b = document.createElement("button");
+                b.className = "custom-entry";
+                b.setAttribute("role", "menuitem");
+                b.setAttribute("aria-label", ":" + name + ":");
+                const img = document.createElement("img");
+                img.className = "custom-emoji";
+                img.src = `data:${map[name].mime};base64,${map[name].data_b64}`;
+                img.alt = "";
+                b.appendChild(img);
+                b.addEventListener("click", () => addEmoji(":" + name + ":", msgId));
+                picker.prepend(b);
+            }
+        }
         picker.style.display = "grid";
         // Clamp to viewport so picker never clips off-screen on mobile
         const pw = picker.offsetWidth || 160;

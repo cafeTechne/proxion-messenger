@@ -397,6 +397,9 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             createReactions({
                 getSocket: () => socket, getActiveView: () => activeView,
                 getSelfWebId: () => selfWebId, getMessageReactions: () => messageReactions,
+                // R60A: ":name:" reaction keys resolve via the room's custom emoji
+                getRoomEmojiMap: () => (activeView && activeView.type !== 'dm' && activeView.type !== 'local_dm')
+                    ? getRoomEmoji(activeView.id) : {},
             });
         // Standalone modals (forward / schedule / integrations / search results).
         const { openForwardModal, openSchedulePicker, openIntegrationsPanel, renderSearchResults } =

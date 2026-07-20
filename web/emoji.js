@@ -78,13 +78,22 @@ export const EMOJI_MAP = {
 };
 
 // Prefix matches first (alphabetical), then substring matches — deterministic.
-export function matchShortcodes(query, limit = 8) {
+// R60A: `custom` is the active room's custom-emoji map; its names rank ahead
+// of built-ins and shadow same-named built-ins. Custom entries carry the
+// image ({custom: true, mime, data_b64}) and insert as literal `:name:` text.
+export function matchShortcodes(query, limit = 8, custom = null) {
     const q = (query || '').toLowerCase();
     if (!q) return [];
-    const names = Object.keys(EMOJI_MAP).sort();
-    const prefix = names.filter(n => n.startsWith(q));
-    const infix = names.filter(n => !n.startsWith(q) && n.includes(q));
-    return prefix.concat(infix).slice(0, limit).map(n => ({ name: n, emoji: EMOJI_MAP[n] }));
+    const rank = (names) => {
+        const sorted = [...names].sort();
+        return sorted.filter(n => n.startsWith(q))
+            .concat(sorted.filter(n => !n.startsWith(q) && n.includes(q)));
+    };
+    const customNames = rank(Object.keys(custom || {}));
+    const builtin = rank(Object.keys(EMOJI_MAP)).filter(n => !custom || !custom[n]);
+    const out = customNames.map(n => ({ name: n, custom: true, mime: custom[n].mime, data_b64: custom[n].data_b64 }))
+        .concat(builtin.map(n => ({ name: n, emoji: EMOJI_MAP[n] })));
+    return out.slice(0, limit);
 }
 
 // Scan back from the caret for a `:query` trigger (colon at start or after
@@ -131,11 +140,22 @@ export function createEmoji({ getCustomEmoji } = {}) {
             const row = document.createElement('div');
             row.className = 'mention-option' + (i === 0 ? ' focused' : '');
             row.dataset.idx = String(i);
-            row.dataset.emoji = m.emoji;
-            const glyph = document.createElement('span');
-            glyph.textContent = m.emoji;
-            glyph.style.marginRight = '8px';
-            row.appendChild(glyph);
+            // What selection inserts: unicode for built-ins, literal :name:
+            // for room custom emoji (rendered as an image after send).
+            row.dataset.emoji = m.custom ? ':' + m.name + ':' : m.emoji;
+            if (m.custom) {
+                const img = document.createElement('img');
+                img.className = 'custom-emoji';
+                img.src = `data:${m.mime};base64,${m.data_b64}`;
+                img.alt = '';
+                img.style.marginRight = '8px';
+                row.appendChild(img);
+            } else {
+                const glyph = document.createElement('span');
+                glyph.textContent = m.emoji;
+                glyph.style.marginRight = '8px';
+                row.appendChild(glyph);
+            }
             const label = document.createElement('span');
             label.textContent = ':' + m.name + ':';
             row.appendChild(label);
@@ -226,7 +246,7 @@ export function createEmoji({ getCustomEmoji } = {}) {
             }
             const colonStart = findShortcodeStart(val, caret);
             if (colonStart === -1) { closeEmojiDropdown(); return; }
-            const matches = matchShortcodes(val.slice(colonStart + 1, caret));
+            const matches = matchShortcodes(val.slice(colonStart + 1, caret), 8, getCustomEmoji?.() || null);
             if (!matches.length) { closeEmojiDropdown(); return; }
             state.colonStart = colonStart;
             _render(matches);

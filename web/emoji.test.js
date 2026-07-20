@@ -63,3 +63,24 @@ describe('applyShortcode', () => {
         expect(r.caret).toBe('🔥 '.length);
     });
 });
+
+describe('matchShortcodes with custom room emoji (R60A)', () => {
+    const CUSTOM = {
+        blobheart: { mime: 'image/png', data_b64: 'AA==' },
+        fire: { mime: 'image/png', data_b64: 'BB==' },   // shadows built-in
+    };
+    it('custom names rank first and carry the image payload', () => {
+        const m = matchShortcodes('blob', 8, CUSTOM);
+        expect(m[0]).toMatchObject({ name: 'blobheart', custom: true, mime: 'image/png' });
+    });
+    it('custom shadows a same-named built-in (no duplicate)', () => {
+        const m = matchShortcodes('fire', 8, CUSTOM);
+        const fires = m.filter(x => x.name === 'fire');
+        expect(fires).toHaveLength(1);
+        expect(fires[0].custom).toBe(true);
+    });
+    it('null custom behaves exactly as before', () => {
+        const m = matchShortcodes('fire', 8, null);
+        expect(m[0]).toMatchObject({ name: 'fire', emoji: '🔥' });
+    });
+});

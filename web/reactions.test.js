@@ -104,3 +104,52 @@ describe('togglePicker', () => {
     expect(r.state.lastEmojiMsgId).toBe('m1');
   });
 });
+
+describe('custom-emoji reaction pills (R60A)', () => {
+  it('renders a :name: key as an image pill when the room map has it', () => {
+    const container = {
+      style: {}, innerHTML: '', children: [],
+      appendChild(c) { this.children.push(c); },
+    };
+    const made = [];
+    global.document = {
+      getElementById: (id) => (id.startsWith('reactions-') ? container : null),
+      createElement: (tag) => {
+        const el = { tag, style: {}, className: '', innerText: '', src: '', alt: '',
+          children: [], appendChild(c) { this.children.push(c); }, setAttribute() {} };
+        made.push(el);
+        return el;
+      },
+      createTextNode: (t) => ({ text: t }),
+    };
+    const r = createReactions({
+      getSocket: () => null,
+      getActiveView: () => ({ type: 'local_room', id: 'room-1' }),
+      getSelfWebId: () => 'did:key:zSelf',
+      getMessageReactions: () => ({ m1: { ':blob:': ['did:key:zBob'] } }),
+      getRoomEmojiMap: () => ({ blob: { mime: 'image/png', data_b64: 'QUJD' } }),
+    });
+    r.renderReactions('m1');
+    const img = made.find(el => el.tag === 'img');
+    expect(img).toBeTruthy();
+    expect(img.src).toBe('data:image/png;base64,QUJD');
+    expect(img.alt).toBe(':blob:');
+  });
+  it('unknown :name: keys fall back to literal text', () => {
+    const container = { style: {}, innerHTML: '', children: [], appendChild(c) { this.children.push(c); } };
+    global.document = {
+      getElementById: () => container,
+      createElement: (tag) => ({ tag, style: {}, children: [], appendChild(c) { this.children.push(c); } }),
+      createTextNode: (t) => ({ text: t }),
+    };
+    const r = createReactions({
+      getSocket: () => null,
+      getActiveView: () => ({ type: 'local_room', id: 'room-1' }),
+      getSelfWebId: () => 'did:key:zSelf',
+      getMessageReactions: () => ({ m1: { ':nope:': ['did:key:zBob'] } }),
+      getRoomEmojiMap: () => ({}),
+    });
+    r.renderReactions('m1');
+    expect(container.children[0].innerText).toBe(':nope: 1');
+  });
+});
