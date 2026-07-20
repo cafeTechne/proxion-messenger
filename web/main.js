@@ -15,7 +15,8 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podReadRoomIndex, _podUpdateRoomIndex, podReadRoomMeta,
          podReadDmIndex, _podUpdateDmIndex,
          podArchiveDmMessage, podArchiveDeleteDmMessage, podReadDmMessages,
-         podSyncEnabled, podWriteSettings, podReadSettings } from './pod.js';
+         podSyncEnabled, podWriteSettings, podReadSettings,
+         podWriteMutes, podReadMutes } from './pod.js';
 import {
     didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, timeAgo,
     expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8,
@@ -100,6 +101,21 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             if (!podSyncEnabled()) return;
             // Bookmarks: merge pod-synced saved messages into the local store.
             syncSavedFromPod().catch(() => {});
+            // R64: mutes — union pod-muted threads into the local set (non-destructive).
+            podReadMutes().then((threads) => {
+                if (!Array.isArray(threads) || !threads.length) return;
+                let changed = false;
+                for (const tid of threads) {
+                    if (!mutedThreads.has(tid)) { mutedThreads.add(tid); changed = true; }
+                }
+                if (changed) {
+                    localStorage.setItem("proxion_muted_threads", JSON.stringify([...mutedThreads]));
+                    for (const tid of threads) {
+                        muteThread(tid);   // re-render icon + persist (idempotent)
+                        _sendServerMute(tid, true);   // honor on this device's offline push
+                    }
+                }
+            }).catch(() => {});
             // Settings: apply pod values to localStorage before the toggles read
             // them; switch locale live if it changed.
             let prefs = null;
@@ -474,7 +490,10 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         const { startEdit, commitEdit, cancelEdit, handleMessageEdited } = edit;
         // Mute: mutedThreads is a host-owned Set (read by renderer/dispatch),
         // injected by reference and mutated in place.
-        const { muteThread, unmuteThread } = createMute({ getMutedThreads: () => mutedThreads });
+        const { muteThread, unmuteThread } = createMute({
+            getMutedThreads: () => mutedThreads,
+            onMutesChanged: () => { podWriteMutes([...mutedThreads]).catch(() => {}); },   // R64
+        });
         // @-mention autocomplete: owns its own cursor state + input listeners;
         // call mentions.attach(inputEl) once the input exists.
         const mentions = createMentions({ getCurrentRoomMembers: () => currentRoomMembers });
@@ -4103,6 +4122,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                         pushSettingsToPod();
                         pushAllSavedToPod().catch(() => {});
                         pushAllGifsToPod().catch(() => {});   // R63
+                        podWriteMutes([...mutedThreads]).catch(() => {});   // R64
                     }
                 };
             }

@@ -994,3 +994,32 @@ export async function podReadGifFavorites() {
     }));
     return results.filter((r) => r.status === 'fulfilled' && r.value).map((r) => r.value);
 }
+
+// -- Mutes + blocks (R64) --
+//
+// Personal cross-device state under the same opt-in sync toggle. Small string
+// lists; owner-only.
+
+function _readPxList(url, listKey) {
+    return solidSession.fetch(url, { headers: { Accept: 'application/ld+json' } })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((doc) => {
+            const arr = doc?.[listKey];
+            return Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : null;
+        })
+        .catch(() => null);
+}
+
+export async function podWriteMutes(threadIds) {
+    if (!podSyncEnabled() || !solidSession.info.isLoggedIn) return;
+    await _writePxDoc('proxion/mutes.jsonld', 'px:MuteList', {
+        'px:threads': Array.isArray(threadIds) ? threadIds.filter((x) => typeof x === 'string') : [],
+    });
+}
+
+export async function podReadMutes() {
+    if (!podSyncEnabled() || !solidSession.info.isLoggedIn) return null;
+    const root = podStorageRoot();
+    if (!root) return null;
+    return _readPxList(`${root}proxion/mutes.jsonld`, 'px:threads');
+}

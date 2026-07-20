@@ -65,6 +65,7 @@ Everything lives under a single container, `{pod}/proxion/`:
 │   ├── index.jsonld               px:Index (saved message ids)
 │   └── {messageId}.jsonld         px:SavedMessage
 ├── settings.jsonld                px:Settings (only when sync enabled; opt-in)
+├── mutes.jsonld                   px:MuteList (only when sync enabled; opt-in)
 ├── gifs/                          (only when sync enabled; opt-in)
 │   ├── index.jsonld               px:Index (gif ids)
 │   ├── {id}                       (binary image, real content type)
@@ -247,6 +248,21 @@ themselves, gateway URL) are deliberately excluded.
     "proxion_link_previews_enabled": "0",
     "proxion_locale": "de"
   },
+  "px:updatedAt": "2026-07-20T14:10:00.000Z"
+}
+```
+
+### px:MuteList
+
+`proxion/mutes.jsonld`. The set of conversations you have muted, as a plain
+list of thread ids, so muting follows you across devices. Written only when sync
+is enabled; owner-only.
+
+```json
+{
+  "@context": { "px": "https://proxion.dev/vocab/v1#" },
+  "@type": "px:MuteList",
+  "px:threads": ["general", "dm-thread1"],
   "px:updatedAt": "2026-07-20T14:10:00.000Z"
 }
 ```

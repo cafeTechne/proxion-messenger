@@ -4,10 +4,11 @@
 // main.js — the renderer, dispatch, and sidebar context menu); it is injected
 // by reference via getMutedThreads() and mutated in place, never reassigned.
 // Returned functions are destructured into same-named bindings in main.js.
-export function createMute({ getMutedThreads }) {
+export function createMute({ getMutedThreads, onMutesChanged }) {
 
     function _saveMuted() {
         localStorage.setItem("proxion_muted_threads", JSON.stringify([...getMutedThreads()]));
+        onMutesChanged?.();   // R64: mirror to the pod (no-op unless opted in)
     }
 
     function muteThread(id) {
