@@ -421,5 +421,15 @@
   "saved.remove": "Retirer",
   "saved.added": "Enregistré pour plus tard.",
   "saved.removedToast": "Retiré des messages enregistrés.",
-  "msg.bookmark": "Enregistrer pour plus tard"
+  "msg.bookmark": "Enregistrer pour plus tard",
+  "ui.createPoll": "Créer un sondage",
+  "heading.createPoll": "Créer un sondage",
+  "poll.questionLabel": "Question",
+  "ui.pollQuestion": "Posez une question…",
+  "ui.pollOption1": "Option 1",
+  "ui.pollOption2": "Option 2",
+  "ui.pollOptionN": "Autre option (facultatif)",
+  "btn.createPoll": "Créer le sondage",
+  "poll.needTwo": "Un sondage nécessite une question et au moins deux options.",
+  "poll.voteHint": "Votez en touchant une réaction numérotée ci-dessous."
 }

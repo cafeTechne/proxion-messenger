@@ -954,6 +954,7 @@
                 <label for="file-input" class="paperclip"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13"/></svg></label>
                 <input type="file" id="file-input">
                 <button type="button" id="composer-emoji-btn" class="gif-tray-btn" aria-expanded="false" aria-label="Insert emoji" title="Insert emoji" data-i18n-attr="aria-label:ui.insertEmoji;title:ui.insertEmoji">🙂</button>
+                <button type="button" id="poll-btn" class="gif-tray-btn" aria-label="Create a poll" title="Create a poll" data-i18n-attr="aria-label:ui.createPoll;title:ui.createPoll">📊</button>
                 <button type="button" id="gif-tray-btn" class="gif-tray-btn" aria-expanded="false" aria-label="GIF tray" title="GIF tray" data-i18n-attr="aria-label:ui.gifTray;title:ui.gifTray">GIF</button>
                 <label for="message-input" class="sr-only" data-i18n="label.message">Message</label>
                 <textarea id="message-input" dir="auto" placeholder="Type a message… (Shift+Enter for newline)" rows="1" autocomplete="off" data-i18n-attr="placeholder:ui.typeMessageShiftEnter"></textarea>
@@ -1201,6 +1202,25 @@
                   style="background:var(--slate-700); border:none; color:var(--slate-50); padding:8px 16px; border-radius:4px; cursor:pointer;" data-i18n="btn.cancel">Cancel</button>
           <button id="settings-save-btn"
                   style="background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer;" data-i18n="btn.saveReconnect">Save &amp; Reconnect</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- R59F: poll creation modal — output is a plain-text message + seeded reactions -->
+    <div id="poll-modal" role="dialog" aria-modal="true" aria-label="Create a poll" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1002; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.createPoll">
+      <div style="background:var(--slate-800); border-radius:10px; padding:24px; width:min(420px, 92vw); color:var(--slate-50);">
+        <h3 style="margin:0 0 12px;" data-i18n="heading.createPoll">Create a poll</h3>
+        <label for="poll-question" class="sr-only" data-i18n="poll.questionLabel">Question</label>
+        <input id="poll-question" type="text" maxlength="200" placeholder="Ask a question…" data-i18n-attr="placeholder:ui.pollQuestion"
+               style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:10px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);">
+        <input id="poll-opt-1" type="text" maxlength="100" placeholder="Option 1" data-i18n-attr="placeholder:ui.pollOption1" style="width:100%;box-sizing:border-box;padding:7px;margin-bottom:6px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);">
+        <input id="poll-opt-2" type="text" maxlength="100" placeholder="Option 2" data-i18n-attr="placeholder:ui.pollOption2" style="width:100%;box-sizing:border-box;padding:7px;margin-bottom:6px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);">
+        <input id="poll-opt-3" type="text" maxlength="100" placeholder="Option 3 (optional)" data-i18n-attr="placeholder:ui.pollOptionN" style="width:100%;box-sizing:border-box;padding:7px;margin-bottom:6px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);">
+        <input id="poll-opt-4" type="text" maxlength="100" placeholder="Option 4 (optional)" data-i18n-attr="placeholder:ui.pollOptionN" style="width:100%;box-sizing:border-box;padding:7px;margin-bottom:6px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);">
+        <input id="poll-opt-5" type="text" maxlength="100" placeholder="Option 5 (optional)" data-i18n-attr="placeholder:ui.pollOptionN" style="width:100%;box-sizing:border-box;padding:7px;margin-bottom:12px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);">
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="poll-cancel" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:7px 16px;border-radius:4px;cursor:pointer;" data-i18n="btn.cancel">Cancel</button>
+          <button id="poll-submit" style="background:var(--accent);border:none;color:#fff;padding:7px 16px;border-radius:4px;cursor:pointer;" data-i18n="btn.createPoll">Create poll</button>
         </div>
       </div>
     </div>

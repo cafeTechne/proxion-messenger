@@ -421,5 +421,15 @@
   "saved.remove": "Quitar",
   "saved.added": "Guardado para más tarde.",
   "saved.removedToast": "Eliminado de los mensajes guardados.",
-  "msg.bookmark": "Guardar para más tarde"
+  "msg.bookmark": "Guardar para más tarde",
+  "ui.createPoll": "Crear una encuesta",
+  "heading.createPoll": "Crear una encuesta",
+  "poll.questionLabel": "Pregunta",
+  "ui.pollQuestion": "Haz una pregunta…",
+  "ui.pollOption1": "Opción 1",
+  "ui.pollOption2": "Opción 2",
+  "ui.pollOptionN": "Otra opción (opcional)",
+  "btn.createPoll": "Crear encuesta",
+  "poll.needTwo": "Una encuesta necesita una pregunta y al menos dos opciones.",
+  "poll.voteHint": "Vota tocando una reacción numérica abajo."
 }

@@ -20,6 +20,7 @@
 // })
 
 import { didSuffix, escHtml, webidColor, renderMarkdown, timeAgo, expireLabel as _expireLabel } from './util.js';
+import { parsePoll } from './polls.js';
 import { t, getLocale } from './i18n.js';
 
 // R59A: attachment kind by mime — pure, exported for tests. Video/audio get
@@ -410,11 +411,21 @@ export function createRendering({
         // as a block-level sibling it used to cost every own message a whole
         // extra line just for a "✓".
         const receiptHtml = isOwn ? `<span class="read-receipt" data-msg-id="${msgId}">&#10003;</span>` : "";
+        const _poll = parsePoll(rawText);
         if (msg.content_type === "audio" && msg.audio_b64) {
             const _durSecs = msg.duration_ms ? Math.round(msg.duration_ms / 1000) : 0;
             const dur = _durSecs ? `<span class="audio-duration">${_durSecs}s</span>` : "";
             const _audioLabel = escHtml(t('msg.voiceFrom', { name }) + (_durSecs ? t('msg.voiceDuration', { secs: _durSecs }) : ""));
             body.innerHTML += `<div class="audio-message"><audio controls aria-label="${_audioLabel}" src="data:audio/webm;base64,${msg.audio_b64}"></audio>${dur}${receiptHtml}</div>`;
+        } else if (_poll) {
+            // R59F: poll card — plain text on the wire, upgraded rendering here.
+            // The tally IS the reaction row below (auto-seeded keycaps), so
+            // counts live-update through the existing reaction pipeline.
+            const rows = _poll.options.map(o =>
+                `<div class="poll-opt">${o.emoji} ${escHtml(o.text)}</div>`).join('');
+            body.innerHTML += `<div class="msg-content"><div class="poll-card" dir="auto">
+                <div class="poll-q">${escHtml(_poll.question)}</div>${rows}
+                <div class="poll-hint">${t('poll.voteHint')}</div></div>${editedHtml}${receiptHtml}</div>`;
         } else {
             body.innerHTML += `<div class="msg-content"><span class="msg-text" dir="auto">${renderedText}</span>${editedHtml}${receiptHtml}</div>`;
         }

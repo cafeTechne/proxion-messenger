@@ -421,5 +421,15 @@
   "saved.remove": "Entfernen",
   "saved.added": "Für später gespeichert.",
   "saved.removedToast": "Aus den gespeicherten Nachrichten entfernt.",
-  "msg.bookmark": "Für später speichern"
+  "msg.bookmark": "Für später speichern",
+  "ui.createPoll": "Umfrage erstellen",
+  "heading.createPoll": "Umfrage erstellen",
+  "poll.questionLabel": "Frage",
+  "ui.pollQuestion": "Stelle eine Frage…",
+  "ui.pollOption1": "Option 1",
+  "ui.pollOption2": "Option 2",
+  "ui.pollOptionN": "Weitere Option (optional)",
+  "btn.createPoll": "Umfrage erstellen",
+  "poll.needTwo": "Eine Umfrage braucht eine Frage und mindestens zwei Optionen.",
+  "poll.voteHint": "Stimme ab, indem du unten auf eine Zahlen-Reaktion tippst."
 }

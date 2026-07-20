@@ -434,5 +434,15 @@
   "saved.remove": "إزالة",
   "saved.added": "تم الحفظ لوقت لاحق.",
   "saved.removedToast": "تمت الإزالة من الرسائل المحفوظة.",
-  "msg.bookmark": "حفظ لوقت لاحق"
+  "msg.bookmark": "حفظ لوقت لاحق",
+  "ui.createPoll": "إنشاء استطلاع",
+  "heading.createPoll": "إنشاء استطلاع",
+  "poll.questionLabel": "السؤال",
+  "ui.pollQuestion": "اطرح سؤالاً…",
+  "ui.pollOption1": "الخيار 1",
+  "ui.pollOption2": "الخيار 2",
+  "ui.pollOptionN": "خيار آخر (اختياري)",
+  "btn.createPoll": "إنشاء الاستطلاع",
+  "poll.needTwo": "يحتاج الاستطلاع إلى سؤال وخيارين على الأقل.",
+  "poll.voteHint": "صوّت بالنقر على تفاعل رقمي أدناه."
 }

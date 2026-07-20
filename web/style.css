@@ -585,6 +585,18 @@ button:hover { background: var(--accent-hover); }
     background: #000;
 }
 .msg-audio-preview { display: block; max-width: min(420px, 100%); margin-top: 6px; }
+/* R59F: poll card — structured render of the plain-text poll format */
+.poll-card {
+    border: 1px solid var(--slate-600);
+    border-inline-start: 3px solid var(--accent);
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-top: 4px;
+    max-width: min(420px, 100%);
+}
+.poll-q { font-weight: 600; margin-bottom: 6px; }
+.poll-opt { padding: 2px 0; }
+.poll-hint { margin-top: 6px; font-size: 0.78em; color: var(--text-secondary); }
 /* R59D: ||spoiler|| — text hidden until activated, one-way reveal */
 .spoiler {
     background: var(--slate-700);

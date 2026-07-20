@@ -421,5 +421,15 @@
   "saved.remove": "Remove",
   "saved.added": "Saved for later.",
   "saved.removedToast": "Removed from saved messages.",
-  "msg.bookmark": "Save for later"
+  "msg.bookmark": "Save for later",
+  "ui.createPoll": "Create a poll",
+  "heading.createPoll": "Create a poll",
+  "poll.questionLabel": "Question",
+  "ui.pollQuestion": "Ask a question…",
+  "ui.pollOption1": "Option 1",
+  "ui.pollOption2": "Option 2",
+  "ui.pollOptionN": "Another option (optional)",
+  "btn.createPoll": "Create poll",
+  "poll.needTwo": "A poll needs a question and at least two options.",
+  "poll.voteHint": "Vote by tapping a number reaction below."
 }

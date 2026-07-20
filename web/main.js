@@ -48,6 +48,7 @@ import { createGifTray, saveFavorite } from './gifs.js';
 import { needsDownscale, downscaleImage } from './media-resize.js';
 import { createEmoji } from './emoji.js';
 import { createSaved } from './saved.js';
+import { createPolls } from './polls.js';
 import { inlineNotice, feedEmptyState } from './states.js';
 import { installFocusTrap } from './focus-trap.js';
 import { makeListNavigable, announce } from './a11y.js';
@@ -3198,6 +3199,9 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         // R59E: saved messages (private bookmarks)
         const savedMsgs = createSaved({ showToast, jumpToMsg });
         savedMsgs.wireSaved();
+        // R59F: polls (plain-text message + auto-seeded keycap reactions)
+        const polls = createPolls({ showToast, addEmoji, getAllMessages: () => allMessages });
+        polls.wirePolls();
 
         // --------------- Context Menu ---------------
         let _ctxTarget = null; // { msgId, fromWebid, content, isOwn }
