@@ -24,15 +24,17 @@ no account, no phone number, no company in the middle.
 Every mainstream messenger stores your conversations in someone else's data center, under
 someone else's terms. Proxion inverts that:
 
-- **Your data, in your pod** — message history is written to a [Solid](https://solidproject.org)
-  pod *you* choose: [Inrupt PodSpaces](https://www.inrupt.com) (free tier),
-  [solidcommunity.net](https://solidcommunity.net), or a self-hosted
-  Community Solid Server. Proxion speaks the Solid Protocol directly (WebID, DPoP-bound
-  tokens) — it's a Solid app, not a silo with an export button. Pod-less local-only mode
-  works too.
-- **Actually private** — end-to-end encrypted DMs with per-contact safety numbers you can
-  verify out loud. Your identity is an Ed25519 key generated on your machine; there is no
-  signup, so there is nothing to leak.
+- **Your data, in your pod, in the open** — room history is written to a
+  [Solid](https://solidproject.org) pod *you* choose ([Inrupt PodSpaces](https://www.inrupt.com)
+  free tier, [solidcommunity.net](https://solidcommunity.net), or a self-hosted Community Solid
+  Server) as standard, typed RDF that any Solid app you authorize can read — **not an opaque
+  encrypted blob**. Proxion speaks the protocol directly (WebID, DPoP-bound tokens); it's a Solid
+  app, not a silo with an export button. Pod-less local-only mode works too.
+- **Actually private** — end-to-end encrypted DMs with per-contact safety numbers you can verify
+  out loud. The encryption is *on the wire*, between you and your contact, so no relay or gateway
+  in the middle can read your messages — it is **not** a lock-box that hides your own data from
+  your own apps. Your identity is an Ed25519 key generated on your machine; no signup, nothing
+  to leak.
 - **No lock-in** — open source, open protocol, standard data. Gateways federate
   peer-to-peer by Proxion address, with no central registry to shut down.
 
@@ -51,6 +53,11 @@ Grab the latest native build for **Windows (x64/ARM64), macOS (Intel/Apple Silic
 Linux (x64/ARM64)** from the [install page](https://cafetechne.github.io/proxion-messenger/)
 or the [releases page](../../releases/latest).
 
+**Just download and open it.** The gateway that powers Proxion is bundled *inside* the app —
+there's no Python to install and no server to run. Running a standalone gateway is optional and
+only for people who want to self-host or connect a phone to their own desktop (see
+[Run from source](#run-from-source-developers--self-hosters)).
+
 The executables are intentionally not vendor-signed (no Apple/Microsoft gatekeeping;
 updates are verified against Proxion's own signing key), so the OS shows a one-time
 caution prompt — on Windows: *More info → Run anyway*; on macOS: *right-click → Open*.
@@ -66,7 +73,10 @@ Every release ships `SHA256SUMS.txt` and signed build-provenance attestations
 proving each installer was built by CI from this repository's public source —
 see [docs/VERIFYING.md](docs/VERIFYING.md).
 
-## Run from source
+## Run from source (developers & self-hosters)
+
+Most people should just use the installer above — this section is for hacking on Proxion or
+running your own always-on gateway (e.g. to point a phone at it).
 
 ```bash
 pip install -e ./proxion-messenger-core[gateway]
@@ -91,10 +101,14 @@ cd tauri-app && cargo tauri build # native installer
 - `tauri-app/` — Rust/Tauri desktop wrapper bundling the gateway as a sidecar
 - `landing/` — the GitHub Pages install page
 
-Each user runs their own **gateway** — the app and the server are the same download. The
-gateway holds your identity keys, talks Solid to your pod, and federates directly with
-your contacts' gateways. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
-[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
+The **gateway** is Proxion's real-time transport layer: it holds your identity keys, talks Solid
+to your pod, and federates directly with your contacts' gateways by Proxion address. Real-time
+federated messaging needs a component like this — the same job a homeserver does for Matrix or an
+SMTP server does for email — because the Solid Protocol covers data and identity, not live
+delivery, presence, or WebRTC signaling. For desktop users the gateway is **bundled inside the
+installer as a sidecar and starts with the app** — you never see it or touch Python. Self-hosters
+can instead run it standalone and point phones or browsers at it. See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
 
 ## Testing
 
