@@ -28,8 +28,9 @@ someone else's terms. Proxion inverts that:
   [Solid](https://solidproject.org) pod *you* choose ([Inrupt PodSpaces](https://www.inrupt.com)
   free tier, [solidcommunity.net](https://solidcommunity.net), or a self-hosted Community Solid
   Server) as standard, typed RDF that any Solid app you authorize can read — **not an opaque
-  encrypted blob**. Proxion speaks the protocol directly (WebID, DPoP-bound tokens); it's a Solid
-  app, not a silo with an export button. Pod-less local-only mode works too.
+  encrypted blob**. The storage format is a documented, open contract
+  ([docs/POD_DATA_MODEL.md](docs/POD_DATA_MODEL.md)), so it's a Solid app any other app can
+  interoperate with, not a silo with an export button. Pod-less local-only mode works too.
 - **Actually private** — end-to-end encrypted DMs with per-contact safety numbers you can verify
   out loud. The encryption is *on the wire*, between you and your contact, so no relay or gateway
   in the middle can read your messages — it is **not** a lock-box that hides your own data from

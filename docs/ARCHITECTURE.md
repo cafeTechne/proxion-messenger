@@ -172,6 +172,11 @@ logging. The heavyweight assurance subsystem is opt-in (R35).
   the gateway write-through-mirrors history so the user can *never lose anything*
   and read from anywhere. This is positioned as an upgrade, **not a requirement**
   — Proxion is fully functional with no Pod.
+- **Open, documented storage format:** what lands on the pod is plain typed
+  JSON-LD under the `px:` (`https://proxion.dev/vocab/v1#`) vocabulary, readable
+  by any authorized Solid app — the end-to-end encryption is a transport property,
+  not an at-rest lock-box. The full contract is
+  [`docs/POD_DATA_MODEL.md`](POD_DATA_MODEL.md).
 
 ---
 
