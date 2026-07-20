@@ -195,7 +195,8 @@ class DmHandlerMixin:
         (b"\xff\xd8\xff",    "image/jpeg"),
         (b"\x89PNG\r\n",     "image/png"),
         (b"GIF8",            "image/gif"),
-        (b"RIFF",            "audio/wav"),   # RIFF container (WAV)
+        # NOTE: RIFF (WAV/WebP/AVI share the prefix) is disambiguated by
+        # container kind in _handle_send_file, not listed here.
         (b"%PDF",            "application/pdf"),
         (b"PK\x03\x04",     "application/zip"),
         (b"ID3",             "audio/mpeg"),
@@ -259,10 +260,22 @@ class DmHandlerMixin:
 
         # Magic-byte sniffing to derive effective MIME (overrides declared MIME)
         sniffed_mime = None
-        for magic, smime in self._MAGIC_BYTES:
-            if file_bytes[:len(magic)] == magic:
-                sniffed_mime = smime
-                break
+        if file_bytes[:4] == b"RIFF":
+            # RIFF is a container shared by several formats — the kind lives at
+            # bytes 8..12. A bare RIFF→audio/wav mapping mislabeled every WebP
+            # upload as audio (R59B found this: downscaled room images came
+            # back as audio players). Unknown RIFF kinds (e.g. AVI) fall back
+            # to the declared MIME and still face the allowlist below.
+            _riff_kind = file_bytes[8:12]
+            if _riff_kind == b"WAVE":
+                sniffed_mime = "audio/wav"
+            elif _riff_kind == b"WEBP":
+                sniffed_mime = "image/webp"
+        else:
+            for magic, smime in self._MAGIC_BYTES:
+                if file_bytes[:len(magic)] == magic:
+                    sniffed_mime = smime
+                    break
         effective_mime = sniffed_mime or mime_type
 
         # Reject text/* MIME with >20% NUL bytes (binary disguised as text).

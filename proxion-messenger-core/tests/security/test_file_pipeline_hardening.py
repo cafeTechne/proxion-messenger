@@ -191,3 +191,65 @@ async def test_pe_file_disguised_as_png_rejected(gateway):
     resp = json.loads(ws.send.call_args[0][0])
     assert resp["type"] == "error"
     assert "file_type_not_allowed" in resp.get("message", "")
+
+
+# ---------------------------------------------------------------------------
+# R59B: RIFF container disambiguation (WAV vs WebP share the RIFF prefix)
+# ---------------------------------------------------------------------------
+
+def _echoed_mime(ws):
+    """The mime_type of the last echoed file message, or None."""
+    for call in reversed(ws.send.call_args_list):
+        msg = json.loads(call[0][0])
+        if msg.get("type") == "message" and msg.get("file"):
+            return msg["file"].get("mime_type")
+    return None
+
+
+@pytest.mark.asyncio
+async def test_webp_riff_sniffed_as_image_not_audio(gateway):
+    """WebP (RIFF....WEBP) must stay image/webp — a bare RIFF→audio/wav
+    mapping used to relabel every WebP upload as audio."""
+    ws = _registered_ws(gateway)
+    webp = b"RIFF" + (200).to_bytes(4, "little") + b"WEBPVP8 " + b"\x00" * 200
+    await gateway._handle_send_file(ws, {
+        "room_id": _room(gateway, ws),
+        "filename": "photo.webp",
+        "mime_type": "image/webp",
+        "data_b64": _b64(webp),
+    })
+    for call in ws.send.call_args_list:
+        msg = json.loads(call[0][0])
+        assert "file_type_not_allowed" not in msg.get("message", "")
+    assert _echoed_mime(ws) == "image/webp"
+
+
+@pytest.mark.asyncio
+async def test_wav_riff_still_sniffed_as_audio(gateway):
+    """WAV (RIFF....WAVE) keeps its audio/wav sniff after the disambiguation."""
+    ws = _registered_ws(gateway)
+    wav = b"RIFF" + (200).to_bytes(4, "little") + b"WAVEfmt " + b"\x00" * 200
+    await gateway._handle_send_file(ws, {
+        "room_id": _room(gateway, ws),
+        "filename": "clip.wav",
+        "mime_type": "application/octet-stream",   # declared wrong on purpose
+        "data_b64": _b64(wav),
+    })
+    assert _echoed_mime(ws) == "audio/wav"
+
+
+@pytest.mark.asyncio
+async def test_unknown_riff_kind_falls_back_to_declared_mime(gateway):
+    """RIFF kinds we don't know (e.g. AVI) fall back to the declared MIME and
+    still face the allowlist — a disallowed declared MIME is rejected."""
+    ws = _registered_ws(gateway)
+    avi = b"RIFF" + (200).to_bytes(4, "little") + b"AVI LIST" + b"\x00" * 200
+    await gateway._handle_send_file(ws, {
+        "room_id": _room(gateway, ws),
+        "filename": "clip.avi",
+        "mime_type": "video/x-msvideo",   # not allowlisted
+        "data_b64": _b64(avi),
+    })
+    resp = json.loads(ws.send.call_args[0][0])
+    assert resp["type"] == "error"
+    assert "file_type_not_allowed" in resp.get("message", "")
