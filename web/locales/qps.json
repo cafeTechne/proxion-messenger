@@ -443,5 +443,14 @@
   "roomEmoji.badImage": "⟦Çóúĺð ñóţ ρŕóçéšš ţĥáţ íɱáǧé. áéíóúáéíóúáé⟧",
   "roomEmoji.gifTooLarge": "⟦Áñíɱáţéð ǦÍƑ éɱóĵí ɱúšţ ḅé 64 ĶḄ óŕ šɱáĺĺéŕ. áéíóúáéíóúáéíóúáéí⟧",
   "roomEmoji.removeNamed": "⟦Ŕéɱóṽé :{name}: áéíó⟧",
-  "btn.uploadEmoji": "⟦Úρĺóáð éɱóĵí áéíóú⟧"
+  "btn.uploadEmoji": "⟦Úρĺóáð éɱóĵí áéíóú⟧",
+  "btn.makeMeme": "⟦Ṁáķé á ɱéɱé… áéíóú⟧",
+  "ui.memeEditor": "⟦Ṁéɱé éðíţóŕ áéíó⟧",
+  "heading.memeEditor": "⟦Ṁéɱé éðíţóŕ áéíó⟧",
+  "meme.topLabel": "⟦Ţóρ ţéẋţ áéí⟧",
+  "meme.bottomLabel": "⟦Ḅóţţóɱ ţéẋţ áéíó⟧",
+  "ui.memeTop": "⟦Ţóρ ţéẋţ áéí⟧",
+  "ui.memeBottom": "⟦Ḅóţţóɱ ţéẋţ áéíó⟧",
+  "meme.badImage": "⟦Çóúĺð ñóţ ĺóáð ţĥáţ íɱáǧé. áéíóúáéíóú⟧",
+  "msg.makeMeme": "⟦Ṁáķé á ɱéɱé ƒŕóɱ ţĥíš íɱáǧé áéíóúáéíóúá⟧"
 }

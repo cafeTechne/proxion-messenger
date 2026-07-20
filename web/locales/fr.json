@@ -442,5 +442,14 @@
   "roomEmoji.badImage": "Impossible de traiter cette image.",
   "roomEmoji.gifTooLarge": "Les GIF animés doivent faire 64 Ko ou moins.",
   "roomEmoji.removeNamed": "Retirer :{name}:",
-  "btn.uploadEmoji": "Téléverser un émoji"
+  "btn.uploadEmoji": "Téléverser un émoji",
+  "btn.makeMeme": "Créer un même…",
+  "ui.memeEditor": "Éditeur de mèmes",
+  "heading.memeEditor": "Éditeur de mèmes",
+  "meme.topLabel": "Texte du haut",
+  "meme.bottomLabel": "Texte du bas",
+  "ui.memeTop": "Texte du haut",
+  "ui.memeBottom": "Texte du bas",
+  "meme.badImage": "Impossible de charger cette image.",
+  "msg.makeMeme": "Créer un mème à partir de cette image"
 }

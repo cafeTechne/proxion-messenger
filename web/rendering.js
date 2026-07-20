@@ -347,8 +347,13 @@ export function createRendering({
         const bookmarkBtn = `<button data-msg-action="bookmark" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="${t('msg.bookmark')}">&#128278;</button>`;
         // R58: star an image attachment into the local GIF tray
         const _mimeForGif = (msg.file?.mime_type || '').toLowerCase();
-        const saveGifBtn = (msg.file?.data_b64 && ['image/jpeg','image/png','image/gif','image/webp','image/avif'].includes(_mimeForGif))
+        const _isImageMsg = !!(msg.file?.data_b64 && ['image/jpeg','image/png','image/gif','image/webp','image/avif'].includes(_mimeForGif));
+        const saveGifBtn = _isImageMsg
             ? `<button data-msg-action="save-gif" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.85rem;" title="${t('gif.saveAction')}">&#9734;</button>`
+            : "";
+        // R60B: caption an image into a meme
+        const memeBtn = _isImageMsg
+            ? `<button data-msg-action="meme" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.72rem;font-weight:700;" title="${t('msg.makeMeme')}">M</button>`
             : "";
 
         // --- Avatar column ---
@@ -441,7 +446,7 @@ export function createRendering({
         body.innerHTML += `<div class="msg-actions">
             <button data-msg-action="react" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.8rem;" title="${t('msg.react')}">+</button>
             <button data-msg-action="reply" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.85rem;" title="${t('msg.reply')}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3"/></svg></button>
-            ${editBtn}${deleteBtn}${forwardBtn}${saveGifBtn}${bookmarkBtn}
+            ${editBtn}${deleteBtn}${forwardBtn}${saveGifBtn}${memeBtn}${bookmarkBtn}
             <button data-msg-action="pin" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="${t('msg.pin')}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z"/></svg></button>
         </div>`;
 

@@ -971,6 +971,26 @@
             <div id="gif-tray" role="group" aria-label="GIF tray" style="display:none;" data-i18n-attr="aria-label:ui.gifTray">
               <p class="gif-tray-title" data-i18n="gif.trayTitle">Your GIF tray</p>
               <div id="gif-tray-grid" class="gif-tray-grid"></div>
+              <!-- R60B: meme generator entry -->
+              <button id="meme-btn" type="button" style="margin-top:8px;background:var(--slate-700);border:none;color:var(--slate-50);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;" data-i18n="btn.makeMeme">Make a meme…</button>
+              <input type="file" id="meme-file-input" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" style="display:none">
+            </div>
+            <!-- R60B: meme editor modal -->
+            <div id="meme-modal" role="dialog" aria-modal="true" aria-label="Meme editor" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1002; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.memeEditor">
+              <div style="background:var(--slate-800); border-radius:10px; padding:20px; width:min(480px, 94vw); max-height:90vh; overflow-y:auto; color:var(--slate-50);">
+                <h3 style="margin:0 0 10px;" data-i18n="heading.memeEditor">Meme editor</h3>
+                <canvas id="meme-canvas" style="display:block;max-width:100%;height:auto;border-radius:6px;border:1px solid var(--slate-600);margin-bottom:10px;"></canvas>
+                <label for="meme-top" class="sr-only" data-i18n="meme.topLabel">Top text</label>
+                <input id="meme-top" type="text" maxlength="120" placeholder="Top text" data-i18n-attr="placeholder:ui.memeTop"
+                       style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:6px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);">
+                <label for="meme-bottom" class="sr-only" data-i18n="meme.bottomLabel">Bottom text</label>
+                <input id="meme-bottom" type="text" maxlength="120" placeholder="Bottom text" data-i18n-attr="placeholder:ui.memeBottom"
+                       style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:12px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);">
+                <div style="display:flex;gap:8px;justify-content:flex-end;">
+                  <button id="meme-cancel" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:7px 16px;border-radius:4px;cursor:pointer;" data-i18n="btn.cancel">Cancel</button>
+                  <button id="meme-send" style="background:var(--accent);border:none;color:#fff;padding:7px 16px;border-radius:4px;cursor:pointer;" data-i18n="btn.send">Send</button>
+                </div>
+              </div>
             </div>
         </main>
 

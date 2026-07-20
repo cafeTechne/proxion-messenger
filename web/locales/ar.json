@@ -455,5 +455,14 @@
   "roomEmoji.badImage": "تعذّرت معالجة هذه الصورة.",
   "roomEmoji.gifTooLarge": "يجب ألا تتجاوز رموز GIF المتحركة 64 كيلوبايت.",
   "roomEmoji.removeNamed": "إزالة :{name}:",
-  "btn.uploadEmoji": "رفع رمز"
+  "btn.uploadEmoji": "رفع رمز",
+  "btn.makeMeme": "إنشاء ميم…",
+  "ui.memeEditor": "محرر الميمات",
+  "heading.memeEditor": "محرر الميمات",
+  "meme.topLabel": "النص العلوي",
+  "meme.bottomLabel": "النص السفلي",
+  "ui.memeTop": "النص العلوي",
+  "ui.memeBottom": "النص السفلي",
+  "meme.badImage": "تعذّر تحميل هذه الصورة.",
+  "msg.makeMeme": "إنشاء ميم من هذه الصورة"
 }

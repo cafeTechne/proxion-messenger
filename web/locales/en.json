@@ -442,5 +442,14 @@
   "roomEmoji.badImage": "Could not process that image.",
   "roomEmoji.gifTooLarge": "Animated GIF emoji must be 64 KB or smaller.",
   "roomEmoji.removeNamed": "Remove :{name}:",
-  "btn.uploadEmoji": "Upload emoji"
+  "btn.uploadEmoji": "Upload emoji",
+  "btn.makeMeme": "Make a meme…",
+  "ui.memeEditor": "Meme editor",
+  "heading.memeEditor": "Meme editor",
+  "meme.topLabel": "Top text",
+  "meme.bottomLabel": "Bottom text",
+  "ui.memeTop": "Top text",
+  "ui.memeBottom": "Bottom text",
+  "meme.badImage": "Could not load that image.",
+  "msg.makeMeme": "Make a meme from this image"
 }

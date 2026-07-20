@@ -50,6 +50,7 @@ import { createEmoji } from './emoji.js';
 import { createSaved } from './saved.js';
 import { createPolls } from './polls.js';
 import { createRoomEmoji, getRoomEmoji } from './room-emoji.js';
+import { createMeme } from './meme.js';
 import { inlineNotice, feedEmptyState } from './states.js';
 import { installFocusTrap } from './focus-trap.js';
 import { makeListNavigable, announce } from './a11y.js';
@@ -3226,6 +3227,9 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         // R59F: polls (plain-text message + auto-seeded keycap reactions)
         const polls = createPolls({ showToast, addEmoji, getAllMessages: () => allMessages });
         polls.wirePolls();
+        // R60B: meme generator (GIF-tray button + image-message caption action)
+        const meme = createMeme({ showToast, sendAttachmentFile });
+        meme.wireMeme();
         // R59G: custom room emoji management modal
         roomEmoji.wireRoomEmoji();
         document.getElementById('sctx-emoji')?.addEventListener('click', () => {
@@ -4033,6 +4037,16 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     case 'bookmark':
                         savedMsgs.toggleBookmark(messageMap[msgId], activeView);
                         break;
+                    case 'meme': {
+                        const mm = messageMap[msgId];
+                        if (mm?.file?.data_b64) {
+                            const bin = atob(mm.file.data_b64);
+                            const bytes = new Uint8Array(bin.length);
+                            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                            meme.openWithBlob(new Blob([bytes], { type: mm.file.mime_type }));
+                        }
+                        break;
+                    }
                     case 'save-gif': {
                         const m = messageMap[msgId];
                         if (m?.file?.data_b64) {
