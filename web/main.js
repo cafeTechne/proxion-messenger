@@ -127,7 +127,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         const CMD_ALLOWED_KEYS = {
             connect_css:      new Set(["cmd","css_url","email","password"]),
             create_webhook:   new Set(["cmd","thread_id","direction","url","bot_name"]),
-            send_file:        new Set(["cmd","cert_id","room_id","filename","mime_type","data_b64"]),
+            send_file:        new Set(["cmd","cert_id","room_id","filename","mime_type","data_b64","spoiler"]),
             schedule_message: new Set(["cmd","thread_id","content","send_at"]),
             file_offer:       new Set(["cmd","to_webid","file_id","filename","mime_type","size_bytes","total_chunks"]),
             file_accept:      new Set(["cmd","to_webid","file_id"]),
@@ -2947,7 +2947,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         // and large ones (>512 KB) through the chunked DM-only path.
         // R59B: oversized still images headed to a ROOM are downscaled to fit
         // the 512 KB inline cap instead of being refused outright.
-        async function sendAttachmentFile(file) {
+        async function sendAttachmentFile(file, opts = {}) {
             if (!file || !socket || !activeView) return;
             if (needsDownscale(file, activeView.type)) {
                 try {
@@ -2975,6 +2975,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     mime_type: file.type || "application/octet-stream",
                     data_b64: base64,
                 };
+                if (opts.spoiler === true) payload.spoiler = true;   // R60C
                 if (activeView.type === "dm" || activeView.type === "local_dm") payload.cert_id = activeView.id;
                 else payload.room_id = activeView.id;
                 sendCmd("send_file", payload);
@@ -2985,9 +2986,38 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             reader.readAsDataURL(file);
         }
 
+        // R60C: one confirm for every attachment entry point (picker, paste,
+        // drop) with a mark-as-spoiler option for images. Resolves
+        // {ok, spoiler} — spoiler row only shows for image files.
+        function confirmAttachment(file) {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('file-confirm-modal');
+                if (!modal) { resolve({ ok: true, spoiler: false }); return; }
+                document.getElementById('file-confirm-msg').textContent =
+                    t('file.confirmSend', { filename: file.name || 'file' });
+                const row = document.getElementById('file-confirm-spoiler-row');
+                const cb = document.getElementById('file-confirm-spoiler');
+                const isImage = (file.type || '').startsWith('image/');
+                if (row) row.style.display = isImage ? '' : 'none';
+                if (cb) cb.checked = false;
+                const done = (ok) => {
+                    modal.style.display = 'none';
+                    resolve({ ok, spoiler: !!(isImage && cb?.checked) });
+                };
+                document.getElementById('file-confirm-cancel').onclick = () => done(false);
+                document.getElementById('file-confirm-ok').onclick = () => done(true);
+                modal.style.display = 'flex';
+            });
+        }
+
+        async function confirmAndSend(file) {
+            const { ok, spoiler } = await confirmAttachment(file);
+            if (ok) await sendAttachmentFile(file, { spoiler });
+        }
+
         document.getElementById("file-input").onchange = (e) => {
             const file = e.target.files[0];
-            if (file) sendAttachmentFile(file);
+            if (file) confirmAndSend(file);
             e.target.value = "";
         };
 
@@ -3003,8 +3033,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     const file = item.getAsFile();
                     if (!file) continue;
                     e.preventDefault();
-                    const name = file.name || "image";
-                    showConfirm(t('file.confirmSend', { filename: name }), () => sendAttachmentFile(file));
+                    confirmAndSend(file);   // R60C: shared confirm w/ spoiler option
                     return;
                 }
             }
@@ -3022,8 +3051,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                 el.addEventListener("drop", (e) => {
                     el.classList.remove("drop-active");
                     const file = e.dataTransfer?.files?.[0];
-                    if (!file) return;
-                    showConfirm(t('file.confirmSend', { filename: file.name || "file" }), () => sendAttachmentFile(file));
+                    if (file) confirmAndSend(file);   // R60C: shared confirm
                 });
             }
         }
@@ -3987,16 +4015,22 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             attachListener('#empty-create-room-btn', 'click', () => document.getElementById('create-room-btn').click());
             attachListener('#empty-add-contact-btn', 'click', () => document.getElementById('add-peer-btn').click());
 
-            // R59D: spoiler reveal (click; Enter/Space via keydown below).
-            // Reveal is one-way — no re-hide, matching every other messenger.
+            // R59D/R60C: spoiler reveal — text spans and media covers share the
+            // one-way contract (click / Enter / Space; button semantics dropped
+            // once revealed).
+            const _revealSpoiler = (sp) => {
+                sp.classList.add('revealed');
+                sp.removeAttribute('role');
+                sp.removeAttribute('tabindex');
+            };
             document.getElementById('message-feed')?.addEventListener('click', e => {
-                const sp = e.target.closest('.spoiler:not(.revealed)');
-                if (sp) { sp.classList.add('revealed'); sp.removeAttribute('role'); sp.removeAttribute('tabindex'); }
+                const sp = e.target.closest('.spoiler:not(.revealed), .media-spoiler:not(.revealed)');
+                if (sp) { e.preventDefault(); _revealSpoiler(sp); }
             });
             document.getElementById('message-feed')?.addEventListener('keydown', e => {
                 if (e.key !== 'Enter' && e.key !== ' ') return;
-                const sp = e.target.closest?.('.spoiler:not(.revealed)');
-                if (sp) { e.preventDefault(); sp.classList.add('revealed'); sp.removeAttribute('role'); sp.removeAttribute('tabindex'); }
+                const sp = e.target.closest?.('.spoiler:not(.revealed), .media-spoiler:not(.revealed)');
+                if (sp) { e.preventDefault(); _revealSpoiler(sp); }
             });
 
             // Event delegation: #messages — message action buttons

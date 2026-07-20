@@ -1227,6 +1227,21 @@
       </div>
     </div>
 
+    <!-- R60C: attachment-send confirm with mark-as-spoiler (images) -->
+    <div id="file-confirm-modal" role="dialog" aria-modal="true" aria-label="Send file" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:3000; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.sendFile">
+      <div style="background:var(--slate-800); border-radius:10px; padding:20px; width:min(360px, 92vw); color:var(--slate-50);">
+        <p id="file-confirm-msg" style="margin:0 0 12px;font-size:0.95em;"></p>
+        <label id="file-confirm-spoiler-row" style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.88em;margin-bottom:14px;">
+          <input type="checkbox" id="file-confirm-spoiler">
+          <span data-i18n="file.spoilerOption">Mark as spoiler (blurred until revealed)</span>
+        </label>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="file-confirm-cancel" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:7px 16px;border-radius:4px;cursor:pointer;" data-i18n="btn.cancel">Cancel</button>
+          <button id="file-confirm-ok" style="background:var(--accent);border:none;color:#fff;padding:7px 16px;border-radius:4px;cursor:pointer;" data-i18n="btn.send">Send</button>
+        </div>
+      </div>
+    </div>
+
     <!-- R59G: custom room emoji management (admins; server enforces) -->
     <div id="room-emoji-modal" role="dialog" aria-modal="true" aria-label="Custom room emoji" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1002; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.customRoomEmoji">
       <div style="background:var(--slate-800); border-radius:10px; padding:24px; width:min(400px, 92vw); max-height:80vh; overflow-y:auto; color:var(--slate-50);">

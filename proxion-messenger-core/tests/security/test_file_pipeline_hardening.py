@@ -253,3 +253,31 @@ async def test_unknown_riff_kind_falls_back_to_declared_mime(gateway):
     resp = json.loads(ws.send.call_args[0][0])
     assert resp["type"] == "error"
     assert "file_type_not_allowed" in resp.get("message", "")
+
+
+# ---------------------------------------------------------------------------
+# R60C: media-spoiler flag round-trip (strict bool)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_spoiler_flag_round_trips_as_strict_bool(gateway):
+    ws = _registered_ws(gateway)
+    jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100
+    room_id = _room(gateway, ws)
+    await gateway._handle_send_file(ws, {
+        "room_id": room_id, "filename": "s.jpg", "mime_type": "image/jpeg",
+        "data_b64": _b64(jpeg), "spoiler": True,
+    })
+    echoed = [json.loads(c[0][0]) for c in ws.send.call_args_list
+              if json.loads(c[0][0]).get("file")]
+    assert echoed and echoed[-1]["file"]["spoiler"] is True
+
+    ws2 = _registered_ws(gateway, webid="did:key:file-user2")
+    gateway._local_rooms[room_id]["members"].add(ws2)
+    await gateway._handle_send_file(ws2, {
+        "room_id": room_id, "filename": "s2.jpg", "mime_type": "image/jpeg",
+        "data_b64": _b64(jpeg), "spoiler": "yes-string",   # truthy but not bool
+    })
+    echoed2 = [json.loads(c[0][0]) for c in ws2.send.call_args_list
+               if json.loads(c[0][0]).get("file")]
+    assert echoed2 and echoed2[-1]["file"]["spoiler"] is False

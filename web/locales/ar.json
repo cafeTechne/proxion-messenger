@@ -464,5 +464,9 @@
   "ui.memeTop": "النص العلوي",
   "ui.memeBottom": "النص السفلي",
   "meme.badImage": "تعذّر تحميل هذه الصورة.",
-  "msg.makeMeme": "إنشاء ميم من هذه الصورة"
+  "msg.makeMeme": "إنشاء ميم من هذه الصورة",
+  "ui.sendFile": "إرسال الملف",
+  "file.spoilerOption": "وضع علامة محتوى مخفي (مموّه حتى الكشف)",
+  "spoiler.reveal": "كشف الصورة المخفية",
+  "spoiler.mediaLabel": "محتوى مخفي — انقر للكشف"
 }

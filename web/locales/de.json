@@ -451,5 +451,9 @@
   "ui.memeTop": "Text oben",
   "ui.memeBottom": "Text unten",
   "meme.badImage": "Bild konnte nicht geladen werden.",
-  "msg.makeMeme": "Aus diesem Bild ein Meme machen"
+  "msg.makeMeme": "Aus diesem Bild ein Meme machen",
+  "ui.sendFile": "Datei senden",
+  "file.spoilerOption": "Als Spoiler markieren (unscharf bis zum Aufdecken)",
+  "spoiler.reveal": "Spoiler-Bild aufdecken",
+  "spoiler.mediaLabel": "Spoiler — zum Aufdecken klicken"
 }

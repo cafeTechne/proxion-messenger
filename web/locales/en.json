@@ -451,5 +451,9 @@
   "ui.memeTop": "Top text",
   "ui.memeBottom": "Bottom text",
   "meme.badImage": "Could not load that image.",
-  "msg.makeMeme": "Make a meme from this image"
+  "msg.makeMeme": "Make a meme from this image",
+  "ui.sendFile": "Send file",
+  "file.spoilerOption": "Mark as spoiler (blurred until revealed)",
+  "spoiler.reveal": "Reveal spoiler image",
+  "spoiler.mediaLabel": "Spoiler — click to reveal"
 }

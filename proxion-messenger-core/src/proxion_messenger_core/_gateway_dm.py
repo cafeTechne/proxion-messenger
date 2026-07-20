@@ -221,6 +221,9 @@ class DmHandlerMixin:
         room_id = data.get("room_id")
         filename = data.get("filename", "file")
         data_b64 = data.get("data_b64", "")
+        # R60C: sender-marked media spoiler — validated to a strict bool and
+        # echoed on the file object so receivers blur until revealed.
+        _spoiler = data.get("spoiler") is True
         mime_type = data.get("mime_type", "application/octet-stream")
         import base64 as _b64
         import posixpath as _posix
@@ -324,7 +327,8 @@ class DmHandlerMixin:
                 "content": f"📎 {filename}", "timestamp": ts,
                 "message_id": message_id, "local": True,
                 "file": {"filename": filename, "mime_type": mime_type,
-                         "size": len(file_bytes), "data_b64": data_b64},
+                         "size": len(file_bytes), "data_b64": data_b64,
+                         "spoiler": _spoiler},
             }
             if self._store:
                 self._store.save_message(message_id, cert_id, "local_dm",
@@ -385,7 +389,8 @@ class DmHandlerMixin:
                                 "display_name": sender_name,
                                 "signature": sig,
                                 "file": {"filename": filename, "mime_type": mime_type,
-                                         "size": len(file_bytes), "data_b64": data_b64},
+                                         "size": len(file_bytes), "data_b64": data_b64,
+                                         "spoiler": _spoiler},
                             }
                             http_base = peer_gw.replace("wss://", "https://").replace("ws://", "http://")
                             delivered = await post_relay(http_base.rstrip("/") + "/relay", relay_payload)
@@ -414,7 +419,8 @@ class DmHandlerMixin:
                 "content": f"📎 {filename}", "timestamp": ts,
                 "message_id": message_id, "local": True,
                 "file": {"filename": filename, "mime_type": mime_type,
-                         "size": len(file_bytes), "data_b64": data_b64},
+                         "size": len(file_bytes), "data_b64": data_b64,
+                         "spoiler": _spoiler},
             }
             if self._store:
                 self._store.save_message(message_id, room_id, "room", sender_webid, sender_name, f"📎 {filename}", ts)

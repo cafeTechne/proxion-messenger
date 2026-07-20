@@ -303,11 +303,17 @@ export function createRendering({
             const _dlLink = `<a href="data:application/octet-stream;base64,${msg.file.data_b64}" download="${safeFilename}"
                        style="color:#e94560;font-size:0.8em;display:block;margin-top:3px;">Download ${safeFilename}</a>`;
             if (_kind === 'image' && msg.file.data_b64) {
-                // R13.7: inline image preview
+                // R13.7: inline image preview (+R60C: sender-marked spoiler
+                // renders blurred under a reveal cover — one-way, like text
+                // spoilers; the reveal handler lives in the feed delegation)
                 const _imgSrc = `data:${_mime};base64,${msg.file.data_b64}`;
-                fileHtml = `<div class="attachment">
-                    <img class="msg-image-preview" src="${_imgSrc}" alt="${safeFilename}" loading="lazy">
-                    ${_dlLink}</div>`;
+                const _img = `<img class="msg-image-preview" src="${_imgSrc}" alt="${safeFilename}" loading="lazy">`;
+                fileHtml = msg.file.spoiler === true
+                    ? `<div class="attachment">
+                        <div class="media-spoiler" role="button" tabindex="0" aria-label="${t('spoiler.reveal')}">
+                          ${_img}<span class="media-spoiler-label">${t('spoiler.mediaLabel')}</span>
+                        </div>${_dlLink}</div>`
+                    : `<div class="attachment">${_img}${_dlLink}</div>`;
             } else if (_kind === 'video' && msg.file.data_b64) {
                 // R59A: inline video player (short clips are the modern GIF)
                 fileHtml = `<div class="attachment">

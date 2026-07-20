@@ -451,5 +451,9 @@
   "ui.memeTop": "Texte du haut",
   "ui.memeBottom": "Texte du bas",
   "meme.badImage": "Impossible de charger cette image.",
-  "msg.makeMeme": "Créer un mème à partir de cette image"
+  "msg.makeMeme": "Créer un mème à partir de cette image",
+  "ui.sendFile": "Envoyer le fichier",
+  "file.spoilerOption": "Marquer comme spoiler (flouté jusqu'à révélation)",
+  "spoiler.reveal": "Révéler l'image spoiler",
+  "spoiler.mediaLabel": "Spoiler — cliquez pour révéler"
 }
