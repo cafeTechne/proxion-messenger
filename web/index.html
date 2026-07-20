@@ -1150,6 +1150,11 @@
           <span style="color:var(--slate-300);">Archive DM history to my pod<br><span style="font-size:0.78em;color:var(--slate-500);">Off by default. Stores your decrypted DM history on your own pod (private, only you can read it) so it syncs across your devices.</span></span>
           <input type="checkbox" id="settings-dm-pod-archive-toggle" style="width:18px;height:18px;cursor:pointer;">
         </label>
+        <!-- R62: opt-in bookmarks + settings sync to the pod (off by default) -->
+        <label style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:0.9em;cursor:pointer;">
+          <span style="color:var(--slate-300);">Sync bookmarks &amp; settings to my pod<br><span style="font-size:0.78em;color:var(--slate-500);">Off by default. Mirrors your saved messages and app preferences to your own pod (private) so they follow you across devices.</span></span>
+          <input type="checkbox" id="settings-pod-sync-toggle" style="width:18px;height:18px;cursor:pointer;">
+        </label>
         <button id="settings-clear-dm-history-btn"
                 style="background:var(--slate-800);border:1px solid var(--slate-600);color:var(--color-danger-soft);
                        padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.82em;

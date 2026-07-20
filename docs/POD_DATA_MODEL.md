@@ -61,6 +61,10 @@ Everything lives under a single container, `{pod}/proxion/`:
 │       └── messages/
 │           ├── index.jsonld       px:Index (message ids)
 │           └── {messageId}.jsonld px:Message
+├── saved/                         (only when bookmarks+settings sync is enabled; opt-in)
+│   ├── index.jsonld               px:Index (saved message ids)
+│   └── {messageId}.jsonld         px:SavedMessage
+├── settings.jsonld                px:Settings (only when sync enabled; opt-in)
 ├── contacts/
 │   ├── index.jsonld               px:Index (cert ids)
 │   └── {certId}.jsonld            px:Contact
@@ -195,6 +199,51 @@ authorizes a contact. `px:certificate` is the certificate object.
   "px:certId": "cert-xyz",
   "px:certificate": { "...": "certificate fields" },
   "px:updatedAt": "2026-07-20T14:00:00.000Z"
+}
+```
+
+### px:SavedMessage
+
+`proxion/saved/{messageId}.jsonld`, enumerated by `proxion/saved/index.jsonld`.
+A private bookmark (a snapshot of a saved message, not a live copy). Written
+only when the opt-in bookmarks + settings sync is enabled; owner-only, because a
+bookmark can quote a DM.
+
+```json
+{
+  "@context": { "px": "https://proxion.dev/vocab/v1#" },
+  "@type": "px:SavedMessage",
+  "px:messageId": "m-abc123",
+  "px:threadId": "general",
+  "px:threadType": "local_room",
+  "px:threadLabel": "general",
+  "px:fromName": "Alice",
+  "px:content": "worth remembering",
+  "px:hasFile": false,
+  "px:fileKind": "",
+  "px:timestamp": "2026-07-20T14:03:11.000Z",
+  "px:savedAt": 1721480400000,
+  "px:updatedAt": "2026-07-20T14:10:00.000Z"
+}
+```
+
+### px:Settings
+
+`proxion/settings.jsonld`. A single document holding your synced, account-level
+app preferences under `px:prefs` (a plain string map). Written only when sync is
+enabled. Device-specific preferences (local DM-history cache, the sync toggles
+themselves, gateway URL) are deliberately excluded.
+
+```json
+{
+  "@context": { "px": "https://proxion.dev/vocab/v1#" },
+  "@type": "px:Settings",
+  "px:prefs": {
+    "proxion_receipts_enabled": "1",
+    "proxion_link_previews_enabled": "0",
+    "proxion_locale": "de"
+  },
+  "px:updatedAt": "2026-07-20T14:10:00.000Z"
 }
 ```
 

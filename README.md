@@ -46,8 +46,9 @@ someone else's terms. Proxion inverts that:
 
 Rooms and DMs · P2P WebRTC voice calls · file attachments and media previews · reactions,
 edits, pins, mentions · disappearing and scheduled messages · cross-gateway federation ·
-multi-device with encrypted fanout · offline-capable PWA with push · six languages
-including RTL Arabic · WCAG 2.2 AA accessible.
+multi-device with encrypted fanout · opt-in cross-device sync of DM history, bookmarks, and
+settings via your pod · offline-capable PWA with push · six languages including RTL Arabic ·
+WCAG 2.2 AA accessible.
 
 ## Download
 

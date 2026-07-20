@@ -14,7 +14,8 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podWriteInvite, podReadInvites, podDeleteInvite,
          podReadRoomIndex, _podUpdateRoomIndex, podReadRoomMeta,
          podReadDmIndex, _podUpdateDmIndex,
-         podArchiveDmMessage, podArchiveDeleteDmMessage, podReadDmMessages } from './pod.js';
+         podArchiveDmMessage, podArchiveDeleteDmMessage, podReadDmMessages,
+         podSyncEnabled, podWriteSettings, podReadSettings } from './pod.js';
 import {
     didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, timeAgo,
     expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8,
@@ -48,7 +49,7 @@ import { createRecovery } from './recovery.js';
 import { createGifTray, saveFavorite } from './gifs.js';
 import { needsDownscale, downscaleImage } from './media-resize.js';
 import { createEmoji } from './emoji.js';
-import { createSaved } from './saved.js';
+import { createSaved, syncSavedFromPod, pushAllSavedToPod } from './saved.js';
 import { createPolls } from './polls.js';
 import { createRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { createMeme } from './meme.js';
@@ -73,7 +74,49 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                 if (code === cur) opt.selected = true;
                 sel.appendChild(opt);
             }
-            sel.onchange = () => { if (sel.value && sel.value !== cur) setLocale(sel.value); };
+            sel.onchange = () => {
+                if (sel.value && sel.value !== cur) { setLocale(sel.value); pushSettingsToPod(); }
+            };
+        }
+
+        // R62: account settings sync (opt-in via the pod-sync toggle). Only
+        // account-level, non-sensitive prefs sync; device-specific keys (local
+        // DM history, the sync toggles themselves, gateway URL) never do.
+        const SYNCED_PREF_KEYS = [
+            'proxion_receipts_enabled',
+            'proxion_link_previews_enabled',
+            'proxion_locale',
+        ];
+        function pushSettingsToPod() {
+            if (!podSyncEnabled()) return;
+            const prefs = {};
+            for (const k of SYNCED_PREF_KEYS) {
+                const v = localStorage.getItem(k);
+                if (v !== null) prefs[k] = v;
+            }
+            podWriteSettings(prefs).catch(() => {});
+        }
+        async function hydratePodSyncedData() {
+            if (!podSyncEnabled()) return;
+            // Bookmarks: merge pod-synced saved messages into the local store.
+            syncSavedFromPod().catch(() => {});
+            // Settings: apply pod values to localStorage before the toggles read
+            // them; switch locale live if it changed.
+            let prefs = null;
+            try { prefs = await podReadSettings(); } catch (_) { return; }
+            if (!prefs || typeof prefs !== 'object') return;
+            let localeChanged = null;
+            for (const k of SYNCED_PREF_KEYS) {
+                if (typeof prefs[k] !== 'string') continue;
+                if (k === 'proxion_locale' && prefs[k] !== getLocale()) localeChanged = prefs[k];
+                localStorage.setItem(k, prefs[k]);
+            }
+            // Reflect the applied values on any already-rendered toggles.
+            const rt = document.getElementById('settings-receipts-toggle');
+            if (rt) rt.checked = localStorage.getItem('proxion_receipts_enabled') !== '0';
+            const pt = document.getElementById('settings-link-previews-toggle');
+            if (pt) pt.checked = localStorage.getItem('proxion_link_previews_enabled') === '1';
+            if (localeChanged) { try { setLocale(localeChanged); } catch (_) { /* stays on reload */ } }
         }
 
         // Load the active locale BEFORE any translated UI paints, then apply the
@@ -3487,6 +3530,8 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             setPodBanner(false);
             await discoverStorageRoot();
             ensureProxionContainer().catch(() => {});
+            // R62: hydrate opt-in synced settings + bookmarks from the pod
+            hydratePodSyncedData().catch(() => {});
             // Restore display name from pod if missing from localStorage
             const savedName = localStorage.getItem('proxion_display_name');
             if (!savedName) {
@@ -4029,6 +4074,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     localStorage.setItem("proxion_receipts_enabled", enabled ? "1" : "0");
                     if (socket?.readyState === WebSocket.OPEN)
                         socket.send(JSON.stringify({cmd: "set_receipts_enabled", enabled}));
+                    pushSettingsToPod();   // R62
                 };
             }
 
@@ -4041,6 +4087,22 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     localStorage.setItem("proxion_link_previews_enabled", enabled ? "1" : "0");
                     if (socket?.readyState === WebSocket.OPEN)
                         socket.send(JSON.stringify({cmd: "set_link_previews_enabled", enabled}));
+                    pushSettingsToPod();   // R62
+                };
+            }
+
+            // R62: opt-in bookmarks + settings sync toggle (default OFF).
+            const podSyncToggle = document.getElementById('settings-pod-sync-toggle');
+            if (podSyncToggle) {
+                podSyncToggle.checked = localStorage.getItem("proxion_pod_sync") === "1";
+                podSyncToggle.onchange = () => {
+                    const on = podSyncToggle.checked;
+                    localStorage.setItem("proxion_pod_sync", on ? "1" : "0");
+                    if (on) {
+                        // Immediately reflect this device on the pod.
+                        pushSettingsToPod();
+                        pushAllSavedToPod().catch(() => {});
+                    }
                 };
             }
 

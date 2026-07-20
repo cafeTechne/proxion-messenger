@@ -504,6 +504,31 @@ export async function podDeleteWebhook(id) {
     }
 }
 
+// --- Shared px: document writer (R62) ---
+
+// PUT a px: JSON-LD document. Centralizes the envelope every px: writer repeats
+// ({@context, @type, ...props, px:updatedAt}). `path` is relative to the pod
+// root. Owner-only by construction: resources under proxion/ inherit the
+// container's owner-only ACL; nothing here grants member access.
+async function _writePxDoc(path, type, props) {
+    const root = podStorageRoot();
+    if (!root || !solidSession.info.isLoggedIn) return;
+    try {
+        await solidSession.fetch(root + path, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/ld+json' },
+            body: JSON.stringify({
+                '@context': { px: 'https://proxion.dev/vocab/v1#' },
+                '@type': type,
+                ...props,
+                'px:updatedAt': new Date().toISOString(),
+            }),
+        });
+    } catch (err) {
+        console.warn('[pod] _writePxDoc failed:', path, err);
+    }
+}
+
 // --- Generic index helpers ---
 
 async function _readIndex(indexUrl) {
@@ -770,4 +795,115 @@ export async function podReadDmMessages(threadId) {
         .map((r) => r.value);
     msgs.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
     return msgs;
+}
+
+// --- Opt-in bookmarks + settings sync (R62) ---
+//
+// Off by default. One toggle governs both. When on AND a pod is connected,
+// saved messages and account settings mirror to your own pod (owner-only, open
+// px: RDF) so they sync across your devices. Kept separate from the R61 DM
+// archive toggle. Bookmarks can quote DMs, so they are treated as private.
+
+export function podSyncEnabled() {
+    try {
+        return typeof localStorage !== 'undefined' &&
+            localStorage.getItem('proxion_pod_sync') === '1';
+    } catch {
+        return false;
+    }
+}
+
+// -- Saved messages (bookmarks) --
+
+export async function podSyncSavedMessage(item) {
+    if (!podSyncEnabled()) return;
+    const root = podStorageRoot();
+    if (!root || !solidSession.info.isLoggedIn) return;
+    const id = item?.id;
+    if (typeof id !== 'string' || !SAFE_ID_RE.test(id)) return;
+    await _writePxDoc(`proxion/saved/${id}.jsonld`, 'px:SavedMessage', {
+        'px:messageId': id,
+        'px:threadId': item.thread_id || '',
+        'px:threadType': item.thread_type || '',
+        'px:threadLabel': item.thread_label || '',
+        'px:fromName': item.from_name || '',
+        'px:content': item.content || '',
+        'px:hasFile': !!item.has_file,
+        'px:fileKind': item.file_kind || '',
+        'px:timestamp': item.timestamp || '',
+        'px:savedAt': item.addedAt || Date.now(),
+    });
+    await _addToIndex(`${root}proxion/saved/index.jsonld`, id);
+}
+
+export async function podSyncRemoveSavedMessage(id) {
+    const root = podStorageRoot();
+    if (!root || !solidSession.info.isLoggedIn) return;
+    if (typeof id !== 'string' || !SAFE_ID_RE.test(id)) return;
+    try {
+        await solidSession.fetch(`${root}proxion/saved/${id}.jsonld`, { method: 'DELETE' });
+    } catch (err) {
+        console.warn('[pod] podSyncRemoveSavedMessage failed:', err);
+    }
+    await _removeFromIndex(`${root}proxion/saved/index.jsonld`, id);
+}
+
+export async function podReadSavedMessages() {
+    if (!podSyncEnabled()) return [];
+    const root = podStorageRoot();
+    if (!root || !solidSession.info.isLoggedIn) return [];
+    const base = `${root}proxion/saved/`;
+    const ids = (await _readIndex(`${base}index.jsonld`)).slice(-500);
+    if (!ids.length) return [];
+    const results = await Promise.allSettled(
+        ids.map((id) => solidSession.fetch(`${base}${id}.jsonld`)
+            .then((r) => (r.ok ? r.text() : null))
+            .then((text) => {
+                if (!text || text.length > 65536) return null;
+                const doc = JSON.parse(text);
+                if (doc?.['@type'] !== 'px:SavedMessage') return null;
+                const mid = doc['px:messageId'];
+                if (typeof mid !== 'string' || !SAFE_ID_RE.test(mid)) return null;
+                return {
+                    id: mid,
+                    thread_id: doc['px:threadId'] || '',
+                    thread_type: doc['px:threadType'] || '',
+                    thread_label: doc['px:threadLabel'] || '',
+                    from_name: doc['px:fromName'] || '',
+                    content: doc['px:content'] || '',
+                    has_file: !!doc['px:hasFile'],
+                    file_kind: doc['px:fileKind'] || '',
+                    timestamp: doc['px:timestamp'] || '',
+                    addedAt: doc['px:savedAt'] || Date.now(),
+                };
+            })
+            .catch(() => null))
+    );
+    return results.filter((r) => r.status === 'fulfilled' && r.value).map((r) => r.value);
+}
+
+// -- Account settings --
+
+export async function podWriteSettings(prefs) {
+    if (!podSyncEnabled()) return;
+    if (!solidSession.info.isLoggedIn) return;
+    await _writePxDoc('proxion/settings.jsonld', 'px:Settings', {
+        'px:prefs': prefs && typeof prefs === 'object' ? prefs : {},
+    });
+}
+
+export async function podReadSettings() {
+    if (!podSyncEnabled()) return null;
+    const root = podStorageRoot();
+    if (!root || !solidSession.info.isLoggedIn) return null;
+    try {
+        const res = await solidSession.fetch(`${root}proxion/settings.jsonld`,
+            { headers: { Accept: 'application/ld+json' } });
+        if (!res.ok) return null;
+        const doc = await res.json();
+        const prefs = doc?.['px:prefs'];
+        return prefs && typeof prefs === 'object' ? prefs : null;
+    } catch {
+        return null;
+    }
 }

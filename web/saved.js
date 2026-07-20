@@ -10,6 +10,7 @@
 import { t } from './i18n.js';
 import { inlineNotice } from './states.js';
 import { evictOverCap, sortByRecency } from './gifs.js';
+import { podSyncSavedMessage, podSyncRemoveSavedMessage, podReadSavedMessages } from './pod.js';
 
 const DB_NAME = 'proxion-saved-messages';
 const STORE = 'saved';
@@ -78,6 +79,48 @@ export async function removeSaved(id) {
     });
 }
 
+// R62: put a row without toggling (used when merging pod-synced bookmarks into
+// the local store). Returns true if it was newly added.
+export async function upsertSaved(row) {
+    if (!row?.id) return false;
+    const db = await _open();
+    const existing = await new Promise((res) => {
+        const req = _tx(db, 'readonly').get(row.id);
+        req.onsuccess = () => res(req.result);
+        req.onerror = () => res(null);
+    });
+    if (existing) return false;
+    await new Promise((res, rej) => {
+        const req = _tx(db, 'readwrite').put(row);
+        req.onsuccess = () => res();
+        req.onerror = () => rej(req.error);
+    });
+    return true;
+}
+
+// R62: push every locally-saved bookmark to the pod (used when the user turns
+// sync on, so the pod reflects this device immediately). Gated inside
+// podSyncSavedMessage.
+export async function pushAllSavedToPod() {
+    let rows = [];
+    try { rows = await listSaved(); } catch (_) { return; }
+    for (const row of rows) {
+        try { await podSyncSavedMessage(row); } catch (_) { /* skip */ }
+    }
+}
+
+// R62: pull pod-synced bookmarks into the local store (opt-in + logged-in gated
+// inside podReadSavedMessages). Returns how many were newly added.
+export async function syncSavedFromPod() {
+    let rows = [];
+    try { rows = await podReadSavedMessages(); } catch (_) { return 0; }
+    let added = 0;
+    for (const row of rows) {
+        try { if (await upsertSaved(row)) added++; } catch (_) { /* skip */ }
+    }
+    return added;
+}
+
 // Pure: message + view context → the stored snapshot row.
 export function snapshotFromMessage(msg, view) {
     const content = (msg.content || '').slice(0, 500);
@@ -101,6 +144,9 @@ export function createSaved({ showToast, jumpToMsg }) {
         if (!panel) return;
         panel.style.display = 'block';
         await renderSaved();
+        // R62: pull any pod-synced bookmarks from other devices, then re-render
+        // if anything new arrived.
+        syncSavedFromPod().then((n) => { if (n > 0) renderSaved(); }).catch(() => {});
     }
 
     async function renderSaved() {
@@ -133,6 +179,7 @@ export function createSaved({ showToast, jumpToMsg }) {
             rm.style.cssText = 'background:transparent;border:none;color:#94a3b8;cursor:pointer;padding:0;font-size:0.8em;';
             rm.addEventListener('click', async () => {
                 await removeSaved(row.id).catch(() => {});
+                podSyncRemoveSavedMessage(row.id).catch(() => {});   // R62
                 renderSaved();
             });
             actions.appendChild(jump);
@@ -147,7 +194,11 @@ export function createSaved({ showToast, jumpToMsg }) {
     async function toggleBookmark(msg, view) {
         if (!msg?.message_id) return;
         try {
-            const r = await toggleSaved(snapshotFromMessage(msg, view));
+            const snapshot = snapshotFromMessage(msg, view);
+            const r = await toggleSaved(snapshot);
+            // R62: mirror the change to the pod (no-op unless sync opted in)
+            if (r === 'saved') podSyncSavedMessage({ ...snapshot, addedAt: Date.now() }).catch(() => {});
+            else podSyncRemoveSavedMessage(snapshot.id).catch(() => {});
             showToast(t(r === 'saved' ? 'saved.added' : 'saved.removedToast'));
             if (document.getElementById('saved-panel')?.style.display !== 'none') renderSaved();
         } catch (_) {
