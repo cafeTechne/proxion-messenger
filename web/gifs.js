@@ -9,6 +9,7 @@
 // are exported separately for tests.
 
 import { t } from './i18n.js';
+import { podSyncGifFavorite, podSyncRemoveGifFavorite, podReadGifFavorites } from './pod.js';
 
 const DB_NAME = 'proxion-gif-tray';
 const STORE = 'favorites';
@@ -90,23 +91,67 @@ export async function saveFavorite({ filename, mime, data_b64 }) {
     if (existing) return 'exists';
     const rows = await listFavorites();
     const evict = evictOverCap(rows, MAX_FAVORITES);
+    const row = { id, filename: filename || 'image', mime, data_b64, addedAt: Date.now(), lastUsedAt: 0, useCount: 0 };
     await new Promise((res, rej) => {
         const store = _tx(db, 'readwrite');
         for (const eid of evict) store.delete(eid);
-        store.put({ id, filename: filename || 'image', mime, data_b64, addedAt: Date.now(), lastUsedAt: 0, useCount: 0 });
+        store.put(row);
         store.transaction.oncomplete = () => res();
         store.transaction.onerror = () => rej(store.transaction.error);
     });
+    // R63: mirror to the pod (no-op unless sync opted in)
+    podSyncGifFavorite(row).catch(() => {});
     return 'saved';
 }
 
 export async function removeFavorite(id) {
     const db = await _open();
+    podSyncRemoveGifFavorite(id).catch(() => {});   // R63
     return new Promise((res, rej) => {
         const req = _tx(db, 'readwrite').delete(id);
         req.onsuccess = () => res();
         req.onerror = () => rej(req.error);
     });
+}
+
+// R63: put a favorite without dedup/eviction side effects (merging pod-synced
+// favorites into the local store). Returns true if newly added.
+export async function upsertFavorite(row) {
+    if (!row?.id) return false;
+    const db = await _open();
+    const existing = await new Promise((res) => {
+        const req = _tx(db, 'readonly').get(row.id);
+        req.onsuccess = () => res(req.result);
+        req.onerror = () => res(null);
+    });
+    if (existing) return false;
+    await new Promise((res, rej) => {
+        const req = _tx(db, 'readwrite').put(row);
+        req.onsuccess = () => res();
+        req.onerror = () => rej(req.error);
+    });
+    return true;
+}
+
+// R63: pull pod-synced favorites into the local store (opt-in + logged-in gated
+// inside podReadGifFavorites). Returns how many were newly added.
+export async function syncGifsFromPod() {
+    let rows = [];
+    try { rows = await podReadGifFavorites(); } catch (_) { return 0; }
+    let added = 0;
+    for (const row of rows) {
+        try { if (await upsertFavorite(row)) added++; } catch (_) { /* skip */ }
+    }
+    return added;
+}
+
+// R63: push every local favorite to the pod (on enabling sync).
+export async function pushAllGifsToPod() {
+    let rows = [];
+    try { rows = await listFavorites(); } catch (_) { return; }
+    for (const row of rows) {
+        try { await podSyncGifFavorite(row); } catch (_) { /* skip */ }
+    }
 }
 
 export async function touchFavorite(id) {
@@ -193,6 +238,8 @@ export function createGifTray({ showToast, sendAttachmentFile }) {
         _render().then(() => {
             panel.querySelector('.gif-send, .gif-tray-empty')?.focus?.();
         });
+        // R63: pull pod-synced favorites from other devices, re-render if any new.
+        syncGifsFromPod().then((n) => { if (n > 0 && _open_) _render(); }).catch(() => {});
     }
 
     function closeTray() {

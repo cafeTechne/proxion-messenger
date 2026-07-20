@@ -907,3 +907,90 @@ export async function podReadSettings() {
         return null;
     }
 }
+
+// -- GIF tray favorites (R63) --
+//
+// Under the same opt-in sync toggle. Each favorite is stored as a REAL image
+// resource at a clean URL (so other Solid apps see an image, not base64 in
+// JSON) plus a px:GifFavorite metadata doc referencing it, and an index.
+
+const _GIF_MIMES = new Set(['image/gif', 'image/png', 'image/webp', 'image/jpeg', 'image/avif']);
+
+function _b64ToBytes(b64) {
+    const bin = atob(b64 || '');
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+}
+
+function _bytesToB64(buf) {
+    let bin = '';
+    for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+    return btoa(bin);
+}
+
+export async function podSyncGifFavorite(fav) {
+    if (!podSyncEnabled()) return;
+    const root = podStorageRoot();
+    if (!root || !solidSession.info.isLoggedIn) return;
+    const id = fav?.id;
+    if (typeof id !== 'string' || !SAFE_ID_RE.test(id)) return;
+    const mime = (fav.mime || '').toLowerCase();
+    if (!_GIF_MIMES.has(mime) || !fav.data_b64) return;
+    const imageUrl = `${root}proxion/gifs/${id}`;
+    try {
+        await solidSession.fetch(imageUrl, {
+            method: 'PUT', headers: { 'Content-Type': mime }, body: _b64ToBytes(fav.data_b64),
+        });
+    } catch (err) {
+        console.warn('[pod] gif image PUT failed:', err);
+        return;
+    }
+    await _writePxDoc(`proxion/gifs/${id}.jsonld`, 'px:GifFavorite', {
+        'px:gifId': id,
+        'px:filename': fav.filename || 'image',
+        'px:mime': mime,
+        'px:image': imageUrl,
+        'px:addedAt': fav.addedAt || Date.now(),
+    });
+    await _addToIndex(`${root}proxion/gifs/index.jsonld`, id);
+}
+
+export async function podSyncRemoveGifFavorite(id) {
+    const root = podStorageRoot();
+    if (!root || !solidSession.info.isLoggedIn) return;
+    if (typeof id !== 'string' || !SAFE_ID_RE.test(id)) return;
+    for (const url of [`${root}proxion/gifs/${id}`, `${root}proxion/gifs/${id}.jsonld`]) {
+        try { await solidSession.fetch(url, { method: 'DELETE' }); } catch (_) { /* best-effort */ }
+    }
+    await _removeFromIndex(`${root}proxion/gifs/index.jsonld`, id);
+}
+
+export async function podReadGifFavorites() {
+    if (!podSyncEnabled()) return [];
+    const root = podStorageRoot();
+    if (!root || !solidSession.info.isLoggedIn) return [];
+    const base = `${root}proxion/gifs/`;
+    const ids = (await _readIndex(`${base}index.jsonld`)).slice(-200);
+    if (!ids.length) return [];
+    const results = await Promise.allSettled(ids.map(async (id) => {
+        const metaRes = await solidSession.fetch(`${base}${id}.jsonld`);
+        if (!metaRes.ok) return null;
+        const metaText = await metaRes.text();
+        if (metaText.length > 16384) return null;
+        const doc = JSON.parse(metaText);
+        if (doc?.['@type'] !== 'px:GifFavorite') return null;
+        const mime = (doc['px:mime'] || '').toLowerCase();
+        if (!_GIF_MIMES.has(mime)) return null;
+        const imgRes = await solidSession.fetch(`${base}${id}`);
+        if (!imgRes.ok) return null;
+        const buf = new Uint8Array(await imgRes.arrayBuffer());
+        if (!buf.length || buf.length > 5 * 1024 * 1024) return null;
+        return {
+            id, filename: doc['px:filename'] || 'image', mime,
+            data_b64: _bytesToB64(buf),
+            addedAt: doc['px:addedAt'] || Date.now(), lastUsedAt: 0, useCount: 0,
+        };
+    }));
+    return results.filter((r) => r.status === 'fulfilled' && r.value).map((r) => r.value);
+}

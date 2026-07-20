@@ -65,6 +65,10 @@ Everything lives under a single container, `{pod}/proxion/`:
 │   ├── index.jsonld               px:Index (saved message ids)
 │   └── {messageId}.jsonld         px:SavedMessage
 ├── settings.jsonld                px:Settings (only when sync enabled; opt-in)
+├── gifs/                          (only when sync enabled; opt-in)
+│   ├── index.jsonld               px:Index (gif ids)
+│   ├── {id}                       (binary image, real content type)
+│   └── {id}.jsonld                px:GifFavorite (metadata + image ref)
 ├── contacts/
 │   ├── index.jsonld               px:Index (cert ids)
 │   └── {certId}.jsonld            px:Contact
@@ -243,6 +247,28 @@ themselves, gateway URL) are deliberately excluded.
     "proxion_link_previews_enabled": "0",
     "proxion_locale": "de"
   },
+  "px:updatedAt": "2026-07-20T14:10:00.000Z"
+}
+```
+
+### px:GifFavorite
+
+`proxion/gifs/{id}.jsonld`, enumerated by `proxion/gifs/index.jsonld`. A saved
+GIF-tray favorite. The image itself is stored as a real binary resource at
+`proxion/gifs/{id}` (with its true content type, so other apps see an image, not
+base64 in JSON); this doc is metadata referencing it. `{id}` is the SHA-256 of
+the image (content-addressed, deduplicated). Written only when sync is enabled;
+owner-only.
+
+```json
+{
+  "@context": { "px": "https://proxion.dev/vocab/v1#" },
+  "@type": "px:GifFavorite",
+  "px:gifId": "9f86d0818...",
+  "px:filename": "reaction.gif",
+  "px:mime": "image/gif",
+  "px:image": "https://alice.pod.example/proxion/gifs/9f86d0818...",
+  "px:addedAt": 1721480400000,
   "px:updatedAt": "2026-07-20T14:10:00.000Z"
 }
 ```

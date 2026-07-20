@@ -46,7 +46,7 @@ import { createInvite } from './invite.js';
 import { createPush } from './push.js';
 import { createPairing } from './pairing.js';
 import { createRecovery } from './recovery.js';
-import { createGifTray, saveFavorite } from './gifs.js';
+import { createGifTray, saveFavorite, pushAllGifsToPod } from './gifs.js';
 import { needsDownscale, downscaleImage } from './media-resize.js';
 import { createEmoji } from './emoji.js';
 import { createSaved, syncSavedFromPod, pushAllSavedToPod } from './saved.js';
@@ -4102,6 +4102,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                         // Immediately reflect this device on the pod.
                         pushSettingsToPod();
                         pushAllSavedToPod().catch(() => {});
+                        pushAllGifsToPod().catch(() => {});   // R63
                     }
                 };
             }
