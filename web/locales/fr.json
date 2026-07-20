@@ -412,5 +412,14 @@
   "ui.gifTray": "Tiroir à GIF",
   "file.reduced": "L'image a été redimensionnée pour respecter la limite de pièces jointes du salon.",
   "ui.insertEmoji": "Insérer un émoji",
-  "msg.spoilerReveal": "Révéler le spoiler"
+  "msg.spoilerReveal": "Révéler le spoiler",
+  "ui.savedMessages": "Messages enregistrés",
+  "ui.closeSavedMessages": "Fermer les messages enregistrés",
+  "heading.savedMessages": "Messages enregistrés",
+  "saved.none": "Rien d'enregistré pour l'instant. Utilisez le marque-page sur un message.",
+  "saved.jump": "Aller",
+  "saved.remove": "Retirer",
+  "saved.added": "Enregistré pour plus tard.",
+  "saved.removedToast": "Retiré des messages enregistrés.",
+  "msg.bookmark": "Enregistrer pour plus tard"
 }

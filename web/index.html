@@ -890,6 +890,8 @@
                 <span id="pod-sync-indicator" style="display:none;font-size:0.72em;color:var(--slate-500);margin-left:6px;">&#x2601; syncing...</span>
                 <button id="invite-btn" aria-label="Copy room invite link" title="Copy room invite link" style="display:none;background:transparent;border:none;color:var(--text-secondary);cursor:pointer;margin-right:4px;line-height:0;" data-i18n-attr="title:ui.copyRoomInviteLink;aria-label:ui.copyRoomInviteLink"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg></button>
                 <button id="pin-panel-btn" aria-label="Pinned messages" title="Pinned messages" style="background:transparent;border:none;color:var(--text-secondary);cursor:pointer;margin-right:4px;line-height:0;" data-i18n-attr="title:ui.pinnedMessages;aria-label:ui.pinnedMessages"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z"/></svg></button>
+                <!-- R59E: saved messages (private, local-only) -->
+                <button id="saved-panel-btn" aria-label="Saved messages" title="Saved messages" style="background:transparent;border:none;color:var(--text-secondary);cursor:pointer;margin-right:4px;line-height:0;" data-i18n-attr="title:ui.savedMessages;aria-label:ui.savedMessages"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0ZM12 7v6m3-3H9"/></svg></button>
                 <!-- Round 65: Disappear timer picker (inline in header) -->
                 <select id="disappear-timer-select" title="Disappearing messages" style="display:none;background:var(--slate-900);border:1px solid var(--slate-700);color:var(--text-secondary);padding:3px 6px;border-radius:4px;font-size:0.78em;cursor:pointer;margin-right:4px;" data-i18n-attr="title:ui.disappearingMessages">
                     <option value="0">Off</option>
@@ -1481,6 +1483,13 @@
       <button id="contact-profile-dm-btn" style="background:var(--accent,var(--accent));border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;width:100%;font-size:0.9em;" data-i18n="btn.sendDm">Send DM</button>
     </div>
 
+    <!-- R59E: saved-messages panel (mirror of the pin panel) -->
+    <div id="saved-panel" style="display:none; position:fixed; right:0; top:0; bottom:0; width:300px; background:var(--bg-secondary,var(--slate-800)); box-shadow:-2px 0 10px rgba(0,0,0,.5); z-index:900; overflow-y:auto; padding:16px;">
+      <h3 style="color:var(--text-primary,var(--slate-50)); margin:0 0 12px;" data-i18n="heading.savedMessages">Saved Messages</h3>
+      <button id="saved-panel-close" aria-label="Close saved messages"
+              style="position:absolute;top:12px;right:12px;background:transparent;border:none;color:var(--text-secondary);font-size:1.2em;cursor:pointer;" data-i18n-attr="aria-label:ui.closeSavedMessages"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+      <div id="saved-list"></div>
+    </div>
     <div id="pin-panel" style="display:none; position:fixed; right:0; top:0; bottom:0; width:300px; background:var(--bg-secondary,var(--slate-800)); box-shadow:-2px 0 10px rgba(0,0,0,.5); z-index:900; overflow-y:auto; padding:16px;">
       <h3 style="color:var(--text-primary,var(--slate-50)); margin:0 0 12px;" data-i18n="heading.pinnedMessages">Pinned Messages</h3>
       <button id="pin-panel-close" aria-label="Close pinned messages"

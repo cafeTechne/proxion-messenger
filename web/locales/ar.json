@@ -425,5 +425,14 @@
   "ui.gifTray": "درج الصور المتحركة",
   "file.reduced": "تم تغيير حجم الصورة لتناسب حد المرفقات في الغرفة.",
   "ui.insertEmoji": "إدراج رمز تعبيري",
-  "msg.spoilerReveal": "كشف المحتوى المخفي"
+  "msg.spoilerReveal": "كشف المحتوى المخفي",
+  "ui.savedMessages": "الرسائل المحفوظة",
+  "ui.closeSavedMessages": "إغلاق الرسائل المحفوظة",
+  "heading.savedMessages": "الرسائل المحفوظة",
+  "saved.none": "لا شيء محفوظ بعد. استخدم الإشارة المرجعية على أي رسالة.",
+  "saved.jump": "انتقال",
+  "saved.remove": "إزالة",
+  "saved.added": "تم الحفظ لوقت لاحق.",
+  "saved.removedToast": "تمت الإزالة من الرسائل المحفوظة.",
+  "msg.bookmark": "حفظ لوقت لاحق"
 }

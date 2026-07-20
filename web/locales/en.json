@@ -412,5 +412,14 @@
   "time.today": "Today",
   "time.yesterday": "Yesterday",
   "ui.insertEmoji": "Insert emoji",
-  "msg.spoilerReveal": "Reveal spoiler"
+  "msg.spoilerReveal": "Reveal spoiler",
+  "ui.savedMessages": "Saved messages",
+  "ui.closeSavedMessages": "Close saved messages",
+  "heading.savedMessages": "Saved Messages",
+  "saved.none": "Nothing saved yet. Use the bookmark on any message.",
+  "saved.jump": "Jump",
+  "saved.remove": "Remove",
+  "saved.added": "Saved for later.",
+  "saved.removedToast": "Removed from saved messages.",
+  "msg.bookmark": "Save for later"
 }

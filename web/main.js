@@ -47,6 +47,7 @@ import { createRecovery } from './recovery.js';
 import { createGifTray, saveFavorite } from './gifs.js';
 import { needsDownscale, downscaleImage } from './media-resize.js';
 import { createEmoji } from './emoji.js';
+import { createSaved } from './saved.js';
 import { inlineNotice, feedEmptyState } from './states.js';
 import { installFocusTrap } from './focus-trap.js';
 import { makeListNavigable, announce } from './a11y.js';
@@ -3194,6 +3195,9 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         // R59C: :shortcode: autocomplete + composer emoji panel
         const composerEmoji = createEmoji();
         composerEmoji.attach(document.getElementById("message-input"));
+        // R59E: saved messages (private bookmarks)
+        const savedMsgs = createSaved({ showToast, jumpToMsg });
+        savedMsgs.wireSaved();
 
         // --------------- Context Menu ---------------
         let _ctxTarget = null; // { msgId, fromWebid, content, isOwn }
@@ -3992,6 +3996,9 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                         showContactProfile(webid);
                         break;
                     case 'scroll-reply': document.getElementById(`msg-${replyId}`)?.scrollIntoView({ behavior: 'smooth' }); break;
+                    case 'bookmark':
+                        savedMsgs.toggleBookmark(messageMap[msgId], activeView);
+                        break;
                     case 'save-gif': {
                         const m = messageMap[msgId];
                         if (m?.file?.data_b64) {

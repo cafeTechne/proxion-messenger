@@ -412,5 +412,14 @@
   "ui.gifTray": "GIF-Ablage",
   "file.reduced": "Das Bild wurde verkleinert, um in das Anhang-Limit des Raums zu passen.",
   "ui.insertEmoji": "Emoji einfügen",
-  "msg.spoilerReveal": "Spoiler aufdecken"
+  "msg.spoilerReveal": "Spoiler aufdecken",
+  "ui.savedMessages": "Gespeicherte Nachrichten",
+  "ui.closeSavedMessages": "Gespeicherte Nachrichten schließen",
+  "heading.savedMessages": "Gespeicherte Nachrichten",
+  "saved.none": "Noch nichts gespeichert. Nutze das Lesezeichen an einer Nachricht.",
+  "saved.jump": "Springen",
+  "saved.remove": "Entfernen",
+  "saved.added": "Für später gespeichert.",
+  "saved.removedToast": "Aus den gespeicherten Nachrichten entfernt.",
+  "msg.bookmark": "Für später speichern"
 }

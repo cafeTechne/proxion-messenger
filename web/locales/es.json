@@ -412,5 +412,14 @@
   "ui.gifTray": "Bandeja de GIF",
   "file.reduced": "La imagen se redimensionó para ajustarse al límite de adjuntos de la sala.",
   "ui.insertEmoji": "Insertar emoji",
-  "msg.spoilerReveal": "Mostrar spoiler"
+  "msg.spoilerReveal": "Mostrar spoiler",
+  "ui.savedMessages": "Mensajes guardados",
+  "ui.closeSavedMessages": "Cerrar mensajes guardados",
+  "heading.savedMessages": "Mensajes guardados",
+  "saved.none": "Nada guardado aún. Usa el marcador en cualquier mensaje.",
+  "saved.jump": "Ir",
+  "saved.remove": "Quitar",
+  "saved.added": "Guardado para más tarde.",
+  "saved.removedToast": "Eliminado de los mensajes guardados.",
+  "msg.bookmark": "Guardar para más tarde"
 }
