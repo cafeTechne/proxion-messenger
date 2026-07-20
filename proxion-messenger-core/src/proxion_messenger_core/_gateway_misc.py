@@ -179,6 +179,13 @@ class MiscHandlerMixin:
             self.blocklist.unblock(webid)
         logger.info(f"Unblocked WebID: {webid}")
 
+    async def _handle_list_blocks(self, websocket, data: dict) -> None:
+        """Return the caller-owner's block list so the client can show block
+        state, render a manage-blocks list, and mirror it to the pod."""
+        owner = self._client_webids.get(websocket, "")
+        webids = self._store.get_blocked_by(owner) if (owner and self._store) else []
+        await websocket.send(json.dumps({"type": "blocks", "webids": webids}))
+
     async def _handle_set_thread_mute(self, websocket, data: dict) -> None:
         """Record a thread mute server-side so OFFLINE push respects it. mute_key is
         the peer's webid (DM) or room_id (room)."""

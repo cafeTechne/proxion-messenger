@@ -468,6 +468,9 @@
             box-shadow: 0 4px 12px rgba(233, 69, 96, 0.3);
         }
         .profile-btn:active { transform: translateY(0); }
+        /* R65: block/unblock action in the profile card */
+        .profile-btn-danger { background: var(--slate-700); color: var(--color-danger-soft, #f87171); }
+        .profile-btn-danger:hover { background: var(--slate-600); box-shadow: none; }
 
         /* msg-meta wrapper (avatar + name on first in group) */
         .msg-meta { display: inline; }
@@ -571,6 +574,7 @@
         <div class="profile-divider"></div>
         <div class="profile-actions">
             <button class="profile-btn" id="profile-dm-btn" data-i18n="btn.sendDm">Send DM</button>
+            <button class="profile-btn profile-btn-danger" id="profile-block-btn" data-i18n="btn.block">Block</button>
         </div>
     </div>
 
@@ -1229,6 +1233,10 @@
                 style="background:var(--slate-800);border:1px solid var(--slate-600);color:var(--slate-50);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.82em;margin-top:8px;" data-i18n="btn.linkDevice">
           + Link a device
         </button>
+        <!-- R65: blocked users management -->
+        <hr style="border-color:var(--slate-700);margin:16px 0 12px;">
+        <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;font-weight:600;" data-i18n="heading.blockedUsers">Blocked users</p>
+        <div id="settings-blocked-list" style="font-size:0.85em;color:var(--text-secondary);min-height:24px;"></div>
         </div><!-- /settings-advanced -->
         <div style="display:flex; gap:8px; justify-content:flex-end;">
           <button id="settings-cancel-btn"

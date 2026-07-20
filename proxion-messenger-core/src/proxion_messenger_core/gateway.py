@@ -1188,6 +1188,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_block(websocket, data)
             elif cmd == "unblock":
                 await self._handle_unblock(websocket, data)
+            elif cmd == "list_blocks":
+                await self._handle_list_blocks(websocket, data)
             elif cmd == "mark_read":
                 await self._handle_mark_read(websocket, data)
             elif cmd == "update_last_read":

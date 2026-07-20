@@ -455,5 +455,12 @@
   "ui.sendFile": "Envoyer le fichier",
   "file.spoilerOption": "Marquer comme spoiler (flouté jusqu'à révélation)",
   "spoiler.reveal": "Révéler l'image spoiler",
-  "spoiler.mediaLabel": "Spoiler — cliquez pour révéler"
+  "spoiler.mediaLabel": "Spoiler — cliquez pour révéler",
+  "btn.block": "Bloquer",
+  "btn.unblock": "Débloquer",
+  "blocks.blocked": "Utilisateur bloqué.",
+  "blocks.unblocked": "Utilisateur débloqué.",
+  "blocks.none": "Aucun utilisateur bloqué.",
+  "blocks.unblock": "Débloquer",
+  "heading.blockedUsers": "Utilisateurs bloqués"
 }

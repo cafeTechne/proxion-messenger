@@ -66,6 +66,7 @@ Everything lives under a single container, `{pod}/proxion/`:
 │   └── {messageId}.jsonld         px:SavedMessage
 ├── settings.jsonld                px:Settings (only when sync enabled; opt-in)
 ├── mutes.jsonld                   px:MuteList (only when sync enabled; opt-in)
+├── blocks.jsonld                  px:BlockList (only when sync enabled; opt-in)
 ├── gifs/                          (only when sync enabled; opt-in)
 │   ├── index.jsonld               px:Index (gif ids)
 │   ├── {id}                       (binary image, real content type)
@@ -263,6 +264,20 @@ is enabled; owner-only.
   "@context": { "px": "https://proxion.dev/vocab/v1#" },
   "@type": "px:MuteList",
   "px:threads": ["general", "dm-thread1"],
+  "px:updatedAt": "2026-07-20T14:10:00.000Z"
+}
+```
+
+### px:BlockList
+
+`proxion/blocks.jsonld`. The WebIDs you have blocked, as a plain list, so a
+block follows you across devices. Written only when sync is enabled; owner-only.
+
+```json
+{
+  "@context": { "px": "https://proxion.dev/vocab/v1#" },
+  "@type": "px:BlockList",
+  "px:webids": ["did:key:zEvil"],
   "px:updatedAt": "2026-07-20T14:10:00.000Z"
 }
 ```

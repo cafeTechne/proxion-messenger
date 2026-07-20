@@ -10,7 +10,7 @@
 import { t } from './i18n.js';
 import { webidColor } from './util.js';
 
-export function createProfile({ getSocket, showToast, getUserPresence, getMessageMap }) {
+export function createProfile({ getSocket, showToast, getUserPresence, getMessageMap, isBlocked }) {
     const state = { profileCardActive: null };
 
     function handlePresenceUpdate(event) {
@@ -70,6 +70,13 @@ export function createProfile({ getSocket, showToast, getUserPresence, getMessag
         const avatarEl = document.getElementById("profile-avatar-el");
         avatarEl.style.background = avatarColor;
         avatarEl.textContent = shortName;
+
+        // R65: reflect block state on the block/unblock button
+        const blockBtn = document.getElementById("profile-block-btn");
+        if (blockBtn) {
+            const bl = isBlocked?.(webid);
+            blockBtn.textContent = bl ? t("btn.unblock") : t("btn.block");
+        }
 
         // Position popover near click point
         const card = document.getElementById("profile-card");

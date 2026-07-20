@@ -110,3 +110,30 @@ async def test_send_blocked_is_per_owner(gateway, monkeypatch):
     before = len(sends)
     await gateway.process_command(wsB, {"cmd": "send_dm", "cert_id": cert_id, "content": "hi"})
     assert len(sends) == before + 1, "B did not block the peer → B's DM must send"
+
+
+@pytest.mark.asyncio
+async def test_list_blocks_returns_owner_blocklist(gateway, monkeypatch):
+    """R65: list_blocks returns the caller-owner's current block list so the
+    client can render block state + a manage-list."""
+    import json
+    monkeypatch.setenv("PROXION_REQUIRE_AUTH", "0")
+    priv = Ed25519PrivateKey.generate()
+    ws = _mock_ws()
+    await _register(gateway, ws, _did(priv))
+
+    await gateway.process_command(ws, {"cmd": "block", "webid": "did:key:zEvil"})
+    await gateway.process_command(ws, {"cmd": "block", "webid": "did:key:zSpam"})
+    ws.send.reset_mock()
+
+    await gateway.process_command(ws, {"cmd": "list_blocks"})
+    payloads = [json.loads(c.args[0]) for c in ws.send.call_args_list]
+    blocks_msg = next(p for p in payloads if p.get("type") == "blocks")
+    assert set(blocks_msg["webids"]) == {"did:key:zEvil", "did:key:zSpam"}
+
+    await gateway.process_command(ws, {"cmd": "unblock", "webid": "did:key:zEvil"})
+    ws.send.reset_mock()
+    await gateway.process_command(ws, {"cmd": "list_blocks"})
+    payloads = [json.loads(c.args[0]) for c in ws.send.call_args_list]
+    blocks_msg = next(p for p in payloads if p.get("type") == "blocks")
+    assert set(blocks_msg["webids"]) == {"did:key:zSpam"}

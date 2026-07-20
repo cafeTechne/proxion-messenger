@@ -1023,3 +1023,17 @@ export async function podReadMutes() {
     if (!root) return null;
     return _readPxList(`${root}proxion/mutes.jsonld`, 'px:threads');
 }
+
+export async function podWriteBlocks(webids) {
+    if (!podSyncEnabled() || !solidSession.info.isLoggedIn) return;
+    await _writePxDoc('proxion/blocks.jsonld', 'px:BlockList', {
+        'px:webids': Array.isArray(webids) ? webids.filter((x) => typeof x === 'string') : [],
+    });
+}
+
+export async function podReadBlocks() {
+    if (!podSyncEnabled() || !solidSession.info.isLoggedIn) return null;
+    const root = podStorageRoot();
+    if (!root) return null;
+    return _readPxList(`${root}proxion/blocks.jsonld`, 'px:webids');
+}

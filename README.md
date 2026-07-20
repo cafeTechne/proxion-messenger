@@ -45,10 +45,10 @@ someone else's terms. Proxion inverts that:
 <img src="landing/assets/screenshot-mobile.png" alt="Proxion on mobile" width="210" align="right">
 
 Rooms and DMs · P2P WebRTC voice calls · file attachments and media previews · reactions,
-edits, pins, mentions · disappearing and scheduled messages · cross-gateway federation ·
-multi-device with encrypted fanout · opt-in cross-device sync of DM history, bookmarks,
-settings, saved GIFs, and mutes via your pod · offline-capable PWA with push · six languages
-including RTL Arabic · WCAG 2.2 AA accessible.
+edits, pins, mentions · disappearing and scheduled messages · mute and block · cross-gateway
+federation · multi-device with encrypted fanout · opt-in cross-device sync of DM history,
+bookmarks, settings, saved GIFs, mutes, and blocks via your pod · offline-capable PWA with push ·
+six languages including RTL Arabic · WCAG 2.2 AA accessible.
 
 ## Download
 

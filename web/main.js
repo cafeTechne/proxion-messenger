@@ -16,7 +16,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podReadDmIndex, _podUpdateDmIndex,
          podArchiveDmMessage, podArchiveDeleteDmMessage, podReadDmMessages,
          podSyncEnabled, podWriteSettings, podReadSettings,
-         podWriteMutes, podReadMutes } from './pod.js';
+         podWriteMutes, podReadMutes, podReadBlocks } from './pod.js';
 import {
     didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, timeAgo,
     expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8,
@@ -51,6 +51,7 @@ import { createGifTray, saveFavorite, pushAllGifsToPod } from './gifs.js';
 import { needsDownscale, downscaleImage } from './media-resize.js';
 import { createEmoji } from './emoji.js';
 import { createSaved, syncSavedFromPod, pushAllSavedToPod } from './saved.js';
+import { createBlocks } from './blocks.js';
 import { createPolls } from './polls.js';
 import { createRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { createMeme } from './meme.js';
@@ -116,6 +117,8 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     }
                 }
             }).catch(() => {});
+            // R65: blocks — reconcile pod-synced blocks into this device.
+            podReadBlocks().then((webids) => blocks.reconcileFromPod(webids)).catch(() => {});
             // Settings: apply pod values to localStorage before the toggles read
             // them; switch locale live if it changed.
             let prefs = null;
@@ -476,10 +479,16 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         // dispatch and renderer also touch them) and are injected by reference.
         const {
             handlePresenceUpdate, updatePresence, showProfileCard, profileCardOpenDM,
-            hideProfileCard, showContactProfile,
+            hideProfileCard, showContactProfile, state: profileState,
         } = createProfile({
             getSocket: () => socket, showToast,
             getUserPresence: () => userPresence, getMessageMap: () => messageMap,
+            isBlocked: (webid) => blocks.isBlocked(webid),
+        });
+        // R65: user blocking (the gateway enforces; this is the client feature).
+        const blocks = createBlocks({
+            getSocket: () => socket, showToast,
+            onAfterChange: () => { blocks.renderBlockedList(); },
         });
         // Message editing: editingMsgId is cluster-owned (read by the Escape-key
         // handler via edit.state); messageMap stays host-owned, injected by ref.
@@ -794,7 +803,9 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                 socket.send(JSON.stringify({cmd: "pod_status"}));
                 socket.send(JSON.stringify({cmd: "list_sessions"}));
                 socket.send(JSON.stringify({cmd: "list_devices"}));
+                blocks.requestBlocks();   // R65: refresh the blocked-users list
             }
+            blocks.renderBlockedList();   // R65
             document.getElementById("settings-modal").style.display = "flex";
             // G1: always open with Advanced collapsed (openSettingsToPod re-expands it).
             document.getElementById("settings-advanced").style.display = "none";
@@ -1237,6 +1248,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                             socket.send(JSON.stringify({cmd: "get_identity"}));
                             socket.send(JSON.stringify({cmd: "list_friend_requests"}));
                             socket.send(JSON.stringify({cmd: "get_relationships"}));
+                            blocks.requestBlocks();   // R65: hydrate block state
                             requestNotifPermission();
                             // D4: subscribe to WebPush so messages arrive with the
                             // window closed (idempotent; no-op if permission denied).
@@ -1302,6 +1314,9 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     break;
                 case "pins":
                     renderPins(event.pins);
+                    break;
+                case "blocks":
+                    blocks.handleBlocksEvent(event.webids);   // R65
                     break;
                 case "reaction_added":
                     handleReactionEvent(event, "add");
@@ -3624,6 +3639,14 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
 
             // Profile card: Send DM button
             attachListener('#profile-dm-btn', 'click', profileCardOpenDM);
+            // R65: block/unblock the profile-card subject
+            attachListener('#profile-block-btn', 'click', () => {
+                const webid = profileState?.profileCardActive;
+                if (!webid) return;
+                blocks.toggle(webid);
+                const btn = document.getElementById('profile-block-btn');
+                if (btn) btn.textContent = blocks.isBlocked(webid) ? t('btn.unblock') : t('btn.block');
+            });
 
             // Chat header: Menu toggle
             attachListener('#menu-toggle', 'click', toggleSidebar);
@@ -4123,6 +4146,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                         pushAllSavedToPod().catch(() => {});
                         pushAllGifsToPod().catch(() => {});   // R63
                         podWriteMutes([...mutedThreads]).catch(() => {});   // R64
+                        blocks.pushToPod();   // R65
                     }
                 };
             }

@@ -455,5 +455,12 @@
   "ui.sendFile": "Send file",
   "file.spoilerOption": "Mark as spoiler (blurred until revealed)",
   "spoiler.reveal": "Reveal spoiler image",
-  "spoiler.mediaLabel": "Spoiler — click to reveal"
+  "spoiler.mediaLabel": "Spoiler — click to reveal",
+  "btn.block": "Block",
+  "btn.unblock": "Unblock",
+  "blocks.blocked": "User blocked.",
+  "blocks.unblocked": "User unblocked.",
+  "blocks.none": "No blocked users.",
+  "blocks.unblock": "Unblock",
+  "heading.blockedUsers": "Blocked users"
 }

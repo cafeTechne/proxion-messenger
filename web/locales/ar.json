@@ -468,5 +468,12 @@
   "ui.sendFile": "إرسال الملف",
   "file.spoilerOption": "وضع علامة محتوى مخفي (مموّه حتى الكشف)",
   "spoiler.reveal": "كشف الصورة المخفية",
-  "spoiler.mediaLabel": "محتوى مخفي — انقر للكشف"
+  "spoiler.mediaLabel": "محتوى مخفي — انقر للكشف",
+  "btn.block": "حظر",
+  "btn.unblock": "إلغاء الحظر",
+  "blocks.blocked": "تم حظر المستخدم.",
+  "blocks.unblocked": "تم إلغاء حظر المستخدم.",
+  "blocks.none": "لا يوجد مستخدمون محظورون.",
+  "blocks.unblock": "إلغاء الحظر",
+  "heading.blockedUsers": "المستخدمون المحظورون"
 }
