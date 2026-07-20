@@ -499,6 +499,11 @@ class HttpEndpointsMixin:
             "new_content",
             # dm_disappear_timer relay
             "ms",
+            # room emoji federation deltas (R59G) — same class of bug as the
+            # room_reaction "emoji" note above, caught by the R60D E2E test
+            # BEFORE production this time: handler-level unit tests bypass this
+            # allowlist entirely.
+            "name", "mime", "data_b64",
             # ephemeral relay envelope signature (R55): full-payload Ed25519 sig by
             # the relaying gateway, verified against relay_sig_did over relay_ts.
             "relay_sig_did", "relay_ts",
