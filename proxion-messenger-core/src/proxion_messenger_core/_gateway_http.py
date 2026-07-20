@@ -532,6 +532,7 @@ class HttpEndpointsMixin:
             "voice_signal")
         _MEMBER_SIGNED_TYPES = (
             "room_message", "room_reaction", "room_edit", "room_delete", "room_moderation",
+            "room_emoji",
             "file_offer", "file_accept", "file_reject", "file_chunk", "file_complete",
             "voice_channel_join", "voice_channel_leave")
         _CHANNEL_SIGNED_TYPES = (
@@ -605,6 +606,8 @@ class HttpEndpointsMixin:
         # ── Room moderation relay — ban/mute propagation (R-C1) ──
         if data.get("content_type") == "room_moderation":
             return await self._handle_room_moderation_relay(data)
+        if data.get("content_type") == "room_emoji":
+            return await self._handle_room_emoji_relay(data)
 
         # ── Voice channel relay (cross-gateway group voice) ──
         if data.get("content_type") == "voice_channel_join":

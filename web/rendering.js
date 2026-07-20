@@ -21,6 +21,7 @@
 
 import { didSuffix, escHtml, webidColor, renderMarkdown, timeAgo, expireLabel as _expireLabel } from './util.js';
 import { parsePoll } from './polls.js';
+import { applyRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { t, getLocale } from './i18n.js';
 
 // R59A: attachment kind by mime — pure, exported for tests. Video/audio get
@@ -283,6 +284,9 @@ export function createRendering({
         let renderedText = renderMarkdown(rawText).replace(/@(\w+)/g, (match, uname) =>
             `<span class="${selfDisplayName && uname.toLowerCase() === selfDisplayName.toLowerCase() ? "mention mention-self" : "mention"}">@${uname}</span>`
         );
+        // R59G: replace :name: tokens with this room's custom emoji (post-escape,
+        // map-driven — unknown names pass through untouched).
+        renderedText = applyRoomEmoji(renderedText, getRoomEmoji(msg.thread_id || activeView?.id || ''));
 
         let fileHtml = "";
         if (msg.file) {

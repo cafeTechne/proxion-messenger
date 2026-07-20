@@ -49,6 +49,7 @@ import { needsDownscale, downscaleImage } from './media-resize.js';
 import { createEmoji } from './emoji.js';
 import { createSaved } from './saved.js';
 import { createPolls } from './polls.js';
+import { createRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { inlineNotice, feedEmptyState } from './states.js';
 import { installFocusTrap } from './focus-trap.js';
 import { makeListNavigable, announce } from './a11y.js';
@@ -430,6 +431,14 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         // call mentions.attach(inputEl) once the input exists.
         const mentions = createMentions({ getCurrentRoomMembers: () => currentRoomMembers });
         const { closeMentionDropdown, _selectMention } = mentions;
+        // R59G: custom room emoji (map + management modal). showPromptModal is a
+        // hoisted function declaration; socket/activeView are read live.
+        const roomEmoji = createRoomEmoji({
+            getSocket: () => socket,
+            getActiveView: () => activeView,
+            showToast,
+            showPromptModal: (...a) => showPromptModal(...a),
+        });
         // Rooms (command actions). roomCreatorOf (Set) and roomInviteUrls (object)
         // are host-owned shared state, injected by reference. showConfirm and
         // showCopyModal are hoisted function declarations.
@@ -870,6 +879,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             const list = document.getElementById("members-list");
             if (list) list.innerHTML = inlineNotice(t('members.loading'), "loading");
             if (socket) socket.send(JSON.stringify({cmd: "get_room_members", room_id: roomId}));
+            roomEmoji.requestList(roomId);   // R59G: custom emoji for :name: rendering
         }
         // kickMember: moved to rooms.js (createRooms).
 
@@ -1477,6 +1487,10 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     renderDmSidebar();
                     break;
                 }
+                case "room_emoji":
+                    // R59G: per-room custom emoji list (initial fetch + live updates)
+                    roomEmoji.handleRoomEmojiEvent(event);
+                    break;
                 case "room_members": {
                     currentRoomMembers = event.members || [];
                     renderMembersPanel(event.members);
@@ -3147,6 +3161,9 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             const threadMutedFlag = mutedThreads.has(threadId);
             document.getElementById("sctx-mute").style.display   = threadMutedFlag ? "none" : "";
             document.getElementById("sctx-unmute").style.display = threadMutedFlag ? "" : "none";
+            // R59G: custom emoji is a room feature — hide for DM threads
+            const _sctxEmoji = document.getElementById("sctx-emoji");
+            if (_sctxEmoji) _sctxEmoji.style.display = localDmPeers[threadId] ? "none" : "";
             const menu = document.getElementById("sidebar-ctx-menu");
             menu.style.display = "block";
             const vw = window.innerWidth, vh = window.innerHeight;
@@ -3194,7 +3211,11 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         // to the message input here.
         mentions.attach(document.getElementById("message-input"));
         // R59C: :shortcode: autocomplete + composer emoji panel
-        const composerEmoji = createEmoji();
+        // (+R59G: the active room's custom emoji rides in the panel)
+        const composerEmoji = createEmoji({
+            getCustomEmoji: () => (activeView && activeView.type !== 'dm' && activeView.type !== 'local_dm')
+                ? getRoomEmoji(activeView.id) : {},
+        });
         composerEmoji.attach(document.getElementById("message-input"));
         // R59E: saved messages (private bookmarks)
         const savedMsgs = createSaved({ showToast, jumpToMsg });
@@ -3202,6 +3223,12 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         // R59F: polls (plain-text message + auto-seeded keycap reactions)
         const polls = createPolls({ showToast, addEmoji, getAllMessages: () => allMessages });
         polls.wirePolls();
+        // R59G: custom room emoji management modal
+        roomEmoji.wireRoomEmoji();
+        document.getElementById('sctx-emoji')?.addEventListener('click', () => {
+            document.getElementById('sidebar-ctx-menu').style.display = 'none';
+            if (_sctxTargetId) roomEmoji.openManageModal(_sctxTargetId);
+        });
 
         // --------------- Context Menu ---------------
         let _ctxTarget = null; // { msgId, fromWebid, content, isOwn }

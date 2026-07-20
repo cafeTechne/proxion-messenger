@@ -431,5 +431,16 @@
   "ui.pollOptionN": "Weitere Option (optional)",
   "btn.createPoll": "Umfrage erstellen",
   "poll.needTwo": "Eine Umfrage braucht eine Frage und mindestens zwei Optionen.",
-  "poll.voteHint": "Stimme ab, indem du unten auf eine Zahlen-Reaktion tippst."
+  "poll.voteHint": "Stimme ab, indem du unten auf eine Zahlen-Reaktion tippst.",
+  "sctx.customEmoji": "Eigene Emojis",
+  "ui.customRoomEmoji": "Eigene Raum-Emojis",
+  "heading.customRoomEmoji": "Eigene Raum-Emojis",
+  "roomEmoji.hint": "Bis zu 50 kleine Bilder (max. 64 KB), nutzbar als :name: in diesem Raum. Große Bilder werden automatisch verkleinert.",
+  "roomEmoji.none": "Noch keine eigenen Emojis.",
+  "roomEmoji.namePrompt": "Name für dieses Emoji (a-z, 0-9, _):",
+  "roomEmoji.badName": "Emoji-Namen haben 2-32 Zeichen: a-z, 0-9, _",
+  "roomEmoji.badImage": "Bild konnte nicht verarbeitet werden.",
+  "roomEmoji.gifTooLarge": "Animierte GIF-Emojis dürfen höchstens 64 KB groß sein.",
+  "roomEmoji.removeNamed": ":{name}: entfernen",
+  "btn.uploadEmoji": "Emoji hochladen"
 }

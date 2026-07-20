@@ -444,5 +444,16 @@
   "ui.pollOptionN": "خيار آخر (اختياري)",
   "btn.createPoll": "إنشاء الاستطلاع",
   "poll.needTwo": "يحتاج الاستطلاع إلى سؤال وخيارين على الأقل.",
-  "poll.voteHint": "صوّت بالنقر على تفاعل رقمي أدناه."
+  "poll.voteHint": "صوّت بالنقر على تفاعل رقمي أدناه.",
+  "sctx.customEmoji": "رموز مخصصة",
+  "ui.customRoomEmoji": "رموز الغرفة المخصصة",
+  "heading.customRoomEmoji": "رموز الغرفة المخصصة",
+  "roomEmoji.hint": "حتى 50 صورة صغيرة (بحد أقصى 64 كيلوبايت) تُستخدم كـ :اسم: في هذه الغرفة. الصور الكبيرة تُصغَّر تلقائيًا.",
+  "roomEmoji.none": "لا توجد رموز مخصصة بعد.",
+  "roomEmoji.namePrompt": "اسم هذا الرمز (a-z، 0-9، _):",
+  "roomEmoji.badName": "أسماء الرموز من 2-32 حرفًا: a-z، 0-9، _",
+  "roomEmoji.badImage": "تعذّرت معالجة هذه الصورة.",
+  "roomEmoji.gifTooLarge": "يجب ألا تتجاوز رموز GIF المتحركة 64 كيلوبايت.",
+  "roomEmoji.removeNamed": "إزالة :{name}:",
+  "btn.uploadEmoji": "رفع رمز"
 }

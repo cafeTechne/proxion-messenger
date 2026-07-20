@@ -109,7 +109,7 @@ export function applyShortcode(text, caret, colonStart, emoji) {
     return { text: before + inserted + after, caret: colonStart + inserted.length };
 }
 
-export function createEmoji() {
+export function createEmoji({ getCustomEmoji } = {}) {
     const state = { colonStart: -1, focusIdx: 0 };
     let inputEl = null;
     let _panelOpen = false;
@@ -168,7 +168,7 @@ export function createEmoji() {
     function openPanel() {
         const panel = _panel();
         if (!panel) return;
-        if (!panel.childElementCount) {
+        if (!panel.querySelector('button:not(.custom-entry)')) {
             for (const [name, emoji] of Object.entries(EMOJI_MAP)) {
                 if (name === 'thumbsup' || name === 'thumbsdown') continue;   // dupes of +1/-1
                 const b = document.createElement('button');
@@ -178,6 +178,23 @@ export function createEmoji() {
                 b.addEventListener('click', () => { _insertAtCaret(emoji); });
                 panel.appendChild(b);
             }
+        }
+        // R59G: the active room's custom emoji, rebuilt each open (room-scoped).
+        panel.querySelectorAll('.custom-entry').forEach(el => el.remove());
+        const custom = getCustomEmoji?.() || {};
+        const names = Object.keys(custom).sort().reverse();   // prepend keeps a→z order
+        for (const name of names) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'custom-entry';
+            b.setAttribute('aria-label', ':' + name + ':');
+            const img = document.createElement('img');
+            img.className = 'custom-emoji';
+            img.src = `data:${custom[name].mime};base64,${custom[name].data_b64}`;
+            img.alt = '';
+            b.appendChild(img);
+            b.addEventListener('click', () => { _insertAtCaret(':' + name + ':'); });
+            panel.prepend(b);
         }
         _panelOpen = true;
         panel.style.display = 'grid';

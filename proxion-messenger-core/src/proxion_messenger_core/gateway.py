@@ -1222,6 +1222,12 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_join_room(websocket, data)
             elif cmd == "kick_member":
                 await self._handle_kick_member(websocket, data)
+            elif cmd == "add_room_emoji":
+                await self._handle_add_room_emoji(websocket, data)
+            elif cmd == "remove_room_emoji":
+                await self._handle_remove_room_emoji(websocket, data)
+            elif cmd == "list_room_emoji":
+                await self._handle_list_room_emoji(websocket, data)
             elif cmd == "ban_member":
                 await self._handle_ban_member(websocket, data)
             elif cmd == "unban_member":

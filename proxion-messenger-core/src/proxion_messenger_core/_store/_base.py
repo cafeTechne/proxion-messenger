@@ -1108,6 +1108,19 @@ class _StoreBase(object):
                 """CREATE INDEX IF NOT EXISTS idx_relay_mailbox_recipient
                    ON relay_mailbox(recipient_did)""",
             ],
+            # 55: custom room emoji (R59G) — small images scoped to a room,
+            # rendered for :name: tokens. Federates as per-emoji relay deltas.
+            [
+                """CREATE TABLE IF NOT EXISTS room_emoji (
+                    room_id  TEXT NOT NULL,
+                    name     TEXT NOT NULL,
+                    mime     TEXT NOT NULL,
+                    data_b64 TEXT NOT NULL,
+                    added_by TEXT NOT NULL,
+                    added_at REAL NOT NULL DEFAULT (unixepoch('now','subsec')),
+                    PRIMARY KEY (room_id, name)
+                )""",
+            ],
         ]
 
         for version, migration in enumerate(migrations, start=1):

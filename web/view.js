@@ -197,6 +197,10 @@ export function createView({
                 renderMembersPanel([]);  // clear while loading
             }
         };
+        // R59G fix: this incremental path never wired the sidebar context menu,
+        // so right-click (mute / mark-read / custom emoji) was dead on locally
+        // created rooms — populateSidebar rows had it, these didn't.
+        li.addEventListener("contextmenu", e => openSidebarCtx(e, roomId));
         list.appendChild(li);
     }
 

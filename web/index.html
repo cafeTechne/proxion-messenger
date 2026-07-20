@@ -597,6 +597,7 @@
         <button id="sctx-mute"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M9.143 17.082a24.248 24.248 0 0 0 3.844.148m-3.844-.148a23.856 23.856 0 0 1-5.455-1.31 8.964 8.964 0 0 0 2.3-5.542m3.155 6.852a3 3 0 0 0 5.667 1.97m1.965-2.277L21 21m-4.225-4.225a23.81 23.81 0 0 0 3.536-1.003 8.967 8.967 0 0 1-2.312-6.022V9A6 6 0 0 0 9.239 3.477L3 3m6.239.477A5.965 5.965 0 0 0 6 9v.75a8.966 8.966 0 0 1-2.312 6.022"/></svg> Mute</button>
         <button id="sctx-unmute" style="display:none;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"/></svg> Unmute</button>
         <button id="sctx-mark-read"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg> Mark as read</button>
+        <button id="sctx-emoji"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M15.182 15.182a4.5 4.5 0 0 1-6.364 0M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM9.75 9.75c0 .414-.168.75-.375.75S9 10.164 9 9.75 9.168 9 9.375 9s.375.336.375.75Zm5.25 0c0 .414-.168.75-.375.75s-.375-.336-.375-.75.168-.75.375-.75.375.336.375.75Z"/></svg> <span data-i18n="sctx.customEmoji">Custom emoji</span></button>
     </div>
     <div id="delete-submenu" class="delete-submenu" style="display:none;">
         <button id="delete-for-me-btn" data-msg-id="" data-i18n="btn.deleteMe">Delete for me</button>
@@ -1202,6 +1203,23 @@
                   style="background:var(--slate-700); border:none; color:var(--slate-50); padding:8px 16px; border-radius:4px; cursor:pointer;" data-i18n="btn.cancel">Cancel</button>
           <button id="settings-save-btn"
                   style="background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer;" data-i18n="btn.saveReconnect">Save &amp; Reconnect</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- R59G: custom room emoji management (admins; server enforces) -->
+    <div id="room-emoji-modal" role="dialog" aria-modal="true" aria-label="Custom room emoji" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1002; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.customRoomEmoji">
+      <div style="background:var(--slate-800); border-radius:10px; padding:24px; width:min(400px, 92vw); max-height:80vh; overflow-y:auto; color:var(--slate-50);">
+        <h3 style="margin:0 0 8px;" data-i18n="heading.customRoomEmoji">Custom room emoji</h3>
+        <p style="margin:0 0 12px;font-size:0.82em;color:var(--text-secondary);" data-i18n="roomEmoji.hint">
+          Up to 50 small images (64 KB max) usable as :name: in this room.
+          Large images are shrunk automatically.
+        </p>
+        <div id="room-emoji-list" style="margin-bottom:12px;"></div>
+        <input type="file" id="room-emoji-upload-input" accept="image/png,image/webp,image/gif,image/jpeg" style="display:none">
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="room-emoji-upload-btn" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:7px 16px;border-radius:4px;cursor:pointer;" data-i18n="btn.uploadEmoji">Upload emoji</button>
+          <button id="room-emoji-close" style="background:var(--accent);border:none;color:#fff;padding:7px 16px;border-radius:4px;cursor:pointer;" data-i18n="btn.close">Close</button>
         </div>
       </div>
     </div>

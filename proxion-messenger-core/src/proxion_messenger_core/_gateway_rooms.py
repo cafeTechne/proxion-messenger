@@ -2769,3 +2769,169 @@ class RoomHandlerMixin:
                 }))
             except Exception:
                 pass
+
+    # ------------------------------------------------------------------
+    # Custom room emoji (R59G)
+    # ------------------------------------------------------------------
+    # Small images scoped to a room, rendered for :name: tokens. Admin/owner
+    # manage; every member can list. Changes federate as per-emoji relay
+    # deltas ("room_emoji" content_type, member-signed like room_moderation)
+    # -- a full 50x64KB set would blow the 128 KiB /relay body cap.
+    _EMOJI_MAX_BYTES = 64 * 1024
+    _EMOJI_MAX_PER_ROOM = 50
+    _EMOJI_ALLOWED_MIMES = frozenset({"image/png", "image/webp", "image/gif"})
+
+    @staticmethod
+    def _valid_emoji_name(name: str) -> bool:
+        import re as _re
+        return bool(_re.fullmatch(r"[a-z0-9_]{2,32}", name or ""))
+
+    def _validate_emoji_payload(self, name: str, mime: str, data_b64: str) -> Optional[str]:
+        """Returns an error string, or None if the payload is acceptable."""
+        if not self._valid_emoji_name(name):
+            return "invalid_emoji_name"
+        if (mime or "").lower() not in self._EMOJI_ALLOWED_MIMES:
+            return "emoji_type_not_allowed"
+        try:
+            raw = base64.b64decode(data_b64 or "", validate=True)
+        except Exception:
+            return "invalid_emoji_data"
+        if not raw or len(raw) > self._EMOJI_MAX_BYTES:
+            return "emoji_too_large"
+        # Magic-byte sanity: content must match one of the allowed image types
+        # (RIFF kind checked for WebP -- see the R59B sniffing fix).
+        _is_png = raw[:6] == b"\x89PNG\r\n"
+        _is_gif = raw[:4] == b"GIF8"
+        _is_webp = raw[:4] == b"RIFF" and raw[8:12] == b"WEBP"
+        if not (_is_png or _is_gif or _is_webp):
+            return "emoji_content_mismatch"
+        return None
+
+    async def _broadcast_room_emoji(self, room_id: str) -> None:
+        """Push the room's full emoji list to locally-connected members."""
+        room = self._local_rooms.get(room_id)
+        if not room or not self._store:
+            return
+        payload = json.dumps({
+            "type": "room_emoji", "room_id": room_id,
+            "emoji": self._store.get_room_emoji(room_id),
+        })
+        for ws in list(room.get("members", set())):
+            try:
+                await ws.send(payload)
+            except Exception:
+                pass
+
+    def _relay_room_emoji(self, room_id: str, action: str, name: str,
+                          caller_webid: str, mime: str = "", data_b64: str = "",
+                          only_gateway: str = "") -> None:
+        """Fan an emoji add/remove out to federated member gateways (delta)."""
+        if not self._store:
+            return
+        _seen: set = set()
+        for _fm in (self._store.get_federated_room_members(room_id) or []):
+            _gw = _fm.get("gateway_url", "")
+            if not _gw or _gw in _seen:
+                continue
+            if only_gateway and _gw != only_gateway:
+                continue
+            _seen.add(_gw)
+            _payload = {
+                "content_type": "room_emoji", "action": action,
+                "room_id": room_id, "name": name, "from_webid": caller_webid,
+            }
+            if action == "add":
+                _payload["mime"] = mime
+                _payload["data_b64"] = data_b64
+            asyncio.create_task(self._relay_ephemeral(_gw, _payload))
+
+    def _sync_room_emoji_to_gateway(self, room_id: str, gateway_url: str) -> None:
+        """New federated member gateway: replay the existing set as add deltas."""
+        if not self._store:
+            return
+        room = self._local_rooms.get(room_id)
+        _owner = room.get("creator_webid", "") if room else ""
+        for e in self._store.get_room_emoji(room_id):
+            self._relay_room_emoji(room_id, "add", e["name"], _owner,
+                                   mime=e["mime"], data_b64=e["data_b64"],
+                                   only_gateway=gateway_url)
+
+    async def _handle_add_room_emoji(self, websocket, data: dict) -> None:
+        room_id = data.get("room_id", "")
+        name = (data.get("name", "") or "").lower()
+        mime = (data.get("mime", "") or "").lower()
+        data_b64 = data.get("data_b64", "")
+        if not self._check_room_permission(websocket, room_id, "admin"):
+            await websocket.send(json.dumps({"type": "error", "message": "insufficient_permissions"}))
+            return
+        err = self._validate_emoji_payload(name, mime, data_b64)
+        if err:
+            await websocket.send(json.dumps({"type": "error", "message": err}))
+            return
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no_store"}))
+            return
+        _existing = {e["name"] for e in self._store.get_room_emoji(room_id)}
+        if name not in _existing and len(_existing) >= self._EMOJI_MAX_PER_ROOM:
+            await websocket.send(json.dumps({"type": "error", "message": "emoji_limit_reached"}))
+            return
+        caller = self._client_webids.get(websocket, "")
+        self._store.save_room_emoji(room_id, name, mime, data_b64, caller)
+        await self._broadcast_room_emoji(room_id)
+        self._relay_room_emoji(room_id, "add", name, caller, mime=mime, data_b64=data_b64)
+
+    async def _handle_remove_room_emoji(self, websocket, data: dict) -> None:
+        room_id = data.get("room_id", "")
+        name = (data.get("name", "") or "").lower()
+        if not self._check_room_permission(websocket, room_id, "admin"):
+            await websocket.send(json.dumps({"type": "error", "message": "insufficient_permissions"}))
+            return
+        if not self._valid_emoji_name(name) or not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "invalid_emoji_name"}))
+            return
+        self._store.remove_room_emoji(room_id, name)
+        await self._broadcast_room_emoji(room_id)
+        self._relay_room_emoji(room_id, "remove", name, self._client_webids.get(websocket, ""))
+
+    async def _handle_list_room_emoji(self, websocket, data: dict) -> None:
+        room_id = data.get("room_id", "")
+        if not self._check_room_permission(websocket, room_id, "member"):
+            await websocket.send(json.dumps({"type": "error", "message": "not_a_room_member"}))
+            return
+        emoji = self._store.get_room_emoji(room_id) if self._store else []
+        await websocket.send(json.dumps({"type": "room_emoji", "room_id": room_id, "emoji": emoji}))
+
+    async def _handle_room_emoji_relay(self, data: dict) -> tuple[str, str]:
+        """Inbound relayed emoji delta -- validate, apply, notify local members.
+
+        Same authz stance as _handle_room_moderation_relay: only the room's
+        owner or an admin may change the set, and the receiver re-verifies
+        (never trust the wire) including name/mime/size/magic revalidation.
+        """
+        room_id = data.get("room_id", "")
+        action = data.get("action", "")
+        name = (data.get("name", "") or "").lower()
+        caller = data.get("from_webid", "")
+        if not room_id or action not in ("add", "remove") or not self._store:
+            return "400 Bad Request", '{"error":"missing_emoji_fields"}'
+        _room = self._local_rooms.get(room_id)
+        _owner = _room.get("creator_webid") if _room else None
+        _is_admin = bool(caller) and self._store.get_room_role(room_id, caller) == "admin"
+        if not caller or (caller != _owner and not _is_admin):
+            return "403 Forbidden", '{"error":"not_authorized_for_emoji"}'
+        if action == "add":
+            mime = (data.get("mime", "") or "").lower()
+            data_b64 = data.get("data_b64", "")
+            err = self._validate_emoji_payload(name, mime, data_b64)
+            if err:
+                return "400 Bad Request", json.dumps({"error": err})
+            _existing = {e["name"] for e in self._store.get_room_emoji(room_id)}
+            if name not in _existing and len(_existing) >= self._EMOJI_MAX_PER_ROOM:
+                return "400 Bad Request", '{"error":"emoji_limit_reached"}'
+            self._store.save_room_emoji(room_id, name, mime, data_b64, caller)
+        else:
+            if not self._valid_emoji_name(name):
+                return "400 Bad Request", '{"error":"invalid_emoji_name"}'
+            self._store.remove_room_emoji(room_id, name)
+        await self._broadcast_room_emoji(room_id)
+        return "200 OK", '{"status":"ok"}'

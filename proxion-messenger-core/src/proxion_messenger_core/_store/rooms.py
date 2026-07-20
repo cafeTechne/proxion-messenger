@@ -396,3 +396,33 @@ class RoomStoreMixin(object):
                 conn.execute("DELETE FROM sender_keys WHERE room_id=?", (room_id,))
             except Exception:
                 pass
+
+    # ------------------------------------------------------------------
+    # Custom room emoji (R59G)
+    # ------------------------------------------------------------------
+    def save_room_emoji(self, room_id: str, name: str, mime: str,
+                        data_b64: str, added_by: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO room_emoji (room_id, name, mime, data_b64, added_by) "
+                "VALUES (?,?,?,?,?)",
+                (room_id, name, mime, data_b64, added_by),
+            )
+
+    def remove_room_emoji(self, room_id: str, name: str) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM room_emoji WHERE room_id=? AND name=?", (room_id, name))
+
+    def get_room_emoji(self, room_id: str) -> list:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT name, mime, data_b64, added_by, added_at FROM room_emoji "
+                "WHERE room_id=? ORDER BY name",
+                (room_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def count_room_emoji(self, room_id: str) -> int:
+        with self._conn() as conn:
+            row = conn.execute("SELECT COUNT(*) AS n FROM room_emoji WHERE room_id=?", (room_id,)).fetchone()
+            return int(row["n"] if row else 0)

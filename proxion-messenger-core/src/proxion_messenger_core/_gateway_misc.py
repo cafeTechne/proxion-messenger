@@ -2276,6 +2276,12 @@ class MiscHandlerMixin:
 
         if self._store:
             self._store.add_federated_room_member(room_id, caller_webid, home_gateway)
+            # R59G: replay the room's custom-emoji set to the new member's
+            # gateway (per-emoji deltas — the /relay body cap forbids one blob).
+            try:
+                self._sync_room_emoji_to_gateway(room_id, home_gateway)
+            except Exception:
+                pass
 
         # Notify locally connected members that a federated peer has joined
         _join_event = json.dumps({

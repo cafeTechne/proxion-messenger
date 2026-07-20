@@ -585,6 +585,14 @@ button:hover { background: var(--accent-hover); }
     background: #000;
 }
 .msg-audio-preview { display: block; max-width: min(420px, 100%); margin-top: 6px; }
+/* R59G: custom room emoji — inline in message text and in lists */
+.custom-emoji {
+    height: 1.4em;
+    width: auto;
+    max-width: 3em;
+    vertical-align: -0.3em;
+    object-fit: contain;
+}
 /* R59F: poll card — structured render of the plain-text poll format */
 .poll-card {
     border: 1px solid var(--slate-600);

@@ -431,5 +431,16 @@
   "ui.pollOptionN": "Autre option (facultatif)",
   "btn.createPoll": "Créer le sondage",
   "poll.needTwo": "Un sondage nécessite une question et au moins deux options.",
-  "poll.voteHint": "Votez en touchant une réaction numérotée ci-dessous."
+  "poll.voteHint": "Votez en touchant une réaction numérotée ci-dessous.",
+  "sctx.customEmoji": "Émojis personnalisés",
+  "ui.customRoomEmoji": "Émojis personnalisés du salon",
+  "heading.customRoomEmoji": "Émojis personnalisés",
+  "roomEmoji.hint": "Jusqu'à 50 petites images (64 Ko max) utilisables comme :nom: dans ce salon. Les grandes images sont réduites automatiquement.",
+  "roomEmoji.none": "Aucun émoji personnalisé pour l'instant.",
+  "roomEmoji.namePrompt": "Nom de cet émoji (a-z, 0-9, _) :",
+  "roomEmoji.badName": "Les noms font 2-32 caractères : a-z, 0-9, _",
+  "roomEmoji.badImage": "Impossible de traiter cette image.",
+  "roomEmoji.gifTooLarge": "Les GIF animés doivent faire 64 Ko ou moins.",
+  "roomEmoji.removeNamed": "Retirer :{name}:",
+  "btn.uploadEmoji": "Téléverser un émoji"
 }
