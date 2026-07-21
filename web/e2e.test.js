@@ -440,6 +440,69 @@ describe('skip buffer overflow', () => {
     });
 });
 
+// ── Forged / hostile ciphertext must not corrupt a live session ──────────────
+
+describe('hostile-message hardening', () => {
+    let alice, bob;
+
+    beforeAll(async () => {
+        localStorage.clear();
+        _resetForTesting();
+        await initE2E();
+        alice = {
+            pubB64u: myX25519PubB64u(),
+            privJwk: JSON.parse(localStorage.getItem('proxion_e2e_x25519_priv_jwk')),
+        };
+        bob = await makeX25519Pair();
+    });
+
+    it('a forged ciphertext (new ratchet_pub, bad tag) does not brick the session', async () => {
+        cachePeerPub('bob-forge', bob.pubB64u);
+        const m0 = await ratchetEncrypt('bob-forge', 'real-0');
+        const m1 = await ratchetEncrypt('bob-forge', 'real-1');
+
+        await swapIdentity(bob.privJwk, bob.pubB64u);
+
+        // Bob decrypts the genuine first message → establishes recv state.
+        expect(await ratchetDecrypt('alice-forge', m0.ciphertext, m0.nonce, m0.msgNum, m0.ratchetPub, m0.pn))
+            .toBe('real-0');
+
+        // Attacker injects a message with a *new* ratchet_pub (forces a DH-ratchet
+        // step) and a garbage body. It must throw AND leave the session intact.
+        const forgedPub = (await makeX25519Pair()).pubB64u;
+        const junkCt    = b64uEnc(crypto.getRandomValues(new Uint8Array(48)));
+        const junkNonce = b64uEnc(crypto.getRandomValues(new Uint8Array(12)));
+        await expect(
+            ratchetDecrypt('alice-forge', junkCt, junkNonce, 0, forgedPub, 0)
+        ).rejects.toThrow(E2EDecryptError);
+
+        // The genuine follow-up (same original chain) must still decrypt.
+        expect(await ratchetDecrypt('alice-forge', m1.ciphertext, m1.nonce, m1.msgNum, m1.ratchetPub, m1.pn))
+            .toBe('real-1');
+
+        await swapIdentity(alice.privJwk, alice.pubB64u);
+    });
+
+    it('a forged oversized pn is bounded (no unbounded skip loop)', async () => {
+        cachePeerPub('bob-pn', bob.pubB64u);
+        const m0 = await ratchetEncrypt('bob-pn', 'seed');
+
+        await swapIdentity(bob.privJwk, bob.pubB64u);
+        await ratchetDecrypt('alice-pn', m0.ciphertext, m0.nonce, m0.msgNum, m0.ratchetPub, m0.pn);
+
+        // New ratchet_pub + an absurd pn: the DH-ratchet skip loop must give up at
+        // MAX_SKIP rather than iterating pn times.
+        const forgedPub = (await makeX25519Pair()).pubB64u;
+        const junkCt    = b64uEnc(crypto.getRandomValues(new Uint8Array(48)));
+        const junkNonce = b64uEnc(crypto.getRandomValues(new Uint8Array(12)));
+        await expect(
+            ratchetDecrypt('alice-pn', junkCt, junkNonce, 0, forgedPub, 1_000_000)
+        ).rejects.toThrow(E2EDecryptError);
+
+        await swapIdentity(alice.privJwk, alice.pubB64u);
+    });
+});
+
 // ── Phase 1 state migration ───────────────────────────────────────────────────
 
 describe('Phase 1 state migration', () => {

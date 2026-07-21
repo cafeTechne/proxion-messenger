@@ -361,9 +361,17 @@ async function _initReceiverState(senderRatchetPubB64u) {
 
 // Buffer skipped keys from current recv chain up to `upTo` and apply DH ratchet step.
 async function _dhRatchetReceive(state, newRatchetPubB64u, pn) {
-    // Advance current recv chain to pn, buffering skipped keys
-    let recvChain = new Uint8Array(state.recvChain);
-    while (state.recvMsgNum < pn) {
+    // Advance current recv chain to pn, buffering skipped keys. `pn` arrives off
+    // the wire (attacker-controlled), so bound the work with MAX_SKIP exactly as
+    // the in-chain loop does — otherwise a forged huge pn spins this in an
+    // unbounded HMAC loop and exhausts memory (a classic Double Ratchet DoS).
+    // recvChain can be null when we have only ever sent (no recv chain yet);
+    // there is nothing to buffer in that case.
+    let recvChain = state.recvChain ? new Uint8Array(state.recvChain) : null;
+    while (recvChain && state.recvMsgNum < pn) {
+        if (Object.keys(state.skippedKeys).length >= MAX_SKIP) {
+            throw new E2EDecryptError('Skip buffer overflow during DH ratchet at pn=' + pn);
+        }
         const { msgKey: sk, nextKey } = await advanceChain(recvChain);
         state.skippedKeys[state.theirRatchetPub + ':' + state.recvMsgNum] = b64uEnc(sk);
         recvChain = nextKey;
@@ -455,6 +463,14 @@ export async function ratchetDecrypt(peerId, ciphertextB64u, nonceB64u, msgNum, 
     if (!ratchetPubB64u) throw new E2EDecryptError('ratchet_pub required');
 
     let state = await loadRatchetState(peerId);
+
+    // Work on a COPY and commit only after the GCM tag verifies (saveRatchetState
+    // below). loadRatchetState hands back the live in-memory cached object by
+    // reference; mutating it before the message is proven authentic lets a single
+    // forged/corrupt ciphertext (valid ratchet_pub header, bad tag) advance — or
+    // DH-ratchet — the live session and brick every subsequent real message until
+    // reload. Signal commits post-decrypt for exactly this reason.
+    if (state) state = JSON.parse(JSON.stringify(state));
 
     if (!state) {
         state = await _initReceiverState(ratchetPubB64u);
