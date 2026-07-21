@@ -615,6 +615,7 @@
         <button data-role-action="transfer" data-i18n="btn.transferOwnership">Transfer Ownership</button>
         <hr>
         <button data-role-action="mute" data-i18n="btn.mute">Mute…</button>
+        <button data-role-action="unmute" data-i18n="btn.unmute">Unmute</button>
         <button data-role-action="kick" class="danger" data-i18n="btn.kick">Kick</button>
         <button data-role-action="ban" class="danger" data-i18n="btn.ban">Ban…</button>
     </div>
@@ -1574,6 +1575,8 @@
       <p id="contact-profile-fingerprint" style="font-size:0.75em;color:var(--text-secondary);word-break:break-all;margin:0 0 10px;font-family:monospace;" title="Verify out-of-band" data-i18n-attr="title:ui.verifyOutBand"></p>
       <p id="contact-profile-status-msg" style="font-size:0.82em;color:var(--slate-500);font-style:italic;margin:0 0 12px;"></p>
       <button id="contact-profile-dm-btn" style="background:var(--accent,var(--accent));border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;width:100%;font-size:0.9em;" data-i18n="btn.sendDm">Send DM</button>
+      <!-- Fix: remove/revoke a contact (revoke_contact had no UI) -->
+      <button id="contact-profile-remove-btn" style="background:transparent;border:1px solid var(--slate-600);color:var(--color-danger-soft,#f87171);padding:8px 16px;border-radius:4px;cursor:pointer;width:100%;font-size:0.9em;margin-top:8px;" data-i18n="btn.removeContact">Remove contact</button>
     </div>
 
     <!-- R59E: saved-messages panel (mirror of the pin panel) -->

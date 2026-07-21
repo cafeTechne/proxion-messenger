@@ -3677,6 +3677,18 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                 }
             });
 
+            // Fix: remove/revoke a contact (revoke_contact had no UI).
+            attachListener('#contact-profile-remove-btn', 'click', () => {
+                const webid = document.getElementById('contact-profile-dm-btn')?.dataset.webid;
+                const certId = webid ? peerDidToCertId[webid] : null;
+                if (!certId || !socket) { showToast(t('contact.removeUnavailable')); return; }
+                showConfirm(t('confirm.removeContact'), () => {
+                    socket.send(JSON.stringify({ cmd: 'revoke_contact', cert_id: certId }));
+                    document.getElementById('contact-profile-panel').style.display = 'none';
+                    showToast(t('contact.removed'));
+                });
+            });
+
             // Message feed: Scroll to bottom button
             attachListener('#scroll-bottom-btn', 'click', scrollToBottom);
 
@@ -4350,6 +4362,11 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                         }));
                         showToast(t('members.muted'));
                     } // "mute-cancel" parses NaN → just close
+                } else if (action === 'unmute') {
+                    // The missing reverse of mute_member: "Mute until unmuted" was a
+                    // UI dead-end without this.
+                    socket.send(JSON.stringify({cmd: 'unmute_member', room_id: _rid, webid: targetWebid}));
+                    showToast(t('members.unmuted'));
                 } else {
                     socket.send(JSON.stringify({cmd: 'set_member_role', room_id: _rid, webid: targetWebid, role: action}));
                 }

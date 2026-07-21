@@ -462,5 +462,11 @@
   "blocks.unblocked": "Nutzer entsperrt.",
   "blocks.none": "Keine blockierten Nutzer.",
   "blocks.unblock": "Entsperren",
-  "heading.blockedUsers": "Blockierte Nutzer"
+  "heading.blockedUsers": "Blockierte Nutzer",
+  "btn.unmute": "Stummschaltung aufheben",
+  "members.unmuted": "Stummschaltung des Mitglieds aufgehoben",
+  "btn.removeContact": "Kontakt entfernen",
+  "confirm.removeContact": "Diesen Kontakt entfernen? Deine Unterhaltung wird ausgeblendet und die Verbindung widerrufen.",
+  "contact.removed": "Kontakt entfernt.",
+  "contact.removeUnavailable": "Kontakt konnte nicht entfernt werden."
 }

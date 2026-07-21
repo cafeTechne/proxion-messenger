@@ -475,5 +475,11 @@
   "blocks.unblocked": "تم إلغاء حظر المستخدم.",
   "blocks.none": "لا يوجد مستخدمون محظورون.",
   "blocks.unblock": "إلغاء الحظر",
-  "heading.blockedUsers": "المستخدمون المحظورون"
+  "heading.blockedUsers": "المستخدمون المحظورون",
+  "btn.unmute": "إلغاء الكتم",
+  "members.unmuted": "تم إلغاء كتم العضو",
+  "btn.removeContact": "إزالة جهة الاتصال",
+  "confirm.removeContact": "إزالة جهة الاتصال هذه؟ سيتم إخفاء محادثتك وإلغاء الاتصال.",
+  "contact.removed": "تمت إزالة جهة الاتصال.",
+  "contact.removeUnavailable": "تعذّرت إزالة جهة الاتصال."
 }

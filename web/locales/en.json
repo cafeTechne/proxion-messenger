@@ -462,5 +462,11 @@
   "blocks.unblocked": "User unblocked.",
   "blocks.none": "No blocked users.",
   "blocks.unblock": "Unblock",
-  "heading.blockedUsers": "Blocked users"
+  "heading.blockedUsers": "Blocked users",
+  "btn.unmute": "Unmute",
+  "members.unmuted": "Member unmuted",
+  "btn.removeContact": "Remove contact",
+  "confirm.removeContact": "Remove this contact? Your conversation is hidden and the connection is revoked.",
+  "contact.removed": "Contact removed.",
+  "contact.removeUnavailable": "Could not remove this contact."
 }

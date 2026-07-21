@@ -462,5 +462,11 @@
   "blocks.unblocked": "Utilisateur débloqué.",
   "blocks.none": "Aucun utilisateur bloqué.",
   "blocks.unblock": "Débloquer",
-  "heading.blockedUsers": "Utilisateurs bloqués"
+  "heading.blockedUsers": "Utilisateurs bloqués",
+  "btn.unmute": "Réactiver",
+  "members.unmuted": "Membre réactivé",
+  "btn.removeContact": "Supprimer le contact",
+  "confirm.removeContact": "Supprimer ce contact ? Votre conversation est masquée et la connexion révoquée.",
+  "contact.removed": "Contact supprimé.",
+  "contact.removeUnavailable": "Impossible de supprimer ce contact."
 }
