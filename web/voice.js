@@ -269,14 +269,29 @@ export function createVoice(deps) {
                 if (_st === "failed") {
                     // Surface it (H4): a silently-failing call is the worst case. Toast
                     // once per failure episode (reset on recovery) so ICE flapping
-                    // doesn't spam. restartIce attempts automatic recovery.
+                    // doesn't spam.
                     if (!peerPc._proxionFailToasted) {
                         peerPc._proxionFailToasted = true;
                         showToast(t('voice.connectionTrouble', { peer: targetWebid.slice(0, 20) }), "error");
                     }
-                    try { peerPc.restartIce(); } catch (_) {}
+                    // Recovery: restartIce() alone is a no-op here — it only flags the
+                    // next offer, and this codebase renegotiates by tearing down and
+                    // rebuilding the peer on a fresh voice_invite (initWebRTCForPeer),
+                    // not via an onnegotiationneeded re-offer. So the CALLER side —
+                    // stable per pair by the "one offer per pair" join rule — rebuilds,
+                    // which re-sends voice_invite and restarts ICE end to end. The
+                    // callee waits for that offer to avoid glare. Cap attempts so a
+                    // dead network doesn't loop forever; the counter rides across
+                    // rebuilds and resets once the pair connects.
+                    const _tries = peerPc._proxionReconnects || 0;
+                    if (isCaller && _tries < 3) {
+                        initWebRTCForPeer(targetWebid, state._channelSessionIds[targetWebid] || sessionId, true)
+                            .then(newPc => { if (newPc) newPc._proxionReconnects = _tries + 1; })
+                            .catch(() => {});
+                    }
                 } else if (_st === "connected" || _st === "completed") {
                     peerPc._proxionFailToasted = false;
+                    peerPc._proxionReconnects = 0;
                 }
             };
 
@@ -458,6 +473,19 @@ export function createVoice(deps) {
                     } else {
                         state._pendingCandidates.push(e.candidate);
                     }
+                }
+            };
+
+            // A 1:1 call previously had no connection monitor: if ICE failed after
+            // the call connected (network change, NAT rebind, peer crash), the timer
+            // kept ticking over dead audio and the user was never told. "failed" is
+            // the reliable signal — unlike the often-transient "disconnected" — that
+            // it will not self-recover, so surface it and end the call cleanly.
+            // _doHangup also signals the peer, so both sides tear down.
+            state.pc.oniceconnectionstatechange = () => {
+                if (state.pc && state.pc.iceConnectionState === "failed") {
+                    showToast(t('voice.connectionLost'), "error");
+                    _doHangup();
                 }
             };
 

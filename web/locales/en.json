@@ -25,6 +25,7 @@
   "voice.micError": "Could not access microphone: {error}",
   "voice.callNotAnswered": "Call not answered",
   "voice.connectionTrouble": "Voice connection trouble with {peer} — reconnecting…",
+  "voice.connectionLost": "Voice connection lost — call ended",
   "voice.micRequired": "Microphone is required to start a call.",
   "voice.peerPresent": "{peer} is in the voice channel",
   "voice.peerJoined": "{peer} joined the voice channel",

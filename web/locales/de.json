@@ -25,6 +25,7 @@
   "voice.micError": "Kein Zugriff auf das Mikrofon: {error}",
   "voice.callNotAnswered": "Anruf nicht angenommen",
   "voice.connectionTrouble": "Sprachverbindungsprobleme mit {peer} — verbinde neu…",
+  "voice.connectionLost": "Sprachverbindung verloren — Anruf beendet",
   "voice.micRequired": "Für einen Anruf wird das Mikrofon benötigt.",
   "voice.peerPresent": "{peer} ist im Sprachkanal",
   "voice.peerJoined": "{peer} ist dem Sprachkanal beigetreten",

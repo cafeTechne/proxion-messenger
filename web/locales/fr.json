@@ -25,6 +25,7 @@
   "voice.micError": "Impossible d'accéder au micro : {error}",
   "voice.callNotAnswered": "Appel sans réponse",
   "voice.connectionTrouble": "Problème de connexion vocale avec {peer} — reconnexion…",
+  "voice.connectionLost": "Connexion vocale perdue — appel terminé",
   "voice.micRequired": "Le micro est nécessaire pour démarrer un appel.",
   "voice.peerPresent": "{peer} est dans le canal vocal",
   "voice.peerJoined": "{peer} a rejoint le canal vocal",

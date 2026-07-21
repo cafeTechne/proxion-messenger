@@ -26,6 +26,7 @@
   "voice.micError": "تعذّر الوصول إلى الميكروفون: {error}",
   "voice.callNotAnswered": "لم يتم الرد على المكالمة",
   "voice.connectionTrouble": "مشكلة في الاتصال الصوتي مع {peer} — تجري إعادة الاتصال…",
+  "voice.connectionLost": "انقطع الاتصال الصوتي — انتهت المكالمة",
   "voice.micRequired": "الميكروفون مطلوب لبدء مكالمة.",
   "voice.peerPresent": "{peer} موجود في القناة الصوتية",
   "voice.peerJoined": "انضم {peer} إلى القناة الصوتية",

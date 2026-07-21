@@ -37,7 +37,7 @@ function makeVoice(over = {}) {
   const sent = [];
   const socket = { send: (s) => sent.push(JSON.parse(s)), readyState: 1 };
   const voice = createVoice({
-    showToast: () => {}, renderMessage: () => {}, showOsNotification: () => {},
+    showToast: over.showToast ?? (() => {}), renderMessage: () => {}, showOsNotification: () => {},
     sendCmd: () => {}, playNotificationSound: () => {}, normalizeRelayThreadId: (e) => e,
     stopScreenShare: () => {},
     getSocket: () => socket, getActiveView: () => over.activeView ?? null,
@@ -110,6 +110,79 @@ describe('handleVoicePeerLeft cleanup', () => {
     expect(closed).toHaveBeenCalled();
     expect(voice.state.peerConnections['did:key:zBob']).toBeUndefined();
     expect(voice.state._channelParticipants['did:key:zBob']).toBeUndefined();
+  });
+});
+
+describe('ICE-failure handling (silent-drop regressions)', () => {
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  function installRTC() {
+    class FakePC {
+      constructor() { this.iceConnectionState = 'new'; }
+      addTrack() {}
+      async createOffer() { return { type: 'offer', sdp: 'o' }; }
+      async createAnswer() { return { type: 'answer', sdp: 'a' }; }
+      async setLocalDescription() {}
+      async setRemoteDescription() {}
+      restartIce() {}
+      close() {}
+    }
+    global.RTCPeerConnection = FakePC;
+    global.WebSocket = { OPEN: 1 };
+  }
+
+  it('1:1 call: ICE "failed" surfaces a toast and hangs up (was fully silent)', async () => {
+    installRTC();
+    const toasts = [];
+    const { voice, sent } = makeVoice({ showToast: (m) => toasts.push(m) });
+    voice.state.localStream = { getTracks: () => [{ stop() {} }] };  // skip getUserMedia
+
+    await voice.initWebRTC('cert1', 'sess1', true);
+    expect(sent.some((m) => m.cmd === 'voice_invite')).toBe(true);
+
+    const pc = voice.state.pc;
+    pc.iceConnectionState = 'failed';
+    pc.oniceconnectionstatechange();
+
+    expect(toasts.length).toBeGreaterThan(0);
+    expect(sent.some((m) => m.cmd === 'voice_hangup')).toBe(true);
+  });
+
+  it('group call: the CALLER side rebuilds the peer on ICE "failed" (was a no-op restartIce)', async () => {
+    installRTC();
+    const { voice, sent } = makeVoice();
+    voice.state._inVoiceChannel = 'room1';
+    voice.state.localStream = { getTracks: () => [{ stop() {} }] };
+
+    await voice.initWebRTCForPeer('did:key:zBob', 'sess1', /* isCaller */ true);
+    const inviteCount = () => sent.filter((m) => m.cmd === 'voice_invite').length;
+    expect(inviteCount()).toBe(1);
+
+    const pc = voice.state.peerConnections['did:key:zBob'];
+    pc.iceConnectionState = 'failed';
+    pc.oniceconnectionstatechange();
+    await flush();
+
+    expect(inviteCount()).toBe(2);                       // re-invited → real ICE restart
+    expect(voice.state.peerConnections['did:key:zBob']._proxionReconnects).toBe(1);
+  });
+
+  it('group call: the CALLEE side does NOT re-invite on failure (avoids glare)', async () => {
+    installRTC();
+    const { voice, sent } = makeVoice();
+    voice.state._inVoiceChannel = 'room1';
+    voice.state.localStream = { getTracks: () => [{ stop() {} }] };
+
+    await voice.initWebRTCForPeer('did:key:zBob', 'sess1', /* isCaller */ false, 'remote-offer');
+    expect(sent.some((m) => m.cmd === 'voice_answer')).toBe(true);
+    expect(sent.some((m) => m.cmd === 'voice_invite')).toBe(false);
+
+    const pc = voice.state.peerConnections['did:key:zBob'];
+    pc.iceConnectionState = 'failed';
+    pc.oniceconnectionstatechange();
+    await flush();
+
+    expect(sent.some((m) => m.cmd === 'voice_invite')).toBe(false);   // still no invite
   });
 });
 
