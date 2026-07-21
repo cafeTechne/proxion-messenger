@@ -52,6 +52,7 @@ import { needsDownscale, downscaleImage } from './media-resize.js';
 import { createEmoji } from './emoji.js';
 import { createSaved, syncSavedFromPod, pushAllSavedToPod } from './saved.js';
 import { createBlocks } from './blocks.js';
+import { createSendStatus } from './send-status.js';
 import { createPolls } from './polls.js';
 import { createRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { createMeme } from './meme.js';
@@ -485,6 +486,8 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             getUserPresence: () => userPresence, getMessageMap: () => messageMap,
             isBlocked: (webid) => blocks.isBlocked(webid),
         });
+        // R66: optimistic-send failure tracking (mark unconfirmed messages failed + retry).
+        const sendStatus = createSendStatus();
         // R65: user blocking (the gateway enforces; this is the client feature).
         const blocks = createBlocks({
             getSocket: () => socket, showToast,
@@ -1116,10 +1119,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     // If this is the server echo of an optimistically-rendered message,
                     // mark it confirmed (clear the pending state). renderMessage below
                     // then dedups by message_id, so no duplicate is appended.
-                    const _echoEl = document.getElementById("msg-" + (msg.message_id || ""));
-                    if (_echoEl && _echoEl.classList.contains("msg-pending")) {
-                        _echoEl.classList.remove("msg-pending");
-                    }
+                    if (msg.message_id) sendStatus.confirm(msg.message_id);   // R66
 
                     // Auto-add unknown relay sender to DM sidebar
                     if (msg.source === "relay" && !document.getElementById("nav-" + id)) {
@@ -2114,8 +2114,8 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     if (socket) socket.send(JSON.stringify({ cmd: 'get_peer_device_keys', peer_webid: selfWebId }));
                     break;
                 case "send_dm_fanout_ack":
-                    // Fanout has no self-echo; clear the optimistic pending state on ack.
-                    document.getElementById('msg-' + event.message_id)?.classList.remove('msg-pending');
+                    // Fanout has no self-echo; confirm the optimistic send on ack.
+                    sendStatus.confirm(event.message_id);   // R66
                     break;
                 case "logout_all_complete":
                     showToast(tn('session.loggedOutOthers', event.revoked_count || 0));
@@ -2915,8 +2915,9 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                 for (const d of peerDevs) await addEntry(peerAccount, d);
                 for (const d of ownDevs) await addEntry(selfWebId, d);
                 if (!fanout.length) return false;
-                socketSendOrQueue({ cmd: 'send_dm_fanout', message_id: clientMsgId, fanout });
-                return true;
+                const _fp = { cmd: 'send_dm_fanout', message_id: clientMsgId, fanout };
+                socketSendOrQueue(_fp);
+                return _fp;   // R66: return the exact payload so a failed send can be retried verbatim
             }
             // Single-device peer: keep the normal send (send_dm/local_dm handles the
             // peer + DM history + pod write-through — caller sends it when we return
@@ -2987,8 +2988,11 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                 const _dmPeer = (activeView.type === "dm" || activeView.type === "local_dm")
                     ? (activeView.peerWebid || activeView.peerDid || activeView.id) : null;
                 let _sentViaFanout = false;
+                let _resendPayload = null;   // R66: exact bytes to retry on send failure
                 if (_dmPeer) {
-                    _sentViaFanout = await _tryDmFanout(_dmPeer, content, clientMsgId, payload.reply_to_id, activeView.id);
+                    const _fanoutResult = await _tryDmFanout(_dmPeer, content, clientMsgId, payload.reply_to_id, activeView.id);
+                    _sentViaFanout = !!_fanoutResult;
+                    if (_fanoutResult && typeof _fanoutResult === 'object') _resendPayload = _fanoutResult;
                 }
                 if (!_sentViaFanout) {
                     // Deferred plain-path E2E: only mutate the plain-pid ratchet
@@ -3007,6 +3011,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                         }
                     }
                     socketSendOrQueue(payload);
+                    _resendPayload = payload;   // R66
                 }
 
                 // Optimistic render: show the message instantly instead of waiting for
@@ -3025,6 +3030,8 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     local: true,
                 });
                 document.getElementById('msg-' + clientMsgId)?.classList.add('msg-pending');
+                // R66: track the optimistic send; if unconfirmed, mark it failed + offer retry.
+                if (_resendPayload) sendStatus.track(clientMsgId, () => socketSendOrQueue(_resendPayload));
 
                 // Cache the sent DM's plaintext locally so it survives reopen — for
                 // E2E DMs the server only stores ciphertext we can't re-decrypt.

@@ -468,5 +468,7 @@
   "btn.removeContact": "Kontakt entfernen",
   "confirm.removeContact": "Diesen Kontakt entfernen? Deine Unterhaltung wird ausgeblendet und die Verbindung widerrufen.",
   "contact.removed": "Kontakt entfernt.",
-  "contact.removeUnavailable": "Kontakt konnte nicht entfernt werden."
+  "contact.removeUnavailable": "Kontakt konnte nicht entfernt werden.",
+  "send.notDelivered": "Nicht zugestellt",
+  "send.retry": "Erneut versuchen"
 }

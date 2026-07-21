@@ -468,5 +468,7 @@
   "btn.removeContact": "Supprimer le contact",
   "confirm.removeContact": "Supprimer ce contact ? Votre conversation est masquée et la connexion révoquée.",
   "contact.removed": "Contact supprimé.",
-  "contact.removeUnavailable": "Impossible de supprimer ce contact."
+  "contact.removeUnavailable": "Impossible de supprimer ce contact.",
+  "send.notDelivered": "Non distribué",
+  "send.retry": "Réessayer"
 }

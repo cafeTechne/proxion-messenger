@@ -468,5 +468,7 @@
   "btn.removeContact": "Remove contact",
   "confirm.removeContact": "Remove this contact? Your conversation is hidden and the connection is revoked.",
   "contact.removed": "Contact removed.",
-  "contact.removeUnavailable": "Could not remove this contact."
+  "contact.removeUnavailable": "Could not remove this contact.",
+  "send.notDelivered": "Not delivered",
+  "send.retry": "Retry"
 }
