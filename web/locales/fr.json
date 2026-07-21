@@ -470,5 +470,6 @@
   "contact.removed": "Contact supprimé.",
   "contact.removeUnavailable": "Impossible de supprimer ce contact.",
   "send.notDelivered": "Non distribué",
-  "send.retry": "Réessayer"
+  "send.retry": "Réessayer",
+  "file.notConnected": "Non connecté — reconnectez-vous et réessayez d'envoyer le fichier."
 }

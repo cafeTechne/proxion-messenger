@@ -153,3 +153,19 @@ describe('custom-emoji reaction pills (R60A)', () => {
     expect(container.children[0].innerText).toBe(':nope: 1');
   });
 });
+
+describe('reaction send is socket-state safe (silent-failure fix)', () => {
+  it('does not throw when the socket is CONNECTING (readyState 0)', () => {
+    const sent = [];
+    const connectingSocket = { readyState: 0, send: (s) => sent.push(JSON.parse(s)) };
+    const r = createReactions({
+      getSocket: () => connectingSocket,
+      getActiveView: () => ({ type: 'local_room', id: 'room-1' }),
+      getSelfWebId: () => 'did:key:zSelf',
+      getMessageReactions: () => ({}),
+    });
+    expect(() => r.addEmoji('👍', 'm1')).not.toThrow();
+    expect(() => r.removeReaction('👍', 'm1')).not.toThrow();
+    expect(sent).toHaveLength(0);   // graceful no-op, nothing sent on a non-open socket
+  });
+});

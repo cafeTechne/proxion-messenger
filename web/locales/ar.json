@@ -483,5 +483,6 @@
   "contact.removed": "تمت إزالة جهة الاتصال.",
   "contact.removeUnavailable": "تعذّرت إزالة جهة الاتصال.",
   "send.notDelivered": "لم يُرسَل",
-  "send.retry": "إعادة المحاولة"
+  "send.retry": "إعادة المحاولة",
+  "file.notConnected": "غير متصل — أعد الاتصال وحاول إرسال الملف مرة أخرى."
 }

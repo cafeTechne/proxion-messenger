@@ -153,7 +153,7 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         const activeView = getActiveView();
         // Guard like removeReaction — the thread may have closed while the picker
         // was open; without this activeView.type below throws.
-        if (!getSocket() || !activeView || !mid) return;
+        if (!activeView || !mid) return;
         const payload = {
             cmd: "add_reaction",
             message_id: mid,
@@ -162,19 +162,30 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         if (activeView.type === "dm" || activeView.type === "local_dm") payload.cert_id = activeView.id;
         else payload.room_id = activeView.id;
 
-        getSocket().send(JSON.stringify(payload));
+        _safeSend(payload);
+    }
+
+    // Only send on an OPEN socket. A raw .send() on a CONNECTING socket (mid-
+    // reconnect) throws InvalidStateError; on CLOSING/CLOSED it's silently
+    // discarded. Reactions are low-stakes, so a no-op on a non-open socket is
+    // the right graceful behavior (vs. an unhandled exception).
+    function _safeSend(payload) {
+        const s = getSocket();
+        const OPEN = (typeof WebSocket !== 'undefined' && WebSocket.OPEN) || 1;
+        if (!s || s.readyState !== OPEN) return false;
+        s.send(JSON.stringify(payload));
+        return true;
     }
 
     function removeReaction(emoji, msgId) {
-        const socket = getSocket();
         const activeView = getActiveView();
-        if (!socket || !activeView) return;
+        if (!activeView) return;
         const payload = { cmd: "remove_reaction", message_id: msgId, emoji: emoji };
         if (activeView.type === "dm" || activeView.type === "local_dm")
             payload.cert_id = activeView.id;
         else
             payload.room_id = activeView.id;
-        socket.send(JSON.stringify(payload));
+        _safeSend(payload);
     }
 
     return { handleReactionEvent, renderReactions, togglePicker, addEmoji, removeReaction, state };

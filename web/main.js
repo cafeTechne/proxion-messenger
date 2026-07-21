@@ -3112,6 +3112,12 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                 if (opts.spoiler === true) payload.spoiler = true;   // R60C
                 if (activeView.type === "dm" || activeView.type === "local_dm") payload.cert_id = activeView.id;
                 else payload.room_id = activeView.id;
+                // sendCmd silently drops when the socket isn't open — for a file
+                // (effortful to re-pick) surface that instead of losing it silently.
+                if (!socket || socket.readyState !== WebSocket.OPEN) {
+                    showToast(t('file.notConnected'));
+                    return;
+                }
                 sendCmd("send_file", payload);
                 if (activeView.type === 'local_room') {
                     podUploadFile(activeView.id, fileMsgId, file.name, file).catch(() => {});
