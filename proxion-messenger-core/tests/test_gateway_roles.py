@@ -119,6 +119,31 @@ async def test_get_room_roles_returns_dict(gateway):
 
 
 @pytest.mark.asyncio
+async def test_get_room_roles_denied_to_non_member(gateway):
+    """A non-member cannot enumerate a room's roles (info-leak fix): the roles
+    map (member webids + who is admin/mod) must not leak to outsiders, mirroring
+    the get_room_members membership gate."""
+    ws_member = _mock_ws()
+    ws_outsider = _mock_ws()
+    await _register(gateway, ws_member)
+    await _register(gateway, ws_outsider, "https://mallory.pod/profile/card#me", "Mallory")
+    room_id = "room-private"
+    gateway._local_rooms[room_id] = {
+        "members": {ws_member}, "messages": [], "history_mode": "none",
+        "creator_webid": "https://alice.pod/profile/card#me",
+    }
+    mock_store = MagicMock()
+    mock_store.get_room_members.return_value = ["https://alice.pod/profile/card#me"]
+    mock_store.get_all_room_roles.return_value = {"https://alice.pod/profile/card#me": "admin"}
+    gateway._store = mock_store
+    await gateway.process_command(ws_outsider, {"cmd": "get_room_roles", "room_id": room_id})
+    resp = json.loads(ws_outsider.send.call_args[0][0])
+    assert resp["type"] == "room_roles"
+    assert resp["roles"] == {}                       # leak blocked
+    mock_store.get_all_room_roles.assert_not_called()  # short-circuited before the read
+
+
+@pytest.mark.asyncio
 async def test_set_member_role_broadcasts_to_all(gateway):
     """set_member_role event is broadcast to all room members."""
     ws_alice = _mock_ws()

@@ -2511,6 +2511,18 @@ class RoomHandlerMixin:
         actor = self._client_webids.get(websocket)
         if not actor or not room_id:
             return
+        # Membership gate — mirror _handle_get_room_members. Without it, any
+        # authenticated client could enumerate a room's admins/mods (and their
+        # webids) for an arbitrary room_id, bypassing the members-list privacy
+        # control that get_room_members enforces.
+        if room_id in self._local_rooms:
+            _in_live = websocket in self._local_rooms[room_id]["members"]
+            _in_store = bool(self._store and actor in self._store.get_room_members(room_id))
+            if not _in_live and not _in_store:
+                await websocket.send(json.dumps({
+                    "type": "room_roles", "room_id": room_id, "roles": {},
+                }))
+                return
         roles = {}
         if self._store:
             roles = self._store.get_all_room_roles(room_id)
