@@ -40,6 +40,41 @@ someone else's terms. Proxion inverts that:
 - **No lock-in** — open source, open protocol, standard data. Gateways federate
   peer-to-peer by Proxion address, with no central registry to shut down.
 
+## Don't trust me — check
+
+Claims about privacy software are worth exactly what you can verify. So:
+
+**Every installer is cryptographically traceable to public source.** Releases ship
+`SHA256SUMS.txt` plus signed [SLSA build-provenance](https://slsa.dev) attestations, so you can
+prove the binary you downloaded was built by CI from this repository and not tampered with
+afterwards:
+
+```sh
+sha256sum -c SHA256SUMS.txt --ignore-missing        # checksums match
+gh attestation verify Proxion_0.1.5_x64-setup.exe \
+   --repo cafeTechne/proxion-messenger                # built by CI, from this source
+```
+
+**The code is checked.** 3,400+ backend tests and 400+ frontend tests run on every push across
+Linux, macOS and Windows, alongside accessibility (axe-core, WCAG 2.2 AA), i18n and contrast
+gates. Full detail in [TESTING.md](TESTING.md) and [docs/VERIFYING.md](docs/VERIFYING.md).
+
+**Your data is readable without us.** Pod contents are documented, typed RDF, not an opaque
+blob — the format is a written contract in [docs/POD_DATA_MODEL.md](docs/POD_DATA_MODEL.md),
+so any Solid app you authorize can read it and you can walk away at any time.
+
+## Honest status
+
+Proxion is **beta software built primarily by one person, with AI assistance**, and it has
+**not had a third-party security audit**. The Double Ratchet implementation is our own, not
+libsignal. It is a serious attempt at a sovereign messenger and the security work is real
+(see [SECURITY.md](SECURITY.md) and [docs/security/](docs/security/)) — but if your safety
+depends on your messenger, use [Signal](https://signal.org). Use Proxion because you want to
+own your data, and help us find what's broken.
+
+Bug reports and scoped pull requests are genuinely wanted — see
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Features
 
 <img src="landing/assets/screenshot-mobile.png" alt="Proxion on mobile" width="210" align="right">

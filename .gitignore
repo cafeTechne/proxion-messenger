@@ -8,6 +8,11 @@ proxion-core/identity_private.pem
 # Plan files (implementation scratch pads — not part of the codebase)
 PLAN_ROUND_*.md
 
+# Local assistant/editor context and outreach drafts — working notes, not the project
+CLAUDE.md
+reddit_beta_post.md
+forum_reply.md
+
 # Python build artefacts
 __pycache__/
 *.pyc
