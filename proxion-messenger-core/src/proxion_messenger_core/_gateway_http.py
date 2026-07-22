@@ -47,6 +47,22 @@ _INVITE_DOWNLOAD_URL = "https://github.com/cafeTechne/proxion-messenger"
 
 
 class HttpEndpointsMixin:
+
+    # /relay and /relay/receipt are public endpoints, and their rate-limit buckets
+    # are keyed by source IP via setdefault. The deques self-trim old timestamps,
+    # but an emptied deque keeps its dict slot forever, so the map grew by one
+    # entry per distinct source IP and was never reclaimed — unbounded memory
+    # driven by remote input. Prune idle buckets once the map gets large.
+    _RELAY_RL_WINDOW = 60.0
+    _RELAY_RL_PRUNE_AT = 1024
+
+    def _prune_relay_rate_limiter(self, now: float) -> None:
+        buckets = getattr(self, "_relay_rate_limiter", None)
+        if not buckets or len(buckets) < self._RELAY_RL_PRUNE_AT:
+            return
+        for ip in [ip for ip, b in buckets.items()
+                   if not b or (now - b[-1]) >= self._RELAY_RL_WINDOW]:
+            buckets.pop(ip, None)
     def _render_invite_landing(self, from_addr: str) -> bytes:
         """A4.1: the /i/<token> landing page — branch app-installed vs download,
         carrying the inviter (`from_addr`) through every path. Self-contained
@@ -462,6 +478,7 @@ class HttpEndpointsMixin:
             return "200 OK", '{"status":"received"}'
 
         now = time.time()
+        self._prune_relay_rate_limiter(now)
         bucket = self._relay_rate_limiter.setdefault(client_ip, deque())
         while bucket and (now - bucket[0]) >= 60:
             bucket.popleft()
@@ -1455,6 +1472,7 @@ class HttpEndpointsMixin:
                 if method == "POST" and path == "/relay/receipt":
                     # Rate limit: 60 receipt POSTs per minute per IP
                     _rr_now = time.time()
+                    self._prune_relay_rate_limiter(_rr_now)
                     _rr_bucket = self._relay_rate_limiter.setdefault(peer_ip, deque())
                     while _rr_bucket and (_rr_now - _rr_bucket[0]) >= 60:
                         _rr_bucket.popleft()
