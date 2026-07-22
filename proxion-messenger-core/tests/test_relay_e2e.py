@@ -16,6 +16,14 @@ pytest.importorskip("websockets")
 import websockets
 
 
+# Wall-clock budget for "poll until the message arrives" loops below. Every such
+# loop breaks the moment delivery happens, so a generous budget costs nothing on
+# the happy path and only buys slack when the machine is loaded. This was 3.0s
+# and flaked on Windows CI, where the suite runs ~3x slower than Linux and a
+# cross-gateway relay spans two live gateways plus an HTTP hop.
+_DELIVER_TIMEOUT = 15.0
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -127,7 +135,7 @@ async def test_relay_delivers_dm(tmp_path):
 
         # B should receive the relayed message within 3 seconds
         delivered = None
-        deadline = time.monotonic() + 3.0
+        deadline = time.monotonic() + _DELIVER_TIMEOUT
         while time.monotonic() < deadline:
             try:
                 raw = await asyncio.wait_for(conn_b.recv(), timeout=0.3)
@@ -138,7 +146,7 @@ async def test_relay_delivers_dm(tmp_path):
             except asyncio.TimeoutError:
                 continue
 
-    assert delivered is not None, "Gateway B did not receive the relayed message within 3s"
+    assert delivered is not None, "Gateway B did not receive the relayed message in time"
     assert delivered["from_webid"] == did_a
     assert delivered["content"] == "hello from A"
 
@@ -197,7 +205,7 @@ async def test_send_dm_relay_fallback(tmp_path):
         }))
 
         delivered = None
-        deadline = time.monotonic() + 3.0
+        deadline = time.monotonic() + _DELIVER_TIMEOUT
         while time.monotonic() < deadline:
             try:
                 raw = await asyncio.wait_for(conn_b.recv(), timeout=0.3)
@@ -208,7 +216,7 @@ async def test_send_dm_relay_fallback(tmp_path):
             except asyncio.TimeoutError:
                 continue
 
-    assert delivered is not None, "send_dm relay fallback did not deliver within 3s"
+    assert delivered is not None, "send_dm relay fallback did not deliver in time"
     assert delivered["content"] == "relay fallback works"
 
 
@@ -275,7 +283,7 @@ async def test_full_invite_accept_dm_flow(tmp_path):
 
         # Alice's browser sees friend_request_received
         alice_req = None
-        deadline = time.monotonic() + 3.0
+        deadline = time.monotonic() + _DELIVER_TIMEOUT
         while time.monotonic() < deadline:
             try:
                 raw = await asyncio.wait_for(conn_a.recv(), timeout=0.3)
@@ -295,7 +303,7 @@ async def test_full_invite_accept_dm_flow(tmp_path):
 
         # Alice should get friend_request_accepted with a cert
         alice_accepted = None
-        deadline = time.monotonic() + 3.0
+        deadline = time.monotonic() + _DELIVER_TIMEOUT
         while time.monotonic() < deadline:
             try:
                 raw = await asyncio.wait_for(conn_a.recv(), timeout=0.3)
@@ -310,7 +318,7 @@ async def test_full_invite_accept_dm_flow(tmp_path):
 
         # Bob should get contact_added (via /invite/accept callback)
         bob_added = None
-        deadline = time.monotonic() + 3.0
+        deadline = time.monotonic() + _DELIVER_TIMEOUT
         while time.monotonic() < deadline:
             try:
                 raw = await asyncio.wait_for(conn_b.recv(), timeout=0.3)
@@ -333,7 +341,7 @@ async def test_full_invite_accept_dm_flow(tmp_path):
         }))
 
         bob_msg = None
-        deadline = time.monotonic() + 3.0
+        deadline = time.monotonic() + _DELIVER_TIMEOUT
         while time.monotonic() < deadline:
             try:
                 raw = await asyncio.wait_for(conn_b.recv(), timeout=0.3)
@@ -344,7 +352,7 @@ async def test_full_invite_accept_dm_flow(tmp_path):
             except asyncio.TimeoutError:
                 continue
 
-    assert bob_msg is not None, "Bob did not receive Alice's DM within 3s"
+    assert bob_msg is not None, "Bob did not receive Alice's DM in time"
     assert bob_msg["content"] == "hello bob from alice"
     # thread_id must be the cert_id (not the raw DID) so the browser routes correctly
     bob_cert_id = bob_added["certificate"]["certificate_id"]
@@ -369,7 +377,7 @@ async def test_full_invite_accept_dm_flow(tmp_path):
         }))
 
         alice_reply = None
-        deadline = time.monotonic() + 3.0
+        deadline = time.monotonic() + _DELIVER_TIMEOUT
         while time.monotonic() < deadline:
             try:
                 raw = await asyncio.wait_for(conn_a2.recv(), timeout=0.3)
@@ -380,7 +388,7 @@ async def test_full_invite_accept_dm_flow(tmp_path):
             except asyncio.TimeoutError:
                 continue
 
-    assert alice_reply is not None, "Alice did not receive Bob's reply within 3s"
+    assert alice_reply is not None, "Alice did not receive Bob's reply in time"
     # Alice's thread_id must also be the cert_id (from her cert — same UUID, roles swapped)
     alice_cert_id = alice_cert["certificate_id"]
     assert alice_reply.get("thread_id") == alice_cert_id, (
