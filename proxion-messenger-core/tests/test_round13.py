@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
-import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -19,6 +18,7 @@ from proxion_messenger_core.gateway import ProxionGateway, GatewayConfig
 from proxion_messenger_core.local_store import LocalStore
 from proxion_messenger_core.readstate import ReadState
 from proxion_messenger_core.logging_config import configure_logging, new_request_id, REQUEST_ID
+from gwharness import start_gateway as _serve_gw
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -49,28 +49,10 @@ def _start_gateway(tmp_path):
     pytest.importorskip("websockets")
     import websockets
     gw, ws_port, http_port = _make_gateway(tmp_path)
-    ready = threading.Event()
-    loop = asyncio.new_event_loop()
-
-    def _run():
-        asyncio.set_event_loop(loop)
-
-        async def _serve():
-            async with websockets.serve(gw.handle_client, "127.0.0.1", ws_port):
-                task = asyncio.create_task(gw._serve_http(None, http_port))
-                ready.set()
-                try:
-                    await asyncio.Event().wait()
-                except asyncio.CancelledError:
-                    task.cancel()
-
-        try:
-            loop.run_until_complete(_serve())
-        except Exception:
-            ready.set()
-
-    threading.Thread(target=_run, daemon=True).start()
-    return gw, ws_port, http_port, ready
+    # Raises if the gateway fails to start or never accepts a connection, and
+    # registers it for shutdown after the test (see tests/gwharness.py).
+    handle = _serve_gw(gw, ws_port, http_port)
+    return gw, handle.ws_port, handle.http_port, handle.ready
 
 
 # ── 13.11 — Message edit history ─────────────────────────────────────────────

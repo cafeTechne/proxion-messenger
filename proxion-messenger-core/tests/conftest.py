@@ -63,6 +63,20 @@ def _disable_require_auth_by_default(monkeypatch):
     monkeypatch.setenv("PROXION_ALLOW_WEAK_PASSPHRASE", "1")
 
 
+@pytest.fixture(autouse=True)
+def _shutdown_test_gateways():
+    """Stop any real gateway a test started in a background thread.
+
+    Without this, every gateway started by tests/gwharness.py would outlive its
+    test, holding a thread, an event loop and two listening sockets for the rest
+    of the session. That accumulation (43 call sites across the suite) is what
+    made timing-sensitive socket tests flake on slow machines.
+    """
+    yield
+    import gwharness
+    gwharness.shutdown_all()
+
+
 @pytest.fixture
 def now() -> datetime:
     """Current UTC time, timezone-aware."""

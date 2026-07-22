@@ -2,8 +2,6 @@
 import asyncio
 import json
 import os
-import socket
-import threading
 
 import pytest
 
@@ -14,12 +12,12 @@ import httpx
 from proxion_messenger_core.persist import AgentState
 from proxion_messenger_core.gateway import ProxionGateway, GatewayConfig
 from proxion_messenger_core.readstate import ReadState
+from gwharness import free_port as _free_port, start_gateway as _serve
 
-
-def _free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+# Budget for a local HTTP round trip. 5s is normally ample, but a fully loaded
+# suite can starve the server past it (same class as the relay tests' delivery
+# deadline). A generous budget costs nothing when the server answers promptly.
+_HTTP_TIMEOUT = 15
 
 
 def _start_gateway(tmp_path, host="127.0.0.1"):
@@ -35,41 +33,10 @@ def _start_gateway(tmp_path, host="127.0.0.1"):
         agent=agent, dm_clients={}, room_memberships={}, config=cfg,
         read_state=ReadState(),
     )
-    ready = threading.Event()
-    loop = asyncio.new_event_loop()
-
-    def _run():
-        asyncio.set_event_loop(loop)
-
-        async def _serve():
-            async with websockets.serve(gw.handle_client, "127.0.0.1", ws_port):
-                task = asyncio.create_task(gw._serve_http(None, http_port))
-                ready.set()
-                try:
-                    await asyncio.Event().wait()
-                except asyncio.CancelledError:
-                    task.cancel()
-
-        try:
-            loop.run_until_complete(_serve())
-        except Exception:
-            ready.set()
-
-    threading.Thread(target=_run, daemon=True).start()
-    # ready.set() fires right after create_task(_serve_http) — BEFORE the HTTP
-    # port actually binds. Callers that immediately POST then race a not-yet-
-    # listening server (flaky under full-suite load). Poll the port so we only
-    # return once it accepts connections.
-    ready.wait(timeout=5)
-    import time as _time
-    _deadline = _time.time() + 5
-    while _time.time() < _deadline:
-        try:
-            with socket.create_connection(("127.0.0.1", http_port), timeout=0.5):
-                break
-        except OSError:
-            _time.sleep(0.05)
-    return gw, http_port, ws_port, ready
+    # Raises if the gateway fails to start or never accepts a connection, and
+    # registers it for automatic shutdown after the test (see tests/gwharness.py).
+    handle = _serve(gw, ws_port, http_port)
+    return gw, handle.http_port, handle.ws_port, handle.ready
 
 
 # ── 9.4.3: _is_trusted_origin unit tests ─────────────────────────────────────
@@ -106,7 +73,7 @@ async def test_setup_pod_untrusted_origin_returns_403(tmp_path):
         f"http://127.0.0.1:{http_port}/setup/pod",
         json={"css_url": "https://solidcommunity.net", "email": "x", "password": "y"},
         headers={"Origin": "https://evil.example.com"},
-        timeout=5,
+        timeout=_HTTP_TIMEOUT,
     )
     assert resp.status_code == 403
     assert "forbidden" in resp.json().get("error", "").lower()
@@ -125,7 +92,7 @@ async def test_setup_pod_no_origin_passes_cors_check(tmp_path):
     resp = httpx.post(
         f"http://127.0.0.1:{http_port}/setup/pod",
         json={"css_url": "http://127.0.0.1:1", "email": "x", "password": "y"},
-        timeout=10,
+        timeout=_HTTP_TIMEOUT,
     )
     assert resp.status_code != 403
 
@@ -143,7 +110,7 @@ async def test_import_untrusted_origin_returns_403(tmp_path):
         f"http://127.0.0.1:{http_port}/import",
         json={"messages": [], "contacts": []},
         headers={"Origin": "https://attacker.example.com"},
-        timeout=5,
+        timeout=_HTTP_TIMEOUT,
     )
     assert resp.status_code == 403
 
@@ -169,28 +136,10 @@ async def test_auth_auto_required_for_non_loopback(tmp_path, monkeypatch):
         agent=agent, dm_clients={}, room_memberships={}, config=cfg,
         read_state=ReadState(),
     )
-    ready = threading.Event()
-    loop = asyncio.new_event_loop()
-
-    def _run():
-        asyncio.set_event_loop(loop)
-
-        async def _serve():
-            async with websockets.serve(gw.handle_client, "127.0.0.1", ws_port):
-                task = asyncio.create_task(gw._serve_http(None, http_port))
-                ready.set()
-                try:
-                    await asyncio.Event().wait()
-                except asyncio.CancelledError:
-                    task.cancel()
-
-        try:
-            loop.run_until_complete(_serve())
-        except Exception:
-            ready.set()
-
-    threading.Thread(target=_run, daemon=True).start()
-    assert ready.wait(timeout=5), "gateway failed to start"
+    # WebSocket only: this test exercises the auto-require decision, which reads
+    # config.host. The HTTP server would try to bind config.host (10.0.0.1, not a
+    # local address) and never come up, so don't start it.
+    _serve(gw, ws_port, http_port, serve_http=False)
     await asyncio.sleep(0.2)
 
     from proxion_messenger_core.didkey import pub_key_to_did

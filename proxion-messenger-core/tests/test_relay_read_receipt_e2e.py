@@ -5,7 +5,6 @@ Uses two in-process gateways (same pattern as test_relay_e2e.py).
 import asyncio
 import json
 import socket
-import threading
 import time
 
 import pytest
@@ -15,6 +14,7 @@ import websockets
 
 from proxion_messenger_core.persist import AgentState
 from proxion_messenger_core.didkey import pub_key_to_did
+from gwharness import start_gateway as _serve_gw
 
 
 def _free_port() -> int:
@@ -33,29 +33,10 @@ def _start_gateway(agent, ws_port: int, http_port: int, db_path: str):
     )
     gw = ProxionGateway(agent, {}, {}, cfg, ReadState())
 
-    ready = threading.Event()
-    loop = asyncio.new_event_loop()
-
-    def _run():
-        asyncio.set_event_loop(loop)
-
-        async def _serve():
-            async with websockets.serve(gw.handle_client, "127.0.0.1", ws_port):
-                http_task = asyncio.create_task(gw._serve_http(None, http_port))
-                ready.set()
-                try:
-                    await asyncio.Event().wait()
-                except asyncio.CancelledError:
-                    http_task.cancel()
-
-        try:
-            loop.run_until_complete(_serve())
-        except Exception:
-            ready.set()
-
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-    return gw, t, loop, ready
+    # Raises if the gateway fails to start or never accepts a connection, and
+    # registers it for shutdown after the test (see tests/gwharness.py).
+    handle = _serve_gw(gw, ws_port, http_port)
+    return gw, handle.thread, handle.loop, handle.ready
 
 
 @pytest.fixture(autouse=True)

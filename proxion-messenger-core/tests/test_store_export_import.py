@@ -118,10 +118,10 @@ def test_import_data_display_names(store, tmp_path):
 pytest.importorskip("websockets")
 import websockets  # noqa: E402
 import socket as _socket
-import threading as _threading
 import asyncio as _asyncio
 import httpx as _httpx
 import json as _json
+from gwharness import start_gateway as _serve_gw
 
 
 def _free_port_exp():
@@ -141,28 +141,10 @@ def _start_export_gateway(db_path, ws_port, http_port):
         public_url=f"ws://127.0.0.1:{ws_port}", db_path=db_path,
     )
     gw = ProxionGateway(agent=agent, dm_clients={}, room_memberships={}, config=cfg, read_state=ReadState())
-    ready = _threading.Event()
-    loop = _asyncio.new_event_loop()
-
-    def _run():
-        _asyncio.set_event_loop(loop)
-
-        async def _serve():
-            async with websockets.serve(gw.handle_client, "127.0.0.1", ws_port):
-                task = _asyncio.create_task(gw._serve_http(None, http_port))
-                ready.set()
-                try:
-                    await _asyncio.Event().wait()
-                except _asyncio.CancelledError:
-                    task.cancel()
-
-        try:
-            loop.run_until_complete(_serve())
-        except Exception:
-            ready.set()
-
-    t = _threading.Thread(target=_run, daemon=True)
-    t.start()
+    # Raises on startup failure and is shut down after the test
+    # (see tests/gwharness.py).
+    handle = _serve_gw(gw, ws_port, http_port)
+    ready = handle.ready
     return gw, ready
 
 

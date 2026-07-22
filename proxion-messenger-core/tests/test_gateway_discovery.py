@@ -208,8 +208,8 @@ def test_well_known_conditionally_includes_display_name(tmp_path):
 pytest.importorskip("websockets")
 import websockets
 import socket as _socket
-import threading as _threading
 import httpx as _httpx
+from gwharness import start_gateway as _serve_gw
 
 
 def _free_port_disc():
@@ -227,28 +227,10 @@ def _start_http_gateway(agent, ws_port, http_port):
     )
     gw = ProxionGateway(agent=agent, dm_clients={}, room_memberships={}, config=cfg, read_state=ReadState())
 
-    ready = _threading.Event()
-    loop = _aio.new_event_loop()
-
-    def _run():
-        _aio.set_event_loop(loop)
-
-        async def _serve():
-            async with websockets.serve(gw.handle_client, "127.0.0.1", ws_port):
-                task = _aio.create_task(gw._serve_http(None, http_port))
-                ready.set()
-                try:
-                    await _aio.Event().wait()
-                except _aio.CancelledError:
-                    task.cancel()
-
-        try:
-            loop.run_until_complete(_serve())
-        except Exception:
-            ready.set()
-
-    t = _threading.Thread(target=_run, daemon=True)
-    t.start()
+    # Raises on startup failure and is shut down after the test
+    # (see tests/gwharness.py).
+    handle = _serve_gw(gw, ws_port, http_port)
+    ready = handle.ready
     return gw, ready
 
 

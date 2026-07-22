@@ -10,13 +10,13 @@ verifies and applies it.
 import asyncio
 import json
 import socket
-import threading
 import time
 
 import pytest
 
 pytest.importorskip("websockets")
 import websockets  # noqa: F401  (gateway import path expects it)
+from gwharness import start_gateway as _serve_gw
 
 
 def _free_port() -> int:
@@ -36,29 +36,10 @@ def _start_gateway(agent, ws_port: int, http_port: int, db_path: str):
         public_url=f"ws://127.0.0.1:{ws_port}", db_path=db_path,
     )
     gw = ProxionGateway(agent, {}, {}, cfg, ReadState())
-    ready = threading.Event()
-    loop = _asyncio.new_event_loop()
-
-    def _run():
-        _asyncio.set_event_loop(loop)
-
-        async def _serve():
-            async with _ws.serve(gw.handle_client, "127.0.0.1", ws_port):
-                http_task = _asyncio.create_task(gw._serve_http(web_dir=None, http_port=http_port))
-                ready.set()
-                try:
-                    await _asyncio.Event().wait()
-                except _asyncio.CancelledError:
-                    http_task.cancel()
-
-        try:
-            loop.run_until_complete(_serve())
-        except Exception:
-            ready.set()
-
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-    return gw, loop, ready
+    # Raises if the gateway fails to start or never accepts a connection, and
+    # registers it for shutdown after the test (see tests/gwharness.py).
+    handle = _serve_gw(gw, ws_port, http_port)
+    return gw, handle.loop, handle.ready
 
 
 @pytest.fixture(autouse=True)

@@ -3,15 +3,14 @@
 import asyncio
 import json
 import socket
-import threading
 import pytest
 
 pytest.importorskip("websockets")
-import websockets
 
 from proxion_messenger_core.gateway import ProxionGateway, GatewayConfig
 from proxion_messenger_core.persist import AgentState
 from proxion_messenger_core.readstate import ReadState
+from gwharness import start_gateway as _serve_gw
 
 
 def _free_port():
@@ -31,28 +30,10 @@ def _start_gateway(tmp_path):
     )
     gw = ProxionGateway(agent=agent, dm_clients={}, room_memberships={},
                         config=cfg, read_state=ReadState())
-    ready = threading.Event()
-    loop = asyncio.new_event_loop()
-
-    def _run():
-        asyncio.set_event_loop(loop)
-
-        async def _serve():
-            async with websockets.serve(gw.handle_client, "127.0.0.1", ws_port):
-                task = asyncio.create_task(gw._serve_http(None, http_port))
-                ready.set()
-                try:
-                    await asyncio.Event().wait()
-                except asyncio.CancelledError:
-                    task.cancel()
-
-        try:
-            loop.run_until_complete(_serve())
-        except Exception:
-            ready.set()
-
-    threading.Thread(target=_run, daemon=True).start()
-    return gw, http_port, ready
+    # Raises if the gateway fails to start or never accepts a connection, and
+    # registers it for shutdown after the test (see tests/gwharness.py).
+    handle = _serve_gw(gw, ws_port, http_port)
+    return gw, handle.http_port, handle.ready
 
 
 async def _http(http_port: int, request: bytes) -> bytes:

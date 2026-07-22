@@ -6,7 +6,6 @@ R10.3.2: POST /relay/receipt delivers a read_receipt WebSocket event to the reci
 import asyncio
 import json
 import socket
-import threading
 import time
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -136,6 +135,7 @@ async def test_mark_read_no_receipt_without_peer_gateway(tmp_path):
 
 pytest.importorskip("websockets")
 import websockets
+from gwharness import start_gateway as _serve_gw
 
 
 def _start_gateway(agent, ws_port, http_port, db_path):
@@ -147,29 +147,10 @@ def _start_gateway(agent, ws_port, http_port, db_path):
         public_url=f"ws://127.0.0.1:{ws_port}", db_path=db_path,
     )
     gw = ProxionGateway(agent, {}, {}, cfg, ReadState())
-    ready = threading.Event()
-    loop = asyncio.new_event_loop()
-
-    def _run():
-        asyncio.set_event_loop(loop)
-
-        async def _serve():
-            async with websockets.serve(gw.handle_client, "127.0.0.1", ws_port):
-                http_task = asyncio.create_task(gw._serve_http(None, http_port))
-                ready.set()
-                try:
-                    await asyncio.Event().wait()
-                except asyncio.CancelledError:
-                    http_task.cancel()
-
-        try:
-            loop.run_until_complete(_serve())
-        except Exception:
-            ready.set()
-
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-    return gw, t, loop, ready
+    # Raises if the gateway fails to start or never accepts a connection, and
+    # registers it for shutdown after the test (see tests/gwharness.py).
+    handle = _serve_gw(gw, ws_port, http_port)
+    return gw, handle.thread, handle.loop, handle.ready
 
 
 @pytest.mark.asyncio

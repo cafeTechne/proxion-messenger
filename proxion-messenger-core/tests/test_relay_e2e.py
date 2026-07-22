@@ -6,14 +6,13 @@ production deployment. Gateway A sends a DM to Gateway B via HTTP /relay.
 import asyncio
 import json
 import os
-import socket
-import threading
 import time
 
 import pytest
 
 pytest.importorskip("websockets")
 import websockets
+from gwharness import free_port as _free_port, start_gateway as _serve
 
 
 # Wall-clock budget for "poll until the message arrives" loops below. Every such
@@ -24,18 +23,13 @@ import websockets
 _DELIVER_TIMEOUT = 15.0
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
 def _start_gateway(agent, ws_port: int, http_port: int, db_path: str):
     """Start a ProxionGateway in a background daemon thread with its own event loop.
 
-    Returns (thread, stop_event, ready_event).
+    Returns (gw, thread, loop, ready_event). Raises if the gateway fails to start
+    or never accepts a connection; the gateway is shut down after the test by the
+    autouse fixture in conftest.py (see tests/gwharness.py).
     """
-    import asyncio as _asyncio
     from proxion_messenger_core.gateway import ProxionGateway, GatewayConfig
     from proxion_messenger_core.readstate import ReadState
 
@@ -47,35 +41,8 @@ def _start_gateway(agent, ws_port: int, http_port: int, db_path: str):
         db_path=db_path,
     )
     gw = ProxionGateway(agent, {}, {}, cfg, ReadState())
-
-    ready = threading.Event()
-    loop = _asyncio.new_event_loop()
-
-    def _run():
-        _asyncio.set_event_loop(loop)
-
-        async def _serve():
-            async with websockets.serve(gw.handle_client, "127.0.0.1", ws_port):
-                # Start the HTTP server (relay endpoint)
-                http_task = _asyncio.create_task(gw._serve_http(
-                    web_dir=None,      # no static files needed for tests
-                    http_port=http_port,
-                ))
-                ready.set()
-                # Run until cancelled
-                try:
-                    await _asyncio.Event().wait()
-                except _asyncio.CancelledError:
-                    http_task.cancel()
-
-        try:
-            loop.run_until_complete(_serve())
-        except Exception:
-            ready.set()
-
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-    return gw, t, loop, ready
+    handle = _serve(gw, ws_port, http_port)
+    return gw, handle.thread, handle.loop, handle.ready
 
 
 @pytest.fixture(autouse=True)

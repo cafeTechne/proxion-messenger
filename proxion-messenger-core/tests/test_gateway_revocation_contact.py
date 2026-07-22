@@ -11,6 +11,7 @@ from proxion_messenger_core.persist import AgentState
 from proxion_messenger_core.readstate import ReadState
 from proxion_messenger_core.relay import sign_relay_message
 from proxion_messenger_core.didkey import pub_key_to_did
+from gwharness import start_gateway as _serve_gw
 
 
 def _make_gateway(tmp_path):
@@ -258,28 +259,10 @@ async def test_admin_revoke_contact_broadcasts_event(tmp_path):
         db_path=str(tmp_path / "gw.db"),
     )
 
-    ready = threading.Event()
-    loop = asyncio.new_event_loop()
-
-    def _run():
-        asyncio.set_event_loop(loop)
-
-        async def _serve():
-            async with websockets.serve(gw.handle_client, "127.0.0.1", ws_port):
-                http_task = asyncio.create_task(gw._serve_http(None, http_port))
-                ready.set()
-                try:
-                    await asyncio.Event().wait()
-                except asyncio.CancelledError:
-                    http_task.cancel()
-
-        try:
-            loop.run_until_complete(_serve())
-        except Exception:
-            ready.set()
-
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
+    # Raises on startup failure and is shut down after the test
+    # (see tests/gwharness.py).
+    handle = _serve_gw(gw, ws_port, http_port)
+    ready = handle.ready
     assert ready.wait(timeout=5), "gateway failed to start"
     await asyncio.sleep(0.2)
 
