@@ -723,6 +723,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 )
             self._pending_auth.pop(websocket, None)
             self._auth_verified.discard(websocket)
+            # Only drops the socket-keyed fallback entry (unknown source IP).
+            # IP-keyed lockouts deliberately survive the disconnect — otherwise
+            # reconnecting would reset the brute-force counter.
+            self._auth_fail_counts.pop(websocket, None)
             webid = self._client_webids.pop(websocket, None)
             self._session_device_did.pop(websocket, None)
             # Drop any pairing session this socket was part of (primary or new device).

@@ -70,8 +70,8 @@ async def test_successful_auth_resets_failure_counter(gw, monkeypatch):
     pub = key.public_key()
     did = pub_key_to_did(pub.public_bytes(Encoding.Raw, PublicFormat.Raw))
 
-    # Seed 4 failures manually
-    fail_key = (id(ws), "10.0.0.1")
+    # Seed 4 failures manually (keyed by source IP, not by socket)
+    fail_key = "10.0.0.1"
     gw._auth_fail_counts[fail_key] = {"count": 4, "first_at": time.time()}
 
     # Now do a valid auth
@@ -87,6 +87,71 @@ async def test_successful_auth_resets_failure_counter(gw, monkeypatch):
 
     # Failure counter should be cleared
     assert fail_key not in gw._auth_fail_counts, "Counter should be cleared after successful auth"
+
+
+@pytest.mark.asyncio
+async def test_lockout_survives_reconnect_from_same_ip(gw, monkeypatch):
+    """Reconnecting must NOT reset the brute-force counter.
+
+    The lockout used to be keyed by (id(websocket), ip). Closing the connection
+    on the 5th failure therefore handed the attacker a brand-new counter on
+    reconnect, making the control decorative: unlimited guesses, 4 per socket.
+    """
+    monkeypatch.setenv("PROXION_REQUIRE_AUTH", "1")
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+    from proxion_messenger_core.didkey import pub_key_to_did
+    import time
+
+    key = Ed25519PrivateKey.generate()
+    did = pub_key_to_did(key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw))
+
+    # Burn the allowance on one socket.
+    ws1 = _mock_ws(gw)
+    for i in range(5):
+        gw._pending_auth[ws1] = {
+            "did": did, "webid": "", "display_name": "", "gateway_url": "",
+            "nonce": f"n{i}", "expires_at": time.time() + 60,
+        }
+        await gw._handle_auth_response(ws1, {"signature": "badsig"})
+    assert gw._auth_fail_counts.get("10.0.0.1", {}).get("count", 0) >= 5
+
+    # Attacker reconnects: a new socket object from the same IP.
+    ws2 = _mock_ws(gw)
+    gw._pending_auth[ws2] = {
+        "did": did, "webid": "", "display_name": "", "gateway_url": "",
+        "nonce": "fresh", "expires_at": time.time() + 60,
+    }
+    await gw._handle_auth_response(ws2, {"signature": "badsig"})
+
+    ws2.close.assert_called()
+    assert "auth_lockout" in ws2.close.call_args[0][1]
+
+
+@pytest.mark.asyncio
+async def test_expired_failures_are_pruned(gw):
+    """Old entries fall out of the map so it cannot grow without bound."""
+    import time
+    gw._auth_fail_counts["1.2.3.4"] = {
+        "count": 5, "first_at": time.time() - (gw._AUTH_FAIL_WINDOW + 60),
+    }
+    gw._auth_fail_counts["5.6.7.8"] = {"count": 1, "first_at": time.time()}
+    gw._auth_fail_prune(time.time())
+    assert "1.2.3.4" not in gw._auth_fail_counts, "expired entry should be pruned"
+    assert "5.6.7.8" in gw._auth_fail_counts, "recent entry should survive"
+
+
+@pytest.mark.asyncio
+async def test_unknown_ip_does_not_share_one_bucket(gw):
+    """Clients with no known IP must not collapse into a single shared key.
+
+    Otherwise one bad actor with an unknown source could lock out everyone.
+    """
+    ws_a, ws_b = MagicMock(), MagicMock()
+    gw._session_meta[ws_a] = {}          # no ip_addr
+    gw._session_meta[ws_b] = {}
+    assert gw._auth_fail_key(ws_a) is ws_a
+    assert gw._auth_fail_key(ws_a) != gw._auth_fail_key(ws_b)
 
 
 @pytest.mark.asyncio

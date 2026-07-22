@@ -681,9 +681,10 @@ class MiscHandlerMixin:
             except Exception:
                 pass
         last_purge = getattr(self, "_last_retention_purge_at", None)
+        _lockout_limit = getattr(self, "_AUTH_FAIL_LIMIT", 5)
         auth_lockout_count = sum(
             1 for v in getattr(self, "_auth_fail_counts", {}).values()
-            if v.get("count", 0) >= 5
+            if v.get("count", 0) >= _lockout_limit
         )
         await websocket.send(json.dumps({
             "type": "runtime_security_state",

@@ -23,9 +23,55 @@ logger = logging.getLogger("proxion_messenger_core.gateway")
 
 class AuthHandlerMixin:
 
+    # Auth failures are tracked per source IP, NOT per connection. Keying by the
+    # socket (previously id(websocket)) made the lockout decorative: closing the
+    # connection on the 5th failure handed the attacker a fresh counter on
+    # reconnect, so brute force was unlimited at 4 tries per connection. id() is
+    # also a memory address CPython reuses after GC, so a stale entry could be
+    # inherited by an unrelated new connection and lock out a legitimate user.
+    _AUTH_FAIL_WINDOW = 600.0   # seconds a failure counts against an IP
+    _AUTH_FAIL_LIMIT = 5
+
+    def _auth_fail_key(self, websocket):
+        """Lockout key: source IP when known, else the socket object itself.
+
+        Falling back to the socket (not id(), and not "") matters: an empty IP
+        would collapse every unknown-source client into one shared bucket, so a
+        single bad actor could lock out everyone.
+        """
+        ip = (self._session_meta.get(websocket) or {}).get("ip_addr", "") or ""
+        return ip if ip else websocket
+
+    def _auth_fail_prune(self, now: float) -> None:
+        """Drop expired entries so the map can't grow without bound."""
+        counts = getattr(self, "_auth_fail_counts", None)
+        if not counts:
+            return
+        for key in [k for k, v in counts.items()
+                    if now - v.get("first_at", now) > self._AUTH_FAIL_WINDOW]:
+            counts.pop(key, None)
+
+    def _auth_is_locked_out(self, websocket) -> bool:
+        entry = getattr(self, "_auth_fail_counts", {}).get(self._auth_fail_key(websocket))
+        if not entry:
+            return False
+        if time.time() - entry.get("first_at", 0) > self._AUTH_FAIL_WINDOW:
+            return False
+        return entry.get("count", 0) >= self._AUTH_FAIL_LIMIT
+
     async def _handle_auth_response(self, websocket, data: dict) -> None:
         _ip_ar = (self._session_meta.get(websocket) or {}).get("ip_addr", "?")
         logger.info("auth_response received from %s (has_pending=%s)", _ip_ar, websocket in self._pending_auth)
+        # Enforce the lockout up front, so a locked-out source cannot simply
+        # reconnect and keep guessing.
+        self._auth_fail_prune(time.time())
+        if self._auth_is_locked_out(websocket):
+            await websocket.send(json.dumps({"type": "auth_failed", "reason": "auth_lockout"}))
+            try:
+                await websocket.close(1008, "auth_lockout")
+            except Exception:
+                pass
+            return
         pending = self._pending_auth.pop(websocket, None)
         if not pending:
             await websocket.send(json.dumps({"type": "auth_failed", "reason": "no_pending_challenge"}))
@@ -68,20 +114,18 @@ class AuthHandlerMixin:
                 nonce_bytes = pending["nonce"].encode()
                 pub_key.verify(sig, nonce_bytes)
             except Exception:
-                # Auth failure: track and potentially lockout
-                _ws_key = id(websocket)
+                # Auth failure: track per source IP so the count survives a reconnect.
                 _ip = (self._session_meta.get(websocket) or {}).get("ip_addr", "")
-                _fail_key = (_ws_key, _ip)
+                _fail_key = self._auth_fail_key(websocket)
                 _fail_counts = getattr(self, "_auth_fail_counts", {})
                 _fail_entry = _fail_counts.get(_fail_key, {"count": 0, "first_at": time.time()})
                 # Reset window if >10 minutes since first failure
-                if time.time() - _fail_entry["first_at"] > 600:
+                if time.time() - _fail_entry["first_at"] > self._AUTH_FAIL_WINDOW:
                     _fail_entry = {"count": 0, "first_at": time.time()}
                 _fail_entry["count"] += 1
-                _fail_counts[_fail_key] = _fail_entry
                 if hasattr(self, "_auth_fail_counts"):
                     self._auth_fail_counts[_fail_key] = _fail_entry
-                if _fail_entry["count"] >= 5:
+                if _fail_entry["count"] >= self._AUTH_FAIL_LIMIT:
                     logger.warning("Auth lockout for %s after %d failures", _ip or "unknown", _fail_entry["count"])
                     if self._store:
                         self._store.save_security_event(
@@ -102,10 +146,8 @@ class AuthHandlerMixin:
                 return
         self._auth_verified.add(websocket)
         # Clear failure counter on successful auth
-        _ws_key = id(websocket)
-        _ip = (self._session_meta.get(websocket) or {}).get("ip_addr", "")
         if hasattr(self, "_auth_fail_counts"):
-            self._auth_fail_counts.pop((_ws_key, _ip), None)
+            self._auth_fail_counts.pop(self._auth_fail_key(websocket), None)
         await self.process_command(websocket, {
             "cmd": "register",
             "did": pending["did"],
