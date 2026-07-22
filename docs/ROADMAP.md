@@ -122,8 +122,7 @@ Pod-first model; the system is now relay-first with optional Pod backing.
 Rewrite it to match reality (or supersede with the as-built summary). Move
 the root `ARCH.md` (homelab infra) out of this repo entirely.
 
-**B6. Finish the `proxion-messenger-core` → `proxion-messenger-core` rename** noted in
-CLAUDE.md.
+**B6. Finish the `proxion-messenger-core` → `proxion-messenger-core` rename.**
 
 ---
 
