@@ -101,8 +101,17 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
     function handleFileChunk(event) {
         const rec = _incomingFiles[event.file_id];
         if (!rec) return;
-        if (rec.chunks[event.seq] === undefined) {
-            rec.chunks[event.seq] = event.data;
+        // seq and data are attacker-controlled. seq MUST be an integer in
+        // [0, total): an out-of-range or non-integer seq would write outside the
+        // real chunk indices yet still bump `received`, letting the completeness
+        // check in handleFileComplete pass while chunks[0..total-1] stay empty.
+        // That is exactly the silently-corrupt-file case that check exists to
+        // stop, so the guarantee only holds if every counted seq is a valid index.
+        const seq = event.seq;
+        if (!Number.isInteger(seq) || seq < 0 || seq >= rec.total) return;
+        if (typeof event.data !== "string") return;
+        if (rec.chunks[seq] === undefined) {
+            rec.chunks[seq] = event.data;
             rec.received++;
             _showTransferProgress(event.file_id, rec.meta.filename, Math.round((rec.received / rec.total) * 100), "Receiving");
         }

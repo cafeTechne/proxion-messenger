@@ -60,6 +60,38 @@ describe('handleFileComplete integrity', () => {
     ft.handleFileComplete({ file_id: 'fm' });
     expect(rendered).toBeNull(); // no silently-corrupt file rendered
   });
+
+  it('does NOT let out-of-range seqs satisfy the completeness check', () => {
+    // A malicious sender delivers `total` chunks but with seqs outside [0,total).
+    // Without seq validation these bump `received` to total while the real
+    // indices stay empty, so file_complete would pass and render an empty file.
+    let rendered = null;
+    const { ft } = makeFT({ renderMessage: (m) => { rendered = m; } });
+    ft.handleFileOffer({ file_id: 'fx', from_webid: 'did:x', filename: 'a.bin', mime_type: 'x', size_bytes: 3, total_chunks: 3 });
+    for (const seq of [10, 11, 12]) ft.handleFileChunk({ file_id: 'fx', seq, data: 'AA==' });
+    ft.handleFileComplete({ file_id: 'fx' });
+    expect(rendered).toBeNull();
+  });
+
+  it('ignores non-integer and negative seqs', () => {
+    let rendered = null;
+    const { ft } = makeFT({ renderMessage: (m) => { rendered = m; } });
+    ft.handleFileOffer({ file_id: 'fy', from_webid: 'did:x', filename: 'a.bin', mime_type: 'x', size_bytes: 2, total_chunks: 2 });
+    ft.handleFileChunk({ file_id: 'fy', seq: '0', data: 'AA==' });   // string, not index 0
+    ft.handleFileChunk({ file_id: 'fy', seq: -1, data: 'AA==' });
+    ft.handleFileChunk({ file_id: 'fy', seq: 1.5, data: 'AA==' });
+    ft.handleFileComplete({ file_id: 'fy' });
+    expect(rendered).toBeNull();
+  });
+
+  it('ignores a chunk whose data is not a string', () => {
+    let rendered = null;
+    const { ft } = makeFT({ renderMessage: (m) => { rendered = m; } });
+    ft.handleFileOffer({ file_id: 'fz', from_webid: 'did:x', filename: 'a.bin', mime_type: 'x', size_bytes: 1, total_chunks: 1 });
+    ft.handleFileChunk({ file_id: 'fz', seq: 0, data: { evil: true } });
+    ft.handleFileComplete({ file_id: 'fz' });
+    expect(rendered).toBeNull();
+  });
 });
 
 describe('handleFileChunk + handleFileComplete reassembly', () => {
