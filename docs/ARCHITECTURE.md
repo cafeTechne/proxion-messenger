@@ -1,9 +1,9 @@
-# Proxion Architecture — Technical Reference
+# Proxion Architecture: Technical Reference
 
-Proxion is a **sovereign, federated messenger for small trusted groups (2–6
+Proxion is a **sovereign, federated messenger for small trusted groups (2-6
 people)**. Each user runs their own **gateway** (shipped as a `.exe`/desktop
 app); there is no central server and no account. The product thesis: *download
-it, share a link, message and voice-call your friends — self-hosting is a backend
+it, share a link, message and voice-call your friends. Self-hosting is a backend
 detail the user never has to think about.*
 
 This document describes the **as-built** system. It is **relay-first**: messages
@@ -12,7 +12,7 @@ gateway. A Solid Pod is an **optional durable backbone**, not the transport.
 
 > Historical note: earlier drafts described a "Pod-first" design where clients
 > wrote messages directly into each other's Solid Pods. That is no longer how
-> Proxion works — the Pod is now optional write-through for durability.
+> Proxion works. The Pod is now optional write-through for durability.
 
 ---
 
@@ -39,28 +39,28 @@ gateway. A Solid Pod is an **optional durable backbone**, not the transport.
    +---------------------------+          +---------------------------+
 ```
 
-A user's **address** is `did:key:<ed25519>@https://<their-gateway>` — the
+A user's **address** is `did:key:<ed25519>@https://<their-gateway>`. The
 `did:key` is the gateway's own identity (`_proxion_address`). Sharing is done via
 an **invite link** (`/invite?from=…`, short `/i/<token>`, or `proxion://invite`
 deep link) that resolves to that address.
 
 ### Code map
-- `web/` — vanilla-JS SPA (ES modules; `main.js` is the composition root, with
+- `web/`: vanilla-JS SPA (ES modules; `main.js` is the composition root, with
   feature modules: `connection.js`, `rendering.js`, `view.js`, `voice.js`,
   `e2e.js`, `pod.js`, …). Served by the gateway over HTTPS.
 - `proxion-messenger-core/src/proxion_messenger_core/`
-  - `gateway.py` — `ProxionGateway`: the WS command `switch` + connection state;
+  - `gateway.py`: `ProxionGateway`, the WS command `switch` + connection state,
     composed from mixins.
-  - `_gateway_*.py` mixins — `_gateway_http.py` (all HTTP serving + endpoints),
+  - `_gateway_*.py` mixins: `_gateway_http.py` (all HTTP serving + endpoints),
     `_gateway_voice.py`, `_gateway_rooms.py`, `_gateway_dm.py`, `_gateway_pod.py`
     (PodSyncMixin), `_gateway_mailbox.py` (relay/mailbox), `_gateway_auth.py`,
     `_gateway_misc.py`.
-  - `local_store.py` + `_store/` — SQLite persistence split by domain
+  - `local_store.py` + `_store/`: SQLite persistence split by domain
     (`messages`, `rooms`, `federation`, `devices`, `security`, `identity`).
   - `relay.py`, `persist.py` (`AgentState`), `solid_client.py` (DPoP Pod I/O).
-- `run_gateway.py` — process entry point (loads/generates keys + self-signed
+- `run_gateway.py`: process entry point (loads/generates keys + self-signed
   TLS, starts the gateway, attempts UPnP).
-- `tauri-app/` — Rust/Tauri desktop shell bundling the gateway as a sidecar.
+- `tauri-app/`: Rust/Tauri desktop shell bundling the gateway as a sidecar.
 
 ---
 
@@ -71,11 +71,14 @@ deep link) that resolves to that address.
 - **X25519** keys back the E2E ratchet; published so peers can start a session.
 - **AgentState** (`persist.py`) holds the Ed25519 identity key + X25519 store
   key. Losing it = losing identity (see Phase E recovery work).
-- **RelationshipCertificate** — issued during a mutual opt-in *friend request*
+- **RelationshipCertificate**: issued during a mutual opt-in *friend request*
   handshake; authorizes DM capability between two identities. Federation invites
   (`/invite` + `/invite/accept`) exchange these across gateways.
-- **Device registry** — multiple devices can register under one identity
-  (multi-device UX is still maturing).
+- **Multi-device (delegation, not key-copying)**: a secondary device generates
+  its own Ed25519 keypair and receives a `DeviceCertificate` signed by the
+  primary (`device_cert.py`); the account private key never leaves the primary.
+  The gateway keeps a set of live sockets per identity, so several devices can be
+  online at once, and inbound messages fan out to each with per-device encryption.
 
 ---
 
@@ -84,20 +87,26 @@ deep link) that resolves to that address.
 1. **Client ↔ own gateway:** JSON commands over a WebSocket (`wss://…:7474` by
    default). The client only ever talks to *its own* gateway.
 2. **Gateway ↔ gateway:** cross-gateway delivery is an HTTP `POST /relay` to the
-   peer gateway (resolved from the recipient's address). Payloads are
-   **sealed-sender** — the relay/transit gateway learns routing only, never
-   plaintext or full metadata. `_validate_relay_target` guards against SSRF /
-   unsafe targets.
+   peer gateway (resolved from the recipient's address). Message **content** is
+   encrypted end to end, so no gateway on the path reads it in the clear. On the
+   direct path the recipient's *own* gateway sees the routing fields
+   (`from_webid`/`to_webid`) because it has to deliver to its user; those fields
+   are Ed25519-signed and bound to the sending gateway (R55) so a peer cannot
+   forge them. When delivery instead goes through a **managed middle relay**
+   (§3.3), the sender identity is additionally sealed for the recipient gateway
+   only (`sealed_relay.py`: X25519 + ChaCha20-Poly1305), so the middle node sees
+   the destination but not who sent it. `_validate_relay_target` guards against
+   SSRF / unsafe targets.
 3. **Reachability (the "it just works" layer):**
    - TLS auto-cert on first run (HTTPS UI ⇒ `wss` WS; the meta `x-gateway-url`
      scheme is reconciled to match).
    - **UPnP** auto-port-mapping (R33) so most home gateways are directly
      reachable.
    - **Managed sealed-relay fallback** (R38) for the ~40% of networks where UPnP
-     can't help — routes through a community relay node without exposing
+     can't help. Routes through a community relay node without exposing
      plaintext/metadata.
    - **TURN** credentials for WebRTC when symmetric NAT blocks direct media.
-4. **Mailbox** — messages to an offline peer gateway are queued and delivered on
+4. **Mailbox**: messages to an offline peer gateway are queued and delivered on
    reconnect (`_gateway_mailbox.py`).
 
 ---
@@ -137,9 +146,9 @@ classic metadata problem); content, reactions, and edits are encrypted.
 
 ## 6. Voice (WebRTC, mesh)
 
-- 1:1 and small-group (2–6) calls use **WebRTC**; signaling
+- 1:1 and small-group (2-6) calls use **WebRTC**; signaling
   (`voice_invite` / `voice_answer` / `ice_candidate`) rides the gateway/relay
-  channel — there is **no SFU** (out of scope by design; mesh is correct at this
+  channel, with **no SFU** (out of scope by design; mesh is correct at this
   scale).
 - ICE uses host/STUN candidates; **TURN** (ephemeral credentials) is the
   fallback under symmetric NAT.
@@ -155,7 +164,7 @@ classic metadata problem); content, reactions, and edits are encrypted.
 | Message / reaction text | E2E (Double Ratchet/AEAD)  | No                              |
 | Routing (who→who, when) | Sealed sender mitigates    | Limited routing/timing metadata |
 | Identity key (Ed25519)  | Local AgentState           | No (never transmitted)          |
-| Pod-stored history      | E2E at rest + Pod ACLs     | Only the user's own Pod host    |
+| Pod-stored history      | Owner-only Pod ACLs (open typed RDF, not encrypted at rest) | Only the user's own Pod host |
 
 Hardening present elsewhere in the stack: SSRF/relay-target validation, trust
 pinning + revocation, per-endpoint HTTP rate limits and body-size caps, audit
@@ -171,10 +180,10 @@ logging. The heavyweight assurance subsystem is opt-in (R35).
 - **Optional Solid Pod backbone:** when connected (DPoP-authenticated CSS/ESS),
   the gateway write-through-mirrors history so the user can *never lose anything*
   and read from anywhere. This is positioned as an upgrade, **not a requirement**
-  — Proxion is fully functional with no Pod.
+. Proxion is fully functional with no Pod.
 - **Open, documented storage format:** what lands on the pod is plain typed
   JSON-LD under the `px:` (`https://proxion.dev/vocab/v1#`) vocabulary, readable
-  by any authorized Solid app — the end-to-end encryption is a transport property,
+  by any authorized Solid app. The end-to-end encryption is a transport property,
   not an at-rest lock-box. The full contract is
   [`docs/POD_DATA_MODEL.md`](POD_DATA_MODEL.md).
 
