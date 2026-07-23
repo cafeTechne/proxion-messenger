@@ -10,6 +10,12 @@
 // become an injection path.
 
 import { t } from './i18n.js';
+import { b64attr } from './util.js';
+
+// Mirror the server's emoji mime allowlist client-side so this render path is
+// safe on its own, even if a future delivery route (pod, relay) ever supplied a
+// map the server had not validated.
+const _EMOJI_MIMES = new Set(['image/png', 'image/webp', 'image/gif']);
 import { downscaleImage } from './media-resize.js';
 
 export const EMOJI_NAME_RE = /^[a-z0-9_]{2,32}$/;
@@ -36,8 +42,9 @@ export function applyRoomEmoji(escapedHtml, emojiMap) {
     if (!escapedHtml || !emojiMap || !Object.keys(emojiMap).length) return escapedHtml;
     return escapedHtml.replace(/:([a-z0-9_]{2,32}):/g, (m, name) => {
         const e = emojiMap[name];
-        if (!e) return m;
-        return `<img class="custom-emoji" src="data:${e.mime};base64,${e.data_b64}" alt=":${name}:" title=":${name}:">`;
+        const _mime = (e && e.mime || '').toLowerCase();
+        if (!e || !_EMOJI_MIMES.has(_mime)) return m;
+        return `<img class="custom-emoji" src="data:${_mime};base64,${b64attr(e.data_b64)}" alt=":${name}:" title=":${name}:">`;
     });
 }
 

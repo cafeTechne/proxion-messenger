@@ -19,6 +19,14 @@ export function escHtml(str) {
         .replace(/'/g, '&#39;');
 }
 
+// Strip anything outside the base64 alphabet. Wire-supplied base64 (peer
+// avatars, voice notes) is interpolated into `src="data:...;base64,${x}"`
+// inside innerHTML strings; a stray double-quote there would break out of the
+// attribute and inject markup, so any such value MUST pass through here first.
+export function b64attr(x) {
+    return String(x == null ? '' : x).replace(/[^A-Za-z0-9+/=]/g, '');
+}
+
 export function formatTimestamp(ts) {
     if (!ts) return '';
     const d = new Date(typeof ts === 'number' ? ts * 1000 : ts);

@@ -1,8 +1,29 @@
 import { describe, it, expect } from 'vitest';
 import {
   didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown,
-  expireLabel, timeAgo, u8ToB64, b64ToU8,
+  expireLabel, timeAgo, u8ToB64, b64ToU8, b64attr,
 } from './util.js';
+
+describe('b64attr (attribute-injection guard)', () => {
+  it('keeps a valid base64 string intact', () => {
+    expect(b64attr('SGVsbG8gd29ybGQ=')).toBe('SGVsbG8gd29ybGQ=');
+    expect(b64attr('a+/9Z=')).toBe('a+/9Z=');
+  });
+  it('strips characters that could break out of a src attribute', () => {
+    // A malicious peer avatar/voice-note payload trying to inject markup.
+    // '=' and '/' and '+' are valid base64 and stay; the injection depends on
+    // '"', '<', '>' and spaces, which are all stripped, so no breakout remains.
+    expect(b64attr('AAAA" onerror="alert(1)')).toBe('AAAAonerror=alert1');
+    expect(b64attr('x"><img src=x onerror=alert(1)>')).toBe('ximgsrc=xonerror=alert1');
+    expect(b64attr('data" onload="evil')).not.toMatch(/["<>]/);
+    expect(b64attr('any" attack')).not.toMatch(/[\s"]/);   // no quote or whitespace survives
+  });
+  it('handles null/undefined/non-strings', () => {
+    expect(b64attr(null)).toBe('');
+    expect(b64attr(undefined)).toBe('');
+    expect(b64attr(123)).toBe('123');
+  });
+});
 
 describe('escHtml (XSS guard)', () => {
   it('escapes all dangerous characters', () => {

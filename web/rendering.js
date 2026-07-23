@@ -19,7 +19,7 @@
 //   renderWindow, scrollBatch,
 // })
 
-import { didSuffix, escHtml, webidColor, renderMarkdown, timeAgo, expireLabel as _expireLabel } from './util.js';
+import { didSuffix, escHtml, webidColor, renderMarkdown, timeAgo, expireLabel as _expireLabel, b64attr } from './util.js';
 import { parsePoll } from './polls.js';
 import { applyRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { t, getLocale } from './i18n.js';
@@ -270,7 +270,7 @@ export function createRendering({
                               presenceData.status === "busy" ? "busy" : "";
 
         const avatarBase = msg.from_avatar_b64
-            ? `<img src="data:image/png;base64,${msg.from_avatar_b64}" class="avatar" alt="" style="width:40px;height:40px;border-radius:50%;">`
+            ? `<img src="data:image/png;base64,${b64attr(msg.from_avatar_b64)}" class="avatar" alt="" style="width:40px;height:40px;border-radius:50%;">`
             : `<div class="avatar placeholder" style="background:${avatarColor};width:40px;height:40px;line-height:40px;font-size:16px;font-weight:bold;text-align:center;border-radius:50%;">${(name[0] || "?").toUpperCase()}</div>`;
         const presenceDot = `<div class="avatar-presence ${presenceClass}" title="${presenceData.status}" style="bottom:-1px;right:-1px;"></div>`;
         const avatarHtml = `<div style="position:relative;display:inline-block;cursor:pointer;" data-profile-avatar data-msg-action="profile" data-webid="${msg.from_webid}" data-name="${name.replace(/"/g,'&quot;')}">${avatarBase}${presenceDot}</div>`;
@@ -431,7 +431,7 @@ export function createRendering({
             const _durSecs = msg.duration_ms ? Math.round(msg.duration_ms / 1000) : 0;
             const dur = _durSecs ? `<span class="audio-duration">${_durSecs}s</span>` : "";
             const _audioLabel = escHtml(t('msg.voiceFrom', { name }) + (_durSecs ? t('msg.voiceDuration', { secs: _durSecs }) : ""));
-            body.innerHTML += `<div class="audio-message"><audio controls aria-label="${_audioLabel}" src="data:audio/webm;base64,${msg.audio_b64}"></audio>${dur}${receiptHtml}</div>`;
+            body.innerHTML += `<div class="audio-message"><audio controls aria-label="${_audioLabel}" src="data:audio/webm;base64,${b64attr(msg.audio_b64)}"></audio>${dur}${receiptHtml}</div>`;
         } else if (_poll) {
             // R59F: poll card — plain text on the wire, upgraded rendering here.
             // The tally IS the reaction row below (auto-seeded keycaps), so

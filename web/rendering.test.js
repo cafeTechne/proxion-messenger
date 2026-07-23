@@ -150,6 +150,32 @@ describe('renderMessage (buffer tracking)', () => {
   });
 });
 
+describe('avatar XSS hardening', () => {
+  it('sanitizes a malicious avatar_b64 so it cannot break out of the src attribute', () => {
+    els['message-feed'] = mkEl({ scrollHeight: 500, clientHeight: 500 }); // at-bottom
+    const created = [];
+    const orig = global.document.createElement;
+    global.document.createElement = () => { const el = mkEl(); created.push(el); return el; };
+    try {
+      const r = make();
+      r.renderMessage({
+        message_id: 'x1', thread_id: 'room-1', from_webid: 'did:key:zBob',
+        from_avatar_b64: 'AAAA" onerror="alert(document.cookie)',
+        content: 'hi', timestamp: new Date().toISOString(),
+      });
+      const html = created.map(e => e.innerHTML).join('');
+      // Avatar is still rendered as a data URL, but the attribute-breakout
+      // sequence (a quote closing src, then an onerror handler) is gone: the
+      // leftover "onerror" letters are inert base64 text inside the src value.
+      expect(html).toContain('src="data:image/png;base64,');
+      expect(html).not.toContain('" onerror');
+      expect(html).not.toContain('AAAA" onerror');
+    } finally {
+      global.document.createElement = orig;
+    }
+  });
+});
+
 describe('attachmentKind (R59A pure)', () => {
   it('classifies image, video, audio, and unknown mimes', async () => {
     const { attachmentKind } = await import('./rendering.js');
