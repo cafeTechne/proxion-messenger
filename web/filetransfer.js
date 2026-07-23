@@ -9,6 +9,13 @@ import { u8ToB64, b64ToU8 } from './util.js';
 
 const CHUNK_BYTES = 64 * 1024;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
+// Receive-side resource bounds. Offers are auto-accepted, so without these a
+// malicious or buggy contact could open many transfers (or start one and never
+// finish) and grow browser memory without limit. Cap concurrent incoming
+// transfers and reclaim any that goes idle. Worst-case buffered memory is then
+// MAX_CONCURRENT_INCOMING * MAX_FILE_BYTES.
+const MAX_CONCURRENT_INCOMING = 8;
+const TRANSFER_IDLE_TIMEOUT_MS = 60 * 1000;
 
 /**
  * @param {object} deps
@@ -48,6 +55,29 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
     function _clearTransferProgress(fileId) {
         const el = document.getElementById("xfer-" + fileId);
         if (el) el.remove();
+    }
+    // Free an incoming transfer's buffered chunks, idle timer, and progress UI.
+    function _dropIncoming(fileId) {
+        const rec = _incomingFiles[fileId];
+        if (!rec) return;
+        if (rec._idleTimer) { clearTimeout(rec._idleTimer); rec._idleTimer = null; }
+        delete _incomingFiles[fileId];
+        _clearTransferProgress(fileId);
+    }
+    // (Re)arm the idle watchdog. If no new chunk arrives within the window the
+    // transfer is treated as abandoned and its memory is reclaimed, so a peer
+    // that offers a file and then stalls cannot pin buffered chunks forever.
+    function _armIdleTimeout(fileId) {
+        const rec = _incomingFiles[fileId];
+        if (!rec) return;
+        if (rec._idleTimer) clearTimeout(rec._idleTimer);
+        rec._idleTimer = setTimeout(() => {
+            if (!_incomingFiles[fileId]) return;
+            showToast(t('file.transferFailed', {
+                filename: rec.meta.filename, received: rec.received, total: rec.total,
+            }), "error");
+            _dropIncoming(fileId);
+        }, TRANSFER_IDLE_TIMEOUT_MS);
     }
 
     async function sendFileChunked(file, toWebid) {
@@ -90,11 +120,19 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
             sendCmd("file_reject", { to_webid: event.from_webid, file_id: event.file_id, reason: "bad_offer" });
             return;
         }
+        // Cap concurrent transfers. Offers auto-accept, so this stops a peer from
+        // opening many at once to exhaust memory; existing ones free on
+        // completion or via the idle watchdog below.
+        if (Object.keys(_incomingFiles).length >= MAX_CONCURRENT_INCOMING) {
+            sendCmd("file_reject", { to_webid: event.from_webid, file_id: event.file_id, reason: "busy" });
+            return;
+        }
         _incomingFiles[event.file_id] = {
             meta: { filename: event.filename, mime_type: event.mime_type, size: event.size_bytes },
             chunks: new Array(event.total_chunks), received: 0, total: event.total_chunks,
             fromWebid: event.from_webid,
         };
+        _armIdleTimeout(event.file_id);
         sendCmd("file_accept", { to_webid: event.from_webid, file_id: event.file_id });
         showToast(`Receiving ${event.filename}…`);
     }
@@ -113,12 +151,14 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         if (rec.chunks[seq] === undefined) {
             rec.chunks[seq] = event.data;
             rec.received++;
+            _armIdleTimeout(event.file_id);   // fresh chunk = still active
             _showTransferProgress(event.file_id, rec.meta.filename, Math.round((rec.received / rec.total) * 100), "Receiving");
         }
     }
     function handleFileComplete(event) {
         const rec = _incomingFiles[event.file_id];
         if (!rec) return;
+        if (rec._idleTimer) { clearTimeout(rec._idleTimer); rec._idleTimer = null; }
         _clearTransferProgress(event.file_id);
         // Verify every chunk actually arrived. Without this, a dropped or
         // never-delivered chunk is silently filled with empty bytes below,
@@ -165,9 +205,11 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
     }
 
     return {
-        MAX_FILE_BYTES,
+        MAX_FILE_BYTES, MAX_CONCURRENT_INCOMING, TRANSFER_IDLE_TIMEOUT_MS,
         sendFileChunked,
         handleFileOffer, handleFileChunk, handleFileComplete,
         handleFileAccept, handleFileReject, handleFileUnreachable,
+        // Exposed for tests: how many incoming transfers are buffered right now.
+        _incomingCount: () => Object.keys(_incomingFiles).length,
     };
 }

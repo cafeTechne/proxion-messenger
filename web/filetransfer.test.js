@@ -125,6 +125,61 @@ describe('handleFileChunk + handleFileComplete reassembly', () => {
   });
 });
 
+describe('receive-side resource bounds', () => {
+  function offer(ft, id, chunks = 1) {
+    ft.handleFileOffer({ file_id: id, from_webid: 'did:x', filename: id, mime_type: 'x', size_bytes: 10, total_chunks: chunks });
+  }
+
+  it('caps concurrent incoming transfers and rejects the overflow', () => {
+    const { ft, calls } = makeFT();
+    for (let i = 0; i < ft.MAX_CONCURRENT_INCOMING; i++) offer(ft, 'f' + i);
+    expect(ft._incomingCount()).toBe(ft.MAX_CONCURRENT_INCOMING);
+    calls.length = 0;
+    offer(ft, 'overflow');
+    expect(calls[0].cmd).toBe('file_reject');
+    expect(calls[0].payload.reason).toBe('busy');
+    expect(ft._incomingCount()).toBe(ft.MAX_CONCURRENT_INCOMING); // not stored
+  });
+
+  it('a completed transfer frees its slot', () => {
+    const { ft } = makeFT();
+    offer(ft, 'done', 1);
+    ft.handleFileChunk({ file_id: 'done', seq: 0, data: btoa('z') });
+    ft.handleFileComplete({ file_id: 'done' });
+    expect(ft._incomingCount()).toBe(0);
+  });
+
+  it('reclaims an abandoned transfer after the idle timeout', () => {
+    vi.useFakeTimers();
+    try {
+      const { ft } = makeFT();
+      offer(ft, 'stall', 3);
+      ft.handleFileChunk({ file_id: 'stall', seq: 0, data: btoa('a') });
+      expect(ft._incomingCount()).toBe(1);
+      vi.advanceTimersByTime(ft.TRANSFER_IDLE_TIMEOUT_MS + 1);
+      expect(ft._incomingCount()).toBe(0); // buffered chunks freed
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a chunk resets the idle timer (active transfer is not reclaimed)', () => {
+    vi.useFakeTimers();
+    try {
+      const { ft } = makeFT();
+      offer(ft, 'active', 3);
+      const half = Math.floor(ft.TRANSFER_IDLE_TIMEOUT_MS * 0.75);
+      ft.handleFileChunk({ file_id: 'active', seq: 0, data: btoa('a') });
+      vi.advanceTimersByTime(half);
+      ft.handleFileChunk({ file_id: 'active', seq: 1, data: btoa('b') });  // activity
+      vi.advanceTimersByTime(half);                                        // past original deadline
+      expect(ft._incomingCount()).toBe(1);                                 // still alive
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('accept/reject settle the send handshake', () => {
   it('handleFileAccept resolves so chunks can flow', async () => {
     const { ft, calls } = makeFT();
