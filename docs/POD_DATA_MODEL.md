@@ -88,6 +88,40 @@ Everything lives under a single container, `{pod}/proxion/`:
 Identifiers (`roomId`, `threadId`, `messageId`, `certId`) match
 `^[\w-]{1,128}$`. Timestamps are ISO 8601 strings.
 
+## Interoperability with the Solid chat ecosystem
+
+Other Solid chat apps (the [SolidOS](https://solidos.org/) databrowser's Long
+Chat, POD-CHAT) share one vocabulary, so they can read each other's chats. Room
+messages written by Proxion carry those same standard terms **in addition to**
+the `px:` ones, in the same JSON-LD graph, so another Solid app can read a
+Proxion room without understanding anything Proxion-specific:
+
+| Standard term | Namespace | Carries |
+|---|---|---|
+| `sioc:content` | `http://rdfs.org/sioc/ns#` | the message text |
+| `foaf:maker` | `http://xmlns.com/foaf/0.1/` | the author, as an IRI (WebID) |
+| `dct:created` | `http://purl.org/dc/terms/` | the send time, as `xsd:dateTime` |
+
+Nothing is lost by this: apps that do not understand `px:` ignore it, and Proxion
+keeps using `px:` for the things the shared vocabulary has no term for
+(reactions, forwarding, content-type nuance, cached reply snippets).
+
+**Rooms interoperate; direct messages deliberately do not.** This split is the
+honest consequence of end-to-end encryption. You cannot have bytes that a
+third-party app can read *and* that no third party can read. Rooms are shared by
+design, so their history is plaintext and open. DMs are end-to-end encrypted, so
+they stay `px:`-only and are not third-party readable, on purpose.
+
+A pod-less identity is a `did:key`, which is a valid IRI but is not
+dereferenceable, so other apps will show the identifier rather than a name. That
+is the expected limit of interop for users who have not connected a pod.
+
+Not yet mapped: replies and threads (`sioc:has_reply`, `sioc:Thread`), edits
+(`dct:isReplacedBy`) and deletes (`schema:dateDeleted`). Long Chat models replies
+on the parent message while Proxion models them on the child, so that mapping is
+being prototyped against a real SolidOS thread rather than guessed. Those remain
+`px:`-only until it is verified.
+
 ## Resource types
 
 ### px:Message

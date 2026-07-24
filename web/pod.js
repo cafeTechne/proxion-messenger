@@ -255,30 +255,70 @@ export async function podWriteMessageJsonLd(threadId, messageId, msg, isRoom = t
     if (!root || !solidSession.info.isLoggedIn) return;
     const dir = isRoom ? `rooms/${threadId}` : `dm/${threadId}`;
     const uri = `${root}proxion/${dir}/messages/${messageId}.jsonld`;
+    const timestamp = msg.timestamp || new Date().toISOString();
+    const doc = {
+        '@context': { px: 'https://proxion.dev/vocab/v1#' },
+        '@type': 'px:Message',
+        '@id': uri,
+        'px:messageId': messageId,
+        'px:threadId': threadId,
+        'px:content': msg.content || '',
+        'px:contentType': msg.content_type || 'text',
+        'px:fromWebid': msg.from_webid || '',
+        'px:fromName': msg.from_display_name || '',
+        'px:timestamp': timestamp,
+        'px:replyToId': msg.reply_to_id || null,
+        'px:replyToSnippet': msg.reply_to_snippet || null,
+        'px:forwarded': msg.forwarded || false,
+        'px:forwardedFromName': msg.forwarded_from_name || null,
+    };
+    if (isRoom) applyLongChatTerms(doc, msg, timestamp);
     try {
         await solidSession.fetch(uri, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/ld+json' },
-            body: JSON.stringify({
-                '@context': { px: 'https://proxion.dev/vocab/v1#' },
-                '@type': 'px:Message',
-                '@id': uri,
-                'px:messageId': messageId,
-                'px:threadId': threadId,
-                'px:content': msg.content || '',
-                'px:contentType': msg.content_type || 'text',
-                'px:fromWebid': msg.from_webid || '',
-                'px:fromName': msg.from_display_name || '',
-                'px:timestamp': msg.timestamp || new Date().toISOString(),
-                'px:replyToId': msg.reply_to_id || null,
-                'px:replyToSnippet': msg.reply_to_snippet || null,
-                'px:forwarded': msg.forwarded || false,
-                'px:forwardedFromName': msg.forwarded_from_name || null,
-            }),
+            body: JSON.stringify(doc),
         });
     } catch (err) {
         console.warn('[pod] podWriteMessageJsonLd failed:', err);
     }
+}
+
+// Namespaces used by the Solid chat ecosystem (SolidOS Long Chat, POD-CHAT).
+export const LONGCHAT_CONTEXT = Object.freeze({
+    sioc: 'http://rdfs.org/sioc/ns#',
+    dct: 'http://purl.org/dc/terms/',
+    foaf: 'http://xmlns.com/foaf/0.1/',
+});
+const XSD_DATETIME = 'http://www.w3.org/2001/XMLSchema#dateTime';
+
+/**
+ * Add the standard Solid chat vocabulary to a room message, alongside the px:
+ * terms, so other Solid apps (SolidOS databrowser, POD-CHAT) can read it.
+ *
+ * ROOMS ONLY, on purpose. Rooms are shared by design, so their history is
+ * plaintext and interoperable. Direct messages are end-to-end encrypted, and you
+ * cannot have bytes that a third-party app can read AND that no third party can
+ * read, so DMs stay px:-only and deliberately non-interoperable.
+ *
+ * Scope note (PLAN_ROUND_67 Phase A): only the three mandatory per-message terms
+ * are emitted. Replies/threads (sioc:has_reply, sioc:Thread), edits
+ * (dct:isReplacedBy) and deletes (schema:dateDeleted) are intentionally NOT
+ * mapped yet. Long Chat models replies on the parent and Proxion models them on
+ * the child, so that mapping has to be prototyped against a real SolidOS thread
+ * rather than guessed. Those stay px:-only until then.
+ */
+export function applyLongChatTerms(doc, msg, timestamp) {
+    Object.assign(doc['@context'], LONGCHAT_CONTEXT);
+    doc['sioc:content'] = msg.content || '';
+    doc['dct:created'] = { '@value': timestamp, '@type': XSD_DATETIME };
+    // foaf:maker must be an IRI, not a literal. A pod-connected user's WebID is
+    // an http(s) IRI; a pod-less identity is a did:key, which is a valid IRI but
+    // is not dereferenceable, so other apps will show the id rather than a name.
+    // That is the expected limit of interop for users without a pod.
+    const maker = msg.from_webid || '';
+    if (maker) doc['foaf:maker'] = { '@id': maker };
+    return doc;
 }
 
 export async function podDeleteMessage(threadId, messageId, isRoom = true) {
