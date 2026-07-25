@@ -122,6 +122,46 @@ on the parent message while Proxion models them on the child, so that mapping is
 being prototyped against a real SolidOS thread rather than guessed. Those remain
 `px:`-only until it is verified.
 
+### The Long Chat container layout
+
+Carrying the right terms is not enough for another app to *open* a Proxion room;
+the layout has to match too. So each room is additionally written in the standard
+Long Chat shape, next to the `px:` archive:
+
+```
+proxion/rooms/{roomId}/index.ttl              <#this> a meeting:LongChat
+proxion/rooms/{roomId}/YYYY/MM/DD/chat.ttl    that day's messages
+```
+
+A day file links each message to the channel and then describes it:
+
+```turtle
+<../../../index.ttl#this> meeting:message :m-abc123 .
+
+:m-abc123
+    dct:created "2026-07-22T14:03:11.000Z"^^xsd:dateTime;
+    sioc:content "Morning, everyone";
+    foaf:maker <https://alice.pod.example/profile/card#me>.
+```
+
+Details worth stating because they are easy to get wrong:
+
+- The linking predicate is **`meeting:message`**, not `wf:message`. The spec
+  declares a `wf:` prefix for other purposes.
+- The channel title uses Dublin Core **Elements** (`dc:`), while message
+  timestamps use Dublin Core **Terms** (`dct:`). Different namespaces.
+- Day partitioning uses the message's **UTC** date, as the spec requires.
+- Messages are appended with a SPARQL-Update `PATCH`, not read-modify-write, so
+  two devices writing the same day do not clobber each other.
+
+Reading goes the other way: Proxion requests these resources as JSON-LD via
+content negotiation, so it can display a chat written by SolidOS or POD-CHAT
+without shipping an RDF parser to the browser.
+
+The `px:` per-message JSON-LD documents described below are still written and
+remain the canonical Proxion copy; the Long Chat layout is the interoperable
+view of the same conversation.
+
 ## Resource types
 
 ### px:Message

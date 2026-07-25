@@ -13,7 +13,10 @@ vi.mock('./auth.js', () => ({
     podStorageRoot: () => _root,
 }));
 
-import { podWriteMessageJsonLd, applyLongChatTerms, LONGCHAT_CONTEXT } from './pod.js';
+import {
+    podWriteMessageJsonLd, applyLongChatTerms, LONGCHAT_CONTEXT,
+    podWriteLongChatMessage, podReadLongChatDay,
+} from './pod.js';
 
 const ROOT = 'https://alice.pod.example/';
 const ALICE = 'https://alice.pod.example/profile/card#me';
@@ -36,8 +39,18 @@ const MSG = {
     timestamp: '2026-07-22T14:03:11.000Z',
 };
 
+// Room writes now make several requests (the px: JSON-LD PUT, plus the Long
+// Chat index + day-file PATCH), so target the JSON-LD message document rather
+// than assuming it is the last call.
 function lastBody() {
-    return JSON.parse(_calls[_calls.length - 1].body);
+    const call = [..._calls].reverse().find(
+        c => c.method === 'PUT' && String(c.url).endsWith('.jsonld')
+    );
+    if (!call) throw new Error('no JSON-LD message PUT was made');
+    return JSON.parse(call.body);
+}
+function callsTo(pred) {
+    return _calls.filter(pred);
 }
 
 beforeEach(() => {
@@ -124,6 +137,106 @@ describe('applyLongChatTerms (pure)', () => {
     it('exports the namespace map it applies', () => {
         expect(LONGCHAT_CONTEXT.sioc).toBe('http://rdfs.org/sioc/ns#');
         expect(Object.isFrozen(LONGCHAT_CONTEXT)).toBe(true);
+    });
+});
+
+// ── Phase B: the Long Chat container layout ─────────────────────────────────
+
+describe('Long Chat container layout (Phase B)', () => {
+    it('writes the channel index and appends the message to its UTC day file', async () => {
+        await podWriteLongChatMessage('general', 'm-b1', MSG);
+
+        const patch = callsTo(c => c.method === 'PATCH')[0];
+        expect(patch).toBeTruthy();
+        // Date partition comes from the message's UTC date, per the spec.
+        expect(patch.url).toBe(`${ROOT}proxion/rooms/general/2026/07/22/chat.ttl`);
+
+        // The link predicate is meeting:message, not wf:message.
+        expect(patch.body).toContain('<http://www.w3.org/ns/pim/meeting#message>');
+        expect(patch.body).toContain('<http://rdfs.org/sioc/ns#content>');
+        expect(patch.body).toContain('<http://purl.org/dc/terms/created>');
+        expect(patch.body).toContain('<http://xmlns.com/foaf/0.1/maker>');
+        // Channel is the subject of the link triple.
+        expect(patch.body).toContain(`<${ROOT}proxion/rooms/general/index.ttl#this>`);
+        expect(patch.body.startsWith('INSERT DATA {')).toBe(true);
+    });
+
+    it('creates the channel index as meeting:LongChat when absent', async () => {
+        _session.fetch = vi.fn(async (url, opts = {}) => {
+            _calls.push({ url, method: opts.method || 'GET', body: opts.body });
+            // Report the index as missing so the writer creates it.
+            if ((opts.method || 'GET') === 'HEAD') return { ok: false, status: 404 };
+            return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
+        });
+        await podWriteLongChatMessage('general', 'm-b2', MSG);
+        const put = callsTo(c => c.method === 'PUT' && String(c.url).endsWith('index.ttl'))[0];
+        expect(put).toBeTruthy();
+        expect(put.body).toContain('a meeting:LongChat');
+        expect(put.body).toContain('http://www.w3.org/ns/pim/meeting#');
+        // Titles use Dublin Core ELEMENTS, not TERMS.
+        expect(put.body).toContain('http://purl.org/dc/elements/1.1/');
+    });
+
+    it('a room message write also produces the Long Chat layout', async () => {
+        await podWriteMessageJsonLd('general', 'm-b3', MSG, true);
+        expect(callsTo(c => c.method === 'PATCH').length).toBe(1);
+        expect(lastBody()['sioc:content']).toBe('Morning, everyone');   // px: doc still written
+    });
+
+    it('a DM write produces no Long Chat layout at all', async () => {
+        await podWriteMessageJsonLd('thread-1', 'm-b4', MSG, false);
+        expect(callsTo(c => c.method === 'PATCH')).toHaveLength(0);
+        expect(callsTo(c => String(c.url).includes('index.ttl'))).toHaveLength(0);
+    });
+});
+
+// ── Phase C: reading a Long Chat back ───────────────────────────────────────
+
+describe('reading a Long Chat (Phase C)', () => {
+    // Shaped like expanded JSON-LD from a Solid server, as SolidOS would write.
+    const DAY_DOC = [
+        {
+            '@id': `${ROOT}proxion/rooms/general/2026/07/22/chat.ttl#msg1`,
+            'http://rdfs.org/sioc/ns#content': [{ '@value': 'from SolidOS' }],
+            'http://purl.org/dc/terms/created': [
+                { '@value': '2026-07-22T10:00:00Z', '@type': 'http://www.w3.org/2001/XMLSchema#dateTime' },
+            ],
+            'http://xmlns.com/foaf/0.1/maker': [{ '@id': ALICE }],
+        },
+        {
+            '@id': `${ROOT}proxion/rooms/general/index.ttl#this`,
+            'http://www.w3.org/ns/pim/meeting#message': [
+                { '@id': `${ROOT}proxion/rooms/general/2026/07/22/chat.ttl#msg1` },
+            ],
+        },
+    ];
+
+    it('parses a foreign (SolidOS-written) day file into Proxion messages', async () => {
+        _session.fetch = vi.fn(async (url, opts = {}) => {
+            _calls.push({ url, method: opts.method || 'GET', body: opts.body });
+            return { ok: true, status: 200, json: async () => DAY_DOC };
+        });
+        const msgs = await podReadLongChatDay('general', '2026-07-22T00:00:00Z');
+        expect(msgs).toHaveLength(1);          // the channel node is not a message
+        expect(msgs[0].content).toBe('from SolidOS');
+        expect(msgs[0].from_webid).toBe(ALICE);
+        expect(msgs[0].message_id).toBe('msg1');
+        expect(msgs[0].thread_id).toBe('general');
+    });
+
+    it('requests JSON-LD so no RDF parser is needed in the browser', async () => {
+        let accept = null;
+        _session.fetch = vi.fn(async (url, opts = {}) => {
+            accept = (opts.headers || {}).Accept;
+            return { ok: true, status: 200, json: async () => [] };
+        });
+        await podReadLongChatDay('general', '2026-07-22T00:00:00Z');
+        expect(accept).toBe('application/ld+json');
+    });
+
+    it('returns an empty list rather than throwing when the day has no file', async () => {
+        _session.fetch = vi.fn(async () => ({ ok: false, status: 404 }));
+        await expect(podReadLongChatDay('general', '2026-07-22T00:00:00Z')).resolves.toEqual([]);
     });
 });
 

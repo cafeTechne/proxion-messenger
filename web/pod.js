@@ -1,4 +1,9 @@
 import { solidSession, podStorageRoot } from './auth.js';
+import {
+    chatRootUrl, indexUrlAt, channelIriAt, dayFileAt, messageIriAt,
+    buildIndexTurtle, buildAppendPatch, buildChatAcl,
+    parseLongChatJsonLd, mergeLongChatMessages,
+} from './longchat.js';
 
 const SAFE_ID_RE = /^[\w-]{1,128}$/;
 
@@ -198,7 +203,11 @@ export async function ensureProxionContainer() {
         await solidSession.fetch(`${uri}.acl`, {
             method: 'PUT',
             headers: { 'Content-Type': 'text/turtle' },
-            body: `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n<#owner> a acl:Authorization;\n    acl:agent <${solidSession.info.webId}>;\n    acl:accessTo <${uri}>;\n    acl:defaultForNew <${uri}>;\n    acl:mode acl:Read, acl:Write, acl:Control.`,
+            // acl:default, NOT acl:defaultForNew. The latter is a deprecated
+            // predicate that current servers ignore, which grants access to this
+            // container but to nothing inside it, so every subsequent write under
+            // proxion/ fails with 403. Verified against CSS 7.1.9.
+            body: `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n<#owner> a acl:Authorization;\n    acl:agent <${solidSession.info.webId}>;\n    acl:accessTo <${uri}>;\n    acl:default <${uri}>;\n    acl:mode acl:Read, acl:Write, acl:Control.`,
         });
     } catch (err) {
         console.warn('[pod] ensureProxionContainer failed:', err);
@@ -282,6 +291,247 @@ export async function podWriteMessageJsonLd(threadId, messageId, msg, isRoom = t
     } catch (err) {
         console.warn('[pod] podWriteMessageJsonLd failed:', err);
     }
+    // Rooms are additionally written in the Long Chat container layout so other
+    // Solid apps can open them. Best-effort: a pod that rejects PATCH must not
+    // break the px: archive above, which stays the canonical Proxion copy.
+    if (isRoom) {
+        await podWriteLongChatMessage(threadId, messageId, { ...msg, timestamp });
+    }
+}
+
+// ── Long Chat layout (PLAN_ROUND_67 phases B and C) ──────────────────────────
+
+/** Create a chat channel resource if it is not there yet. Idempotent. */
+async function ensureChatIndexAt(containerUrl, title) {
+    const url = indexUrlAt(containerUrl);
+    try {
+        const head = await solidSession.fetch(url, { method: 'HEAD' });
+        if (head && head.ok) return true;
+    } catch { /* treat as missing and try to create it */ }
+    try {
+        const res = await solidSession.fetch(url, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'text/turtle' },
+            body: buildIndexTurtle(title || 'Proxion room'),
+        });
+        return !!(res && res.ok);
+    } catch (err) {
+        console.warn('[pod] ensureChatIndexAt failed:', err);
+        return false;
+    }
+}
+
+/**
+ * Append one message to a chat at an ARBITRARY container URL. This is the
+ * cross-app primitive: the container may be in our own pod OR in a friend's pod
+ * we have write access to. Appends via SPARQL-Update PATCH the way SolidOS does,
+ * so two people writing the same UTC day do not clobber each other. Verified
+ * against a live pod with a second identity posting to another user's chat.
+ */
+export async function podWriteChatMessageAt(containerUrl, messageId, msg) {
+    if (!containerUrl || !solidSession?.info?.isLoggedIn) return false;
+    const timestamp = msg.timestamp || new Date().toISOString();
+    await ensureChatIndexAt(containerUrl, msg.room_name);
+    const body = buildAppendPatch({
+        channelIri: channelIriAt(containerUrl),
+        messageIri: messageIriAt(containerUrl, messageId, timestamp),
+        content: msg.content || '',
+        createdIso: timestamp,
+        makerIri: msg.from_webid || '',
+    });
+    try {
+        const res = await solidSession.fetch(dayFileAt(containerUrl, timestamp), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/sparql-update' },
+            body,
+        });
+        return !!(res && res.ok);
+    } catch (err) {
+        console.warn('[pod] podWriteChatMessageAt failed:', err);
+        return false;
+    }
+}
+
+/**
+ * Read one UTC day of a chat at an arbitrary container URL. Requested as JSON-LD
+ * via content negotiation (every Solid server supports it), so no RDF parser has
+ * to ship to the browser. Reads chats written by SolidOS and POD-CHAT too.
+ */
+export async function podReadChatDayAt(containerUrl, date, threadId = '') {
+    if (!containerUrl || !solidSession?.info?.isLoggedIn) return [];
+    try {
+        const res = await solidSession.fetch(dayFileAt(containerUrl, date), {
+            headers: { Accept: 'application/ld+json' },
+        });
+        if (!res || !res.ok) return [];
+        return parseLongChatJsonLd(await res.json(), threadId);
+    } catch (err) {
+        console.warn('[pod] podReadChatDayAt failed:', err);
+        return [];
+    }
+}
+
+/**
+ * Grant a set of participants the ability to POST to a chat we host, by writing
+ * the container ACL (owner control + participants read/write/append). This is
+ * what turns "a chat in my pod" into "a conversation others can take part in".
+ */
+export async function podGrantChatParticipants(containerUrl, ownerWebId, participantWebIds) {
+    if (!containerUrl || !solidSession?.info?.isLoggedIn) return false;
+    try {
+        const res = await solidSession.fetch(containerUrl + '.acl', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'text/turtle' },
+            body: buildChatAcl(ownerWebId, participantWebIds, containerUrl),
+        });
+        return !!(res && res.ok);
+    } catch (err) {
+        console.warn('[pod] podGrantChatParticipants failed:', err);
+        return false;
+    }
+}
+
+// ── Self-pod wrappers (a chat WE host under proxion/rooms/{roomId}/) ──────────
+
+export function podWriteLongChatMessage(roomId, messageId, msg) {
+    const root = podStorageRoot();
+    if (!root) return Promise.resolve(false);
+    return podWriteChatMessageAt(chatRootUrl(root, roomId), messageId, msg);
+}
+
+export function podReadLongChatDay(roomId, date) {
+    const root = podStorageRoot();
+    if (!root) return Promise.resolve([]);
+    return podReadChatDayAt(chatRootUrl(root, roomId), date, roomId);
+}
+
+/**
+ * Read the last `days` UTC days of a Long Chat, oldest first.
+ *
+ * Walking back a bounded window is deliberate: enumerating every YYYY/MM/DD
+ * container to find all history would be a request storm on a long-lived chat.
+ * A caller wanting more history pages further back by raising `days`.
+ */
+export async function podReadChatRecentAt(containerUrl, days = 7, threadId = '') {
+    const out = [];
+    const seen = new Set();
+    const today = Date.now();
+    for (let i = Math.max(0, days - 1); i >= 0; i--) {
+        const when = new Date(today - i * 86400000);
+        for (const m of await podReadChatDayAt(containerUrl, when, threadId)) {
+            if (m.message_id && seen.has(m.message_id)) continue;
+            if (m.message_id) seen.add(m.message_id);
+            out.push(m);
+        }
+    }
+    return out;
+}
+
+export function podReadLongChatRecent(roomId, days = 7) {
+    const root = podStorageRoot();
+    if (!root) return Promise.resolve([]);
+    return podReadChatRecentAt(chatRootUrl(root, roomId), days, roomId);
+}
+
+// ── Pod-as-source-of-truth, first step (PLAN_ROUND_67 Phase D) ───────────────
+
+export { mergeLongChatMessages } from './longchat.js';
+
+/**
+ * Hydrate a room's history from its pod Long Chat and merge it with whatever is
+ * held locally. This is the read half of "the pod is the source of truth": it
+ * makes history written by another device, or by another Solid app entirely,
+ * appear in Proxion.
+ *
+ * It deliberately does NOT demote the local store to a cache yet. Doing that
+ * means write-through ordering, offline behaviour and conflict resolution, and
+ * PLAN_ROUND_67 gates that on the format first being proven against a live pod.
+ * So this returns a merged list for a caller to use, and changes nothing on its
+ * own.
+ */
+export async function podHydrateRoom(roomId, { days = 7, local = [] } = {}) {
+    const fromPod = await podReadLongChatRecent(roomId, days);
+    return mergeLongChatMessages(local, fromPod);
+}
+
+// ── Solid social graph (contact import) ──────────────────────────────────────
+//
+// Reading who a Solid user knows so you can start a conversation with them. Uses
+// the standard terms every Solid app writes, so it works on contacts made in
+// SolidOS / POD-CHAT / any Solid app, not just Proxion.
+
+const _FOAF_KNOWS = 'http://xmlns.com/foaf/0.1/knows';
+const _FOAF_NAME = 'http://xmlns.com/foaf/0.1/name';
+const _VCARD_FN = 'http://www.w3.org/2006/vcard/ns#fn';
+
+function _jsonldNodes(json) {
+    if (!json) return [];
+    if (Array.isArray(json)) return json;
+    if (Array.isArray(json['@graph'])) return json['@graph'];
+    return [json];
+}
+function _idsOf(node, predicate) {
+    const raw = node[predicate];
+    if (!raw) return [];
+    const arr = Array.isArray(raw) ? raw : [raw];
+    return arr
+        .map(v => (v && typeof v === 'object') ? v['@id'] : (typeof v === 'string' ? v : null))
+        .filter(id => id && /^https?:\/\//.test(id));
+}
+
+/**
+ * The WebIDs a Solid user lists as `foaf:knows` in their profile. Defaults to
+ * our own profile. These are people you can invite to a conversation.
+ */
+export async function podReadKnownWebIds(profileUrl) {
+    const url = profileUrl || (solidSession?.info?.webId);
+    if (!url || !solidSession?.info?.isLoggedIn) return [];
+    try {
+        const res = await solidSession.fetch(url, { headers: { Accept: 'application/ld+json' } });
+        if (!res || !res.ok) return [];
+        const json = await res.json();
+        const out = new Set();
+        for (const node of _jsonldNodes(json)) {
+            for (const id of _idsOf(node, _FOAF_KNOWS)) out.add(id);
+        }
+        return [...out];
+    } catch (err) {
+        console.warn('[pod] podReadKnownWebIds failed:', err);
+        return [];
+    }
+}
+
+/** A human name for a WebID, from `foaf:name` or `vcard:fn`, or '' if none. */
+export async function podResolveWebIdName(webid) {
+    if (!webid || !solidSession?.info?.isLoggedIn) return '';
+    try {
+        const res = await solidSession.fetch(webid, { headers: { Accept: 'application/ld+json' } });
+        if (!res || !res.ok) return '';
+        const json = await res.json();
+        for (const node of _jsonldNodes(json)) {
+            for (const p of [_FOAF_NAME, _VCARD_FN]) {
+                const raw = node[p];
+                if (!raw) continue;
+                const v = Array.isArray(raw) ? raw[0] : raw;
+                const name = (v && typeof v === 'object' && '@value' in v) ? v['@value']
+                    : (typeof v === 'string' ? v : '');
+                if (name) return String(name);
+            }
+        }
+        return '';
+    } catch (err) {
+        console.warn('[pod] podResolveWebIdName failed:', err);
+        return '';
+    }
+}
+
+/** Known WebIDs paired with a resolved display name (name may be ''). */
+export async function podImportContacts(profileUrl) {
+    const webids = await podReadKnownWebIds(profileUrl);
+    const named = await Promise.all(webids.map(async (webid) => ({
+        webid, name: await podResolveWebIdName(webid),
+    })));
+    return named;
 }
 
 // Namespaces used by the Solid chat ecosystem (SolidOS Long Chat, POD-CHAT).
