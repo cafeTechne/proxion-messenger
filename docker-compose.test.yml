@@ -2,17 +2,29 @@ version: "3.9"
 # Two isolated CSS instances for integration tests.
 # Started automatically by the test fixture; can also be run manually:
 #   docker compose -f docker-compose.test.yml up -d
+#
+# The port is deliberately the SAME inside and outside the container, and
+# CSS_BASE_URL matches it. Both halves are required:
+#   * CSS derives its identifier space from CSS_BASE_URL, so a mismatch makes
+#     every request fail with "outside the configured identifier space".
+#   * CSS dereferences a token's WebID over HTTP to verify it. If the container
+#     listens on a different port than the base URL advertises, that lookup
+#     resolves to nothing inside the container, the WebID "could not be
+#     dereferenced", and every authenticated request is silently downgraded to
+#     anonymous and 401s.
 services:
   css-alice:
     image: solidproject/community-server:latest
     ports:
-      - "3001:3000"
+      - "3001:3001"
     volumes:
       - css-alice-data:/data
     environment:
       CSS_CONFIG: "@css:config/file.json"
+      CSS_BASE_URL: "http://localhost:3001/"
+      CSS_PORT: "3001"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/"]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -20,13 +32,15 @@ services:
   css-bob:
     image: solidproject/community-server:latest
     ports:
-      - "3002:3000"
+      - "3002:3002"
     volumes:
       - css-bob-data:/data
     environment:
       CSS_CONFIG: "@css:config/file.json"
+      CSS_BASE_URL: "http://localhost:3002/"
+      CSS_PORT: "3002"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:3002/"]
       interval: 5s
       timeout: 3s
       retries: 12
