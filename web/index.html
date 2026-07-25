@@ -349,6 +349,25 @@
         /* F3: consistent inline empty/loading/error notice for lists & popovers */
         .state-msg { color: var(--text-secondary); text-align: center; padding: 12px 8px; font-size: 0.9em; margin: 0; }
         .state-msg.state-error { color: var(--color-danger-soft); }
+        /* Solid conversations (cross-app shared chats) */
+        #solidchat-list { list-style: none; margin: 0; padding: 0; }
+        .solidchat-item { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+            width: 100%; text-align: left; background: transparent; border: none; color: inherit;
+            cursor: pointer; padding: 6px 8px; border-radius: 4px; font: inherit; }
+        .solidchat-item:hover, .solidchat-item:focus-visible { background: var(--slate-800, #1e293b); }
+        .solidchat-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .solidchat-item-role { font-size: 0.68em; color: var(--text-secondary, #94a3b8); flex-shrink: 0; }
+        .solidchat-empty { list-style: none; padding: 6px 8px; font-size: 0.8em; color: var(--text-secondary, #94a3b8); }
+        .solidchat-badge { font-size: 0.66em; text-transform: uppercase; letter-spacing: 0.04em;
+            background: var(--slate-700, #334155); color: var(--slate-200, #e2e8f0);
+            padding: 2px 7px; border-radius: 10px; flex-shrink: 0; }
+        .solidchat-msg { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; max-width: 78%; }
+        .solidchat-msg.mine { margin-left: auto; align-items: flex-end; }
+        .solidchat-author { font-size: 0.72em; color: var(--text-secondary, #94a3b8); }
+        .solidchat-body { background: var(--slate-800, #1e293b); padding: 7px 11px; border-radius: 10px;
+            white-space: pre-wrap; word-break: break-word; }
+        .solidchat-msg.mine .solidchat-body { background: var(--accent, #d61f52); color: #fff; }
+
         /* G3/G4: actionable empty-state CTA in the sidebar lists */
         .sidebar-empty { list-style: none; padding: 8px 4px 12px; text-align: center; }
         .sidebar-empty .state-msg { padding: 4px 8px; }
@@ -849,6 +868,13 @@
                     </div>
                     <ul id="dm-list"></ul>
                 </section>
+                <section id="solidchat-section">
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <h2 style="margin:0;" data-i18n="sidebar.solidChats">Solid Chats</h2>
+                        <button id="solidchat-new-btn" aria-label="New Solid conversation" title="New Solid conversation" data-i18n-attr="title:solidchat.new;aria-label:solidchat.new" style="background:transparent;border:none;color:var(--text-secondary,var(--text-secondary));cursor:pointer;padding:2px 6px;line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
+                    </div>
+                    <ul id="solidchat-list"></ul>
+                </section>
             </nav>
             <!-- Voice widget — shown only during a call -->
             <div id="voice-widget" style="display:none;flex-direction:column;padding:10px 12px;border-top:1px solid var(--border);background:#0d1b2e;flex-shrink:0;">
@@ -868,6 +894,23 @@
         </aside>
 
         <main style="flex:1; display:flex; flex-direction:column; overflow:hidden; position:relative;">
+            <!-- Solid conversation view: overlays the normal feed when a shared
+                 Solid chat is open. Distinct from E2E DMs and rooms, plaintext. -->
+            <section id="solidchat-panel" aria-label="Solid conversation" data-i18n-attr="aria-label:solidchat.conversation"
+                     style="display:none;position:absolute;inset:0;z-index:20;background:var(--bg,#0d1b2a);flex-direction:column;">
+              <header style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border,#1d4ed8);flex-shrink:0;">
+                <button id="solidchat-back-btn" aria-label="Back" title="Back" data-i18n-attr="aria-label:ui.back;title:ui.back" style="background:transparent;border:none;color:inherit;cursor:pointer;line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="22" height="22" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5"/></svg></button>
+                <h2 id="solidchat-title" style="flex:1;margin:0;font-size:1em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Conversation</h2>
+                <span class="solidchat-badge" title="Shared plaintext, not end-to-end encrypted" data-i18n-attr="title:solidchat.plaintextHint" data-i18n="solidchat.plaintext">Plaintext</span>
+              </header>
+              <div id="solidchat-feed" role="log" aria-label="Solid conversation messages" aria-live="polite" aria-relevant="additions" data-i18n-attr="aria-label:solidchat.messages" style="flex:1;overflow-y:auto;padding:12px 14px;"></div>
+              <form id="solidchat-form" style="display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--border,#1d4ed8);flex-shrink:0;">
+                <label for="solidchat-input" class="sr-only" data-i18n="label.message">Message</label>
+                <textarea id="solidchat-input" dir="auto" rows="1" placeholder="Type a message…" data-i18n-attr="placeholder:ui.typeMessage" autocomplete="off" style="flex:1;resize:none;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:inherit;border-radius:6px;padding:8px 10px;"></textarea>
+                <button type="submit" data-i18n="btn.send" style="background:var(--accent,#d61f52);border:none;color:#fff;padding:0 16px;border-radius:6px;cursor:pointer;">Send</button>
+              </form>
+            </section>
+
             <div id="conn-banner">Reconnecting…</div>
             <div id="pod-connect-banner"
                  style="display:none; background:#1e3a5f; color:#93c5fd;
@@ -1362,6 +1405,26 @@
     </div>
 
     <!-- Keyboard shortcut help modal -->
+    <div id="solidchat-dialog" role="dialog" aria-modal="true" aria-label="New Solid conversation" data-i18n-attr="aria-label:solidchat.new" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1000; align-items:center; justify-content:center;">
+      <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:8px; padding:22px; min-width:340px; max-width:460px;">
+        <h3 style="margin:0 0 6px; color:var(--text-primary,var(--slate-50))" data-i18n="solidchat.new">New Solid conversation</h3>
+        <p style="margin:0 0 16px; font-size:0.82em; color:var(--text-secondary,var(--slate-400))" data-i18n="solidchat.newHint">Talk to anyone with a Solid pod, in any Solid chat app. These messages are shared plaintext, not end-to-end encrypted.</p>
+        <label for="solidchat-host-title" style="display:block;font-size:0.8em;margin-bottom:4px;color:var(--text-secondary,var(--slate-400))" data-i18n="solidchat.hostLabel">Host a new conversation</label>
+        <div style="display:flex;gap:8px;margin-bottom:16px;">
+          <input id="solidchat-host-title" type="text" placeholder="Conversation name" data-i18n-attr="placeholder:solidchat.namePlaceholder" style="flex:1;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:8px 10px;">
+          <button id="solidchat-host-submit" type="button" data-i18n="solidchat.host" style="background:var(--accent,#d61f52);border:none;color:#fff;padding:0 14px;border-radius:6px;cursor:pointer;">Host</button>
+        </div>
+        <label for="solidchat-join-url" style="display:block;font-size:0.8em;margin-bottom:4px;color:var(--text-secondary,var(--slate-400))" data-i18n="solidchat.joinLabel">Join with a link</label>
+        <div style="display:flex;gap:8px;margin-bottom:16px;">
+          <input id="solidchat-join-url" type="url" inputmode="url" placeholder="https://…/chat/" data-i18n-attr="placeholder:solidchat.linkPlaceholder" style="flex:1;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:8px 10px;">
+          <button id="solidchat-join-submit" type="button" data-i18n="solidchat.join" style="background:var(--slate-700,#334155);border:none;color:#fff;padding:0 14px;border-radius:6px;cursor:pointer;">Join</button>
+        </div>
+        <div style="text-align:right;">
+          <button id="solidchat-dialog-close" type="button" data-i18n="btn.cancel" style="background:transparent;border:1px solid var(--slate-600,#475569);color:var(--text-secondary,var(--slate-400));padding:6px 14px;border-radius:4px;cursor:pointer;">Cancel</button>
+        </div>
+      </div>
+    </div>
+
     <div id="shortcut-modal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1000; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.keyboardShortcuts">
       <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:8px; padding:24px; min-width:360px; max-width:500px;">
         <h3 style="margin:0 0 16px; color:var(--text-primary,var(--slate-50))" data-i18n="kbd.title">Keyboard Shortcuts</h3>

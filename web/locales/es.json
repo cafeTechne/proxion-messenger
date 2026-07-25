@@ -472,5 +472,20 @@
   "contact.removeUnavailable": "No se pudo eliminar este contacto.",
   "send.notDelivered": "No enviado",
   "send.retry": "Reintentar",
-  "file.notConnected": "Sin conexión: reconéctate e intenta enviar el archivo de nuevo."
+  "file.notConnected": "Sin conexión: reconéctate e intenta enviar el archivo de nuevo.",
+  "ui.back": "Atrás",
+  "ui.typeMessage": "Escribe un mensaje…",
+  "sidebar.solidChats": "Chats de Solid",
+  "solidchat.new": "Nueva conversación de Solid",
+  "solidchat.conversation": "Conversación de Solid",
+  "solidchat.plaintext": "Texto plano",
+  "solidchat.plaintextHint": "Texto plano compartido, sin cifrado de extremo a extremo",
+  "solidchat.messages": "Mensajes de la conversación de Solid",
+  "solidchat.newHint": "Habla con cualquier persona que tenga un pod de Solid, en cualquier app de chat de Solid. Estos mensajes son texto plano compartido, sin cifrado de extremo a extremo.",
+  "solidchat.hostLabel": "Crear una conversación",
+  "solidchat.namePlaceholder": "Nombre de la conversación",
+  "solidchat.host": "Crear",
+  "solidchat.joinLabel": "Unirse con un enlace",
+  "solidchat.linkPlaceholder": "https://…/chat/",
+  "solidchat.join": "Unirse"
 }

@@ -472,5 +472,20 @@
   "contact.removeUnavailable": "Could not remove this contact.",
   "send.notDelivered": "Not delivered",
   "send.retry": "Retry",
-  "file.notConnected": "Not connected — reconnect and try sending the file again."
+  "file.notConnected": "Not connected — reconnect and try sending the file again.",
+  "ui.back": "Back",
+  "ui.typeMessage": "Type a message…",
+  "sidebar.solidChats": "Solid Chats",
+  "solidchat.new": "New Solid conversation",
+  "solidchat.conversation": "Solid conversation",
+  "solidchat.plaintext": "Plaintext",
+  "solidchat.plaintextHint": "Shared plaintext, not end-to-end encrypted",
+  "solidchat.messages": "Solid conversation messages",
+  "solidchat.newHint": "Talk to anyone with a Solid pod, in any Solid chat app. These messages are shared plaintext, not end-to-end encrypted.",
+  "solidchat.hostLabel": "Host a new conversation",
+  "solidchat.namePlaceholder": "Conversation name",
+  "solidchat.host": "Host",
+  "solidchat.joinLabel": "Join with a link",
+  "solidchat.linkPlaceholder": "https://…/chat/",
+  "solidchat.join": "Join"
 }

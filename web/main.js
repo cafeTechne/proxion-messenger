@@ -52,6 +52,8 @@ import { needsDownscale, downscaleImage } from './media-resize.js';
 import { createEmoji } from './emoji.js';
 import { createSaved, syncSavedFromPod, pushAllSavedToPod } from './saved.js';
 import { createBlocks } from './blocks.js';
+import { createSolidChat } from './solidchat.js';
+import { createSolidChatUI } from './solidchat-ui.js';
 import { createSendStatus } from './send-status.js';
 import { createPolls } from './polls.js';
 import { createRoomEmoji, getRoomEmoji } from './room-emoji.js';
@@ -493,6 +495,62 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             getSocket: () => socket, showToast,
             onAfterChange: () => { blocks.renderBlockedList(); },
         });
+        // Solid conversations: cross-app shared chats (SolidOS / POD-CHAT). A
+        // distinct plaintext mode, separate from E2E DMs and gateway rooms.
+        const solidChat = createSolidChat({ showToast });
+        const solidChatUI = createSolidChatUI({
+            model: solidChat, showToast,
+            getMyWebId: () => (solidSession.info.isLoggedIn && solidSession.info.webId) || '',
+        });
+        setupSolidChatUI(solidChat, solidChatUI);
+        function _deriveConvTitle(url) {
+            try {
+                const parts = new URL(url).pathname.split('/').filter(Boolean);
+                return parts[parts.length - 1] || new URL(url).host;
+            } catch { return 'Conversation'; }
+        }
+        function setupSolidChatUI(model, ui) {
+            const $ = (id) => document.getElementById(id);
+            const panel = $('solidchat-panel');
+            const feed = $('solidchat-feed');
+            const dialog = $('solidchat-dialog');
+            let currentId = null;
+
+            const renderList = () => { const l = $('solidchat-list'); if (l) ui.renderList(l, openConversation); };
+            async function openConversation(id) {
+                currentId = id;
+                const conv = model.getConversation(id);
+                const titleEl = $('solidchat-title'); if (titleEl) titleEl.textContent = (conv && conv.title) || 'Conversation';
+                if (panel) panel.style.display = 'flex';
+                await ui.openConversation(id, feed);
+            }
+            function closePanel() { currentId = null; ui.close(); if (panel) panel.style.display = 'none'; }
+            function showDialog(show) {
+                if (dialog) dialog.style.display = show ? 'flex' : 'none';
+                if (show) { const h = $('solidchat-host-title'); if (h) h.value = ''; const u = $('solidchat-join-url'); if (u) u.value = ''; }
+            }
+
+            $('solidchat-new-btn')?.addEventListener('click', () => showDialog(true));
+            $('solidchat-dialog-close')?.addEventListener('click', () => showDialog(false));
+            $('solidchat-host-submit')?.addEventListener('click', async () => {
+                const title = ($('solidchat-host-title')?.value || '').trim() || 'Conversation';
+                const conv = await ui.host(title, []);
+                if (conv) { showDialog(false); renderList(); openConversation(conv.id); }
+            });
+            $('solidchat-join-submit')?.addEventListener('click', async () => {
+                const url = ($('solidchat-join-url')?.value || '').trim();
+                const conv = await ui.join(url, _deriveConvTitle(url));
+                if (conv) { showDialog(false); renderList(); openConversation(conv.id); }
+            });
+            $('solidchat-back-btn')?.addEventListener('click', closePanel);
+            $('solidchat-form')?.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const input = $('solidchat-input');
+                const text = input ? input.value : '';
+                if (currentId && text.trim()) { if (input) input.value = ''; await ui.send(currentId, text, feed); }
+            });
+            renderList();
+        }
         // Message editing: editingMsgId is cluster-owned (read by the Escape-key
         // handler via edit.state); messageMap stays host-owned, injected by ref.
         const edit = createEdit({
