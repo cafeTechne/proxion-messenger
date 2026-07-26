@@ -324,7 +324,6 @@
   "btn.continue": "Continue",
   "btn.show": "Show",
   "btn.testConnection": "Test connection",
-  "btn.continue2": "Continue →",
   "btn.chooseDifferentProvider": "← Choose a different provider",
   "btn.joinCode": "Join with Code",
   "btn.openProxion": "Open Proxion",
@@ -352,7 +351,6 @@
   "onboarding.enterCssAccount": "Enter your {url} account email and password.",
   "onboarding.fillAllFields": "Please fill in all fields.",
   "onboarding.testing": "Testing…",
-  "onboarding.connected": "Connected!",
   "onboarding.connectionFailed": "Connection failed.",
   "onboarding.cantConnect": "Couldn't connect. Is Proxion running?",
   "onboarding.testConnection": "Test connection",
@@ -487,5 +485,9 @@
   "solidchat.host": "Host",
   "solidchat.joinLabel": "Join with a link",
   "solidchat.linkPlaceholder": "https://…/chat/",
-  "solidchat.join": "Join"
+  "solidchat.join": "Join",
+  "onboarding.podStepIntro": "Your messages live on your own Solid Pod, a personal data store you control. Pick a provider and choose an email and password. If you are new, we create your pod for you. A pod is also what lets you chat with people on other Solid apps.",
+  "onboarding.signIn": "Sign in to your pod",
+  "onboarding.podReadySignIn": "Pod ready. Sign in to finish.",
+  "onboarding.signInFailed": "Could not start sign-in. Please try again."
 }

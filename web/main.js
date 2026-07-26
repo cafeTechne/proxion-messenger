@@ -455,7 +455,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         const {
             openSettingsToPod, obPodMode, showOnboarding, obGoto, obStep3, obStep2,
             finishOnboarding, obSkipPod, obSelectProvider, obPodTestConnection,
-            copyObInviteUrl, obStep4Create, obStep4Join,
+            obPodSignIn, copyObInviteUrl, obStep4Create, obStep4Join,
         } = createOnboarding({
             getSocket: () => socket, setPodBanner, showToast, showCopyModal, showConfirm,
         });
@@ -4119,7 +4119,10 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             });
             attachListener('#ob-pod-test-btn', 'click', obPodTestConnection);
             attachListener('#ob-pod-continue-btn', 'click', () => {
-                if (!document.getElementById('ob-pod-continue-btn').disabled) obGoto(5);
+                // After the pod is set up, "Continue" signs in via browser OIDC so
+                // the cross-app features actually work (redirects; wizard resumes at
+                // the room step on return). obPodSignIn owns the resume flag.
+                if (!document.getElementById('ob-pod-continue-btn').disabled) obPodSignIn();
             });
             attachListener('#ob-pod-pw-toggle', 'click', () => {
                 const pw = document.getElementById('ob-pod-password');
@@ -4597,6 +4600,16 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             const podWebId = await initSolidAuth();
             if (podWebId) await onPodLoggedIn(podWebId);
             else initPodSettingsPanel(); // re-sync now that auth state is known
+            // Returning from the in-wizard "Sign in to your pod" OIDC redirect: the
+            // page fully reloaded, so re-open onboarding at the room step to finish.
+            if (podWebId && localStorage.getItem('proxion_ob_resume')) {
+                const _step = parseInt(localStorage.getItem('proxion_ob_resume'), 10) || 5;
+                localStorage.removeItem('proxion_ob_resume');
+                if (!localStorage.getItem('proxion_wizard_done')) {
+                    showOnboarding();
+                    obGoto(_step);
+                }
+            }
             await generateOrLoadIdentity();
             // Keep a linked device's account identity; only fall back to the
             // device's own did when it is neither pod-backed nor account-linked.

@@ -8,6 +8,7 @@
 // the existing setupEventListeners wiring keeps working unchanged.
 import { t } from './i18n.js';
 import { podWriteProfile } from './pod.js';
+import { solidLogin } from './auth.js';
 
 export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyModal, showConfirm }) {
 
@@ -141,10 +142,17 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         cont.style.cursor = "not-allowed";
     }
 
+    // The chosen pod server URL: the custom input when "My own server" was
+    // picked, otherwise the selected provider. Trailing slash stripped.
+    function _obCssUrl() {
+        const raw = _obSelectedCssUrl === "custom"
+            ? (document.getElementById("ob-pod-css-url")?.value || "")
+            : _obSelectedCssUrl;
+        return raw.trim().replace(/\/$/, "");
+    }
+
     async function obPodTestConnection() {
-        const cssUrl = (_obSelectedCssUrl === "custom"
-            ? (document.getElementById("ob-pod-css-url")?.value || "").trim().rstrip?.("/") || (document.getElementById("ob-pod-css-url")?.value || "").trim().replace(/\/$/, "")
-            : _obSelectedCssUrl);
+        const cssUrl = _obCssUrl();
         const email = (document.getElementById("ob-pod-email")?.value || "").trim();
         const password = (document.getElementById("ob-pod-password")?.value || "");
         const statusEl = document.getElementById("ob-pod-status");
@@ -167,7 +175,10 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
             });
             const data = await resp.json();
             if (data.status === "ok") {
-                statusEl.textContent = '✓ ' + t('onboarding.connected');
+                // The pod now exists (created if the email was new) and the gateway
+                // is connected. The next step is a browser sign-in, which is what
+                // powers the cross-app features, so say so and enable that button.
+                statusEl.textContent = '✓ ' + t('onboarding.podReadySignIn');
                 statusEl.style.color = "#4ade80";
                 contBtn.disabled = false;
                 contBtn.style.opacity = "1";
@@ -186,6 +197,25 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         }
         testBtn.textContent = t('onboarding.testConnection');
         testBtn.disabled = false;
+    }
+
+    // Establish the BROWSER Solid session (OIDC) for the pod just set up. This is
+    // the session pod.js uses, so it is what actually lights up cross-app chat and
+    // Long Chat interop; the gateway connection alone does not. It redirects away
+    // to the pod's sign-in page, so mark the wizard to resume at the room step when
+    // the app reloads back logged in (handled in main.js's boot path).
+    function obPodSignIn() {
+        const cssUrl = _obCssUrl();
+        if (!cssUrl) return;
+        localStorage.setItem("proxion_ob_resume", "5");
+        Promise.resolve(solidLogin(cssUrl)).catch(() => {
+            localStorage.removeItem("proxion_ob_resume");
+            const statusEl = document.getElementById("ob-pod-status");
+            if (statusEl) {
+                statusEl.textContent = t('onboarding.signInFailed');
+                statusEl.style.color = "#f87171";
+            }
+        });
     }
 
     function copyObInviteUrl() {
@@ -224,6 +254,6 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
     return {
         openSettingsToPod, obPodMode, showOnboarding, obGoto, obStep3, obStep2,
         finishOnboarding, obSkipPod, obSelectProvider, obPodTestConnection,
-        copyObInviteUrl, obStep4Create, obStep4Join,
+        obPodSignIn, copyObInviteUrl, obStep4Create, obStep4Join,
     };
 }

@@ -308,7 +308,6 @@
   "btn.continue": "متابعة",
   "btn.show": "عرض",
   "btn.testConnection": "اختبار الاتصال",
-  "btn.continue2": "متابعة ←",
   "btn.chooseDifferentProvider": "→ اختيار مزود آخر",
   "btn.joinCode": "الانضمام برمز",
   "btn.openProxion": "فتح Proxion",
@@ -336,7 +335,6 @@
   "onboarding.enterCssAccount": "أدخل بريد حسابك في {url} وكلمة مروره.",
   "onboarding.fillAllFields": "يُرجى ملء كل الحقول.",
   "onboarding.testing": "جارٍ الاختبار…",
-  "onboarding.connected": "تم الاتصال!",
   "onboarding.connectionFailed": "فشل الاتصال.",
   "onboarding.cantConnect": "تعذّر الاتصال. هل Proxion قيد التشغيل؟",
   "onboarding.testConnection": "اختبار الاتصال",
@@ -500,5 +498,9 @@
   "solidchat.host": "استضافة",
   "solidchat.joinLabel": "الانضمام عبر رابط",
   "solidchat.linkPlaceholder": "https://…/chat/",
-  "solidchat.join": "انضمام"
+  "solidchat.join": "انضمام",
+  "onboarding.podStepIntro": "تُخزَّن رسائلك في Pod Solid الخاص بك، وهو مخزن بيانات شخصي تتحكم فيه. اختر مزوّدًا وأدخل بريدًا إلكترونيًا وكلمة مرور. إن كنت جديدًا، فسننشئ الـ pod الخاص بك. كما يتيح لك الـ pod الدردشة مع أشخاص على تطبيقات Solid أخرى.",
+  "onboarding.signIn": "تسجيل الدخول إلى الـ pod",
+  "onboarding.podReadySignIn": "الـ pod جاهز. سجّل الدخول للإنهاء.",
+  "onboarding.signInFailed": "تعذّر بدء تسجيل الدخول. حاول مرة أخرى."
 }

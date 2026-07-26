@@ -301,7 +301,6 @@
   "btn.continue": "Continuer",
   "btn.show": "Afficher",
   "btn.testConnection": "Tester la connexion",
-  "btn.continue2": "Continuer →",
   "btn.chooseDifferentProvider": "← Choisir un autre fournisseur",
   "btn.joinCode": "Rejoindre avec un code",
   "btn.openProxion": "Ouvrir Proxion",
@@ -329,7 +328,6 @@
   "onboarding.enterCssAccount": "Saisissez l'e-mail et le mot de passe de votre compte {url}.",
   "onboarding.fillAllFields": "Veuillez remplir tous les champs.",
   "onboarding.testing": "Test en cours…",
-  "onboarding.connected": "Connecté !",
   "onboarding.connectionFailed": "Échec de la connexion.",
   "onboarding.cantConnect": "Connexion impossible. Proxion est-il lancé ?",
   "onboarding.testConnection": "Tester la connexion",
@@ -487,5 +485,9 @@
   "solidchat.host": "Héberger",
   "solidchat.joinLabel": "Rejoindre avec un lien",
   "solidchat.linkPlaceholder": "https://…/chat/",
-  "solidchat.join": "Rejoindre"
+  "solidchat.join": "Rejoindre",
+  "onboarding.podStepIntro": "Vos messages vivent dans votre propre Pod Solid, un espace de données personnel que vous contrôlez. Choisissez un fournisseur, un e-mail et un mot de passe. Si vous êtes nouveau, nous créons votre pod. Un pod vous permet aussi de discuter avec des personnes sur d'autres applications Solid.",
+  "onboarding.signIn": "Se connecter à votre pod",
+  "onboarding.podReadySignIn": "Pod prêt. Connectez-vous pour terminer.",
+  "onboarding.signInFailed": "Impossible de démarrer la connexion. Veuillez réessayer."
 }

@@ -1480,9 +1480,10 @@
         <!-- Step 4: Connect Solid Pod (R16) -->
         <div id="ob-step-4" style="display:none">
           <h2 style="margin:0 0 6px;" data-i18n="heading.whereShouldDataLive">Where should your data live?</h2>
-          <p style="color:var(--text-secondary);font-size:0.88em;margin:0 0 16px;">
-            Your messages are stored on your own Solid Pod — a personal data store you control.
-            Pick a free provider or use your own server.
+          <p style="color:var(--text-secondary);font-size:0.88em;margin:0 0 16px;" data-i18n="onboarding.podStepIntro">
+            Your messages live on your own Solid Pod, a personal data store you control.
+            Pick a provider and choose an email and password. If you are new, we create your
+            pod for you. A pod is also what lets you chat with people on other Solid apps.
           </p>
 
           <!-- Provider selection cards -->
@@ -1538,8 +1539,8 @@
               </button>
               <button id="ob-pod-continue-btn" disabled
                       style="flex:1;padding:9px;background:var(--color-success);border:none;color:#fff;
-                             border-radius:4px;cursor:not-allowed;opacity:0.45;font-size:0.9em;" data-i18n="btn.continue2">
-                Continue →
+                             border-radius:4px;cursor:not-allowed;opacity:0.45;font-size:0.9em;" data-i18n="onboarding.signIn">
+                Sign in to your pod
               </button>
             </div>
             <button id="ob-pod-back-btn"
