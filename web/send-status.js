@@ -75,5 +75,33 @@ export function createSendStatus() {
         }
     }
 
-    return { track, confirm, fail };
+    // D2 (write-through): run a pod write and, if it fails, show a "not saved to
+    // your pod" note with a Retry that re-runs it. This is DISTINCT from delivery
+    // (.msg-pending / "Not delivered", which is the gateway echo): a message can be
+    // delivered to room members in real time yet not yet be durable in the pod. It
+    // stops the old silent swallow of a failed pod write. Returns the write result.
+    async function trackPodWrite(msgId, writeFn) {
+        if (!msgId || typeof writeFn !== 'function') return false;
+        let ok = false;
+        try { ok = await writeFn(); } catch (_) { ok = false; }
+        const el = _el(msgId);
+        if (!el) return ok;
+        el.querySelector('.msg-pod-note')?.remove();   // clear any prior failure note
+        if (ok) return true;
+        const note = document.createElement('span');
+        note.className = 'msg-pod-note';
+        const label = document.createElement('span');
+        label.textContent = t('send.notSavedToPod');
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'msg-retry-btn';
+        retry.textContent = t('send.retry');
+        retry.addEventListener('click', () => { note.remove(); trackPodWrite(msgId, writeFn); });
+        note.appendChild(label);
+        note.appendChild(retry);
+        (el.querySelector('.msg-content') || el).appendChild(note);
+        return false;
+    }
+
+    return { track, confirm, fail, trackPodWrite };
 }

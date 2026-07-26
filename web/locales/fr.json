@@ -489,5 +489,6 @@
   "onboarding.podStepIntro": "Vos messages vivent dans votre propre Pod Solid, un espace de données personnel que vous contrôlez. Choisissez un fournisseur, un e-mail et un mot de passe. Si vous êtes nouveau, nous créons votre pod. Un pod vous permet aussi de discuter avec des personnes sur d'autres applications Solid.",
   "onboarding.signIn": "Se connecter à votre pod",
   "onboarding.podReadySignIn": "Pod prêt. Connectez-vous pour terminer.",
-  "onboarding.signInFailed": "Impossible de démarrer la connexion. Veuillez réessayer."
+  "onboarding.signInFailed": "Impossible de démarrer la connexion. Veuillez réessayer.",
+  "send.notSavedToPod": "Non enregistré dans votre pod"
 }

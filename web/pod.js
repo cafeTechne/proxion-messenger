@@ -261,7 +261,7 @@ export async function podReadProfile() {
 
 export async function podWriteMessageJsonLd(threadId, messageId, msg, isRoom = true) {
     const root = podStorageRoot();
-    if (!root || !solidSession.info.isLoggedIn) return;
+    if (!root || !solidSession.info.isLoggedIn) return false;
     const dir = isRoom ? `rooms/${threadId}` : `dm/${threadId}`;
     const uri = `${root}proxion/${dir}/messages/${messageId}.jsonld`;
     const timestamp = msg.timestamp || new Date().toISOString();
@@ -282,21 +282,27 @@ export async function podWriteMessageJsonLd(threadId, messageId, msg, isRoom = t
         'px:forwardedFromName': msg.forwarded_from_name || null,
     };
     if (isRoom) applyLongChatTerms(doc, msg, timestamp);
+    // Report success (D2 write-through): the send path tracks this and surfaces a
+    // retry if the pod write does not land, instead of the old silent swallow.
+    let pxOk = false;
     try {
-        await solidSession.fetch(uri, {
+        const res = await solidSession.fetch(uri, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/ld+json' },
             body: JSON.stringify(doc),
         });
+        pxOk = !!(res && res.ok);
     } catch (err) {
         console.warn('[pod] podWriteMessageJsonLd failed:', err);
     }
     // Rooms are additionally written in the Long Chat container layout so other
-    // Solid apps can open them. Best-effort: a pod that rejects PATCH must not
-    // break the px: archive above, which stays the canonical Proxion copy.
+    // Solid apps can open them. For a room this IS the durable log, so its write
+    // counts toward "saved to the pod"; for a DM there is no Long Chat.
+    let lcOk = true;
     if (isRoom) {
-        await podWriteLongChatMessage(threadId, messageId, { ...msg, timestamp });
+        lcOk = await podWriteLongChatMessage(threadId, messageId, { ...msg, timestamp });
     }
+    return pxOk && lcOk;
 }
 
 // ── Long Chat layout (PLAN_ROUND_67 phases B and C) ──────────────────────────
@@ -495,7 +501,7 @@ export function podReadLongChatRecent(roomId, days = 7) {
 
 // ── Pod-as-source-of-truth, first step (PLAN_ROUND_67 Phase D) ───────────────
 
-export { mergeLongChatMessages } from './longchat.js';
+export { mergeLongChatMessages, reconcileRoomHistory } from './longchat.js';
 
 /**
  * Hydrate a room's history from its pod Long Chat and merge it with whatever is

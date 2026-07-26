@@ -311,6 +311,49 @@ export function mergeLongChatMessages(local = [], fromPod = []) {
     );
 }
 
+/**
+ * Reconcile a room's on-open history with the pod being AUTHORITATIVE for content
+ * (PLAN_ROUND_69 D1). The opposite of mergeLongChatMessages' local-wins: here the
+ * pod is the durable log, so for a message the pod has, the pod's content, deleted
+ * state and timestamp win; local-only richer fields (reactions, reply context,
+ * display name) are kept where the pod copy is blank. A local message the pod does
+ * NOT have yet (an in-flight or failed send) is overlaid on top. A tombstoned
+ * (schema:dateDeleted) message is dropped from the feed, which also removes a copy
+ * shown optimistically from a local cache. Result is timestamp-ordered.
+ *
+ * Safety: with an empty or unreadable pod list this returns the local list
+ * unchanged (every local message is "local-only"), so a pod outage never blanks a
+ * room. The caller decides whether to call this at all (both pod reads failing =>
+ * skip and keep local-first).
+ */
+export function reconcileRoomHistory(local = [], pod = []) {
+    const localById = new Map();
+    for (const m of local || []) if (m && m.message_id) localById.set(m.message_id, m);
+    const out = [];
+    const seen = new Set();
+    for (const p of pod || []) {
+        if (!p || !p.message_id || seen.has(p.message_id)) continue;
+        seen.add(p.message_id);            // mark seen even when deleted, so a local copy is dropped too
+        if (p.deleted) continue;           // tombstoned: reads as deleted, not shown
+        const l = localById.get(p.message_id);
+        // Pod wins for content/deleted/timestamp/author; keep local's extra fields
+        // (which the shared vocabulary has no term for) where the pod copy is blank.
+        out.push(l ? {
+            ...l,
+            content: p.content,
+            deleted: false,
+            timestamp: p.timestamp || l.timestamp,
+            from_webid: p.from_webid || l.from_webid,
+            from_display_name: p.from_display_name || l.from_display_name,
+        } : p);
+    }
+    for (const l of local || []) {
+        if (l && l.message_id && !seen.has(l.message_id)) out.push(l);
+    }
+    out.sort((a, b) => String(a.timestamp || '').localeCompare(String(b.timestamp || '')));
+    return out;
+}
+
 export function parseLongChatJsonLd(json, threadId = '') {
     const out = [];
     for (const node of nodesOf(json)) {

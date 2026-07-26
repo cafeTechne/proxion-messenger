@@ -18,7 +18,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podSyncEnabled, podWriteSettings, podReadSettings,
          podWriteMutes, podReadMutes, podReadBlocks,
          podReadLongChatRecent, podEditLongChatMessage,
-         podSoftDeleteLongChatMessage } from './pod.js';
+         podSoftDeleteLongChatMessage, reconcileRoomHistory } from './pod.js';
 import {
     didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, timeAgo,
     expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8,
@@ -2557,15 +2557,6 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
 
         // setPodSyncIndicator: moved to status-banners.js (createStatusBanners).
 
-        function _injectPodMessage(msg) {
-            if (!msg || !msg.message_id) return;
-            if (allMessages.find(m => m.message_id === msg.message_id)) return;
-            messageMap[msg.message_id] = msg;
-            allMessages.push(msg);
-            allMessages.sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || ""));
-            renderMessages();
-        }
-
         function loadRoomHistory(threadId, limit) {
             loadLocalHistory(threadId, limit);
             if (!solidSession.info.isLoggedIn) return;
@@ -2576,28 +2567,35 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             setPodSyncIndicator(true);
             // Two reads in parallel: the px: index (our own format) and the
             // standard Long Chat (what SolidOS / POD-CHAT write into the same
-            // container). A message we authored appears in both with the same id
-            // and dedups; a message another Solid app wrote has an id we have
-            // never seen, so it surfaces in the native feed. This is the visible
-            // half of the interop. allSettled so one read failing keeps the other.
+            // container). allSettled so one read failing keeps the other.
             Promise.allSettled([
                 podReadMessages(threadId),
                 podReadLongChatRecent(threadId),
             ])
                 .then((results) => {
                     setPodSyncIndicator(false);
-                    const known = new Set(allMessages.map(m => m.message_id));
+                    // D1: the pod is the durable log, so reconcile pod-authoritative
+                    // rather than merely injecting unknown ids. The pod becomes the
+                    // base list (its content/edits/deletes win, and foreign messages
+                    // from other Solid apps surface); local un-acked sends overlay on
+                    // top. If BOTH reads failed we keep the local-first render, so a
+                    // pod outage never blanks or reorders the room.
+                    let anyOk = false;
+                    const podMsgs = [];
                     for (const r of results) {
-                        if (r.status !== "fulfilled" || !Array.isArray(r.value)) continue;
-                        for (const m of r.value) {
-                            if (!m || !m.message_id || known.has(m.message_id)) continue;
-                            known.add(m.message_id);
-                            // A tombstoned (schema:dateDeleted) message reads as
-                            // deleted: do not surface its content in the feed.
-                            if (m.deleted) continue;
-                            _injectPodMessage(m);
+                        if (r.status === "fulfilled" && Array.isArray(r.value)) {
+                            anyOk = true;
+                            podMsgs.push(...r.value);
                         }
                     }
+                    if (!anyOk) return;
+                    // Only reconcile the room actually in view; a slow pod read that
+                    // resolves after the user switched rooms must not rewrite the feed.
+                    if (!activeView || activeView.id !== threadId) return;
+                    allMessages = reconcileRoomHistory(allMessages, podMsgs);
+                    Object.keys(messageMap).forEach(k => delete messageMap[k]);
+                    for (const m of allMessages) messageMap[m.message_id] = m;
+                    renderMessages();
                 })
                 .catch(() => setPodSyncIndicator(false));
         }
@@ -3146,21 +3144,28 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     podArchiveDmMessage(activeView.id, _dmRecord).catch(() => {});
                 }
 
-                if (activeView?.type === 'local_room') {
-                    podWriteMessageJsonLd(activeView.id, clientMsgId, {
+                if (activeView?.type === 'local_room' && solidSession.info.isLoggedIn) {
+                    const _roomId = activeView.id;
+                    const _podMsg = {
                         content: content,
                         from_webid: selfWebId,
                         from_display_name: localStorage.getItem('proxion_display_name') || '',
                         timestamp: new Date().toISOString(),
                         reply_to_id: replyingTo?.id || null,
-                    }, true).catch(err => console.warn('[pod] message write failed:', err));
-                    podWriteMessageWithIndex(activeView.id, {
+                    };
+                    // D2 write-through: the send is not durably done until the pod
+                    // write lands. Track it so a failure shows a "not saved to your
+                    // pod" retry instead of being swallowed. Retry re-runs the same
+                    // write (idempotent: same id, same day file).
+                    sendStatus.trackPodWrite(clientMsgId,
+                        () => podWriteMessageJsonLd(_roomId, clientMsgId, _podMsg, true));
+                    podWriteMessageWithIndex(_roomId, {
                         message_id: clientMsgId,
-                        room_id: activeView.id,
+                        room_id: _roomId,
                         from_webid: selfWebId,
                         display_name: localStorage.getItem('proxion_display_name') || '',
                         content: content,
-                        timestamp: new Date().toISOString(),
+                        timestamp: _podMsg.timestamp,
                     }).catch(() => {});
                 }
 

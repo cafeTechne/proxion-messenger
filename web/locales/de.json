@@ -489,5 +489,6 @@
   "onboarding.podStepIntro": "Deine Nachrichten liegen in deinem eigenen Solid-Pod, einem persönlichen Datenspeicher, den du kontrollierst. Wähle einen Anbieter sowie eine E-Mail und ein Passwort. Wenn du neu bist, erstellen wir deinen Pod. Ein Pod ermöglicht dir außerdem, mit Menschen in anderen Solid-Apps zu chatten.",
   "onboarding.signIn": "Bei deinem Pod anmelden",
   "onboarding.podReadySignIn": "Pod bereit. Melde dich an, um abzuschließen.",
-  "onboarding.signInFailed": "Anmeldung konnte nicht gestartet werden. Bitte versuche es erneut."
+  "onboarding.signInFailed": "Anmeldung konnte nicht gestartet werden. Bitte versuche es erneut.",
+  "send.notSavedToPod": "Nicht in deinem Pod gespeichert"
 }

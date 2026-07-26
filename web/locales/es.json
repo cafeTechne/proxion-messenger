@@ -489,5 +489,6 @@
   "onboarding.podStepIntro": "Tus mensajes viven en tu propio Pod de Solid, un almacén de datos personal que tú controlas. Elige un proveedor y un correo y una contraseña. Si eres nuevo, creamos tu pod. Un pod también te permite chatear con personas en otras apps de Solid.",
   "onboarding.signIn": "Inicia sesión en tu pod",
   "onboarding.podReadySignIn": "Pod listo. Inicia sesión para terminar.",
-  "onboarding.signInFailed": "No se pudo iniciar la sesión. Inténtalo de nuevo."
+  "onboarding.signInFailed": "No se pudo iniciar la sesión. Inténtalo de nuevo.",
+  "send.notSavedToPod": "No se guardó en tu pod"
 }

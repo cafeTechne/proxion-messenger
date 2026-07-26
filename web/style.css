@@ -221,6 +221,17 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
     padding: 1px 8px; cursor: pointer; font-size: 0.95em;
 }
 .msg-retry-btn:hover, .msg-retry-btn:focus-visible { background: rgba(248, 113, 113, 0.12); }
+/* D2: pod write-through failure. The message DID deliver to room members; it is
+   just not durable in the pod yet. Softer than delivery failure (amber, not red)
+   and a different glyph, so the two states are not confused. */
+.msg-pod-note {
+    display: inline-flex; align-items: center; gap: 8px;
+    margin-top: 4px; font-size: 0.78em; color: #f59e0b;
+}
+.msg-pod-note::before { content: "\2601"; }   /* ☁ */
+.msg-pod-note .msg-retry-btn { border-color: #f59e0b; color: #f59e0b; }
+.msg-pod-note .msg-retry-btn:hover,
+.msg-pod-note .msg-retry-btn:focus-visible { background: rgba(245, 158, 11, 0.12); }
 /* Voice speaking indicator (Phase J): green ring on the active speaker's pill. */
 #voice-channel-participants span { transition: box-shadow var(--transition-fast); }
 #voice-channel-participants span.vc-speaking { box-shadow: 0 0 0 2px var(--color-success-soft); }

@@ -502,5 +502,6 @@
   "onboarding.podStepIntro": "تُخزَّن رسائلك في Pod Solid الخاص بك، وهو مخزن بيانات شخصي تتحكم فيه. اختر مزوّدًا وأدخل بريدًا إلكترونيًا وكلمة مرور. إن كنت جديدًا، فسننشئ الـ pod الخاص بك. كما يتيح لك الـ pod الدردشة مع أشخاص على تطبيقات Solid أخرى.",
   "onboarding.signIn": "تسجيل الدخول إلى الـ pod",
   "onboarding.podReadySignIn": "الـ pod جاهز. سجّل الدخول للإنهاء.",
-  "onboarding.signInFailed": "تعذّر بدء تسجيل الدخول. حاول مرة أخرى."
+  "onboarding.signInFailed": "تعذّر بدء تسجيل الدخول. حاول مرة أخرى.",
+  "send.notSavedToPod": "لم يُحفَظ في الـ pod الخاص بك"
 }

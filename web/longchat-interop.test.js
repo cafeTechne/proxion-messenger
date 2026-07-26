@@ -98,6 +98,36 @@ describe('room messages carry the standard Long Chat vocabulary', () => {
     });
 });
 
+describe('podWriteMessageJsonLd reports success (D2 write-through)', () => {
+    it('returns true when the pod accepts the write', async () => {
+        const ok = await podWriteMessageJsonLd('general', 'm-ok', MSG, true);
+        expect(ok).toBe(true);
+    });
+
+    it('returns false when the px: message PUT is rejected', async () => {
+        _session.fetch = vi.fn(async (url, opts = {}) => {
+            _calls.push({ url, method: opts.method || 'GET', body: opts.body });
+            // The canonical per-message PUT is denied (e.g. 403); everything else ok.
+            if ((opts.method || 'GET') === 'PUT' && String(url).endsWith('.jsonld')) {
+                return { ok: false, status: 403 };
+            }
+            return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
+        });
+        const ok = await podWriteMessageJsonLd('general', 'm-bad', MSG, true);
+        expect(ok).toBe(false);
+    });
+
+    it('returns false for a room when the Long Chat PATCH is rejected', async () => {
+        _session.fetch = vi.fn(async (url, opts = {}) => {
+            _calls.push({ url, method: opts.method || 'GET', body: opts.body });
+            if ((opts.method || 'GET') === 'PATCH') return { ok: false, status: 409 };
+            return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
+        });
+        const ok = await podWriteMessageJsonLd('general', 'm-lc', MSG, true);
+        expect(ok).toBe(false);
+    });
+});
+
 describe('DMs stay px:-only (E2E cannot be third-party readable)', () => {
     it('does NOT emit Long Chat terms for a direct message', async () => {
         await podWriteMessageJsonLd('thread-1', 'm-dm', MSG, /* isRoom */ false);
