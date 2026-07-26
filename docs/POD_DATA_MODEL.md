@@ -116,11 +116,22 @@ A pod-less identity is a `did:key`, which is a valid IRI but is not
 dereferenceable, so other apps will show the identifier rather than a name. That
 is the expected limit of interop for users who have not connected a pod.
 
-Not yet mapped: replies and threads (`sioc:has_reply`, `sioc:Thread`), edits
-(`dct:isReplacedBy`) and deletes (`schema:dateDeleted`). Long Chat models replies
-on the parent message while Proxion models them on the child, so that mapping is
-being prototyped against a real SolidOS thread rather than guessed. Those remain
-`px:`-only until it is verified.
+**Edits and deletes** are reflected in the Long Chat too, both verified against
+the real SolidOS databrowser:
+
+- An **edit** rewrites the message's `sioc:content` in place (a SPARQL-Update
+  `DELETE`/`INSERT`/`WHERE` on the day file), so the latest text shows in any
+  reader of `sioc:content`. This is used in preference to a `dct:isReplacedBy`
+  replacement chain, whose rendering is reader-dependent; the `px:` layer keeps
+  full edit history.
+- A **delete** appends a `schema:dateDeleted` tombstone (`http://schema.org/`).
+  The message node stays so the append-only day file remains valid; the
+  databrowser hides a tombstoned message, and Proxion's reader blanks its content.
+
+Not yet mapped: replies and threads (`sioc:has_reply`, `sioc:Thread`). Long Chat
+models replies on the parent message while Proxion models them on the child, so
+that mapping is being prototyped against a real SolidOS thread rather than
+guessed. Those relations remain `px:`-only until verified.
 
 ### The Long Chat container layout
 
@@ -137,6 +148,7 @@ A day file links each message to the channel and then describes it:
 
 ```turtle
 <../../../index.ttl#this> meeting:message :m-abc123 .
+<../../../index.ttl#this> wf:message :m-abc123 .
 
 :m-abc123
     dct:created "2026-07-22T14:03:11.000Z"^^xsd:dateTime;
@@ -146,8 +158,11 @@ A day file links each message to the channel and then describes it:
 
 Details worth stating because they are easy to get wrong:
 
-- The linking predicate is **`meeting:message`**, not `wf:message`. The spec
-  declares a `wf:` prefix for other purposes.
+- **Both** linking predicates are emitted: `meeting:message` (the written spec
+  and POD-CHAT) and `wf:message` (`http://www.w3.org/2005/01/wf/flow#`). The
+  SolidOS databrowser enumerates a channel's messages with `wf:message`, so a
+  chat carrying only `meeting:message` is invisible in the reference app. This
+  was found by driving the real databrowser, not by reading the spec.
 - The channel title uses Dublin Core **Elements** (`dc:`), while message
   timestamps use Dublin Core **Terms** (`dct:`). Different namespaces.
 - Day partitioning uses the message's **UTC** date, as the spec requires.
