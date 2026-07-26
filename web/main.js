@@ -19,6 +19,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podWriteMutes, podReadMutes, podReadBlocks,
          podReadLongChatRecent, podEditLongChatMessage,
          podSoftDeleteLongChatMessage, reconcileRoomHistory } from './pod.js';
+import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
 import {
     didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, timeAgo,
     expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8,
@@ -3153,12 +3154,17 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                         timestamp: new Date().toISOString(),
                         reply_to_id: replyingTo?.id || null,
                     };
-                    // D2 write-through: the send is not durably done until the pod
-                    // write lands. Track it so a failure shows a "not saved to your
-                    // pod" retry instead of being swallowed. Retry re-runs the same
-                    // write (idempotent: same id, same day file).
-                    sendStatus.trackPodWrite(clientMsgId,
-                        () => podWriteMessageJsonLd(_roomId, clientMsgId, _podMsg, true));
+                    // D2 write-through + D3 durable queue: the send is not durably
+                    // done until the pod write lands. Track it (shows a "not saved to
+                    // your pod" retry on failure) and, if it fails, persist it to the
+                    // offline queue so a reload/offline does not lose it; it flushes
+                    // in order on reconnect. Remove on success (idempotent re-run).
+                    sendStatus.trackPodWrite(clientMsgId, async () => {
+                        const ok = await podWriteMessageJsonLd(_roomId, clientMsgId, _podMsg, true);
+                        if (ok) podQueueRemove(clientMsgId);
+                        else podQueueAdd({ message_id: clientMsgId, room_id: _roomId, msg: _podMsg });
+                        return ok;
+                    });
                     podWriteMessageWithIndex(_roomId, {
                         message_id: clientMsgId,
                         room_id: _roomId,
@@ -3675,6 +3681,18 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             }
         }
 
+        // D3: drain the durable offline queue of room pod writes, in send order,
+        // when the pod is reachable again (login, reconnect, or the browser coming
+        // back online). Each success clears that message's "not saved" note.
+        function flushPodQueue() {
+            if (!solidSession.info.isLoggedIn) return;
+            podQueueFlush(
+                (entry) => podWriteMessageJsonLd(entry.room_id, entry.message_id, entry.msg, true),
+                (id) => document.getElementById('msg-' + id)?.querySelector('.msg-pod-note')?.remove()
+            ).catch(() => {});
+        }
+        window.addEventListener('online', flushPodQueue);
+
         async function onPodLoggedIn(webId) {
             localStorage.setItem('proxion_pod_webid', webId);
             selfWebId = webId;
@@ -3713,6 +3731,8 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             }
             // Non-blocking pod sync — contacts, invites, and thread indexes
             syncFromPod().catch(() => {});
+            // D3: flush any room pod writes queued while offline / logged out.
+            flushPodQueue();
         }
 
         function initPodSettingsPanel() {
