@@ -52,6 +52,9 @@ export const P = Object.freeze({
     // Phase B: the two SAFE edit/delete terms. A soft-delete is a schema.org
     // dateDeleted tombstone (the message node stays; readers hide its content).
     dateDeleted: NS.schema + 'dateDeleted',
+    // D4: a per-message monotonic order hint (px:, ours only) so a user's devices
+    // agree on order despite client clock skew. Not part of the shared vocabulary.
+    seq: NS.px + 'seq',
 });
 
 // Characters that must never survive into a Turtle literal or IRI. Built from
@@ -163,7 +166,7 @@ export function buildIndexTurtle(title) {
  * SolidOS appends. Absolute IRIs throughout, so relative-reference resolution
  * inside a PATCH body cannot vary between servers.
  */
-export function buildAppendPatch({ channelIri, messageIri, content, createdIso, makerIri }) {
+export function buildAppendPatch({ channelIri, messageIri, content, createdIso, makerIri, seq }) {
     const triples = [
         // Both link predicates: wf:message for the SolidOS databrowser,
         // meeting:message for the written spec and POD-CHAT.
@@ -177,7 +180,38 @@ export function buildAppendPatch({ channelIri, messageIri, content, createdIso, 
     if (makerIri) {
         triples.push(`  ${iriRef(messageIri)} ${iriRef(P.maker)} ${iriRef(makerIri)} .`);
     }
+    // D4: a monotonic order hint (the gateway's server-clock time as epoch ms), so
+    // this device's messages order correctly against the SAME user's other devices
+    // regardless of client clock skew. Omitted when not known yet (set on echo).
+    if (Number.isFinite(seq)) {
+        triples.push(`  ${iriRef(messageIri)} ${iriRef(P.seq)} ${Math.trunc(seq)} .`);
+    }
     return `INSERT DATA {\n${triples.join('\n')}\n}\n`;
+}
+
+/**
+ * A SPARQL-Update body that adds the D4 order hint (px:seq) to an existing
+ * message. Used to stamp the server-assigned order onto a message that was
+ * written optimistically before the echo arrived. Idempotent in effect: writing
+ * the same triple twice is a no-op in RDF; a caller that re-stamps a different seq
+ * should DELETE first, but in practice the server order for a message is stable.
+ */
+export function buildSeqPatch({ messageIri, seq }) {
+    if (!Number.isFinite(seq)) return '';
+    return `INSERT DATA {\n  ${iriRef(messageIri)} ${iriRef(P.seq)} ${Math.trunc(seq)} .\n}\n`;
+}
+
+/**
+ * Order comparator for room history (D4). When BOTH messages carry a px:seq (the
+ * gateway's single-clock order), compare by it: that is the skew-free order every
+ * device agrees on. Otherwise fall back to timestamp, the existing behaviour, so a
+ * message without a seq yet still sorts sensibly.
+ */
+export function compareByOrder(a, b) {
+    const sa = a && Number.isFinite(a.seq) ? a.seq : null;
+    const sb = b && Number.isFinite(b.seq) ? b.seq : null;
+    if (sa !== null && sb !== null) return sa - sb;
+    return String((a && a.timestamp) || '').localeCompare(String((b && b.timestamp) || ''));
 }
 
 /**
@@ -345,12 +379,14 @@ export function reconcileRoomHistory(local = [], pod = []) {
             timestamp: p.timestamp || l.timestamp,
             from_webid: p.from_webid || l.from_webid,
             from_display_name: p.from_display_name || l.from_display_name,
+            // Pod's order hint wins when present (D4); keep the local one otherwise.
+            ...(Number.isFinite(p.seq) ? { seq: p.seq } : {}),
         } : p);
     }
     for (const l of local || []) {
         if (l && l.message_id && !seen.has(l.message_id)) out.push(l);
     }
-    out.sort((a, b) => String(a.timestamp || '').localeCompare(String(b.timestamp || '')));
+    out.sort(compareByOrder);   // D4: server order (px:seq) when known, else timestamp
     return out;
 }
 
@@ -365,6 +401,8 @@ export function parseLongChatJsonLd(json, threadId = '') {
         // (by us or another app). It reads as deleted with no content, never as
         // stale text; callers can drop it or show a tombstone.
         const deletedAt = firstLiteral(node, P.dateDeleted);
+        const seqRaw = firstLiteral(node, P.seq);
+        const seq = seqRaw == null ? undefined : Number(seqRaw);
         out.push({
             message_id: id.includes('#') ? id.slice(id.lastIndexOf('#') + 1) : id,
             thread_id: threadId,
@@ -373,12 +411,15 @@ export function parseLongChatJsonLd(json, threadId = '') {
             deleted_at: deletedAt || null,
             timestamp: firstLiteral(node, P.created) || null,
             from_webid: firstId(node, P.maker) || '',
+            // D4 order hint (ours). Absent on SolidOS / POD-CHAT messages; those
+            // fall back to timestamp order via compareByOrder.
+            ...(Number.isFinite(seq) ? { seq } : {}),
             // Extras only Proxion writes; absent on SolidOS / POD-CHAT messages.
             from_display_name: firstLiteral(node, NS.px + 'fromName') || '',
             content_type: firstLiteral(node, NS.px + 'contentType') || 'text',
             source: 'longchat',
         });
     }
-    out.sort((a, b) => String(a.timestamp || '').localeCompare(String(b.timestamp || '')));
+    out.sort(compareByOrder);
     return out;
 }

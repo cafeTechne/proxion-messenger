@@ -18,7 +18,8 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podSyncEnabled, podWriteSettings, podReadSettings,
          podWriteMutes, podReadMutes, podReadBlocks,
          podReadLongChatRecent, podEditLongChatMessage,
-         podSoftDeleteLongChatMessage, reconcileRoomHistory } from './pod.js';
+         podSoftDeleteLongChatMessage, podSetLongChatSeq,
+         reconcileRoomHistory } from './pod.js';
 import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
 import {
     didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, timeAgo,
@@ -1181,6 +1182,20 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     // mark it confirmed (clear the pending state). renderMessage below
                     // then dedups by message_id, so no duplicate is appended.
                     if (msg.message_id) sendStatus.confirm(msg.message_id);   // R66
+
+                    // D4: the echo carries the gateway's server-clock timestamp. Stamp
+                    // it as the pod order hint (px:seq) on OUR OWN room message, so this
+                    // user's other devices order it correctly despite client clock skew.
+                    // Rooms only, own messages only (each client mirrors its own sends
+                    // to its own pod); the write ran optimistically before this echo.
+                    if (solidSession.info.isLoggedIn && msg.message_id && msg.timestamp
+                        && (msg.source === "room" || msg.source === "local_room")
+                        && msg.from_webid && msg.from_webid === selfWebId) {
+                        const _seq = Date.parse(msg.timestamp);
+                        if (Number.isFinite(_seq)) {
+                            podSetLongChatSeq(id, msg.message_id, msg.timestamp, _seq).catch(() => {});
+                        }
+                    }
 
                     // Auto-add unknown relay sender to DM sidebar
                     if (msg.source === "relay" && !document.getElementById("nav-" + id)) {

@@ -1,7 +1,8 @@
 import { solidSession, podStorageRoot } from './auth.js';
 import {
     chatRootUrl, indexUrlAt, channelIriAt, dayFileAt, messageIriAt,
-    buildIndexTurtle, buildAppendPatch, buildEditPatch, buildDeletePatch, buildChatAcl,
+    buildIndexTurtle, buildAppendPatch, buildEditPatch, buildDeletePatch,
+    buildSeqPatch, buildChatAcl,
     parseLongChatJsonLd, mergeLongChatMessages,
 } from './longchat.js';
 
@@ -426,6 +427,30 @@ export async function podSoftDeleteChatMessageAt(containerUrl, messageId, date, 
 }
 
 /**
+ * Stamp the D4 order hint (px:seq) onto a message already in a chat's day file.
+ * Used on the gateway echo, once the server's single-clock order is known, so a
+ * user's devices agree on order despite client clock skew. `date` locates the day
+ * file; the server and client send times share a UTC day in all but the rare
+ * midnight-boundary case, where this simply no-ops and timestamp order stands.
+ */
+export async function podSetChatSeqAt(containerUrl, messageId, date, seq) {
+    if (!containerUrl || !solidSession?.info?.isLoggedIn || !Number.isFinite(seq)) return false;
+    const body = buildSeqPatch({ messageIri: messageIriAt(containerUrl, messageId, date), seq });
+    if (!body) return false;
+    try {
+        const res = await solidSession.fetch(dayFileAt(containerUrl, date), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/sparql-update' },
+            body,
+        });
+        return !!(res && res.ok);
+    } catch (err) {
+        console.warn('[pod] podSetChatSeqAt failed:', err);
+        return false;
+    }
+}
+
+/**
  * Grant a set of participants the ability to POST to a chat we host, by writing
  * the container ACL (owner control + participants read/write/append). This is
  * what turns "a chat in my pod" into "a conversation others can take part in".
@@ -469,6 +494,12 @@ export function podSoftDeleteLongChatMessage(roomId, messageId, date, deletedIso
     const root = podStorageRoot();
     if (!root) return Promise.resolve(false);
     return podSoftDeleteChatMessageAt(chatRootUrl(root, roomId), messageId, date, deletedIso);
+}
+
+export function podSetLongChatSeq(roomId, messageId, date, seq) {
+    const root = podStorageRoot();
+    if (!root) return Promise.resolve(false);
+    return podSetChatSeqAt(chatRootUrl(root, roomId), messageId, date, seq);
 }
 
 /**

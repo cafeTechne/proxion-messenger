@@ -26,8 +26,10 @@ vi.mock('./auth.js', () => ({
     podStorageRoot: () => _storageRoot,
 }));
 
-import { podWriteLongChatMessage, podReadLongChatRecent, ensureProxionContainer } from './pod.js';
-import { chatRootUrl, chatDayUrl, messageIriFor, dayPath, NS } from './longchat.js';
+import {
+    podWriteLongChatMessage, podReadLongChatRecent, podSetLongChatSeq, ensureProxionContainer,
+} from './pod.js';
+import { chatRootUrl, dayPath } from './longchat.js';
 
 const LIVE = !!process.env.TEST_CSS_CLIENT_ID;
 const DAY = new Date().toISOString().slice(0, 10);
@@ -55,20 +57,10 @@ beforeAll(async () => {
     await ensureProxionContainer();
 
     const me = webId();
-    // Two devices, one day file. Intended order A then B; clocks disagree.
+    // Two of the same user's devices, one day file. Intended order A then B, but A
+    // was written with the LATER client clock (skew), so dct:created order reverses.
     await podWriteLongChatMessage(ROOM, 'msgA', { content: 'A intended first', from_webid: me, timestamp: A_TIME });
     await podWriteLongChatMessage(ROOM, 'msgB', { content: 'B intended second', from_webid: me, timestamp: B_TIME });
-
-    // The remedy under test: a monotonic px:seq hint in the SAME day file, written
-    // the way D4's build would (A=1, B=2), independent of the clocks.
-    const day = chatDayUrl(_storageRoot, ROOM, A_TIME);   // A and B share the UTC day
-    const seqPatch = `INSERT DATA {\n` +
-        `  <${messageIriFor(_storageRoot, ROOM, 'msgA', A_TIME)}> <${NS.px}seq> 1 .\n` +
-        `  <${messageIriFor(_storageRoot, ROOM, 'msgB', B_TIME)}> <${NS.px}seq> 2 .\n}`;
-    const res = await _session.fetch(day, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/sparql-update' }, body: seqPatch,
-    });
-    if (!res.ok) throw new Error(`seq PATCH failed: ${res.status}`);
 }, 90000);
 
 afterAll(async () => {
@@ -83,31 +75,25 @@ afterAll(async () => {
     await _session.logout();
 }, 60000);
 
-describe.skipIf(!LIVE)('D4 prototype: multi-device ordering under clock skew', () => {
+describe.skipIf(!LIVE)('D4: multi-device ordering under clock skew, via the real path', () => {
     it('THE PROBLEM: timestamp order reverses the intended order under skew', async () => {
         const byTime = await podReadLongChatRecent(ROOM, WINDOW);
-        // podReadLongChatRecent orders by dct:created, so the behind-clock B sorts
-        // before A even though A was intended (and delivered) first. This is why
-        // pure timestamp order is not enough for multi-device.
+        // podReadLongChatRecent falls back to dct:created when no seq is present, so
+        // the behind-clock B sorts before A even though A was intended (and
+        // delivered) first. This is why pure timestamp order is not enough.
         expect(byTime.map(m => m.message_id)).toEqual(['msgB', 'msgA']);   // reversed vs intent
     }, 60000);
 
-    it('THE REMEDY: a monotonic px:seq recovers the intended order regardless of clocks', async () => {
-        // Read the raw day file and order by the seq hint instead of the clock.
-        const day = chatDayUrl(_storageRoot, ROOM, A_TIME);
-        const res = await _session.fetch(day, { headers: { Accept: 'application/ld+json' } });
-        const json = await res.json();
-        const nodes = Array.isArray(json) ? json : (json['@graph'] || [json]);
-        const seqOf = (node) => {
-            const v = node[`${NS.px}seq`];
-            const raw = Array.isArray(v) ? v[0] : v;
-            const n = raw && typeof raw === 'object' ? raw['@value'] : raw;
-            return n == null ? null : Number(n);
-        };
-        const withSeq = nodes
-            .filter(n => seqOf(n) != null)
-            .map(n => ({ id: String(n['@id']).split('#').pop(), seq: seqOf(n) }))
-            .sort((a, b) => a.seq - b.seq);
-        expect(withSeq.map(x => x.id)).toEqual(['msgA', 'msgB']);   // intended order recovered
+    it('THE REMEDY: stamping px:seq via the product path recovers the intended order', async () => {
+        // Exactly what the echo handler does: stamp the gateway's server-clock order
+        // (A earlier -> smaller seq, B later -> larger seq) through podSetLongChatSeq.
+        expect(await podSetLongChatSeq(ROOM, 'msgA', A_TIME, 1000)).toBe(true);
+        expect(await podSetLongChatSeq(ROOM, 'msgB', B_TIME, 2000)).toBe(true);
+
+        // Now the real read orders by seq (compareByOrder), regardless of the clocks.
+        const bySeq = await podReadLongChatRecent(ROOM, WINDOW);
+        expect(bySeq.map(m => m.message_id)).toEqual(['msgA', 'msgB']);   // intended order recovered
+        expect(bySeq.find(m => m.message_id === 'msgA').seq).toBe(1000);
+        expect(bySeq.find(m => m.message_id === 'msgB').seq).toBe(2000);
     }, 60000);
 });
