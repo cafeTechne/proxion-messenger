@@ -16,7 +16,8 @@ import { solidSession, podStorageRoot } from './auth.js';
 import {
     podWriteChatMessageAt, podReadChatRecentAt, podGrantChatParticipants,
 } from './pod.js';
-import { chatRootUrl } from './longchat.js';
+import { chatRootUrl, dayFileAt } from './longchat.js';
+import { watchResource } from './notify.js';
 
 const STORE_KEY = 'proxion_solid_conversations';
 
@@ -147,26 +148,31 @@ export function createSolidChat({ showToast = () => {}, onChange = () => {} } = 
 
     /**
      * Watch a conversation for new messages and call `onMessages(fresh)` with any
-     * that appear. Polling based: a shared chat lives in another pod, and polling
-     * the current UTC day is the portable way to notice new posts on any server.
-     * (Solid Notifications / Live Update is a later enhancement over the same
-     * shape.) Returns an unsubscribe function; safe to call more than once.
+     * that appear. Real-time via Solid Notifications on today's day file, falling
+     * back to polling (watchResource owns that choice). A notification is only a
+     * "changed" nudge; we re-read the recent window and emit messages not seen yet.
+     * Returns an unsubscribe function; safe to call more than once.
+     *
+     * Note: the watched resource is TODAY's day file. A subscription that stays
+     * open across UTC midnight will not get notifications for tomorrow's new file;
+     * reopening the conversation re-subscribes to the new day. The polling fallback
+     * (which reads the recent window) still covers that case when notifications are
+     * unavailable.
      */
     function subscribeConversation(id, onMessages, { intervalMs = 5000, days = 1 } = {}) {
         const seen = new Set();
         let stopped = false;
-        let timer = null;
-        async function tick() {
+        async function check() {
             if (stopped) return;
             let msgs = [];
-            try { msgs = await loadConversation(id, days); } catch { /* keep polling */ }
+            try { msgs = await loadConversation(id, days); } catch { return; }
             const fresh = msgs.filter(m => m.message_id && !seen.has(m.message_id));
             fresh.forEach(m => seen.add(m.message_id));
             if (fresh.length && !stopped) onMessages(fresh);
-            if (!stopped) timer = setTimeout(tick, intervalMs);
         }
-        tick();
-        return () => { stopped = true; if (timer) clearTimeout(timer); };
+        const unwatch = watchResource(dayFileAt(id, new Date()), check, { pollMs: intervalMs });
+        check();   // prime immediately; the UI dedups by message id
+        return () => { stopped = true; unwatch(); };
     }
 
     return {
