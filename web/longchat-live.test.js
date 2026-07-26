@@ -29,6 +29,8 @@ vi.mock('./auth.js', () => ({
 import {
     podWriteMessageJsonLd,
     podWriteLongChatMessage,
+    podEditLongChatMessage,
+    podSoftDeleteLongChatMessage,
     podReadLongChatDay,
     podReadLongChatRecent,
     ensureProxionContainer,
@@ -230,5 +232,60 @@ describe.skipIf(!LIVE)('C: reading a Long Chat from a live pod', () => {
         expect(foreign).toBeTruthy();
         expect(foreign.from_webid).toBe(webId());
         expect(foreign.message_id).toBe('msgForeign');
+    }, 60000);
+});
+
+// ── Phase B (PLAN_ROUND_68): edits and deletes round-trip on a live pod ──────
+//
+// The unit tests prove the PATCH bodies are well-formed. Only a real server
+// tells us whether CSS accepts a DELETE/INSERT/WHERE modify (the edit path) and
+// an appended schema:dateDeleted tombstone (the delete path). These are THE
+// gates for the design choice of an in-place content rewrite over a replacement
+// chain: if CSS rejects the modify, the approach is wrong.
+
+describe.skipIf(!LIVE)('B (R68): edits and deletes round-trip on a live pod', () => {
+    const EDIT_ROOM = `lce-${Math.random().toString(36).slice(2, 10)}`;
+
+    it('THE edit gate: CSS accepts the in-place content rewrite (DELETE/INSERT/WHERE)', async () => {
+        await podWriteLongChatMessage(EDIT_ROOM, 'm-e1', {
+            content: 'before edit', from_webid: webId(), timestamp: TS,
+        });
+        const ok = await podEditLongChatMessage(EDIT_ROOM, 'm-e1', TS, 'after edit');
+        expect(ok).toBe(true);
+
+        const msgs = await podReadLongChatDay(EDIT_ROOM, TS);
+        const edited = msgs.find(m => m.message_id === 'm-e1');
+        expect(edited).toBeTruthy();
+        expect(edited.content).toBe('after edit');          // latest text shows
+        // Exactly one content triple survived: no stale copy left behind.
+        expect(msgs.filter(m => m.message_id === 'm-e1')).toHaveLength(1);
+    }, 60000);
+
+    it('THE delete gate: a schema:dateDeleted tombstone reads back as deleted', async () => {
+        await podWriteLongChatMessage(EDIT_ROOM, 'm-e2', {
+            content: 'to be deleted', from_webid: webId(), timestamp: TS,
+        });
+        const ok = await podSoftDeleteLongChatMessage(EDIT_ROOM, 'm-e2', TS, '2026-07-25T12:00:00.000Z');
+        expect(ok).toBe(true);
+
+        const msgs = await podReadLongChatDay(EDIT_ROOM, TS);
+        const gone = msgs.find(m => m.message_id === 'm-e2');
+        expect(gone).toBeTruthy();          // node stays (append-only day file)
+        expect(gone.deleted).toBe(true);
+        expect(gone.content).toBe('');      // stale text does not surface
+    }, 60000);
+
+    afterAll(async () => {
+        if (!LIVE || !_session) return;
+        const targets = [
+            chatDayUrl(_storageRoot, EDIT_ROOM, TS),
+            `${_storageRoot}proxion/rooms/${EDIT_ROOM}/${DAY}/`,
+            `${_storageRoot}proxion/rooms/${EDIT_ROOM}/2026/07/`,
+            `${_storageRoot}proxion/rooms/${EDIT_ROOM}/2026/`,
+            chatIndexUrl(_storageRoot, EDIT_ROOM),
+        ];
+        for (const url of targets) {
+            try { await _session.fetch(url, { method: 'DELETE' }); } catch { /* ignore */ }
+        }
     }, 60000);
 });

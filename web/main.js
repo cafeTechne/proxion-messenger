@@ -16,7 +16,9 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podReadDmIndex, _podUpdateDmIndex,
          podArchiveDmMessage, podArchiveDeleteDmMessage, podReadDmMessages,
          podSyncEnabled, podWriteSettings, podReadSettings,
-         podWriteMutes, podReadMutes, podReadBlocks } from './pod.js';
+         podWriteMutes, podReadMutes, podReadBlocks,
+         podReadLongChatRecent, podEditLongChatMessage,
+         podSoftDeleteLongChatMessage } from './pod.js';
 import {
     didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, timeAgo,
     expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8,
@@ -1352,12 +1354,23 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                         }
                     }
                     break;
-                case "message_edited":
+                case "message_edited": {
+                    // Read the original send time BEFORE handleMessageEdited runs,
+                    // so we know which UTC day file the Long Chat copy lives in.
+                    const _editedTs = messageMap[event.message_id]?.timestamp;
                     handleMessageEdited(event);
                     if (event.message_id && event.new_content != null) {
                         dmHistoryUpdateContent(event.message_id, event.new_content);
                     }
+                    // Mirror the edit into the room's Long Chat so other Solid apps
+                    // see the latest text. Rooms only; DMs are E2E, never mirrored.
+                    if (event.thread_id && _editedTs && activeView
+                        && activeView.type === "local_room" && activeView.id === event.thread_id) {
+                        podEditLongChatMessage(event.thread_id, event.message_id, _editedTs, event.new_content)
+                            .catch(() => {});
+                    }
                     break;
+                }
                 case "message_pinned":
                     showToast(t('pin.pinned'));
                     if (document.getElementById("pin-panel").style.display !== "none") {
@@ -1839,6 +1852,9 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     break;
                 }
                 case "message_deleted": {
+                    // Original send time, before the local record is dropped: it
+                    // says which UTC day file the Long Chat copy lives in.
+                    const _deletedTs = messageMap[event.message_id]?.timestamp;
                     const el = document.getElementById(`msg-${event.message_id}`);
                     if (el) el.remove();
                     allMessages = allMessages.filter(m => m.message_id !== event.message_id);
@@ -1848,6 +1864,12 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                         const _isRoom = !!(activeView && activeView.type === 'local_room');
                         if (_isRoom) {
                             podDeleteMessage(event.thread_id, event.message_id, true).catch(() => {});
+                            // Soft-delete the Long Chat copy so other Solid apps see
+                            // the message was withdrawn rather than keeping stale text.
+                            if (_deletedTs) {
+                                podSoftDeleteLongChatMessage(event.thread_id, event.message_id, _deletedTs)
+                                    .catch(() => {});
+                            }
                         } else {
                             // R61: remove from the DM archive AND its per-thread index
                             podArchiveDeleteDmMessage(event.thread_id, event.message_id).catch(() => {});
@@ -2552,11 +2574,30 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             if ((now - last) < POD_READ_DEBOUNCE_MS) return;
             _podReadLastFetch[threadId] = now;
             setPodSyncIndicator(true);
-            podReadMessages(threadId)
-                .then((podMsgs) => {
+            // Two reads in parallel: the px: index (our own format) and the
+            // standard Long Chat (what SolidOS / POD-CHAT write into the same
+            // container). A message we authored appears in both with the same id
+            // and dedups; a message another Solid app wrote has an id we have
+            // never seen, so it surfaces in the native feed. This is the visible
+            // half of the interop. allSettled so one read failing keeps the other.
+            Promise.allSettled([
+                podReadMessages(threadId),
+                podReadLongChatRecent(threadId),
+            ])
+                .then((results) => {
                     setPodSyncIndicator(false);
                     const known = new Set(allMessages.map(m => m.message_id));
-                    podMsgs.filter(m => !known.has(m.message_id)).forEach(_injectPodMessage);
+                    for (const r of results) {
+                        if (r.status !== "fulfilled" || !Array.isArray(r.value)) continue;
+                        for (const m of r.value) {
+                            if (!m || !m.message_id || known.has(m.message_id)) continue;
+                            known.add(m.message_id);
+                            // A tombstoned (schema:dateDeleted) message reads as
+                            // deleted: do not surface its content in the feed.
+                            if (m.deleted) continue;
+                            _injectPodMessage(m);
+                        }
+                    }
                 })
                 .catch(() => setPodSyncIndicator(false));
         }

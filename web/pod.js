@@ -1,7 +1,7 @@
 import { solidSession, podStorageRoot } from './auth.js';
 import {
     chatRootUrl, indexUrlAt, channelIriAt, dayFileAt, messageIriAt,
-    buildIndexTurtle, buildAppendPatch, buildChatAcl,
+    buildIndexTurtle, buildAppendPatch, buildEditPatch, buildDeletePatch, buildChatAcl,
     parseLongChatJsonLd, mergeLongChatMessages,
 } from './longchat.js';
 
@@ -372,6 +372,54 @@ export async function podReadChatDayAt(containerUrl, date, threadId = '') {
 }
 
 /**
+ * Rewrite a message's text in a chat's Long Chat day file (Phase B: edits). The
+ * message lives in the day file for its ORIGINAL send date, so `date` must be the
+ * message's own timestamp, not now. Best-effort, like the write path.
+ */
+export async function podEditChatMessageAt(containerUrl, messageId, date, newContent) {
+    if (!containerUrl || !solidSession?.info?.isLoggedIn) return false;
+    const body = buildEditPatch({
+        messageIri: messageIriAt(containerUrl, messageId, date),
+        newContent: newContent || '',
+    });
+    try {
+        const res = await solidSession.fetch(dayFileAt(containerUrl, date), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/sparql-update' },
+            body,
+        });
+        return !!(res && res.ok);
+    } catch (err) {
+        console.warn('[pod] podEditChatMessageAt failed:', err);
+        return false;
+    }
+}
+
+/**
+ * Soft-delete a message in a chat's Long Chat day file (Phase B: deletes) by
+ * appending a schema:dateDeleted tombstone. `date` is the message's own send
+ * date (which day file it lives in), not now.
+ */
+export async function podSoftDeleteChatMessageAt(containerUrl, messageId, date, deletedIso) {
+    if (!containerUrl || !solidSession?.info?.isLoggedIn) return false;
+    const body = buildDeletePatch({
+        messageIri: messageIriAt(containerUrl, messageId, date),
+        deletedIso: deletedIso || new Date().toISOString(),
+    });
+    try {
+        const res = await solidSession.fetch(dayFileAt(containerUrl, date), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/sparql-update' },
+            body,
+        });
+        return !!(res && res.ok);
+    } catch (err) {
+        console.warn('[pod] podSoftDeleteChatMessageAt failed:', err);
+        return false;
+    }
+}
+
+/**
  * Grant a set of participants the ability to POST to a chat we host, by writing
  * the container ACL (owner control + participants read/write/append). This is
  * what turns "a chat in my pod" into "a conversation others can take part in".
@@ -403,6 +451,18 @@ export function podReadLongChatDay(roomId, date) {
     const root = podStorageRoot();
     if (!root) return Promise.resolve([]);
     return podReadChatDayAt(chatRootUrl(root, roomId), date, roomId);
+}
+
+export function podEditLongChatMessage(roomId, messageId, date, newContent) {
+    const root = podStorageRoot();
+    if (!root) return Promise.resolve(false);
+    return podEditChatMessageAt(chatRootUrl(root, roomId), messageId, date, newContent);
+}
+
+export function podSoftDeleteLongChatMessage(roomId, messageId, date, deletedIso) {
+    const root = podStorageRoot();
+    if (!root) return Promise.resolve(false);
+    return podSoftDeleteChatMessageAt(chatRootUrl(root, roomId), messageId, date, deletedIso);
 }
 
 /**
@@ -551,12 +611,13 @@ const XSD_DATETIME = 'http://www.w3.org/2001/XMLSchema#dateTime';
  * cannot have bytes that a third-party app can read AND that no third party can
  * read, so DMs stay px:-only and deliberately non-interoperable.
  *
- * Scope note (PLAN_ROUND_67 Phase A): only the three mandatory per-message terms
- * are emitted. Replies/threads (sioc:has_reply, sioc:Thread), edits
- * (dct:isReplacedBy) and deletes (schema:dateDeleted) are intentionally NOT
- * mapped yet. Long Chat models replies on the parent and Proxion models them on
- * the child, so that mapping has to be prototyped against a real SolidOS thread
- * rather than guessed. Those stay px:-only until then.
+ * Scope note: only the three mandatory per-message terms are emitted here on the
+ * initial write. Edits and deletes are mapped separately (PLAN_ROUND_68 Phase B):
+ * an edit rewrites sioc:content in place via podEditChatMessageAt, a delete
+ * appends a schema:dateDeleted tombstone via podSoftDeleteChatMessageAt.
+ * Replies/threads (sioc:has_reply, sioc:Thread) are still px:-only: Long Chat
+ * models replies on the parent and Proxion on the child, so that mapping has to
+ * be prototyped against a real SolidOS thread rather than guessed (Phase C).
  */
 export function applyLongChatTerms(doc, msg, timestamp) {
     Object.assign(doc['@context'], LONGCHAT_CONTEXT);

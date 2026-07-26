@@ -31,6 +31,7 @@ export const NS = Object.freeze({
     dc: 'http://purl.org/dc/elements/1.1/',
     foaf: 'http://xmlns.com/foaf/0.1/',
     xsd: 'http://www.w3.org/2001/XMLSchema#',
+    schema: 'http://schema.org/',
     px: 'https://proxion.dev/vocab/v1#',
 });
 
@@ -48,6 +49,9 @@ export const P = Object.freeze({
     maker: NS.foaf + 'maker',
     title: NS.dc + 'title',
     dateTime: NS.xsd + 'dateTime',
+    // Phase B: the two SAFE edit/delete terms. A soft-delete is a schema.org
+    // dateDeleted tombstone (the message node stays; readers hide its content).
+    dateDeleted: NS.schema + 'dateDeleted',
 });
 
 // Characters that must never survive into a Turtle literal or IRI. Built from
@@ -177,6 +181,45 @@ export function buildAppendPatch({ channelIri, messageIri, content, createdIso, 
 }
 
 /**
+ * A SPARQL-Update body that rewrites a message's text in place (Phase B: edits).
+ *
+ * DELETE/INSERT ... WHERE, not DELETE DATA + INSERT DATA, on purpose: it replaces
+ * whatever sioc:content the message currently carries without needing to know the
+ * old value, so it is idempotent and safe under concurrent edits, always ending
+ * with exactly one content triple holding the latest text.
+ *
+ * Chosen over the append-only dct:isReplacedBy replacement-node chain
+ * deliberately: an in-place content swap shows the latest text in ANY Long Chat
+ * reader, whereas whether a given reader follows a replacement chain is
+ * unverified (the R67 wf:message lesson: do not assume a reader honours the
+ * spec). The px: layer keeps full edit history; the shared copy just stays current.
+ */
+export function buildEditPatch({ messageIri, newContent }) {
+    const m = iriRef(messageIri);
+    const c = iriRef(P.content);
+    return [
+        `DELETE { ${m} ${c} ?old . }`,
+        `INSERT { ${m} ${c} "${escapeTurtleLiteral(newContent)}" . }`,
+        `WHERE  { ${m} ${c} ?old . }`,
+        '',
+    ].join('\n');
+}
+
+/**
+ * A SPARQL-Update body that soft-deletes a message (Phase B: deletes).
+ *
+ * Appends a schema:dateDeleted tombstone rather than removing the node, so the
+ * append-only day file stays valid and other Solid apps can see the message was
+ * withdrawn. Our reader blanks the content of a tombstoned message on read.
+ */
+export function buildDeletePatch({ messageIri, deletedIso }) {
+    return (
+        `INSERT DATA {\n  ${iriRef(messageIri)} ${iriRef(P.dateDeleted)} ` +
+        `"${escapeTurtleLiteral(deletedIso)}"^^${iriRef(P.dateTime)} .\n}\n`
+    );
+}
+
+/**
  * WAC ACL for a shared chat container. Owner gets full control; each participant
  * gets Read + Write + Append so they can POST. Verified against CSS 7.1.9: a
  * second WebID with this grant can PATCH the day file in another user's pod.
@@ -275,10 +318,16 @@ export function parseLongChatJsonLd(json, threadId = '') {
         const content = firstLiteral(node, P.content);
         if (content == null) continue;          // not a message node
         const id = String(node['@id'] || '');
+        // Phase B: a schema:dateDeleted tombstone means the message was withdrawn
+        // (by us or another app). It reads as deleted with no content, never as
+        // stale text; callers can drop it or show a tombstone.
+        const deletedAt = firstLiteral(node, P.dateDeleted);
         out.push({
             message_id: id.includes('#') ? id.slice(id.lastIndexOf('#') + 1) : id,
             thread_id: threadId,
-            content,
+            content: deletedAt != null ? '' : content,
+            deleted: deletedAt != null,
+            deleted_at: deletedAt || null,
             timestamp: firstLiteral(node, P.created) || null,
             from_webid: firstId(node, P.maker) || '',
             // Extras only Proxion writes; absent on SolidOS / POD-CHAT messages.
