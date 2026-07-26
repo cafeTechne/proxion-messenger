@@ -5,6 +5,10 @@ import {
     buildSeqPatch, buildChatAcl,
     parseLongChatJsonLd, mergeLongChatMessages,
 } from './longchat.js';
+import {
+    buildEmptyTypeIndex, buildRegisterPatch, buildDeregisterPatch, buildProfileLinkPatch,
+    parsePublicTypeIndex, parseRegisteredContainers,
+} from './typeindex.js';
 
 const SAFE_ID_RE = /^[\w-]{1,128}$/;
 
@@ -321,7 +325,16 @@ async function ensureChatIndexAt(containerUrl, title) {
             headers: { 'Content-Type': 'text/turtle' },
             body: buildIndexTurtle(title || 'Proxion room'),
         });
-        return !!(res && res.ok);
+        const ok = !!(res && res.ok);
+        // Track D: the index was just created, so this is a NEW chat in our pod.
+        // Register it in the public type index (once, here) so other Solid apps can
+        // discover it. Container-addressed, so this covers both rooms and shared
+        // chats. Best-effort and only for chats in OUR pod (we can only register
+        // discoverable instances of our own storage).
+        if (ok && containerUrl.startsWith(podStorageRoot() || ' ')) {
+            podRegisterChat(containerUrl).catch(() => {});
+        }
+        return ok;
     } catch (err) {
         console.warn('[pod] ensureChatIndexAt failed:', err);
         return false;
@@ -549,6 +562,128 @@ export { mergeLongChatMessages, reconcileRoomHistory } from './longchat.js';
 export async function podHydrateRoom(roomId, { days = 7, local = [] } = {}) {
     const fromPod = await podReadLongChatRecent(roomId, days);
     return mergeLongChatMessages(local, fromPod);
+}
+
+// ── Type Index: make chats discoverable by other Solid apps (Track D) ─────────
+//
+// A chat we host is Long-Chat-readable, but another app cannot FIND it without the
+// URL unless it is registered in the pod's public type index. These functions
+// ensure the index exists and is linked from the WebID card, then register /
+// deregister / list meeting:LongChat containers there.
+
+/** The public type index IRI linked from our WebID profile, or null. */
+export async function podReadPublicTypeIndexUrl() {
+    const webId = solidSession?.info?.webId;
+    if (!webId || !solidSession.info.isLoggedIn) return null;
+    try {
+        const res = await solidSession.fetch(webId, { headers: { Accept: 'application/ld+json' } });
+        if (!res || !res.ok) return null;
+        return parsePublicTypeIndex(await res.json(), webId);
+    } catch (err) {
+        console.warn('[pod] podReadPublicTypeIndexUrl failed:', err);
+        return null;
+    }
+}
+
+/**
+ * Ensure a public type index exists and is linked from the WebID card; return its
+ * URL (or null if we could not establish one). Best-effort: if the profile PATCH
+ * is refused, we still return the index we created so our own reads/writes work,
+ * but discovery by other apps needs the profile link.
+ */
+export async function podEnsurePublicTypeIndex() {
+    const existing = await podReadPublicTypeIndexUrl();
+    if (existing) return existing;
+    const root = podStorageRoot();
+    const webId = solidSession?.info?.webId;
+    if (!root || !webId) return null;
+    const indexUrl = `${root}settings/publicTypeIndex.ttl`;
+    try {
+        // Create the index document (CSS creates intermediate containers on PUT).
+        const put = await solidSession.fetch(indexUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'text/turtle' },
+            body: buildEmptyTypeIndex(),
+        });
+        if (!put || !put.ok) return null;
+        // Link it from the profile so other apps can discover it.
+        try {
+            await solidSession.fetch(webId.split('#')[0], {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/sparql-update' },
+                body: buildProfileLinkPatch({ webId, indexUrl }),
+            });
+        } catch (err) {
+            console.warn('[pod] type index created but profile link failed:', err);
+        }
+        return indexUrl;
+    } catch (err) {
+        console.warn('[pod] podEnsurePublicTypeIndex failed:', err);
+        return null;
+    }
+}
+
+/** Register a chat container as a meeting:LongChat instance (discoverable). */
+export async function podRegisterChat(containerUrl) {
+    if (!containerUrl || !solidSession?.info?.isLoggedIn) return false;
+    const indexUrl = await podEnsurePublicTypeIndex();
+    if (!indexUrl) return false;
+    try {
+        const res = await solidSession.fetch(indexUrl, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/sparql-update' },
+            body: buildRegisterPatch({ indexUrl, containerUrl }),
+        });
+        return !!(res && res.ok);
+    } catch (err) {
+        console.warn('[pod] podRegisterChat failed:', err);
+        return false;
+    }
+}
+
+/** Remove a chat container's registration from the public type index. */
+export async function podDeregisterChat(containerUrl) {
+    if (!containerUrl || !solidSession?.info?.isLoggedIn) return false;
+    const indexUrl = await podReadPublicTypeIndexUrl();
+    if (!indexUrl) return true;   // nothing linked, nothing to remove
+    try {
+        const res = await solidSession.fetch(indexUrl, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/sparql-update' },
+            body: buildDeregisterPatch({ indexUrl, containerUrl }),
+        });
+        return !!(res && res.ok);
+    } catch (err) {
+        console.warn('[pod] podDeregisterChat failed:', err);
+        return false;
+    }
+}
+
+/** Chat containers registered for meeting:LongChat in our public type index. */
+export async function podListRegisteredChats() {
+    const indexUrl = await podReadPublicTypeIndexUrl();
+    if (!indexUrl) return [];
+    try {
+        const res = await solidSession.fetch(indexUrl, { headers: { Accept: 'application/ld+json' } });
+        if (!res || !res.ok) return [];
+        return parseRegisteredContainers(await res.json());
+    } catch (err) {
+        console.warn('[pod] podListRegisteredChats failed:', err);
+        return [];
+    }
+}
+
+// Self-pod wrapper: register the room we host under proxion/rooms/{roomId}/.
+export function podRegisterRoomChat(roomId) {
+    const root = podStorageRoot();
+    if (!root) return Promise.resolve(false);
+    return podRegisterChat(chatRootUrl(root, roomId));
+}
+
+export function podDeregisterRoomChat(roomId) {
+    const root = podStorageRoot();
+    if (!root) return Promise.resolve(false);
+    return podDeregisterChat(chatRootUrl(root, roomId));
 }
 
 // ── Solid social graph (contact import) ──────────────────────────────────────
