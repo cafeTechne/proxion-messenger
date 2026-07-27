@@ -19,8 +19,9 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podWriteMutes, podReadMutes, podReadBlocks,
          podReadLongChatRecent, podEditLongChatMessage,
          podSoftDeleteLongChatMessage, podSetLongChatSeq,
-         reconcileRoomHistory } from './pod.js';
+         reconcileRoomHistory, podWriteRoomDescriptor, podReadRoomDescriptor } from './pod.js';
 import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
+import { buildRoomDescriptor, withMembers } from './roomdesc.js';
 import {
     didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, timeAgo,
     expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8,
@@ -1456,13 +1457,20 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     roomCreatorOf.add(event.room_id);
                     _local_rooms[event.room_id] = { memberWebIds: new Set(selfWebId ? [selfWebId] : []) };
                     addRoomToSidebar(event.room_id, event.name, event.invite_url);
-                    podWriteRoomMeta(event.room_id, {
-                        room_id: event.room_id,
-                        name: event.name,
-                        code: event.code,
-                        creator_webid: selfWebId,
-                        created_at: new Date().toISOString(),
-                    }).catch(() => {});
+                    // B1: write the canonical room descriptor (owner + members +
+                    // Long Chat pointer) as room.json, keeping the legacy fields
+                    // (name/code/creator_webid) so existing readers still work. This
+                    // is the durable record a gateway rehydrates the room from (B2).
+                    {
+                        const _desc = buildRoomDescriptor({
+                            roomId: event.room_id, title: event.name, owner: selfWebId,
+                            members: [{ webid: selfWebId, role: 'owner' }],
+                        });
+                        podWriteRoomDescriptor({
+                            ..._desc, name: event.name, code: event.code,
+                            creator_webid: selfWebId, created_at: _desc.created,
+                        }).catch(() => {});
+                    }
                     _podUpdateRoomIndex(event.room_id, true).catch(() => {});
                     if (solidSession.info.isLoggedIn && selfWebId) {
                         podSetContainerAcl(`rooms/${event.room_id}/`, selfWebId, []).catch(() => {});
@@ -1673,6 +1681,17 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                 case "room_members": {
                     currentRoomMembers = event.members || [];
                     renderMembersPanel(event.members);
+                    // B1: keep the pod room descriptor's membership current. Owner
+                    // only (only the owner's pod holds the room's descriptor), and
+                    // only when logged in. Read-modify-write preserves title/owner.
+                    {
+                        const _rid = event.room_id || (activeView && activeView.id);
+                        if (_rid && roomCreatorOf.has(_rid) && solidSession.info.isLoggedIn) {
+                            podReadRoomDescriptor(_rid).then((desc) => {
+                                if (desc) return podWriteRoomDescriptor(withMembers(desc, event.members || []));
+                            }).catch(() => {});
+                        }
+                    }
                     // (The old room-members-modal populate block was removed with
                     // the modal itself — the members PANEL above is the only
                     // surface; moderation lives in its right-click context menu.)

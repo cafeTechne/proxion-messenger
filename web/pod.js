@@ -9,6 +9,7 @@ import {
     buildEmptyTypeIndex, buildRegisterPatch, buildDeregisterPatch, buildProfileLinkPatch,
     parsePublicTypeIndex, parseRegisteredContainers,
 } from './typeindex.js';
+import { parseRoomDescriptor } from './roomdesc.js';
 
 const SAFE_ID_RE = /^[\w-]{1,128}$/;
 
@@ -108,6 +109,49 @@ export async function podWriteRoomMeta(roomId, meta) {
             body: JSON.stringify(meta),
         }
     );
+}
+
+/**
+ * Write the canonical room descriptor (PLAN_ROUND_71 B1) to rooms/{id}/room.json.
+ * Fills in the Long Chat pointer from the room id when the caller omitted it, so
+ * the descriptor points at the same container the type index registers. Returns
+ * success (unlike the best-effort podWriteRoomMeta) so callers/tests can react.
+ */
+export async function podWriteRoomDescriptor(descriptor) {
+    const roomId = descriptor && descriptor.room_id;
+    if (!roomId || !SAFE_ID_RE.test(roomId) || !solidSession?.info?.isLoggedIn) return false;
+    const root = podStorageRoot();
+    if (!root) return false;
+    const doc = { ...descriptor };
+    if (!doc.long_chat) doc.long_chat = chatRootUrl(root, roomId);
+    try {
+        const res = await solidSession.fetch(`${root}rooms/${roomId}/room.json`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(doc),
+        });
+        return !!(res && res.ok);
+    } catch (err) {
+        console.warn('[pod] podWriteRoomDescriptor failed:', err);
+        return false;
+    }
+}
+
+/** Read + parse the canonical room descriptor, or null. */
+export async function podReadRoomDescriptor(roomId) {
+    if (!SAFE_ID_RE.test(roomId)) return null;
+    const root = podStorageRoot();
+    if (!root || !solidSession?.info?.isLoggedIn) return null;
+    try {
+        const res = await solidSession.fetch(`${root}rooms/${roomId}/room.json`);
+        if (!res || !res.ok) return null;
+        const text = await res.text();
+        if (text.length > 65536) return null;
+        return parseRoomDescriptor(JSON.parse(text));
+    } catch (err) {
+        console.warn('[pod] podReadRoomDescriptor failed:', err);
+        return null;
+    }
 }
 
 export async function podReadMessages(roomId) {
