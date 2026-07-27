@@ -1628,6 +1628,70 @@ class RoomHandlerMixin:
             "invite_url": invite_url,
         }))
 
+    async def _handle_rehost_room(self, websocket, data: dict) -> None:
+        """Reconstruct a room this gateway has no state for, from the host-owned
+        descriptor the client read from its pod (PLAN_ROUND_71 B2, client-driven
+        rehydration). Owner-only and idempotent: an already-hosted room is not
+        clobbered. B3 will additionally verify the descriptor's signature so a
+        spoofed webid cannot rehost; here the check is that the requester's session
+        webid IS the room owner.
+        """
+        import re as _re
+        desc = data.get("descriptor") or {}
+        room_id = str(desc.get("room_id") or "")
+        owner = str(desc.get("owner") or "")
+        if not room_id or not _re.fullmatch(r"[\w-]{1,128}", room_id):
+            await websocket.send(json.dumps({"type": "error", "code": "E_REHOST", "message": "bad room id"}))
+            return
+        requester = self._client_webids.get(websocket, "")
+        if not owner or not requester or owner != requester:
+            await websocket.send(json.dumps({"type": "error", "code": "E_REHOST", "message": "not room owner"}))
+            return
+
+        # Already hosted: just make sure the requester is a live member; never clobber.
+        if room_id in self._local_rooms:
+            self._local_rooms[room_id]["members"].add(websocket)
+            await websocket.send(json.dumps({
+                "type": "room_rehosted", "room_id": room_id,
+                "name": self._local_rooms[room_id].get("name", ""), "already": True,
+            }))
+            return
+
+        name = (str(desc.get("title") or desc.get("name") or "Room")).strip()[:100]
+        history_mode = str(desc.get("history_mode") or "none")
+        # Restore the invite code if the descriptor carried the plaintext one.
+        code_plain = str(desc.get("code") or "")
+        code_hash = self._hmac_invite_code(code_plain) if code_plain else ""
+        if self.config.http_port and code_plain:
+            host_display = self.config.host if self.config.host != "0.0.0.0" else "127.0.0.1"
+            invite_url = f"http://{host_display}:{self.config.http_port}/?join={code_plain}"
+        else:
+            invite_url = code_plain
+
+        self._local_rooms[room_id] = {
+            "name": name,
+            "code": code_hash,
+            "members": {websocket},
+            "invite_url": invite_url,
+            "history_mode": history_mode,
+            "messages": [],
+            "creator_webid": owner,
+        }
+        if code_hash:
+            self._room_codes[code_hash] = room_id
+        if self._store:
+            self._store.save_room(room_id, name, code_hash, invite_url, history_mode, owner)
+            self._store.add_room_member(room_id, owner)
+            for m in (desc.get("members") or []):
+                wid = m.get("webid") if isinstance(m, dict) else m
+                if isinstance(wid, str) and wid and wid != owner:
+                    self._store.add_room_member(room_id, wid)
+        logger.info("Room rehosted from pod descriptor: %r (%s) by %s", name, room_id, owner)
+        await websocket.send(json.dumps({
+            "type": "room_rehosted", "room_id": room_id, "name": name,
+            "code": code_plain, "invite_url": invite_url,
+        }))
+
     async def _handle_join_room(self, websocket, data: dict) -> None:
         code = (data.get("code") or "").strip()
         # Rate-limit join attempts per IP before doing any hash computation

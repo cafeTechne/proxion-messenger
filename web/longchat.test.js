@@ -5,8 +5,21 @@ import {
     NS, P,
     escapeTurtleLiteral, iriRef, dayPath,
     chatIndexUrl, chatChannelIri, chatDayUrl, messageIriFor,
+    chatRootUrl, roomIdFromChatContainer,
     buildIndexTurtle, buildAppendPatch, parseLongChatJsonLd, mergeLongChatMessages,
 } from './longchat.js';
+
+describe('roomIdFromChatContainer (inverse of chatRootUrl)', () => {
+    it('round-trips a room id, including one needing url-encoding', () => {
+        for (const id of ['general', 'room-abc123', 'a b/c']) {
+            expect(roomIdFromChatContainer(chatRootUrl('https://me.pod/', id))).toBe(id);
+        }
+    });
+    it('returns null for a non-chat container', () => {
+        expect(roomIdFromChatContainer('https://me.pod/contacts/')).toBe(null);
+        expect(roomIdFromChatContainer('')).toBe(null);
+    });
+});
 
 const ROOT = 'https://alice.pod.example/';
 const ALICE = 'https://alice.pod.example/profile/card#me';

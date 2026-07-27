@@ -120,6 +120,14 @@ export function chatRootUrl(storageRoot, roomId) {
     return `${storageRoot}proxion/rooms/${encodeURIComponent(roomId)}/`;
 }
 
+// The inverse of chatRootUrl: the roomId from a chat container URL, or null. Used
+// to map type-index registrations back to rooms (B2 rehydration).
+export function roomIdFromChatContainer(url) {
+    const m = String(url || '').match(/\/proxion\/rooms\/([^/]+)\/?$/);
+    if (!m) return null;
+    try { return decodeURIComponent(m[1]); } catch { return m[1]; }
+}
+
 // Container-addressed (works for any chat, including ones in someone else's pod).
 export function indexUrlAt(containerUrl) {
     return `${containerUrl}index.ttl`;

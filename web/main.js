@@ -19,7 +19,8 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podWriteMutes, podReadMutes, podReadBlocks,
          podReadLongChatRecent, podEditLongChatMessage,
          podSoftDeleteLongChatMessage, podSetLongChatSeq,
-         reconcileRoomHistory, podWriteRoomDescriptor, podReadRoomDescriptor } from './pod.js';
+         reconcileRoomHistory, podWriteRoomDescriptor, podReadRoomDescriptor,
+         podListOwnedRoomDescriptors } from './pod.js';
 import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
 import { buildRoomDescriptor, withMembers } from './roomdesc.js';
 import {
@@ -1678,6 +1679,16 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     // R59G: per-room custom emoji list (initial fetch + live updates)
                     roomEmoji.handleRoomEmojiEvent(event);
                     break;
+                case "room_rehosted": {
+                    // B2: the gateway reconstructed a room we own from our pod
+                    // descriptor. Re-establish it in the sidebar if it is not there.
+                    if (event.room_id && !document.getElementById('nav-' + event.room_id)) {
+                        roomCreatorOf.add(event.room_id);
+                        _local_rooms[event.room_id] = { memberWebIds: new Set(selfWebId ? [selfWebId] : []) };
+                        addRoomToSidebar(event.room_id, event.name || event.room_id, event.invite_url || '');
+                    }
+                    break;
+                }
                 case "room_members": {
                     currentRoomMembers = event.members || [];
                     renderMembersPanel(event.members);
@@ -3727,6 +3738,21 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         }
         window.addEventListener('online', flushPodQueue);
 
+        // B2: rehydrate rooms we OWN to a gateway that may have lost them (fresh
+        // gateway, restart, re-home). Enumerate our rooms from the pod (type index
+        // + descriptors) and ask the gateway to rehost each; it is idempotent, so a
+        // room it already knows is a no-op. Client-driven, so the gateway never
+        // needs credentials to read our pod.
+        function rehostOwnedRooms() {
+            if (!solidSession.info.isLoggedIn || !selfWebId) return;
+            if (!socket || socket.readyState !== WebSocket.OPEN) return;
+            podListOwnedRoomDescriptors(selfWebId).then((descs) => {
+                for (const d of descs) {
+                    try { socket.send(JSON.stringify({ cmd: 'rehost_room', descriptor: d })); } catch (_) { /* ignore */ }
+                }
+            }).catch(() => {});
+        }
+
         async function onPodLoggedIn(webId) {
             localStorage.setItem('proxion_pod_webid', webId);
             selfWebId = webId;
@@ -3767,6 +3793,8 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             syncFromPod().catch(() => {});
             // D3: flush any room pod writes queued while offline / logged out.
             flushPodQueue();
+            // B2: rehydrate rooms we own to a gateway that may have lost them.
+            rehostOwnedRooms();
         }
 
         function initPodSettingsPanel() {

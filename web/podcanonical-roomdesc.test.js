@@ -16,7 +16,10 @@ vi.mock('./auth.js', () => ({
     podStorageRoot: () => _storageRoot,
 }));
 
-import { podWriteRoomDescriptor, podReadRoomDescriptor, ensureProxionContainer } from './pod.js';
+import {
+    podWriteRoomDescriptor, podReadRoomDescriptor, podRegisterRoomChat,
+    podDeregisterRoomChat, podListOwnedRoomDescriptors, ensureProxionContainer,
+} from './pod.js';
 import { buildRoomDescriptor, withMembers } from './roomdesc.js';
 import { chatRootUrl } from './longchat.js';
 
@@ -40,8 +43,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
     if (!LIVE || !_session) return;
+    try { await podDeregisterRoomChat(ROOM); } catch { /* ignore */ }
     try { await _session.fetch(`${_storageRoot}rooms/${ROOM}/room.json`, { method: 'DELETE' }); } catch { /* ignore */ }
     try { await _session.fetch(`${_storageRoot}rooms/${ROOM}/`, { method: 'DELETE' }); } catch { /* ignore */ }
+    try { await _session.fetch(`${_storageRoot}settings/publicTypeIndex.ttl`, { method: 'DELETE' }); } catch { /* ignore */ }
     await _session.logout();
 }, 60000);
 
@@ -73,5 +78,12 @@ describe.skipIf(!LIVE)('room descriptor round-trips on a live pod', () => {
         expect(read.members.map(m => m.webid).sort()).toEqual([webId(), BOB].sort());
         expect(read.members.find(m => m.webid === webId()).role).toBe('owner');
         expect(read.members.find(m => m.webid === BOB).role).toBe('member');
+    }, 60000);
+
+    it('enumerates owned room descriptors via the type index (B2 rehydration source)', async () => {
+        // Register the room so it appears in the type index (as first message write would).
+        expect(await podRegisterRoomChat(ROOM)).toBe(true);
+        const owned = await podListOwnedRoomDescriptors(webId());
+        expect(owned.some(d => d.room_id === ROOM && d.owner === webId())).toBe(true);
     }, 60000);
 });

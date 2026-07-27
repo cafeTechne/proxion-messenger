@@ -2,7 +2,7 @@ import { solidSession, podStorageRoot } from './auth.js';
 import {
     chatRootUrl, indexUrlAt, channelIriAt, dayFileAt, messageIriAt,
     buildIndexTurtle, buildAppendPatch, buildEditPatch, buildDeletePatch,
-    buildSeqPatch, buildChatAcl,
+    buildSeqPatch, buildChatAcl, roomIdFromChatContainer,
     parseLongChatJsonLd, mergeLongChatMessages,
 } from './longchat.js';
 import {
@@ -135,6 +135,25 @@ export async function podWriteRoomDescriptor(descriptor) {
         console.warn('[pod] podWriteRoomDescriptor failed:', err);
         return false;
     }
+}
+
+/**
+ * Enumerate the descriptors for rooms this user OWNS, by reading the public type
+ * index (R70 D) for registered chats, mapping each container back to a room id, and
+ * reading its descriptor. This is how the client finds which rooms to rehydrate to
+ * a gateway that has lost them (B2). Bounded by the number of registered chats.
+ */
+export async function podListOwnedRoomDescriptors(myWebId) {
+    if (!myWebId || !solidSession?.info?.isLoggedIn) return [];
+    const containers = await podListRegisteredChats();
+    const out = [];
+    for (const c of containers) {
+        const roomId = roomIdFromChatContainer(c);
+        if (!roomId) continue;
+        const desc = await podReadRoomDescriptor(roomId);
+        if (desc && desc.owner === myWebId) out.push(desc);
+    }
+    return out;
 }
 
 /** Read + parse the canonical room descriptor, or null. */
