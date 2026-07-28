@@ -1637,15 +1637,26 @@ class RoomHandlerMixin:
         webid IS the room owner.
         """
         import re as _re
+        from .room_descriptor import verify_descriptor
         desc = data.get("descriptor") or {}
         room_id = str(desc.get("room_id") or "")
         owner = str(desc.get("owner") or "")
         if not room_id or not _re.fullmatch(r"[\w-]{1,128}", room_id):
             await websocket.send(json.dumps({"type": "error", "code": "E_REHOST", "message": "bad room id"}))
             return
+        # B3: the descriptor must carry a valid signature, and the signer must be
+        # this connection's auth-verified identity. This is what makes rehost safe:
+        # a fabricated or tampered descriptor fails the signature, and a descriptor
+        # signed by someone else cannot be replayed by a different session. The
+        # signer did is the room's cryptographic authority (owner webid is
+        # descriptive).
+        signer = verify_descriptor(desc)
         requester = self._client_webids.get(websocket, "")
-        if not owner or not requester or owner != requester:
-            await websocket.send(json.dumps({"type": "error", "code": "E_REHOST", "message": "not room owner"}))
+        if not signer:
+            await websocket.send(json.dumps({"type": "error", "code": "E_REHOST", "message": "descriptor not signed / bad signature"}))
+            return
+        if not requester or signer != requester:
+            await websocket.send(json.dumps({"type": "error", "code": "E_REHOST", "message": "signer is not the requester"}))
             return
 
         # Already hosted: just make sure the requester is a live member; never clobber.
@@ -1675,18 +1686,18 @@ class RoomHandlerMixin:
             "invite_url": invite_url,
             "history_mode": history_mode,
             "messages": [],
-            "creator_webid": owner,
+            "creator_webid": signer,
         }
         if code_hash:
             self._room_codes[code_hash] = room_id
         if self._store:
-            self._store.save_room(room_id, name, code_hash, invite_url, history_mode, owner)
-            self._store.add_room_member(room_id, owner)
+            self._store.save_room(room_id, name, code_hash, invite_url, history_mode, signer)
+            self._store.add_room_member(room_id, signer)
             for m in (desc.get("members") or []):
                 wid = m.get("webid") if isinstance(m, dict) else m
-                if isinstance(wid, str) and wid and wid != owner:
+                if isinstance(wid, str) and wid and wid != signer:
                     self._store.add_room_member(room_id, wid)
-        logger.info("Room rehosted from pod descriptor: %r (%s) by %s", name, room_id, owner)
+        logger.info("Room rehosted from pod descriptor: %r (%s) by %s", name, room_id, signer)
         await websocket.send(json.dumps({
             "type": "room_rehosted", "room_id": room_id, "name": name,
             "code": code_plain, "invite_url": invite_url,

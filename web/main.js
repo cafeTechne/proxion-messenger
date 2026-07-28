@@ -22,7 +22,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          reconcileRoomHistory, podWriteRoomDescriptor, podReadRoomDescriptor,
          podListOwnedRoomDescriptors } from './pod.js';
 import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
-import { buildRoomDescriptor, withMembers } from './roomdesc.js';
+import { buildRoomDescriptor, withMembers, descriptorSigningBytes } from './roomdesc.js';
 import {
     didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, timeAgo,
     expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8,
@@ -1467,10 +1467,13 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                             roomId: event.room_id, title: event.name, owner: selfWebId,
                             members: [{ webid: selfWebId, role: 'owner' }],
                         });
-                        podWriteRoomDescriptor({
+                        const _full = {
                             ..._desc, name: event.name, code: event.code,
                             creator_webid: selfWebId, created_at: _desc.created,
-                        }).catch(() => {});
+                        };
+                        signRoomDescriptor(_full)
+                            .then((signed) => podWriteRoomDescriptor(signed))
+                            .catch(() => {});
                     }
                     _podUpdateRoomIndex(event.room_id, true).catch(() => {});
                     if (solidSession.info.isLoggedIn && selfWebId) {
@@ -1699,7 +1702,9 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                         const _rid = event.room_id || (activeView && activeView.id);
                         if (_rid && roomCreatorOf.has(_rid) && solidSession.info.isLoggedIn) {
                             podReadRoomDescriptor(_rid).then((desc) => {
-                                if (desc) return podWriteRoomDescriptor(withMembers(desc, event.members || []));
+                                if (!desc) return;
+                                return signRoomDescriptor(withMembers(desc, event.members || []))
+                                    .then((signed) => podWriteRoomDescriptor(signed));
                             }).catch(() => {});
                         }
                     }
@@ -3737,6 +3742,23 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             ).catch(() => {});
         }
         window.addEventListener('online', flushPodQueue);
+
+        // B3: sign a room descriptor with this device's Ed25519 identity key so a
+        // gateway can trust it before rehosting (B2). The signer did is the room's
+        // cryptographic authority; the owner webid is descriptive. long_chat is
+        // filled server-side after signing and is intentionally not covered.
+        async function signRoomDescriptor(desc) {
+            if (!_identityPrivKey || !clientDid) return desc;
+            try {
+                const sig = new Uint8Array(await crypto.subtle.sign(
+                    'Ed25519', _identityPrivKey, descriptorSigningBytes(desc)));
+                let s = '';
+                for (const b of sig) s += String.fromCharCode(b);
+                return { ...desc, 'px:signer': clientDid, 'px:sig': btoa(s) };
+            } catch (_) {
+                return desc;   // unsigned; the gateway will refuse to rehost it
+            }
+        }
 
         // B2: rehydrate rooms we OWN to a gateway that may have lost them (fresh
         // gateway, restart, re-home). Enumerate our rooms from the pod (type index

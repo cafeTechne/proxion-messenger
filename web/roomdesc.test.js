@@ -4,8 +4,43 @@
 import { describe, it, expect } from 'vitest';
 import {
     buildRoomDescriptor, normalizeMembers, withMembers, parseRoomDescriptor,
-    ROOM_DESC_VERSION,
+    descriptorSigningBytes, ROOM_DESC_VERSION,
 } from './roomdesc.js';
+
+const _toHex = (u8) => Array.from(u8).map((b) => b.toString(16).padStart(2, '0')).join('');
+
+describe('descriptorSigningBytes (B3: must match Python room_descriptor.canonical_bytes)', () => {
+    const desc = {
+        room_id: 'room-abc123',
+        owner: 'https://me.pod/profile/card#me',
+        created: '2026-07-26T09:00:00.000Z',
+        long_chat: 'https://me.pod/proxion/rooms/room-abc123/',
+        members: [
+            { webid: 'https://bob.pod/#me', role: 'member' },
+            { webid: 'https://me.pod/profile/card#me', role: 'owner' },
+        ],
+    };
+    // Vector produced by the Python canonical_bytes for the SAME descriptor. If the
+    // two encoders drift, a browser-signed descriptor stops verifying on the gateway.
+    const EXPECTED =
+        '001a70726f78696f6e2d726f6f6d2d64657363726970746f722d76317c000b726f6f6d2d61' +
+        '6263313233' + '7c001e68747470733a2f2f6d652e706f642f70726f66696c652f63617264236d65' +
+        '7c0018323032362d30372d32365430393a30303a30302e3030305a' +
+        '7c003f68747470733a2f2f626f622e706f642f236d651f6d656d6265721e68747470733a2f2f6d' +
+        '652e706f642f70726f66696c652f63617264236d651f6f776e6572';
+
+    it('produces the exact cross-language byte vector', () => {
+        expect(_toHex(descriptorSigningBytes(desc))).toBe(EXPECTED);
+    });
+
+    it('excludes long_chat and updated (filled/changed after signing)', () => {
+        expect(_toHex(descriptorSigningBytes({ ...desc, long_chat: 'X', updated: 'Y' }))).toBe(EXPECTED);
+    });
+
+    it('is stable regardless of member order (canonical sort)', () => {
+        expect(_toHex(descriptorSigningBytes({ ...desc, members: [...desc.members].reverse() }))).toBe(EXPECTED);
+    });
+});
 
 const OWNER = 'https://me.pod/profile/card#me';
 const BOB = 'https://bob.pod/profile/card#me';

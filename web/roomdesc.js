@@ -58,6 +58,51 @@ export function withMembers(descriptor, members) {
     };
 }
 
+// ── Signing (B3) ──────────────────────────────────────────────────────────────
+//
+// The exact bytes signed over a descriptor, mirroring the gateway's
+// room_descriptor.canonical_bytes (length-prefixed UTF-8 parts joined by '|', the
+// device-cert scheme). long_chat and updated are NOT signed (long_chat is filled
+// server-side after signing; updated is not security relevant). main.js signs these
+// bytes with the client's Ed25519 key and attaches px:signer + px:sig.
+const _ENC = new TextEncoder();
+const _US = String.fromCharCode(0x1f);   // webid/role separator (0x1f, matches Python)
+const _RS = String.fromCharCode(0x1e);   // between-members separator (0x1e, matches Python)
+
+function _lengthPrefixed(parts) {
+    const chunks = parts.map((p) => {
+        const c = new Uint8Array(2 + p.length);
+        c[0] = (p.length >> 8) & 0xff;
+        c[1] = p.length & 0xff;
+        c.set(p, 2);
+        return c;
+    });
+    const total = chunks.reduce((a, c) => a + c.length, 0) + Math.max(0, chunks.length - 1);
+    const out = new Uint8Array(total);
+    let off = 0;
+    chunks.forEach((c, i) => {
+        if (i > 0) out[off++] = 0x7c;   // '|'
+        out.set(c, off);
+        off += c.length;
+    });
+    return out;
+}
+
+export function descriptorSigningBytes(desc) {
+    const members = (desc.members || [])
+        .filter((m) => m && m.webid)
+        .map((m) => `${m.webid}${_US}${m.role || ''}`)
+        .sort();
+    const parts = [
+        'proxion-room-descriptor-v1',
+        String(desc.room_id || ''),
+        String(desc.owner || ''),
+        String(desc.created || ''),
+        members.join(_RS),
+    ].map((s) => _ENC.encode(s));
+    return _lengthPrefixed(parts);
+}
+
 /** Parse + validate a stored descriptor; null if it is not a usable one. */
 export function parseRoomDescriptor(json) {
     if (!json || typeof json !== 'object') return null;
