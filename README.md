@@ -42,6 +42,8 @@ someone else's terms. Proxion inverts that:
 
 ## Works with other Solid apps
 
+<img src="landing/assets/interop-sidebyside.png" alt="The same room side by side: Proxion on the left and the SolidOS databrowser on the right, showing the same three messages read from the same pod" width="900">
+
 A Proxion room is not a private format only Proxion can read. Rooms are written as
 standard Solid [Long Chat](https://solid.github.io/chat/), so they interoperate with
 the wider Solid ecosystem, not just a promise of it:
