@@ -40,6 +40,29 @@ someone else's terms. Proxion inverts that:
 - **No lock-in.** Open source, open protocol, standard data. Gateways federate
   peer-to-peer by Proxion address, with no central registry to shut down.
 
+## Works with other Solid apps
+
+A Proxion room is not a private format only Proxion can read. Rooms are written as
+standard Solid [Long Chat](https://solid.github.io/chat/), so they interoperate with
+the wider Solid ecosystem, not just a promise of it:
+
+- **A Proxion room opens as a chat in the [SolidOS](https://solidos.org) databrowser**,
+  every message and author intact. This is checked against the real databrowser in CI,
+  not asserted from a spec.
+- **Your chats are discoverable.** Proxion registers each room in your pod's public
+  type index, so another Solid app can find your chats without being handed a URL.
+- **Real-time across apps.** New posts arrive over the Solid Notifications protocol, so
+  a message another Solid app writes into a shared room shows up live, not on a timer.
+- **Your rooms outlive the gateway.** A room's structure and history live in your pod as
+  a signed record, so a fresh gateway can rebuild the room from your pod alone.
+
+Rooms are shared, so they are plaintext and open. Direct messages are the opposite by
+design: end-to-end encrypted and deliberately not third-party readable. You cannot have
+bytes a third-party app can read and that no third party can read, so the two are
+different modes, stated plainly rather than blurred. The full data model and a
+server-by-server compatibility picture are in
+[docs/POD_DATA_MODEL.md](docs/POD_DATA_MODEL.md) and [docs/INTEROP.md](docs/INTEROP.md).
+
 ## Verify it yourself
 
 Claims about privacy software are worth exactly what you can verify. So:
@@ -75,13 +98,15 @@ Bug reports and scoped pull requests are genuinely wanted. See
 
 ## Features
 
-<img src="landing/assets/screenshot-mobile.png" alt="Proxion on mobile" width="210" align="right">
-
 Rooms and DMs · P2P WebRTC voice calls · file attachments and media previews · reactions,
 edits, pins, mentions · disappearing and scheduled messages · mute and block · cross-gateway
 federation · multi-device with encrypted fanout · opt-in cross-device sync of DM history,
 bookmarks, settings, saved GIFs, mutes, and blocks via your pod · offline-capable PWA with push ·
 six languages including RTL Arabic · WCAG 2.2 AA accessible.
+
+<p align="center">
+  <img src="landing/assets/screenshot-mobile.png" alt="Proxion running on a phone" width="240">
+</p>
 
 ## Download
 
