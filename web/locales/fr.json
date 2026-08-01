@@ -14,6 +14,7 @@
   "control.settings": "Paramètres",
   "kbd.title": "Raccourcis clavier",
   "push.newMessage": "Nouveau message",
+  "push.newInvite": "Nouvelle invitation de chat",
   "push.newMessageFrom": "Nouveau message de {name}",
   "pairing.notConnected": "Non connecté.",
   "pairing.certSignFailed": "Impossible de signer le certificat de l'appareil.",

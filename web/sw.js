@@ -1,4 +1,4 @@
-const CACHE = "proxion-shell-v143";
+const CACHE = "proxion-shell-v144";
 const SHELL = [
   "/",
   "/index.html",
@@ -156,18 +156,23 @@ self.addEventListener("push", (event) => {
     try { data = event.data ? event.data.json() : {}; } catch (_) {}
     const i18n = await _i18nPush();
     const threadId = data.thread_id || "";
+    const isInvite = data.type === "invite";
     await self.registration.showNotification(
       data.title || "Proxion",
       {
-        // Server-provided body wins; otherwise the localized default.
-        body: data.body || (i18n && i18n.newMessage) || "New message",
+        // Server-provided body wins; otherwise the localized default. Invitations
+        // carry no content (privacy), so the body is filled in from the i18n mirror.
+        body: data.body
+          || (isInvite ? ((i18n && i18n.newInvite) || "New chat invitation")
+                       : ((i18n && i18n.newMessage) || "New message")),
         // PNG, not SVG — several platforms ignore SVG notification icons.
         icon: "/icons/icon-192.png",
         badge: "/icons/icon-192.png",
-        // Per-thread tag so different conversations don't collapse into one.
-        tag: threadId ? ("proxion-" + threadId) : "proxion-msg",
+        // Per-thread tag so different conversations don't collapse into one;
+        // invitations get their own tag so they never merge with messages.
+        tag: isInvite ? "proxion-invite" : (threadId ? ("proxion-" + threadId) : "proxion-msg"),
         renotify: true,
-        data: { thread_id: threadId },
+        data: { thread_id: threadId, type: data.type || "message" },
       }
     );
   })());

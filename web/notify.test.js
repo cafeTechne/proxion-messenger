@@ -8,7 +8,7 @@ vi.mock('./auth.js', () => ({
     solidSession: { fetch: h.fetch, info: { isLoggedIn: true } },
 }));
 
-import { watchResource, discoverWebSocketService, subscribeWebSocket } from './notify.js';
+import { watchResource, discoverWebSocketService, subscribeWebSocket, subscribeWebhook } from './notify.js';
 
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 
@@ -132,5 +132,41 @@ describe('direct v0.3 discovery + subscribe', () => {
             return { ok: true, json: async () => DESC };
         });
         expect(await subscribeWebSocket('https://p/d/chat.ttl')).toBe(null);
+    });
+});
+
+describe('webhook channel (R77 — closed-app inbox push)', () => {
+    const LINK = '<https://p/.well-known/solid>; rel="http://www.w3.org/ns/solid/terms#storageDescription"';
+    const WH = 'http://www.w3.org/ns/solid/notifications#WebhookChannel2023';
+    const CT = 'http://www.w3.org/ns/solid/notifications#channelType';
+    const DESC = { '@graph': [{ '@id': 'https://p/.notifications/WebhookChannel2023/', [CT]: [{ '@id': WH }] }] };
+
+    beforeEach(() => h.fetch.mockReset());
+
+    it('subscribes the resource with topic + sendTo, carrying the webhook IRI', async () => {
+        let posted = null;
+        h.fetch.mockImplementation(async (url, opts) => {
+            if ((opts?.method) === 'HEAD') return { headers: { get: () => LINK } };
+            if ((opts?.method) === 'POST') { posted = JSON.parse(opts.body); return { ok: true, json: async () => ({}) }; }
+            return { ok: true, json: async () => DESC };
+        });
+        expect(await subscribeWebhook('https://p/inbox/', 'https://gw/solid-webhook/tok')).toBe(true);
+        expect(posted.type).toBe(WH);
+        expect(posted.topic).toBe('https://p/inbox/');
+        expect(posted.sendTo).toBe('https://gw/solid-webhook/tok');
+    });
+
+    it('returns false when the server offers no webhook channel', async () => {
+        const WS = 'http://www.w3.org/ns/solid/notifications#WebSocketChannel2023';
+        const WSONLY = { '@graph': [{ '@id': 'https://p/.notifications/WebSocketChannel2023/', [CT]: [{ '@id': WS }] }] };
+        h.fetch.mockImplementation(async (url, opts) => {
+            if ((opts?.method) === 'HEAD') return { headers: { get: () => LINK } };
+            return { ok: true, json: async () => WSONLY };
+        });
+        expect(await subscribeWebhook('https://p/inbox/', 'https://gw/solid-webhook/tok')).toBe(false);
+    });
+
+    it('returns false without a sendTo target', async () => {
+        expect(await subscribeWebhook('https://p/inbox/', '')).toBe(false);
     });
 });

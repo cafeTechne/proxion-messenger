@@ -14,6 +14,7 @@
   "control.settings": "Einstellungen",
   "kbd.title": "Tastenkürzel",
   "push.newMessage": "Neue Nachricht",
+  "push.newInvite": "Neue Chat-Einladung",
   "push.newMessageFrom": "Neue Nachricht von {name}",
   "pairing.notConnected": "Nicht verbunden.",
   "pairing.certSignFailed": "Gerätezertifikat konnte nicht signiert werden.",

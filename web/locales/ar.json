@@ -15,6 +15,7 @@
   "control.settings": "الإعدادات",
   "kbd.title": "اختصارات لوحة المفاتيح",
   "push.newMessage": "رسالة جديدة",
+  "push.newInvite": "دعوة دردشة جديدة",
   "push.newMessageFrom": "رسالة جديدة من {name}",
   "pairing.notConnected": "غير متصل.",
   "pairing.certSignFailed": "تعذّر توقيع شهادة الجهاز.",

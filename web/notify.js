@@ -17,6 +17,7 @@ import { solidSession } from './auth.js';
 
 const NS = 'http://www.w3.org/ns/solid/notifications#';
 const WS_CHANNEL = NS + 'WebSocketChannel2023';
+const WEBHOOK_CHANNEL = NS + 'WebhookChannel2023';
 const CHANNEL_TYPE = NS + 'channelType';
 const STORAGE_DESCRIPTION = 'http://www.w3.org/ns/solid/terms#storageDescription';
 
@@ -37,10 +38,10 @@ function _nodes(json) {
 }
 
 /**
- * The WebSocketChannel2023 subscription-service URL for a resource, discovered via
- * its storage description, or null if the server advertises none.
+ * The subscription-service URL for a given channel type on a resource, discovered via
+ * its storage description, or null if the server advertises none of that type.
  */
-export async function discoverWebSocketService(resourceUrl) {
+async function _discoverChannelService(resourceUrl, channelType) {
     let descUrl = null;
     try {
         const head = await solidSession.fetch(resourceUrl, { method: 'HEAD' });
@@ -57,9 +58,19 @@ export async function discoverWebSocketService(resourceUrl) {
         if (!node || typeof node !== 'object') continue;
         const ct = node[CHANNEL_TYPE];
         const arr = Array.isArray(ct) ? ct : (ct ? [ct] : []);
-        if (arr.some(v => (v && (v['@id'] || v)) === WS_CHANNEL)) return node['@id'];
+        if (arr.some(v => (v && (v['@id'] || v)) === channelType)) return node['@id'];
     }
     return null;
+}
+
+/** The WebSocketChannel2023 subscription-service URL for a resource, or null. */
+export function discoverWebSocketService(resourceUrl) {
+    return _discoverChannelService(resourceUrl, WS_CHANNEL);
+}
+
+/** The WebhookChannel2023 subscription-service URL for a resource, or null. */
+export function discoverWebhookService(resourceUrl) {
+    return _discoverChannelService(resourceUrl, WEBHOOK_CHANNEL);
 }
 
 /**
@@ -85,6 +96,31 @@ export async function subscribeWebSocket(resourceUrl) {
         return body.receiveFrom || null;
     } catch {
         return null;
+    }
+}
+
+/**
+ * Subscribe `resourceUrl` to the WebhookChannel2023 so the server POSTs a
+ * notification to `sendTo` when the resource changes (R77 — closed-app inbox push).
+ * Returns true on success, false if the server offers no webhook channel or refuses.
+ */
+export async function subscribeWebhook(resourceUrl, sendTo) {
+    const service = await discoverWebhookService(resourceUrl);
+    if (!service || !sendTo) return false;
+    try {
+        const res = await solidSession.fetch(service, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/ld+json' },
+            body: JSON.stringify({
+                '@context': ['https://www.w3.org/ns/solid/notification/v1'],
+                type: WEBHOOK_CHANNEL,
+                topic: resourceUrl,
+                sendTo,
+            }),
+        });
+        return !!(res && res.ok);
+    } catch {
+        return false;
     }
 }
 

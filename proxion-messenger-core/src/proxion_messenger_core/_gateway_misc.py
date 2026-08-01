@@ -1510,6 +1510,101 @@ class MiscHandlerMixin:
         await websocket.send(json.dumps({"type": "push_unsubscribed", "subscription_id": subscription_id}))
 
     # ------------------------------------------------------------------
+    # Solid inbox webhook (R77): closed-app push for LDN chat invitations.
+    #
+    # CSS cannot Web-Push a browser (no WebPushChannel2023 by default), but it can
+    # POST a notification to a URL we name when a resource changes (WebhookChannel2023).
+    # The client subscribes its inbox with sendTo = {origin}/solid-webhook/{token}; on
+    # a change, CSS calls us and we relay a privacy-preserving Web Push. The token is a
+    # stateless HMAC over the WebID, so no per-user table and it survives restart when
+    # VAPID is persisted.
+    # ------------------------------------------------------------------
+
+    def _inbox_webhook_secret(self):
+        """Symmetric key for inbox-webhook tokens, derived from the VAPID private key."""
+        pem = getattr(self, "_vapid_private_pem", "") or ""
+        if not pem:
+            return None
+        import hashlib
+        return hashlib.sha256(("proxion-inbox-webhook:" + pem).encode("utf-8")).digest()
+
+    def _inbox_webhook_token(self, webid: str) -> str:
+        """A capability token encoding `webid`, verifiable by us alone. '' if unavailable."""
+        secret = self._inbox_webhook_secret()
+        if not secret or not webid:
+            return ""
+        import base64
+        import hashlib
+        import hmac
+        mac = hmac.new(secret, webid.encode("utf-8"), hashlib.sha256).digest()[:16]
+        wid = base64.urlsafe_b64encode(webid.encode("utf-8")).rstrip(b"=").decode()
+        sig = base64.urlsafe_b64encode(mac).rstrip(b"=").decode()
+        return f"{wid}.{sig}"
+
+    def _verify_inbox_webhook_token(self, token: str):
+        """Recover the WebID from a token if the HMAC checks out, else None."""
+        secret = self._inbox_webhook_secret()
+        if not secret or not token or "." not in token:
+            return None
+        import base64
+        import hashlib
+        import hmac
+        try:
+            wid_b64, sig_b64 = token.split(".", 1)
+            webid = base64.urlsafe_b64decode(wid_b64 + "=" * (-len(wid_b64) % 4)).decode("utf-8")
+            sig = base64.urlsafe_b64decode(sig_b64 + "=" * (-len(sig_b64) % 4))
+        except Exception:
+            return None
+        expected = hmac.new(secret, webid.encode("utf-8"), hashlib.sha256).digest()[:16]
+        if not hmac.compare_digest(sig, expected):
+            return None
+        return webid
+
+    def _deliver_inbox_webhook(self, token: str) -> bool:
+        """A CSS webhook fired for a user's inbox: send a content-free push nudge.
+
+        Synchronous (send_web_push does network I/O); the HTTP route offloads it to an
+        executor so the 204 returns immediately. Returns True if any push was accepted.
+        """
+        webid = self._verify_inbox_webhook_token(token)
+        if not webid or not self._store:
+            return False
+        subs = self._store.get_push_subscriptions(webid)
+        vpk = getattr(self, "_vapid_private_pem", None)
+        vsub = getattr(self, "_vapid_subject", None)
+        if not (subs and vpk and vsub):
+            return False
+        from .webpush import send_web_push
+        sent = False
+        for sub in subs:
+            try:
+                ok = send_web_push(
+                    subscription={
+                        "endpoint": sub["endpoint"],
+                        "keys": {"p256dh": sub["p256dh_b64"], "auth": sub["auth_b64"]},
+                    },
+                    # Privacy-preserving: type only, no sender or content.
+                    payload={"type": "invite", "thread_id": ""},
+                    vapid_private_pem=vpk,
+                    vapid_subject=vsub,
+                )
+                sent = sent or bool(ok)
+            except Exception:
+                pass
+        return sent
+
+    async def _handle_get_inbox_webhook(self, websocket, data: dict) -> None:
+        """Give the connected user their inbox-webhook token so the client can point
+        CSS's WebhookChannel2023 at us (sendTo = {origin}/solid-webhook/{token})."""
+        owner_webid = self._client_webids.get(websocket, "")
+        token = self._inbox_webhook_token(owner_webid) if owner_webid else ""
+        await websocket.send(json.dumps({
+            "type": "inbox_webhook",
+            "token": token,
+            "path": "/solid-webhook/",
+        }))
+
+    # ------------------------------------------------------------------
     # DM session lifecycle (R18)
     # ------------------------------------------------------------------
 

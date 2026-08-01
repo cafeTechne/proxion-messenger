@@ -2327,6 +2327,28 @@ class HttpEndpointsMixin:
                     await writer.drain()
                     return
 
+                # ── POST /solid-webhook/{token} — CSS inbox notification → Web Push (R77) ──
+                # CSS's WebhookChannel2023 POSTs here when a user's inbox changes. We
+                # treat the body as an opaque nudge, verify the token, and relay a
+                # content-free push. Always 204 so we never leak token validity.
+                if method == "POST" and path.startswith("/solid-webhook/"):
+                    _wh_token = path[len("/solid-webhook/"):]
+                    try:
+                        if content_length > 0:
+                            await _read_http_body(reader, min(content_length, 65536), 10.0)
+                    except Exception:
+                        pass
+                    if _wh_token:
+                        try:
+                            import asyncio as _a_wh
+                            _a_wh.get_event_loop().run_in_executor(
+                                None, self._deliver_inbox_webhook, _wh_token)
+                        except Exception:
+                            pass
+                    writer.write(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n")
+                    await writer.drain()
+                    return
+
                 # ── POST /api/pod-disconnect — sign-out fallback usable without WebSocket ──
                 if method == "POST" and path == "/api/pod-disconnect":
                     if not self._is_trusted_origin(origin_header, http_port, peer_ip):

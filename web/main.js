@@ -51,6 +51,7 @@ import { createRendering } from './rendering.js';
 import { createView } from './view.js';
 import { createInvite } from './invite.js';
 import { createPush } from './push.js';
+import { subscribeWebhook } from './notify.js';
 import { createPairing } from './pairing.js';
 import { createRecovery } from './recovery.js';
 import { createGifTray, saveFavorite, pushAllGifsToPod } from './gifs.js';
@@ -511,6 +512,11 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         // Assigned by setupSolidChatUI; called from onPodLoggedIn to begin watching
         // the Solid inbox for live chat invitations (PLAN_ROUND_76).
         let startSolidInboxWatch = () => {};
+        // R77: closed-app push. We point CSS's WebhookChannel2023 at the gateway so an
+        // invite raises a notification with no tab open. Set once we know the inbox URL;
+        // the gateway's token arrives async as an `inbox_webhook` event.
+        let _inboxWebhookUrl = null;
+        let _inboxWebhookSubscribed = false;
         setupSolidChatUI(solidChat, solidChatUI);
         function _deriveConvTitle(url) {
             try {
@@ -2157,6 +2163,16 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     sessionStorage.setItem(warnKey, "1");
                     const days = Math.ceil((event.expires_at - Date.now() / 1000) / 86400);
                     showToast(tn('contact.expiresInDays', days, { peer: (event.peer_did || "a contact").slice(8, 18) + "…" }));
+                    break;
+                }
+                case "inbox_webhook": {
+                    // R77: the gateway handed us a webhook token; point CSS at the
+                    // gateway so inbox invites push even with the app closed.
+                    if (event.token && _inboxWebhookUrl && !_inboxWebhookSubscribed) {
+                        _inboxWebhookSubscribed = true;
+                        const sendTo = location.origin + (event.path || '/solid-webhook/') + event.token;
+                        subscribeWebhook(_inboxWebhookUrl, sendTo).catch(() => {});
+                    }
                     break;
                 }
                 case "pod_status": {
@@ -3869,6 +3885,26 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             rehostOwnedRooms();
             // R76: watch the Solid inbox so chat invitations arrive live.
             startSolidInboxWatch();
+            // R77: also arrange closed-app push for inbox invitations.
+            setupInboxPush();
+        }
+
+        // R77: subscribe our inbox to CSS's WebhookChannel2023 with sendTo pointing at
+        // the gateway, so an invite dropped while the app is closed still notifies us.
+        // Needs push enabled (permission granted) and the inbox to exist; the webhook
+        // token is requested from the gateway and applied when its reply arrives.
+        async function setupInboxPush() {
+            if (_inboxWebhookSubscribed) return;
+            try {
+                const pushOn = await push.enablePush();
+                if (!pushOn) return;                       // no permission → no point subscribing
+                const inbox = await solidChat.ensureInbox();
+                if (!inbox) return;
+                _inboxWebhookUrl = inbox;
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ cmd: 'get_inbox_webhook' }));
+                }
+            } catch (_) { /* best-effort */ }
         }
 
         function initPodSettingsPanel() {

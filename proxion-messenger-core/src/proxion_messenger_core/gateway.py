@@ -1104,6 +1104,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_subscribe_push(websocket, data)
             elif cmd == "unsubscribe_push":
                 await self._handle_unsubscribe_push(websocket, data)
+            elif cmd == "get_inbox_webhook":
+                await self._handle_get_inbox_webhook(websocket, data)
             elif cmd == "list_dm_sessions":
                 await self._handle_list_dm_sessions(websocket, data)
             elif cmd == "expire_dm_session":
