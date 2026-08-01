@@ -113,6 +113,7 @@ export function createView({
         document.getElementById("members-panel").style.display = "none";
         document.getElementById("members-panel").classList.remove("mobile-open");
         document.getElementById("start-call-btn").style.display = "block";
+        { const _vb = document.getElementById("start-video-call-btn"); if (_vb) _vb.style.display = "block"; }
         document.getElementById("invite-btn").style.display = "none";
         document.querySelectorAll("nav li").forEach(el => el.classList.remove("active"));
         const li = document.getElementById(`nav-${id}`);
@@ -174,6 +175,7 @@ export function createView({
             setCurrentRoomMembers([]);
             closeMentionDropdown();
             document.getElementById("start-call-btn").style.display = "none";
+            { const _vb = document.getElementById("start-video-call-btn"); if (_vb) _vb.style.display = "none"; }
             document.getElementById("invite-btn").style.display =
                 roomInviteUrls[roomId] ? "inline-block" : "none";
             document.getElementById("members-toggle").style.display = "inline-block";
@@ -241,6 +243,7 @@ export function createView({
                 if (window.innerWidth <= 768) toggleSidebar();
 
                 document.getElementById("start-call-btn").style.display = type === "dm" ? "block" : "none";
+                { const _vb = document.getElementById("start-video-call-btn"); if (_vb) _vb.style.display = type === "dm" ? "block" : "none"; }
                 document.getElementById("invite-btn").style.display =
                     (type === "room" && roomInviteUrls[id]) ? "inline-block" : "none";
                 const dtSel = document.getElementById("disappear-timer-select");

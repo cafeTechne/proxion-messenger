@@ -516,5 +516,17 @@
   "solidchat.participantPlaceholder": "دعوة WebID (اختياري)",
   "solidchat.inviteReceived": "دعوة دردشة جديدة",
   "solidchat.invitesReceived": "{count} دعوات دردشة جديدة",
-  "solidchat.pendingInvites": "{count} دعوات معلقة"
+  "solidchat.pendingInvites": "{count} دعوات معلقة",
+  "voice.identityUnverified": "تعذّر التحقق من هوية المتصل. تم رفض المكالمة من أجل سلامتك.",
+  "voice.verified": "مُوَّثَق",
+  "voice.unverified": "غير مُوَّثَق",
+  "voice.verifiedHint": "تم تأكيد هوية الجهاز الآخر تشفيريًا. الوسائط مشفّرة من طرف إلى طرف.",
+  "voice.unverifiedHint": "تعذّر تأكيد هوية جهة الاتصال هذه. الوسائط لا تزال مشفّرة من طرف إلى طرف.",
+  "voice.cameraError": "الكاميرا غير متاحة: {error}",
+  "voice.capturingCamera": "● الكاميرا قيد التشغيل",
+  "voice.capturingScreen": "● أنت تشارك شاشتك",
+  "voice.capturingBoth": "● الكاميرا والشاشة نشطتان",
+  "ui.cameraToggle": "تشغيل / إيقاف الكاميرا",
+  "ui.videoCall": "مكالمة فيديو",
+  "ui.video": "فيديو"
 }

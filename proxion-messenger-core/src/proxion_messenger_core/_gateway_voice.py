@@ -206,12 +206,19 @@ class VoiceHandlerMixin:
         asyncio.get_event_loop().call_later(
             60.0, lambda: self._voice_sessions.pop(session_id, None)
         )
+        # R79: identity-bound DTLS fingerprint signature travels with the SDP so the
+        # callee can detect a gateway that tampered with the media channel. Opaque to
+        # the gateway; forwarded verbatim.
+        fp_sig = data.get("fp_sig", "")
+        fp_signer = data.get("fp_signer", "")
         event = {
             "type": "voice_invite",
             "session_id": session_id,
             "caller_webid": caller_webid,
             "sdp_offer": sdp_offer,
             "cert_id": cert_id,
+            "fp_sig": fp_sig,
+            "fp_signer": fp_signer,
         }
 
         target_ws = self._any_socket(target_webid) if target_webid else None
@@ -230,6 +237,8 @@ class VoiceHandlerMixin:
                             "session_id": session_id,
                             "sdp_offer": sdp_offer,
                             "caller_webid": caller_webid,
+                            "fp_sig": fp_sig,
+                            "fp_signer": fp_signer,
                         },
                     )
                 except Exception:
@@ -260,6 +269,9 @@ class VoiceHandlerMixin:
         session_id = data.get("session_id", "")
         sdp_answer = data.get("sdp_answer", "")
         cert_id = data.get("cert_id")
+        # R79: identity-bound fingerprint signature for the answer, forwarded verbatim.
+        fp_sig = data.get("fp_sig", "")
+        fp_signer = data.get("fp_signer", "")
 
         # Group voice: answer addressed directly to the calling peer by webid.
         target_webid = data.get("target_webid")
@@ -270,6 +282,8 @@ class VoiceHandlerMixin:
                 "from_webid": sender_wid,
                 "session_id": session_id,
                 "sdp_answer": sdp_answer,
+                "fp_sig": fp_sig,
+                "fp_signer": fp_signer,
             }
             target_ws = self._any_socket(target_webid)
             if target_ws and target_ws in self.clients:
@@ -282,7 +296,7 @@ class VoiceHandlerMixin:
                 asyncio.create_task(self._relay_voice_signal(
                     target_webid, "answer",
                     {"session_id": session_id, "sdp_answer": sdp_answer,
-                     "caller_webid": sender_wid},
+                     "caller_webid": sender_wid, "fp_sig": fp_sig, "fp_signer": fp_signer},
                 ))
             return
 
@@ -303,7 +317,8 @@ class VoiceHandlerMixin:
                 sess["callee_ws"] = websocket
             sess["answered"] = True
             caller_ws = sess["caller_ws"]
-            event = {"type": "voice_answer", "session_id": session_id, "sdp_answer": sdp_answer}
+            event = {"type": "voice_answer", "session_id": session_id, "sdp_answer": sdp_answer,
+                     "fp_sig": fp_sig, "fp_signer": fp_signer}
             if caller_ws and caller_ws in self.clients:
                 await caller_ws.send(json.dumps(event))
 

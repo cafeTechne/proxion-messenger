@@ -92,10 +92,17 @@ export function createMedia({ getSocket, getActiveView, showToast, getVoiceState
         state.isSharing = false;
         state.screenStream?.getTracks().forEach(tr => tr.stop());
         state.screenStream = null;
+        const voiceState = getVoiceState();
+        // Restore the pre-negotiated video sender to the camera track (if the camera
+        // is on) or to nothing — no renegotiation, since the m-line already exists.
+        try {
+            const sender = voiceState.pc?.getSenders().find(s => s.track?.kind === 'video')
+                || voiceState._videoSender;
+            if (sender) sender.replaceTrack(voiceState.videoEnabled ? (voiceState._cameraTrack || null) : null);
+        } catch (_) { /* ignore */ }
         const sBtn = document.getElementById('screenshare-btn');
         if (sBtn) sBtn.classList.remove('vw-sharing');
         const socket = getSocket();
-        const voiceState = getVoiceState();
         if (socket && voiceState.currentCall) socket.send(JSON.stringify({ cmd: 'screenshare_stopped', session_id: voiceState.currentCall.session_id || '' }));
     }
 

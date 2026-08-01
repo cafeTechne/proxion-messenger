@@ -503,5 +503,17 @@
   "solidchat.participantPlaceholder": "Ein WebID einladen (optional)",
   "solidchat.inviteReceived": "Neue Chat-Einladung",
   "solidchat.invitesReceived": "{count} neue Chat-Einladungen",
-  "solidchat.pendingInvites": "{count} ausstehende Einladungen"
+  "solidchat.pendingInvites": "{count} ausstehende Einladungen",
+  "voice.identityUnverified": "Identität des Anrufers konnte nicht überprüft werden. Anruf zu Ihrer Sicherheit abgelehnt.",
+  "voice.verified": "Verifiziert",
+  "voice.unverified": "Nicht verifiziert",
+  "voice.verifiedHint": "Die Identität des anderen Geräts wurde kryptografisch bestätigt. Medien sind Ende-zu-Ende verschlüsselt.",
+  "voice.unverifiedHint": "Die Identität dieses Kontakts konnte nicht bestätigt werden. Medien sind dennoch Ende-zu-Ende verschlüsselt.",
+  "voice.cameraError": "Kamera nicht verfügbar: {error}",
+  "voice.capturingCamera": "● Ihre Kamera ist an",
+  "voice.capturingScreen": "● Sie teilen Ihren Bildschirm",
+  "voice.capturingBoth": "● Kamera und Bildschirm sind aktiv",
+  "ui.cameraToggle": "Kamera an / aus",
+  "ui.videoCall": "Videoanruf",
+  "ui.video": "Video"
 }

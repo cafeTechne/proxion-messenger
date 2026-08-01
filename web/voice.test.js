@@ -23,8 +23,11 @@ describe('audioLevel (speaking detection)', () => {
 beforeEach(() => {
   const els = {};
   const mkEl = () => ({ id: '', style: {}, textContent: '', innerHTML: '',
+    dataset: {}, srcObject: null, muted: false,
     classList: { toggle() {}, add() {}, remove() {} },
     querySelectorAll: () => [], appendChild() {}, remove() {},
+    setAttribute() {}, removeAttribute() {}, getAttribute() { return null; },
+    play() { return Promise.resolve(); },
     setProperty() {}, addEventListener() {} });
   global.document = {
     getElementById: (id) => (els[id] ||= mkEl()),
@@ -120,6 +123,8 @@ describe('ICE-failure handling (silent-drop regressions)', () => {
     class FakePC {
       constructor() { this.iceConnectionState = 'new'; }
       addTrack() {}
+      addTransceiver() { return { sender: { replaceTrack() { return Promise.resolve(); } } }; }
+      getSenders() { return []; }
       async createOffer() { return { type: 'offer', sdp: 'o' }; }
       async createAnswer() { return { type: 'answer', sdp: 'a' }; }
       async setLocalDescription() {}

@@ -503,5 +503,17 @@
   "solidchat.participantPlaceholder": "Inviter un WebID (facultatif)",
   "solidchat.inviteReceived": "Nouvelle invitation de chat",
   "solidchat.invitesReceived": "{count} nouvelles invitations de chat",
-  "solidchat.pendingInvites": "{count} invitations en attente"
+  "solidchat.pendingInvites": "{count} invitations en attente",
+  "voice.identityUnverified": "Impossible de vérifier l'identité de l'appelant. Appel refusé par sécurité.",
+  "voice.verified": "Vérifié",
+  "voice.unverified": "Non vérifié",
+  "voice.verifiedHint": "L'identité de l'autre appareil a été confirmée cryptographiquement. Les médias sont chiffrés de bout en bout.",
+  "voice.unverifiedHint": "L'identité de ce contact n'a pas pu être confirmée. Les médias restent chiffrés de bout en bout.",
+  "voice.cameraError": "Caméra indisponible : {error}",
+  "voice.capturingCamera": "● Votre caméra est active",
+  "voice.capturingScreen": "● Vous partagez votre écran",
+  "voice.capturingBoth": "● Votre caméra et votre écran sont actifs",
+  "ui.cameraToggle": "Caméra activée / désactivée",
+  "ui.videoCall": "Appel vidéo",
+  "ui.video": "Vidéo"
 }

@@ -448,6 +448,22 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             getSocket: () => socket, getActiveView: () => activeView, getSelfWebId: () => selfWebId,
             getTurnUrl: () => turnUrl, getTurnSecret: () => turnSecret,
             getLocalDmPeers: () => localDmPeers, getCurrentRoomMembers: () => currentRoomMembers, getIsSharing: () => media.state.isSharing,
+            // R79: end-to-end call authentication — our identity key signs the DTLS
+            // fingerprint; the peer's known identity verifies it.
+            getIdentityPrivKey: () => _identityPrivKey,
+            getClientDid: () => clientDid,
+            getExpectedPeerDid: (view, event) => {
+                const cw = event && (event.caller_webid || event.from_webid);
+                if (cw && cw.startsWith('did:key:') && peerDidToCertId[cw]) return cw;
+                if (view) {
+                    if (view.peerWebid && String(view.peerWebid).startsWith('did:key:')) return view.peerWebid;
+                    if (view.id) {
+                        const found = Object.keys(peerDidToCertId).find(d => peerDidToCertId[d] === view.id);
+                        if (found) return found;
+                    }
+                }
+                return '';
+            },
         });
         // Pod / connectivity status banners (no deps). Instantiated before
         // onboarding because setPodBanner is injected into createOnboarding below.
@@ -2992,6 +3008,16 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             if (!activeView || (activeView.type !== "dm" && activeView.type !== "local_dm")) return;
             await voice.initWebRTC(activeView.id, null, true);
         };
+
+        // R79: start a call with the camera on (video call). Same signaling path;
+        // the extra flag captures the camera into the pre-negotiated video sender.
+        document.getElementById("start-video-call-btn")?.addEventListener("click", async () => {
+            if (!activeView || (activeView.type !== "dm" && activeView.type !== "local_dm")) return;
+            await voice.initWebRTC(activeView.id, null, true, null, true);
+        });
+        document.getElementById("camera-btn")?.addEventListener("click", () => {
+            voice.toggleCamera();
+        });
 
         document.getElementById("voice-answer").onclick = async () => {
             if (!voice.state.currentCall) return;

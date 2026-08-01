@@ -33,19 +33,26 @@ if (!CHROME) { console.error('No Chrome/Edge found; set PROXION_CHROME.'); proce
 
 // Runs in the page: a real RTCPeerConnection loopback with a fake mic track.
 async function loopback() {
-  const result = { gum: false, iceA: '', iceB: '', remoteTracks: 0, error: '' };
+  const result = { gum: false, iceA: '', iceB: '', remoteTracks: 0, remoteVideoTracks: 0, error: '' };
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    result.gum = stream.getAudioTracks().length > 0;
+    // Capture audio AND video (fake devices) to exercise the video-call path:
+    // the video transceiver, the remote video track, and screen-share plumbing all
+    // depend on a video m-line negotiating and a remote video track arriving.
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+    result.gum = stream.getAudioTracks().length > 0 && stream.getVideoTracks().length > 0;
 
     const pcA = new RTCPeerConnection();
     const pcB = new RTCPeerConnection();
     pcA.onicecandidate = (e) => { if (e.candidate) pcB.addIceCandidate(e.candidate).catch(() => {}); };
     pcB.onicecandidate = (e) => { if (e.candidate) pcA.addIceCandidate(e.candidate).catch(() => {}); };
 
-    const gotTrack = new Promise((resolve) => {
-      pcB.ontrack = (e) => { result.remoteTracks++; if (e.track) resolve(); };
+    const gotVideo = new Promise((resolve) => {
+      pcB.ontrack = (e) => {
+        result.remoteTracks++;
+        if (e.track && e.track.kind === 'video') { result.remoteVideoTracks++; resolve(); }
+      };
     });
+    const gotTrack = gotVideo;
 
     stream.getTracks().forEach((t) => pcA.addTrack(t, stream));
 
@@ -104,17 +111,17 @@ try {
 
   const r = await page.evaluate(loopback);
   console.log(`Loaded ${URL}`);
-  console.log('getUserMedia (fake mic):', r.gum);
+  console.log('getUserMedia (fake mic+cam):', r.gum);
   console.log('ICE states:', `A=${r.iceA || '(none)'} B=${r.iceB || '(none)'}`);
-  console.log('remote media tracks received:', r.remoteTracks);
+  console.log('remote media tracks received:', r.remoteTracks, `(video: ${r.remoteVideoTracks})`);
   if (r.error) console.log('error:', r.error);
   if (pageErrors.length) console.log('page errors:', pageErrors.slice(0, 3));
 
   const connected = (r.iceA === 'connected' || r.iceA === 'completed') &&
                     (r.iceB === 'connected' || r.iceB === 'completed');
-  if (r.gum && connected && r.remoteTracks > 0 && !r.error) {
+  if (r.gum && connected && r.remoteVideoTracks > 0 && !r.error) {
     console.log('\n✓ WebRTC media path works in the served app environment ' +
-                '(getUserMedia + RTCPeerConnection + ICE + live remote track).');
+                '(getUserMedia audio+video + RTCPeerConnection + ICE + live remote VIDEO track).');
     process.exitCode = 0;
   } else {
     console.error('\n✗ WebRTC media smoke test FAILED.');

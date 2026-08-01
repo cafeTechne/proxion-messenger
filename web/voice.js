@@ -3,6 +3,7 @@
 // handlers main.js wires into the WS dispatch and call/mute/leave buttons.
 import { t } from './i18n.js';
 import { escHtml } from './util.js';
+import { extractFingerprint, signFingerprint, classifyPeerSdp } from './callsec.js';
 
 export const CALL_TIMEOUT_MS = 30000;
 export const CallState = Object.freeze({
@@ -26,7 +27,7 @@ export function audioLevel(data) {
 }
 
 export function createVoice(deps) {
-    const { showToast, renderMessage, showOsNotification, sendCmd, playNotificationSound, normalizeRelayThreadId, stopScreenShare, getSocket, getActiveView, getSelfWebId, getTurnUrl, getTurnSecret, getLocalDmPeers, getCurrentRoomMembers, getIsSharing } = deps;
+    const { showToast, renderMessage, showOsNotification, sendCmd, playNotificationSound, normalizeRelayThreadId, stopScreenShare, getSocket, getActiveView, getSelfWebId, getTurnUrl, getTurnSecret, getLocalDmPeers, getCurrentRoomMembers, getIsSharing, getIdentityPrivKey, getClientDid, getExpectedPeerDid } = deps;
     const state = {
             currentCall: null,
             localStream: null,
@@ -46,6 +47,10 @@ export function createVoice(deps) {
             callTimerInterval: null,
             _inVoiceChannel: null,
             ringOscillator: null,
+            videoEnabled: false,     // is our camera track live in this call
+            _videoSender: null,      // the pre-negotiated video sender (camera/screen go here)
+            _cameraTrack: null,      // our camera track when video is on
+            _verifyState: 'unverified',  // 'verified' | 'unverified' | (mismatch → call refused)
     };
 
         function updateVoiceChannels(roomId) {
@@ -119,7 +124,9 @@ export function createVoice(deps) {
             try {
                 // D1: browser-native call-quality DSP (noise suppression, echo
                 // cancellation, auto gain). Falls back gracefully if a browser
-                // ignores unknown constraints.
+                // ignores unknown constraints. Audio only here — video is captured
+                // separately via enableCamera and attached to the pre-negotiated
+                // video sender, so it can be toggled without renegotiation.
                 state.localStream = await navigator.mediaDevices.getUserMedia({
                     audio: { noiseSuppression: true, echoCancellation: true, autoGainControl: true },
                     video: false,
@@ -129,6 +136,92 @@ export function createVoice(deps) {
                 showToast(t('voice.micError', { error: (err && err.name ? err.name : err) }), "error");
             }
             return state.localStream;
+        }
+
+        // Attach a media stream to a <video> element in the call widget. `mirror`
+        // flips the local self-view so it reads like a mirror.
+        function _renderVideo(elId, stream, { mirror = false, muted = false } = {}) {
+            const el = document.getElementById(elId);
+            if (!el) return;
+            el.srcObject = stream || null;
+            el.muted = muted;
+            el.style.transform = mirror ? 'scaleX(-1)' : '';
+            el.style.display = stream ? '' : 'none';
+            if (stream) el.play?.().catch(() => {});
+        }
+
+        // Sign the DTLS fingerprint from our own local SDP so the peer can prove the
+        // media channel is really ours (defeats a gateway SDP swap). Returns
+        // { fp_sig, fp_signer } or {} if we cannot sign (no identity key).
+        async function _signLocalFingerprint(role) {
+            try {
+                const priv = getIdentityPrivKey?.();
+                const did = getClientDid?.();
+                if (!priv || !did || !state.pc?.localDescription?.sdp) return {};
+                const fingerprint = extractFingerprint(state.pc.localDescription.sdp);
+                if (!fingerprint) return {};
+                const fp_sig = await signFingerprint({
+                    fingerprint, sessionId: state.currentCallSessionId || '', role, privKey: priv,
+                });
+                return { fp_sig, fp_signer: did };
+            } catch { return {}; }
+        }
+
+        // Verify a received offer/answer SDP against the expected contact identity.
+        // Returns true to proceed, false if the call must be refused (MitM).
+        async function _verifyPeerSdp(sdp, role, event) {
+            const verdict = await classifyPeerSdp({
+                sdp,
+                sessionId: state.currentCallSessionId || event?.session_id || '',
+                role,
+                signatureB64: event?.fp_sig || '',
+                signerDid: event?.fp_signer || '',
+                expectedDid: getExpectedPeerDid?.(getActiveView(), event) || '',
+            });
+            if (verdict === 'mismatch') {
+                showToast(t('voice.identityUnverified'), 'error');
+                state._verifyState = 'mismatch';
+                return false;
+            }
+            state._verifyState = verdict === 'verified' ? 'verified' : 'unverified';
+            _updateVerifyBadge();
+            return true;
+        }
+
+        function _updateVerifyBadge() {
+            const el = document.getElementById('vw-verified');
+            if (!el) return;
+            const v = state._verifyState === 'verified';
+            el.textContent = v ? t('voice.verified') : t('voice.unverified');
+            el.title = v ? t('voice.verifiedHint') : t('voice.unverifiedHint');
+            el.dataset.state = state._verifyState;
+            el.style.display = state._callState === CallState.CONNECTED ? '' : 'none';
+        }
+
+        // Turn our camera on/off mid-call by swapping the track in the pre-negotiated
+        // video sender — no renegotiation needed. Returns the new enabled state.
+        async function toggleCamera() {
+            if (!state.pc || !state._videoSender) return state.videoEnabled;
+            if (state.videoEnabled) {
+                try { state._cameraTrack?.stop(); } catch (_) {}
+                state._cameraTrack = null;
+                await state._videoSender.replaceTrack(null);
+                state.videoEnabled = false;
+                _renderVideo('vw-local-video', null);
+            } else {
+                let cam;
+                try { cam = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); }
+                catch (err) { showToast(t('voice.cameraError', { error: (err && err.name) || err }), 'error'); return false; }
+                const track = cam.getVideoTracks()[0];
+                if (!track) return false;
+                state._cameraTrack = track;
+                await state._videoSender.replaceTrack(track);
+                state.videoEnabled = true;
+                _renderVideo('vw-local-video', cam, { mirror: true, muted: true });
+                track.onended = () => { if (state.videoEnabled) toggleCamera(); };
+            }
+            _updateCallUI();
+            return state.videoEnabled;
         }
 
         async function getTurnCredentials(username, secret) {
@@ -166,11 +259,39 @@ export function createVoice(deps) {
             widget.style.display = active ? "flex" : "none";
             const ssBtn = document.getElementById("screenshare-btn");
             if (ssBtn) ssBtn.style.display = connected ? "flex" : "none";
+            const camBtn = document.getElementById("camera-btn");
+            if (camBtn) {
+                camBtn.style.display = connected ? "flex" : "none";
+                camBtn.classList.toggle("vw-active", state.videoEnabled);
+                camBtn.setAttribute("aria-pressed", state.videoEnabled ? "true" : "false");
+            }
             if (!connected && getIsSharing()) stopScreenShare();
+            // Privacy: an always-visible indicator whenever our camera or screen is live.
+            const capEl = document.getElementById("vw-capture-indicator");
+            if (capEl) {
+                const sharing = getIsSharing();
+                const on = connected && (state.videoEnabled || sharing);
+                capEl.style.display = on ? "" : "none";
+                capEl.textContent = state.videoEnabled && sharing ? t('voice.capturingBoth')
+                    : sharing ? t('voice.capturingScreen')
+                        : state.videoEnabled ? t('voice.capturingCamera') : "";
+            }
+            _syncRemoteVideoVisibility();
+            _updateVerifyBadge();
             const statusEl = document.getElementById("vw-status");
             if (statusEl && !connected) {
                 statusEl.textContent = state._callState === CallState.CALLING ? "Calling..." : "Incoming...";
             }
+        }
+
+        // Show the remote video surface only when a live remote video track is present,
+        // so a voice-only call does not show a black rectangle.
+        function _syncRemoteVideoVisibility() {
+            const el = document.getElementById('vw-remote-video');
+            if (!el) return;
+            const hasVideo = !!(state.remoteStream &&
+                state.remoteStream.getVideoTracks().some(tr => tr.readyState === 'live' && !tr.muted));
+            el.style.display = hasVideo ? '' : 'none';
         }
 
         function _startCallTimeout() {
@@ -429,12 +550,14 @@ export function createVoice(deps) {
             Object.keys(state._channelParticipants).forEach(k => delete state._channelParticipants[k]);
         }
 
-        async function initWebRTC(certId, sessionId, isCaller = false, sdpOffer = null) {
+        async function initWebRTC(certId, sessionId, isCaller = false, sdpOffer = null, withVideo = false) {
             const iceServers = await _getIceServers();
             state.pc = new RTCPeerConnection({ iceServers: iceServers });
             state._pendingCandidates = [];
             state._remoteDescSet = false;
-            
+            state.currentCallSessionId = sessionId;
+            state._verifyState = 'unverified';
+
             const stream = await getMedia();
             // A caller with no microphone would start a call the other side can't
             // hear — abort cleanly instead of silently establishing a dead call.
@@ -446,17 +569,28 @@ export function createVoice(deps) {
             if (stream) {
                 stream.getTracks().forEach(track => state.pc.addTrack(track, stream));
             }
+            // Negotiate a video m-line up front (sendrecv) on EVERY call, even
+            // voice-only, so camera and screen share can be toggled later via
+            // replaceTrack with no mid-call renegotiation.
+            const vt = state.pc.addTransceiver('video', { direction: 'sendrecv' });
+            state._videoSender = vt.sender;
+            state.videoEnabled = false;
+            state._cameraTrack = null;
 
             state.pc.ontrack = (event) => {
-                console.log("Remote track received");
-                const remoteAudio = new Audio();
-                remoteAudio.srcObject = event.streams[0];
-                remoteAudio.play().catch(() => {});
-                // Keep a reference so the element isn't garbage-collected mid-call.
-                state._remoteAudio = remoteAudio;
+                // A <video> element plays both audio and video, so route the remote
+                // stream there for voice and video calls alike.
+                state.remoteStream = event.streams[0];
+                _renderVideo('vw-remote-video', event.streams[0]);
+                _syncRemoteVideoVisibility();
+                event.streams[0].getVideoTracks().forEach(tr => {
+                    tr.onmute = tr.onunmute = tr.onended = _syncRemoteVideoVisibility;
+                });
                 setCallState(CallState.CONNECTED);
+                _updateVerifyBadge();
                 const peerName = getActiveView() ? (getActiveView().name || getActiveView().id || "") : "";
-                document.getElementById("vw-peer-name").textContent = peerName || "";
+                const pn = document.getElementById("vw-peer-name");
+                if (pn) pn.textContent = peerName || "";
             };
 
             state.pc.onicecandidate = (e) => {
@@ -490,28 +624,42 @@ export function createVoice(deps) {
             };
 
             if (isCaller) {
+                // Start-as-video: put the camera track into the video sender before
+                // the offer so it is negotiated from the first exchange.
+                if (withVideo) { try { await toggleCamera(); } catch (_) {} }
                 const offer = await state.pc.createOffer();
                 await state.pc.setLocalDescription(offer);
                 state.currentCallSessionId = sessionId;
                 setCallState(CallState.CALLING);
                 _startCallTimeout();
+                const fp = await _signLocalFingerprint('offer');
                 getSocket().send(JSON.stringify({
                     cmd: "voice_invite",
                     cert_id: certId,
                     session_id: sessionId,
                     target_webid: getActiveView() ? getActiveView().peerWebid : null,
-                    sdp_offer: offer.sdp
+                    sdp_offer: offer.sdp,
+                    ...fp,
                 }));
             } else if (sdpOffer) {
+                // Refuse a call whose media channel we cannot authenticate to the
+                // expected contact (a gateway MitM would show up here). The offer's
+                // signature travelled in the invite we stored as state.currentCall.
+                if (!(await _verifyPeerSdp(sdpOffer, 'offer', state.currentCall || {}))) {
+                    hangupCleanup();
+                    return;
+                }
                 await _setRemoteAndDrainCandidates(sdpOffer, 'offer');
                 const answer = await state.pc.createAnswer();
                 await state.pc.setLocalDescription(answer);
                 state.currentCallSessionId = sessionId;
+                const fp = await _signLocalFingerprint('answer');
                 getSocket().send(JSON.stringify({
                     cmd: "voice_answer",
                     cert_id: certId,
                     session_id: sessionId,
-                    sdp_answer: answer.sdp
+                    sdp_answer: answer.sdp,
+                    ...fp,
                 }));
                 setCallState(CallState.CONNECTED);
                 startCallTimer();
@@ -557,6 +705,16 @@ export function createVoice(deps) {
             if (state.pc) { state.pc.close(); state.pc = null; }
             if (state._remoteAudio) { try { state._remoteAudio.pause(); state._remoteAudio.srcObject = null; } catch (_) {} state._remoteAudio = null; }
             if (state.localStream) { state.localStream.getTracks().forEach(tr => tr.stop()); state.localStream = null; }
+            // Release the camera and clear the video surfaces so the OS capture
+            // indicator goes out and no self-view lingers after the call.
+            if (state._cameraTrack) { try { state._cameraTrack.stop(); } catch (_) {} state._cameraTrack = null; }
+            if (getIsSharing && getIsSharing()) { try { stopScreenShare(); } catch (_) {} }
+            state.videoEnabled = false;
+            state._videoSender = null;
+            state.remoteStream = null;
+            state._verifyState = 'unverified';
+            _renderVideo('vw-local-video', null);
+            _renderVideo('vw-remote-video', null);
             state._mediaDenied = false;
             stopCallTimer();
             stopRingTone();
@@ -627,6 +785,11 @@ export function createVoice(deps) {
 
         async function handleVoiceAnswer(event) {
             if (state.pc) {
+                // Authenticate the answerer's media channel before accepting it.
+                if (!(await _verifyPeerSdp(event.sdp_answer, 'answer', event))) {
+                    _doHangup();
+                    return;
+                }
                 await _setRemoteAndDrainCandidates(event.sdp_answer, 'answer');
                 _clearCallTimeout();
                 setCallState(CallState.CONNECTED);
@@ -681,6 +844,7 @@ export function createVoice(deps) {
         initWebRTCForPeer,
         _getIceServers,
         getMedia,
+        toggleCamera,
         getTurnCredentials,
         handleVoiceAnswer,
         handleIceCandidate,

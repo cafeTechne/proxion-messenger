@@ -503,5 +503,17 @@
   "solidchat.participantPlaceholder": "Invitar a un WebID (opcional)",
   "solidchat.inviteReceived": "Nueva invitación de chat",
   "solidchat.invitesReceived": "{count} nuevas invitaciones de chat",
-  "solidchat.pendingInvites": "{count} invitaciones pendientes"
+  "solidchat.pendingInvites": "{count} invitaciones pendientes",
+  "voice.identityUnverified": "No se pudo verificar la identidad de quien llama. Llamada rechazada por seguridad.",
+  "voice.verified": "Verificado",
+  "voice.unverified": "Sin verificar",
+  "voice.verifiedHint": "La identidad del otro dispositivo se confirmó criptográficamente. El contenido está cifrado de extremo a extremo.",
+  "voice.unverifiedHint": "No se pudo confirmar la identidad de este contacto. El contenido sigue cifrado de extremo a extremo.",
+  "voice.cameraError": "Cámara no disponible: {error}",
+  "voice.capturingCamera": "● Tu cámara está encendida",
+  "voice.capturingScreen": "● Estás compartiendo tu pantalla",
+  "voice.capturingBoth": "● Tu cámara y pantalla están activas",
+  "ui.cameraToggle": "Cámara sí / no",
+  "ui.videoCall": "Videollamada",
+  "ui.video": "Vídeo"
 }
