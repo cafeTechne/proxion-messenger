@@ -50,7 +50,7 @@ import { createConnection } from './connection.js';
 import { createRendering } from './rendering.js';
 import { createView } from './view.js';
 import { createInvite } from './invite.js';
-import { createPush } from './push.js';
+import { createPush, closedAppPushStatus } from './push.js';
 import { subscribeWebhook } from './notify.js';
 import { createPairing } from './pairing.js';
 import { createRecovery } from './recovery.js';
@@ -3889,6 +3889,19 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             setupInboxPush();
         }
 
+        // R78 (L1): tell the user, honestly, whether an invitation can reach them with
+        // the app closed. Closed-app push needs the gateway to be publicly reachable; a
+        // loopback/private origin means the pod's CSS can never POST it, so we say so
+        // rather than silently no-op.
+        function updatePushStatus() {
+            const el = document.getElementById('settings-push-status');
+            if (!el) return;
+            const state = closedAppPushStatus();
+            const key = state === 'on' ? 'push.bgOn'
+                : state === 'in-app-only' ? 'push.bgInAppOnly' : 'push.bgOff';
+            el.textContent = t(key);
+        }
+
         // R77: subscribe our inbox to CSS's WebhookChannel2023 with sendTo pointing at
         // the gateway, so an invite dropped while the app is closed still notifies us.
         // Needs push enabled (permission granted) and the inbox to exist; the webhook
@@ -3897,6 +3910,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             if (_inboxWebhookSubscribed) return;
             try {
                 const pushOn = await push.enablePush();
+                updatePushStatus();                        // reflect permission outcome honestly
                 if (!pushOn) return;                       // no permission → no point subscribing
                 const inbox = await solidChat.ensureInbox();
                 if (!inbox) return;
@@ -3916,6 +3930,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                 if (connDiv) connDiv.style.display = 'block';
                 if (discDiv) discDiv.style.display = 'none';
                 if (webidEl) webidEl.textContent = webId; // S5: textContent not innerHTML
+                updatePushStatus();   // R78: honest closed-app push status
             } else {
                 if (connDiv) connDiv.style.display = 'none';
                 if (discDiv) discDiv.style.display = 'block';

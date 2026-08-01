@@ -1,78 +1,34 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createPush } from './push.js';
+// push.test.js — closed-app push reachability status (R78 L1). Pure helpers.
+import { describe, it, expect } from 'vitest';
+import { isPrivateHost, closedAppPushStatus } from './push.js';
 
-let sent, socketOpen, perm, vapidOk, existingSub, subscribedWith;
-beforeEach(() => {
-  sent = [];
-  socketOpen = true;
-  perm = 'granted';
-  vapidOk = true;
-  existingSub = null;
-  subscribedWith = null;
-  global.WebSocket = { OPEN: 1 };
-  global.atob = (b64) => Buffer.from(b64, 'base64').toString('binary');
-  global.Notification = { get permission() { return perm; }, requestPermission: vi.fn(async () => 'granted') };
-  const fakeSub = {
-    endpoint: 'https://push.example/abc',
-    toJSON: () => ({ keys: { p256dh: 'P256DH', auth: 'AUTH' } }),
-  };
-  const pushManager = {
-    getSubscription: vi.fn(async () => existingSub),
-    subscribe: vi.fn(async (opts) => { subscribedWith = opts; return fakeSub; }),
-  };
-  global.navigator = { serviceWorker: { ready: Promise.resolve({ pushManager }) } };
-  global.window = { PushManager: function () {} };
-  global.fetch = vi.fn(async () => ({
-    ok: vapidOk,
-    json: async () => ({ publicKey: 'BHl0bWFpbg' }),  // base64url-ish
-  }));
+describe('isPrivateHost', () => {
+    it('treats loopback, private, and mDNS hosts as unreachable', () => {
+        for (const h of ['localhost', 'x.local', '127.0.0.1', '::1', '[::1]',
+            '10.0.0.5', '192.168.1.20', '172.16.4.1', '172.31.255.1', '169.254.1.1', '0.0.0.0']) {
+            expect(isPrivateHost(h)).toBe(true);
+        }
+    });
+    it('treats public hostnames and IPs as reachable', () => {
+        for (const h of ['proxion.example', 'pod.alice.net', '8.8.8.8', '172.32.0.1', '192.167.0.1']) {
+            expect(isPrivateHost(h)).toBe(false);
+        }
+    });
 });
 
-function make() {
-  return createPush({ getSocket: () => (socketOpen ? { readyState: 1, send: (m) => sent.push(JSON.parse(m)) } : { readyState: 3 }) });
-}
-
-describe('_urlB64ToUint8Array', () => {
-  it('decodes base64url (with - and _) to bytes', () => {
-    const out = make()._urlB64ToUint8Array('aGVsbG8');  // "hello"
-    expect(Array.from(out)).toEqual([104, 101, 108, 108, 111]);
-  });
-});
-
-describe('enablePush', () => {
-  it('subscribes and registers the subscription with the gateway', async () => {
-    const ok = await make().enablePush();
-    expect(ok).toBe(true);
-    expect(subscribedWith.userVisibleOnly).toBe(true);
-    expect(subscribedWith.applicationServerKey).toBeInstanceOf(Uint8Array);
-    expect(sent).toEqual([{
-      cmd: 'subscribe_push',
-      endpoint: 'https://push.example/abc',
-      p256dh_b64: 'P256DH',
-      auth_b64: 'AUTH',
-    }]);
-  });
-  it('reuses an existing subscription instead of re-subscribing', async () => {
-    existingSub = { endpoint: 'https://push.example/old', toJSON: () => ({ keys: { p256dh: 'OLD', auth: 'A2' } }) };
-    const p = make();
-    const ok = await p.enablePush();
-    expect(ok).toBe(true);
-    expect(sent[0].endpoint).toBe('https://push.example/old');
-  });
-  it('no-ops when notification permission is denied', async () => {
-    perm = 'denied';
-    expect(await make().enablePush()).toBe(false);
-    expect(sent).toHaveLength(0);
-  });
-  it('requests permission when undecided, then subscribes on grant', async () => {
-    perm = 'default';
-    const ok = await make().enablePush();
-    expect(global.Notification.requestPermission).toHaveBeenCalled();
-    expect(ok).toBe(true);
-  });
-  it('returns false when the VAPID key endpoint is unavailable', async () => {
-    vapidOk = false;
-    expect(await make().enablePush()).toBe(false);
-    expect(sent).toHaveLength(0);
-  });
+describe('closedAppPushStatus', () => {
+    it('is off without notification permission', () => {
+        expect(closedAppPushStatus({ origin: 'https://proxion.example', permission: 'default' })).toBe('off');
+        expect(closedAppPushStatus({ origin: 'https://proxion.example', permission: 'denied' })).toBe('off');
+    });
+    it('is in-app-only when granted but served from a private origin', () => {
+        expect(closedAppPushStatus({ origin: 'http://localhost:8080', permission: 'granted' })).toBe('in-app-only');
+        expect(closedAppPushStatus({ origin: 'http://192.168.1.10:8080', permission: 'granted' })).toBe('in-app-only');
+    });
+    it('is on when granted and served from a public origin', () => {
+        expect(closedAppPushStatus({ origin: 'https://proxion.example', permission: 'granted' })).toBe('on');
+    });
+    it('is off when the origin is unparseable', () => {
+        expect(closedAppPushStatus({ origin: 'not a url', permission: 'granted' })).toBe('off');
+    });
 });

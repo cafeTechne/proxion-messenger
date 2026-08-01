@@ -8,6 +8,42 @@
 //
 // createPush({ getSocket }) — getSocket returns the reassignable host socket.
 
+// A host that a remote pod's CSS could never POST (loopback / private / mDNS). If the
+// app is served from such an origin, the gateway is not publicly reachable, so
+// closed-app push via the R77 webhook cannot arrive.
+export function isPrivateHost(host) {
+    const h = String(host || "").toLowerCase().replace(/^\[|\]$/g, "");
+    if (!h) return true;
+    if (h === "localhost" || h.endsWith(".local") || h.endsWith(".localhost")) return true;
+    if (h === "::1" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80")) return true;
+    const m = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+    if (m) {
+        const a = +m[1], b = +m[2];
+        if (a === 10 || a === 127) return true;
+        if (a === 192 && b === 168) return true;
+        if (a === 172 && b >= 16 && b <= 31) return true;
+        if (a === 169 && b === 254) return true;    // link-local
+        if (a === 0) return true;
+    }
+    return false;
+}
+
+// Whether an invitation can reach the user with the app CLOSED:
+//   'off'         — no notification permission, so no push at all.
+//   'in-app-only' — served from a loopback/private origin, so the gateway is not
+//                   reachable by the pod; live updates work while open, nothing when closed.
+//   'on'          — public origin; closed-app push is expected to work (best-effort).
+export function closedAppPushStatus({ origin, permission } = {}) {
+    const o = origin || (typeof location !== "undefined" ? location.origin : "");
+    const perm = permission || (typeof Notification !== "undefined" ? Notification.permission : "default");
+    if (perm !== "granted") return "off";
+    try {
+        return isPrivateHost(new URL(o).hostname) ? "in-app-only" : "on";
+    } catch {
+        return "off";
+    }
+}
+
 export function createPush({ getSocket }) {
     // VAPID public key is base64url; PushManager wants a Uint8Array.
     function _urlB64ToUint8Array(b64) {
