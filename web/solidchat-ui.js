@@ -142,9 +142,44 @@ export function createSolidChatUI({ model, getMyWebId = () => '', showToast = ()
         return conv;
     }
 
+    /**
+     * Discover the chats a WebID hosts and render them into `listEl` as joinable
+     * items (PLAN_ROUND_74). Titles/WebIDs are foreign data, rendered textContent
+     * only. Clicking a result joins via the existing join() path.
+     */
+    async function discover(webId, listEl, onJoined) {
+        if (!listEl) return;
+        listEl.innerHTML = '';
+        let results = [];
+        try { results = await model.discoverChats(webId); } catch { results = []; }
+        if (!results.length) {
+            const li = document.createElement('li');
+            li.className = 'solidchat-empty';
+            li.textContent = 'No chats found for that WebID.';
+            listEl.appendChild(li);
+            return;
+        }
+        for (const r of results) {
+            const li = document.createElement('li');
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'solidchat-item';
+            const t = document.createElement('span');
+            t.className = 'solidchat-item-title';
+            t.textContent = r.title || shortWebId(r.container);   // textContent: safe
+            item.appendChild(t);
+            item.addEventListener('click', async () => {
+                const conv = await join(r.container, r.title || shortWebId(r.container));
+                if (conv && onJoined) onJoined(conv);
+            });
+            li.appendChild(item);
+            listEl.appendChild(li);
+        }
+    }
+
     function close() { _clearSub(); _openId = null; }
 
-    return { renderList, renderMessages, openConversation, send, host, join, close, shortWebId };
+    return { renderList, renderMessages, openConversation, send, host, join, discover, close, shortWebId };
 }
 
 export { shortWebId };

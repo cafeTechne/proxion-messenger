@@ -1419,6 +1419,12 @@
           <input id="solidchat-join-url" type="url" inputmode="url" placeholder="https://…/chat/" data-i18n-attr="placeholder:solidchat.linkPlaceholder" style="flex:1;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:8px 10px;">
           <button id="solidchat-join-submit" type="button" data-i18n="solidchat.join" style="background:var(--slate-700,#334155);border:none;color:#fff;padding:0 14px;border-radius:6px;cursor:pointer;">Join</button>
         </div>
+        <label for="solidchat-discover-webid" style="display:block;font-size:0.8em;margin-bottom:4px;color:var(--text-secondary,var(--slate-400))" data-i18n="solidchat.discoverLabel">Find someone's chats by WebID</label>
+        <div style="display:flex;gap:8px;margin-bottom:8px;">
+          <input id="solidchat-discover-webid" type="url" inputmode="url" placeholder="https://…/profile/card#me" data-i18n-attr="placeholder:solidchat.webidPlaceholder" style="flex:1;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:8px 10px;">
+          <button id="solidchat-discover-btn" type="button" data-i18n="solidchat.find" style="background:var(--slate-700,#334155);border:none;color:#fff;padding:0 14px;border-radius:6px;cursor:pointer;">Find</button>
+        </div>
+        <ul id="solidchat-discover-list" aria-label="Discovered chats" data-i18n-attr="aria-label:solidchat.discoveredChats" style="list-style:none;margin:0 0 16px;padding:0;max-height:180px;overflow:auto;"></ul>
         <div style="text-align:right;">
           <button id="solidchat-dialog-close" type="button" data-i18n="btn.cancel" style="background:transparent;border:1px solid var(--slate-600,#475569);color:var(--text-secondary,var(--slate-400));padding:6px 14px;border-radius:4px;cursor:pointer;">Cancel</button>
         </div>

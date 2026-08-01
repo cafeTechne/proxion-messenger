@@ -30,6 +30,7 @@ function fakeModel(over = {}) {
         sendMessage: over.sendMessage || (async () => true),
         hostConversation: over.hostConversation || (async () => ({ id: 'https://me.pod/x/', role: 'host' })),
         joinConversation: over.joinConversation || (async () => ({ id: 'https://a.pod/x/', role: 'participant' })),
+        discoverChats: over.discoverChats || (async () => []),
     };
 }
 
@@ -125,6 +126,45 @@ describe('openConversation', () => {
         subs[0].cb([{ message_id: 'm2', from_webid: 'https://a.pod/#me', content: 'new one' }]);
         expect(feed._children).toHaveLength(2);
         expect(feed._children[1].dataset.mid).toBe('m2');
+    });
+});
+
+describe('discover (Track F2)', () => {
+    const flush = () => new Promise(r => setTimeout(r, 0));
+
+    it("lists a WebID's chats and joins the chosen one", async () => {
+        const joined = [];
+        const ui = createSolidChatUI({
+            model: fakeModel({
+                discoverChats: async () => [{ container: 'https://a.pod/proxion/rooms/team/', title: 'Team' }],
+                joinConversation: async (url) => ({ id: url, role: 'participant' }),
+            }),
+        });
+        const list = mkEl();
+        await ui.discover('https://a.pod/#me', list, (c) => joined.push(c));
+        expect(harvest(list).text.join(' ')).toContain('Team');
+        list._children[0]._children[0]._on.click();   // list -> li -> button
+        await flush();
+        expect(joined).toHaveLength(1);
+        expect(joined[0].id).toBe('https://a.pod/proxion/rooms/team/');
+    });
+
+    it('shows an empty state when the WebID hosts no chats', async () => {
+        const ui = createSolidChatUI({ model: fakeModel({ discoverChats: async () => [] }) });
+        const list = mkEl();
+        await ui.discover('https://a.pod/#me', list, () => {});
+        expect(harvest(list).text.join(' ')).toMatch(/no chats found/i);
+    });
+
+    it('renders a hostile discovered title as text, never markup', async () => {
+        const ui = createSolidChatUI({
+            model: fakeModel({ discoverChats: async () => [{ container: 'https://a.pod/x/', title: '<img src=x onerror=alert(1)>' }] }),
+        });
+        const list = mkEl();
+        await ui.discover('https://a.pod/#me', list, () => {});
+        const h = harvest(list);
+        expect(h.text.join(' ')).toContain('<img src=x onerror=alert(1)>');
+        expect(h.html.join(' ')).not.toContain('<img');
     });
 });
 

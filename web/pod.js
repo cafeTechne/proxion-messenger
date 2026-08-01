@@ -394,7 +394,8 @@ async function ensureChatIndexAt(containerUrl, title) {
         // discover it. Container-addressed, so this covers both rooms and shared
         // chats. Best-effort and only for chats in OUR pod (we can only register
         // discoverable instances of our own storage).
-        if (ok && containerUrl.startsWith(podStorageRoot() || ' ')) {
+        const _ownRoot = podStorageRoot();
+        if (ok && _ownRoot && containerUrl.startsWith(_ownRoot)) {
             podRegisterChat(containerUrl).catch(() => {});
         }
         return ok;
@@ -634,18 +635,22 @@ export async function podHydrateRoom(roomId, { days = 7, local = [] } = {}) {
 // ensure the index exists and is linked from the WebID card, then register /
 // deregister / list meeting:LongChat containers there.
 
-/** The public type index IRI linked from our WebID profile, or null. */
-export async function podReadPublicTypeIndexUrl() {
-    const webId = solidSession?.info?.webId;
-    if (!webId || !solidSession.info.isLoggedIn) return null;
+/** The public type index IRI linked from ANY WebID's profile, or null. */
+export async function podReadPublicTypeIndexUrlFor(webId) {
+    if (!webId || !solidSession?.info?.isLoggedIn) return null;
     try {
         const res = await solidSession.fetch(webId, { headers: { Accept: 'application/ld+json' } });
         if (!res || !res.ok) return null;
         return parsePublicTypeIndex(await res.json(), webId);
     } catch (err) {
-        console.warn('[pod] podReadPublicTypeIndexUrl failed:', err);
+        console.warn('[pod] podReadPublicTypeIndexUrlFor failed:', err);
         return null;
     }
+}
+
+/** The public type index IRI linked from OUR WebID profile, or null. */
+export function podReadPublicTypeIndexUrl() {
+    return podReadPublicTypeIndexUrlFor(solidSession?.info?.webId);
 }
 
 /**
@@ -669,6 +674,21 @@ export async function podEnsurePublicTypeIndex() {
             body: buildEmptyTypeIndex(),
         });
         if (!put || !put.ok) return null;
+        // Make it PUBLIC-readable: it is the *public* type index, and discovery by
+        // another app/person only works if they can actually read it. Owner keeps
+        // full control. Without this the index is owner-only and discovery silently
+        // fails cross-identity.
+        try {
+            await solidSession.fetch(indexUrl + '.acl', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'text/turtle' },
+                body: `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n@prefix foaf: <http://xmlns.com/foaf/0.1/>.\n`
+                    + `<#owner> a acl:Authorization; acl:agent <${webId}>; acl:accessTo <${indexUrl}>; acl:mode acl:Read, acl:Write, acl:Control.\n`
+                    + `<#public> a acl:Authorization; acl:agentClass foaf:Agent; acl:accessTo <${indexUrl}>; acl:mode acl:Read.\n`,
+            });
+        } catch (err) {
+            console.warn('[pod] type index public ACL failed:', err);
+        }
         // Link it from the profile so other apps can discover it.
         try {
             await solidSession.fetch(webId.split('#')[0], {
@@ -733,6 +753,47 @@ export async function podListRegisteredChats() {
     } catch (err) {
         console.warn('[pod] podListRegisteredChats failed:', err);
         return [];
+    }
+}
+
+/**
+ * Discover the chats a given WebID hosts (PLAN_ROUND_74 F1). Reads that WebID's
+ * public type index for meeting:LongChat containers, then best-effort reads each
+ * chat's index.ttl for a friendly dc:title (falling back to the room id). Read-only
+ * and permission-respecting: only what the target pod's ACLs allow is returned.
+ * Returns [{ container, title }].
+ */
+export async function podListChatsForWebId(webId) {
+    if (!webId || !solidSession?.info?.isLoggedIn) return [];
+    const indexUrl = await podReadPublicTypeIndexUrlFor(webId);
+    if (!indexUrl) return [];
+    let containers = [];
+    try {
+        const res = await solidSession.fetch(indexUrl, { headers: { Accept: 'application/ld+json' } });
+        if (!res || !res.ok) return [];
+        containers = parseRegisteredContainers(await res.json());
+    } catch (err) {
+        console.warn('[pod] podListChatsForWebId failed:', err);
+        return [];
+    }
+    const out = [];
+    for (const container of containers) {
+        out.push({ container, title: await _readChatTitle(container) });
+    }
+    return out;
+}
+
+// Best-effort dc:title of a chat, from its index.ttl; falls back to the room id.
+async function _readChatTitle(container) {
+    const fallback = roomIdFromChatContainer(container) || container;
+    try {
+        const res = await solidSession.fetch(indexUrlAt(container), { headers: { Accept: 'text/turtle' } });
+        if (!res || !res.ok) return fallback;
+        const ttl = await res.text();
+        const m = ttl.match(/(?:dc:title|<http:\/\/purl\.org\/dc\/elements\/1\.1\/title>)\s+"([^"]*)"/);
+        return (m && m[1]) ? m[1] : fallback;
+    } catch {
+        return fallback;
     }
 }
 

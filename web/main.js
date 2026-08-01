@@ -533,7 +533,12 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             function closePanel() { currentId = null; ui.close(); if (panel) panel.style.display = 'none'; }
             function showDialog(show) {
                 if (dialog) dialog.style.display = show ? 'flex' : 'none';
-                if (show) { const h = $('solidchat-host-title'); if (h) h.value = ''; const u = $('solidchat-join-url'); if (u) u.value = ''; }
+                if (show) {
+                    const h = $('solidchat-host-title'); if (h) h.value = '';
+                    const u = $('solidchat-join-url'); if (u) u.value = '';
+                    const d = $('solidchat-discover-webid'); if (d) d.value = '';
+                    const dl = $('solidchat-discover-list'); if (dl) dl.innerHTML = '';
+                }
             }
 
             $('solidchat-new-btn')?.addEventListener('click', () => showDialog(true));
@@ -547,6 +552,15 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                 const url = ($('solidchat-join-url')?.value || '').trim();
                 const conv = await ui.join(url, _deriveConvTitle(url));
                 if (conv) { showDialog(false); renderList(); openConversation(conv.id); }
+            });
+            $('solidchat-discover-btn')?.addEventListener('click', async () => {
+                const webId = ($('solidchat-discover-webid')?.value || '').trim();
+                const listEl = $('solidchat-discover-list');
+                if (webId && listEl) {
+                    await ui.discover(webId, listEl, (conv) => {
+                        showDialog(false); renderList(); openConversation(conv.id);
+                    });
+                }
             });
             $('solidchat-back-btn')?.addEventListener('click', closePanel);
             $('solidchat-form')?.addEventListener('submit', async (e) => {

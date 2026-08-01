@@ -490,5 +490,9 @@
   "onboarding.signIn": "Sign in to your pod",
   "onboarding.podReadySignIn": "Pod ready. Sign in to finish.",
   "onboarding.signInFailed": "Could not start sign-in. Please try again.",
-  "send.notSavedToPod": "Not saved to your pod"
+  "send.notSavedToPod": "Not saved to your pod",
+  "solidchat.discoverLabel": "Find someone's chats by WebID",
+  "solidchat.webidPlaceholder": "Their WebID URL",
+  "solidchat.find": "Find",
+  "solidchat.discoveredChats": "Discovered chats"
 }

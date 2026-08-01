@@ -503,5 +503,9 @@
   "onboarding.signIn": "تسجيل الدخول إلى الـ pod",
   "onboarding.podReadySignIn": "الـ pod جاهز. سجّل الدخول للإنهاء.",
   "onboarding.signInFailed": "تعذّر بدء تسجيل الدخول. حاول مرة أخرى.",
-  "send.notSavedToPod": "لم يُحفَظ في الـ pod الخاص بك"
+  "send.notSavedToPod": "لم يُحفَظ في الـ pod الخاص بك",
+  "solidchat.discoverLabel": "ابحث عن دردشات شخص عبر WebID",
+  "solidchat.webidPlaceholder": "عنوان WebID الخاص بهم",
+  "solidchat.find": "بحث",
+  "solidchat.discoveredChats": "الدردشات المكتشفة"
 }

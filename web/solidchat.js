@@ -15,6 +15,7 @@
 import { solidSession, podStorageRoot } from './auth.js';
 import {
     podWriteChatMessageAt, podReadChatRecentAt, podGrantChatParticipants,
+    podListChatsForWebId,
 } from './pod.js';
 import { chatRootUrl, dayFileAt } from './longchat.js';
 import { watchResource } from './notify.js';
@@ -175,10 +176,21 @@ export function createSolidChat({ showToast = () => {}, onChange = () => {} } = 
         return () => { stopped = true; unwatch(); };
     }
 
+    /**
+     * Discover the chats a WebID hosts (PLAN_ROUND_74). Reads that WebID's public
+     * type index; returns [{ container, title }]. Read-only and permission-
+     * respecting; joining a result still goes through joinConversation.
+     */
+    function discoverChats(webId) {
+        const w = String(webId || '').trim();
+        if (!w) return Promise.resolve([]);
+        return podListChatsForWebId(w);
+    }
+
     return {
         listConversations, getConversation,
         hostConversation, joinConversation, leaveConversation,
-        sendMessage, loadConversation, subscribeConversation,
+        sendMessage, loadConversation, subscribeConversation, discoverChats,
         _STORE_KEY: STORE_KEY,
     };
 }
