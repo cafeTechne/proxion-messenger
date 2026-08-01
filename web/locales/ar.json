@@ -509,5 +509,8 @@
   "solidchat.find": "بحث",
   "solidchat.discoveredChats": "الدردشات المكتشفة",
   "solidchat.invitationsLabel": "الدعوات",
-  "solidchat.participantPlaceholder": "دعوة WebID (اختياري)"
+  "solidchat.participantPlaceholder": "دعوة WebID (اختياري)",
+  "solidchat.inviteReceived": "دعوة دردشة جديدة",
+  "solidchat.invitesReceived": "{count} دعوات دردشة جديدة",
+  "solidchat.pendingInvites": "{count} دعوات معلقة"
 }

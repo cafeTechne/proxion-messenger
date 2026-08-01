@@ -496,5 +496,8 @@
   "solidchat.find": "Find",
   "solidchat.discoveredChats": "Discovered chats",
   "solidchat.invitationsLabel": "Invitations",
-  "solidchat.participantPlaceholder": "Invite a WebID (optional)"
+  "solidchat.participantPlaceholder": "Invite a WebID (optional)",
+  "solidchat.inviteReceived": "New chat invitation",
+  "solidchat.invitesReceived": "{count} new chat invitations",
+  "solidchat.pendingInvites": "{count} pending invitations"
 }

@@ -497,5 +497,8 @@
   "solidchat.find": "⟦Ƒíñð áé⟧",
   "solidchat.discoveredChats": "⟦Ðíšçóṽéŕéð çĥáţš áéíóúá⟧",
   "solidchat.invitationsLabel": "⟦Íñṽíţáţíóñš áéíó⟧",
-  "solidchat.participantPlaceholder": "⟦Íñṽíţé á ŴéḅÍÐ (óρţíóñáĺ) áéíóúáéíóú⟧"
+  "solidchat.participantPlaceholder": "⟦Íñṽíţé á ŴéḅÍÐ (óρţíóñáĺ) áéíóúáéíóú⟧",
+  "solidchat.inviteReceived": "⟦Ñéŵ çĥáţ íñṽíţáţíóñ áéíóúáéí⟧",
+  "solidchat.invitesReceived": "⟦{count} ñéŵ çĥáţ íñṽíţáţíóñš áéíóúáéí⟧",
+  "solidchat.pendingInvites": "⟦{count} ρéñðíñǧ íñṽíţáţíóñš áéíóúáéí⟧"
 }

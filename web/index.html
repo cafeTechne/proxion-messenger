@@ -870,7 +870,10 @@
                 </section>
                 <section id="solidchat-section">
                     <div style="display:flex;align-items:center;justify-content:space-between;">
-                        <h2 style="margin:0;" data-i18n="sidebar.solidChats">Solid Chats</h2>
+                        <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+                            <h2 style="margin:0;" data-i18n="sidebar.solidChats">Solid Chats</h2>
+                            <span id="solidchat-invite-badge" role="status" aria-live="polite" hidden style="background:var(--accent,#d61f52);color:#fff;border-radius:10px;font-size:0.62em;font-weight:600;padding:1px 7px;min-width:18px;text-align:center;line-height:1.6;"></span>
+                        </div>
                         <button id="solidchat-new-btn" aria-label="New Solid conversation" title="New Solid conversation" data-i18n-attr="title:solidchat.new;aria-label:solidchat.new" style="background:transparent;border:none;color:var(--text-secondary,var(--text-secondary));cursor:pointer;padding:2px 6px;line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
                     </div>
                     <ul id="solidchat-list"></ul>

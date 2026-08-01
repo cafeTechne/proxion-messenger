@@ -508,6 +508,9 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             model: solidChat, showToast,
             getMyWebId: () => (solidSession.info.isLoggedIn && solidSession.info.webId) || '',
         });
+        // Assigned by setupSolidChatUI; called from onPodLoggedIn to begin watching
+        // the Solid inbox for live chat invitations (PLAN_ROUND_76).
+        let startSolidInboxWatch = () => {};
         setupSolidChatUI(solidChat, solidChatUI);
         function _deriveConvTitle(url) {
             try {
@@ -522,8 +525,34 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             const dialog = $('solidchat-dialog');
             let currentId = null;
             let inboxEnsured = false;   // create/advertise our inbox once, lazily
+            let inboxWatchStop = null;  // live inbox watch; started once at pod-login
+            let unreadInvites = 0;
 
             const renderList = () => { const l = $('solidchat-list'); if (l) ui.renderList(l, openConversation); };
+            const renderInvites = () => ui.renderInvitations($('solidchat-invites-list'), (conv) => {
+                showDialog(false); renderList(); openConversation(conv.id);
+            });
+            function setInviteBadge(n) {
+                const b = $('solidchat-invite-badge');
+                if (!b) return;
+                if (n > 0) { b.textContent = String(n); b.hidden = false; b.setAttribute('aria-label', t('solidchat.pendingInvites', { count: n })); }
+                else { b.textContent = ''; b.hidden = true; b.removeAttribute('aria-label'); }
+            }
+            // Begin watching the inbox for live invitations. Idempotent: the first
+            // call wins, later ones are no-ops (survives reconnect firing onPodLoggedIn).
+            startSolidInboxWatch = () => {
+                if (inboxWatchStop) return;
+                inboxWatchStop = model.watchInbox((fresh) => {
+                    if (dialog && dialog.style.display !== 'none') {
+                        renderInvites();   // dialog open: refresh in place, no badge
+                    } else {
+                        unreadInvites += fresh.length;
+                        setInviteBadge(unreadInvites);
+                        showToast(fresh.length === 1 ? t('solidchat.inviteReceived')
+                            : t('solidchat.invitesReceived', { count: fresh.length }));
+                    }
+                });
+            };
             async function openConversation(id) {
                 currentId = id;
                 const conv = model.getConversation(id);
@@ -542,9 +571,8 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     const p = $('solidchat-host-participant'); if (p) p.value = '';
                     if (!inboxEnsured) { inboxEnsured = true; model.ensureInbox(); }   // so others can invite us
                     ui.populateContacts($('solidchat-contacts'));   // fill the WebID datalist from foaf:knows
-                    ui.renderInvitations($('solidchat-invites-list'), (conv) => {
-                        showDialog(false); renderList(); openConversation(conv.id);
-                    });
+                    unreadInvites = 0; setInviteBadge(0);           // viewing them clears the unread badge
+                    renderInvites();
                 }
             }
 
@@ -3839,6 +3867,8 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             flushPodQueue();
             // B2: rehydrate rooms we own to a gateway that may have lost them.
             rehostOwnedRooms();
+            // R76: watch the Solid inbox so chat invitations arrive live.
+            startSolidInboxWatch();
         }
 
         function initPodSettingsPanel() {

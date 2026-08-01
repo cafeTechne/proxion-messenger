@@ -239,11 +239,41 @@ export function createSolidChat({ showToast = () => {}, onChange = () => {} } = 
         try { return await podDeleteInboxNotification(inv.id); } catch { return false; }
     }
 
+    /**
+     * Watch our inbox for new chat invitations and call `onInvites(fresh)` with any
+     * that appear (PLAN_ROUND_76). Real-time via the Solid Notifications channel on
+     * the inbox container, with a polling fallback (watchResource owns that choice).
+     * Primes once immediately so pending invites surface at login. Returns an
+     * unsubscribe; emits each invitation only once (deduped by notification id).
+     * Mirrors subscribeConversation.
+     */
+    function watchInbox(onInvites, { intervalMs = 20000 } = {}) {
+        if (!_myWebId()) return () => {};
+        const seen = new Set();
+        let stopped = false;
+        let unwatch = null;
+        async function check() {
+            if (stopped) return;
+            let invites = [];
+            try { invites = await podReadInboxNotifications(); } catch { return; }
+            const fresh = invites.filter(i => i.id && !seen.has(i.id));
+            fresh.forEach(i => seen.add(i.id));
+            if (fresh.length && !stopped) onInvites(fresh);
+        }
+        (async () => {
+            const inbox = await ensureInbox();
+            if (stopped || !inbox) return;
+            unwatch = watchResource(inbox, check, { pollMs: intervalMs });
+        })();
+        check();   // prime immediately; dedup by id makes the first poll a no-op
+        return () => { stopped = true; if (unwatch) { try { unwatch(); } catch { /* ignore */ } } };
+    }
+
     return {
         listConversations, getConversation,
         hostConversation, joinConversation, leaveConversation,
         sendMessage, loadConversation, subscribeConversation, discoverChats, listContacts,
-        ensureInbox, listInvitations, acceptInvitation, dismissInvitation,
+        ensureInbox, listInvitations, acceptInvitation, dismissInvitation, watchInbox,
         _STORE_KEY: STORE_KEY,
     };
 }

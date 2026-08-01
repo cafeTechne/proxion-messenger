@@ -12,13 +12,19 @@ vi.mock('./auth.js', () => ({
 
 // Record calls to the pod primitives; control their return values per test.
 const pod = {
-    writes: [], reads: [], grants: [],
-    writeOk: true, grantOk: true, readResult: [],
+    writes: [], reads: [], grants: [], deleted: [],
+    writeOk: true, grantOk: true, readResult: [], inboxResult: [],
 };
 vi.mock('./pod.js', () => ({
     podWriteChatMessageAt: vi.fn(async (container, id, msg) => { pod.writes.push({ container, id, msg }); return pod.writeOk; }),
     podReadChatRecentAt: vi.fn(async (container, days, thread) => { pod.reads.push({ container, days, thread }); return pod.readResult; }),
     podGrantChatParticipants: vi.fn(async (container, owner, parts) => { pod.grants.push({ container, owner, parts }); return pod.grantOk; }),
+    podListChatsForWebId: vi.fn(async () => []),
+    podImportContacts: vi.fn(async () => []),
+    podEnsureInbox: vi.fn(async () => 'https://me.pod/inbox/'),
+    podSendChatInvite: vi.fn(async () => true),
+    podReadInboxNotifications: vi.fn(async () => pod.inboxResult),
+    podDeleteInboxNotification: vi.fn(async (url) => { pod.deleted.push(url); return true; }),
 }));
 
 import { createSolidChat, isValidChatContainer } from './solidchat.js';
@@ -33,8 +39,8 @@ beforeEach(() => {
     };
     _webId = 'https://me.pod/profile/card#me';
     _root = 'https://me.pod/';
-    pod.writes = []; pod.reads = []; pod.grants = [];
-    pod.writeOk = true; pod.grantOk = true; pod.readResult = [];
+    pod.writes = []; pod.reads = []; pod.grants = []; pod.deleted = [];
+    pod.writeOk = true; pod.grantOk = true; pod.readResult = []; pod.inboxResult = [];
 });
 
 function make(over = {}) {
@@ -217,5 +223,44 @@ describe('subscribeConversation (live update by polling)', () => {
         } finally {
             vi.useRealTimers();
         }
+    });
+});
+
+describe('watchInbox (live invitations, R76)', () => {
+    it('emits only NEW invitations, primes at once, and stops on unsubscribe', async () => {
+        vi.useFakeTimers();
+        try {
+            const { sc } = make();
+            const got = [];
+            pod.inboxResult = [{ id: 'n1', from: 'https://a.pod/#me', container: 'https://a.pod/x/', title: 'One' }];
+            const stop = sc.watchInbox((fresh) => got.push(...fresh.map(i => i.id)), { intervalMs: 1000 });
+            await vi.advanceTimersByTimeAsync(0);          // prime (immediate check)
+            expect(got).toEqual(['n1']);
+
+            pod.inboxResult = [pod.inboxResult[0], { id: 'n2', from: 'https://b.pod/#me', container: 'https://b.pod/y/', title: 'Two' }];
+            await vi.advanceTimersByTimeAsync(1000);       // poll: only the new one
+            expect(got).toEqual(['n1', 'n2']);
+
+            await vi.advanceTimersByTimeAsync(1000);       // no change -> nothing
+            expect(got).toEqual(['n1', 'n2']);
+
+            stop();
+            pod.inboxResult = [...pod.inboxResult, { id: 'n3', container: 'https://c.pod/z/' }];
+            await vi.advanceTimersByTimeAsync(5000);       // stopped: silent
+            expect(got).toEqual(['n1', 'n2']);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('is a no-op without a connected pod', async () => {
+        _webId = '';
+        const { sc } = make();
+        const got = [];
+        const stop = sc.watchInbox((fresh) => got.push(...fresh));
+        await Promise.resolve();
+        expect(got).toEqual([]);
+        expect(typeof stop).toBe('function');
+        stop();
     });
 });
