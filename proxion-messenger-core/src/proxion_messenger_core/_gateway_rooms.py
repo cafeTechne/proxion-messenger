@@ -1652,10 +1652,14 @@ class RoomHandlerMixin:
         # descriptive).
         signer = verify_descriptor(desc)
         requester = self._client_webids.get(websocket, "")
+        # R73: a pod session's display identity is its webid, but its descriptors are
+        # signed by its did, retained as the connection's proven signing did. Accept
+        # either, so a pod-connected owner can rehost.
+        signing_did = self._session_signing_did.get(websocket, "")
         if not signer:
             await websocket.send(json.dumps({"type": "error", "code": "E_REHOST", "message": "descriptor not signed / bad signature"}))
             return
-        if not requester or signer != requester:
+        if signer != requester and signer != signing_did:
             await websocket.send(json.dumps({"type": "error", "code": "E_REHOST", "message": "signer is not the requester"}))
             return
 

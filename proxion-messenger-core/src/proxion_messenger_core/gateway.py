@@ -139,6 +139,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # when it authenticated as a delegated device (account_did lives in
         # _client_webids). Absent for primary/single-device sessions.
         self._session_device_did: dict = {}
+        # R73: websocket -> the connection's auth-proven signing did:key, retained
+        # even after a pod webid register supersedes it as the display identity, so
+        # rehost can verify a descriptor signed by that did (not just the webid).
+        self._session_signing_did: dict = {}
         # Multi-device pairing relay: pairing_code -> pairing session dict. A
         # primary starts a session; a new device submits its device_did against
         # the code; the primary signs+relays a delegation cert back. Short TTL,

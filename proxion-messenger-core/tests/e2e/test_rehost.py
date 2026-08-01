@@ -85,6 +85,19 @@ async def test_rehost_rejects_replay_by_a_different_session(live_gateway, alice_
 
 
 @pytest.mark.asyncio
+async def test_rehost_works_for_a_pod_webid_session(live_gateway, alice_agent):
+    # R73: a pod-connected client registers its did (on connect), then re-registers
+    # with its webid (on pod login), so its display identity becomes the webid while
+    # its descriptors are still signed by its did. Rehost must still succeed.
+    alice = await connect_and_register(live_gateway["url"], "Alice", alice_agent)
+    await alice.send(cmd="register", webid="https://alice.pod/profile/card#me", display_name="Alice")
+    desc = _sign(_descriptor(alice.webid, room_id="room-podowner"), alice_agent, alice.did)
+    await alice.send(cmd="rehost_room", descriptor=desc)
+    evt = await alice.recv_type("room_rehosted", timeout=5.0)
+    assert evt["room_id"] == "room-podowner"
+
+
+@pytest.mark.asyncio
 async def test_rehost_is_idempotent(live_gateway, alice_agent):
     alice = await connect_and_register(live_gateway["url"], "Alice", alice_agent)
     desc = _sign(_descriptor(alice.webid, room_id="room-idem"), alice_agent, alice.did)

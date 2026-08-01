@@ -285,6 +285,17 @@ class AuthHandlerMixin:
             identity = account_did
 
         if identity:
+            # R73: remember the connection's proven signing did across a later pod
+            # webid register. A did register records itself; a subsequent webid
+            # register (which supersedes the display identity) keeps the did so
+            # rehost can match an Ed25519-signed descriptor to it. Only the did the
+            # connection already registered as is trusted, never one from a payload.
+            if str(identity).startswith("did:key:"):
+                self._session_signing_did[websocket] = identity
+            else:
+                _prev_did = self._client_webids.get(websocket, "")
+                if str(_prev_did).startswith("did:key:"):
+                    self._session_signing_did[websocket] = _prev_did
             self._client_webids[websocket] = identity
             self._webid_sockets.setdefault(identity, set()).add(websocket)
             # R7: single-session mode — revoke all other active sockets for this identity
