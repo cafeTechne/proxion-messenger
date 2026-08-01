@@ -176,6 +176,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # Connected pod URL and webid (for gateway discovery endpoint)
         self._pod_url: Optional[str] = None
         self._pod_webid: Optional[str] = None
+        # R78 (L2): per-inbox seen notification set + per-WebID last-push time for the
+        # outbound inbox poll (closed-app push behind NAT).
+        self._inbox_seen: dict = {}
+        self._last_inbox_push: dict = {}
         self._pod_available: bool = False
 
         # Local (pod-free) rooms
@@ -1106,6 +1110,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_unsubscribe_push(websocket, data)
             elif cmd == "get_inbox_webhook":
                 await self._handle_get_inbox_webhook(websocket, data)
+            elif cmd == "get_gateway_webid":
+                await self._handle_get_gateway_webid(websocket, data)
             elif cmd == "list_dm_sessions":
                 await self._handle_list_dm_sessions(websocket, data)
             elif cmd == "expire_dm_session":
@@ -2895,6 +2901,11 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             # R16: Continuous assurance loop
             if self._assurance_loop_instance is not None:
                 main_tasks.append(asyncio.create_task(self._continuous_assurance_loop()))
+
+            # R78 (L2): outbound inbox poll so chat invitations push even when the
+            # gateway is not publicly reachable (behind NAT). Outbound-only; needs the
+            # user to have granted the gateway's WebID read on their inbox.
+            main_tasks.append(asyncio.create_task(self.inbox_poll_loop()))
 
             # R38: drain our sealed mailbox from the relay node (if configured)
             if relay_fallback_url():

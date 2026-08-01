@@ -39,9 +39,11 @@ The settings panel shows the honest status:
 ## Behind NAT, without opening a port
 
 If you run an always-on gateway at home but do not want to expose an inbound port, the
-gateway can instead subscribe to your inbox over an outbound WebSocket and send the push
-itself when the inbox changes. This needs no inbound reachability. It asks you to grant
-the gateway's WebID read access to your inbox, a read-only, inbox-scoped delegation.
+gateway can instead poll your inbox over an outbound connection and send the push itself
+when a new invitation appears. This needs no inbound reachability. It asks you to grant
+the gateway's WebID read access to your inbox, a read-only, inbox-scoped delegation that
+Proxion writes for you on sign-in. The poll and the webhook are deduplicated, so a
+gateway that is both reachable and polling never notifies you twice for one invitation.
 
 ## Persisting the push identity
 

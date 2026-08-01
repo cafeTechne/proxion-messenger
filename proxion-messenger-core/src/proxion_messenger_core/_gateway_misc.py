@@ -1560,13 +1560,13 @@ class MiscHandlerMixin:
             return None
         return webid
 
-    def _deliver_inbox_webhook(self, token: str) -> bool:
-        """A CSS webhook fired for a user's inbox: send a content-free push nudge.
+    # Minimum seconds between inbox pushes to one WebID. Collapses a webhook push
+    # (R77) and a poll push (R78) for the same invite; the SW's shared invite tag
+    # collapses any that still slip through at the OS layer.
+    _INBOX_PUSH_MIN_INTERVAL = 60.0
 
-        Synchronous (send_web_push does network I/O); the HTTP route offloads it to an
-        executor so the 204 returns immediately. Returns True if any push was accepted.
-        """
-        webid = self._verify_inbox_webhook_token(token)
+    def _send_inbox_push(self, webid: str) -> bool:
+        """Send a content-free 'new invitation' push to a WebID's devices, rate-limited."""
         if not webid or not self._store:
             return False
         subs = self._store.get_push_subscriptions(webid)
@@ -1574,6 +1574,12 @@ class MiscHandlerMixin:
         vsub = getattr(self, "_vapid_subject", None)
         if not (subs and vpk and vsub):
             return False
+        import time as _t
+        last = self._last_inbox_push.get(webid, 0.0)
+        now = _t.time()
+        if now - last < self._INBOX_PUSH_MIN_INTERVAL:
+            return False
+        self._last_inbox_push[webid] = now
         from .webpush import send_web_push
         sent = False
         for sub in subs:
@@ -1592,6 +1598,115 @@ class MiscHandlerMixin:
             except Exception:
                 pass
         return sent
+
+    def _deliver_inbox_webhook(self, token: str) -> bool:
+        """A CSS webhook fired for a user's inbox: send a content-free push nudge.
+
+        Synchronous (send_web_push does network I/O); the HTTP route offloads it to an
+        executor so the 204 returns immediately. Returns True if a push was sent.
+        """
+        webid = self._verify_inbox_webhook_token(token)
+        if not webid:
+            return False
+        return self._send_inbox_push(webid)
+
+    # ------------------------------------------------------------------
+    # R78 (L2): outbound inbox poll for gateways that are NOT publicly reachable.
+    #
+    # Instead of waiting for CSS to POST us (R77 webhook, needs an open port), we
+    # authenticate to the pod and poll each push-subscribed user's inbox ourselves,
+    # pushing when a new notification appears. Outbound only, so it works behind NAT.
+    # Needs the user to have granted the gateway's WebID acl:Read on their inbox.
+    # ------------------------------------------------------------------
+
+    _LDP_INBOX_RE = None  # compiled lazily
+
+    def _discover_inbox_from_profile(self, webid: str):
+        """The ldp:inbox IRI from a WebID profile (public read), or None."""
+        client = self._pod_client()
+        if not client or not webid:
+            return None
+        import re
+        try:
+            body = client.get(webid.split("#")[0]).decode("utf-8", "replace")
+        except Exception:
+            return None
+        m = re.search(r"(?:ldp:inbox|<http://www\.w3\.org/ns/ldp#inbox>)\s*<([^>]+)>", body)
+        return m.group(1) if m else None
+
+    def _list_inbox_children(self, inbox_url: str):
+        """The set of child resource IRIs contained in an inbox container, or None on error."""
+        client = self._pod_client()
+        if not client or not inbox_url:
+            return None
+        import re
+        try:
+            body = client.get(inbox_url).decode("utf-8", "replace")
+        except Exception:
+            return None
+        out = set()
+        for m in re.finditer(r"<([^>]+)>", body):
+            iri = m.group(1)
+            # Direct children only: start with the inbox URL and add a segment.
+            if iri.startswith(inbox_url) and len(iri) > len(inbox_url) and not iri.endswith(".acl"):
+                out.add(iri)
+        return out
+
+    def _poll_inboxes_once(self) -> int:
+        """Poll every push-subscribed user's inbox; push on newly-appeared notifications.
+
+        First sight of an inbox seeds the seen-set WITHOUT pushing, so pre-existing
+        invitations (already visible in-app) do not fire a notification. Returns the
+        number of WebIDs pushed this pass.
+        """
+        if not self._store or not self._pod_client():
+            return 0
+        pushed = 0
+        for webid in self._store.list_push_subscription_owners():
+            try:
+                inbox = self._discover_inbox_from_profile(webid)
+                if not inbox:
+                    continue
+                children = self._list_inbox_children(inbox)
+                if children is None:
+                    continue   # unreadable (no grant / offline): skip, try next pass
+                seen = self._inbox_seen.get(inbox)
+                if seen is None:
+                    self._inbox_seen[inbox] = set(children)   # seed, no push
+                    continue
+                fresh = children - seen
+                if fresh:
+                    self._inbox_seen[inbox] = seen | children
+                    if self._send_inbox_push(webid):
+                        pushed += 1
+            except Exception:
+                continue
+        return pushed
+
+    async def inbox_poll_loop(self):
+        """Poll granted inboxes for new invitations and push. Runs regardless of whether
+        any app is connected (the point is closed-app delivery). Best-effort; errors
+        back off. Enabled only when the gateway itself is connected to a pod."""
+        import asyncio as _a
+        interval = 45.0
+        while not self._stop_event.is_set():
+            try:
+                if self._pod_client() and self._store and self._store.list_push_subscription_owners():
+                    await _a.get_event_loop().run_in_executor(None, self._poll_inboxes_once)
+            except Exception as exc:
+                logger.debug("inbox_poll_loop error: %s", exc)
+            try:
+                await _a.wait_for(self._stop_event.wait(), timeout=interval)
+            except _a.TimeoutError:
+                pass
+
+    async def _handle_get_gateway_webid(self, websocket, data: dict) -> None:
+        """Tell the client the gateway's WebID so it can grant inbox read for the
+        outbound poll path (R78 L2)."""
+        await websocket.send(json.dumps({
+            "type": "gateway_webid",
+            "webid": self._pod_webid or "",
+        }))
 
     async def _handle_get_inbox_webhook(self, websocket, data: dict) -> None:
         """Give the connected user their inbox-webhook token so the client can point

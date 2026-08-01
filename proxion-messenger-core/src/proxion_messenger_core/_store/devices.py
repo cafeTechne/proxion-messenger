@@ -183,6 +183,16 @@ class DeviceStoreMixin(object):
                 return [dict(r) for r in rows]
             except Exception:
                 return []
+    def list_push_subscription_owners(self) -> list[str]:
+        """Distinct WebIDs that have at least one push subscription (R78 inbox poll)."""
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT DISTINCT owner_webid FROM push_subscriptions"
+                ).fetchall()
+                return [r[0] for r in rows if r and r[0]]
+            except Exception:
+                return []
     def delete_push_subscription(self, subscription_id: str) -> None:
         with self._conn() as conn:
             try:

@@ -17,6 +17,7 @@ import {
     podWriteChatMessageAt, podReadChatRecentAt, podGrantChatParticipants,
     podListChatsForWebId, podImportContacts,
     podEnsureInbox, podSendChatInvite, podReadInboxNotifications, podDeleteInboxNotification,
+    podGrantInboxReader,
 } from './pod.js';
 import { chatRootUrl, dayFileAt } from './longchat.js';
 import { watchResource } from './notify.js';
@@ -219,6 +220,15 @@ export function createSolidChat({ showToast = () => {}, onChange = () => {} } = 
         try { return await podEnsureInbox(); } catch { return null; }
     }
 
+    /**
+     * Grant a gateway's WebID read access to our inbox (R78 L2) so an always-on
+     * gateway behind NAT can poll it for invitations and push us. Read-only.
+     */
+    async function grantInboxReader(gatewayWebId) {
+        if (!_myWebId() || !gatewayWebId) return false;
+        try { return await podGrantInboxReader(gatewayWebId); } catch { return false; }
+    }
+
     /** Pending chat invitations sitting in our inbox: [{ id, from, container, title }]. */
     async function listInvitations() {
         if (!_myWebId()) return [];
@@ -273,7 +283,7 @@ export function createSolidChat({ showToast = () => {}, onChange = () => {} } = 
         listConversations, getConversation,
         hostConversation, joinConversation, leaveConversation,
         sendMessage, loadConversation, subscribeConversation, discoverChats, listContacts,
-        ensureInbox, listInvitations, acceptInvitation, dismissInvitation, watchInbox,
+        ensureInbox, grantInboxReader, listInvitations, acceptInvitation, dismissInvitation, watchInbox,
         _STORE_KEY: STORE_KEY,
     };
 }

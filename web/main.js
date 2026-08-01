@@ -517,6 +517,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         // the gateway's token arrives async as an `inbox_webhook` event.
         let _inboxWebhookUrl = null;
         let _inboxWebhookSubscribed = false;
+        let _gatewayInboxGranted = false;   // grant the gateway inbox-read once per session
         setupSolidChatUI(solidChat, solidChatUI);
         function _deriveConvTitle(url) {
             try {
@@ -2172,6 +2173,15 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                         _inboxWebhookSubscribed = true;
                         const sendTo = location.origin + (event.path || '/solid-webhook/') + event.token;
                         subscribeWebhook(_inboxWebhookUrl, sendTo).catch(() => {});
+                    }
+                    break;
+                }
+                case "gateway_webid": {
+                    // R78 (L2): grant the gateway read on our inbox so it can poll it
+                    // and push us even when it is not publicly reachable (behind NAT).
+                    if (event.webid && !_gatewayInboxGranted) {
+                        _gatewayInboxGranted = true;
+                        solidChat.grantInboxReader(event.webid).catch(() => {});
                     }
                     break;
                 }
@@ -3917,6 +3927,8 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                 _inboxWebhookUrl = inbox;
                 if (socket && socket.readyState === WebSocket.OPEN) {
                     socket.send(JSON.stringify({ cmd: 'get_inbox_webhook' }));
+                    // R78 (L2): also let a behind-NAT gateway poll our inbox — grant it read.
+                    if (!_gatewayInboxGranted) socket.send(JSON.stringify({ cmd: 'get_gateway_webid' }));
                 }
             } catch (_) { /* best-effort */ }
         }

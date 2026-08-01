@@ -866,9 +866,7 @@ export async function podEnsureInbox() {
             await solidSession.fetch(inboxUrl + '.acl', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'text/turtle' },
-                body: `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n@prefix foaf: <http://xmlns.com/foaf/0.1/>.\n`
-                    + `<#owner> a acl:Authorization; acl:agent <${webId}>; acl:accessTo <${inboxUrl}>; acl:default <${inboxUrl}>; acl:mode acl:Read, acl:Write, acl:Control.\n`
-                    + `<#public> a acl:Authorization; acl:agentClass foaf:Agent; acl:accessTo <${inboxUrl}>; acl:mode acl:Append.\n`,
+                body: buildInboxAcl(inboxUrl, webId, []),
             });
         } catch (err) {
             console.warn('[pod] inbox ACL failed:', err);
@@ -887,6 +885,43 @@ export async function podEnsureInbox() {
     } catch (err) {
         console.warn('[pod] podEnsureInbox failed:', err);
         return null;
+    }
+}
+
+// The inbox ACL: owner full control, public Append (LDN norm), plus any extra
+// read-only agents (R78: the gateway's WebID, so it can poll the inbox for us).
+export function buildInboxAcl(inboxUrl, ownerWebId, readerWebIds = []) {
+    let ttl = `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n@prefix foaf: <http://xmlns.com/foaf/0.1/>.\n`
+        + `<#owner> a acl:Authorization; acl:agent <${ownerWebId}>; acl:accessTo <${inboxUrl}>; acl:default <${inboxUrl}>; acl:mode acl:Read, acl:Write, acl:Control.\n`
+        + `<#public> a acl:Authorization; acl:agentClass foaf:Agent; acl:accessTo <${inboxUrl}>; acl:mode acl:Append.\n`;
+    const readers = [...new Set(readerWebIds.filter(w => w && w !== ownerWebId))];
+    if (readers.length) {
+        const agents = readers.map(w => `acl:agent <${w}>`).join('; ');
+        ttl += `<#gatewayread> a acl:Authorization; ${agents}; acl:accessTo <${inboxUrl}>; acl:default <${inboxUrl}>; acl:mode acl:Read.\n`;
+    }
+    return ttl;
+}
+
+/**
+ * Grant a WebID read-only access to our inbox (R78 L2), so an always-on gateway that
+ * is not publicly reachable can poll it for invitations and push us. Read-only and
+ * inbox-scoped; owner control and public-Append are preserved. Idempotent.
+ */
+export async function podGrantInboxReader(readerWebId) {
+    const me = solidSession?.info?.webId;
+    if (!readerWebId || !me || !solidSession?.info?.isLoggedIn) return false;
+    const inbox = await podEnsureInbox();
+    if (!inbox) return false;
+    try {
+        const res = await solidSession.fetch(inbox + '.acl', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'text/turtle' },
+            body: buildInboxAcl(inbox, me, [readerWebId]),
+        });
+        return !!(res && res.ok);
+    } catch (err) {
+        console.warn('[pod] podGrantInboxReader failed:', err);
+        return false;
     }
 }
 
