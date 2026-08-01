@@ -177,9 +177,29 @@ export function createSolidChatUI({ model, getMyWebId = () => '', showToast = ()
         }
     }
 
+    /**
+     * Fill a <datalist> with the user's contacts so the discover input offers
+     * them by name (PLAN_ROUND_74 F3). value = WebID (what gets inserted), the
+     * label shows the contact's name. Foreign data set via value/label
+     * properties, never innerHTML, so a hostile contact name cannot inject.
+     */
+    async function populateContacts(datalistEl) {
+        if (!datalistEl) return;
+        let contacts = [];
+        try { contacts = await model.listContacts(); } catch { contacts = []; }
+        datalistEl.innerHTML = '';
+        for (const c of contacts) {
+            if (!c || !c.webid) continue;
+            const opt = document.createElement('option');
+            opt.value = c.webid;                                 // inserted value (safe)
+            opt.label = c.name || shortWebId(c.webid);           // shown hint (safe)
+            datalistEl.appendChild(opt);
+        }
+    }
+
     function close() { _clearSub(); _openId = null; }
 
-    return { renderList, renderMessages, openConversation, send, host, join, discover, close, shortWebId };
+    return { renderList, renderMessages, openConversation, send, host, join, discover, populateContacts, close, shortWebId };
 }
 
 export { shortWebId };

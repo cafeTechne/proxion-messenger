@@ -15,7 +15,7 @@
 import { solidSession, podStorageRoot } from './auth.js';
 import {
     podWriteChatMessageAt, podReadChatRecentAt, podGrantChatParticipants,
-    podListChatsForWebId,
+    podListChatsForWebId, podImportContacts,
 } from './pod.js';
 import { chatRootUrl, dayFileAt } from './longchat.js';
 import { watchResource } from './notify.js';
@@ -187,10 +187,20 @@ export function createSolidChat({ showToast = () => {}, onChange = () => {} } = 
         return podListChatsForWebId(w);
     }
 
+    /**
+     * The user's `foaf:knows` contacts (WebID + resolved name), so the common
+     * discover path is "pick a contact" not "paste a WebID" (PLAN_ROUND_74 F3).
+     * Best-effort: returns [] when not connected or the profile has none.
+     */
+    async function listContacts() {
+        if (!_myWebId()) return [];
+        try { return await podImportContacts(); } catch { return []; }
+    }
+
     return {
         listConversations, getConversation,
         hostConversation, joinConversation, leaveConversation,
-        sendMessage, loadConversation, subscribeConversation, discoverChats,
+        sendMessage, loadConversation, subscribeConversation, discoverChats, listContacts,
         _STORE_KEY: STORE_KEY,
     };
 }

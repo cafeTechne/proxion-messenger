@@ -31,6 +31,7 @@ function fakeModel(over = {}) {
         hostConversation: over.hostConversation || (async () => ({ id: 'https://me.pod/x/', role: 'host' })),
         joinConversation: over.joinConversation || (async () => ({ id: 'https://a.pod/x/', role: 'participant' })),
         discoverChats: over.discoverChats || (async () => []),
+        listContacts: over.listContacts || (async () => []),
     };
 }
 
@@ -165,6 +166,46 @@ describe('discover (Track F2)', () => {
         const h = harvest(list);
         expect(h.text.join(' ')).toContain('<img src=x onerror=alert(1)>');
         expect(h.html.join(' ')).not.toContain('<img');
+    });
+});
+
+describe('populateContacts (Track F3)', () => {
+    it('fills the datalist with contacts: WebID as value, name as label', async () => {
+        const ui = createSolidChatUI({
+            model: fakeModel({ listContacts: async () => [
+                { webid: 'https://alice.pod/profile/card#me', name: 'Alice' },
+                { webid: 'https://bob.pod/bob/profile/card#me', name: '' },
+            ] }),
+        });
+        const dl = mkEl();
+        await ui.populateContacts(dl);
+        expect(dl._children).toHaveLength(2);
+        expect(dl._children[0].value).toBe('https://alice.pod/profile/card#me');
+        expect(dl._children[0].label).toBe('Alice');
+        // No name -> a readable short label, never empty.
+        expect(dl._children[1].value).toBe('https://bob.pod/bob/profile/card#me');
+        expect(dl._children[1].label).toBe('bob@bob.pod');
+    });
+
+    it('sets a hostile contact name via label, never as markup', async () => {
+        const ui = createSolidChatUI({
+            model: fakeModel({ listContacts: async () => [
+                { webid: 'https://x.pod/#me', name: '<img src=x onerror=alert(1)>' },
+            ] }),
+        });
+        const dl = mkEl();
+        await ui.populateContacts(dl);
+        expect(dl._children[0].label).toBe('<img src=x onerror=alert(1)>');   // property, not parsed
+        expect(dl.innerHTML).toBe('');                                        // never touched innerHTML
+    });
+
+    it('skips entries without a WebID and tolerates no contacts', async () => {
+        const ui = createSolidChatUI({
+            model: fakeModel({ listContacts: async () => [{ name: 'no webid' }, null] }),
+        });
+        const dl = mkEl();
+        await ui.populateContacts(dl);
+        expect(dl._children).toHaveLength(0);
     });
 });
 

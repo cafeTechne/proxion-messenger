@@ -538,6 +538,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     const u = $('solidchat-join-url'); if (u) u.value = '';
                     const d = $('solidchat-discover-webid'); if (d) d.value = '';
                     const dl = $('solidchat-discover-list'); if (dl) dl.innerHTML = '';
+                    ui.populateContacts($('solidchat-contacts'));   // fill the WebID datalist from foaf:knows
                 }
             }
 
