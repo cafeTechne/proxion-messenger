@@ -10,6 +10,9 @@ import {
     parsePublicTypeIndex, parseRegisteredContainers,
 } from './typeindex.js';
 import { parseRoomDescriptor } from './roomdesc.js';
+import {
+    buildInviteNotification, parseInboxListing, parseInviteNotification, INBOX_PRED,
+} from './ldn.js';
 
 const SAFE_ID_RE = /^[\w-]{1,128}$/;
 
@@ -808,6 +811,145 @@ export function podDeregisterRoomChat(roomId) {
     const root = podStorageRoot();
     if (!root) return Promise.resolve(false);
     return podDeregisterChat(chatRootUrl(root, roomId));
+}
+
+// ── Solid inbox (Linked Data Notifications) — cross-app chat invites ──────────
+//
+// LDN (W3C Rec): a WebID profile advertises an ldp:inbox; anyone may POST a
+// notification there; only the owner reads/lists/deletes. We use it to send and
+// receive chat invitations that any Solid app can produce or consume.
+
+/** The ldp:inbox IRI advertised by a WebID's profile, or null. */
+export async function podDiscoverInbox(webId) {
+    if (!webId || !solidSession?.info?.isLoggedIn) return null;
+    try {
+        const res = await solidSession.fetch(webId, { headers: { Accept: 'application/ld+json' } });
+        if (!res || !res.ok) return null;
+        const json = await res.json();
+        for (const node of _jsonldNodes(json)) {
+            const [inbox] = _idsOf(node, INBOX_PRED);
+            if (inbox) return inbox;
+        }
+        return null;
+    } catch (err) {
+        console.warn('[pod] podDiscoverInbox failed:', err);
+        return null;
+    }
+}
+
+/**
+ * Ensure OUR inbox exists, is public-Append (the LDN norm: others may drop a
+ * notification, only we read/delete), and is linked from our profile so others
+ * can find it. Best-effort; returns the inbox URL or null.
+ */
+export async function podEnsureInbox() {
+    const existing = await podDiscoverInbox(solidSession?.info?.webId);
+    if (existing) return existing;
+    const root = podStorageRoot();
+    const webId = solidSession?.info?.webId;
+    if (!root || !webId) return null;
+    const inboxUrl = `${root}inbox/`;
+    try {
+        // Create the container (LDP: PUT with a BasicContainer type link).
+        const put = await solidSession.fetch(inboxUrl, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'text/turtle',
+                Link: '<http://www.w3.org/ns/ldp#BasicContainer>; rel="type"',
+            },
+            body: '',
+        });
+        if (!put || !(put.ok || put.status === 409 || put.status === 405)) return null;
+        // Public-Append ACL: owner full control (and default over children so we can
+        // read/delete the notifications inside); everyone else may only Append.
+        try {
+            await solidSession.fetch(inboxUrl + '.acl', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'text/turtle' },
+                body: `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n@prefix foaf: <http://xmlns.com/foaf/0.1/>.\n`
+                    + `<#owner> a acl:Authorization; acl:agent <${webId}>; acl:accessTo <${inboxUrl}>; acl:default <${inboxUrl}>; acl:mode acl:Read, acl:Write, acl:Control.\n`
+                    + `<#public> a acl:Authorization; acl:agentClass foaf:Agent; acl:accessTo <${inboxUrl}>; acl:mode acl:Append.\n`,
+            });
+        } catch (err) {
+            console.warn('[pod] inbox ACL failed:', err);
+        }
+        // Advertise it from the profile.
+        try {
+            await solidSession.fetch(webId.split('#')[0], {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/sparql-update' },
+                body: `INSERT DATA {\n  <${webId}> <${INBOX_PRED}> <${inboxUrl}> .\n}\n`,
+            });
+        } catch (err) {
+            console.warn('[pod] inbox created but profile link failed:', err);
+        }
+        return inboxUrl;
+    } catch (err) {
+        console.warn('[pod] podEnsureInbox failed:', err);
+        return null;
+    }
+}
+
+/** POST a chat invite to a recipient's inbox. Returns true on success. */
+export async function podSendChatInvite(recipientWebId, { container, title = '' } = {}) {
+    const me = solidSession?.info?.webId;
+    if (!recipientWebId || !container || !me || !solidSession?.info?.isLoggedIn) return false;
+    const inbox = await podDiscoverInbox(recipientWebId);
+    if (!inbox) return false;
+    try {
+        const res = await solidSession.fetch(inbox, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/ld+json' },
+            body: JSON.stringify(buildInviteNotification({
+                from: me, to: recipientWebId, container, title,
+            })),
+        });
+        return !!(res && res.ok);
+    } catch (err) {
+        console.warn('[pod] podSendChatInvite failed:', err);
+        return false;
+    }
+}
+
+/**
+ * Read our inbox and return the pending chat invitations: [{ id, from, container,
+ * title }]. Only notifications that reference a chat container are surfaced;
+ * anything else in the inbox is ignored.
+ */
+export async function podReadInboxNotifications() {
+    const inbox = await podDiscoverInbox(solidSession?.info?.webId);
+    if (!inbox) return [];
+    let urls = [];
+    try {
+        const res = await solidSession.fetch(inbox, { headers: { Accept: 'application/ld+json' } });
+        if (!res || !res.ok) return [];
+        urls = parseInboxListing(await res.json(), inbox);
+    } catch (err) {
+        console.warn('[pod] podReadInboxNotifications listing failed:', err);
+        return [];
+    }
+    const out = [];
+    for (const url of urls) {
+        try {
+            const r = await solidSession.fetch(url, { headers: { Accept: 'application/ld+json' } });
+            if (!r || !r.ok) continue;
+            const inv = parseInviteNotification(await r.json());
+            if (inv && inv.container) out.push({ id: url, from: inv.from, container: inv.container, title: inv.title });
+        } catch { /* skip a single unreadable notification */ }
+    }
+    return out;
+}
+
+/** Delete a processed notification from our inbox. */
+export async function podDeleteInboxNotification(url) {
+    if (!url || !solidSession?.info?.isLoggedIn) return false;
+    try {
+        const res = await solidSession.fetch(url, { method: 'DELETE' });
+        return !!(res && (res.ok || res.status === 404));
+    } catch (err) {
+        console.warn('[pod] podDeleteInboxNotification failed:', err);
+        return false;
+    }
 }
 
 // ── Solid social graph (contact import) ──────────────────────────────────────

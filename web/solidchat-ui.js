@@ -197,9 +197,58 @@ export function createSolidChatUI({ model, getMyWebId = () => '', showToast = ()
         }
     }
 
+    /**
+     * Render pending inbox invitations into `listEl` (PLAN_ROUND_75). Each row shows
+     * the sender and chat title (foreign data, textContent only) with Accept and
+     * Dismiss. Accept joins and calls onAccepted(conv); both clear the row.
+     */
+    async function renderInvitations(listEl, onAccepted) {
+        if (!listEl) return;
+        listEl.innerHTML = '';
+        let invites = [];
+        try { invites = await model.listInvitations(); } catch { invites = []; }
+        if (!invites.length) {
+            const li = document.createElement('li');
+            li.className = 'solidchat-empty';
+            li.textContent = 'No pending invitations.';
+            listEl.appendChild(li);
+            return;
+        }
+        for (const inv of invites) {
+            const li = document.createElement('li');
+            li.className = 'solidchat-invite';
+            const label = document.createElement('span');
+            label.className = 'solidchat-invite-label';
+            const who = shortWebId(inv.from) || 'someone';
+            label.textContent = `${inv.title || shortWebId(inv.container)} — from ${who}`;   // textContent: safe
+            const accept = document.createElement('button');
+            accept.type = 'button';
+            accept.className = 'solidchat-invite-accept';
+            accept.textContent = 'Accept';
+            accept.addEventListener('click', async () => {
+                const conv = await model.acceptInvitation(inv);
+                li.remove();
+                if (conv && onAccepted) onAccepted(conv);
+            });
+            const dismiss = document.createElement('button');
+            dismiss.type = 'button';
+            dismiss.className = 'solidchat-invite-dismiss';
+            dismiss.textContent = 'Dismiss';
+            dismiss.addEventListener('click', async () => {
+                await model.dismissInvitation(inv);
+                li.remove();
+            });
+            li.append(label, accept, dismiss);
+            listEl.appendChild(li);
+        }
+    }
+
     function close() { _clearSub(); _openId = null; }
 
-    return { renderList, renderMessages, openConversation, send, host, join, discover, populateContacts, close, shortWebId };
+    return {
+        renderList, renderMessages, openConversation, send, host, join, discover,
+        populateContacts, renderInvitations, close, shortWebId,
+    };
 }
 
 export { shortWebId };

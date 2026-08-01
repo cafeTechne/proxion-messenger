@@ -494,5 +494,7 @@
   "solidchat.discoverLabel": "Trouver les chats de quelqu'un par WebID",
   "solidchat.webidPlaceholder": "URL de leur WebID",
   "solidchat.find": "Chercher",
-  "solidchat.discoveredChats": "Chats découverts"
+  "solidchat.discoveredChats": "Chats découverts",
+  "solidchat.invitationsLabel": "Invitations",
+  "solidchat.participantPlaceholder": "Inviter un WebID (facultatif)"
 }

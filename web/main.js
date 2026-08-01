@@ -521,6 +521,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             const feed = $('solidchat-feed');
             const dialog = $('solidchat-dialog');
             let currentId = null;
+            let inboxEnsured = false;   // create/advertise our inbox once, lazily
 
             const renderList = () => { const l = $('solidchat-list'); if (l) ui.renderList(l, openConversation); };
             async function openConversation(id) {
@@ -538,7 +539,12 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     const u = $('solidchat-join-url'); if (u) u.value = '';
                     const d = $('solidchat-discover-webid'); if (d) d.value = '';
                     const dl = $('solidchat-discover-list'); if (dl) dl.innerHTML = '';
+                    const p = $('solidchat-host-participant'); if (p) p.value = '';
+                    if (!inboxEnsured) { inboxEnsured = true; model.ensureInbox(); }   // so others can invite us
                     ui.populateContacts($('solidchat-contacts'));   // fill the WebID datalist from foaf:knows
+                    ui.renderInvitations($('solidchat-invites-list'), (conv) => {
+                        showDialog(false); renderList(); openConversation(conv.id);
+                    });
                 }
             }
 
@@ -546,7 +552,8 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             $('solidchat-dialog-close')?.addEventListener('click', () => showDialog(false));
             $('solidchat-host-submit')?.addEventListener('click', async () => {
                 const title = ($('solidchat-host-title')?.value || '').trim() || 'Conversation';
-                const conv = await ui.host(title, []);
+                const participant = ($('solidchat-host-participant')?.value || '').trim();
+                const conv = await ui.host(title, participant ? [participant] : []);
                 if (conv) { showDialog(false); renderList(); openConversation(conv.id); }
             });
             $('solidchat-join-submit')?.addEventListener('click', async () => {

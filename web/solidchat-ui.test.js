@@ -10,9 +10,10 @@ function mkEl() {
         className: '', type: '', _text: '', innerHTML: '', dataset: {}, _children: [],
         set textContent(v) { this._text = String(v); },
         get textContent() { return this._text; },
-        appendChild(c) { this._children.push(c); return c; },
-        append(...cs) { this._children.push(...cs); },
+        appendChild(c) { c._parent = this; this._children.push(c); return c; },
+        append(...cs) { cs.forEach(c => { if (c) c._parent = this; }); this._children.push(...cs); },
         addEventListener(ev, fn) { this._on = this._on || {}; this._on[ev] = fn; },
+        remove() { const p = this._parent; if (p) p._children = p._children.filter(c => c !== this); },
         querySelector() { return null; },
     };
     return el;
@@ -32,6 +33,9 @@ function fakeModel(over = {}) {
         joinConversation: over.joinConversation || (async () => ({ id: 'https://a.pod/x/', role: 'participant' })),
         discoverChats: over.discoverChats || (async () => []),
         listContacts: over.listContacts || (async () => []),
+        listInvitations: over.listInvitations || (async () => []),
+        acceptInvitation: over.acceptInvitation || (async () => ({ id: 'https://a.pod/x/', role: 'participant' })),
+        dismissInvitation: over.dismissInvitation || (async () => true),
     };
 }
 
@@ -206,6 +210,66 @@ describe('populateContacts (Track F3)', () => {
         const dl = mkEl();
         await ui.populateContacts(dl);
         expect(dl._children).toHaveLength(0);
+    });
+});
+
+describe('renderInvitations (Track G2)', () => {
+    const flush = () => new Promise(r => setTimeout(r, 0));
+
+    it('lists invitations with sender + title as text, and accepts one', async () => {
+        const accepted = [];
+        const ui = createSolidChatUI({
+            model: fakeModel({
+                listInvitations: async () => [{ id: 'https://b.pod/inbox/n1', from: 'https://alice.pod/alice/profile/card#me', container: 'https://alice.pod/x/', title: 'Team' }],
+                acceptInvitation: async (inv) => ({ id: inv.container, role: 'participant' }),
+            }),
+        });
+        const list = mkEl();
+        await ui.renderInvitations(list, (c) => accepted.push(c));
+        const h = harvest(list);
+        expect(h.text.join(' ')).toContain('Team');
+        expect(h.text.join(' ')).toContain('alice@alice.pod');
+        // li -> [label, Accept, Dismiss]; click Accept.
+        list._children[0]._children[1]._on.click();
+        await flush();
+        expect(accepted).toHaveLength(1);
+        expect(accepted[0].id).toBe('https://alice.pod/x/');
+        expect(list._children).toHaveLength(0);   // row removed
+    });
+
+    it('dismisses an invitation without joining', async () => {
+        const dismissed = [];
+        const ui = createSolidChatUI({
+            model: fakeModel({
+                listInvitations: async () => [{ id: 'https://b.pod/inbox/n1', from: 'https://a.pod/#me', container: 'https://a.pod/x/', title: 'X' }],
+                dismissInvitation: async (inv) => { dismissed.push(inv.id); return true; },
+                acceptInvitation: async () => { throw new Error('should not accept'); },
+            }),
+        });
+        const list = mkEl();
+        await ui.renderInvitations(list, () => {});
+        list._children[0]._children[2]._on.click();   // Dismiss
+        await flush();
+        expect(dismissed).toEqual(['https://b.pod/inbox/n1']);
+        expect(list._children).toHaveLength(0);
+    });
+
+    it('shows an empty state when there are no invitations', async () => {
+        const ui = createSolidChatUI({ model: fakeModel({ listInvitations: async () => [] }) });
+        const list = mkEl();
+        await ui.renderInvitations(list, () => {});
+        expect(harvest(list).text.join(' ')).toMatch(/no pending invitations/i);
+    });
+
+    it('renders a hostile invite title as text, never markup', async () => {
+        const ui = createSolidChatUI({
+            model: fakeModel({ listInvitations: async () => [{ id: 'n', from: 'https://a.pod/#me', container: 'https://a.pod/x/', title: '<img src=x onerror=alert(1)>' }] }),
+        });
+        const list = mkEl();
+        await ui.renderInvitations(list, () => {});
+        const h = harvest(list);
+        expect(h.text.join(' ')).toContain('<img src=x onerror=alert(1)>');
+        expect(h.html.join(' ')).not.toContain('<img');
     });
 });
 

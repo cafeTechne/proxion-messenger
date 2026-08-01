@@ -16,6 +16,7 @@ import { solidSession, podStorageRoot } from './auth.js';
 import {
     podWriteChatMessageAt, podReadChatRecentAt, podGrantChatParticipants,
     podListChatsForWebId, podImportContacts,
+    podEnsureInbox, podSendChatInvite, podReadInboxNotifications, podDeleteInboxNotification,
 } from './pod.js';
 import { chatRootUrl, dayFileAt } from './longchat.js';
 import { watchResource } from './notify.js';
@@ -92,6 +93,18 @@ export function createSolidChat({ showToast = () => {}, onChange = () => {} } = 
         // creates the index + day file. Granting also creates the container.
         const granted = await podGrantChatParticipants(container, me, participants);
         if (!granted) { showToast('Could not set up the conversation'); return null; }
+
+        // Best-effort LDN invites: drop a notification in each participant's inbox so
+        // they see it in Proxion (or any Solid app), not only when granted silently.
+        let invited = 0;
+        for (const w of participants) {
+            try { if (await podSendChatInvite(w, { container, title })) invited++; } catch { /* ignore */ }
+        }
+        if (participants.length) {
+            showToast(invited === participants.length ? 'Invitations sent.'
+                : invited ? `Invited ${invited} of ${participants.length}.`
+                    : 'Access granted; no reachable inbox to notify.');
+        }
 
         return _upsert({
             id: container, title: String(title).slice(0, 200), host: me,
@@ -197,10 +210,40 @@ export function createSolidChat({ showToast = () => {}, onChange = () => {} } = 
         try { return await podImportContacts(); } catch { return []; }
     }
 
+    /**
+     * Ensure our own inbox exists and is advertised, so others can invite us
+     * (PLAN_ROUND_75). Best-effort, fire-and-forget on pod connect.
+     */
+    async function ensureInbox() {
+        if (!_myWebId()) return null;
+        try { return await podEnsureInbox(); } catch { return null; }
+    }
+
+    /** Pending chat invitations sitting in our inbox: [{ id, from, container, title }]. */
+    async function listInvitations() {
+        if (!_myWebId()) return [];
+        try { return await podReadInboxNotifications(); } catch { return []; }
+    }
+
+    /** Accept an invitation: join the chat (access-checked) then clear the notice. */
+    async function acceptInvitation(inv) {
+        if (!inv || !inv.container) return null;
+        const conv = await joinConversation(inv.container, { title: inv.title || 'Conversation' });
+        if (conv && inv.id) { try { await podDeleteInboxNotification(inv.id); } catch { /* ignore */ } }
+        return conv;
+    }
+
+    /** Dismiss an invitation without joining: just clear the notification. */
+    async function dismissInvitation(inv) {
+        if (!inv || !inv.id) return false;
+        try { return await podDeleteInboxNotification(inv.id); } catch { return false; }
+    }
+
     return {
         listConversations, getConversation,
         hostConversation, joinConversation, leaveConversation,
         sendMessage, loadConversation, subscribeConversation, discoverChats, listContacts,
+        ensureInbox, listInvitations, acceptInvitation, dismissInvitation,
         _STORE_KEY: STORE_KEY,
     };
 }

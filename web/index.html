@@ -1409,11 +1409,14 @@
       <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:8px; padding:22px; min-width:340px; max-width:460px;">
         <h3 style="margin:0 0 6px; color:var(--text-primary,var(--slate-50))" data-i18n="solidchat.new">New Solid conversation</h3>
         <p style="margin:0 0 16px; font-size:0.82em; color:var(--text-secondary,var(--slate-400))" data-i18n="solidchat.newHint">Talk to anyone with a Solid pod, in any Solid chat app. These messages are shared plaintext, not end-to-end encrypted.</p>
+        <label style="display:block;font-size:0.8em;margin-bottom:4px;color:var(--text-secondary,var(--slate-400))" data-i18n="solidchat.invitationsLabel">Invitations</label>
+        <ul id="solidchat-invites-list" aria-label="Chat invitations" data-i18n-attr="aria-label:solidchat.invitationsLabel" style="list-style:none;margin:0 0 16px;padding:0;max-height:140px;overflow:auto;"></ul>
         <label for="solidchat-host-title" style="display:block;font-size:0.8em;margin-bottom:4px;color:var(--text-secondary,var(--slate-400))" data-i18n="solidchat.hostLabel">Host a new conversation</label>
-        <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <div style="display:flex;gap:8px;margin-bottom:8px;">
           <input id="solidchat-host-title" type="text" placeholder="Conversation name" data-i18n-attr="placeholder:solidchat.namePlaceholder" style="flex:1;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:8px 10px;">
           <button id="solidchat-host-submit" type="button" data-i18n="solidchat.host" style="background:var(--accent,#d61f52);border:none;color:#fff;padding:0 14px;border-radius:6px;cursor:pointer;">Host</button>
         </div>
+        <input id="solidchat-host-participant" list="solidchat-contacts" type="url" inputmode="url" placeholder="Invite a WebID (optional)" data-i18n-attr="placeholder:solidchat.participantPlaceholder" style="width:100%;box-sizing:border-box;margin-bottom:16px;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:8px 10px;">
         <label for="solidchat-join-url" style="display:block;font-size:0.8em;margin-bottom:4px;color:var(--text-secondary,var(--slate-400))" data-i18n="solidchat.joinLabel">Join with a link</label>
         <div style="display:flex;gap:8px;margin-bottom:16px;">
           <input id="solidchat-join-url" type="url" inputmode="url" placeholder="https://…/chat/" data-i18n-attr="placeholder:solidchat.linkPlaceholder" style="flex:1;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:8px 10px;">

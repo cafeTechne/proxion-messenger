@@ -507,5 +507,7 @@
   "solidchat.discoverLabel": "ابحث عن دردشات شخص عبر WebID",
   "solidchat.webidPlaceholder": "عنوان WebID الخاص بهم",
   "solidchat.find": "بحث",
-  "solidchat.discoveredChats": "الدردشات المكتشفة"
+  "solidchat.discoveredChats": "الدردشات المكتشفة",
+  "solidchat.invitationsLabel": "الدعوات",
+  "solidchat.participantPlaceholder": "دعوة WebID (اختياري)"
 }
