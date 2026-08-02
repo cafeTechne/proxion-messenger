@@ -522,5 +522,11 @@
   "quality.high": "⟦Ĥíǧĥ áé⟧",
   "quality.standard": "⟦Šţáñðáŕð áéí⟧",
   "quality.saver": "⟦Ðáţá šáṽéŕ áéíó⟧",
-  "ui.fullscreen": "⟦Ƒúĺĺšçŕééñ áéíó⟧"
+  "ui.fullscreen": "⟦Ƒúĺĺšçŕééñ áéíó⟧",
+  "preview.title": "⟦Çĥéçķ ýóúŕ çáɱéŕá áñð ɱíçŕóρĥóñé áéíóúáéíóúáéí⟧",
+  "preview.mic": "⟦Ṁíç á⟧",
+  "preview.micLevel": "⟦Ṁíçŕóρĥóñé ĺéṽéĺ áéíóúá⟧",
+  "preview.camera": "⟦Çáɱéŕá áé⟧",
+  "preview.microphone": "⟦Ṁíçŕóρĥóñé áéíó⟧",
+  "preview.join": "⟦Ĵóíñ çáĺĺ áéíó⟧"
 }

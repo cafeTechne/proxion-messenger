@@ -5,6 +5,9 @@ import { t } from './i18n.js';
 import { escHtml } from './util.js';
 import { extractFingerprint, signFingerprint, classifyPeerSdp } from './callsec.js';
 import { senderCap } from './callquality.js';
+import { mediaConstraints } from './devices.js';
+
+const _dev = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
 
 export const CALL_TIMEOUT_MS = 30000;
 export const CallState = Object.freeze({
@@ -180,10 +183,8 @@ export function createVoice(deps) {
                 // ignores unknown constraints. Audio only here — video is captured
                 // separately via enableCamera and attached to the pre-negotiated
                 // video sender, so it can be toggled without renegotiation.
-                state.localStream = await navigator.mediaDevices.getUserMedia({
-                    audio: { noiseSuppression: true, echoCancellation: true, autoGainControl: true },
-                    video: false,
-                });
+                state.localStream = await navigator.mediaDevices.getUserMedia(
+                    mediaConstraints({ micId: _dev('proxion_mic_id'), video: false }));
             } catch (err) {
                 state._mediaDenied = true;
                 showToast(t('voice.micError', { error: (err && err.name ? err.name : err) }), "error");
@@ -274,8 +275,10 @@ export function createVoice(deps) {
                 _renderVideo(selfView, null);
             } else {
                 let cam;
-                try { cam = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); }
-                catch (err) { showToast(t('voice.cameraError', { error: (err && err.name) || err }), 'error'); return false; }
+                try {
+                    const camId = _dev('proxion_cam_id');
+                    cam = await navigator.mediaDevices.getUserMedia({ video: camId ? { deviceId: { exact: camId } } : true, audio: false });
+                } catch (err) { showToast(t('voice.cameraError', { error: (err && err.name) || err }), 'error'); return false; }
                 const track = cam.getVideoTracks()[0];
                 if (!track) return false;
                 state._cameraTrack = track;

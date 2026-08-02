@@ -28,7 +28,8 @@ import {
     expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8,
 } from './util.js';
 import { createFileTransfer } from './filetransfer.js';
-import { createVoice, CallState } from './voice.js';
+import { createVoice, CallState, audioLevel } from './voice.js';
+import { mapDevices, preferredDeviceId, mediaConstraints } from './devices.js';
 import { createNotifications } from './notifications.js';
 import { createOnboarding } from './onboarding.js';
 import { createReactions } from './reactions.js';
@@ -3011,11 +3012,100 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             await voice.initWebRTC(activeView.id, null, true);
         };
 
-        // R79: start a call with the camera on (video call). Same signaling path;
-        // the extra flag captures the camera into the pre-negotiated video sender.
-        document.getElementById("start-video-call-btn")?.addEventListener("click", async () => {
+        // R81 R2: pre-join camera/mic preview. Shows your camera, a live mic meter,
+        // and device pickers before the call connects. `onJoin` starts the actual call.
+        let _previewStream = null, _previewAC = null, _previewRAF = 0, _previewOnJoin = null;
+        async function _previewAcquire() {
+            const camId = (() => { try { return localStorage.getItem('proxion_cam_id') || ''; } catch { return ''; } })();
+            const micId = (() => { try { return localStorage.getItem('proxion_mic_id') || ''; } catch { return ''; } })();
+            _previewStopStream();
+            _previewStream = await navigator.mediaDevices.getUserMedia(mediaConstraints({ cameraId: camId, micId, video: true }));
+            const v = document.getElementById('preview-video');
+            if (v) { v.srcObject = _previewStream; v.play?.().catch(() => {}); }
+            _previewMeter(_previewStream);
+        }
+        function _previewMeter(stream) {
+            try {
+                const AC = window.AudioContext || window.webkitAudioContext;
+                if (!AC) return;
+                _previewAC = new AC();
+                const src = _previewAC.createMediaStreamSource(stream);
+                const an = _previewAC.createAnalyser(); an.fftSize = 256;
+                src.connect(an);
+                const data = new Uint8Array(an.fftSize);
+                const bar = document.getElementById('preview-mic-level');
+                const tick = () => {
+                    an.getByteTimeDomainData(data);
+                    if (bar) bar.style.width = Math.min(100, Math.round(audioLevel(data) * 320)) + '%';
+                    _previewRAF = requestAnimationFrame(tick);
+                };
+                tick();
+            } catch (_) { /* meter is best-effort */ }
+        }
+        function _previewStopStream() {
+            if (_previewRAF) { cancelAnimationFrame(_previewRAF); _previewRAF = 0; }
+            if (_previewAC) { try { _previewAC.close(); } catch (_) {} _previewAC = null; }
+            if (_previewStream) { _previewStream.getTracks().forEach(tr => tr.stop()); _previewStream = null; }
+        }
+        async function _previewPopulateDevices() {
+            let infos = [];
+            try { infos = await navigator.mediaDevices.enumerateDevices(); } catch (_) { return; }
+            const { cameras, mics } = mapDevices(infos);
+            const fill = (sel, list, savedKey) => {
+                if (!sel) return;
+                sel.innerHTML = '';
+                for (const d of list) {
+                    const o = document.createElement('option');
+                    o.value = d.id; o.textContent = d.label || d.id.slice(0, 8) || 'Device';
+                    sel.appendChild(o);
+                }
+                let saved = ''; try { saved = localStorage.getItem(savedKey) || ''; } catch { /* ignore */ }
+                sel.value = preferredDeviceId(list, saved);
+            };
+            fill(document.getElementById('preview-camera'), cameras, 'proxion_cam_id');
+            fill(document.getElementById('preview-mic'), mics, 'proxion_mic_id');
+        }
+        function closeCallPreview() {
+            _previewStopStream();
+            const d = document.getElementById('call-preview'); if (d) d.style.display = 'none';
+            _previewOnJoin = null;
+        }
+        async function openCallPreview(onJoin) {
+            _previewOnJoin = onJoin;
+            const d = document.getElementById('call-preview');
+            if (!d) { onJoin?.(); return; }              // no dialog: just call
+            d.style.display = 'flex';
+            try {
+                await _previewAcquire();
+                await _previewPopulateDevices();          // labels populate after permission
+                document.getElementById('preview-join')?.focus();
+            } catch (_) {
+                closeCallPreview(); onJoin?.();            // preview failed: call directly
+            }
+        }
+        document.getElementById('preview-camera')?.addEventListener('change', async (e) => {
+            try { localStorage.setItem('proxion_cam_id', e.target.value); } catch { /* ignore */ }
+            try { await _previewAcquire(); } catch (_) { /* keep dialog open */ }
+        });
+        document.getElementById('preview-mic')?.addEventListener('change', async (e) => {
+            try { localStorage.setItem('proxion_mic_id', e.target.value); } catch { /* ignore */ }
+            try { await _previewAcquire(); } catch (_) { /* ignore */ }
+        });
+        document.getElementById('preview-cancel')?.addEventListener('click', closeCallPreview);
+        document.getElementById('preview-join')?.addEventListener('click', () => {
+            const go = _previewOnJoin;
+            closeCallPreview();
+            go?.();
+        });
+        document.getElementById('call-preview')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeCallPreview();
+        });
+
+        // R79/R81: start a video call. Show the camera/mic preview first (R2); Join
+        // proceeds into the call. Falls back to a direct call if the preview fails.
+        document.getElementById("start-video-call-btn")?.addEventListener("click", () => {
             if (!activeView || (activeView.type !== "dm" && activeView.type !== "local_dm")) return;
-            await voice.initWebRTC(activeView.id, null, true, null, true);
+            openCallPreview(() => voice.initWebRTC(activeView.id, null, true, null, true));
         });
         document.getElementById("camera-btn")?.addEventListener("click", () => {
             voice.toggleCamera();

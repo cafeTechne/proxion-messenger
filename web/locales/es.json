@@ -521,5 +521,11 @@
   "quality.high": "Alta",
   "quality.standard": "Estándar",
   "quality.saver": "Ahorro de datos",
-  "ui.fullscreen": "Pantalla completa"
+  "ui.fullscreen": "Pantalla completa",
+  "preview.title": "Comprueba tu cámara y micrófono",
+  "preview.mic": "Micro",
+  "preview.micLevel": "Nivel del micrófono",
+  "preview.camera": "Cámara",
+  "preview.microphone": "Micrófono",
+  "preview.join": "Unirse a la llamada"
 }

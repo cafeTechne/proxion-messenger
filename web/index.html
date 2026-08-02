@@ -1439,6 +1439,26 @@
       </div>
     </div>
 
+    <!-- R81 R2: pre-join camera/mic check for video calls -->
+    <div id="call-preview" role="dialog" aria-modal="true" aria-label="Check your camera and microphone" data-i18n-attr="aria-label:preview.title" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1100; align-items:center; justify-content:center;">
+      <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:8px; padding:20px; width:min(92vw,420px);">
+        <h3 style="margin:0 0 12px;color:var(--text-primary,var(--slate-50))" data-i18n="preview.title">Check your camera and microphone</h3>
+        <video id="preview-video" autoplay playsinline muted style="width:100%;max-height:220px;background:#000;border-radius:8px;object-fit:cover;transform:scaleX(-1);"></video>
+        <div style="display:flex;align-items:center;gap:8px;margin:10px 0;">
+          <span style="font-size:0.75em;color:var(--text-secondary,var(--slate-400));min-width:32px;" data-i18n="preview.mic">Mic</span>
+          <div style="flex:1;height:8px;background:var(--slate-900,#0f172a);border-radius:4px;overflow:hidden;"><div id="preview-mic-level" role="meter" aria-label="Microphone level" data-i18n-attr="aria-label:preview.micLevel" style="height:100%;width:0;background:var(--color-success,#4ade80);transition:width .08s;"></div></div>
+        </div>
+        <label for="preview-camera" style="display:block;font-size:0.78em;margin-bottom:3px;color:var(--text-secondary,var(--slate-400))" data-i18n="preview.camera">Camera</label>
+        <select id="preview-camera" style="width:100%;box-sizing:border-box;margin-bottom:10px;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:7px 8px;"></select>
+        <label for="preview-mic" style="display:block;font-size:0.78em;margin-bottom:3px;color:var(--text-secondary,var(--slate-400))" data-i18n="preview.microphone">Microphone</label>
+        <select id="preview-mic" style="width:100%;box-sizing:border-box;margin-bottom:14px;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:7px 8px;"></select>
+        <div style="display:flex;justify-content:flex-end;gap:8px;">
+          <button id="preview-cancel" type="button" data-i18n="btn.cancel" style="background:transparent;border:1px solid var(--slate-600,#475569);color:var(--text-secondary,var(--slate-400));padding:7px 14px;border-radius:6px;cursor:pointer;">Cancel</button>
+          <button id="preview-join" type="button" data-i18n="preview.join" style="background:var(--accent,#d61f52);border:none;color:#fff;padding:7px 16px;border-radius:6px;cursor:pointer;">Join call</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Keyboard shortcut help modal -->
     <div id="solidchat-dialog" role="dialog" aria-modal="true" aria-label="New Solid conversation" data-i18n-attr="aria-label:solidchat.new" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1000; align-items:center; justify-content:center;">
       <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:8px; padding:22px; min-width:340px; max-width:460px;">

@@ -534,5 +534,11 @@
   "quality.high": "عالية",
   "quality.standard": "قياسية",
   "quality.saver": "توفير البيانات",
-  "ui.fullscreen": "ملء الشاشة"
+  "ui.fullscreen": "ملء الشاشة",
+  "preview.title": "تحقق من الكاميرا والميكروفون",
+  "preview.mic": "ميكروفون",
+  "preview.micLevel": "مستوى الميكروفون",
+  "preview.camera": "الكاميرا",
+  "preview.microphone": "الميكروفون",
+  "preview.join": "الانضمام إلى المكالمة"
 }
