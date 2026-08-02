@@ -60,6 +60,15 @@ def test_discover_inbox_from_profile(gw):
     assert gw._discover_inbox_from_profile(WEBID) == INBOX
 
 
+def test_cross_origin_inbox_rejected_ssrf(gw):
+    """R80 A3: a profile advertising an off-origin ldp:inbox must not be fetched."""
+    evil = b"@prefix ldp: <http://www.w3.org/ns/ldp#>.\n<%s> ldp:inbox <http://169.254.169.254/latest/> .\n" % WEBID.encode()
+    client = MagicMock()
+    client.get.side_effect = lambda url: evil if url in (WEBID, WEBID.split("#")[0]) else _inbox_ttl([])
+    gw._pod_client = lambda: client
+    assert gw._discover_inbox_from_profile(WEBID) is None
+
+
 def test_list_inbox_children_parses_contains(gw):
     _wire_client(gw, inbox_bodies=[_inbox_ttl([INBOX + "n1", INBOX + "n2"])])
     kids = gw._list_inbox_children(INBOX)
@@ -85,6 +94,19 @@ def test_new_notification_pushes_once(gw):
     gw._poll_inboxes_once()
     assert gw._poll_inboxes_once() == 1
     assert sent == [WEBID]
+
+
+def test_seen_set_tracks_current_children_not_union(gw):
+    """R80 A3: the seen-set must not accumulate dismissed notifications forever."""
+    gw._store.save_push_subscription("s1", WEBID, "https://push/ep", "p", "a")
+    _wire_client(gw, inbox_bodies=[
+        _inbox_ttl([INBOX + "n1", INBOX + "n2"]),   # seed
+        _inbox_ttl([INBOX + "n1"]),                 # n2 dismissed
+    ])
+    gw._send_inbox_push = lambda w: True
+    gw._poll_inboxes_once()                          # seed {n1,n2}
+    gw._poll_inboxes_once()                          # n2 gone
+    assert gw._inbox_seen[INBOX] == {INBOX + "n1"}   # bounded to current, not union
 
 
 def test_unreadable_inbox_is_skipped(gw):

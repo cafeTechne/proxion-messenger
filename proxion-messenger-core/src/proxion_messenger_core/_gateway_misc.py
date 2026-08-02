@@ -1622,17 +1622,35 @@ class MiscHandlerMixin:
     _LDP_INBOX_RE = None  # compiled lazily
 
     def _discover_inbox_from_profile(self, webid: str):
-        """The ldp:inbox IRI from a WebID profile (public read), or None."""
+        """The ldp:inbox IRI from a WebID profile, or None.
+
+        The inbox MUST be same-origin as the WebID (a pod hosts its own inbox). This
+        blocks an SSRF where a profile advertises an ldp:inbox on an internal/attacker
+        host and the gateway then makes an AUTHENTICATED GET to it, leaking creds and
+        probing the gateway's network (R80 A3).
+        """
         client = self._pod_client()
         if not client or not webid:
             return None
         import re
+        from urllib.parse import urlparse
         try:
             body = client.get(webid.split("#")[0]).decode("utf-8", "replace")
         except Exception:
             return None
         m = re.search(r"(?:ldp:inbox|<http://www\.w3\.org/ns/ldp#inbox>)\s*<([^>]+)>", body)
-        return m.group(1) if m else None
+        if not m:
+            return None
+        inbox = m.group(1)
+        try:
+            iu, wu = urlparse(inbox), urlparse(webid)
+            if iu.scheme not in ("http", "https"):
+                return None
+            if (iu.scheme, iu.netloc) != (wu.scheme, wu.netloc):
+                return None   # cross-origin inbox: refuse to fetch it authenticated
+        except Exception:
+            return None
+        return inbox
 
     def _list_inbox_children(self, inbox_url: str):
         """The set of child resource IRIs contained in an inbox container, or None on error."""
@@ -1675,10 +1693,12 @@ class MiscHandlerMixin:
                     self._inbox_seen[inbox] = set(children)   # seed, no push
                     continue
                 fresh = children - seen
-                if fresh:
-                    self._inbox_seen[inbox] = seen | children
-                    if self._send_inbox_push(webid):
-                        pushed += 1
+                # Track the CURRENT children only, not the union of all ever seen, so a
+                # long-running gateway does not accumulate dismissed notification URLs
+                # without bound (R80 A3). Correct because fresh = current - previous.
+                self._inbox_seen[inbox] = set(children)
+                if fresh and self._send_inbox_push(webid):
+                    pushed += 1
             except Exception:
                 continue
         return pushed

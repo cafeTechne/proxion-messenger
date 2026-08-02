@@ -95,4 +95,24 @@ describe('classifyPeerSdp (call trust decision)', () => {
             sdp: 'v=0\r\nno fp', sessionId: 's1', role: 'offer', signatureB64: 'x', signerDid: peer.did, expectedDid: peer.did,
         })).toBe('unverifiable');
     });
+
+    it('is a mismatch when the SDP carries divergent fingerprints (R80 A4)', async () => {
+        const peer = await identity();
+        // Peer signs the real fingerprint, but the received SDP has a SECOND, different
+        // fingerprint on another m-line (media redirected).
+        const sig = await signFingerprint({ fingerprint: FP, sessionId: 's1', role: 'offer', privKey: peer.priv });
+        const split = `v=0\r\na=fingerprint:${FP}\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=fingerprint:sha-256 DE:AD:BE:EF\r\n`;
+        expect(await classifyPeerSdp({
+            sdp: split, sessionId: 's1', role: 'offer', signatureB64: sig, signerDid: peer.did, expectedDid: peer.did,
+        })).toBe('mismatch');
+    });
+
+    it('accepts identical fingerprints repeated per m-line (normal bundled call)', async () => {
+        const peer = await identity();
+        const sig = await signFingerprint({ fingerprint: FP, sessionId: 's1', role: 'offer', privKey: peer.priv });
+        const bundled = `v=0\r\na=fingerprint:${FP}\r\nm=audio 9 x\r\na=fingerprint:${FP}\r\nm=video 9 x\r\na=fingerprint:${FP}\r\n`;
+        expect(await classifyPeerSdp({
+            sdp: bundled, sessionId: 's1', role: 'offer', signatureB64: sig, signerDid: peer.did, expectedDid: peer.did,
+        })).toBe('verified');
+    });
 });

@@ -946,10 +946,17 @@ export async function podSendChatInvite(recipientWebId, { container, title = '' 
     }
 }
 
+// The inbox is public-Append, so anyone may drop notifications in it. Bound the work
+// per read so a flooded inbox cannot hang the client or hammer the pod with an
+// unbounded number of sequential fetches (R80 A1). Pruning the inbox is the pod
+// operator's lever; we just refuse to process an unbounded batch at once.
+const MAX_INBOX_NOTIFICATIONS = 100;
+
 /**
  * Read our inbox and return the pending chat invitations: [{ id, from, container,
  * title }]. Only notifications that reference a chat container are surfaced;
- * anything else in the inbox is ignored.
+ * anything else in the inbox is ignored. Processes at most MAX_INBOX_NOTIFICATIONS
+ * per call.
  */
 export async function podReadInboxNotifications() {
     const inbox = await podDiscoverInbox(solidSession?.info?.webId);
@@ -963,6 +970,7 @@ export async function podReadInboxNotifications() {
         console.warn('[pod] podReadInboxNotifications listing failed:', err);
         return [];
     }
+    if (urls.length > MAX_INBOX_NOTIFICATIONS) urls = urls.slice(0, MAX_INBOX_NOTIFICATIONS);
     const out = [];
     for (const url of urls) {
         try {

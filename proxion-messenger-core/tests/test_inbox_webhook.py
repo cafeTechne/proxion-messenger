@@ -40,9 +40,26 @@ def test_token_round_trips(gw):
 
 def test_tampered_token_rejected(gw):
     tok = gw._inbox_webhook_token(WEBID)
-    # Flip the last character of the signature.
-    bad = tok[:-1] + ("A" if tok[-1] != "A" else "B")
-    assert gw._verify_inbox_webhook_token(bad) is None
+    wid_b64, sig_b64 = tok.split(".", 1)
+    # Flip the FIRST signature char (most-significant bits — a reliable change; the
+    # last base64url char of a 16-byte MAC has slack bits that can decode identically).
+    flipped = ("A" if sig_b64[0] != "A" else "B") + sig_b64[1:]
+    assert gw._verify_inbox_webhook_token(f"{wid_b64}.{flipped}") is None
+    # Every single-character mutation of the signature must be rejected.
+    import base64 as _b64
+    real_sig = _b64.urlsafe_b64decode(sig_b64 + "=" * (-len(sig_b64) % 4))
+    for i in range(len(sig_b64)):
+        for c in "AB_-0":
+            if c == sig_b64[i]:
+                continue
+            cand = sig_b64[:i] + c + sig_b64[i + 1:]
+            try:
+                same = _b64.urlsafe_b64decode(cand + "=" * (-len(cand) % 4)) == real_sig
+            except Exception:
+                same = False
+            if same:
+                continue  # slack-bit collision: decodes to the same MAC, legitimately valid
+            assert gw._verify_inbox_webhook_token(f"{wid_b64}.{cand}") is None
     assert gw._verify_inbox_webhook_token("garbage") is None
     assert gw._verify_inbox_webhook_token("") is None
 

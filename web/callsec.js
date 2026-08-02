@@ -77,16 +77,25 @@ function _canonical(parts) {
     return out;
 }
 
+// Every a=fingerprint line in an SDP, normalized. A single DTLS certificate yields
+// one fingerprint shared by every m-line; more than one DISTINCT value is anomalous
+// and treated as tampering during verification.
+export function extractAllFingerprints(sdp) {
+    if (typeof sdp !== 'string') return [];
+    const out = [];
+    const re = /a=fingerprint:(\S+)\s+([0-9A-Fa-f:]+)/ig;
+    let m;
+    while ((m = re.exec(sdp)) !== null) out.push(`${m[1].toLowerCase()} ${m[2].toUpperCase()}`);
+    return out;
+}
+
 /**
  * The DTLS fingerprint from an SDP, normalized to "<hash-func> AA:BB:..." (algo
  * lower-case, hex upper-case), or null. A single DTLS certificate yields one
  * session fingerprint shared by every m-line, so the first is authoritative.
  */
 export function extractFingerprint(sdp) {
-    if (typeof sdp !== 'string') return null;
-    const m = sdp.match(/a=fingerprint:(\S+)\s+([0-9A-Fa-f:]+)/i);
-    if (!m) return null;
-    return `${m[1].toLowerCase()} ${m[2].toUpperCase()}`;
+    return extractAllFingerprints(sdp)[0] || null;
 }
 
 /** Sign a fingerprint bound to the session and role (offer/answer) with our identity key. */
@@ -120,17 +129,24 @@ export async function verifyFingerprint({ fingerprint, sessionId, role, signatur
  * different signer or a bad signature is a 'mismatch', never merely 'unverifiable'.
  */
 export async function classifyPeerSdp({ sdp, sessionId, role, signatureB64, signerDid, expectedDid }) {
-    const fingerprint = extractFingerprint(sdp);
-    if (!fingerprint) return 'unverifiable';
+    const fps = extractAllFingerprints(sdp);
+    if (!fps.length) return 'unverifiable';
+    // Divergent fingerprints across m-lines are anomalous: with one DTLS certificate
+    // every line matches. More than one distinct value means the SDP was tampered to
+    // redirect part of the media. For a known contact that is a mismatch; even for an
+    // unknown peer we cannot soundly bind a signature to a split channel.
+    const distinct = [...new Set(fps)];
+    const fingerprint = fps[0];
     if (expectedDid) {
         // We know who this must be: anyone else, or no proof at all, is a failure.
         if (!signatureB64 || !signerDid) return 'mismatch';
         if (signerDid !== expectedDid) return 'mismatch';
+        if (distinct.length !== 1) return 'mismatch';
         const ok = await verifyFingerprint({ fingerprint, sessionId, role, signatureB64, signerDid });
         return ok ? 'verified' : 'mismatch';
     }
     // Unknown peer identity: verify if we can, but we cannot bind it to a contact.
-    if (signatureB64 && signerDid) {
+    if (signatureB64 && signerDid && distinct.length === 1) {
         const ok = await verifyFingerprint({ fingerprint, sessionId, role, signatureB64, signerDid });
         return ok ? 'verified' : 'mismatch';
     }
