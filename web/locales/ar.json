@@ -540,5 +540,8 @@
   "preview.micLevel": "مستوى الميكروفون",
   "preview.camera": "الكاميرا",
   "preview.microphone": "الميكروفون",
-  "preview.join": "الانضمام إلى المكالمة"
+  "preview.join": "الانضمام إلى المكالمة",
+  "voice.conn.good": "اتصال جيد",
+  "voice.conn.fair": "اتصال متوسط",
+  "voice.conn.poor": "اتصال ضعيف"
 }

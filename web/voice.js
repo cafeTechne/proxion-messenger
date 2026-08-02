@@ -6,6 +6,7 @@ import { escHtml } from './util.js';
 import { extractFingerprint, signFingerprint, classifyPeerSdp } from './callsec.js';
 import { senderCap } from './callquality.js';
 import { mediaConstraints } from './devices.js';
+import { classifyConnection, deriveStats } from './callstats.js';
 
 const _dev = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
 
@@ -91,6 +92,46 @@ export function createVoice(deps) {
     async function recapSenders() {
         for (const s of _allVideoSenders()) await _capSender(s);
     }
+    // R81 S: poll getStats and surface a call-health level (good/fair/poor). One timer
+    // covers the 1:1 pc and every group peer connection.
+    function _startStatsMonitor() {
+        if (state._statsTimer) return;
+        state._statsPrev = {};
+        state._statsTimer = setInterval(() => { _pollStats().catch(() => {}); }, 2500);
+    }
+    function _stopStatsMonitor() {
+        if (state._statsTimer) { clearInterval(state._statsTimer); state._statsTimer = null; }
+        state._statsPrev = {};
+        const el = document.getElementById('vw-conn'); if (el) el.style.display = 'none';
+    }
+    async function _pollStats() {
+        const collect = async (pc) => { const out = []; (await pc.getStats()).forEach(s => out.push(s)); return out; };
+        if (state.pc && state.pc.getStats) {
+            const d = deriveStats(await collect(state.pc), state._statsPrev['_1to1']);
+            state._statsPrev['_1to1'] = d;
+            _setConnIndicator(classifyConnection(d));
+        }
+        for (const [webid, pc] of Object.entries(state.peerConnections)) {
+            if (!pc || !pc.getStats) continue;
+            const d = deriveStats(await collect(pc), state._statsPrev[webid]);
+            state._statsPrev[webid] = d;
+            const pill = document.querySelector?.('#voice-channel-participants [data-vc-webid="' + webid + '"]');
+            if (pill) pill.dataset.quality = classifyConnection(d);
+        }
+    }
+    function _setConnIndicator(level) {
+        const el = document.getElementById('vw-conn');
+        if (!el) return;
+        const color = { good: '#4ade80', fair: '#fbbf24', poor: '#f87171' }[level] || '#94a3b8';
+        // Literal t() calls so the i18n checker sees these keys referenced.
+        const label = level === 'good' ? t('voice.conn.good')
+            : level === 'fair' ? t('voice.conn.fair') : t('voice.conn.poor');
+        el.style.display = state._callState === CallState.CONNECTED ? '' : 'none';
+        el.style.color = color;
+        el.textContent = '● ' + label;
+        el.title = label;
+    }
+
     // Persist a new quality preference and apply it to the live call immediately.
     function setQualityProfile(name) {
         try { localStorage.setItem('proxion_call_quality', name); } catch { /* quota */ }
@@ -104,6 +145,7 @@ export function createVoice(deps) {
         async function joinVoice(roomId) {
             getSocket().send(JSON.stringify({cmd: "join_voice_channel", room_id: roomId}));
             state._inVoiceChannel = roomId;
+            _startStatsMonitor();
             const leaveBtn = document.getElementById("leave-voice-channel-btn");
             if (leaveBtn) leaveBtn.style.display = "";
             _showChannelPanel();
@@ -142,6 +184,7 @@ export function createVoice(deps) {
             // indicator stays lit after leaving the channel.
             if (state.localStream) { state.localStream.getTracks().forEach(tr => tr.stop()); state.localStream = null; }
             state._mediaDenied = false;
+            _stopStatsMonitor();
             _speaking.stopAll();
             _hideChannelPanel();
             showToast(t('voice.left'));
@@ -816,6 +859,7 @@ export function createVoice(deps) {
         }
 
         function startCallTimer() {
+            _startStatsMonitor();
             state.callStartTime = Date.now();
             if (state.callTimerInterval) clearInterval(state.callTimerInterval);
             state.callTimerInterval = setInterval(() => {
@@ -865,6 +909,7 @@ export function createVoice(deps) {
             _renderVideo('vw-local-video', null);
             _renderVideo('vw-remote-video', null);
             state._mediaDenied = false;
+            _stopStatsMonitor();
             stopCallTimer();
             stopRingTone();
             _clearCallTimeout();

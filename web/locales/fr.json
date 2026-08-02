@@ -527,5 +527,8 @@
   "preview.micLevel": "Niveau du micro",
   "preview.camera": "Caméra",
   "preview.microphone": "Microphone",
-  "preview.join": "Rejoindre l'appel"
+  "preview.join": "Rejoindre l'appel",
+  "voice.conn.good": "Bonne connexion",
+  "voice.conn.fair": "Connexion moyenne",
+  "voice.conn.poor": "Mauvaise connexion"
 }

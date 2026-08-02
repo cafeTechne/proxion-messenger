@@ -528,5 +528,8 @@
   "preview.micLevel": "⟦Ṁíçŕóρĥóñé ĺéṽéĺ áéíóúá⟧",
   "preview.camera": "⟦Çáɱéŕá áé⟧",
   "preview.microphone": "⟦Ṁíçŕóρĥóñé áéíó⟧",
-  "preview.join": "⟦Ĵóíñ çáĺĺ áéíó⟧"
+  "preview.join": "⟦Ĵóíñ çáĺĺ áéíó⟧",
+  "voice.conn.good": "⟦Ǧóóð çóññéçţíóñ áéíóúá⟧",
+  "voice.conn.fair": "⟦Ƒáíŕ çóññéçţíóñ áéíóúá⟧",
+  "voice.conn.poor": "⟦Ρóóŕ çóññéçţíóñ áéíóúá⟧"
 }
