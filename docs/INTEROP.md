@@ -43,9 +43,19 @@ ignore what they do not understand; nothing is lost.
 - **Discoverable via the type index.** Each room registers as a
   `solid:TypeRegistration` for `meeting:LongChat` in the pod's public type index, so
   another app finds it without a URL. `web/podcanonical-typeindex.test.js`.
+- **Discover another WebID's chats.** Reading a WebID's public type index lists the
+  chats it hosts, joinable through the access-checked join.
+  `web/discover.test.js`, `web/podcanonical-discover-live.test.js`.
+- **Invitations via the Solid inbox.** Hosting with a participant drops an
+  ActivityStreams `Invite` in their `ldp:inbox` (Linked Data Notifications), which any
+  Solid app can produce or consume. `web/ldn.test.js`,
+  `web/podcanonical-ldn-live.test.js`.
 - **Real-time over Solid Notifications.** New posts arrive over a
-  `WebSocketChannel2023` subscription, with polling as a fallback.
-  `web/podcanonical-notify.test.js`, `web/notify.test.js`.
+  `WebSocketChannel2023` subscription, with polling as a fallback. Inbox invitations are
+  watched the same way, and reach a closed app via the `WebhookChannel2023` -> gateway
+  -> Web Push bridge or an outbound poll. `web/podcanonical-notify.test.js`,
+  `web/notify.test.js`, `web/podcanonical-inboxwatch-live.test.js`. See
+  [NOTIFICATIONS.md](NOTIFICATIONS.md).
 - **Cross-identity shared chat.** A second identity, granted write access, posts to a
   chat hosted in someone else's pod. `web/longchat-shared.test.js`,
   `web/podcanonical-b4.test.js`.

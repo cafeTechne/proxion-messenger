@@ -53,8 +53,13 @@ the wider Solid ecosystem, not just a promise of it:
   not asserted from a spec.
 - **Your chats are discoverable.** Proxion registers each room in your pod's public
   type index, so another Solid app can find your chats without being handed a URL.
+- **Reach anyone with a WebID.** Point Proxion at a contact's WebID to discover the
+  chats they host and join one, or send an invitation that lands in their standard Solid
+  inbox, so it works with any Solid app, not only Proxion.
 - **Real-time across apps.** New posts arrive over the Solid Notifications protocol, so
   a message another Solid app writes into a shared room shows up live, not on a timer.
+  Invitations arrive live too, and can reach you even with Proxion closed. See
+  [docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md).
 - **Your rooms outlive the gateway.** A room's structure and history live in your pod as
   a signed record, so a fresh gateway can rebuild the room from your pod alone.
 
@@ -92,15 +97,18 @@ so any Solid app you authorize can read it and you can walk away at any time.
 
 Double Ratchet DMs with per-contact safety numbers you can verify out loud, owner-only pod
 ACLs by construction, a centralized authorization policy on every gateway command, and a
-written threat model. Details in [SECURITY.md](SECURITY.md) and
-[docs/security/](docs/security/).
+written threat model. Calls are encrypted end to end (DTLS-SRTP) and identity-authenticated,
+so a compromised gateway cannot sit in the middle of the media; the model is written up in
+[docs/CALLS.md](docs/CALLS.md) and [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md). More
+in [SECURITY.md](SECURITY.md) and [docs/security/](docs/security/).
 
 Bug reports and scoped pull requests are genuinely wanted. See
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Features
 
-Rooms and DMs · P2P WebRTC voice calls · file attachments and media previews · reactions,
+Rooms and DMs · P2P WebRTC voice and video calls with screen sharing · cross-app chat
+discovery and Solid-inbox invitations · file attachments and media previews · reactions,
 edits, pins, mentions · disappearing and scheduled messages · mute and block · cross-gateway
 federation · multi-device with encrypted fanout · opt-in cross-device sync of DM history,
 bookmarks, settings, saved GIFs, mutes, and blocks via your pod · offline-capable PWA with push ·

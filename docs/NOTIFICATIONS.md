@@ -29,12 +29,12 @@ Proxion service in the path.
 
 The settings panel shows the honest status:
 
-- **Background notifications: on** — the app is served from a public origin, so the
+- **Background notifications: on**: the app is served from a public origin, so the
   gateway is reachable and closed-app push is expected to work.
-- **Notifications only while Proxion is open** — the app is served from a loopback or
+- **Notifications only while Proxion is open**: the app is served from a loopback or
   private address (for example the Tauri desktop app's local sidecar, or a LAN-only
   gateway). A remote pod cannot reach that gateway, so only the in-app path works.
-- **Background notifications: off** — notification permission has not been granted.
+- **Background notifications: off**: notification permission has not been granted.
 
 ## Behind NAT, without opening a port
 
