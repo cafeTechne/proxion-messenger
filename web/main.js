@@ -3029,6 +3029,19 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         document.getElementById("voice-channel-screenshare-btn")?.addEventListener("click", () => {
             media.state.isSharing ? stopScreenShare() : startScreenShare();
         });
+        // R81 Q2: fullscreen the video area (Escape exits, native). 1:1 targets the
+        // call widget's video area; the channel targets its video grid.
+        function _toggleFullscreen(el) {
+            if (!el) return;
+            try {
+                if (document.fullscreenElement) document.exitFullscreen();
+                else el.requestFullscreen?.();
+            } catch (_) { /* unsupported */ }
+        }
+        document.getElementById("vw-fullscreen-btn")?.addEventListener("click", () =>
+            _toggleFullscreen(document.getElementById("vw-video-area")));
+        document.getElementById("vc-fullscreen-btn")?.addEventListener("click", () =>
+            _toggleFullscreen(document.getElementById("voice-channel-videos")));
         // R81 P3: video quality selectors (1:1 widget + channel), kept in sync.
         for (const qid of ["vw-quality", "vc-quality"]) {
             const sel = document.getElementById(qid);

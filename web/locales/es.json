@@ -520,5 +520,6 @@
   "quality.auto": "Automática",
   "quality.high": "Alta",
   "quality.standard": "Estándar",
-  "quality.saver": "Ahorro de datos"
+  "quality.saver": "Ahorro de datos",
+  "ui.fullscreen": "Pantalla completa"
 }

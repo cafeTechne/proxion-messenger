@@ -520,5 +520,6 @@
   "quality.auto": "Automatisch",
   "quality.high": "Hoch",
   "quality.standard": "Standard",
-  "quality.saver": "Datensparmodus"
+  "quality.saver": "Datensparmodus",
+  "ui.fullscreen": "Vollbild"
 }

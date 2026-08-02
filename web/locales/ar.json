@@ -533,5 +533,6 @@
   "quality.auto": "تلقائي",
   "quality.high": "عالية",
   "quality.standard": "قياسية",
-  "quality.saver": "توفير البيانات"
+  "quality.saver": "توفير البيانات",
+  "ui.fullscreen": "ملء الشاشة"
 }

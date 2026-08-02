@@ -331,6 +331,12 @@ export function createVoice(deps) {
                 camBtn.classList.toggle("vw-active", state.videoEnabled);
                 camBtn.setAttribute("aria-pressed", state.videoEnabled ? "true" : "false");
             }
+            const fsBtn = document.getElementById("vw-fullscreen-btn");
+            if (fsBtn) {
+                const hasVideo = state.videoEnabled || !!(state.remoteStream &&
+                    state.remoteStream.getVideoTracks && state.remoteStream.getVideoTracks().length);
+                fsBtn.style.display = connected && hasVideo ? "flex" : "none";
+            }
             if (!connected && getIsSharing()) stopScreenShare();
             // Privacy: an always-visible indicator whenever our camera or screen is live.
             const capEl = document.getElementById("vw-capture-indicator");
@@ -587,9 +593,14 @@ export function createVoice(deps) {
             const nodes = {};  // webid -> { source, analyser, data }
             const THRESHOLD = 0.045;
             function setSpeaking(webid, on) {
-                const el = document.querySelector?.(
+                const pill = document.querySelector?.(
                     '#voice-channel-participants [data-vc-webid="' + webid + '"]');
-                if (el) el.classList.toggle('vc-speaking', on);
+                if (pill) pill.classList.toggle('vc-speaking', on);
+                // R81 Q3: also ring the participant's video tile (group) so the active
+                // speaker is visible, not just their pill.
+                const tile = document.querySelector?.(
+                    '#voice-channel-videos [data-vc-webid="' + webid + '"]');
+                if (tile) tile.classList.toggle('vc-speaking', on);
             }
             function loop() {
                 if (raf) return;

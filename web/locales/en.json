@@ -520,5 +520,6 @@
   "quality.auto": "Auto",
   "quality.high": "High",
   "quality.standard": "Standard",
-  "quality.saver": "Data saver"
+  "quality.saver": "Data saver",
+  "ui.fullscreen": "Fullscreen"
 }
