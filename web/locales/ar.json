@@ -528,5 +528,10 @@
   "voice.capturingBoth": "● الكاميرا والشاشة نشطتان",
   "ui.cameraToggle": "تشغيل / إيقاف الكاميرا",
   "ui.videoCall": "مكالمة فيديو",
-  "ui.video": "فيديو"
+  "ui.video": "فيديو",
+  "quality.label": "جودة الفيديو",
+  "quality.auto": "تلقائي",
+  "quality.high": "عالية",
+  "quality.standard": "قياسية",
+  "quality.saver": "توفير البيانات"
 }

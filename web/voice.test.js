@@ -51,6 +51,33 @@ function makeVoice(over = {}) {
   return { voice, sent };
 }
 
+describe('video quality (R81 P2)', () => {
+  function mockSender() {
+    return {
+      _p: { encodings: [{}] },
+      replaceTrack: () => Promise.resolve(),
+      getParameters() { return this._p; },
+      setParameters(p) { this._p = p; return Promise.resolve(); },
+    };
+  }
+
+  it('setQualityProfile persists and re-caps live senders', async () => {
+    const store = {};
+    global.localStorage = { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); } };
+    const { voice } = makeVoice();
+    const s = mockSender();
+    voice.state._videoSender = s;              // a live 1:1 sender
+    voice.setQualityProfile('saver');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(store['proxion_call_quality']).toBe('saver');
+    // 1:1 saver ceiling is 300 kbps.
+    expect(s._p.encodings[0].maxBitrate).toBe(300000);
+    voice.setQualityProfile('high');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(s._p.encodings[0].maxBitrate).toBe(2500000);
+  });
+});
+
 describe('CallState enum', () => {
   it('is a frozen set of states', () => {
     expect(CallState.IDLE).toBe('idle');

@@ -516,5 +516,10 @@
   "voice.capturingBoth": "⟦● Ýóúŕ çáɱéŕá áñð šçŕééñ áŕé ĺíṽé áéíóúáéíóúáéí⟧",
   "ui.cameraToggle": "⟦Çáɱéŕá óñ / óƒƒ áéíóúá⟧",
   "ui.videoCall": "⟦Ṽíðéó çáĺĺ áéíó⟧",
-  "ui.video": "⟦Ṽíðéó áé⟧"
+  "ui.video": "⟦Ṽíðéó áé⟧",
+  "quality.label": "⟦Ṽíðéó ǫúáĺíţý áéíóú⟧",
+  "quality.auto": "⟦Áúţó áé⟧",
+  "quality.high": "⟦Ĥíǧĥ áé⟧",
+  "quality.standard": "⟦Šţáñðáŕð áéí⟧",
+  "quality.saver": "⟦Ðáţá šáṽéŕ áéíó⟧"
 }

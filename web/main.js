@@ -424,6 +424,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         const media = createMedia({
             getSocket: () => socket, getActiveView: () => activeView,
             showToast, getVoiceState: () => voice.state,
+            getVoice: () => voice,   // R81: recap senders when screen share changes the profile
         });
         const { startVoiceRecording, stopVoiceRecording, sendVoiceMessage, startScreenShare, stopScreenShare } = media;
         // Message rendering (core slice 2). Created before voice/modals because they
@@ -3028,6 +3029,17 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         document.getElementById("voice-channel-screenshare-btn")?.addEventListener("click", () => {
             media.state.isSharing ? stopScreenShare() : startScreenShare();
         });
+        // R81 P3: video quality selectors (1:1 widget + channel), kept in sync.
+        for (const qid of ["vw-quality", "vc-quality"]) {
+            const sel = document.getElementById(qid);
+            if (!sel) continue;
+            sel.value = voice.getQualityProfile();
+            sel.addEventListener("change", () => {
+                voice.setQualityProfile(sel.value);
+                const other = document.getElementById(qid === "vw-quality" ? "vc-quality" : "vw-quality");
+                if (other) other.value = sel.value;
+            });
+        }
 
         document.getElementById("voice-answer").onclick = async () => {
             if (!voice.state.currentCall) return;

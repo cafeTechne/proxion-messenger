@@ -515,5 +515,10 @@
   "voice.capturingBoth": "● Your camera and screen are live",
   "ui.cameraToggle": "Camera on / off",
   "ui.videoCall": "Video call",
-  "ui.video": "Video"
+  "ui.video": "Video",
+  "quality.label": "Video quality",
+  "quality.auto": "Auto",
+  "quality.high": "High",
+  "quality.standard": "Standard",
+  "quality.saver": "Data saver"
 }

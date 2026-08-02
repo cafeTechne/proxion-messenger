@@ -515,5 +515,10 @@
   "voice.capturingBoth": "● Votre caméra et votre écran sont actifs",
   "ui.cameraToggle": "Caméra activée / désactivée",
   "ui.videoCall": "Appel vidéo",
-  "ui.video": "Vidéo"
+  "ui.video": "Vidéo",
+  "quality.label": "Qualité vidéo",
+  "quality.auto": "Auto",
+  "quality.high": "Haute",
+  "quality.standard": "Standard",
+  "quality.saver": "Économie de données"
 }

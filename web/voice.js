@@ -4,6 +4,7 @@
 import { t } from './i18n.js';
 import { escHtml } from './util.js';
 import { extractFingerprint, signFingerprint, classifyPeerSdp } from './callsec.js';
+import { senderCap } from './callquality.js';
 
 export const CALL_TIMEOUT_MS = 30000;
 export const CallState = Object.freeze({
@@ -58,16 +59,39 @@ export function createVoice(deps) {
     // Mesh video is O(n^2) in bandwidth. Beyond this many channel participants we keep
     // the call voice-only rather than fan a camera to everyone (R80 C4).
     const MAX_VIDEO_PARTICIPANTS = 4;
-    // Cap each outgoing video sender so a group call does not saturate uplinks.
-    const VIDEO_MAX_BITRATE = 512000;   // 512 kbps
+
+    // The user's quality preference: 'auto' | 'high' | 'standard' | 'saver'.
+    function getQualityProfile() {
+        try { return localStorage.getItem('proxion_call_quality') || 'auto'; } catch { return 'auto'; }
+    }
+    function _participantCount() {
+        return Object.keys(state._channelParticipants || {}).length + 1;
+    }
+    // Apply the adaptive cap to one sender for the current call context (R81 P2).
     async function _capSender(sender) {
         try {
+            const cap = senderCap({
+                profile: getQualityProfile(),
+                isGroup: !!state._inVoiceChannel,
+                participantCount: _participantCount(),
+                kind: (getIsSharing && getIsSharing()) ? 'screen' : 'camera',
+            });
             const p = sender.getParameters();
             p.encodings = p.encodings && p.encodings.length ? p.encodings : [{}];
-            p.encodings[0].maxBitrate = VIDEO_MAX_BITRATE;
-            p.encodings[0].maxFramerate = 24;
+            p.encodings[0].maxBitrate = cap.maxBitrate;
+            p.encodings[0].maxFramerate = cap.maxFramerate;
             await sender.setParameters(p);
         } catch (_) { /* best-effort; some browsers reject mid-call */ }
+    }
+    // Re-apply the cap to every active video sender (on count change, camera/screen
+    // toggle, or a quality-setting change). No renegotiation.
+    async function recapSenders() {
+        for (const s of _allVideoSenders()) await _capSender(s);
+    }
+    // Persist a new quality preference and apply it to the live call immediately.
+    function setQualityProfile(name) {
+        try { localStorage.setItem('proxion_call_quality', name); } catch { /* quota */ }
+        recapSenders();
     }
 
         function updateVoiceChannels(roomId) {
@@ -686,6 +710,7 @@ export function createVoice(deps) {
             state._videoSender = vt.sender;
             state.videoEnabled = false;
             state._cameraTrack = null;
+            _capSender(vt.sender);   // R81: apply the user's quality ceiling (generous for 1:1)
 
             state.pc.ontrack = (event) => {
                 // A <video> element plays both audio and video, so route the remote
@@ -881,6 +906,7 @@ export function createVoice(deps) {
             _addChannelParticipant(event.peer_webid);
             // We are an existing member; call the new joiner (one offer per pair).
             initWebRTCForPeer(event.peer_webid, null, true).catch(console.warn);
+            recapSenders();   // the mesh grew: re-divide each sender's bitrate budget
         }
 
         function handleVoicePeerLeft(event) {
@@ -895,6 +921,7 @@ export function createVoice(deps) {
             delete state._channelSessionIds[event.peer_webid];
             _speaking.detach(event.peer_webid);
             _removeChannelParticipant(event.peer_webid);
+            recapSenders();   // the mesh shrank: senders can reclaim bitrate
         }
 
         async function handleVoiceAnswer(event) {
@@ -966,6 +993,9 @@ export function createVoice(deps) {
         _getIceServers,
         getMedia,
         toggleCamera,
+        recapSenders,
+        getQualityProfile,
+        setQualityProfile,
         getTurnCredentials,
         handleVoiceAnswer,
         handleIceCandidate,

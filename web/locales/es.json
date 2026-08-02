@@ -515,5 +515,10 @@
   "voice.capturingBoth": "● Tu cámara y pantalla están activas",
   "ui.cameraToggle": "Cámara sí / no",
   "ui.videoCall": "Videollamada",
-  "ui.video": "Vídeo"
+  "ui.video": "Vídeo",
+  "quality.label": "Calidad de vídeo",
+  "quality.auto": "Automática",
+  "quality.high": "Alta",
+  "quality.standard": "Estándar",
+  "quality.saver": "Ahorro de datos"
 }

@@ -11,7 +11,7 @@
 import { t } from './i18n.js';
 import { podUploadVoiceAudio } from './pod.js';
 
-export function createMedia({ getSocket, getActiveView, showToast, getVoiceState }) {
+export function createMedia({ getSocket, getActiveView, showToast, getVoiceState, getVoice = () => null }) {
     const state = {
         mediaRecorder: null,
         recordingChunks: [],
@@ -94,6 +94,7 @@ export function createMedia({ getSocket, getActiveView, showToast, getVoiceState
         state.isSharing = true;
         const screenTrack = state.screenStream.getVideoTracks()[0];
         for (const s of senders) { try { s.replaceTrack(screenTrack); } catch (_) {} }
+        try { getVoice()?.recapSenders?.(); } catch (_) {}   // apply the screen-share profile
         screenTrack.onended = () => stopScreenShare();
         const sBtn = document.getElementById('screenshare-btn');
         if (sBtn) sBtn.classList.add('vw-sharing');
@@ -110,6 +111,7 @@ export function createMedia({ getSocket, getActiveView, showToast, getVoiceState
         // nothing. No renegotiation, since the m-lines already exist.
         const restore = voiceState.videoEnabled ? (voiceState._cameraTrack || null) : null;
         for (const s of _videoSenders(voiceState)) { try { s.replaceTrack(restore); } catch (_) {} }
+        try { getVoice()?.recapSenders?.(); } catch (_) {}   // back to the camera profile
         const sBtn = document.getElementById('screenshare-btn');
         if (sBtn) sBtn.classList.remove('vw-sharing');
         const socket = getSocket();
