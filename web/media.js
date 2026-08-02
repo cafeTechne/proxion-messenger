@@ -69,18 +69,31 @@ export function createMedia({ getSocket, getActiveView, showToast, getVoiceState
         reader2.readAsDataURL(blob);
     }
 
+    // Every pre-negotiated video sender in the current call: the 1:1 sender plus each
+    // group peer's, so screen share fans out to everyone with no renegotiation.
+    function _videoSenders(voiceState) {
+        const out = [];
+        if (voiceState._videoSender) out.push(voiceState._videoSender);
+        for (const s of Object.values(voiceState._peerVideoSenders || {})) if (s) out.push(s);
+        // Fallback for a 1:1 call whose sender ref is not exposed: find it on the pc.
+        if (!out.length && voiceState.pc) {
+            const s = voiceState.pc.getSenders().find(x => x.track?.kind === 'video');
+            if (s) out.push(s);
+        }
+        return out;
+    }
+
     // -- Round 67: Screen sharing --
     async function startScreenShare() {
         const voiceState = getVoiceState();
-        if (state.isSharing || !voiceState.pc) return;
+        const senders = _videoSenders(voiceState);
+        if (state.isSharing || !senders.length) return;
         try {
             state.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: false });
         } catch { showToast(t('media.screenShareCancelled')); return; }
         state.isSharing = true;
         const screenTrack = state.screenStream.getVideoTracks()[0];
-        const sender = voiceState.pc.getSenders().find(s => s.track?.kind === 'video');
-        if (sender) sender.replaceTrack(screenTrack);
-        else voiceState.pc.addTrack(screenTrack, state.screenStream);
+        for (const s of senders) { try { s.replaceTrack(screenTrack); } catch (_) {} }
         screenTrack.onended = () => stopScreenShare();
         const sBtn = document.getElementById('screenshare-btn');
         if (sBtn) sBtn.classList.add('vw-sharing');
@@ -93,13 +106,10 @@ export function createMedia({ getSocket, getActiveView, showToast, getVoiceState
         state.screenStream?.getTracks().forEach(tr => tr.stop());
         state.screenStream = null;
         const voiceState = getVoiceState();
-        // Restore the pre-negotiated video sender to the camera track (if the camera
-        // is on) or to nothing — no renegotiation, since the m-line already exists.
-        try {
-            const sender = voiceState.pc?.getSenders().find(s => s.track?.kind === 'video')
-                || voiceState._videoSender;
-            if (sender) sender.replaceTrack(voiceState.videoEnabled ? (voiceState._cameraTrack || null) : null);
-        } catch (_) { /* ignore */ }
+        // Restore every video sender to the camera track (if the camera is on) or to
+        // nothing. No renegotiation, since the m-lines already exist.
+        const restore = voiceState.videoEnabled ? (voiceState._cameraTrack || null) : null;
+        for (const s of _videoSenders(voiceState)) { try { s.replaceTrack(restore); } catch (_) {} }
         const sBtn = document.getElementById('screenshare-btn');
         if (sBtn) sBtn.classList.remove('vw-sharing');
         const socket = getSocket();

@@ -60,34 +60,47 @@ describe('stopVoiceRecording', () => {
 });
 
 describe('startScreenShare', () => {
-  it('is a no-op when there is no active peer connection', async () => {
+  it('is a no-op when there is no pre-negotiated video sender', async () => {
     const { media, sent } = make({ voiceState: { pc: null, currentCall: null } });
     await media.startScreenShare();
     expect(media.state.isSharing).toBe(false);
     expect(sent).toHaveLength(0);
   });
-  it('adds the screen track and signals screenshare_started', async () => {
+  it('replaceTracks the screen into the video sender and signals screenshare_started', async () => {
     const track = { kind: 'video', onended: null };
     const stream = { getVideoTracks: () => [track], getTracks: () => [track] };
     global.navigator = { mediaDevices: { getDisplayMedia: () => Promise.resolve(stream) } };
-    const pc = { getSenders: () => [], addTrack: vi.fn() };
-    const { media, sent } = make({ voiceState: { pc, currentCall: { session_id: 's1' } } });
+    // R80: screen share fans out via the pre-negotiated video sender (no addTrack).
+    const sender = { replaceTrack: vi.fn() };
+    const { media, sent } = make({ voiceState: { pc: null, _videoSender: sender, _peerVideoSenders: {}, currentCall: { session_id: 's1' } } });
     await media.startScreenShare();
     expect(media.state.isSharing).toBe(true);
-    expect(pc.addTrack).toHaveBeenCalled();
+    expect(sender.replaceTrack).toHaveBeenCalledWith(track);
     expect(sent).toContainEqual({ cmd: 'screenshare_started', session_id: 's1' });
+  });
+  it('fans the screen out to every group peer sender', async () => {
+    const track = { kind: 'video', onended: null };
+    const stream = { getVideoTracks: () => [track], getTracks: () => [track] };
+    global.navigator = { mediaDevices: { getDisplayMedia: () => Promise.resolve(stream) } };
+    const s1 = { replaceTrack: vi.fn() }, s2 = { replaceTrack: vi.fn() };
+    const { media } = make({ voiceState: { pc: null, _videoSender: null, _peerVideoSenders: { a: s1, b: s2 }, currentCall: null } });
+    await media.startScreenShare();
+    expect(s1.replaceTrack).toHaveBeenCalledWith(track);
+    expect(s2.replaceTrack).toHaveBeenCalledWith(track);
   });
 });
 
 describe('stopScreenShare', () => {
-  it('stops tracks, clears state, and signals screenshare_stopped', () => {
+  it('stops tracks, restores the sender, clears state, and signals screenshare_stopped', () => {
     const stop = vi.fn();
-    const { media, sent } = make({ voiceState: { pc: {}, currentCall: { session_id: 's1' } } });
+    const sender = { replaceTrack: vi.fn() };
+    const { media, sent } = make({ voiceState: { pc: null, _videoSender: sender, _peerVideoSenders: {}, videoEnabled: false, _cameraTrack: null, currentCall: { session_id: 's1' } } });
     media.state.isSharing = true;
     media.state.screenStream = { getTracks: () => [{ stop }] };
     media.stopScreenShare();
     expect(media.state.isSharing).toBe(false);
     expect(stop).toHaveBeenCalled();
+    expect(sender.replaceTrack).toHaveBeenCalledWith(null);   // camera off -> clear
     expect(media.state.screenStream).toBe(null);
     expect(sent).toContainEqual({ cmd: 'screenshare_stopped', session_id: 's1' });
   });

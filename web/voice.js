@@ -51,7 +51,24 @@ export function createVoice(deps) {
             _videoSender: null,      // the pre-negotiated video sender (camera/screen go here)
             _cameraTrack: null,      // our camera track when video is on
             _verifyState: 'unverified',  // 'verified' | 'unverified' | (mismatch → call refused)
+            _peerVideoSenders: {},   // group: per-peer video sender for camera/screen fan-out
+            peerVideoElements: {},   // group: per-peer <video> tile
     };
+
+    // Mesh video is O(n^2) in bandwidth. Beyond this many channel participants we keep
+    // the call voice-only rather than fan a camera to everyone (R80 C4).
+    const MAX_VIDEO_PARTICIPANTS = 4;
+    // Cap each outgoing video sender so a group call does not saturate uplinks.
+    const VIDEO_MAX_BITRATE = 512000;   // 512 kbps
+    async function _capSender(sender) {
+        try {
+            const p = sender.getParameters();
+            p.encodings = p.encodings && p.encodings.length ? p.encodings : [{}];
+            p.encodings[0].maxBitrate = VIDEO_MAX_BITRATE;
+            p.encodings[0].maxFramerate = 24;
+            await sender.setParameters(p);
+        } catch (_) { /* best-effort; some browsers reject mid-call */ }
+    }
 
         function updateVoiceChannels(roomId) {
             // Voice channels not yet implemented — keep section hidden
@@ -81,6 +98,18 @@ export function createVoice(deps) {
                 state.peerAudioElements[peerId].srcObject = null;
                 delete state.peerAudioElements[peerId];
             }
+            // Tear down group video: tiles, senders, our own camera + self-view.
+            for (const peerId of Object.keys(state.peerVideoElements)) {
+                try { state.peerVideoElements[peerId].srcObject = null; state.peerVideoElements[peerId].remove(); } catch (_) {}
+                delete state.peerVideoElements[peerId];
+            }
+            state._peerVideoSenders = {};
+            if (state._cameraTrack) { try { state._cameraTrack.stop(); } catch (_) {} state._cameraTrack = null; }
+            if (getIsSharing && getIsSharing()) { try { stopScreenShare(); } catch (_) {} }
+            state.videoEnabled = false;
+            _renderVideo('vw-local-video', null);
+            const vgrid = document.getElementById('voice-channel-videos');
+            if (vgrid) vgrid.style.display = 'none';
             state._channelSessionIds = {};
             // Release the microphone — otherwise the OS/browser recording
             // indicator stays lit after leaving the channel.
@@ -200,14 +229,25 @@ export function createVoice(deps) {
 
         // Turn our camera on/off mid-call by swapping the track in the pre-negotiated
         // video sender — no renegotiation needed. Returns the new enabled state.
+        // Every video sender in the current call: the 1:1 sender plus each group peer's.
+        function _allVideoSenders() {
+            const out = [];
+            if (state._videoSender) out.push(state._videoSender);
+            for (const s of Object.values(state._peerVideoSenders)) if (s) out.push(s);
+            return out;
+        }
+
         async function toggleCamera() {
-            if (!state.pc || !state._videoSender) return state.videoEnabled;
+            const senders = _allVideoSenders();
+            if (!senders.length) return state.videoEnabled;
+            // Group calls show the self-view in the channel grid; 1:1 in the call widget.
+            const selfView = state._inVoiceChannel ? 'vc-local-video' : 'vw-local-video';
             if (state.videoEnabled) {
                 try { state._cameraTrack?.stop(); } catch (_) {}
                 state._cameraTrack = null;
-                await state._videoSender.replaceTrack(null);
+                for (const s of senders) { try { await s.replaceTrack(null); } catch (_) {} }
                 state.videoEnabled = false;
-                _renderVideo('vw-local-video', null);
+                _renderVideo(selfView, null);
             } else {
                 let cam;
                 try { cam = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); }
@@ -215,9 +255,11 @@ export function createVoice(deps) {
                 const track = cam.getVideoTracks()[0];
                 if (!track) return false;
                 state._cameraTrack = track;
-                await state._videoSender.replaceTrack(track);
+                for (const s of senders) { try { await s.replaceTrack(track); } catch (_) {} }
                 state.videoEnabled = true;
-                _renderVideo('vw-local-video', cam, { mirror: true, muted: true });
+                _renderVideo(selfView, cam, { mirror: true, muted: true });
+                const grid = document.getElementById('voice-channel-videos');
+                if (state._inVoiceChannel && grid) grid.style.display = 'flex';
                 track.onended = () => { if (state.videoEnabled) toggleCamera(); };
             }
             _updateCallUI();
@@ -346,7 +388,7 @@ export function createVoice(deps) {
             return iceServers;
         }
 
-        async function initWebRTCForPeer(targetWebid, sessionId, isCaller = false, sdpOffer = null) {
+        async function initWebRTCForPeer(targetWebid, sessionId, isCaller = false, sdpOffer = null, offerMeta = null) {
             if (state.peerConnections[targetWebid]) {
                 try { state.peerConnections[targetWebid].close(); } catch (_) {}
                 delete state.peerConnections[targetWebid];
@@ -358,16 +400,23 @@ export function createVoice(deps) {
 
             const stream = await getMedia();
             if (stream) stream.getTracks().forEach(tr => peerPc.addTrack(tr, stream));
+            // Per-peer video m-line up front so camera/screen fan out via replaceTrack
+            // with no renegotiation (R80 C1), unless the channel is too large for mesh
+            // video (C4), in which case this pair stays voice-only.
+            if (Object.keys(state._channelParticipants).length + 1 <= MAX_VIDEO_PARTICIPANTS) {
+                const vt = peerPc.addTransceiver('video', { direction: 'sendrecv' });
+                state._peerVideoSenders[targetWebid] = vt.sender;
+                _capSender(vt.sender);
+                // If our camera is already live, send it to this peer immediately.
+                if (state.videoEnabled && state._cameraTrack) {
+                    try { vt.sender.replaceTrack(state._cameraTrack); } catch (_) {}
+                }
+            }
 
             peerPc.ontrack = (event) => {
-                let audio = state.peerAudioElements[targetWebid];
-                if (!audio) {
-                    audio = new Audio();
-                    audio.autoplay = true;
-                    state.peerAudioElements[targetWebid] = audio;
-                }
-                audio.srcObject = event.streams[0];
-                audio.play().catch(() => {});
+                // Route the peer's stream to a persistent per-peer <video> tile (it
+                // plays audio too), so group calls show video, not just pills.
+                _renderPeerVideo(targetWebid, event.streams[0]);
                 _updateChannelParticipantUI(targetWebid, "connected");
                 _speaking.attach(targetWebid, event.streams[0]);
             };
@@ -419,24 +468,85 @@ export function createVoice(deps) {
             if (isCaller) {
                 const offer = await peerPc.createOffer();
                 await peerPc.setLocalDescription(offer);
+                const fp = await _signPeerFingerprint(peerPc, sessionId || state._channelSessionIds[targetWebid] || '', 'offer');
                 getSocket()?.send(JSON.stringify({
                     cmd: "voice_invite",
                     target_webid: targetWebid,
                     sdp_offer: offer.sdp,
                     channel_id: state._inVoiceChannel || "",
+                    ...fp,
                 }));
             } else if (sdpOffer) {
+                // Authenticate the co-member's media channel where we know their identity.
+                if (!(await _verifyGroupSdp(targetWebid, sdpOffer, 'offer', offerMeta || {}))) {
+                    try { peerPc.close(); } catch (_) {}
+                    delete state.peerConnections[targetWebid];
+                    return null;
+                }
                 await peerPc.setRemoteDescription({ type: "offer", sdp: sdpOffer });
                 const answer = await peerPc.createAnswer();
                 await peerPc.setLocalDescription(answer);
+                const fp = await _signPeerFingerprint(peerPc, sessionId || '', 'answer');
                 getSocket()?.send(JSON.stringify({
                     cmd: "voice_answer",
                     target_webid: targetWebid,
                     session_id: sessionId,
                     sdp_answer: answer.sdp,
+                    ...fp,
                 }));
             }
             return peerPc;
+        }
+
+        // Sign a specific peer connection's local DTLS fingerprint (group path).
+        async function _signPeerFingerprint(peerPc, sessionId, role) {
+            try {
+                const priv = getIdentityPrivKey?.();
+                const did = getClientDid?.();
+                if (!priv || !did || !peerPc?.localDescription?.sdp) return {};
+                const fingerprint = extractFingerprint(peerPc.localDescription.sdp);
+                if (!fingerprint) return {};
+                const fp_sig = await signFingerprint({ fingerprint, sessionId: sessionId || '', role, privKey: priv });
+                return { fp_sig, fp_signer: did };
+            } catch { return {}; }
+        }
+
+        // Verify a group co-member's SDP against their known identity, if we have one.
+        // Refuse on a proven mismatch; allow (unverified) when the identity is unknown.
+        async function _verifyGroupSdp(peerWebid, sdp, role, event) {
+            const expectedDid = getExpectedPeerDid?.(null, { caller_webid: peerWebid, from_webid: peerWebid }) || '';
+            const verdict = await classifyPeerSdp({
+                sdp,
+                sessionId: state._channelSessionIds[peerWebid] || event?.session_id || '',
+                role,
+                signatureB64: event?.fp_sig || '',
+                signerDid: event?.fp_signer || '',
+                expectedDid,
+            });
+            if (verdict === 'mismatch') {
+                showToast(t('voice.identityUnverified'), 'error');
+                return false;
+            }
+            return true;
+        }
+
+        // Persistent per-peer video tile (created on first track, removed on leave).
+        function _renderPeerVideo(webid, stream) {
+            const grid = document.getElementById('voice-channel-videos');
+            if (!grid) return;
+            let el = state.peerVideoElements[webid];
+            if (!el) {
+                el = document.createElement('video');
+                el.autoplay = true; el.playsInline = true;
+                el.className = 'vc-video-tile';
+                el.dataset.vcWebid = webid;
+                el.style.cssText = 'width:160px;max-height:120px;background:#000;border-radius:6px;object-fit:cover;';
+                state.peerVideoElements[webid] = el;
+                grid.appendChild(el);
+            }
+            el.srcObject = stream || null;
+            el.play?.().catch(() => {});
+            grid.style.display = Object.keys(state.peerVideoElements).length ? 'flex' : 'none';
         }
 
         function _addChannelParticipant(webid) {
@@ -752,7 +862,8 @@ export function createVoice(deps) {
                 // Cross-gateway group channel offer: auto-answer if we're in a channel
                 if (state._inVoiceChannel && event.from_webid) {
                     _addChannelParticipant(event.from_webid);
-                    initWebRTCForPeer(event.from_webid, event.session_id, false, sd.sdp_offer)
+                    initWebRTCForPeer(event.from_webid, event.session_id, false, sd.sdp_offer,
+                        { session_id: event.session_id, fp_sig: sd.fp_sig, fp_signer: sd.fp_signer })
                         .catch(console.warn);
                 } else {
                     showVoiceBanner({ ...merged, caller_webid: event.from_webid, sdp_offer: sd.sdp_offer });
@@ -778,6 +889,9 @@ export function createVoice(deps) {
             if (peerPc) { try { peerPc.close(); } catch (_) {} delete state.peerConnections[event.peer_webid]; }
             const audio = state.peerAudioElements[event.peer_webid];
             if (audio) { audio.srcObject = null; delete state.peerAudioElements[event.peer_webid]; }
+            const vtile = state.peerVideoElements[event.peer_webid];
+            if (vtile) { try { vtile.srcObject = null; vtile.remove(); } catch (_) {} delete state.peerVideoElements[event.peer_webid]; }
+            delete state._peerVideoSenders[event.peer_webid];
             delete state._channelSessionIds[event.peer_webid];
             _speaking.detach(event.peer_webid);
             _removeChannelParticipant(event.peer_webid);
@@ -812,6 +926,13 @@ export function createVoice(deps) {
         async function handleGroupVoiceAnswer(event) {
             const peerPc = state.peerConnections[event.from_webid];
             if (!peerPc) return;
+            // Authenticate the answerer's media channel where identity is known.
+            if (!(await _verifyGroupSdp(event.from_webid, event.sdp_answer, 'answer', event))) {
+                try { peerPc.close(); } catch (_) {}
+                delete state.peerConnections[event.from_webid];
+                _removeChannelParticipant(event.from_webid);
+                return;
+            }
             try {
                 await peerPc.setRemoteDescription({ type: "answer", sdp: event.sdp_answer });
                 _updateChannelParticipantUI(event.from_webid, "connected");

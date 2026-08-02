@@ -33,7 +33,7 @@ if (!CHROME) { console.error('No Chrome/Edge found; set PROXION_CHROME.'); proce
 
 // Runs in the page: a real RTCPeerConnection loopback with a fake mic track.
 async function loopback() {
-  const result = { gum: false, iceA: '', iceB: '', remoteTracks: 0, remoteVideoTracks: 0, error: '' };
+  const result = { gum: false, iceA: '', iceB: '', remoteTracks: 0, remoteVideoTracks: 0, meshVideoPeers: 0, error: '' };
   try {
     // Capture audio AND video (fake devices) to exercise the video-call path:
     // the video transceiver, the remote video track, and screen-share plumbing all
@@ -83,7 +83,30 @@ async function loopback() {
     ]);
     result.iceA = pcA.iceConnectionState;
     result.iceB = pcB.iceConnectionState;
-    pcA.close(); pcB.close();
+
+    // Group video (mesh): the SAME local camera track must fan out to a SECOND peer
+    // connection (pcA2 -> pcC) and arrive as a remote video track there too. This is
+    // the mechanic group video relies on: one camera, N peer connections.
+    const videoTrack = stream.getVideoTracks()[0];
+    const pcA2 = new RTCPeerConnection();
+    const pcC = new RTCPeerConnection();
+    pcA2.onicecandidate = (e) => { if (e.candidate) pcC.addIceCandidate(e.candidate).catch(() => {}); };
+    pcC.onicecandidate = (e) => { if (e.candidate) pcA2.addIceCandidate(e.candidate).catch(() => {}); };
+    const gotMesh = new Promise((resolve) => {
+      pcC.ontrack = (e) => { if (e.track && e.track.kind === 'video') { result.meshVideoPeers = 2; resolve(); } };
+    });
+    const vtx = pcA2.addTransceiver('video', { direction: 'sendrecv' });
+    await vtx.sender.replaceTrack(videoTrack);   // fan the existing camera to peer C
+    const o2 = await pcA2.createOffer(); await pcA2.setLocalDescription(o2);
+    await pcC.setRemoteDescription(o2);
+    const a2 = await pcC.createAnswer(); await pcC.setLocalDescription(a2);
+    await pcA2.setRemoteDescription(a2);
+    await Promise.race([
+      gotMesh,
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout: mesh video did not fan out')), 15000)),
+    ]);
+
+    pcA.close(); pcB.close(); pcA2.close(); pcC.close();
     stream.getTracks().forEach((t) => t.stop());
   } catch (e) {
     result.error = String(e && e.message || e);
@@ -114,14 +137,15 @@ try {
   console.log('getUserMedia (fake mic+cam):', r.gum);
   console.log('ICE states:', `A=${r.iceA || '(none)'} B=${r.iceB || '(none)'}`);
   console.log('remote media tracks received:', r.remoteTracks, `(video: ${r.remoteVideoTracks})`);
+  console.log('mesh fan-out: one camera reached', r.meshVideoPeers, 'peer connections');
   if (r.error) console.log('error:', r.error);
   if (pageErrors.length) console.log('page errors:', pageErrors.slice(0, 3));
 
   const connected = (r.iceA === 'connected' || r.iceA === 'completed') &&
                     (r.iceB === 'connected' || r.iceB === 'completed');
-  if (r.gum && connected && r.remoteVideoTracks > 0 && !r.error) {
+  if (r.gum && connected && r.remoteVideoTracks > 0 && r.meshVideoPeers === 2 && !r.error) {
     console.log('\n✓ WebRTC media path works in the served app environment ' +
-                '(getUserMedia audio+video + RTCPeerConnection + ICE + live remote VIDEO track).');
+                '(getUserMedia audio+video + ICE + live remote VIDEO track + mesh fan-out to a 2nd peer).');
     process.exitCode = 0;
   } else {
     console.error('\n✗ WebRTC media smoke test FAILED.');

@@ -972,11 +972,18 @@
                 <button id="start-call-btn" style="display:none;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.176.42l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.175l-1.106-4.423a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z"/></svg> <span class="btn-label">Call</span></button>
                 <button id="start-video-call-btn" style="display:none;" aria-label="Start video call" title="Video call" data-i18n-attr="title:ui.videoCall;aria-label:ui.videoCall"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h8.25a2.25 2.25 0 0 0 2.25-2.25V7.5a2.25 2.25 0 0 0-2.25-2.25H4.5A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z"/></svg> <span class="btn-label" data-i18n="ui.video">Video</span></button></div>
             </header>
-            <!-- R34: Voice channel participant panel -->
-            <div id="voice-channel-panel" style="display:none;position:fixed;bottom:0;left:0;right:0;background:var(--slate-900);border-top:1px solid var(--slate-800);padding:8px 16px;z-index:800;align-items:center;gap:12px;">
-              <span style="font-size:0.8em;color:var(--color-success-soft);font-weight:600;flex-shrink:0;">&#x1F50A; Voice channel</span>
-              <div id="voice-channel-participants" style="display:flex;gap:8px;flex:1;flex-wrap:wrap;"></div>
-              <button id="voice-channel-mute-btn" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:4px 10px;border-radius:4px;cursor:pointer;font-size:0.8em;flex-shrink:0;" data-i18n="btn.mute2">Mute</button>
+            <!-- R34: Voice channel participant panel; R80: group video grid + controls -->
+            <div id="voice-channel-panel" style="display:none;position:fixed;bottom:0;left:0;right:0;background:var(--slate-900);border-top:1px solid var(--slate-800);padding:8px 16px;z-index:800;flex-direction:column;gap:8px;">
+              <div id="voice-channel-videos" style="display:none;gap:8px;flex-wrap:wrap;align-items:center;">
+                <video id="vc-local-video" autoplay playsinline muted style="display:none;width:160px;max-height:120px;background:#000;border:1px solid var(--slate-600,#475569);border-radius:6px;object-fit:cover;transform:scaleX(-1);"></video>
+              </div>
+              <div style="display:flex;align-items:center;gap:12px;">
+                <span style="font-size:0.8em;color:var(--color-success-soft);font-weight:600;flex-shrink:0;">&#x1F50A; Voice channel</span>
+                <div id="voice-channel-participants" style="display:flex;gap:8px;flex:1;flex-wrap:wrap;"></div>
+                <button id="voice-channel-camera-btn" aria-label="Turn camera on or off" title="Camera on / off" aria-pressed="false" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:4px 10px;border-radius:4px;cursor:pointer;font-size:0.8em;flex-shrink:0;" data-i18n-attr="title:ui.cameraToggle;aria-label:ui.cameraToggle" data-i18n="ui.video">Video</button>
+                <button id="voice-channel-screenshare-btn" aria-label="Share screen" title="Share Screen" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:4px 10px;border-radius:4px;cursor:pointer;font-size:0.8em;flex-shrink:0;" data-i18n-attr="title:ui.shareScreen;aria-label:ui.shareScreen2" data-i18n="ui.shareScreen">Share Screen</button>
+                <button id="voice-channel-mute-btn" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:4px 10px;border-radius:4px;cursor:pointer;font-size:0.8em;flex-shrink:0;" data-i18n="btn.mute2">Mute</button>
+              </div>
             </div>
             <!-- R11.2.2: Safety number bar (DM only) -->
             <div id="fingerprint-bar" style="display:none;padding:6px 16px;background:var(--slate-900);border-bottom:1px solid var(--slate-800);font-size:0.78em;color:var(--slate-500);align-items:center;gap:10px;flex-wrap:wrap;">

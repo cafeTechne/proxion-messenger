@@ -1662,7 +1662,8 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     // from channel peers instead of showing the 1:1 ringing banner.
                     if (voice.state._inVoiceChannel && event.caller_webid) {
                         voice._addChannelParticipant(event.caller_webid);
-                        voice.initWebRTCForPeer(event.caller_webid, event.session_id, false, event.sdp_offer)
+                        voice.initWebRTCForPeer(event.caller_webid, event.session_id, false, event.sdp_offer,
+                            { session_id: event.session_id, fp_sig: event.fp_sig, fp_signer: event.fp_signer })
                             .catch(console.warn);
                     } else {
                         voice.showVoiceBanner(event);
@@ -3017,6 +3018,15 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         });
         document.getElementById("camera-btn")?.addEventListener("click", () => {
             voice.toggleCamera();
+        });
+        // R80 C2: group video controls in the voice-channel panel.
+        document.getElementById("voice-channel-camera-btn")?.addEventListener("click", async (e) => {
+            const on = await voice.toggleCamera();
+            e.currentTarget.setAttribute("aria-pressed", on ? "true" : "false");
+            e.currentTarget.classList.toggle("vw-active", !!on);
+        });
+        document.getElementById("voice-channel-screenshare-btn")?.addEventListener("click", () => {
+            media.state.isSharing ? stopScreenShare() : startScreenShare();
         });
 
         document.getElementById("voice-answer").onclick = async () => {
