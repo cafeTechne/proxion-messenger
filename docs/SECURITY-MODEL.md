@@ -67,8 +67,9 @@ TURN relay sees only ciphertext. See `docs/CALLS.md` for the full description.
   received. A relay that swaps or splits the fingerprint is detected and the call is
   refused. A known contact whose signature is stripped is refused, not silently
   downgraded.
-- **Scope.** This covers 1:1 calls. Group calls are currently voice and their media
-  channel is not yet identity-authenticated; that is planned alongside group video.
+- **Scope.** This covers 1:1 and group calls. A group call is a mesh of peer
+  connections, and each pair is authenticated the same way against the co-member's
+  known identity.
 - **Capture.** Camera and screen capture require an explicit action and the browser's
   permission prompt. A self-view and an on-air indicator show what is being sent.
   Nothing is recorded.

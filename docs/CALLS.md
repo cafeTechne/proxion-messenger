@@ -46,7 +46,12 @@ into a verified call without detection.
   always know what is being sent.
 - Nothing is recorded. Media streams exist only for the duration of the call.
 
-## Scope
+## Group calls
 
-Video and screen sharing are 1:1 today. Group calls are voice. There is no media
-server: calls are peer to peer, which is what keeps the media out of any middle box.
+Group calls run as a mesh: each participant holds a direct peer connection to every
+other, so there is no media server and the same DTLS-SRTP encryption and fingerprint
+authentication apply to every pair. Camera and screen sharing work in a group; one
+camera fans out to each peer. Because mesh bandwidth grows with the square of the
+participant count, each video sender is capped and video is offered only up to a small
+participant ceiling, above which the call stays voice-only. There is no media server and
+no recording: calls are peer to peer, which is what keeps the media out of any middle box.
