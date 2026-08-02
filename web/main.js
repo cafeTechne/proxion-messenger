@@ -3014,7 +3014,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
 
         // R81 R2: pre-join camera/mic preview. Shows your camera, a live mic meter,
         // and device pickers before the call connects. `onJoin` starts the actual call.
-        let _previewStream = null, _previewAC = null, _previewRAF = 0, _previewOnJoin = null;
+        let _previewStream = null, _previewAC = null, _previewRAF = 0, _previewOnJoin = null, _previewOpener = null;
         async function _previewAcquire() {
             const camId = (() => { try { return localStorage.getItem('proxion_cam_id') || ''; } catch { return ''; } })();
             const micId = (() => { try { return localStorage.getItem('proxion_mic_id') || ''; } catch { return ''; } })();
@@ -3069,9 +3069,13 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             _previewStopStream();
             const d = document.getElementById('call-preview'); if (d) d.style.display = 'none';
             _previewOnJoin = null;
+            // Return focus to whatever opened the preview (screen-reader friendly).
+            try { _previewOpener?.focus?.(); } catch (_) { /* ignore */ }
+            _previewOpener = null;
         }
         async function openCallPreview(onJoin) {
             _previewOnJoin = onJoin;
+            _previewOpener = document.activeElement;
             const d = document.getElementById('call-preview');
             if (!d) { onJoin?.(); return; }              // no dialog: just call
             d.style.display = 'flex';
