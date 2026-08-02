@@ -530,5 +530,6 @@
   "preview.join": "Anruf beitreten",
   "voice.conn.good": "Gute Verbindung",
   "voice.conn.fair": "Mittelmäßige Verbindung",
-  "voice.conn.poor": "Schlechte Verbindung"
+  "voice.conn.poor": "Schlechte Verbindung",
+  "tip.interop": "Tipp: Öffne Solid-Chats, um Kontakte in jeder Solid-App zu finden und einzuladen, und starte einen Videoanruf aus jeder DM."
 }

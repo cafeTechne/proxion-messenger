@@ -4048,6 +4048,13 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             startSolidInboxWatch();
             // R77: also arrange closed-app push for inbox invitations.
             setupInboxPush();
+            // R81 T: a one-time nudge so people find the interop + call features.
+            try {
+                if (!localStorage.getItem('proxion_tip_interop_shown')) {
+                    localStorage.setItem('proxion_tip_interop_shown', '1');
+                    setTimeout(() => showToast(t('tip.interop')), 2500);
+                }
+            } catch (_) { /* ignore */ }
         }
 
         // R78 (L1): tell the user, honestly, whether an invitation can reach them with

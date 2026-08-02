@@ -40,7 +40,8 @@ export function createSolidChatUI({ model, getMyWebId = () => '', showToast = ()
             // Must be an <li> — a <ul> may only contain <li> (WCAG list rule).
             const li = document.createElement('li');
             li.className = 'solidchat-empty';
-            li.textContent = 'No Solid conversations yet. Host one or join with a link.';
+            // Point at what the + dialog can do, so discovery and invites are findable.
+            li.textContent = 'No Solid conversations yet. Tap + to host one, discover a contact’s chats by WebID, or invite someone to their Solid inbox.';
             listEl.appendChild(li);
             return;
         }

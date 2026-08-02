@@ -530,5 +530,6 @@
   "preview.join": "Rejoindre l'appel",
   "voice.conn.good": "Bonne connexion",
   "voice.conn.fair": "Connexion moyenne",
-  "voice.conn.poor": "Mauvaise connexion"
+  "voice.conn.poor": "Mauvaise connexion",
+  "tip.interop": "Astuce : ouvrez les Chats Solid pour découvrir et inviter des contacts dans n'importe quelle app Solid, et lancez un appel vidéo depuis n'importe quel message privé."
 }
