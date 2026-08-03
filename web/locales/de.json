@@ -30,6 +30,7 @@
   "voice.callNotAnswered": "Anruf nicht angenommen",
   "voice.connectionTrouble": "Sprachverbindungsprobleme mit {peer} — verbinde neu…",
   "voice.connectionLost": "Sprachverbindung verloren — Anruf beendet",
+  "voice.noRelay": "Anruf konnte nicht verbunden werden. Dieses Netzwerk blockiert eine direkte Verbindung und benötigt einen Relay-Server.",
   "voice.micRequired": "Für einen Anruf wird das Mikrofon benötigt.",
   "voice.peerPresent": "{peer} ist im Sprachkanal",
   "voice.peerJoined": "{peer} ist dem Sprachkanal beigetreten",

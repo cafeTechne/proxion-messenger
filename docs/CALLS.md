@@ -11,6 +11,26 @@ candidates that let the peers find each other); it never carries the media. When
 direct path is blocked by NAT, a TURN relay forwards the packets, but those packets
 are already encrypted, so the relay sees ciphertext, not your call.
 
+## Connecting through restrictive networks
+
+To connect peer to peer, each device has to discover an address the other can reach.
+On ordinary home networks this works with STUN alone, which is built in and needs no
+setup, so most calls just connect. Some networks (symmetric NAT, and many corporate or
+mobile firewalls) allow no direct path at all. There the call needs a TURN relay: a
+server both sides can reach that forwards the encrypted packets between them.
+
+The bundled desktop app and a default gateway ship with STUN only, so a first call on a
+restrictive network can fail. To make those calls connect, run a TURN relay and point
+the gateway at it by setting `TURN_URL` and `TURN_SECRET` (a coturn shared secret). The
+gateway then hands each client short-lived, HMAC-signed credentials over the
+authenticated connection; it never ships a static password. `docker-compose.full.yml`
+bundles a coturn server configured this way. See
+[SELF_HOSTING.md](SELF_HOSTING.md) for the setup.
+
+When a call cannot find any path and no relay is configured, it does not fail silently:
+the caller is told the network is blocking a direct connection and a relay is needed,
+which is the actual fix rather than a dead end.
+
 ## Encryption
 
 WebRTC media is encrypted end to end by DTLS-SRTP. The peers derive the media keys

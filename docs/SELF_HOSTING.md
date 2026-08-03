@@ -164,6 +164,19 @@ docker compose -f docker-compose.full.yml up -d
 The gateway automatically generates time-limited TURN credentials using `TURN_SECRET`
 and sends them to clients over the authenticated WebSocket.
 
+If you run the gateway directly (the `pip install` path, not `docker-compose.full.yml`),
+point it at your own coturn with both variables:
+
+```bash
+TURN_URL=turn:relay.example.com:3478
+TURN_SECRET=<same shared secret coturn uses (use-auth-secret / static-auth-secret)>
+```
+
+Both must be set for the relay to be offered. With neither, calls use STUN only:
+they connect on ordinary home networks but cannot get through symmetric NAT or a
+strict firewall, and a call that finds no direct path ends with a message telling
+the user a relay is needed rather than failing silently.
+
 ---
 
 ## Backup and restore

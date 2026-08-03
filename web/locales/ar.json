@@ -31,6 +31,7 @@
   "voice.callNotAnswered": "لم يتم الرد على المكالمة",
   "voice.connectionTrouble": "مشكلة في الاتصال الصوتي مع {peer} — تجري إعادة الاتصال…",
   "voice.connectionLost": "انقطع الاتصال الصوتي — انتهت المكالمة",
+  "voice.noRelay": "تعذّر إجراء المكالمة. هذه الشبكة تحجب الاتصال المباشر وتحتاج إلى خادم ترحيل لإتمامها.",
   "voice.micRequired": "الميكروفون مطلوب لبدء مكالمة.",
   "voice.peerPresent": "{peer} موجود في القناة الصوتية",
   "voice.peerJoined": "انضم {peer} إلى القناة الصوتية",

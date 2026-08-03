@@ -180,6 +180,24 @@ describe('ICE-failure handling (silent-drop regressions)', () => {
     expect(sent.some((m) => m.cmd === 'voice_hangup')).toBe(true);
   });
 
+  it('1:1 call: with no relay, the failure toast points at the real fix', async () => {
+    installRTC();
+    const toasts = [];
+    const { voice } = makeVoice({ showToast: (m) => toasts.push(m) });
+    voice.state.localStream = { getTracks: () => [{ stop() {} }] };
+
+    await voice.initWebRTC('cert1', 'sess1', true);   // no fetch, no client TURN → STUN only
+    expect(voice.state._turnConfigured).toBe(false);
+
+    const pc = voice.state.pc;
+    pc.iceConnectionState = 'failed';
+    pc.oniceconnectionstatechange();
+
+    // The no-relay variant (key returned verbatim since no locale is loaded in tests).
+    expect(toasts).toContain('voice.noRelay');
+    expect(toasts).not.toContain('voice.connectionLost');
+  });
+
   it('group call: the CALLER side rebuilds the peer on ICE "failed" (was a no-op restartIce)', async () => {
     installRTC();
     const { voice, sent } = makeVoice();
@@ -215,6 +233,29 @@ describe('ICE-failure handling (silent-drop regressions)', () => {
     await flush();
 
     expect(sent.some((m) => m.cmd === 'voice_invite')).toBe(false);   // still no invite
+  });
+});
+
+describe('_getIceServers records whether a relay is available', () => {
+  it('STUN-only (no /turn-credentials, no client TURN) → _turnConfigured false', async () => {
+    const savedFetch = global.fetch;
+    global.fetch = undefined;                       // no relay endpoint reachable
+    const { voice } = makeVoice();                  // getTurnUrl/getTurnSecret return null
+    const servers = await voice._getIceServers();
+    expect(servers.some((s) => String(s.urls).startsWith('stun:'))).toBe(true);
+    expect(voice.state._turnConfigured).toBe(false);
+    global.fetch = savedFetch;
+  });
+
+  it('a turn: server from /turn-credentials → _turnConfigured true', async () => {
+    const savedFetch = global.fetch;
+    global.fetch = () => Promise.resolve({
+      json: () => Promise.resolve({ urls: ['turn:relay.example:3478'], username: 'u', credential: 'c' }),
+    });
+    const { voice } = makeVoice();
+    await voice._getIceServers();
+    expect(voice.state._turnConfigured).toBe(true);
+    global.fetch = savedFetch;
   });
 });
 

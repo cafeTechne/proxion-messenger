@@ -487,6 +487,14 @@ export function createVoice(deps) {
                 const credential = await getTurnCredentials(username, getTurnSecret());
                 iceServers.push({ urls: getTurnUrl(), username, credential });
             }
+            // Record whether any relay (turn:/turns:) made it into the list. A call
+            // that fails with only STUN was blocked by a restrictive NAT/firewall and
+            // would need a TURN relay, so the failure toast can say so instead of a
+            // bare "connection lost" the user can do nothing about.
+            state._turnConfigured = iceServers.some((s) => {
+                const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
+                return urls.some((u) => typeof u === 'string' && /^turns?:/.test(u));
+            });
             return iceServers;
         }
 
@@ -546,7 +554,11 @@ export function createVoice(deps) {
                     // doesn't spam.
                     if (!peerPc._proxionFailToasted) {
                         peerPc._proxionFailToasted = true;
-                        showToast(t('voice.connectionTrouble', { peer: targetWebid.slice(0, 20) }), "error");
+                        showToast(
+                            state._turnConfigured
+                                ? t('voice.connectionTrouble', { peer: targetWebid.slice(0, 20) })
+                                : t('voice.noRelay'),
+                            "error");
                     }
                     // Recovery: restartIce() alone is a no-op here — it only flags the
                     // next offer, and this codebase renegotiates by tearing down and
@@ -841,7 +853,10 @@ export function createVoice(deps) {
             // _doHangup also signals the peer, so both sides tear down.
             state.pc.oniceconnectionstatechange = () => {
                 if (state.pc && state.pc.iceConnectionState === "failed") {
-                    showToast(t('voice.connectionLost'), "error");
+                    // No relay + a failed call almost always means a restrictive network
+                    // (symmetric NAT / firewall) with no direct path. Tell the user the
+                    // actual fix rather than a dead-end "connection lost".
+                    showToast(state._turnConfigured ? t('voice.connectionLost') : t('voice.noRelay'), "error");
                     _doHangup();
                 }
             };

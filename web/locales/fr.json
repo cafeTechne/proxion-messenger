@@ -30,6 +30,7 @@
   "voice.callNotAnswered": "Appel sans réponse",
   "voice.connectionTrouble": "Problème de connexion vocale avec {peer} — reconnexion…",
   "voice.connectionLost": "Connexion vocale perdue — appel terminé",
+  "voice.noRelay": "Impossible de connecter l'appel. Ce réseau bloque la connexion directe et nécessite un serveur relais pour aboutir.",
   "voice.micRequired": "Le micro est nécessaire pour démarrer un appel.",
   "voice.peerPresent": "{peer} est dans le canal vocal",
   "voice.peerJoined": "{peer} a rejoint le canal vocal",
