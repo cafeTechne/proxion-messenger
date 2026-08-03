@@ -547,5 +547,13 @@
   "tip.interop": "نصيحة: افتح دردشات Solid لاكتشاف ودعوة جهات الاتصال عبر أي تطبيق Solid، وابدأ مكالمة فيديو من أي رسالة مباشرة.",
   "push.missedCall": "مكالمة فائتة",
   "voice.unavailable": "غير متاح الآن",
-  "voice.missedFrom": "مكالمة فائتة من {peer}"
+  "voice.missedFrom": "مكالمة فائتة من {peer}",
+  "btn.accept": "قبول",
+  "btn.dismiss": "تجاهل",
+  "solidchat.emptyList": "لا توجد محادثات Solid بعد. اضغط + لاستضافة واحدة أو اكتشاف محادثات جهة اتصال عبر WebID أو دعوة شخص إلى صندوق Solid الخاص به.",
+  "solidchat.created": "تم إنشاء المحادثة. شارك رابطها لدعوة الآخرين.",
+  "solidchat.joined": "انضممت إلى المحادثة.",
+  "solidchat.noChatsFound": "لم يتم العثور على محادثات لهذا الـ WebID.",
+  "solidchat.noInvites": "لا توجد دعوات معلقة.",
+  "solidchat.inviteFrom": "{title} من {who}"
 }

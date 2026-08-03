@@ -534,5 +534,13 @@
   "tip.interop": "Tipp: Öffne Solid-Chats, um Kontakte in jeder Solid-App zu finden und einzuladen, und starte einen Videoanruf aus jeder DM.",
   "push.missedCall": "Verpasster Anruf",
   "voice.unavailable": "Gerade nicht erreichbar",
-  "voice.missedFrom": "Verpasster Anruf von {peer}"
+  "voice.missedFrom": "Verpasster Anruf von {peer}",
+  "btn.accept": "Annehmen",
+  "btn.dismiss": "Verwerfen",
+  "solidchat.emptyList": "Noch keine Solid-Unterhaltungen. Tippe auf +, um eine zu hosten, die Chats eines Kontakts per WebID zu entdecken oder jemanden in seinen Solid-Posteingang einzuladen.",
+  "solidchat.created": "Unterhaltung erstellt. Teile den Link, um andere einzuladen.",
+  "solidchat.joined": "Der Unterhaltung beigetreten.",
+  "solidchat.noChatsFound": "Keine Chats für diese WebID gefunden.",
+  "solidchat.noInvites": "Keine ausstehenden Einladungen.",
+  "solidchat.inviteFrom": "{title} von {who}"
 }

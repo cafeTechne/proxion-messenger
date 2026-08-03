@@ -534,5 +534,13 @@
   "tip.interop": "Consejo: abre Chats de Solid para descubrir e invitar contactos en cualquier app Solid, e inicia una videollamada desde cualquier mensaje directo.",
   "push.missedCall": "Llamada perdida",
   "voice.unavailable": "No está disponible ahora mismo",
-  "voice.missedFrom": "Llamada perdida de {peer}"
+  "voice.missedFrom": "Llamada perdida de {peer}",
+  "btn.accept": "Aceptar",
+  "btn.dismiss": "Descartar",
+  "solidchat.emptyList": "Aún no hay conversaciones de Solid. Toca + para crear una, descubrir los chats de un contacto por WebID o invitar a alguien a su bandeja de Solid.",
+  "solidchat.created": "Conversación creada. Comparte su enlace para invitar a otros.",
+  "solidchat.joined": "Te uniste a la conversación.",
+  "solidchat.noChatsFound": "No se encontraron chats para ese WebID.",
+  "solidchat.noInvites": "No hay invitaciones pendientes.",
+  "solidchat.inviteFrom": "{title} de {who}"
 }

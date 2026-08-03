@@ -23,7 +23,25 @@ function shortWebId(webid) {
     }
 }
 
-export function createSolidChatUI({ model, getMyWebId = () => '', showToast = () => {} }) {
+// English fallbacks, param-interpolated. Production injects i18n's real `t`; unit tests
+// use the default so they can assert on stable English without loading a locale.
+const _EN = {
+    'solidchat.emptyList': 'No Solid conversations yet. Tap + to host one, discover a contact’s chats by WebID, or invite someone to their Solid inbox.',
+    'solidchat.created': 'Conversation created. Share its link to invite others.',
+    'solidchat.joined': 'Joined the conversation.',
+    'solidchat.noChatsFound': 'No chats found for that WebID.',
+    'solidchat.noInvites': 'No pending invitations.',
+    'solidchat.inviteFrom': '{title} from {who}',
+    'btn.accept': 'Accept',
+    'btn.dismiss': 'Dismiss',
+};
+function _defaultT(key, params) {
+    let s = _EN[key] || key;
+    if (params) for (const k of Object.keys(params)) s = s.split('{' + k + '}').join(params[k]);
+    return s;
+}
+
+export function createSolidChatUI({ model, getMyWebId = () => '', showToast = () => {}, t = _defaultT }) {
     let _unsub = null;
     let _openId = null;
 
@@ -41,7 +59,7 @@ export function createSolidChatUI({ model, getMyWebId = () => '', showToast = ()
             const li = document.createElement('li');
             li.className = 'solidchat-empty';
             // Point at what the + dialog can do, so discovery and invites are findable.
-            li.textContent = 'No Solid conversations yet. Tap + to host one, discover a contact’s chats by WebID, or invite someone to their Solid inbox.';
+            li.textContent = t('solidchat.emptyList');
             listEl.appendChild(li);
             return;
         }
@@ -133,13 +151,13 @@ export function createSolidChatUI({ model, getMyWebId = () => '', showToast = ()
 
     async function host(title, participantWebIds) {
         const conv = await model.hostConversation({ title, participantWebIds });
-        if (conv) showToast('Conversation created. Share its link to invite others.');
+        if (conv) showToast(t('solidchat.created'));
         return conv;
     }
 
     async function join(url, title) {
         const conv = await model.joinConversation(url, { title });
-        if (conv) showToast('Joined the conversation.');
+        if (conv) showToast(t('solidchat.joined'));
         return conv;
     }
 
@@ -156,7 +174,7 @@ export function createSolidChatUI({ model, getMyWebId = () => '', showToast = ()
         if (!results.length) {
             const li = document.createElement('li');
             li.className = 'solidchat-empty';
-            li.textContent = 'No chats found for that WebID.';
+            li.textContent = t('solidchat.noChatsFound');
             listEl.appendChild(li);
             return;
         }
@@ -165,10 +183,10 @@ export function createSolidChatUI({ model, getMyWebId = () => '', showToast = ()
             const item = document.createElement('button');
             item.type = 'button';
             item.className = 'solidchat-item';
-            const t = document.createElement('span');
-            t.className = 'solidchat-item-title';
-            t.textContent = r.title || shortWebId(r.container);   // textContent: safe
-            item.appendChild(t);
+            const titleEl = document.createElement('span');
+            titleEl.className = 'solidchat-item-title';
+            titleEl.textContent = r.title || shortWebId(r.container);   // textContent: safe
+            item.appendChild(titleEl);
             item.addEventListener('click', async () => {
                 const conv = await join(r.container, r.title || shortWebId(r.container));
                 if (conv && onJoined) onJoined(conv);
@@ -211,7 +229,7 @@ export function createSolidChatUI({ model, getMyWebId = () => '', showToast = ()
         if (!invites.length) {
             const li = document.createElement('li');
             li.className = 'solidchat-empty';
-            li.textContent = 'No pending invitations.';
+            li.textContent = t('solidchat.noInvites');
             listEl.appendChild(li);
             return;
         }
@@ -221,11 +239,11 @@ export function createSolidChatUI({ model, getMyWebId = () => '', showToast = ()
             const label = document.createElement('span');
             label.className = 'solidchat-invite-label';
             const who = shortWebId(inv.from) || 'someone';
-            label.textContent = `${inv.title || shortWebId(inv.container)} — from ${who}`;   // textContent: safe
+            label.textContent = t('solidchat.inviteFrom', { title: inv.title || shortWebId(inv.container), who });   // textContent: safe
             const accept = document.createElement('button');
             accept.type = 'button';
             accept.className = 'solidchat-invite-accept';
-            accept.textContent = 'Accept';
+            accept.textContent = t('btn.accept');
             accept.addEventListener('click', async () => {
                 const conv = await model.acceptInvitation(inv);
                 li.remove();
@@ -234,7 +252,7 @@ export function createSolidChatUI({ model, getMyWebId = () => '', showToast = ()
             const dismiss = document.createElement('button');
             dismiss.type = 'button';
             dismiss.className = 'solidchat-invite-dismiss';
-            dismiss.textContent = 'Dismiss';
+            dismiss.textContent = t('btn.dismiss');
             dismiss.addEventListener('click', async () => {
                 await model.dismissInvitation(inv);
                 li.remove();

@@ -534,5 +534,13 @@
   "tip.interop": "Astuce : ouvrez les Chats Solid pour découvrir et inviter des contacts dans n'importe quelle app Solid, et lancez un appel vidéo depuis n'importe quel message privé.",
   "push.missedCall": "Appel manqué",
   "voice.unavailable": "Indisponible pour le moment",
-  "voice.missedFrom": "Appel manqué de {peer}"
+  "voice.missedFrom": "Appel manqué de {peer}",
+  "btn.accept": "Accepter",
+  "btn.dismiss": "Ignorer",
+  "solidchat.emptyList": "Aucune conversation Solid pour l'instant. Touchez + pour en héberger une, découvrir les chats d'un contact par WebID, ou inviter quelqu'un dans sa boîte de réception Solid.",
+  "solidchat.created": "Conversation créée. Partagez le lien pour inviter d'autres personnes.",
+  "solidchat.joined": "Vous avez rejoint la conversation.",
+  "solidchat.noChatsFound": "Aucun chat trouvé pour ce WebID.",
+  "solidchat.noInvites": "Aucune invitation en attente.",
+  "solidchat.inviteFrom": "{title} de {who}"
 }

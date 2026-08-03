@@ -534,5 +534,13 @@
   "tip.interop": "Tip: open Solid Chats to discover and invite contacts across any Solid app, and start a video call from any DM.",
   "push.missedCall": "Missed call",
   "voice.unavailable": "They are unavailable right now",
-  "voice.missedFrom": "Missed call from {peer}"
+  "voice.missedFrom": "Missed call from {peer}",
+  "btn.accept": "Accept",
+  "btn.dismiss": "Dismiss",
+  "solidchat.emptyList": "No Solid conversations yet. Tap + to host one, discover a contact’s chats by WebID, or invite someone to their Solid inbox.",
+  "solidchat.created": "Conversation created. Share its link to invite others.",
+  "solidchat.joined": "Joined the conversation.",
+  "solidchat.noChatsFound": "No chats found for that WebID.",
+  "solidchat.noInvites": "No pending invitations.",
+  "solidchat.inviteFrom": "{title} from {who}"
 }

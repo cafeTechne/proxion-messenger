@@ -524,7 +524,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         // distinct plaintext mode, separate from E2E DMs and gateway rooms.
         const solidChat = createSolidChat({ showToast });
         const solidChatUI = createSolidChatUI({
-            model: solidChat, showToast,
+            model: solidChat, showToast, t,
             getMyWebId: () => (solidSession.info.isLoggedIn && solidSession.info.webId) || '',
         });
         // Assigned by setupSolidChatUI; called from onPodLoggedIn to begin watching
