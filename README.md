@@ -85,7 +85,7 @@ gh attestation verify Proxion_0.1.5_x64-setup.exe \
    --repo cafeTechne/proxion-messenger                # built by CI, from this source
 ```
 
-**The code is checked.** 3,400+ backend tests and 400+ frontend tests run on every push across
+**The code is checked.** 3,400+ backend tests and 600+ frontend tests run on every push across
 Linux, macOS and Windows, alongside accessibility (axe-core, WCAG 2.2 AA), i18n and contrast
 gates. Full detail in [TESTING.md](TESTING.md) and [docs/VERIFYING.md](docs/VERIFYING.md).
 
