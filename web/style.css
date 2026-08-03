@@ -758,3 +758,13 @@ button:hover { background: var(--accent-hover); }
   #vw-remote-video { max-height: 40vh; }
   .vc-video-tile, #vc-local-video { width: 44vw !important; max-height: 30vh; }
 }
+
+/* R83: spotlight the active speaker's video tile in a larger group call */
+#voice-channel-videos .vc-video-tile.vc-speaking {
+  width: 280px;
+  max-height: 210px;
+  order: -1;   /* float the active speaker to the front of the grid */
+}
+@media (max-width: 768px) {
+  #voice-channel-videos .vc-video-tile.vc-speaking { width: 70vw; max-height: 42vh; }
+}

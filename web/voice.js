@@ -4,7 +4,7 @@
 import { t } from './i18n.js';
 import { escHtml } from './util.js';
 import { extractFingerprint, signFingerprint, classifyPeerSdp } from './callsec.js';
-import { senderCap } from './callquality.js';
+import { senderCap, canEnableVideo } from './callquality.js';
 import { mediaConstraints } from './devices.js';
 import { classifyConnection, deriveStats } from './callstats.js';
 
@@ -61,9 +61,14 @@ export function createVoice(deps) {
             _peerRemoteStreams: {},  // group: per-peer accumulated remote MediaStream
     };
 
-    // Mesh video is O(n^2) in bandwidth. Beyond this many channel participants we keep
-    // the call voice-only rather than fan a camera to everyone (R80 C4).
-    const MAX_VIDEO_PARTICIPANTS = 4;
+    // Peers currently sending us live video (R83): bounds how many share at once.
+    function _activeRemoteVideoCount() {
+        let n = 0;
+        for (const s of Object.values(state._peerRemoteStreams || {})) {
+            if (s && s.getVideoTracks && s.getVideoTracks().some(tr => tr.readyState === 'live')) n++;
+        }
+        return n;
+    }
 
     // The user's quality preference: 'auto' | 'high' | 'standard' | 'saver'.
     function getQualityProfile() {
@@ -331,6 +336,12 @@ export function createVoice(deps) {
                 state.videoEnabled = false;
                 _renderVideo(selfView, null);
             } else {
+                // R83: in a group call, cap how many people share video at once so a
+                // large mesh call stays within bandwidth. Audio is unaffected.
+                if (state._inVoiceChannel && !canEnableVideo(_activeRemoteVideoCount())) {
+                    showToast(t('voice.videoFull'));
+                    return false;
+                }
                 let cam;
                 try {
                     const camId = _dev('proxion_cam_id');
@@ -492,16 +503,15 @@ export function createVoice(deps) {
             const stream = await getMedia();
             if (stream) stream.getTracks().forEach(tr => peerPc.addTrack(tr, stream));
             // Per-peer video m-line up front so camera/screen fan out via replaceTrack
-            // with no renegotiation (R80 C1), unless the channel is too large for mesh
-            // video (C4), in which case this pair stays voice-only.
-            if (Object.keys(state._channelParticipants).length + 1 <= MAX_VIDEO_PARTICIPANTS) {
-                const vt = peerPc.addTransceiver('video', { direction: 'sendrecv' });
-                state._peerVideoSenders[targetWebid] = vt.sender;
-                _capSender(vt.sender);
-                // If our camera is already live, send it to this peer immediately.
-                if (state.videoEnabled && state._cameraTrack) {
-                    try { vt.sender.replaceTrack(state._cameraTrack); } catch (_) {}
-                }
+            // with no renegotiation (R80 C1). The transceiver is idle and free until
+            // someone actually shares, so we negotiate it regardless of call size — the
+            // concurrent-video CAP (R83) bounds how many send at once, not who can.
+            const vt = peerPc.addTransceiver('video', { direction: 'sendrecv' });
+            state._peerVideoSenders[targetWebid] = vt.sender;
+            _capSender(vt.sender);
+            // If our camera is already live, send it to this peer immediately.
+            if (state.videoEnabled && state._cameraTrack) {
+                try { vt.sender.replaceTrack(state._cameraTrack); } catch (_) {}
             }
 
             peerPc.ontrack = (event) => {

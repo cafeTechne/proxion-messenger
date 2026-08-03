@@ -542,5 +542,6 @@
   "solidchat.joined": "Joined the conversation.",
   "solidchat.noChatsFound": "No chats found for that WebID.",
   "solidchat.noInvites": "No pending invitations.",
-  "solidchat.inviteFrom": "{title} from {who}"
+  "solidchat.inviteFrom": "{title} from {who}",
+  "voice.videoFull": "Video is full: too many people are already sharing video"
 }

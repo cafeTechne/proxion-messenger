@@ -1,6 +1,20 @@
 // callquality.test.js — R81 P1: quality profiles + adaptive per-sender cap. Pure.
 import { describe, it, expect } from 'vitest';
-import { senderCap, resolveProfile, QUALITY_PROFILES, SCREEN_PROFILES } from './callquality.js';
+import { senderCap, resolveProfile, QUALITY_PROFILES, SCREEN_PROFILES, canEnableVideo, MAX_CONCURRENT_VIDEO } from './callquality.js';
+
+describe('canEnableVideo (R83 concurrent-video cap)', () => {
+    it('allows video below the cap and blocks at/above it', () => {
+        expect(canEnableVideo(0)).toBe(true);
+        expect(canEnableVideo(MAX_CONCURRENT_VIDEO - 1)).toBe(true);
+        expect(canEnableVideo(MAX_CONCURRENT_VIDEO)).toBe(false);
+        expect(canEnableVideo(MAX_CONCURRENT_VIDEO + 5)).toBe(false);
+    });
+    it('honors an explicit cap and tolerates junk', () => {
+        expect(canEnableVideo(2, 3)).toBe(true);
+        expect(canEnableVideo(3, 3)).toBe(false);
+        expect(canEnableVideo(undefined)).toBe(true);
+    });
+});
 
 describe('resolveProfile', () => {
     it('honors explicit profiles and resolves auto by call size', () => {

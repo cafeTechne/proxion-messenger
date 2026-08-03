@@ -555,5 +555,6 @@
   "solidchat.joined": "انضممت إلى المحادثة.",
   "solidchat.noChatsFound": "لم يتم العثور على محادثات لهذا الـ WebID.",
   "solidchat.noInvites": "لا توجد دعوات معلقة.",
-  "solidchat.inviteFrom": "{title} من {who}"
+  "solidchat.inviteFrom": "{title} من {who}",
+  "voice.videoFull": "الفيديو ممتلئ: عدد كبير جدًا يشاركون الفيديو بالفعل"
 }

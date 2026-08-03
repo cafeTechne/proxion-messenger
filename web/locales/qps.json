@@ -543,5 +543,6 @@
   "solidchat.joined": "⟦Ĵóíñéð ţĥé çóñṽéŕšáţíóñ. áéíóúáéíóú⟧",
   "solidchat.noChatsFound": "⟦Ñó çĥáţš ƒóúñð ƒóŕ ţĥáţ ŴéḅÍÐ. áéíóúáéíóúáé⟧",
   "solidchat.noInvites": "⟦Ñó ρéñðíñǧ íñṽíţáţíóñš. áéíóúáéíó⟧",
-  "solidchat.inviteFrom": "⟦{title} ƒŕóɱ {who} áé⟧"
+  "solidchat.inviteFrom": "⟦{title} ƒŕóɱ {who} áé⟧",
+  "voice.videoFull": "⟦Ṽíðéó íš ƒúĺĺ: ţóó ɱáñý ρéóρĺé áŕé áĺŕéáðý šĥáŕíñǧ ṽíðéó áéíóúáéíóúáéíóúáéíóúáé⟧"
 }

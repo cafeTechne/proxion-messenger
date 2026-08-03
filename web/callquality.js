@@ -22,6 +22,16 @@ export const SCREEN_PROFILES = Object.freeze({
 
 export const QUALITY_CHOICES = Object.freeze(['auto', 'high', 'standard', 'saver']);
 
+// A mesh group call scales audio to many participants, but each concurrent video
+// sender uploads to every peer, so we cap how many share video AT ONCE (not how many
+// are in the call). This keeps a large call usable without a media server (R83).
+export const MAX_CONCURRENT_VIDEO = 6;
+
+/** Whether we may turn our camera on given how many peers are already sending video. */
+export function canEnableVideo(activeRemoteVideoCount, cap = MAX_CONCURRENT_VIDEO) {
+    return (Number(activeRemoteVideoCount) || 0) < cap;
+}
+
 // Never drop a sender below this, or video becomes unusable.
 const BITRATE_FLOOR = 150_000;
 

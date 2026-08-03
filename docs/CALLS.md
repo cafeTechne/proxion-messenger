@@ -53,7 +53,16 @@ alarm) is planned work. The media is end-to-end encrypted regardless.
 Group calls run as a mesh: each participant holds a direct peer connection to every
 other, so there is no media server and the same DTLS-SRTP encryption and fingerprint
 authentication apply to every pair. Camera and screen sharing work in a group; one
-camera fans out to each peer. Because mesh bandwidth grows with the square of the
-participant count, each video sender is capped and video is offered only up to a small
-participant ceiling, above which the call stays voice-only. There is no media server and
-no recording: calls are peer to peer, which is what keeps the media out of any middle box.
+camera fans out to each peer.
+
+Because mesh video bandwidth grows with the number of concurrent senders, the call
+separates two limits. Audio is cheap and scales to a dozen or so participants. Video is
+bounded not by call size but by how many people share at once: turning your camera on
+past that cap is declined with a message, and audio is unaffected. Each video sender's
+bitrate also scales down automatically as the call grows. The active speaker is
+spotlighted so a larger call stays legible.
+
+There is no media server and no recording: calls are peer to peer, which is what keeps
+the media out of any middle box. Larger video rooms than a mesh can carry would need a
+selective forwarding server, which would put media through a server and is deliberately
+not part of Proxion.
