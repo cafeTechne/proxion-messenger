@@ -62,14 +62,16 @@ access to their inbox.
 TURN relay sees only ciphertext. See `docs/CALLS.md` for the full description.
 
 - **Media authentication.** Each peer signs its DTLS fingerprint with its Ed25519
-  identity key, bound to the call session and role. The other peer verifies it against
-  the contact's known identity and checks it against every fingerprint in the SDP it
-  received. A relay that swaps or splits the fingerprint is detected and the call is
-  refused. A known contact whose signature is stripped is refused, not silently
-  downgraded.
-- **Scope.** This covers 1:1 and group calls. A group call is a mesh of peer
-  connections, and each pair is authenticated the same way against the co-member's
-  known identity.
+  identity key, bound to the role, and the other peer verifies it against every
+  fingerprint in the SDP it received (a swapped or split fingerprint fails to verify).
+  This is currently **advisory**: it drives a Verified / Unverified status rather than
+  refusing the call, because a call is signed by the browser identity while a federated
+  contact is known by their gateway identity, so the two do not always match for a
+  legitimate call. Binding the call signature to the contact roster, so a genuine
+  mismatch can be treated as an alarm, is planned. The media is DTLS-SRTP encrypted
+  either way.
+- **Scope.** This covers 1:1 and group calls, including cross-gateway 1:1 calls (the
+  answer and ICE candidates route by WebID, gated on a stored relationship).
 - **Capture.** Camera and screen capture require an explicit action and the browser's
   permission prompt. A self-view and an on-air indicator show what is being sent.
   Nothing is recorded.

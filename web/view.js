@@ -68,6 +68,11 @@ export function createView({
         setActiveView(view);
         const header = document.getElementById("chat-header-name");
         if (header) header.textContent = view.name;
+        // A cert contact is a DM: reveal the call controls (this path previously left
+        // them hidden, so calling a federated contact was impossible). R82 V3.
+        const _cb = document.getElementById("start-call-btn"); if (_cb) _cb.style.display = "block";
+        const _vcb = document.getElementById("start-video-call-btn"); if (_vcb) _vcb.style.display = "block";
+        const _inv = document.getElementById("invite-btn"); if (_inv) _inv.style.display = "none";
         updateE2EStatus(contact.peer_did);
         updateIdentityFingerprint(contact.peer_did);
         // Clear feed and reset message state

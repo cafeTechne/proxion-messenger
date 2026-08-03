@@ -31,21 +31,20 @@ describe('extractFingerprint', () => {
 describe('sign / verify', () => {
     it('verifies a genuine signature and rejects tampering', async () => {
         const me = await identity();
-        const sig = await signFingerprint({ fingerprint: FP, sessionId: 's1', role: 'offer', privKey: me.priv });
-        expect(await verifyFingerprint({ fingerprint: FP, sessionId: 's1', role: 'offer', signatureB64: sig, signerDid: me.did })).toBe(true);
-        // Tampered fingerprint.
-        expect(await verifyFingerprint({ fingerprint: 'sha-256 00:00', sessionId: 's1', role: 'offer', signatureB64: sig, signerDid: me.did })).toBe(false);
-        // Wrong session (replay to another call).
-        expect(await verifyFingerprint({ fingerprint: FP, sessionId: 's2', role: 'offer', signatureB64: sig, signerDid: me.did })).toBe(false);
-        // Wrong role (reflection).
-        expect(await verifyFingerprint({ fingerprint: FP, sessionId: 's1', role: 'answer', signatureB64: sig, signerDid: me.did })).toBe(false);
+        const sig = await signFingerprint({ fingerprint: FP, role: 'offer', privKey: me.priv });
+        expect(await verifyFingerprint({ fingerprint: FP, role: 'offer', signatureB64: sig, signerDid: me.did })).toBe(true);
+        // Tampered fingerprint (this is what actually prevents replay: the fingerprint
+        // is fresh per call, so an old signature never matches a new call's SDP).
+        expect(await verifyFingerprint({ fingerprint: 'sha-256 00:00', role: 'offer', signatureB64: sig, signerDid: me.did })).toBe(false);
+        // Wrong role (reflection of an offer signature as an answer).
+        expect(await verifyFingerprint({ fingerprint: FP, role: 'answer', signatureB64: sig, signerDid: me.did })).toBe(false);
     });
 
     it('rejects a signature from a different identity', async () => {
         const me = await identity();
         const other = await identity();
-        const sig = await signFingerprint({ fingerprint: FP, sessionId: 's1', role: 'offer', privKey: me.priv });
-        expect(await verifyFingerprint({ fingerprint: FP, sessionId: 's1', role: 'offer', signatureB64: sig, signerDid: other.did })).toBe(false);
+        const sig = await signFingerprint({ fingerprint: FP, role: 'offer', privKey: me.priv });
+        expect(await verifyFingerprint({ fingerprint: FP, role: 'offer', signatureB64: sig, signerDid: other.did })).toBe(false);
     });
 });
 

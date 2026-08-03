@@ -58,6 +58,7 @@ export function createVoice(deps) {
             _verifyState: 'unverified',  // 'verified' | 'unverified' | (mismatch → call refused)
             _peerVideoSenders: {},   // group: per-peer video sender for camera/screen fan-out
             peerVideoElements: {},   // group: per-peer <video> tile
+            _peerRemoteStreams: {},  // group: per-peer accumulated remote MediaStream
     };
 
     // Mesh video is O(n^2) in bandwidth. Beyond this many channel participants we keep
@@ -267,19 +268,20 @@ export function createVoice(deps) {
         // Verify a received offer/answer SDP against the expected contact identity.
         // Returns true to proceed, false if the call must be refused (MitM).
         async function _verifyPeerSdp(sdp, role, event) {
+            const _exp = getExpectedPeerDid?.(getActiveView(), event) || '';
             const verdict = await classifyPeerSdp({
                 sdp,
-                sessionId: state.currentCallSessionId || event?.session_id || '',
                 role,
                 signatureB64: event?.fp_sig || '',
                 signerDid: event?.fp_signer || '',
-                expectedDid: getExpectedPeerDid?.(getActiveView(), event) || '',
+                expectedDid: _exp,
             });
-            if (verdict === 'mismatch') {
-                showToast(t('voice.identityUnverified'), 'error');
-                state._verifyState = 'mismatch';
-                return false;
-            }
+            // Advisory, not blocking: we show Verified only when the peer's identity
+            // signature checks out against the identity we know them by, otherwise
+            // Unverified. The call is never refused, because a call's signing identity
+            // is not yet bound to the contact roster across gateways (a browser signs,
+            // but a federated contact is known by their gateway identity). Media stays
+            // DTLS-SRTP encrypted regardless. See docs/CALLS.md.
             state._verifyState = verdict === 'verified' ? 'verified' : 'unverified';
             _updateVerifyBadge();
             return true;
@@ -435,6 +437,7 @@ export function createVoice(deps) {
                     cmd: "ice_candidate",
                     cert_id: getActiveView()?.id,
                     session_id: state.currentCallSessionId,
+                    target_webid: state._callPeerWebid || undefined,
                     candidate: c.candidate,
                     sdp_mid: c.sdpMid,
                     sdp_mline_index: c.sdpMLineIndex
@@ -490,11 +493,14 @@ export function createVoice(deps) {
             }
 
             peerPc.ontrack = (event) => {
-                // Route the peer's stream to a persistent per-peer <video> tile (it
-                // plays audio too), so group calls show video, not just pills.
-                _renderPeerVideo(targetWebid, event.streams[0]);
+                // Accumulate tracks per peer: replaceTrack-added video/screen tracks
+                // carry no MediaStream, so event.streams is empty for them.
+                let s = state._peerRemoteStreams[targetWebid];
+                if (!s) { s = new MediaStream(); state._peerRemoteStreams[targetWebid] = s; }
+                try { s.addTrack(event.track); } catch (_) { /* dup */ }
+                _renderPeerVideo(targetWebid, s);
                 _updateChannelParticipantUI(targetWebid, "connected");
-                _speaking.attach(targetWebid, event.streams[0]);
+                _speaking.attach(targetWebid, s);
             };
 
             peerPc.onicecandidate = (e) => {
@@ -593,16 +599,13 @@ export function createVoice(deps) {
             const expectedDid = getExpectedPeerDid?.(null, { caller_webid: peerWebid, from_webid: peerWebid }) || '';
             const verdict = await classifyPeerSdp({
                 sdp,
-                sessionId: state._channelSessionIds[peerWebid] || event?.session_id || '',
                 role,
                 signatureB64: event?.fp_sig || '',
                 signerDid: event?.fp_signer || '',
                 expectedDid,
             });
-            if (verdict === 'mismatch') {
-                showToast(t('voice.identityUnverified'), 'error');
-                return false;
-            }
+            // Advisory (see _verifyPeerSdp): never refuse; track state for the tile badge.
+            state._verifyState = verdict === 'verified' ? 'verified' : 'unverified';
             return true;
         }
 
@@ -748,6 +751,13 @@ export function createVoice(deps) {
             state._remoteDescSet = false;
             state.currentCallSessionId = sessionId;
             state._verifyState = 'unverified';
+            // The peer's routable webid, so answer + ICE reach them across gateways
+            // (the 1:1 session model only routes within one gateway). Caller: the DM
+            // peer; callee: whoever invited us.
+            state._callPeerWebid = isCaller
+                ? (getActiveView() ? getActiveView().peerWebid : null)
+                : ((state.currentCall && state.currentCall.caller_webid)
+                    || (getActiveView() ? getActiveView().peerWebid : null));
 
             const stream = await getMedia();
             // A caller with no microphone would start a call the other side can't
@@ -757,27 +767,24 @@ export function createVoice(deps) {
                 hangupCleanup();
                 return;
             }
-            if (stream) {
-                stream.getTracks().forEach(track => state.pc.addTrack(track, stream));
-            }
-            // Negotiate a video m-line up front (sendrecv) on EVERY call, even
-            // voice-only, so camera and screen share can be toggled later via
-            // replaceTrack with no mid-call renegotiation.
-            const vt = state.pc.addTransceiver('video', { direction: 'sendrecv' });
-            state._videoSender = vt.sender;
+            // Media is attached PER ROLE below: the caller adds its audio track and a
+            // video transceiver before the offer; the callee sets the remote offer
+            // FIRST, then attaches to the offer's own transceivers. Attaching before
+            // setRemoteDescription mis-associates m-lines and produces a recvonly
+            // answer (the callee's media never reaches the caller).
             state.videoEnabled = false;
             state._cameraTrack = null;
-            _capSender(vt.sender);   // R81: apply the user's quality ceiling (generous for 1:1)
+            state.remoteStream = null;
 
             state.pc.ontrack = (event) => {
-                // A <video> element plays both audio and video, so route the remote
-                // stream there for voice and video calls alike.
-                state.remoteStream = event.streams[0];
-                _renderVideo('vw-remote-video', event.streams[0]);
+                // Build the remote stream from individual tracks: a track put in via
+                // replaceTrack (camera, screen) carries NO MediaStream, so event.streams
+                // is empty for it. Accumulating event.track ourselves is the robust path.
+                if (!state.remoteStream) state.remoteStream = new MediaStream();
+                try { state.remoteStream.addTrack(event.track); } catch (_) { /* dup */ }
+                _renderVideo('vw-remote-video', state.remoteStream);
                 _syncRemoteVideoVisibility();
-                event.streams[0].getVideoTracks().forEach(tr => {
-                    tr.onmute = tr.onunmute = tr.onended = _syncRemoteVideoVisibility;
-                });
+                if (event.track) event.track.onmute = event.track.onunmute = event.track.onended = _syncRemoteVideoVisibility;
                 setCallState(CallState.CONNECTED);
                 _updateVerifyBadge();
                 const peerName = getActiveView() ? (getActiveView().name || getActiveView().id || "") : "";
@@ -792,6 +799,8 @@ export function createVoice(deps) {
                             cmd: "ice_candidate",
                             cert_id: certId,
                             session_id: sessionId,
+                            // Route by webid so ICE reaches a peer on another gateway.
+                            target_webid: state._callPeerWebid || undefined,
                             candidate: e.candidate.candidate,
                             sdp_mid: e.candidate.sdpMid,
                             sdp_mline_index: e.candidate.sdpMLineIndex
@@ -816,8 +825,12 @@ export function createVoice(deps) {
             };
 
             if (isCaller) {
-                // Start-as-video: put the camera track into the video sender before
-                // the offer so it is negotiated from the first exchange.
+                // Add our audio and a sendrecv video m-line, then (optionally) the
+                // camera, then offer.
+                if (stream) stream.getTracks().forEach(track => state.pc.addTrack(track, stream));
+                const vt = state.pc.addTransceiver('video', { direction: 'sendrecv' });
+                state._videoSender = vt.sender;
+                _capSender(vt.sender);
                 if (withVideo) { try { await toggleCamera(); } catch (_) {} }
                 const offer = await state.pc.createOffer();
                 await state.pc.setLocalDescription(offer);
@@ -834,14 +847,30 @@ export function createVoice(deps) {
                     ...fp,
                 }));
             } else if (sdpOffer) {
-                // Refuse a call whose media channel we cannot authenticate to the
-                // expected contact (a gateway MitM would show up here). The offer's
-                // signature travelled in the invite we stored as state.currentCall.
-                if (!(await _verifyPeerSdp(sdpOffer, 'offer', state.currentCall || {}))) {
-                    hangupCleanup();
-                    return;
-                }
+                // Authenticate the media channel (advisory; see _verifyPeerSdp).
+                await _verifyPeerSdp(sdpOffer, 'offer', state.currentCall || {});
+                // Set the remote offer FIRST, then attach our media to the offer's OWN
+                // transceivers via replaceTrack (addTrack can spawn a new m-line the
+                // caller never offered, leaving that transceiver recvonly so our media
+                // never reaches the caller). Force each to sendrecv.
                 await _setRemoteAndDrainCandidates(sdpOffer, 'offer');
+                const txs = state.pc.getTransceivers();
+                const audioTx = txs.find(tt => tt.receiver && tt.receiver.track && tt.receiver.track.kind === 'audio');
+                const videoTx = txs.find(tt => tt.receiver && tt.receiver.track && tt.receiver.track.kind === 'video');
+                const audioTrack = stream ? stream.getAudioTracks()[0] : null;
+                if (audioTx) {
+                    try { audioTx.direction = 'sendrecv'; } catch (_) { /* older browsers */ }
+                    if (audioTrack) { try { await audioTx.sender.replaceTrack(audioTrack); } catch (_) {} }
+                } else if (stream) {
+                    stream.getTracks().forEach(track => state.pc.addTrack(track, stream));
+                }
+                // Adopt the offer's video transceiver as our sender, sendrecv, so the
+                // camera can be turned on later without renegotiation.
+                if (videoTx) {
+                    try { videoTx.direction = 'sendrecv'; } catch (_) { /* older browsers */ }
+                    state._videoSender = videoTx.sender;
+                    _capSender(videoTx.sender);
+                }
                 const answer = await state.pc.createAnswer();
                 await state.pc.setLocalDescription(answer);
                 state.currentCallSessionId = sessionId;
@@ -850,6 +879,8 @@ export function createVoice(deps) {
                     cmd: "voice_answer",
                     cert_id: certId,
                     session_id: sessionId,
+                    // Route by webid so the answer reaches a caller on another gateway.
+                    target_webid: state._callPeerWebid || undefined,
                     sdp_answer: answer.sdp,
                     ...fp,
                 }));

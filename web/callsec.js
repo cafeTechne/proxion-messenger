@@ -98,20 +98,25 @@ export function extractFingerprint(sdp) {
     return extractAllFingerprints(sdp)[0] || null;
 }
 
-/** Sign a fingerprint bound to the session and role (offer/answer) with our identity key. */
-export async function signFingerprint({ fingerprint, sessionId, role, privKey }) {
-    const canon = _canonical([DOMAIN, fingerprint || '', sessionId || '', role || '']);
+// Sign the DTLS fingerprint bound to the role (offer/answer) with our identity key.
+// We deliberately do NOT bind a session id: the caller signs the offer before the
+// gateway assigns a session, so the two sides could never agree on one. Binding is
+// unnecessary anyway, because the fingerprint is unique per call (a fresh DTLS
+// certificate), and a replayed (fingerprint, signature) is useless to an attacker
+// without the matching DTLS private key.
+export async function signFingerprint({ fingerprint, role, privKey }) {
+    const canon = _canonical([DOMAIN, fingerprint || '', role || '']);
     const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', privKey, canon));
     return _b64std(sig);
 }
 
 /** Verify a fingerprint signature against a signer's did:key. Never throws. */
-export async function verifyFingerprint({ fingerprint, sessionId, role, signatureB64, signerDid }) {
+export async function verifyFingerprint({ fingerprint, role, signatureB64, signerDid }) {
     try {
         if (!fingerprint || !signatureB64 || !signerDid) return false;
         const pub = await crypto.subtle.importKey('raw', _didToPubBytes(signerDid), { name: 'Ed25519' }, false, ['verify']);
         return await crypto.subtle.verify('Ed25519', pub, _b64dec(signatureB64),
-            _canonical([DOMAIN, fingerprint, sessionId || '', role || '']));
+            _canonical([DOMAIN, fingerprint, role || '']));
     } catch {
         return false;
     }
@@ -128,7 +133,7 @@ export async function verifyFingerprint({ fingerprint, sessionId, role, signatur
  * `expectedDid` is the contact's known identity (their did:key). When we know it, a
  * different signer or a bad signature is a 'mismatch', never merely 'unverifiable'.
  */
-export async function classifyPeerSdp({ sdp, sessionId, role, signatureB64, signerDid, expectedDid }) {
+export async function classifyPeerSdp({ sdp, role, signatureB64, signerDid, expectedDid }) {
     const fps = extractAllFingerprints(sdp);
     if (!fps.length) return 'unverifiable';
     // Divergent fingerprints across m-lines are anomalous: with one DTLS certificate
@@ -142,12 +147,12 @@ export async function classifyPeerSdp({ sdp, sessionId, role, signatureB64, sign
         if (!signatureB64 || !signerDid) return 'mismatch';
         if (signerDid !== expectedDid) return 'mismatch';
         if (distinct.length !== 1) return 'mismatch';
-        const ok = await verifyFingerprint({ fingerprint, sessionId, role, signatureB64, signerDid });
+        const ok = await verifyFingerprint({ fingerprint, role, signatureB64, signerDid });
         return ok ? 'verified' : 'mismatch';
     }
     // Unknown peer identity: verify if we can, but we cannot bind it to a contact.
     if (signatureB64 && signerDid && distinct.length === 1) {
-        const ok = await verifyFingerprint({ fingerprint, sessionId, role, signatureB64, signerDid });
+        const ok = await verifyFingerprint({ fingerprint, role, signatureB64, signerDid });
         return ok ? 'verified' : 'mismatch';
     }
     return 'unverifiable';

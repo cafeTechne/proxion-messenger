@@ -12,6 +12,7 @@
     "gen:pseudo": "node scripts/gen_pseudo_locale.mjs",
     "smoke:browser": "node smoke_browser.mjs",
     "smoke:webrtc": "node smoke_webrtc.mjs",
+    "smoke:call": "node smoke_call.mjs",
     "smoke:visual": "node smoke_visual.mjs",
     "smoke:journey": "node smoke_journey.mjs",
     "smoke:federation": "node smoke_federation.mjs",

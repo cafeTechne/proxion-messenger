@@ -26,15 +26,17 @@ identity key, and the other device verifies that signature against the contact's
 identity (their `did:key`) and checks that the signed fingerprint matches the one in
 the SDP it actually received.
 
-- If the signature is valid and the fingerprint matches, the call shows **Verified**
-  and you have cryptographic proof the media channel is with the real contact.
-- If a relay altered the fingerprint, or the identity does not match the expected
-  contact, the call is **refused**.
-- If the peer is not a known contact (so there is no identity to check against), the
-  call still connects, is still DTLS-SRTP encrypted, and is shown as **Unverified**.
+- If the signature is valid and matches the identity you know the contact by, the call
+  shows **Verified**, and you have cryptographic proof the media channel is with them.
+- Otherwise the call shows **Unverified**. It still connects and is still DTLS-SRTP
+  encrypted; you simply do not have the extra identity proof.
 
-The gateway cannot forge a contact's Ed25519 signature, so it cannot insert itself
-into a verified call without detection.
+This is advisory, not blocking: the check surfaces a status, it does not refuse the
+call. The reason is that a call is signed by the browser's identity key, while a
+federated contact is known to you by their gateway identity, so the two do not always
+line up even for a legitimate call. Binding the call signature to the contact roster
+(so Verified can be shown across gateways, and a genuine mismatch can be treated as an
+alarm) is planned work. The media is end-to-end encrypted regardless.
 
 ## Privacy of capture
 
