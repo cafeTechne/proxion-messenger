@@ -86,7 +86,14 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         const socket = getSocket();
         if (socket) socket.send(JSON.stringify({ cmd: "set_identity", display_name: name }));
         podWriteProfile({ displayName: name }).catch(() => {});
-        obGoto(3);
+        // R84: skip the presence step in first-run (it asks a brand-new user with no
+        // contacts to set a status before doing anything). Default to online; presence
+        // can be changed any time from the profile.
+        localStorage.setItem('proxion_status', 'online');
+        if (socket?.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ cmd: 'set_presence', status: 'online' }));
+        }
+        obGoto(4);
     }
 
     function finishOnboarding() {
