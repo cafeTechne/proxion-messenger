@@ -2,11 +2,11 @@
 
 # Proxion
 
-**The messenger that keeps your data yours.**
+**Private messaging that you actually own.**
 
-End-to-end encrypted messaging and voice, built on the [Solid Protocol](https://solidproject.org).
-Your messages live in your own Solid pod, on hardware you control.
-No account, no phone number, no company in the middle.
+Chat, voice, and video with real end-to-end encryption, where your conversations live in
+storage you control instead of a company's servers. Built on the open
+[Solid](https://solidproject.org) standard. No phone number, no signup, no company in the middle.
 
 [![CI](https://github.com/cafeTechne/proxion-messenger/actions/workflows/ci.yml/badge.svg)](https://github.com/cafeTechne/proxion-messenger/actions/workflows/ci.yml)
 ![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)
@@ -15,184 +15,136 @@ No account, no phone number, no company in the middle.
 ![WCAG 2.2 AA](https://img.shields.io/badge/accessibility-WCAG%202.2%20AA-4ade80)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux%20%C2%B7%20PWA-8598ae)
 
-<img src="landing/assets/screenshot-chat.png" alt="Proxion desktop: a verified end-to-end encrypted conversation, with rooms and contacts in the sidebar" width="800">
+<img src="landing/assets/screenshot-chat.png" alt="Proxion desktop: an end-to-end encrypted conversation, with rooms and contacts in the sidebar" width="800">
 
 </div>
 
-## Why Proxion
+## What is Proxion?
 
-Every mainstream messenger stores your conversations in someone else's data center, under
-someone else's terms. Proxion inverts that:
+Proxion is a messenger like the ones you already use, with one difference that changes
+everything: your data belongs to you.
 
-- **Your data, in your pod, in the open.** Room history is written to a
-  [Solid](https://solidproject.org) pod *you* choose ([Inrupt PodSpaces](https://www.inrupt.com)
-  free tier, [solidcommunity.net](https://solidcommunity.net), or a self-hosted Community Solid
-  Server) as standard, typed RDF that any Solid app you authorize can read, **not an opaque
-  encrypted blob**. The storage format is a documented, open contract
-  ([docs/POD_DATA_MODEL.md](docs/POD_DATA_MODEL.md)), so it's a Solid app any other app can
-  interoperate with, not a silo with an export button. Pod-less local-only mode works too.
-- **Actually private.** End-to-end encrypted DMs with per-contact safety numbers you can verify
-  out loud. The encryption is *on the wire*, between you and your contact, so no relay or gateway
-  in the middle can read your messages. It is **not** a lock-box that hides your own data from
-  your own apps. DM history stays on-device by default; an **opt-in** archive (off by default)
-  can mirror it to your own pod as open RDF for cross-device sync. Your identity is an Ed25519
-  key generated on your machine; no signup, nothing to leak.
-- **No lock-in.** Open source, open protocol, standard data. Gateways federate
-  peer-to-peer by Proxion address, with no central registry to shut down.
+Your messages, files, and call history live in your own **Solid pod**, a personal storage
+space you control, instead of being locked inside a company's app. Pick a free pod
+provider, bring your own, or run one yourself, and move any time. Your identity is created
+on your device, so there is no account to sign up for and nothing to leak.
 
-## Works with other Solid apps
+It is a real, everyday messenger: rooms and direct messages, voice and video calls with
+screen sharing, files, reactions, replies, and more, on Windows, macOS, Linux, and the web.
 
-<img src="landing/assets/interop-sidebyside.png" alt="The same room side by side: Proxion on the left and the SolidOS databrowser on the right, showing the same three messages read from the same pod" width="900">
+## Get Proxion
 
-A Proxion room is not a private format only Proxion can read. Rooms are written as
-standard Solid [Long Chat](https://solid.github.io/chat/), so they interoperate with
-the wider Solid ecosystem, not just a promise of it:
+**Download and open it.** There is nothing to configure and no server to run.
 
-- **A Proxion room opens as a chat in the [SolidOS](https://solidos.org) databrowser**,
-  every message and author intact. This is checked against the real databrowser in CI,
-  not asserted from a spec.
-- **Your chats are discoverable.** Proxion registers each room in your pod's public
-  type index, so another Solid app can find your chats without being handed a URL.
-- **Reach anyone with a WebID.** Point Proxion at a contact's WebID to discover the
-  chats they host and join one, or send an invitation that lands in their standard Solid
-  inbox, so it works with any Solid app, not only Proxion.
-- **Real-time across apps.** New posts arrive over the Solid Notifications protocol, so
-  a message another Solid app writes into a shared room shows up live, not on a timer.
-  Invitations arrive live too, and can reach you even with Proxion closed. See
-  [docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md).
-- **Your rooms outlive the gateway.** A room's structure and history live in your pod as
-  a signed record, so a fresh gateway can rebuild the room from your pod alone.
+- **Windows, macOS, or Linux:** grab the [install page](https://cafetechne.github.io/proxion-messenger/)
+  or the [latest release](../../releases/latest).
+- **macOS with [Homebrew](https://brew.sh):** `brew install cafeTechne/proxion/proxion`
+- **In your browser:** Proxion also runs as an installable web app.
 
-Rooms are shared, so they are plaintext and open. Direct messages are the opposite by
-design: end-to-end encrypted and deliberately not third-party readable. You cannot have
-bytes a third-party app can read and that no third party can read, so the two are
-different modes, stated plainly rather than blurred. The full data model and a
-server-by-server compatibility picture are in
-[docs/POD_DATA_MODEL.md](docs/POD_DATA_MODEL.md) and [docs/INTEROP.md](docs/INTEROP.md).
+Because Proxion is not signed by Apple or Microsoft (on purpose, so no gatekeeper sits
+between you and your own software), your OS shows a one-time prompt the first time you open
+it. On Windows choose *More info then Run anyway*; on macOS *right-click then Open*; Linux
+has no prompt.
 
-## Verify it yourself
+## What you can do
 
-Claims about privacy software are worth exactly what you can verify. So:
-
-**Every installer is cryptographically traceable to public source.** Releases ship
-`SHA256SUMS.txt` plus signed [SLSA build-provenance](https://slsa.dev) attestations, so you can
-prove the binary you downloaded was built by CI from this repository and not tampered with
-afterwards:
-
-```sh
-sha256sum -c SHA256SUMS.txt --ignore-missing        # checksums match
-gh attestation verify Proxion_0.1.5_x64-setup.exe \
-   --repo cafeTechne/proxion-messenger                # built by CI, from this source
-```
-
-**The code is checked.** 3,400+ backend tests and 600+ frontend tests run on every push across
-Linux, macOS and Windows, alongside accessibility (axe-core, WCAG 2.2 AA), i18n and contrast
-gates. Full detail in [TESTING.md](TESTING.md) and [docs/VERIFYING.md](docs/VERIFYING.md).
-
-**Your data is readable without us.** Pod contents are documented, typed RDF, not an opaque
-blob. The format is a written contract in [docs/POD_DATA_MODEL.md](docs/POD_DATA_MODEL.md),
-so any Solid app you authorize can read it and you can walk away at any time.
-
-## Security
-
-Double Ratchet DMs with per-contact safety numbers you can verify out loud, owner-only pod
-ACLs by construction, a centralized authorization policy on every gateway command, and a
-written threat model. Calls are encrypted end to end (DTLS-SRTP) and identity-authenticated,
-so a compromised gateway cannot sit in the middle of the media; the model is written up in
-[docs/CALLS.md](docs/CALLS.md) and [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md). More
-in [SECURITY.md](SECURITY.md) and [docs/security/](docs/security/).
-
-Bug reports and scoped pull requests are genuinely wanted. See
-[CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Features
-
-Rooms and DMs · P2P WebRTC voice and video calls with screen sharing · cross-app chat
-discovery and Solid-inbox invitations · file attachments and media previews · reactions,
-edits, pins, mentions · disappearing and scheduled messages · mute and block · cross-gateway
-federation · multi-device with encrypted fanout · opt-in cross-device sync of DM history,
-bookmarks, settings, saved GIFs, mutes, and blocks via your pod · offline-capable PWA with push ·
-six languages including RTL Arabic · WCAG 2.2 AA accessible.
+- **Message and call.** Group rooms and private one-to-one chats, plus peer-to-peer voice
+  and video calls with screen sharing.
+- **Keep your history.** Everything lives in your pod, in an open format, so it is yours to
+  keep, read with other tools, and take with you.
+- **Truly private conversations.** Direct messages are end-to-end encrypted, and you can
+  confirm you are really talking to your contact with a short safety phrase you read aloud
+  together. Calls are encrypted the same way.
+- **Reach anyone on Solid.** Find and invite people across the wider Solid ecosystem, not
+  just other Proxion users.
+- **Use it anywhere.** Desktop, browser, and mobile, offline-capable, in six languages
+  including right-to-left Arabic, and built to work with a screen reader and keyboard alone.
 
 <p align="center">
   <img src="landing/assets/screenshot-mobile.png" alt="Proxion running on a phone" width="240">
 </p>
 
-## Download
+## Part of the Solid ecosystem
 
-Grab the latest native build for **Windows (x64/ARM64), macOS (Intel/Apple Silicon), or
-Linux (x64/ARM64)** from the [install page](https://cafetechne.github.io/proxion-messenger/)
-or the [releases page](../../releases/latest).
+Proxion is a good Solid citizen, not a walled garden that happens to use Solid underneath.
+A room you create is written in the standard Solid chat format, so other Solid apps can
+read and join it.
 
-**Just download and open it.** The gateway that powers Proxion is bundled *inside* the app,
-so there's no Python to install and no server to run. Running a standalone gateway is optional and
-only for people who want to self-host or connect a phone to their own desktop (see
-[Run from source](#run-from-source-developers--self-hosters)).
+<img src="landing/assets/interop-sidebyside.png" alt="The same room shown side by side in Proxion and the SolidOS databrowser, with the same messages" width="900">
 
-The executables are intentionally not vendor-signed (no Apple/Microsoft gatekeeping;
-updates are verified against Proxion's own signing key), so the OS shows a one-time
-caution prompt. On Windows: *More info → Run anyway*; on macOS: *right-click → Open*.
-Linux has no prompt.
+- **Open a Proxion room in [SolidOS](https://solidos.org)** and every message is there.
+  This is checked against the real SolidOS in our tests, not just claimed.
+- **Find and invite people by their WebID.** Discover the chats someone hosts, or drop an
+  invitation in their Solid inbox that any Solid app can read.
+- **See new messages and invitations in real time,** even reaching you when Proxion is
+  closed.
+- **Your rooms outlive any one server.** A room's structure lives in your pod, so it can be
+  rebuilt from your pod alone.
 
-On macOS you can also install via [Homebrew](https://brew.sh):
+Shared rooms are open by design so other apps can read them; private direct messages are
+end-to-end encrypted and deliberately readable only by the people in them. The full data
+format is documented in [docs/POD_DATA_MODEL.md](docs/POD_DATA_MODEL.md), and the
+app-by-app compatibility picture in [docs/INTEROP.md](docs/INTEROP.md).
 
-```sh
-brew install cafeTechne/proxion/proxion
-```
+## Private by design
 
-Every release ships `SHA256SUMS.txt` and signed build-provenance attestations
-proving each installer was built by CI from this repository's public source.
-See [docs/VERIFYING.md](docs/VERIFYING.md).
+- **End-to-end encrypted** direct messages and calls, so no relay or server in the middle
+  can read them.
+- **Your data in your pod, in the open.** It is documented, standard data, not a locked
+  blob, so any app you allow can read it and you can walk away whenever you like.
+- **Verifiable, not just promised.** Every download can be checked back to this public
+  source code, and thousands of automated tests run on every change.
 
-## Run from source (developers & self-hosters)
+For the details, including the call security model, the threat model, and how to verify a
+download, see [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md),
+[docs/CALLS.md](docs/CALLS.md), [SECURITY.md](SECURITY.md), and
+[docs/VERIFYING.md](docs/VERIFYING.md).
 
-Most people should just use the installer above. This section is for hacking on Proxion or
-running your own always-on gateway (e.g. to point a phone at it).
+## Contributing
+
+Proxion is open source and contributions are genuinely welcome, from bug reports to code.
+Start with [CONTRIBUTING.md](CONTRIBUTING.md). If you are here from the Solid community and
+something does not interoperate the way you expect, that is exactly the kind of issue we
+want to hear about.
+
+## For developers and self-hosters
+
+Most people should just use the installer above. To hack on Proxion or run your own
+always-on gateway (for example to point a phone at your desktop):
 
 ```bash
 pip install -e ./proxion-messenger-core[gateway]
-cp .env.example .env   # optional: pod credentials; leave blank for local-only
+cp .env.example .env   # optional pod credentials; leave blank for local-only
 python run_gateway.py
 # open http://localhost:8080
 ```
 
-## Build a native executable
+Build a native installer:
 
 ```bash
 pip install pyinstaller
 pip install -e ./proxion-messenger-core[gateway]
-python build_sidecar.py           # PyInstaller sidecar for your platform
+python build_sidecar.py           # bundle the gateway for your platform
 cd tauri-app && cargo tauri build # native installer
 ```
 
-## Architecture
-
-- `web/`: frontend (vanilla JS, no framework), served by the gateway
-- `proxion-messenger-core/`: Python backend library + WebSocket/HTTP gateway
-- `tauri-app/`: Rust/Tauri desktop wrapper bundling the gateway as a sidecar
-- `landing/`: the GitHub Pages install page
-
-The **gateway** is Proxion's real-time transport layer: it holds your identity keys, talks Solid
-to your pod, and federates directly with your contacts' gateways by Proxion address. Real-time
-federated messaging needs a component like this, the same job a homeserver does for Matrix or an
-SMTP server does for email, because the Solid Protocol covers data and identity, not live
-delivery, presence, or WebRTC signaling. For desktop users the gateway is **bundled inside the
-installer as a sidecar and starts with the app**, so you never see it or touch Python. Self-hosters
-can instead run it standalone and point phones or browsers at it. See
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
-
-## Testing
+Run the tests:
 
 ```bash
 cd proxion-messenger-core && pytest    # backend
-cd web && npm test                     # frontend units
+cd web && npm test                     # frontend
 ```
 
-Browser-level gates live in `web/` (`smoke:a11y`, `smoke:keyboard`, `smoke:pseudo`,
-`smoke:federation`, …). See [TESTING.md](TESTING.md).
+**How it fits together.** The frontend (in `web/`) is served by a small **gateway** (in
+`proxion-messenger-core/`) that holds your keys, talks to your pod, and connects directly
+to your contacts' gateways. On desktop the gateway is bundled inside the app and starts
+with it, so you never see it or install Python. The gateway exists because Solid covers
+data and identity but not live delivery, presence, or call setup, the same role a
+homeserver plays for Matrix or an SMTP server plays for email. Details in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
 
 ## License
 
-[AGPL-3.0](LICENSE). Free to use, self-host, fork, and contribute to. If you run a
-modified Proxion as a service for others, you must publish your changes. That's the
-point: nobody gets to turn this back into a silo.
+[AGPL-3.0](LICENSE). Free to use, self-host, fork, and contribute to. If you run a modified
+Proxion as a service for others, you have to publish your changes. That is the point:
+nobody gets to turn this back into a silo.
