@@ -18,6 +18,12 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+# The gateway caps connections per IP at 8 by default. The test suite drives many
+# gateways and connections from 127.0.0.1, so under CI's load that limit trips
+# (ws close 1008 ip_connection_limit) and flakes e2e tests. Lift it for tests only;
+# set before any gateway starts, since the limit is read from the env per connection.
+os.environ.setdefault("PROXION_MAX_CONNECTIONS_PER_IP", "1000")
+
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
