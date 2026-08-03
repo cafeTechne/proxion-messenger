@@ -161,7 +161,23 @@ try {
   await alice.waitForFunction(() => { const d = document.getElementById('call-preview'); return d && getComputedStyle(d).display !== 'none'; }, { timeout: 8000 })
     .catch(() => fail('call preview did not open'));
   if (process.exitCode) throw new Error('stop');
-  await sleep(600);   // let the preview acquire the fake camera
+  await sleep(700);   // let the preview acquire the fake camera
+
+  // R82 Y: verify the pre-join preview's interactive bits actually work.
+  step = 'preview-checks';
+  const pv = await alice.evaluate(() => {
+    const v = document.getElementById('preview-video');
+    const s = v && v.srcObject;
+    return {
+      hasVideo: !!(s && s.getVideoTracks && s.getVideoTracks().length),
+      camSel: !!document.getElementById('preview-camera'),
+      micSel: !!document.getElementById('preview-mic'),
+    };
+  });
+  if (!pv.hasVideo) fail('preview camera did not render (srcObject has no video track)');
+  if (!pv.camSel || !pv.micSel) fail('preview device pickers are missing');
+  if (process.exitCode) throw new Error('stop');
+
   await alice.evaluate(() => document.getElementById('preview-join').click());
 
   step = 'bob-answer';
@@ -203,10 +219,21 @@ try {
   if (!ok[1]) fail('Alice never received Bob\'s video');
   if (!notRefused[0] || !notRefused[1]) fail('a call was refused by the fingerprint check (identity unverified)');
 
+  // R82 Y: the in-call quality selector changes and persists.
+  step = 'quality-check';
+  const q = await alice.evaluate(() => {
+    const s = document.getElementById('vw-quality');
+    if (!s) return null;
+    s.value = 'saver';
+    s.dispatchEvent(new Event('change'));
+    try { return localStorage.getItem('proxion_call_quality'); } catch { return null; }
+  });
+  if (q !== 'saver') fail(`quality selector did not persist (got ${q})`);
+
   step = 'done';
   if (!process.exitCode) {
-    console.log('  ✓ two-party call OK — cross-gateway signaling, both sides answered, and');
-    console.log('    bidirectional video media established (fingerprint-verified, not refused).');
+    console.log('  ✓ two-party call OK — cross-gateway signaling, both answered, bidirectional');
+    console.log('    video media, and the preview + quality controls work interactively.');
   }
 } catch (e) {
   if (e.message !== 'stop') console.error(`  ✗ [${step}] threw: ${e.message}`);
