@@ -531,5 +531,8 @@
   "voice.conn.good": "Good connection",
   "voice.conn.fair": "Fair connection",
   "voice.conn.poor": "Poor connection",
-  "tip.interop": "Tip: open Solid Chats to discover and invite contacts across any Solid app, and start a video call from any DM."
+  "tip.interop": "Tip: open Solid Chats to discover and invite contacts across any Solid app, and start a video call from any DM.",
+  "push.missedCall": "Missed call",
+  "voice.unavailable": "They are unavailable right now",
+  "voice.missedFrom": "Missed call from {peer}"
 }

@@ -1692,6 +1692,9 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                 case "voice_hangup":
                     voice.handleVoiceHangup(event);
                     break;
+                case "voice_unavailable":
+                    voice.handleVoiceUnavailable(event);
+                    break;
                 case "voice_signal":
                     voice.handleVoiceSignalRelay(event);
                     break;

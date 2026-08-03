@@ -531,5 +531,8 @@
   "voice.conn.good": "Conexión buena",
   "voice.conn.fair": "Conexión regular",
   "voice.conn.poor": "Conexión mala",
-  "tip.interop": "Consejo: abre Chats de Solid para descubrir e invitar contactos en cualquier app Solid, e inicia una videollamada desde cualquier mensaje directo."
+  "tip.interop": "Consejo: abre Chats de Solid para descubrir e invitar contactos en cualquier app Solid, e inicia una videollamada desde cualquier mensaje directo.",
+  "push.missedCall": "Llamada perdida",
+  "voice.unavailable": "No está disponible ahora mismo",
+  "voice.missedFrom": "Llamada perdida de {peer}"
 }

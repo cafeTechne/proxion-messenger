@@ -131,6 +131,33 @@ class VoiceHandlerMixin:
             logger.debug("_relay_voice_signal post failed: %s", exc)
             return False
 
+    def _push_missed_call(self, to_webid: str, from_webid: str = "") -> bool:
+        """Web-push an offline account about a missed call, honoring mutes. Privacy-
+        preserving: type only, no caller identity in the payload (R82 W2)."""
+        if not self._store or not to_webid:
+            return False
+        if from_webid and self._store.is_thread_muted(to_webid, from_webid):
+            return False
+        subs = self._store.get_push_subscriptions(to_webid)
+        vpk = getattr(self, "_vapid_private_pem", None)
+        vsub = getattr(self, "_vapid_subject", None)
+        if not (subs and vpk and vsub):
+            return False
+        from .webpush import send_web_push
+        sent = False
+        for sub in subs:
+            try:
+                ok = send_web_push(
+                    subscription={"endpoint": sub["endpoint"],
+                                  "keys": {"p256dh": sub["p256dh_b64"], "auth": sub["auth_b64"]}},
+                    payload={"type": "missed_call", "thread_id": ""},
+                    vapid_private_pem=vpk, vapid_subject=vsub,
+                )
+                sent = sent or bool(ok)
+            except Exception:
+                pass
+        return sent
+
     async def _handle_voice_invite(self, websocket, data: dict) -> None:
         import secrets as _secrets
         import time as _time
@@ -229,6 +256,7 @@ class VoiceHandlerMixin:
             # Target is on a different gateway.
             # First try: relay (fast, works without pod)
             _relayed = False
+            _delivered_local = False
             if target_webid:
                 try:
                     _relayed = await self._relay_voice_signal(
@@ -264,6 +292,23 @@ class VoiceHandlerMixin:
                         )
                 except Exception as exc:
                     logger.debug("Pod voice_invite write skipped: %s", exc)
+
+            # Nothing reached the callee's gateway: tell the caller it is unavailable
+            # (so the UI stops ringing into the void) and try a local missed-call push
+            # in case the callee is a known local user who is simply offline (R82 W1/W2).
+            if not _relayed and target_webid:
+                try:
+                    await websocket.send(json.dumps({
+                        "type": "voice_unavailable", "session_id": session_id,
+                        "target_webid": target_webid,
+                    }))
+                except Exception:
+                    pass
+                try:
+                    asyncio.get_event_loop().run_in_executor(
+                        None, self._push_missed_call, target_webid, caller_webid)
+                except Exception:
+                    pass
 
     async def _handle_voice_answer(self, websocket, data: dict) -> None:
         session_id = data.get("session_id", "")

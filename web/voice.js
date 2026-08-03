@@ -207,13 +207,25 @@ export function createVoice(deps) {
                 `Incoming call from ${_callerDisplayName(invite.caller_webid)}`;
             banner.style.display = "flex";
             playRingTone();
+            const _ringCaller = invite.caller_webid;
             setTimeout(() => {
                 if (state._callState === CallState.RINGING) {
                     banner.style.display = "none";
                     state.currentCall = null;
                     setCallState(CallState.IDLE);
+                    stopRingTone();
+                    // R82 W3: an unanswered ring leaves a missed-call trace in-app.
+                    showToast(t('voice.missedFrom', { peer: _callerDisplayName(_ringCaller) }));
                 }
             }, 30000);
+        }
+
+        // R82 W1: the gateway could not reach the callee (offline / unreachable).
+        function handleVoiceUnavailable(event) {
+            if (state._callState === CallState.IDLE) return;
+            stopRingTone();
+            showToast(t('voice.unavailable'));
+            _doHangup();
         }
 
         async function getMedia() {
@@ -1096,6 +1108,7 @@ export function createVoice(deps) {
         handleVoicePeerLeft,
         handleVoiceSignalRelay,
         showVoiceBanner,
+        handleVoiceUnavailable,
         handleVoiceHangup,
         hangupCleanup,
         joinVoice,

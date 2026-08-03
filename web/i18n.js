@@ -161,6 +161,7 @@ function _mirrorForServiceWorker() {
         newMessage: _lookup('push.newMessage') || 'New message',
         newMessageFrom: _lookup('push.newMessageFrom') || 'New message from {name}',
         newInvite: _lookup('push.newInvite') || 'New chat invitation',
+        missedCall: _lookup('push.missedCall') || 'Missed call',
     };
     try { localStorage.setItem('proxion_i18n_push', JSON.stringify(payload)); } catch { /* ignore */ }
     try {

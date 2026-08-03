@@ -1877,6 +1877,14 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
         target_sockets = self._sockets_for(to_webid)  # _sockets_for handles the own-identity fallback
         if not target_sockets:
+            # A call offer for an offline callee on this gateway: push a missed-call
+            # nudge so a closed app still learns (R82 W2).
+            if signal_type == "offer":
+                try:
+                    asyncio.get_event_loop().run_in_executor(
+                        None, self._push_missed_call, to_webid, from_webid)
+                except Exception:
+                    pass
             return "202 Accepted", '{"status":"offline"}'
 
         event = json.dumps({
