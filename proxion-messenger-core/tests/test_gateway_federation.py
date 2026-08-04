@@ -400,3 +400,48 @@ async def test_get_relationships_includes_x25519_pub(tmp_path):
     contact = next((c for c in contacts if c.get("certificate_id") == cert_id), None)
     assert contact is not None, f"cert_id not in contacts: {contacts}"
     assert contact.get("x25519_pub") == "peer_x25519_pub_b64u=", f"x25519_pub missing or wrong: {contact}"
+
+
+# ── R86/Track 4: single authorization reduction for relayed secondary ops ──────
+
+def test_authorized_relationship_reduces_and_gates(tmp_path):
+    """_authorized_relationship is the one gate every secondary-op relay handler uses:
+    it returns (cert, our_cert_id) for a known actor and None for unknown/revoked/blocked."""
+    from proxion_messenger_core.federation import RelationshipCertificate, Capability
+
+    from proxion_messenger_core.blocklist import Blocklist
+
+    gw, agent, key, _ = _make_gateway(tmp_path)
+    if not hasattr(gw, "_revoked_dids"):
+        gw._revoked_dids = set()
+    # Isolate the blocklist: the gateway defaults it to a shared ~/.proxion file, which
+    # would leak block state across tests and machines. Point it at tmp for this test.
+    gw.blocklist = Blocklist(str(tmp_path / "blocklist.json"))
+    peer_did = "did:key:zPeerAuthzTest"
+
+    # No relationship, and empty input, reduce to None.
+    assert gw._authorized_relationship(peer_did) is None
+    assert gw._authorized_relationship("") is None
+
+    cert = RelationshipCertificate(
+        issuer=agent.identity_pub_bytes.hex(), subject="peerpubhex",
+        capabilities=[Capability(with_="stash://dm/", can="crud/write")],
+    )
+    cert.sign(key)
+    cert_dict = cert.to_dict()
+    gw._store.save_relationship(cert_dict, peer_did=peer_did)
+
+    rel = gw._authorized_relationship(peer_did)
+    assert rel is not None
+    got_cert, our_cert_id = rel
+    assert our_cert_id == cert_dict["certificate_id"]
+
+    # Revoked actor reduces to None.
+    gw._revoked_dids.add(peer_did)
+    assert gw._authorized_relationship(peer_did) is None
+    gw._revoked_dids.discard(peer_did)
+    assert gw._authorized_relationship(peer_did) is not None
+
+    # Blocked actor reduces to None.
+    gw.blocklist.block(peer_did)
+    assert gw._authorized_relationship(peer_did) is None

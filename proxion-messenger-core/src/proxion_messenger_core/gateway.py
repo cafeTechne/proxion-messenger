@@ -2012,6 +2012,28 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
         return "200 OK", '{"status":"delivered"}' if delivered else '{"status":"offline"}'
 
+    def _authorized_relationship(self, from_webid: str):
+        """Reduce an inbound relayed actor's identity to the relationship that authorizes
+        it, or None. One place decides "may this relayed actor act on a DM with us", so
+        every secondary-op relay handler (react/edit/delete/pin/disappear) agrees instead
+        of repeating the check, which is where the R54 identity-conflation bugs lived.
+
+        Returns (cert_dict, our_cert_id) for a known, non-revoked, non-blocked actor;
+        None when there is no store, no relationship, or the actor is revoked/blocked
+        (callers treat None as "accept the POST but reveal nothing"). Note the cert_id
+        asymmetry: our_cert_id is OUR side's id for the relationship, not the sender's.
+        See docs/IDENTITY.md.
+        """
+        if not self._store or not from_webid:
+            return None
+        cert_dict = self._store.get_relationship_by_did(from_webid)
+        if not cert_dict:
+            return None
+        if from_webid in getattr(self, "_revoked_dids", set()) or self.blocklist.is_blocked(from_webid):
+            return None
+        our_cert_id = cert_dict.get("certificate_id") or cert_dict.get("id") or ""
+        return cert_dict, our_cert_id
+
     async def _handle_dm_disappear_relay(self, data: dict) -> tuple[str, str]:
         """Inbound relayed DM disappear-timer from a peer gateway. Set the timer
         on OUR cert_id so our expiry loop deletes the shared messages too."""
@@ -2023,12 +2045,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             return "400 Bad Request", '{"error":"invalid_ms"}'
         if not from_webid or not to_webid:
             return "400 Bad Request", '{"error":"missing_fields"}'
-        cert_dict = self._store.get_relationship_by_did(from_webid) if self._store else None
-        if not cert_dict:
+        rel = self._authorized_relationship(from_webid)
+        if not rel:
             return "200 OK", '{"status":"received"}'
-        if from_webid in getattr(self, "_revoked_dids", set()) or self.blocklist.is_blocked(from_webid):
-            return "200 OK", '{"status":"received"}'
-        our_cert_id = cert_dict.get("certificate_id") or cert_dict.get("id") or ""
+        cert_dict, our_cert_id = rel
         if our_cert_id:
             self._dm_disappear_timers[our_cert_id] = ms
             if self._store:
@@ -2050,12 +2070,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         action     = data.get("action", "pin")
         if not all([from_webid, to_webid, message_id]):
             return "400 Bad Request", '{"error":"missing_pin_fields"}'
-        cert_dict = self._store.get_relationship_by_did(from_webid) if self._store else None
-        if not cert_dict:
+        rel = self._authorized_relationship(from_webid)
+        if not rel:
             return "200 OK", '{"status":"received"}'
-        if from_webid in getattr(self, "_revoked_dids", set()) or self.blocklist.is_blocked(from_webid):
-            return "200 OK", '{"status":"received"}'
-        our_cert_id = cert_dict.get("certificate_id") or cert_dict.get("id") or ""
+        cert_dict, our_cert_id = rel
         if self._store and our_cert_id:
             try:
                 if action == "unpin":
@@ -2082,12 +2100,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         message_id = data.get("message_id", "")
         if not all([from_webid, to_webid, message_id]):
             return "400 Bad Request", '{"error":"missing_delete_fields"}'
-        cert_dict = self._store.get_relationship_by_did(from_webid) if self._store else None
-        if not cert_dict:
+        rel = self._authorized_relationship(from_webid)
+        if not rel:
             return "200 OK", '{"status":"received"}'
-        if from_webid in getattr(self, "_revoked_dids", set()) or self.blocklist.is_blocked(from_webid):
-            return "200 OK", '{"status":"received"}'
-        our_cert_id = cert_dict.get("certificate_id") or cert_dict.get("id") or ""
+        cert_dict, our_cert_id = rel
         # Only let a peer delete a message THEY authored (if we have it stored).
         if self._store:
             try:
@@ -2116,12 +2132,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             return "400 Bad Request", '{"error":"missing_edit_fields"}'
         if len(new_content.encode("utf-8")) > 16_384:
             return "400 Bad Request", '{"error":"content_too_large"}'
-        cert_dict = self._store.get_relationship_by_did(from_webid) if self._store else None
-        if not cert_dict:
-            return "200 OK", '{"status":"received"}'   # no relationship, no reveal
-        if from_webid in getattr(self, "_revoked_dids", set()) or self.blocklist.is_blocked(from_webid):
+        rel = self._authorized_relationship(from_webid)   # no relationship/revoked → no reveal
+        if not rel:
             return "200 OK", '{"status":"received"}'
-        our_cert_id = cert_dict.get("certificate_id") or cert_dict.get("id") or ""
+        cert_dict, our_cert_id = rel
         if self._store:
             try:
                 self._store.update_message(message_id, new_content,
@@ -2149,16 +2163,12 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if not all([from_webid, to_webid, message_id, emoji]):
             return "400 Bad Request", '{"error":"missing_reaction_fields"}'
         # Anti-spoof: only accept reactions from a peer we hold a relationship
-        # with. Unknown senders are silently accepted (200, no block-reveal) but
-        # not delivered — matching the relay block-enforcement model.
-        cert_dict = self._store.get_relationship_by_did(from_webid) if self._store else None
-        if not cert_dict:
+        # with. Unknown/revoked/blocked senders are silently accepted (200, no
+        # block-reveal) but not delivered — matching the relay block-enforcement model.
+        rel = self._authorized_relationship(from_webid)
+        if not rel:
             return "200 OK", '{"status":"received"}'
-        if from_webid in getattr(self, "_revoked_dids", set()):
-            return "200 OK", '{"status":"received"}'
-        if self.blocklist.is_blocked(from_webid):
-            return "200 OK", '{"status":"received"}'
-        our_cert_id = cert_dict.get("certificate_id") or cert_dict.get("id") or ""
+        cert_dict, our_cert_id = rel
         if self._store and our_cert_id:
             try:
                 if action == "remove":

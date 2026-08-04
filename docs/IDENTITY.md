@@ -96,7 +96,16 @@ single resolver (`web/identity.js`, `createIdentityResolver`). It answers:
   a call (an event's `caller_webid`/`from_webid`, or the open thread's peer) to the
   account did of a known contact, or `''` when unknown.
 
-Call identity verification consumes the resolver today. The plan is to move DM fanout,
-mute keys, contact resolution, and the gateway-side authorization checks
-(`get_relationship_by_did`, envelope authz, voice routing) onto the same reduction, so
-there is one definition of "who is this" rather than one per surface.
+Call identity verification and the R86 call-binding capability consume the client resolver
+today.
+
+On the gateway there is a matching reduction, `_authorized_relationship(from_webid)`, the
+single gate that maps a relayed actor's identity to the relationship that authorizes it
+(returning the cert and OUR cert_id, or None for an unknown, revoked, or blocked actor).
+Every secondary-op relay handler (react, edit, delete, pin, disappear-timer) goes through
+it, so they agree on "may this actor act on a DM with us" instead of each repeating the
+check, which is where the R54 identity-conflation bugs lived.
+
+Still to consolidate onto these two reducers: DM fanout, mute keys, and the remaining
+gateway authorization sites (the primary DM path, envelope authz, voice routing), so there
+is one definition of "who is this" per side rather than one per surface.
