@@ -8,9 +8,9 @@ externalized into a per-locale JSON file and resolved at runtime by
 
 | File | Role |
 |------|------|
-| `en.json` | **Canonical.** The single source of truth — every key lives here first. |
+| `en.json` | **Canonical.** The single source of truth, every key lives here first. |
 | `es/de/fr/ar.json` | Shippable drafts (`_meta.draft: true`). May lag `en.json`; missing keys fall back to English per-key. |
-| `qps.json` | **Generated, test-only** pseudo-locale. Do not edit by hand — run `npm run gen:pseudo`. Never listed in `SUPPORTED_LOCALES`, so it's only reachable via an explicit `localStorage.proxion_locale = "qps"`. |
+| `qps.json` | **Generated, test-only** pseudo-locale. Do not edit by hand, run `npm run gen:pseudo`. Never listed in `SUPPORTED_LOCALES`, so it's only reachable via an explicit `localStorage.proxion_locale = "qps"`. |
 
 ## Key conventions
 
@@ -26,10 +26,10 @@ externalized into a per-locale JSON file and resolved at runtime by
 ## The no-markup rule (security)
 
 `t()` / `tn()` return **plain text**. Callers escape at the HTML sink exactly as
-they did before i18n — the translation layer must never become an
+they did before i18n, the translation layer must never become an
 HTML-injection path. Therefore **a locale value may not contain markup**: any
 value containing `<` fails `i18n_check`. When a surface genuinely needs markup
-(e.g. the NAT-warning banner), compose it in JS — keep the HTML skeleton in
+(e.g. the NAT-warning banner), compose it in JS, keep the HTML skeleton in
 code and interpolate plain-text `t()` fragments (see `status-banners.js`).
 
 ## Adding or updating a locale

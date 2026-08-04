@@ -115,6 +115,9 @@ for (const f of LOCALE_FILES) {
   for (const [k, v] of Object.entries(data)) {
     if (k === '_meta' || typeof v !== 'string') continue;
     if (v.includes('<')) fail(`${code}.json["${k}"] contains markup ('<') — locale values must be plain text`);
+    // Public-writing rule: no em/en dashes in user-visible text (the single most
+    // cited "AI slop" tell). Use a comma, colon, or a separate sentence instead.
+    if (/[—–]/.test(v)) fail(`${code}.json["${k}"] contains an em/en dash — use a comma, colon, or separate sentence`);
   }
 }
 
