@@ -1454,8 +1454,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             return
         
         # Build capabilities
-        from .federation import Capability
-        caps = [Capability(with_="stash://dm/", can="crud/write")]
+        from .federation import Capability, call_binding_capability
+        # R86: advertise that we bind our calls, so the acceptor knows this contact is
+        # call-capable from the relationship and can refuse a later stripped call.
+        caps = [Capability(with_="stash://dm/", can="crud/write"), call_binding_capability()]
         
         # Create invite — include our HTTP base URL so the acceptor can POST back
         from . import handshake
@@ -1528,7 +1530,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             await websocket.send(json.dumps({"type": "error", "message": "invite_not_found"}))
             return
 
-        from .federation import FederationInvite, RelationshipCertificate, Capability
+        from .federation import (
+            FederationInvite, RelationshipCertificate, Capability,
+            call_binding_capability, CALL_BINDING_CAP, _caps_have,
+        )
         from .handshake import _ed25519_verify
         from .didkey import pub_key_to_did
         import time
@@ -1561,10 +1566,16 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         bob_did = pub_key_to_did(self.agent.identity_pub_bytes)
 
         # Build RelationshipCertificate (Bob is issuer, Alice is subject)
+        # R86: mark that we (issuer) bind calls, and mark the subject too when their
+        # invite advertised it, so the single shared cert tells BOTH parties whether the
+        # OTHER is call-capable (each checks the marker for the other's role).
+        _rel_caps = [Capability(with_="stash://dm/", can="crud/write"), call_binding_capability()]
+        if _caps_have(invite.capabilities, CALL_BINDING_CAP):
+            _rel_caps.append(call_binding_capability(peer=True))
         cert = RelationshipCertificate(
             issuer=bob_pub_hex,
             subject=alice_pub_hex,
-            capabilities=[Capability(with_="stash://dm/", can="crud/write")],
+            capabilities=_rel_caps,
         )
         cert.sign(self.agent.identity_key)
 

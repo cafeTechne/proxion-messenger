@@ -60,6 +60,54 @@ async def test_register_issues_gateway_delegation_cert(live_gateway, alice_agent
 
 
 @pytest.mark.asyncio
+async def test_contacts_list_exposes_binds_calls(live_gateway):
+    """The contacts list reports whether a contact's relationship advertises call binding,
+    so the client can refuse a later stripped call from them as a downgrade (R86)."""
+    import json
+    import websockets
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+    from proxion_messenger_core.didkey import pub_key_to_did
+    from proxion_messenger_core.federation import (
+        RelationshipCertificate, Capability, call_binding_capability,
+    )
+
+    gw = live_gateway["gateway"]
+    owner_hex = gw.agent.identity_pub_bytes.hex()
+    owner_did = pub_key_to_did(gw.agent.identity_pub_bytes)
+
+    # A peer whose relationship advertises call binding (we, as issuer, set the subject
+    # marker because their invite advertised it).
+    peer_priv = Ed25519PrivateKey.generate()
+    peer_hex = peer_priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+    peer_did = pub_key_to_did(peer_priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw))
+    cert = RelationshipCertificate(
+        issuer=owner_hex, subject=peer_hex,
+        capabilities=[Capability(with_="stash://dm/", can="crud/write"),
+                      call_binding_capability(), call_binding_capability(peer=True)],
+    )
+    cert.sign(gw.agent.identity_key)
+    gw._store.save_relationship(cert.to_dict(), peer_did=peer_did)
+
+    ws = await websockets.connect(live_gateway["url"])
+    try:
+        await asyncio.wait_for(ws.recv(), timeout=5.0)  # config
+        await ws.send(json.dumps({"cmd": "register", "did": owner_did, "display_name": "Owner"}))
+        contacts = None
+        for _ in range(10):
+            ev = json.loads(await asyncio.wait_for(ws.recv(), timeout=5.0))
+            if ev.get("type") == "relationships":
+                contacts = ev.get("contacts", [])
+                break
+        assert contacts, "no relationships event with contacts"
+        mine = [c for c in contacts if c.get("peer_did") == peer_did]
+        assert mine, f"peer {peer_did} not in contacts"
+        assert mine[0].get("binds_calls") is True
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_voice_invite_delivered(alice_session, bob_session, voice_room):
     """Alice sends voice_invite to Bob; Bob receives voice_invite event."""
     import secrets

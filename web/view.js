@@ -18,6 +18,7 @@ export function createView({
     getSocket,
     setActiveView, setMessageMap, setAllMessages, setCurrentRoomMembers, getAllMessages,
     getPeerDidToCertId, getThreadNames, getRoomInviteUrls, getRoomCreatorOf,
+    getCertCapableContacts,
     getUnreadCounts, getMutedThreads,
     hideEmptyState, updateE2EStatus, updateIdentityFingerprint, closeMentionDropdown,
     updateSidebarBadge, sendUpdateLastRead, loadRoomHistory, toggleSidebar,
@@ -35,8 +36,13 @@ export function createView({
         section.style.display = "";
         hideEmptyState();
         for (const k in peerDidToCertId) delete peerDidToCertId[k]; // reset (mutate in place)
+        // R86: which contacts advertise call binding (authenticated, from their signed
+        // relationship). Rebuilt from the server's contacts list each time.
+        const certCapable = getCertCapableContacts ? getCertCapableContacts() : null;
+        if (certCapable) certCapable.clear();
         contacts.forEach(c => {
             if (c.peer_did && c.certificate_id) peerDidToCertId[c.peer_did] = c.certificate_id;
+            if (certCapable && c.peer_did && c.binds_calls) certCapable.add(c.peer_did);
             if (c.certificate_id) {
                 _threadNames[c.certificate_id] = c.display_name || (c.peer_did || '').slice(8, 22) + '…';
             }

@@ -170,3 +170,53 @@ def test_relationship_certificate_constructed_without_wireguard():
     """Assert RelationshipCertificate can be created without wireguard field."""
     cert = RelationshipCertificate(issuer="a", subject="b", capabilities=[])
     assert cert.wireguard == {}
+
+
+# ---------------------------------------------------------------------------
+# R86 — call-binding capability advertisement
+# ---------------------------------------------------------------------------
+
+def test_call_binding_markers_are_role_specific():
+    from proxion_messenger_core.federation import (
+        call_binding_capability, CALL_BINDING_CAP, CALL_BINDING_PEER_CAP,
+    )
+    assert call_binding_capability().with_ == CALL_BINDING_CAP
+    assert call_binding_capability(peer=True).with_ == CALL_BINDING_PEER_CAP
+
+
+def test_cert_dict_peer_binds_calls_checks_the_peer_role():
+    from proxion_messenger_core.federation import (
+        call_binding_capability, cert_dict_peer_binds_calls, Capability,
+    )
+    # Issuer=bob binds calls (issuer marker); subject=alice does not.
+    cert = RelationshipCertificate(
+        issuer="bobhex", subject="alicehex",
+        capabilities=[Capability(with_="stash://dm/", can="crud/write"), call_binding_capability()],
+    ).to_dict()
+    assert cert_dict_peer_binds_calls(cert, "bobhex") is True     # peer is issuer, marker present
+    assert cert_dict_peer_binds_calls(cert, "alicehex") is False  # peer is subject, no subject marker
+    # Now also mark the subject.
+    cert2 = RelationshipCertificate(
+        issuer="bobhex", subject="alicehex",
+        capabilities=[call_binding_capability(), call_binding_capability(peer=True)],
+    ).to_dict()
+    assert cert_dict_peer_binds_calls(cert2, "alicehex") is True  # subject marker now present
+    assert cert_dict_peer_binds_calls(cert2, "strangerhex") is False
+
+
+def test_marker_capabilities_survive_signing_and_roundtrip(priv, pub_hex):
+    """The markers ride in the signed capabilities list, so a cert carrying them still
+    verifies and the markers survive a to_dict/from_dict round trip (cross-version safe)."""
+    from proxion_messenger_core.federation import call_binding_capability, cert_dict_peer_binds_calls
+    other = Ed25519PrivateKey.generate().public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+    cert = RelationshipCertificate(
+        issuer=pub_hex, subject=other,
+        capabilities=[Capability(with_="stash://dm/", can="crud/write"),
+                      call_binding_capability(), call_binding_capability(peer=True)],
+    )
+    cert.sign(priv)
+    assert cert.verify(_ed25519_verify) is True
+    rt = RelationshipCertificate.from_dict(cert.to_dict())
+    assert rt.verify(_ed25519_verify) is True
+    assert cert_dict_peer_binds_calls(rt.to_dict(), pub_hex) is True      # issuer marker
+    assert cert_dict_peer_binds_calls(rt.to_dict(), other) is True        # subject marker

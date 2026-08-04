@@ -500,11 +500,17 @@ class AuthHandlerMixin:
 
                 rel_list = []
                 all_last_reads = self._store.get_all_last_reads(identity)
+                from .federation import cert_dict_peer_binds_calls
+                owner_hex = self.agent.identity_pub_bytes.hex()
                 for cert_dict in self._store.list_relationships():
                     cert_id = cert_dict.get("certificate_id")
                     peer_did = cert_dict.get("peer_did") or ""
                     lr_ts = all_last_reads.get(cert_id, 0)
                     unread = self._store.count_messages_after(cert_id, lr_ts)
+                    # R86: the peer is whichever party is not us; report whether their
+                    # (authenticated) relationship advertises call binding, so the client
+                    # can refuse a later stripped call from them as a downgrade.
+                    peer_hex = cert_dict.get("subject") if cert_dict.get("issuer") == owner_hex else cert_dict.get("issuer")
                     rel_list.append({
                         "certificate_id": cert_id,
                         "peer_did":       peer_did,
@@ -513,6 +519,7 @@ class AuthHandlerMixin:
                         "x25519_pub":     (self._store.get_e2e_key(peer_did) or self._store.get_x25519_pub(peer_did)) if peer_did else None,
                         "last_read_ts":   lr_ts,
                         "unread_count":   unread,
+                        "binds_calls":    cert_dict_peer_binds_calls(cert_dict, peer_hex) if peer_hex else False,
                     })
                 if rel_list:
                     await websocket.send(json.dumps({"type": "relationships", "contacts": rel_list}))

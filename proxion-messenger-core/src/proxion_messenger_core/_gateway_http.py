@@ -249,7 +249,10 @@ class HttpEndpointsMixin:
         if not invitation_id or not acceptor_pub_hex:
             return "400 Bad Request", '{"error":"missing fields"}'
 
-        from .federation import RelationshipCertificate, Capability
+        from .federation import (
+            RelationshipCertificate, Capability,
+            call_binding_capability, CALL_BINDING_CAP, _caps_have,
+        )
         from .didkey import pub_key_to_did
 
         # Verify from_pub_hex is valid and matches from_did if provided
@@ -298,10 +301,15 @@ class HttpEndpointsMixin:
             self._store.prune_invite_nonces(time.time() - 86400)
 
         # Build requester's symmetric cert (Alice is issuer, Bob is subject)
+        # R86: advertise our own call binding, and mark the subject (Bob) too when his
+        # returned cert advertised it, so this stored cert tells us Bob is call-capable.
+        _rel_caps = [Capability(with_="stash://dm/", can="crud/write"), call_binding_capability()]
+        if acceptor_cert and _caps_have(parsed_cert.capabilities, CALL_BINDING_CAP):
+            _rel_caps.append(call_binding_capability(peer=True))
         cert = RelationshipCertificate(
             issuer=my_pub_hex,
             subject=acceptor_pub_hex,
-            capabilities=[Capability(with_="stash://dm/", can="crud/write")],
+            capabilities=_rel_caps,
         )
         cert.sign(self.agent.identity_key)
 

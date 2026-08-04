@@ -447,7 +447,8 @@ import { createIdentityResolver } from './identity.js';
         });
         const { renderMessages, renderMessage, _renderThreaded, scrollToBottom } = rendering;
         // R86: which contacts are known to bind their calls. Two sources, unioned:
-        //  - certCapableContacts: their signed relationship advertises call binding (6b).
+        //  - certCapableContacts: their signed relationship advertises call binding,
+        //    rebuilt from the server contacts list (binds_calls) in renderContacts.
         //  - callCapablePins: first-use trust — once we accept a cert-BOUND (verified)
         //    call from a contact, we pin it, so a later unbindable call is a downgrade.
         // A capable peer's call with no binding proof is refused instead of allowed.
@@ -735,6 +736,7 @@ import { createIdentityResolver } from './identity.js';
             setCurrentRoomMembers: (c) => { currentRoomMembers = c; },
             getAllMessages: () => allMessages,
             getPeerDidToCertId: () => peerDidToCertId, getThreadNames: () => _threadNames,
+            getCertCapableContacts: () => certCapableContacts,
             getRoomInviteUrls: () => roomInviteUrls, getRoomCreatorOf: () => roomCreatorOf,
             getUnreadCounts: () => unreadCounts, getMutedThreads: () => mutedThreads,
             hideEmptyState, updateE2EStatus: _updateE2EStatus,

@@ -5,6 +5,46 @@ import secrets
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Optional, Any
 
+# R86: call-binding capability advertisement. A modern gateway issues per-browser
+# delegation certs so its users' calls can be identity-verified across gateways; it
+# advertises that in the signed invite and relationship cert so a contact knows, from
+# the relationship alone, that this party binds its calls. A call from such a contact
+# that arrives with no binding proof is then treated as a downgrade, not a legacy client.
+# Two markers on a cert, one per role, so a single shared cert tells both parties:
+#   CALL_BINDING_CAP        — the artifact's issuer/signer (invite issuer, cert issuer) binds calls
+#   CALL_BINDING_PEER_CAP   — the cert's SUBJECT binds calls (set by the issuer from the invite)
+# They ride in the existing signed `capabilities` list, so old peers preserve them in the
+# signed canonical (signatures still verify) and simply ignore them. See PLAN_ROUND_86.
+CALL_BINDING_CAP = "proxion://cap/call-binding"
+CALL_BINDING_PEER_CAP = "proxion://cap/call-binding/peer"
+
+
+def call_binding_capability(peer: bool = False) -> "Capability":
+    """The marker capability advertising call-binding support (issuer, or subject if peer)."""
+    return Capability(with_=CALL_BINDING_PEER_CAP if peer else CALL_BINDING_CAP, can="v1")
+
+
+def _caps_have(caps, with_uri: str) -> bool:
+    """True if a capabilities list (Capability objects OR plain dicts) contains with_uri."""
+    for c in caps or []:
+        got = getattr(c, "with_", None) if not isinstance(c, dict) else (c.get("with") or c.get("with_"))
+        if got == with_uri:
+            return True
+    return False
+
+
+def cert_dict_peer_binds_calls(cert_dict: dict, peer_pub_hex: str) -> bool:
+    """Whether the PEER (identified by pubkey hex) in a stored cert advertises call binding.
+
+    The peer may be the cert issuer or subject; check the marker for their role.
+    """
+    caps = cert_dict.get("capabilities", [])
+    if cert_dict.get("issuer") == peer_pub_hex:
+        return _caps_have(caps, CALL_BINDING_CAP)
+    if cert_dict.get("subject") == peer_pub_hex:
+        return _caps_have(caps, CALL_BINDING_PEER_CAP)
+    return False
+
 def _normalize_endpoint_hints(hints: list) -> list:
     """Normalize endpoint hints: trim, lowercase scheme+host, remove trailing slash, deduplicate."""
     import urllib.parse as _up
