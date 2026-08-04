@@ -67,17 +67,6 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         }
     }
 
-    function obStep3() {
-        const selected = document.querySelector('input[name="ob-status"]:checked');
-        const status = selected ? selected.value : 'online';
-        localStorage.setItem('proxion_status', status);
-        const socket = getSocket();
-        if (socket?.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ cmd: 'set_presence', status }));
-        }
-        obGoto(4);
-    }
-
     function obStep2() {
         const name = document.getElementById("ob-name").value.trim();
         if (!name) { document.getElementById("ob-name").focus(); return; }
@@ -259,7 +248,7 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
     }
 
     return {
-        openSettingsToPod, obPodMode, showOnboarding, obGoto, obStep3, obStep2,
+        openSettingsToPod, obPodMode, showOnboarding, obGoto, obStep2,
         finishOnboarding, obSkipPod, obSelectProvider, obPodTestConnection,
         obPodSignIn, copyObInviteUrl, obStep4Create, obStep4Join,
     };

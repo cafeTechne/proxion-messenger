@@ -127,7 +127,8 @@ describe('joinConversation', () => {
         const toasts = [];
         const sc = fresh({ showToast: (m) => toasts.push(m) });
         expect(await sc.joinConversation(URL)).toBeNull();
-        expect(toasts.join(' ')).toMatch(/access/i);
+        // Toast is i18n-keyed now; t() returns the key when no locale is loaded.
+        expect(toasts.join(' ')).toMatch(/solidchat\.openFailed/);
         expect(sc.getConversation(URL)).toBeNull();
     });
 });
@@ -158,7 +159,7 @@ describe('sendMessage', () => {
         const { sc, toasts } = make();
         const conv = await sc.hostConversation({ title: 'x' });
         expect(await sc.sendMessage(conv.id, 'hi')).toBe(false);
-        expect(toasts.join(' ')).toMatch(/not sent/i);
+        expect(toasts.join(' ')).toMatch(/solidchat\.notSent/);
         expect(sc.getConversation(conv.id).lastAt).toBeNull();
     });
 });

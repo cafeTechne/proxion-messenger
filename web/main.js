@@ -486,7 +486,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
         // socket is read live via the getter; showCopyModal is a hoisted
         // function declaration; setPodBanner comes from createStatusBanners above.
         const {
-            openSettingsToPod, obPodMode, showOnboarding, obGoto, obStep3, obStep2,
+            openSettingsToPod, obPodMode, showOnboarding, obGoto, obStep2,
             finishOnboarding, obSkipPod, obSelectProvider, obPodTestConnection,
             obPodSignIn, copyObInviteUrl, obStep4Create, obStep4Join,
         } = createOnboarding({
@@ -4334,9 +4334,6 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
 
             // Onboarding: Step 2 - Continue
             attachListener('#ob-step2-btn', 'click', obStep2);
-
-            // Onboarding: Step 3 - Continue
-            attachListener('#ob-step3-btn', 'click', obStep3);
 
             // Onboarding: Step 4 - Create a Room
             attachListener('#ob-step5-create', 'click', obStep4Create);

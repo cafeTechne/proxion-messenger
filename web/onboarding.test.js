@@ -49,7 +49,7 @@ describe('obGoto', () => {
     ob.obGoto(2);
     expect(els['ob-step-2'].style.display).toBe('block');
     expect(els['ob-step-1'].style.display).toBe('none');
-    expect(els['ob-step-3'].style.display).toBe('none');
+    expect(els['ob-step-4'].style.display).toBe('none');
   });
 });
 

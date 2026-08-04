@@ -21,6 +21,7 @@ import {
 } from './pod.js';
 import { chatRootUrl, dayFileAt } from './longchat.js';
 import { watchResource } from './notify.js';
+import { t } from './i18n.js';
 
 const STORE_KEY = 'proxion_solid_conversations';
 
@@ -84,7 +85,7 @@ export function createSolidChat({ showToast = () => {}, onChange = () => {} } = 
     async function hostConversation({ title = 'Conversation', participantWebIds = [] } = {}) {
         const root = podStorageRoot();
         const me = _myWebId();
-        if (!root || !me) { showToast('Connect a pod to host a conversation'); return null; }
+        if (!root || !me) { showToast(t('solidchat.hostNeedPod')); return null; }
         const roomId = 'sc-' + _uuid();
         const container = chatRootUrl(root, roomId);
         const participants = [...new Set(participantWebIds)].filter(w => w && w !== me);
@@ -93,7 +94,7 @@ export function createSolidChat({ showToast = () => {}, onChange = () => {} } = 
         // a PATCH-only primitive, so grant access first, then the first send
         // creates the index + day file. Granting also creates the container.
         const granted = await podGrantChatParticipants(container, me, participants);
-        if (!granted) { showToast('Could not set up the conversation'); return null; }
+        if (!granted) { showToast(t('solidchat.setupFailed')); return null; }
 
         // Best-effort LDN invites: drop a notification in each participant's inbox so
         // they see it in Proxion (or any Solid app), not only when granted silently.
@@ -102,9 +103,9 @@ export function createSolidChat({ showToast = () => {}, onChange = () => {} } = 
             try { if (await podSendChatInvite(w, { container, title })) invited++; } catch { /* ignore */ }
         }
         if (participants.length) {
-            showToast(invited === participants.length ? 'Invitations sent.'
-                : invited ? `Invited ${invited} of ${participants.length}.`
-                    : 'Access granted; no reachable inbox to notify.');
+            showToast(invited === participants.length ? t('solidchat.invitesSent')
+                : invited ? t('solidchat.invitesPartial', { invited, total: participants.length })
+                    : t('solidchat.invitesNone'));
         }
 
         return _upsert({
@@ -119,13 +120,13 @@ export function createSolidChat({ showToast = () => {}, onChange = () => {} } = 
      * a bad or forbidden URL fails loudly rather than sitting broken in the list.
      */
     async function joinConversation(containerUrl, { title = 'Conversation' } = {}) {
-        if (!isValidChatContainer(containerUrl)) { showToast('That is not a valid conversation link'); return null; }
-        if (!_myWebId()) { showToast('Connect a pod to join a conversation'); return null; }
+        if (!isValidChatContainer(containerUrl)) { showToast(t('solidchat.invalidLink')); return null; }
+        if (!_myWebId()) { showToast(t('solidchat.joinNeedPod')); return null; }
         // A read attempt doubles as an access check.
         try {
             await podReadChatRecentAt(containerUrl, 1, containerUrl);
         } catch {
-            showToast('Could not open that conversation (no access?)');
+            showToast(t('solidchat.openFailed'));
             return null;
         }
         return _upsert({
@@ -151,7 +152,7 @@ export function createSolidChat({ showToast = () => {}, onChange = () => {} } = 
             content: body, from_webid: me, timestamp: ts, room_name: conv.title,
         });
         if (ok) _upsert({ id, lastAt: ts });
-        else showToast('Message not sent');
+        else showToast(t('solidchat.notSent'));
         return ok;
     }
 
