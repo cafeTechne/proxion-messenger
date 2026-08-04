@@ -71,6 +71,7 @@ import { installFocusTrap } from './focus-trap.js';
 import { makeListNavigable, announce } from './a11y.js';
 import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport } from './dmhistory.js';
 import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } from './i18n.js';
+import { createIdentityResolver } from './identity.js';
 
         // Populate the settings language picker from the locale manifest, mark the
         // active one, and reload on change (J1). Endonyms so each language reads
@@ -445,6 +446,13 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             renderWindow: RENDER_WINDOW, scrollBatch: SCROLL_BATCH,
         });
         const { renderMessages, renderMessage, _renderThreaded, scrollToBottom } = rendering;
+        // One resolver for identity questions (see docs/IDENTITY.md). peerDidToCertId is
+        // declared later but read lazily, so the getter resolves it at call time.
+        const identity = createIdentityResolver({
+            getClientDid: () => clientDid,
+            getAccountDid: () => accountDid,
+            getPeerDidToCertId: () => peerDidToCertId,
+        });
         const voice = createVoice({
             showToast, renderMessage, showOsNotification, sendCmd, playNotificationSound, normalizeRelayThreadId, stopScreenShare,
             getSocket: () => socket, getActiveView: () => activeView, getSelfWebId: () => selfWebId,
@@ -464,18 +472,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     return r ? JSON.parse(r) : null;
                 } catch { return null; }
             },
-            getExpectedPeerDid: (view, event) => {
-                const cw = event && (event.caller_webid || event.from_webid);
-                if (cw && cw.startsWith('did:key:') && peerDidToCertId[cw]) return cw;
-                if (view) {
-                    if (view.peerWebid && String(view.peerWebid).startsWith('did:key:')) return view.peerWebid;
-                    if (view.id) {
-                        const found = Object.keys(peerDidToCertId).find(d => peerDidToCertId[d] === view.id);
-                        if (found) return found;
-                    }
-                }
-                return '';
-            },
+            getExpectedPeerDid: (view, event) => identity.contactForCall(view, event),
         });
         // Pod / connectivity status banners (no deps). Instantiated before
         // onboarding because setPodBanner is injected into createOnboarding below.
