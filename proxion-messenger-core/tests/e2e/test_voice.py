@@ -20,6 +20,46 @@ async def voice_room(alice_session, bob_session):
 
 
 @pytest.mark.asyncio
+async def test_register_issues_gateway_delegation_cert(live_gateway, alice_agent):
+    """On register, the gateway certifies the browser's signing key as speaking for the
+    gateway identity, so a call it signs can be bound to the contact across gateways
+    (R85 Track 1)."""
+    import json
+    import websockets
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+    from proxion_messenger_core.didkey import pub_key_to_did
+    from proxion_messenger_core.device_cert import verify_device_cert
+
+    gateway = live_gateway["gateway"]
+    gateway_did = pub_key_to_did(gateway.agent.identity_pub_bytes)
+    browser_did = pub_key_to_did(
+        alice_agent.identity_pub.public_bytes(Encoding.Raw, PublicFormat.Raw)
+    )
+
+    ws = await websockets.connect(live_gateway["url"])
+    try:
+        await asyncio.wait_for(ws.recv(), timeout=5.0)  # config
+        await ws.send(json.dumps({"cmd": "register", "did": browser_did, "display_name": "Alice"}))
+        registered = None
+        for _ in range(6):
+            ev = json.loads(await asyncio.wait_for(ws.recv(), timeout=5.0))
+            if ev.get("type") == "registered":
+                registered = ev
+                break
+        assert registered is not None, "no registered event"
+        cert = registered.get("gateway_delegation_cert")
+        assert cert, "register did not issue a gateway delegation cert"
+        # The cert binds THIS browser key to the gateway's identity, signed by the gateway.
+        assert cert["device_did"] == browser_did
+        assert cert["account_did"] == gateway_did
+        assert verify_device_cert(
+            cert, expected_device_did=browser_did, expected_account_did=gateway_did
+        ) == gateway_did
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_voice_invite_delivered(alice_session, bob_session, voice_room):
     """Alice sends voice_invite to Bob; Bob receives voice_invite event."""
     import secrets

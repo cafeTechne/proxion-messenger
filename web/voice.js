@@ -32,7 +32,7 @@ export function audioLevel(data) {
 }
 
 export function createVoice(deps) {
-    const { showToast, renderMessage, showOsNotification, sendCmd, playNotificationSound, normalizeRelayThreadId, stopScreenShare, getSocket, getActiveView, getSelfWebId, getTurnUrl, getTurnSecret, getLocalDmPeers, getCurrentRoomMembers, getIsSharing, getIdentityPrivKey, getClientDid, getExpectedPeerDid } = deps;
+    const { showToast, renderMessage, showOsNotification, sendCmd, playNotificationSound, normalizeRelayThreadId, stopScreenShare, getSocket, getActiveView, getSelfWebId, getTurnUrl, getTurnSecret, getLocalDmPeers, getCurrentRoomMembers, getIsSharing, getIdentityPrivKey, getClientDid, getExpectedPeerDid, getDeviceCert } = deps;
     const state = {
             currentCall: null,
             localStream: null,
@@ -56,6 +56,7 @@ export function createVoice(deps) {
             _videoSender: null,      // the pre-negotiated video sender (camera/screen go here)
             _cameraTrack: null,      // our camera track when video is on
             _verifyState: 'unverified',  // 'verified' | 'unverified' | (mismatch → call refused)
+            _peerVerifyState: {},    // group: per-peer 'verified' | 'unverified' | 'mismatch'
             _peerVideoSenders: {},   // group: per-peer video sender for camera/screen fan-out
             peerVideoElements: {},   // group: per-peer <video> tile
             _peerRemoteStreams: {},  // group: per-peer accumulated remote MediaStream
@@ -278,7 +279,10 @@ export function createVoice(deps) {
                 const fp_sig = await signFingerprint({
                     fingerprint, sessionId: state.currentCallSessionId || '', role, privKey: priv,
                 });
-                return { fp_sig, fp_signer: did };
+                // On a linked device the signer is this device's key, not the account
+                // the peer knows us by; ship the device->account cert so they can bind it.
+                const fp_cert = getDeviceCert?.() || null;
+                return fp_cert ? { fp_sig, fp_signer: did, fp_cert } : { fp_sig, fp_signer: did };
             } catch { return {}; }
         }
 
@@ -292,13 +296,20 @@ export function createVoice(deps) {
                 signatureB64: event?.fp_sig || '',
                 signerDid: event?.fp_signer || '',
                 expectedDid: _exp,
+                // Chains a linked device's signing key to the account (R85 Track 1).
+                deviceCert: event?.fp_cert || null,
             });
-            // Advisory, not blocking: we show Verified only when the peer's identity
-            // signature checks out against the identity we know them by, otherwise
-            // Unverified. The call is never refused, because a call's signing identity
-            // is not yet bound to the contact roster across gateways (a browser signs,
-            // but a federated contact is known by their gateway identity). Media stays
-            // DTLS-SRTP encrypted regardless. See docs/CALLS.md.
+            if (verdict === 'mismatch') {
+                // A signature that does NOT bind to the identity we know this contact by
+                // is the one case we refuse: it is the fingerprint of a tampered media
+                // channel (a gateway sitting in the DTLS handshake). 'unverifiable' still
+                // connects: an unknown or legacy peer with no proof is not proof of an
+                // attack. The caller aborts the call on false. See docs/CALLS.md.
+                state._verifyState = 'mismatch';
+                _updateVerifyBadge();
+                showToast(t('voice.identityUnverified'), 'error');
+                return false;
+            }
             state._verifyState = verdict === 'verified' ? 'verified' : 'unverified';
             _updateVerifyBadge();
             return true;
@@ -623,24 +634,45 @@ export function createVoice(deps) {
                 const fingerprint = extractFingerprint(peerPc.localDescription.sdp);
                 if (!fingerprint) return {};
                 const fp_sig = await signFingerprint({ fingerprint, sessionId: sessionId || '', role, privKey: priv });
-                return { fp_sig, fp_signer: did };
+                const fp_cert = getDeviceCert?.() || null;
+                return fp_cert ? { fp_sig, fp_signer: did, fp_cert } : { fp_sig, fp_signer: did };
             } catch { return {}; }
         }
 
         // Verify a group co-member's SDP against their known identity, if we have one.
         // Refuse on a proven mismatch; allow (unverified) when the identity is unknown.
         async function _verifyGroupSdp(peerWebid, sdp, role, event) {
-            const expectedDid = getExpectedPeerDid?.(null, { caller_webid: peerWebid, from_webid: peerWebid }) || '';
+            // A group co-member is identified on the wire by their account did (their
+            // caller_webid), which is what getExpectedPeerDid resolves to a contact.
+            const acctWebid = event?.caller_webid || peerWebid;
+            const expectedDid = getExpectedPeerDid?.(null, { caller_webid: acctWebid, from_webid: acctWebid }) || '';
             const verdict = await classifyPeerSdp({
                 sdp,
                 role,
                 signatureB64: event?.fp_sig || '',
                 signerDid: event?.fp_signer || '',
                 expectedDid,
+                deviceCert: event?.fp_cert || null,
             });
-            // Advisory (see _verifyPeerSdp): never refuse; track state for the tile badge.
-            state._verifyState = verdict === 'verified' ? 'verified' : 'unverified';
-            return true;
+            // Per-peer, so one tile can read Verified while another reads Unverified.
+            const st = verdict === 'verified' ? 'verified'
+                : (verdict === 'mismatch' ? 'mismatch' : 'unverified');
+            state._peerVerifyState[peerWebid] = st;
+            _updatePeerVerifyBadge(peerWebid);
+            // Refuse a proven mismatch for THIS peer only (drop the one connection);
+            // the rest of the mesh is unaffected. Unverifiable still connects.
+            return verdict !== 'mismatch';
+        }
+
+        // Reflect a group peer's verify state onto its video tile, if the tile exists.
+        function _updatePeerVerifyBadge(peerWebid) {
+            const tile = state.peerVideoElements[peerWebid];
+            const badge = tile && tile.parentElement
+                ? tile.parentElement.querySelector('.vw-peer-verified') : null;
+            if (!badge) return;
+            const st = state._peerVerifyState[peerWebid] || 'unverified';
+            badge.textContent = st === 'verified' ? t('voice.verified') : t('voice.unverified');
+            badge.dataset.state = st;
         }
 
         // Persistent per-peer video tile (created on first track, removed on leave).
@@ -785,12 +817,15 @@ export function createVoice(deps) {
             state._remoteDescSet = false;
             state.currentCallSessionId = sessionId;
             state._verifyState = 'unverified';
-            // The peer's routable webid, so answer + ICE reach them across gateways
+            // The peer's ROUTABLE webid, so answer + ICE reach them across gateways
             // (the 1:1 session model only routes within one gateway). Caller: the DM
-            // peer; callee: whoever invited us.
+            // peer (a gateway-routable did). Callee: the caller's GATEWAY did, which is
+            // what routes back; the caller's account did (caller_webid) is for identity
+            // verification only and is NOT routable on this gateway. Same-gateway calls
+            // have no caller_gateway and fall back to the (locally routable) account did.
             state._callPeerWebid = isCaller
                 ? (getActiveView() ? getActiveView().peerWebid : null)
-                : ((state.currentCall && state.currentCall.caller_webid)
+                : ((state.currentCall && (state.currentCall.caller_gateway || state.currentCall.caller_webid))
                     || (getActiveView() ? getActiveView().peerWebid : null));
 
             const stream = await getMedia();
@@ -884,8 +919,11 @@ export function createVoice(deps) {
                     ...fp,
                 }));
             } else if (sdpOffer) {
-                // Authenticate the media channel (advisory; see _verifyPeerSdp).
-                await _verifyPeerSdp(sdpOffer, 'offer', state.currentCall || {});
+                // Authenticate the media channel; refuse a proven identity mismatch (MitM).
+                if (!(await _verifyPeerSdp(sdpOffer, 'offer', state.currentCall || {}))) {
+                    _doHangup();
+                    return;
+                }
                 // Set the remote offer FIRST, then attach our media to the offer's OWN
                 // transceivers via replaceTrack (addTrack can spawn a new m-line the
                 // caller never offered, leaving that transceiver recvonly so our media
@@ -1015,10 +1053,22 @@ export function createVoice(deps) {
                 if (state._inVoiceChannel && event.from_webid) {
                     _addChannelParticipant(event.from_webid);
                     initWebRTCForPeer(event.from_webid, event.session_id, false, sd.sdp_offer,
-                        { session_id: event.session_id, fp_sig: sd.fp_sig, fp_signer: sd.fp_signer })
+                        { session_id: event.session_id, caller_webid: sd.caller_webid,
+                          fp_sig: sd.fp_sig, fp_signer: sd.fp_signer, fp_cert: sd.fp_cert })
                         .catch(console.warn);
                 } else {
-                    showVoiceBanner({ ...merged, caller_webid: event.from_webid, sdp_offer: sd.sdp_offer });
+                    // Two DIFFERENT identities are needed here and must not be conflated:
+                    //  - caller_webid: the caller's ACCOUNT did (sd.caller_webid), used to
+                    //    VERIFY their identity against our contact roster.
+                    //  - caller_gateway: the relaying GATEWAY did (event.from_webid), the
+                    //    only identity that ROUTES the answer/ICE back across gateways
+                    //    (peer-gateway mappings are keyed by gateway did, not account did).
+                    showVoiceBanner({
+                        ...merged,
+                        caller_webid: sd.caller_webid || event.from_webid,
+                        caller_gateway: event.from_webid,
+                        sdp_offer: sd.sdp_offer,
+                    });
                 }
             }
         }

@@ -13,6 +13,8 @@
 // swapped fingerprint is detected and the call is refused. Pure + no I/O; the crypto
 // mirrors device-cert.js so it interops with the rest of the identity system.
 
+import { verifyDeviceCert } from './device-cert.js';
+
 const _ENC = new TextEncoder();
 const DOMAIN = 'proxion-call-fingerprint-v1';
 const _B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -130,10 +132,17 @@ export async function verifyFingerprint({ fingerprint, role, signatureB64, signe
  *   'unverifiable' — no signature, no fingerprint, or the peer identity is unknown, so
  *                    we cannot prove it either way (allow, but surface as unverified).
  *
- * `expectedDid` is the contact's known identity (their did:key). When we know it, a
- * different signer or a bad signature is a 'mismatch', never merely 'unverifiable'.
+ * `expectedDid` is the contact's known identity (their ACCOUNT did:key). When we know
+ * it, a signer we cannot bind to it or a bad signature is a 'mismatch', never merely
+ * 'unverifiable'.
+ *
+ * `deviceCert` (optional) chains the signer's DEVICE did to the account. A contact on a
+ * linked device signs the fingerprint with that device's key, not the account key we
+ * know them by, so we accept the signature when a valid device cert proves the signing
+ * device belongs to `expectedDid`. Single-device contacts sign with the account key
+ * directly (signerDid === expectedDid) and need no cert.
  */
-export async function classifyPeerSdp({ sdp, role, signatureB64, signerDid, expectedDid }) {
+export async function classifyPeerSdp({ sdp, role, signatureB64, signerDid, expectedDid, deviceCert }) {
     const fps = extractAllFingerprints(sdp);
     if (!fps.length) return 'unverifiable';
     // Divergent fingerprints across m-lines are anomalous: with one DTLS certificate
@@ -143,9 +152,32 @@ export async function classifyPeerSdp({ sdp, role, signatureB64, signerDid, expe
     const distinct = [...new Set(fps)];
     const fingerprint = fps[0];
     if (expectedDid) {
-        // We know who this must be: anyone else, or no proof at all, is a failure.
-        if (!signatureB64 || !signerDid) return 'mismatch';
-        if (signerDid !== expectedDid) return 'mismatch';
+        // No signature/signer at all: an older or non-signing peer. We cannot prove
+        // it is them, but a missing proof is not proof of an attack, so allow it
+        // (Unverified) rather than refuse. Refusing here would break calls with any
+        // client that predates call signing.
+        if (!signatureB64 || !signerDid) return 'unverifiable';
+        // Is the signer bound to the contact we expect? Either it IS their identity,
+        // or a still-valid cert chains the signing key to it (a linked device, or a
+        // browser certified by the contact's gateway for cross-gateway calls).
+        let bound = signerDid === expectedDid;
+        let certFailedToChain = false;
+        if (!bound && deviceCert) {
+            const acct = await verifyDeviceCert(deviceCert, {
+                expectedDeviceDid: signerDid, expectedAccountDid: expectedDid,
+            });
+            if (acct === expectedDid) bound = true;
+            else certFailedToChain = true;   // a cert was offered but does not chain
+        }
+        if (!bound) {
+            // A cert that fails to chain is a forgery attempt (refuse); a signer with
+            // NO cert is merely unbindable (a different-identity call we cannot tie to
+            // this contact, e.g. cross-gateway with an old client) — allow, Unverified.
+            return certFailedToChain ? 'mismatch' : 'unverifiable';
+        }
+        // The signer IS the contact: now the fingerprint must check out. A divergent
+        // or unverifiable fingerprint from a bound signer means the media channel was
+        // tampered (a relay swapped the DTLS fingerprint) — refuse.
         if (distinct.length !== 1) return 'mismatch';
         const ok = await verifyFingerprint({ fingerprint, role, signatureB64, signerDid });
         return ok ? 'verified' : 'mismatch';

@@ -4,6 +4,7 @@ import { webcrypto } from 'node:crypto';
 import {
     extractFingerprint, signFingerprint, verifyFingerprint, classifyPeerSdp, ed25519PubToDid,
 } from './callsec.js';
+import { issueDeviceCert } from './device-cert.js';
 
 // Node exposes WebCrypto; the module uses the global `crypto`.
 beforeAll(() => { if (!globalThis.crypto) globalThis.crypto = webcrypto; });
@@ -66,20 +67,25 @@ describe('classifyPeerSdp (call trust decision)', () => {
         })).toBe('mismatch');
     });
 
-    it('is a mismatch when a known contact is impersonated by another key', async () => {
+    it('is unverifiable (not refused) when a signer cannot be bound and offers no cert', async () => {
+        // A different signing key with no cert to chain it to the contact: we cannot
+        // prove it is them, but neither can we prove an attack (this is also the shape
+        // of a cross-gateway call from a client that predates gateway delegation), so
+        // it connects Unverified rather than being refused.
         const peer = await identity();
-        const attacker = await identity();
-        const sig = await signFingerprint({ fingerprint: FP, sessionId: 's1', role: 'offer', privKey: attacker.priv });
+        const other = await identity();
+        const sig = await signFingerprint({ fingerprint: FP, sessionId: 's1', role: 'offer', privKey: other.priv });
         expect(await classifyPeerSdp({
-            sdp: sdp(), sessionId: 's1', role: 'offer', signatureB64: sig, signerDid: attacker.did, expectedDid: peer.did,
-        })).toBe('mismatch');
+            sdp: sdp(), sessionId: 's1', role: 'offer', signatureB64: sig, signerDid: other.did, expectedDid: peer.did,
+        })).toBe('unverifiable');
     });
 
-    it('is a mismatch when a known contact call carries no signature at all', async () => {
+    it('is unverifiable when a known contact call carries no signature at all', async () => {
+        // No signature: an older/non-signing peer. Allowed (Unverified), not refused.
         const peer = await identity();
         expect(await classifyPeerSdp({
             sdp: sdp(), sessionId: 's1', role: 'offer', signatureB64: '', signerDid: '', expectedDid: peer.did,
-        })).toBe('mismatch');
+        })).toBe('unverifiable');
     });
 
     it('is unverifiable for an unknown peer with no signature', async () => {
@@ -113,5 +119,70 @@ describe('classifyPeerSdp (call trust decision)', () => {
         expect(await classifyPeerSdp({
             sdp: bundled, sessionId: 's1', role: 'offer', signatureB64: sig, signerDid: peer.did, expectedDid: peer.did,
         })).toBe('verified');
+    });
+});
+
+// R85 Track 1: a contact on a LINKED device signs with that device's key, not the
+// account key we know them by. A device->account cert lets us accept it, so Verified
+// works across devices and gateways without weakening the MitM refusal.
+describe('classifyPeerSdp with a linked-device cert', () => {
+    it('is verified when a valid device cert chains the signer to the expected account', async () => {
+        const account = await identity();       // the contact as we know them
+        const device = await identity();        // their linked device (signs the call)
+        const cert = await issueDeviceCert(account.priv, account.did, device.did);
+        const sig = await signFingerprint({ fingerprint: FP, role: 'offer', privKey: device.priv });
+        expect(await classifyPeerSdp({
+            sdp: sdp(), role: 'offer', signatureB64: sig,
+            signerDid: device.did, expectedDid: account.did, deviceCert: cert,
+        })).toBe('verified');
+    });
+
+    it('is unverifiable when the device signs but ships NO cert (cannot bind, not refused)', async () => {
+        const account = await identity();
+        const device = await identity();
+        const sig = await signFingerprint({ fingerprint: FP, role: 'offer', privKey: device.priv });
+        expect(await classifyPeerSdp({
+            sdp: sdp(), role: 'offer', signatureB64: sig,
+            signerDid: device.did, expectedDid: account.did, // no deviceCert
+        })).toBe('unverifiable');
+    });
+
+    it('is a mismatch when the cert is for a DIFFERENT account (forged binding)', async () => {
+        const account = await identity();
+        const attackerAccount = await identity();
+        const device = await identity();
+        // Cert binds the device to the attacker's account, not the contact we expect.
+        const cert = await issueDeviceCert(attackerAccount.priv, attackerAccount.did, device.did);
+        const sig = await signFingerprint({ fingerprint: FP, role: 'offer', privKey: device.priv });
+        expect(await classifyPeerSdp({
+            sdp: sdp(), role: 'offer', signatureB64: sig,
+            signerDid: device.did, expectedDid: account.did, deviceCert: cert,
+        })).toBe('mismatch');
+    });
+
+    it('is a mismatch when the cert authorizes a different device than the signer', async () => {
+        const account = await identity();
+        const device = await identity();
+        const otherDevice = await identity();
+        // Valid cert, but for otherDevice; the signer is `device`, so it must not pass.
+        const cert = await issueDeviceCert(account.priv, account.did, otherDevice.did);
+        const sig = await signFingerprint({ fingerprint: FP, role: 'offer', privKey: device.priv });
+        expect(await classifyPeerSdp({
+            sdp: sdp(), role: 'offer', signatureB64: sig,
+            signerDid: device.did, expectedDid: account.did, deviceCert: cert,
+        })).toBe('mismatch');
+    });
+
+    it('is a mismatch when the device cert has expired', async () => {
+        const account = await identity();
+        const device = await identity();
+        // Issued and expired in the past.
+        const nowPast = Math.floor(Date.now() / 1000) - 10 * 86400;
+        const cert = await issueDeviceCert(account.priv, account.did, device.did, { ttlDays: 1, now: nowPast });
+        const sig = await signFingerprint({ fingerprint: FP, role: 'offer', privKey: device.priv });
+        expect(await classifyPeerSdp({
+            sdp: sdp(), role: 'offer', signatureB64: sig,
+            signerDid: device.did, expectedDid: account.did, deviceCert: cert,
+        })).toBe('mismatch');
     });
 });

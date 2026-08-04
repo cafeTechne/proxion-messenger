@@ -219,6 +219,17 @@ try {
   if (!ok[1]) fail('Alice never received Bob\'s video');
   if (!notRefused[0] || !notRefused[1]) fail('a call was refused by the fingerprint check (identity unverified)');
 
+  // R85 Track 1: cross-gateway identity verification is bound to the contact roster,
+  // so a legitimate call must read Verified on BOTH sides (not merely not-refused).
+  step = 'assert-verified';
+  const verified = await Promise.all([
+    bob.evaluate(() => document.getElementById('vw-verified')?.dataset.state || 'none'),
+    alice.evaluate(() => document.getElementById('vw-verified')?.dataset.state || 'none'),
+  ]);
+  console.log(`  · verify state: Bob=${verified[0]}  Alice=${verified[1]}`);
+  if (verified[0] !== 'verified') fail(`Bob's call did not verify Alice's identity cross-gateway (state=${verified[0]})`);
+  if (verified[1] !== 'verified') fail(`Alice's call did not verify Bob's identity cross-gateway (state=${verified[1]})`);
+
   // R82 Y: the in-call quality selector changes and persists.
   step = 'quality-check';
   const q = await alice.evaluate(() => {

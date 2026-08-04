@@ -238,6 +238,9 @@ class VoiceHandlerMixin:
         # the gateway; forwarded verbatim.
         fp_sig = data.get("fp_sig", "")
         fp_signer = data.get("fp_signer", "")
+        # Device->account cert that binds a linked device's signing key to the account
+        # (opaque to the gateway; forwarded verbatim so the callee can verify identity).
+        fp_cert = data.get("fp_cert")
         event = {
             "type": "voice_invite",
             "session_id": session_id,
@@ -246,6 +249,7 @@ class VoiceHandlerMixin:
             "cert_id": cert_id,
             "fp_sig": fp_sig,
             "fp_signer": fp_signer,
+            "fp_cert": fp_cert,
         }
 
         target_ws = self._any_socket(target_webid) if target_webid else None
@@ -267,6 +271,7 @@ class VoiceHandlerMixin:
                             "caller_webid": caller_webid,
                             "fp_sig": fp_sig,
                             "fp_signer": fp_signer,
+                            "fp_cert": fp_cert,
                         },
                     )
                 except Exception:
@@ -317,6 +322,7 @@ class VoiceHandlerMixin:
         # R79: identity-bound fingerprint signature for the answer, forwarded verbatim.
         fp_sig = data.get("fp_sig", "")
         fp_signer = data.get("fp_signer", "")
+        fp_cert = data.get("fp_cert")
 
         # Group voice: answer addressed directly to the calling peer by webid.
         target_webid = data.get("target_webid")
@@ -329,6 +335,7 @@ class VoiceHandlerMixin:
                 "sdp_answer": sdp_answer,
                 "fp_sig": fp_sig,
                 "fp_signer": fp_signer,
+                "fp_cert": fp_cert,
             }
             target_ws = self._any_socket(target_webid)
             if target_ws and target_ws in self.clients:
@@ -341,7 +348,8 @@ class VoiceHandlerMixin:
                 asyncio.create_task(self._relay_voice_signal(
                     target_webid, "answer",
                     {"session_id": session_id, "sdp_answer": sdp_answer,
-                     "caller_webid": sender_wid, "fp_sig": fp_sig, "fp_signer": fp_signer},
+                     "caller_webid": sender_wid, "fp_sig": fp_sig, "fp_signer": fp_signer,
+                     "fp_cert": fp_cert},
                 ))
             return
 
@@ -363,7 +371,7 @@ class VoiceHandlerMixin:
             sess["answered"] = True
             caller_ws = sess["caller_ws"]
             event = {"type": "voice_answer", "session_id": session_id, "sdp_answer": sdp_answer,
-                     "fp_sig": fp_sig, "fp_signer": fp_signer}
+                     "fp_sig": fp_sig, "fp_signer": fp_signer, "fp_cert": fp_cert}
             if caller_ws and caller_ws in self.clients:
                 await caller_ws.send(json.dumps(event))
 

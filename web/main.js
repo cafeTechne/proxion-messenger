@@ -454,6 +454,16 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
             // fingerprint; the peer's known identity verifies it.
             getIdentityPrivKey: () => _identityPrivKey,
             getClientDid: () => clientDid,
+            // The gateway's cert for our signing key (clientDid -> our gateway did),
+            // shipped with a call's fingerprint signature so a federated contact can
+            // bind our browser key to the gateway identity they know us by. Refreshed
+            // by the gateway on every register (R85 Track 1).
+            getDeviceCert: () => {
+                try {
+                    const r = localStorage.getItem('proxion_gateway_delegation_cert');
+                    return r ? JSON.parse(r) : null;
+                } catch { return null; }
+            },
             getExpectedPeerDid: (view, event) => {
                 const cw = event && (event.caller_webid || event.from_webid);
                 if (cw && cw.startsWith('did:key:') && peerDidToCertId[cw]) return cw;
@@ -1371,6 +1381,12 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
                     break;
                 case "registered":
                     if (event.turn) voice.state._turnIceServer = event.turn;
+                    // R85 Track 1: cache the gateway's cert for our signing key so calls
+                    // can prove this browser speaks for our gateway identity (the id a
+                    // federated contact knows us by). Refreshed on every register.
+                    if (event.gateway_delegation_cert) {
+                        try { localStorage.setItem("proxion_gateway_delegation_cert", JSON.stringify(event.gateway_delegation_cert)); } catch (_) {}
+                    }
                     // Auth is complete — now safe to send all init commands that
                     // require an authenticated socket (they were withheld from onopen).
                     (function _postAuthInit() {

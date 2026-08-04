@@ -47,6 +47,8 @@ function makeVoice(over = {}) {
     getSelfWebId: () => 'did:key:zSelf', getTurnUrl: () => null, getTurnSecret: () => null,
     getLocalDmPeers: () => over.localDmPeers ?? {}, getCurrentRoomMembers: () => over.members ?? [],
     getIsSharing: () => false,
+    getExpectedPeerDid: () => over.expectedPeerDid ?? '',
+    getDeviceCert: () => over.deviceCert ?? null,
   });
   return { voice, sent };
 }
@@ -196,6 +198,40 @@ describe('ICE-failure handling (silent-drop regressions)', () => {
     // The no-relay variant (key returned verbatim since no locale is loaded in tests).
     expect(toasts).toContain('voice.noRelay');
     expect(toasts).not.toContain('voice.connectionLost');
+  });
+
+  it('1:1 call: REFUSES a tampered media channel (bound signer, bad fingerprint sig)', async () => {
+    installRTC();
+    const toasts = [];
+    // The contact IS the signer (signerDid === the identity we expect), but the
+    // fingerprint signature does not check out: a relay swapped the DTLS fingerprint.
+    // That is the one case we refuse.
+    const peer = 'did:key:zPeer';
+    const { voice, sent } = makeVoice({ showToast: (m) => toasts.push(m), expectedPeerDid: peer });
+    voice.state.localStream = { getTracks: () => [{ stop() {} }] };
+    await voice.initWebRTC('cert1', 'sess1', true);
+
+    const answerSdp = 'v=0\r\na=fingerprint:sha-256 AA:BB:CC:DD\r\n';
+    await voice.handleVoiceAnswer({ sdp_answer: answerSdp, fp_sig: 'not-a-valid-signature', fp_signer: peer });
+
+    // The call is refused: the user is told, and the session is torn down (cleanup
+    // resets _verifyState, so the observable signals are the toast and the hangup).
+    expect(toasts).toContain('voice.identityUnverified');
+    expect(sent.some((m) => m.cmd === 'voice_hangup')).toBe(true);
+    expect(voice.state._callState).not.toBe(CallState.CONNECTED);
+  });
+
+  it('1:1 call: an UNKNOWN peer (no expected identity) still connects, marked unverified', async () => {
+    installRTC();
+    const { voice } = makeVoice({ expectedPeerDid: '' });   // we do not know this peer
+    voice.state.localStream = { getTracks: () => [{ stop() {} }] };
+    await voice.initWebRTC('cert1', 'sess1', true);
+
+    const answerSdp = 'v=0\r\na=fingerprint:sha-256 AA:BB:CC:DD\r\n';
+    await voice.handleVoiceAnswer({ sdp_answer: answerSdp, fp_sig: '', fp_signer: '' });
+
+    expect(voice.state._verifyState).toBe('unverified');   // allowed, not refused
+    expect(voice.state._callState).toBe(CallState.CONNECTED);
   });
 
   it('group call: the CALLER side rebuilds the peer on ICE "failed" (was a no-op restartIce)', async () => {

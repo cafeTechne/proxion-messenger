@@ -376,6 +376,19 @@ class AuthHandlerMixin:
             registered_msg: dict = {"type": "registered", "webid": identity}
             if turn_creds:
                 registered_msg["turn"] = turn_creds
+            # R85 Track 1: certify the connecting browser's signing key (its clientDid)
+            # as speaking for THIS gateway's identity. A federated contact knows us by
+            # our gateway did (federation relationships are keyed gateway-to-gateway),
+            # not by the browser key that signs a call's DTLS fingerprint. Shipping this
+            # cert with a call lets the far side bind the two and show Verified.
+            _signing_did = data.get("did") or ""
+            if isinstance(_signing_did, str) and _signing_did.startswith("did:key:"):
+                try:
+                    from .device_cert import issue_device_cert
+                    registered_msg["gateway_delegation_cert"] = issue_device_cert(
+                        self.agent.identity_key, _signing_did, ttl_days=30)
+                except Exception:
+                    logger.debug("gateway delegation cert issue skipped", exc_info=True)
             await websocket.send(json.dumps(registered_msg))
 
             if self._store:

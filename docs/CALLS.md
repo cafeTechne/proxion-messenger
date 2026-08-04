@@ -46,17 +46,23 @@ identity key, and the other device verifies that signature against the contact's
 identity (their `did:key`) and checks that the signed fingerprint matches the one in
 the SDP it actually received.
 
-- If the signature is valid and matches the identity you know the contact by, the call
+- If the signature is valid and binds to the identity you know the contact by, the call
   shows **Verified**, and you have cryptographic proof the media channel is with them.
-- Otherwise the call shows **Unverified**. It still connects and is still DTLS-SRTP
+- If the signer cannot be bound to that contact (for example an older client with no
+  proof), the call shows **Unverified**. It still connects and is still DTLS-SRTP
   encrypted; you simply do not have the extra identity proof.
+- If the signer IS your contact but the fingerprint signature does not check out, that
+  is the fingerprint of a tampered media channel. The call is **refused**.
 
-This is advisory, not blocking: the check surfaces a status, it does not refuse the
-call. The reason is that a call is signed by the browser's identity key, while a
-federated contact is known to you by their gateway identity, so the two do not always
-line up even for a legitimate call. Binding the call signature to the contact roster
-(so Verified can be shown across gateways, and a genuine mismatch can be treated as an
-alarm) is planned work. The media is end-to-end encrypted regardless.
+Binding across gateways. A call is signed by the browser's own key, while a federated
+contact is known to you by their gateway identity (federation relationships are keyed
+gateway to gateway). Proxion bridges the two: your gateway issues a short-lived
+certificate binding your browser's signing key to its gateway identity, and the call
+carries it, so the far side can tie the signature to the contact it already trusts and
+show **Verified** even across gateways. A device linked to your account is bridged the
+same way. When no such proof is present, the call is allowed but shown Unverified rather
+than refused, so a legitimate call is never blocked; only a proven fingerprint swap or a
+certificate that fails to chain is refused. The media is end-to-end encrypted regardless.
 
 ## Privacy of capture
 
