@@ -64,6 +64,14 @@ same way. When no such proof is present, the call is allowed but shown Unverifie
 than refused, so a legitimate call is never blocked; only a proven fingerprint swap or a
 certificate that fails to chain is refused. The media is end-to-end encrypted regardless.
 
+Downgrade protection. Once a contact is known to bind their calls, because we have already
+accepted a bound (Verified) call from them, or because their relationship advertises it, a
+later call from them that arrives with no binding proof is treated as a downgrade (a
+stripped or withheld certificate) and refused, not quietly allowed. A contact we cannot
+confirm is capable is still allowed as Unverified, so peers on older clients are never
+blocked. This matters most when a gateway is shared or hosted rather than one you run
+yourself; see PLAN_ROUND_86 for the threat boundary.
+
 ## Privacy of capture
 
 - The camera and screen are never captured without an explicit action from you, and

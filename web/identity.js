@@ -19,6 +19,7 @@ export function createIdentityResolver({
     getClientDid = () => null,
     getAccountDid = () => null,
     getPeerDidToCertId = () => ({}),
+    isCallCapablePeer = () => false,
 } = {}) {
     const isDidKey = (s) => typeof s === 'string' && s.startsWith('did:key:');
 
@@ -53,5 +54,13 @@ export function createIdentityResolver({
         return '';
     }
 
-    return { selfDeviceDid, selfAccountDid, contactForCall };
+    // Whether a contact is known to bind their calls (their relationship advertises it,
+    // or we have accepted a bound call from them before). When true, an unbindable call
+    // from them is treated as a downgrade rather than an old client. See docs/CALLS.md
+    // and PLAN_ROUND_86.
+    function peerBindsCalls(contactDid) {
+        return !!(contactDid && isCallCapablePeer(contactDid));
+    }
+
+    return { selfDeviceDid, selfAccountDid, contactForCall, peerBindsCalls };
 }

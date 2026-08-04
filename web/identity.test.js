@@ -11,6 +11,7 @@ function make(over = {}) {
         getClientDid: () => over.clientDid ?? DEV,
         getAccountDid: () => over.accountDid ?? null,
         getPeerDidToCertId: () => over.map ?? {},
+        isCallCapablePeer: over.isCallCapablePeer ?? (() => false),
     });
 }
 
@@ -55,5 +56,19 @@ describe('contactForCall (reduce a call identity to a known contact)', () => {
     it('returns empty when nothing is recognized', () => {
         expect(make().contactForCall(null, { from_webid: GATEWAY })).toBe('');
         expect(make().contactForCall(null, null)).toBe('');
+    });
+});
+
+describe('peerBindsCalls (R86 capability)', () => {
+    it('is true only for a peer the capability source recognizes', () => {
+        const capable = new Set([PEER]);
+        const r = make({ isCallCapablePeer: (d) => capable.has(d) });
+        expect(r.peerBindsCalls(PEER)).toBe(true);
+        expect(r.peerBindsCalls(ACCT)).toBe(false);
+    });
+    it('is false for an empty/unknown contact', () => {
+        const r = make({ isCallCapablePeer: () => true });
+        expect(r.peerBindsCalls('')).toBe(false);
+        expect(r.peerBindsCalls(null)).toBe(false);
     });
 });

@@ -186,3 +186,44 @@ describe('classifyPeerSdp with a linked-device cert', () => {
         })).toBe('mismatch');
     });
 });
+
+// R86: the SAME unbindable call is allowed for a peer we cannot confirm binds calls,
+// but refused as a downgrade for a peer we know does (a stripped/absent binding proof).
+describe('classifyPeerSdp peer-aware downgrade (R86)', () => {
+    it('a stripped cert is unverifiable for a non-capable peer, downgrade for a capable one', async () => {
+        const account = await identity();
+        const device = await identity();
+        const sig = await signFingerprint({ fingerprint: FP, role: 'offer', privKey: device.priv });
+        const base = { sdp: sdp(), role: 'offer', signatureB64: sig, signerDid: device.did, expectedDid: account.did };
+        expect(await classifyPeerSdp({ ...base, peerBindsCalls: false })).toBe('unverifiable');
+        expect(await classifyPeerSdp({ ...base, peerBindsCalls: true })).toBe('downgrade');
+    });
+
+    it('no signature at all is unverifiable normally, downgrade for a capable peer', async () => {
+        const account = await identity();
+        const base = { sdp: sdp(), role: 'offer', signatureB64: '', signerDid: '', expectedDid: account.did };
+        expect(await classifyPeerSdp({ ...base, peerBindsCalls: false })).toBe('unverifiable');
+        expect(await classifyPeerSdp({ ...base, peerBindsCalls: true })).toBe('downgrade');
+    });
+
+    it('peerBindsCalls does NOT change a genuinely verified call', async () => {
+        const account = await identity();
+        const device = await identity();
+        const cert = await issueDeviceCert(account.priv, account.did, device.did);
+        const sig = await signFingerprint({ fingerprint: FP, role: 'offer', privKey: device.priv });
+        expect(await classifyPeerSdp({
+            sdp: sdp(), role: 'offer', signatureB64: sig,
+            signerDid: device.did, expectedDid: account.did, deviceCert: cert, peerBindsCalls: true,
+        })).toBe('verified');
+    });
+
+    it('peerBindsCalls does NOT downgrade a real tamper to something softer (still mismatch)', async () => {
+        // Bound signer, bad fingerprint sig = tampered channel, refused as mismatch
+        // regardless of the capability flag.
+        const account = await identity();
+        expect(await classifyPeerSdp({
+            sdp: sdp(), role: 'offer', signatureB64: 'bogus',
+            signerDid: account.did, expectedDid: account.did, peerBindsCalls: true,
+        })).toBe('mismatch');
+    });
+});

@@ -446,12 +446,26 @@ import { createIdentityResolver } from './identity.js';
             renderWindow: RENDER_WINDOW, scrollBatch: SCROLL_BATCH,
         });
         const { renderMessages, renderMessage, _renderThreaded, scrollToBottom } = rendering;
+        // R86: which contacts are known to bind their calls. Two sources, unioned:
+        //  - certCapableContacts: their signed relationship advertises call binding (6b).
+        //  - callCapablePins: first-use trust — once we accept a cert-BOUND (verified)
+        //    call from a contact, we pin it, so a later unbindable call is a downgrade.
+        // A capable peer's call with no binding proof is refused instead of allowed.
+        const certCapableContacts = new Set();     // account did -> capable (from cert marker)
+        let callCapablePins = new Set();
+        try { callCapablePins = new Set(JSON.parse(localStorage.getItem('proxion_call_capable_peers') || '[]')); } catch (_) {}
+        function _noteCallCapablePeer(did) {
+            if (!did || callCapablePins.has(did)) return;
+            callCapablePins.add(did);
+            try { localStorage.setItem('proxion_call_capable_peers', JSON.stringify([...callCapablePins])); } catch (_) {}
+        }
         // One resolver for identity questions (see docs/IDENTITY.md). peerDidToCertId is
         // declared later but read lazily, so the getter resolves it at call time.
         const identity = createIdentityResolver({
             getClientDid: () => clientDid,
             getAccountDid: () => accountDid,
             getPeerDidToCertId: () => peerDidToCertId,
+            isCallCapablePeer: (did) => certCapableContacts.has(did) || callCapablePins.has(did),
         });
         const voice = createVoice({
             showToast, renderMessage, showOsNotification, sendCmd, playNotificationSound, normalizeRelayThreadId, stopScreenShare,
@@ -473,6 +487,8 @@ import { createIdentityResolver } from './identity.js';
                 } catch { return null; }
             },
             getExpectedPeerDid: (view, event) => identity.contactForCall(view, event),
+            getPeerBindsCalls: (did) => identity.peerBindsCalls(did),
+            onPeerVerified: (did) => _noteCallCapablePeer(did),
         });
         // Pod / connectivity status banners (no deps). Instantiated before
         // onboarding because setPodBanner is injected into createOnboarding below.

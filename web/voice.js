@@ -32,7 +32,8 @@ export function audioLevel(data) {
 }
 
 export function createVoice(deps) {
-    const { showToast, renderMessage, showOsNotification, sendCmd, playNotificationSound, normalizeRelayThreadId, stopScreenShare, getSocket, getActiveView, getSelfWebId, getTurnUrl, getTurnSecret, getLocalDmPeers, getCurrentRoomMembers, getIsSharing, getIdentityPrivKey, getClientDid, getExpectedPeerDid, getDeviceCert } = deps;
+    const { showToast, renderMessage, showOsNotification, sendCmd, playNotificationSound, normalizeRelayThreadId, stopScreenShare, getSocket, getActiveView, getSelfWebId, getTurnUrl, getTurnSecret, getLocalDmPeers, getCurrentRoomMembers, getIsSharing, getIdentityPrivKey, getClientDid, getExpectedPeerDid, getDeviceCert,
+        getPeerBindsCalls, onPeerVerified } = deps;
     const state = {
             currentCall: null,
             localStream: null,
@@ -298,18 +299,24 @@ export function createVoice(deps) {
                 expectedDid: _exp,
                 // Chains a linked device's signing key to the account (R85 Track 1).
                 deviceCert: event?.fp_cert || null,
+                // Whether this contact is known to bind calls (R86): if so, a call with
+                // no binding proof is a downgrade, not a legacy client.
+                peerBindsCalls: getPeerBindsCalls?.(_exp) || false,
             });
-            if (verdict === 'mismatch') {
-                // A signature that does NOT bind to the identity we know this contact by
-                // is the one case we refuse: it is the fingerprint of a tampered media
-                // channel (a gateway sitting in the DTLS handshake). 'unverifiable' still
-                // connects: an unknown or legacy peer with no proof is not proof of an
-                // attack. The caller aborts the call on false. See docs/CALLS.md.
+            if (verdict === 'mismatch' || verdict === 'downgrade') {
+                // Both refuse. 'mismatch' is a tampered media channel (a swapped DTLS
+                // fingerprint); 'downgrade' is a capable peer whose binding proof was
+                // stripped/absent. 'unverifiable' still connects: a peer we cannot
+                // confirm is capable is not proof of an attack. Caller aborts on false.
                 state._verifyState = 'mismatch';
                 _updateVerifyBadge();
                 showToast(t('voice.identityUnverified'), 'error');
+                if (verdict === 'downgrade') {
+                    console.warn('proxion: call refused — binding proof missing from a call-capable peer (possible downgrade)', _exp);
+                }
                 return false;
             }
+            if (verdict === 'verified') onPeerVerified?.(_exp);   // pin capability (R86 first-use)
             state._verifyState = verdict === 'verified' ? 'verified' : 'unverified';
             _updateVerifyBadge();
             return true;
@@ -653,15 +660,18 @@ export function createVoice(deps) {
                 signerDid: event?.fp_signer || '',
                 expectedDid,
                 deviceCert: event?.fp_cert || null,
+                peerBindsCalls: getPeerBindsCalls?.(expectedDid) || false,
             });
+            const refuse = verdict === 'mismatch' || verdict === 'downgrade';
             // Per-peer, so one tile can read Verified while another reads Unverified.
-            const st = verdict === 'verified' ? 'verified'
-                : (verdict === 'mismatch' ? 'mismatch' : 'unverified');
+            const st = verdict === 'verified' ? 'verified' : (refuse ? 'mismatch' : 'unverified');
             state._peerVerifyState[peerWebid] = st;
             _updatePeerVerifyBadge(peerWebid);
-            // Refuse a proven mismatch for THIS peer only (drop the one connection);
-            // the rest of the mesh is unaffected. Unverifiable still connects.
-            return verdict !== 'mismatch';
+            if (verdict === 'verified') onPeerVerified?.(expectedDid);   // pin capability (R86)
+            else if (verdict === 'downgrade') console.warn('proxion: group peer call refused — binding proof missing from a call-capable peer', expectedDid);
+            // Refuse a proven mismatch/downgrade for THIS peer only (drop the one
+            // connection); the rest of the mesh is unaffected. Unverifiable still connects.
+            return !refuse;
         }
 
         // Reflect a group peer's verify state onto its video tile, if the tile exists.

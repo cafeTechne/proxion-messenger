@@ -141,8 +141,16 @@ export async function verifyFingerprint({ fingerprint, role, signatureB64, signe
  * know them by, so we accept the signature when a valid device cert proves the signing
  * device belongs to `expectedDid`. Single-device contacts sign with the account key
  * directly (signerDid === expectedDid) and need no cert.
+ *
+ * `peerBindsCalls` (optional) is true when we know this contact is capable of binding
+ * their calls (their relationship advertises it, or we have accepted a bound call from
+ * them before). For such a peer, an unbindable call, no cert and no matching signer, is
+ * not a legacy client but a DOWNGRADE (a stripped/absent binding proof) and returns
+ * 'downgrade'. For a peer we cannot confirm is capable, the same call stays
+ * 'unverifiable' (allowed) so older clients are never refused. 'downgrade' is a refusal
+ * like 'mismatch', reported distinctly so a real strip is diagnosable.
  */
-export async function classifyPeerSdp({ sdp, role, signatureB64, signerDid, expectedDid, deviceCert }) {
+export async function classifyPeerSdp({ sdp, role, signatureB64, signerDid, expectedDid, deviceCert, peerBindsCalls = false }) {
     const fps = extractAllFingerprints(sdp);
     if (!fps.length) return 'unverifiable';
     // Divergent fingerprints across m-lines are anomalous: with one DTLS certificate
@@ -152,11 +160,10 @@ export async function classifyPeerSdp({ sdp, role, signatureB64, signerDid, expe
     const distinct = [...new Set(fps)];
     const fingerprint = fps[0];
     if (expectedDid) {
-        // No signature/signer at all: an older or non-signing peer. We cannot prove
-        // it is them, but a missing proof is not proof of an attack, so allow it
-        // (Unverified) rather than refuse. Refusing here would break calls with any
-        // client that predates call signing.
-        if (!signatureB64 || !signerDid) return 'unverifiable';
+        // No signature/signer at all. For a peer we cannot confirm binds calls this is
+        // an older/non-signing client: allow (Unverified), never refuse. For a peer we
+        // KNOW binds calls, a call that arrived stripped of its proof is a downgrade.
+        if (!signatureB64 || !signerDid) return peerBindsCalls ? 'downgrade' : 'unverifiable';
         // Is the signer bound to the contact we expect? Either it IS their identity,
         // or a still-valid cert chains the signing key to it (a linked device, or a
         // browser certified by the contact's gateway for cross-gateway calls).
@@ -170,10 +177,12 @@ export async function classifyPeerSdp({ sdp, role, signatureB64, signerDid, expe
             else certFailedToChain = true;   // a cert was offered but does not chain
         }
         if (!bound) {
-            // A cert that fails to chain is a forgery attempt (refuse); a signer with
-            // NO cert is merely unbindable (a different-identity call we cannot tie to
-            // this contact, e.g. cross-gateway with an old client) — allow, Unverified.
-            return certFailedToChain ? 'mismatch' : 'unverifiable';
+            // A cert that fails to chain is a forgery attempt: always refuse (mismatch).
+            // A signer with NO cert cannot be tied to this contact: for a peer known to
+            // bind calls that is a downgrade (refuse); otherwise it is an old/other-
+            // identity client we allow as Unverified.
+            if (certFailedToChain) return 'mismatch';
+            return peerBindsCalls ? 'downgrade' : 'unverifiable';
         }
         // The signer IS the contact: now the fingerprint must check out. A divergent
         // or unverifiable fingerprint from a bound signer means the media channel was

@@ -49,6 +49,8 @@ function makeVoice(over = {}) {
     getIsSharing: () => false,
     getExpectedPeerDid: () => over.expectedPeerDid ?? '',
     getDeviceCert: () => over.deviceCert ?? null,
+    getPeerBindsCalls: () => over.peerBindsCalls ?? false,
+    onPeerVerified: over.onPeerVerified ?? (() => {}),
   });
   return { voice, sent };
 }
@@ -219,6 +221,38 @@ describe('ICE-failure handling (silent-drop regressions)', () => {
     expect(toasts).toContain('voice.identityUnverified');
     expect(sent.some((m) => m.cmd === 'voice_hangup')).toBe(true);
     expect(voice.state._callState).not.toBe(CallState.CONNECTED);
+  });
+
+  it('1:1 call: a call-CAPABLE peer whose answer has no binding proof is refused (downgrade)', async () => {
+    installRTC();
+    const toasts = [];
+    // We know this contact binds calls (a pin or cert marker), so an answer stripped of
+    // its binding proof is a downgrade, not a legacy client: refuse it.
+    const { voice, sent } = makeVoice({
+      showToast: (m) => toasts.push(m), expectedPeerDid: 'did:key:zPeer', peerBindsCalls: true,
+    });
+    voice.state.localStream = { getTracks: () => [{ stop() {} }] };
+    await voice.initWebRTC('cert1', 'sess1', true);
+
+    const answerSdp = 'v=0\r\na=fingerprint:sha-256 AA:BB:CC:DD\r\n';
+    await voice.handleVoiceAnswer({ sdp_answer: answerSdp, fp_sig: '', fp_signer: '' });
+
+    expect(toasts).toContain('voice.identityUnverified');
+    expect(sent.some((m) => m.cmd === 'voice_hangup')).toBe(true);
+    expect(voice.state._callState).not.toBe(CallState.CONNECTED);
+  });
+
+  it('1:1 call: the SAME stripped answer connects (Unverified) for a non-capable peer', async () => {
+    installRTC();
+    const { voice } = makeVoice({ expectedPeerDid: 'did:key:zPeer', peerBindsCalls: false });
+    voice.state.localStream = { getTracks: () => [{ stop() {} }] };
+    await voice.initWebRTC('cert1', 'sess1', true);
+
+    const answerSdp = 'v=0\r\na=fingerprint:sha-256 AA:BB:CC:DD\r\n';
+    await voice.handleVoiceAnswer({ sdp_answer: answerSdp, fp_sig: '', fp_signer: '' });
+
+    expect(voice.state._verifyState).toBe('unverified');
+    expect(voice.state._callState).toBe(CallState.CONNECTED);   // allowed, not refused
   });
 
   it('1:1 call: an UNKNOWN peer (no expected identity) still connects, marked unverified', async () => {
