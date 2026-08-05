@@ -409,14 +409,11 @@ def test_authorized_relationship_reduces_and_gates(tmp_path):
     it returns (cert, our_cert_id) for a known actor and None for unknown/revoked/blocked."""
     from proxion_messenger_core.federation import RelationshipCertificate, Capability
 
-    from proxion_messenger_core.blocklist import Blocklist
-
     gw, agent, key, _ = _make_gateway(tmp_path)
     if not hasattr(gw, "_revoked_dids"):
         gw._revoked_dids = set()
-    # Isolate the blocklist: the gateway defaults it to a shared ~/.proxion file, which
-    # would leak block state across tests and machines. Point it at tmp for this test.
-    gw.blocklist = Blocklist(str(tmp_path / "blocklist.json"))
+    # The gateway now anchors its blocklist to the (tmp) data dir, so it is already
+    # isolated from other tests and the machine's ~/.proxion.
     peer_did = "did:key:zPeerAuthzTest"
 
     # No relationship, and empty input, reduce to None.
@@ -445,3 +442,21 @@ def test_authorized_relationship_reduces_and_gates(tmp_path):
     # Blocked actor reduces to None.
     gw.blocklist.block(peer_did)
     assert gw._authorized_relationship(peer_did) is None
+
+
+def test_blocklist_anchored_to_data_dir_not_shared(tmp_path):
+    """The blocklist lives under the configured data dir, so separate gateways do not
+    share block state (fixes the former hardcoded ~/.proxion path)."""
+    d1 = tmp_path / "gw1"
+    d2 = tmp_path / "gw2"
+    d1.mkdir()
+    d2.mkdir()
+    gw1, *_ = _make_gateway(d1)
+    gw2, *_ = _make_gateway(d2)
+
+    assert gw1.blocklist.storage_path.parent == d1
+    assert gw2.blocklist.storage_path.parent == d2
+
+    gw1.blocklist.block("did:key:zBlockIsolationTest")
+    assert gw1.blocklist.is_blocked("did:key:zBlockIsolationTest")
+    assert not gw2.blocklist.is_blocked("did:key:zBlockIsolationTest")  # not shared

@@ -96,12 +96,37 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         
         from .blocklist import Blocklist
         from .outbox import Outbox
-        import os
-        # Default to a subfolder of the agent's identity directory if possible
-        outbox_dir = os.path.expanduser("~/.proxion/outbox")
+        import os, shutil
+        # Anchor peripheral state (blocklist, outbox) to the CONFIGURED data directory,
+        # the same place the SQLite store lives, so multiple gateways on one machine (and
+        # the test suite) do not share them. Fall back to ~/.proxion when no db path is
+        # configured. Previously these were hardcoded to ~/.proxion, which leaked block
+        # state across instances.
+        _db = config.db_path
+        if _db and _db != ":memory:":
+            _data_dir = os.path.dirname(os.path.abspath(_db)) or os.path.expanduser("~/.proxion")
+        else:
+            _data_dir = os.path.expanduser("~/.proxion")
+        try:
+            os.makedirs(_data_dir, exist_ok=True)
+        except Exception:
+            pass
+        outbox_dir = os.path.join(_data_dir, "outbox")
         self.outbox = Outbox(outbox_dir)
-        
-        blocklist_path = os.path.expanduser("~/.proxion/blocklist.json")
+
+        blocklist_path = os.path.join(_data_dir, "blocklist.json")
+        # One-time migration from the former shared ~/.proxion location so a user's
+        # existing blocks are not silently lost when a data dir is configured. Tests set
+        # PROXION_SKIP_LEGACY_MIGRATION=1 so they stay hermetic and never inherit the
+        # machine's blocklist.
+        _legacy_bl = os.path.expanduser("~/.proxion/blocklist.json")
+        if (os.environ.get("PROXION_SKIP_LEGACY_MIGRATION") != "1"
+                and _legacy_bl != blocklist_path
+                and os.path.exists(_legacy_bl) and not os.path.exists(blocklist_path)):
+            try:
+                shutil.copy2(_legacy_bl, blocklist_path)
+            except Exception:
+                pass
         self.blocklist = Blocklist(blocklist_path)
         self._rate_counters = {}       # websocket -> [count, window_start]  (global 30/10s)
         self._rate_auth_counters = {}  # websocket -> [count, window_start]  (auth 5/min)

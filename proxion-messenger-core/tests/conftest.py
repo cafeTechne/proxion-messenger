@@ -24,6 +24,10 @@ from pathlib import Path
 # set before any gateway starts, since the limit is read from the env per connection.
 os.environ.setdefault("PROXION_MAX_CONNECTIONS_PER_IP", "1000")
 
+# Keep tests hermetic: never migrate the machine's legacy ~/.proxion/blocklist.json into
+# a test gateway's data dir. Each test gateway starts with an empty, isolated blocklist.
+os.environ.setdefault("PROXION_SKIP_LEGACY_MIGRATION", "1")
+
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
