@@ -1299,10 +1299,17 @@
           <p style="margin:0 0 4px;font-size:0.8em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">About</p>
           <p style="margin:0 0 2px;font-size:0.9em;color:var(--slate-50);">Proxion <span id="settings-app-version" style="color:var(--slate-500);font-size:0.9em;"></span></p>
           <p style="margin:0 0 8px;font-size:0.82em;color:var(--slate-500);">Sovereign messaging on your Solid Pod</p>
-          <button id="settings-about-website-btn"
-                  style="background:var(--slate-700);border:none;color:var(--slate-50);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;" data-i18n="btn.viewProjectWebsite">
-            View project website
-          </button>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+            <button id="settings-about-website-btn"
+                    style="background:var(--slate-700);border:none;color:var(--slate-50);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;" data-i18n="btn.viewProjectWebsite">
+              View project website
+            </button>
+            <button id="check-updates-btn"
+                    style="background:var(--slate-700);border:none;color:var(--slate-50);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;" data-i18n="update.check">
+              Check for updates
+            </button>
+          </div>
+          <p id="update-check-result" role="status" aria-live="polite" style="display:none;margin:0 0 4px;font-size:0.83em;"></p>
         </div>
 
         <!-- Round 66: Active Sessions -->

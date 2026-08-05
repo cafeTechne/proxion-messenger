@@ -13,7 +13,7 @@ Microsoft**.
 | **OS code signing** | Removes the OS first-launch caution prompt | Apple / Microsoft | Paid | **Optional** |
 
 You can ship a fully working, auto-updating, sovereign app using only the
-updater key. The OS prompt is a one-time "are you sure?" — see the landing
+updater key. The OS prompt is a one-time "are you sure?", see the landing
 page copy for the honest per-OS story (Linux: none; Windows: More info → Run
 anyway; macOS: right-click → Open).
 
@@ -28,35 +28,45 @@ One-time setup:
 2. Repo Settings → Pages → Source = **GitHub Actions**.
 3. Push; `.github/workflows/pages.yml` deploys it. Share that Pages URL.
 
-## Recommended: sovereign auto-update (free, no vendor)
+## Sovereign auto-update (free, no vendor) is ACTIVE
 
-```
-cargo install tauri-cli --version "^1"
-tauri signer generate -w ~/.proxion-updater.key
-```
-- Put the **public** key in `tauri-app/src-tauri/tauri.conf.json` →
-  `tauri.updater.pubkey`; set `updater.active = true`; replace `ORG` in
-  `endpoints` with your `owner/repo`.
-- Add the **private** key + password as repo secrets `TAURI_PRIVATE_KEY` /
-  `TAURI_KEY_PASSWORD`.
+The updater is turned ON: `tauri.conf.json` has `updater.active = true` and a
+committed `updater.pubkey`, so running installs check the endpoint, verify a new
+version against that public key, and update, with no Apple/Microsoft involved.
 
-Running apps then check the endpoint, see the new version, verify it against
-your public key, and update — with no Apple/Microsoft involvement.
+**REQUIRED before the next release, or the build fails.** Because the updater is
+active, `tauri build` must SIGN the update artifacts. The signing private key is
+not in the repo; it is provided to CI as repo secrets. Set both once:
 
-The app shows a custom in-app banner ("A new version is ready — Restart &
-update") instead of Tauri's native dialog (`updater.dialog` is `false`). The
-banner is wired in `web/main.js` (`_checkForUpdates`) and stays dormant in
-the browser and until the updater is active.
+- `TAURI_PRIVATE_KEY`, the CONTENTS of the private key file from
+  `tauri signer generate` (paste the file's text, not its path).
+- `TAURI_KEY_PASSWORD`, the password chosen at generation (empty string if none).
+
+Add them under repo Settings > Secrets and variables > Actions. If they are
+absent, the Release workflow fails to sign and no `latest.json` is produced.
+(`release.yml` already wires these env vars into tauri-action and sets
+`includeUpdaterJson: true`, so once the secrets exist, the next tag ships a
+signed release plus the update manifest automatically.)
+
+The private key was generated locally with `tauri signer generate`; keep it
+OUTSIDE the repo and back it up. If it is ever lost, running installs can no
+longer verify updates and users must reinstall once from GitHub with a new key.
+
+The app shows a custom in-app banner (localized "A new version is ready, Restart
+& update") instead of Tauri's native dialog (`updater.dialog` is `false`), and
+Settings > App > Check for updates runs the same check on demand and reports
+"you are on the latest version". Both are wired in `web/main.js`
+(`_showUpdateBanner` / `_manualCheckForUpdates`) and stay dormant in the browser.
 
 ## Optional: remove the OS prompt (paid, only if you want to)
 
-- **Windows** — Authenticode cert (a CA, or Azure Trusted Signing ~$10/mo):
+- **Windows**, Authenticode cert (a CA, or Azure Trusted Signing ~$10/mo):
   secrets `WINDOWS_CERTIFICATE` (base64 .pfx), `WINDOWS_CERTIFICATE_PASSWORD`.
-- **macOS** — Apple Developer ID + notarization: `APPLE_CERTIFICATE`,
+- **macOS**, Apple Developer ID + notarization: `APPLE_CERTIFICATE`,
   `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`,
   `APPLE_PASSWORD`, `APPLE_TEAM_ID`.
 
-Absent secrets are skipped — the release still builds.
+Absent secrets are skipped, the release still builds.
 
 ## Cutting a release
 
@@ -87,7 +97,7 @@ After the three OS builds upload their assets, the `verify` job in
 `release.yml` publishes a `SHA256SUMS.txt` to the release and signs a
 [build-provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations)
 for every asset. End-user verification steps live in
-[`docs/VERIFYING.md`](VERIFYING.md). Nothing to provision — attestations use
+[`docs/VERIFYING.md`](VERIFYING.md). Nothing to provision, attestations use
 GitHub's OIDC identity, no secrets involved.
 
 ## Verifying the updater manifest
@@ -97,9 +107,11 @@ entries. `proxion-messenger-core/tests/test_updater_manifest.py` validates the s
 
 ## Status
 
-- ✅ Wired: landing page + Pages deploy, release CI (unsigned builds succeed),
-  updater config (default-off), manifest validation test.
+- ✅ Wired: landing page + Pages deploy, release CI, manifest validation test,
+  in-app update banner + Settings > App > Check for updates.
 - ✅ `REPO` set to `cafeTechne/proxion-messenger` in the landing page and the
   updater endpoint; repo pushed; Pages enabled.
-- ⏳ Optional: generate the updater key (`tauri signer generate`) and flip
-  `updater.active` to true to enable auto-update.
+- ✅ Auto-update ON: `updater.active = true` with a committed `pubkey`
+  (key ID `529EEA89E67E1E6E`).
+- ⏳ REQUIRED before the next release: add the `TAURI_PRIVATE_KEY` /
+  `TAURI_KEY_PASSWORD` repo secrets, or the signed build fails (see above).

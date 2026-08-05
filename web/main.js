@@ -5153,43 +5153,66 @@ import { createIdentityResolver } from './identity.js';
                 });
             })();
 
-            // R37: in-app auto-update banner (Tauri desktop only; dormant until
-            // the updater is configured with a pubkey + active=true).
-            (function _checkForUpdates() {
+            // R37 + R92: in-app auto-update (Tauri desktop only; a no-op in the browser
+            // and while the updater is inactive). The launch check shows a banner when an
+            // update is ready; Settings > App > Check for updates runs the same check on
+            // demand and reports "up to date" when there is nothing new.
+            function _showUpdateBanner(info) {
+                const updater = window.__TAURI__ && window.__TAURI__.updater;
+                if (!updater || document.getElementById("update-banner")) return;
+                const ver = (info && info.manifest && info.manifest.version) || "";
+                const banner = document.createElement("div");
+                banner.id = "update-banner";
+                banner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:2100;background:#134e26;color:#d1fae5;padding:9px 16px;font-size:0.88em;display:flex;align-items:center;gap:12px;";
+                banner.innerHTML = `<span style="flex:1"></span>
+                    <button id="update-install-btn" style="background:#4ade80;border:none;color:#052e16;font-weight:600;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:0.95em;"></button>
+                    <button id="update-dismiss-btn" style="background:transparent;border:none;color:#d1fae5;cursor:pointer;font-size:1.1em;padding:0 4px;">&#x2715;</button>`;
+                banner.querySelector("span").textContent = ver ? t('update.availableVersion', { version: ver }) : t('update.available');
+                const installBtn = banner.querySelector("#update-install-btn");
+                installBtn.textContent = t('update.install');
+                const dismissBtn = banner.querySelector("#update-dismiss-btn");
+                dismissBtn.setAttribute("aria-label", t('update.later'));
+                document.body.prepend(banner);
+                dismissBtn.onclick = () => banner.remove();
+                installBtn.onclick = async () => {
+                    installBtn.disabled = true; installBtn.textContent = t('update.updating');
+                    try {
+                        await updater.installUpdate();
+                        if (window.__TAURI__.process && window.__TAURI__.process.relaunch) {
+                            await window.__TAURI__.process.relaunch();
+                        } else {
+                            installBtn.textContent = t('update.restart');
+                        }
+                    } catch (e) {
+                        installBtn.disabled = false;
+                        installBtn.textContent = t('update.retry');
+                        showToast(t('common.updateFailed'));
+                    }
+                };
+            }
+            async function _manualCheckForUpdates() {
+                const updater = window.__TAURI__ && window.__TAURI__.updater;
+                const res = document.getElementById("update-check-result");
+                if (!updater || typeof updater.checkUpdate !== "function") return;
+                if (res) { res.style.display = ""; res.style.color = "var(--text-secondary)"; res.textContent = t('update.checking'); }
+                let info;
+                try { info = await updater.checkUpdate(); }
+                catch (_) { if (res) { res.style.color = "var(--color-danger,#f87171)"; res.textContent = t('common.updateFailed'); } return; }
+                if (info && info.shouldUpdate) {
+                    if (res) { res.style.color = "var(--color-success,#4ade80)"; res.textContent = t('update.available'); }
+                    _showUpdateBanner(info);
+                } else if (res) {
+                    res.style.color = "var(--text-secondary)"; res.textContent = t('update.upToDate');
+                }
+            }
+            document.getElementById("check-updates-btn")?.addEventListener("click", _manualCheckForUpdates);
+            (function _checkForUpdatesOnLaunch() {
                 const updater = window.__TAURI__ && window.__TAURI__.updater;
                 if (!updater || typeof updater.checkUpdate !== "function") return;
                 setTimeout(async () => {
                     let info;
-                    try {
-                        info = await updater.checkUpdate();
-                    } catch (_) { return; } // updater inactive / network error — stay quiet
-                    if (!info || !info.shouldUpdate) return;
-                    const ver = (info.manifest && info.manifest.version) || "";
-                    if (document.getElementById("update-banner")) return;
-                    const banner = document.createElement("div");
-                    banner.id = "update-banner";
-                    banner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:2100;background:#134e26;color:#d1fae5;padding:9px 16px;font-size:0.88em;display:flex;align-items:center;gap:12px;";
-                    banner.innerHTML = `<span style="flex:1">A new version of Proxion${ver ? " (" + ver + ")" : ""} is ready.</span>
-                        <button id="update-install-btn" style="background:#4ade80;border:none;color:#052e16;font-weight:600;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:0.95em;">Restart &amp; update</button>
-                        <button id="update-dismiss-btn" style="background:transparent;border:none;color:#d1fae5;cursor:pointer;font-size:1.1em;padding:0 4px;" aria-label="Later">&#x2715;</button>`;
-                    document.body.prepend(banner);
-                    document.getElementById("update-dismiss-btn").onclick = () => banner.remove();
-                    document.getElementById("update-install-btn").onclick = async () => {
-                        const btn = document.getElementById("update-install-btn");
-                        btn.disabled = true; btn.textContent = t('update.updating');
-                        try {
-                            await updater.installUpdate();
-                            if (window.__TAURI__.process && window.__TAURI__.process.relaunch) {
-                                await window.__TAURI__.process.relaunch();
-                            } else {
-                                btn.textContent = t('update.restart');
-                            }
-                        } catch (e) {
-                            btn.disabled = false;
-                            btn.textContent = t('update.retry');
-                            showToast(t('common.updateFailed'));
-                        }
-                    };
+                    try { info = await updater.checkUpdate(); } catch (_) { return; } // inactive / offline — stay quiet
+                    if (info && info.shouldUpdate) _showUpdateBanner(info);
                 }, 8000);
             })();
 
