@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.2.1
+
+Calls that connect and verify. This release makes a first call work on real networks,
+proves who you are talking to, and smooths the first five minutes.
+
+### Calls
+
+- **Calls connect out of the box, even on restrictive networks.** A call between two
+  people behind strict or mobile (CGNAT) networks needs a relay to get through. Proxion
+  now uses a free public relay by default, the same way it already uses public STUN, so
+  most of these calls just connect with nothing to configure. The media stays end-to-end
+  encrypted; a relay only ever forwards ciphertext, and only for calls with no direct path.
+- **Know before you call.** Settings, Calls has a connectivity self-test that reports
+  whether your network is reachable and whether a relay is available, so a restrictive
+  network is diagnosed up front instead of a call failing mysteriously.
+- **Add your own relay in the app.** Paste a TURN relay (your provider's or your own) in
+  Settings, Calls, used on your next call with no config files or restart. You can also
+  turn the default public relay off.
+- **Verified means verified, across gateways.** A call signs its media fingerprint with
+  your identity, and the other side binds it to the contact they know, so a call reads
+  Verified even between two different gateways. A tampered media channel is now refused,
+  not just flagged, and a call from a contact known to sign that arrives stripped of its
+  proof is refused as a downgrade. See [docs/CALLS.md](docs/CALLS.md).
+
+### First run
+
+- **A plainer, shorter start.** The welcome screen drops the jargon, the premature
+  presence step is gone, and starting with no account is a first-class choice rather than
+  hidden advanced text. The finish screen and empty state explain what to do next.
+
+### Privacy and correctness
+
+- **Blocks are per account.** On a gateway shared by more than one person, one account's
+  block no longer affects another. Blocking also matches a contact regardless of which
+  identity form a check uses, so a block can no longer silently miss.
+
+### Under the hood
+
+- One identity model with a single place that answers who a message, call, or contact
+  belongs to, documented in [docs/IDENTITY.md](docs/IDENTITY.md), replacing the scattered
+  per-surface logic behind several past bugs.
+- App-visible text follows the project writing rules, checked automatically.
+
 ## 0.2.0
 
 Cross-app reach and real calls. This release makes Proxion interoperate across the
