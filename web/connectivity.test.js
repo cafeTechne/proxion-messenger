@@ -1,21 +1,34 @@
 import { describe, it, expect } from 'vitest';
 import {
-    buildIceServers, candidateType, classifyConnectivity, probeIceCandidates, DEFAULT_STUN,
+    buildIceServers, candidateType, classifyConnectivity, probeIceCandidates,
+    DEFAULT_STUN, DEFAULT_TURN,
 } from './connectivity.js';
 
+// Most cases isolate the STUN/user-relay logic by disabling the free default relay.
+const NO_DEFAULT = { includeDefaultRelay: false };
+
 describe('buildIceServers', () => {
-    it('defaults to the reputable STUN set', () => {
-        const s = buildIceServers();
+    it('defaults to the reputable STUN set (with the default relay disabled)', () => {
+        const s = buildIceServers({ ...NO_DEFAULT });
         expect(s.map((x) => x.urls)).toEqual(DEFAULT_STUN);
     });
 
+    it('includes the free default relay by default, and omits it when disabled', () => {
+        const withRelay = buildIceServers();
+        for (const d of DEFAULT_TURN) {
+            expect(withRelay).toContainEqual({ ...d });
+        }
+        const without = buildIceServers({ includeDefaultRelay: false });
+        expect(without.some((x) => /^turns?:/.test(Array.isArray(x.urls) ? x.urls[0] : x.urls))).toBe(false);
+    });
+
     it('normalizes a long-term credential TURN server', () => {
-        const s = buildIceServers({ stun: [], turn: { url: 'turns:relay.example:5349', username: 'u', password: 'p' } });
+        const s = buildIceServers({ stun: [], turn: { url: 'turns:relay.example:5349', username: 'u', password: 'p' }, ...NO_DEFAULT });
         expect(s).toEqual([{ urls: 'turns:relay.example:5349', username: 'u', credential: 'p' }]);
     });
 
     it('accepts credential as an alias for password', () => {
-        const s = buildIceServers({ stun: [], turn: { url: 'turn:r:3478', username: 'u', credential: 'c' } });
+        const s = buildIceServers({ stun: [], turn: { url: 'turn:r:3478', username: 'u', credential: 'c' }, ...NO_DEFAULT });
         expect(s[0].credential).toBe('c');
     });
 
@@ -25,17 +38,23 @@ describe('buildIceServers', () => {
             { urls: ['turn:t.example:3478', 'turns:t.example:5349'], username: 'u', credential: 'c' },
             { urls: 'https://not-a-relay' },   // dropped
         ];
-        const s = buildIceServers({ stun: [], turn: { raw } });
+        const s = buildIceServers({ stun: [], turn: { raw }, ...NO_DEFAULT });
         expect(s).toHaveLength(2);
         expect(s[1].username).toBe('u');
     });
 
     it('drops a TURN url with a bad scheme', () => {
-        expect(buildIceServers({ stun: [], turn: { url: 'http://relay', username: 'u', password: 'p' } })).toEqual([]);
+        expect(buildIceServers({ stun: [], turn: { url: 'http://relay', username: 'u', password: 'p' }, ...NO_DEFAULT })).toEqual([]);
     });
 
     it('drops non-stun entries from the stun list', () => {
-        expect(buildIceServers({ stun: ['stun:ok:3478', 'ftp:bad'] })).toEqual([{ urls: 'stun:ok:3478' }]);
+        expect(buildIceServers({ stun: ['stun:ok:3478', 'ftp:bad'], ...NO_DEFAULT })).toEqual([{ urls: 'stun:ok:3478' }]);
+    });
+
+    it('a user relay is added ALONGSIDE the default relay (both offered)', () => {
+        const s = buildIceServers({ stun: [], turn: { url: 'turns:mine:5349', username: 'u', password: 'p' } });
+        expect(s).toContainEqual({ urls: 'turns:mine:5349', username: 'u', credential: 'p' });
+        expect(s).toContainEqual({ ...DEFAULT_TURN[0] });
     });
 });
 

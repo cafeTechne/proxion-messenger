@@ -1270,6 +1270,11 @@
           <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Calls</p>
           <button id="calls-test-btn" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 14px;border-radius:6px;cursor:pointer;font-size:0.88em;" data-i18n="conn.test.button">Test call connectivity</button>
           <p id="calls-test-result" role="status" aria-live="polite" style="display:none;margin:8px 0 0;font-size:0.85em;line-height:1.5;"></p>
+          <label style="display:flex;align-items:center;gap:8px;margin:12px 0 4px;font-size:0.85em;cursor:pointer;">
+            <input type="checkbox" id="calls-default-relay-toggle" checked>
+            <span data-i18n="conn.relay.useDefault">Use a free public relay so calls connect on restrictive networks (recommended)</span>
+          </label>
+          <p style="margin:0 0 8px;font-size:0.75em;color:var(--slate-500);line-height:1.5;" data-i18n="conn.relay.defaultHint">Only calls with no direct path use it, and media stays end-to-end encrypted. Turn it off to use no third-party relay, or add your own below.</p>
           <p style="margin:12px 0 6px;font-size:0.78em;color:var(--text-secondary);line-height:1.5;" data-i18n="conn.relay.hint">On a restrictive network, calls need a relay (TURN) server to connect. Add one from your provider or self-host; it is used for your next call, no restart needed.</p>
           <input id="calls-relay-url" type="text" autocomplete="off" spellcheck="false" placeholder="turns:relay.example.com:5349" data-i18n-attr="placeholder:conn.relay.urlPlaceholder" style="width:100%;box-sizing:border-box;margin-bottom:6px;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:7px 8px;font-size:0.85em;">
           <div style="display:flex;gap:6px;margin-bottom:8px;">

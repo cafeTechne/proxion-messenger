@@ -10,6 +10,45 @@ export const DEFAULT_STUN = [
     'stun:stun1.l.google.com:19302',
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DEFAULT PUBLIC TURN RELAY  ***READ THIS IF CALLS STOP CONNECTING***
+// ─────────────────────────────────────────────────────────────────────────────
+// A TURN relay is required to connect calls between two peers who are BOTH behind a
+// restrictive NAT/firewall (symmetric NAT, mobile/CGNAT). Proxion does NOT run a relay:
+// like the public Google STUN servers above, this points at a FREE, BEST-EFFORT,
+// THIRD-PARTY public TURN service so the app "just works" for most such users without the
+// project operating or paying for anything. The call media stays end-to-end encrypted
+// (DTLS-SRTP), so the relay only ever forwards ciphertext, never call content.
+//
+// THIS IS A THIRD-PARTY DEPENDENCY THAT WILL EVENTUALLY CHANGE OR BREAK. When it does,
+// users behind restrictive NAT stop being able to connect calls. Here is the runbook:
+//
+//   SYMPTOM  A user behind NAT cannot connect a call; Settings > Calls > "Test call
+//            connectivity" reports "host only" (or "your network is reachable" but calls
+//            still drop) even though this default relay is enabled.
+//   DIAGNOSE Run the self-test yourself on a restrictive network. A healthy relay makes it
+//            report the "relay" verdict. If it does not, this server is the likely cause
+//            (rate-limited, endpoints changed, or shut down).
+//   FIX      Replace the entries below with another provider's TURN (free or paid) or your
+//            own coturn, then ship a release. That is the ONLY place to change; everything
+//            downstream reads DEFAULT_TURN. Users can always override with their own relay
+//            in Settings > Calls, or disable this default there (privacy).
+//
+// Source: metered.ca "Open Relay Project", a free public TURN. VERIFY the current endpoints
+// and terms at https://www.metered.ca/tools/openrelay/ before relying on them; free public
+// relays come and go. Alternatives if it is gone: Cloudflare TURN, Twilio, Xirsys, or a
+// self-hosted coturn (see docs/CALLS.md and docs/SELF_HOSTING.md).
+//
+// Privacy note: only calls with no direct path actually use a relay (a minority, mostly
+// mobile/CGNAT), TURN is the last resort in ICE (direct and STUN are always preferred), and
+// the relay sees ciphertext + IP metadata, never content. Users who prefer not to use any
+// third-party relay can disable this in Settings > Calls and bring their own.
+export const DEFAULT_TURN = [
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turns:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+];
+
 const _isStun = (u) => typeof u === 'string' && /^stuns?:/i.test(u);
 const _isTurn = (u) => typeof u === 'string' && /^turns?:/i.test(u);
 
@@ -21,10 +60,15 @@ const _isTurn = (u) => typeof u === 'string' && /^turns?:/i.test(u);
  * Bad schemes are dropped. coturn shared-secret (HMAC) creds are time-limited and derived
  * at call time, so those stay in the caller (voice.js _getIceServers), not here.
  */
-export function buildIceServers({ stun = DEFAULT_STUN, turn = null } = {}) {
+export function buildIceServers({ stun = DEFAULT_STUN, turn = null, includeDefaultRelay = true } = {}) {
     const servers = [];
     for (const u of stun || []) {
         if (_isStun(u)) servers.push({ urls: u });
+    }
+    // The free public default relay (unless the user disabled it). ICE always prefers a
+    // direct/STUN path, so this only carries calls that have no other route.
+    if (includeDefaultRelay) {
+        for (const s of DEFAULT_TURN) servers.push({ ...s });
     }
     if (turn && Array.isArray(turn.raw)) {
         for (const s of turn.raw) {

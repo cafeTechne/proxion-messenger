@@ -51,6 +51,9 @@ function makeVoice(over = {}) {
     getDeviceCert: () => over.deviceCert ?? null,
     getPeerBindsCalls: () => over.peerBindsCalls ?? false,
     onPeerVerified: over.onPeerVerified ?? (() => {}),
+    getUserRelay: () => over.userRelay ?? null,
+    // Default relay is on unless a test opts out (to exercise the STUN-only path).
+    getUseDefaultRelay: () => over.useDefaultRelay ?? true,
   });
   return { voice, sent };
 }
@@ -187,7 +190,8 @@ describe('ICE-failure handling (silent-drop regressions)', () => {
   it('1:1 call: with no relay, the failure toast points at the real fix', async () => {
     installRTC();
     const toasts = [];
-    const { voice } = makeVoice({ showToast: (m) => toasts.push(m) });
+    // Disable the default public relay to exercise the genuinely-no-relay path.
+    const { voice } = makeVoice({ showToast: (m) => toasts.push(m), useDefaultRelay: false });
     voice.state.localStream = { getTracks: () => [{ stop() {} }] };
 
     await voice.initWebRTC('cert1', 'sess1', true);   // no fetch, no client TURN → STUN only
@@ -310,7 +314,7 @@ describe('_getIceServers records whether a relay is available', () => {
   it('STUN-only (no /turn-credentials, no client TURN) → _turnConfigured false', async () => {
     const savedFetch = global.fetch;
     global.fetch = undefined;                       // no relay endpoint reachable
-    const { voice } = makeVoice();                  // getTurnUrl/getTurnSecret return null
+    const { voice } = makeVoice({ useDefaultRelay: false });   // and no default public relay
     const servers = await voice._getIceServers();
     expect(servers.some((s) => String(s.urls).startsWith('stun:'))).toBe(true);
     expect(voice.state._turnConfigured).toBe(false);
@@ -323,6 +327,15 @@ describe('_getIceServers records whether a relay is available', () => {
       json: () => Promise.resolve({ urls: ['turn:relay.example:3478'], username: 'u', credential: 'c' }),
     });
     const { voice } = makeVoice();
+    await voice._getIceServers();
+    expect(voice.state._turnConfigured).toBe(true);
+    global.fetch = savedFetch;
+  });
+
+  it('the free default relay alone makes _turnConfigured true (R91)', async () => {
+    const savedFetch = global.fetch;
+    global.fetch = undefined;                        // no gateway/client TURN
+    const { voice } = makeVoice();                   // default relay ON
     await voice._getIceServers();
     expect(voice.state._turnConfigured).toBe(true);
     global.fetch = savedFetch;

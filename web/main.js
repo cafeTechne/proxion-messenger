@@ -479,6 +479,11 @@ import { createIdentityResolver } from './identity.js';
                 try { const r = localStorage.getItem('proxion_user_relay'); return r ? JSON.parse(r) : null; }
                 catch { return null; }
             },
+            // R91: the free default public relay is on unless the user opted out (privacy).
+            getUseDefaultRelay: () => {
+                try { return localStorage.getItem('proxion_no_default_relay') !== '1'; }
+                catch { return true; }
+            },
             getLocalDmPeers: () => localDmPeers, getCurrentRoomMembers: () => currentRoomMembers, getIsSharing: () => media.state.isSharing,
             // R79: end-to-end call authentication — our identity key signs the DTLS
             // fingerprint; the peer's known identity verifies it.
@@ -989,6 +994,8 @@ import { createIdentityResolver } from './identity.js';
                 if (_u) _u.value = _r.url || "";
                 if (_un) _un.value = _r.username || "";
                 if (_pw) _pw.value = _r.password || "";
+                const _tog = document.getElementById("calls-default-relay-toggle");
+                if (_tog) _tog.checked = localStorage.getItem("proxion_no_default_relay") !== "1";
                 const _res = document.getElementById("calls-test-result");
                 if (_res) _res.style.display = "none";
             } catch (_) {}
@@ -4302,6 +4309,12 @@ import { createIdentityResolver } from './identity.js';
                 });
                 voice.state._turnIceServer = null;
                 showToast(t('conn.relay.cleared'));
+            });
+            attachListener('#calls-default-relay-toggle', 'change', (e) => {
+                try {
+                    if (e.target.checked) localStorage.removeItem('proxion_no_default_relay');
+                    else localStorage.setItem('proxion_no_default_relay', '1');
+                } catch (_) {}
             });
 
             // G1: Advanced settings progressive disclosure

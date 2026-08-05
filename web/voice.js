@@ -34,7 +34,7 @@ export function audioLevel(data) {
 
 export function createVoice(deps) {
     const { showToast, renderMessage, showOsNotification, sendCmd, playNotificationSound, normalizeRelayThreadId, stopScreenShare, getSocket, getActiveView, getSelfWebId, getTurnUrl, getTurnSecret, getLocalDmPeers, getCurrentRoomMembers, getIsSharing, getIdentityPrivKey, getClientDid, getExpectedPeerDid, getDeviceCert,
-        getPeerBindsCalls, onPeerVerified, getUserRelay } = deps;
+        getPeerBindsCalls, onPeerVerified, getUserRelay, getUseDefaultRelay } = deps;
     const state = {
             currentCall: null,
             localStream: null,
@@ -489,9 +489,13 @@ export function createVoice(deps) {
         }
 
         async function _getIceServers() {
-            // Multiple STUN (so STUN is not a single point of failure) plus any relay the
-            // user configured in-app (R91). Gateway-pushed coturn creds are added below.
-            const iceServers = buildIceServers({ turn: getUserRelay?.() || null });
+            // Multiple STUN (so STUN is not a single point of failure), the free default
+            // public relay unless the user disabled it, plus any relay the user configured
+            // in-app (R91). Gateway-pushed coturn creds are added below.
+            const iceServers = buildIceServers({
+                turn: getUserRelay?.() || null,
+                includeDefaultRelay: getUseDefaultRelay ? getUseDefaultRelay() : true,
+            });
             if (!state._turnIceServer) {
                 try {
                     const _tc = await fetch('/turn-credentials').then(r => r.json());

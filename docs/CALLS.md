@@ -14,22 +14,47 @@ are already encrypted, so the relay sees ciphertext, not your call.
 ## Connecting through restrictive networks
 
 To connect peer to peer, each device has to discover an address the other can reach.
-On ordinary home networks this works with STUN alone, which is built in and needs no
-setup, so most calls just connect. Some networks (symmetric NAT, and many corporate or
-mobile firewalls) allow no direct path at all. There the call needs a TURN relay: a
-server both sides can reach that forwards the encrypted packets between them.
+On ordinary home networks this works with STUN alone (built in, no setup), so most calls
+just connect. Some networks (symmetric NAT, and many corporate or mobile/CGNAT firewalls)
+allow no direct path at all. There the call needs a TURN relay: a server both sides can
+reach that forwards the encrypted packets between them (the media stays end-to-end
+encrypted, so a relay only ever carries ciphertext).
 
-The bundled desktop app and a default gateway ship with STUN only, so a first call on a
-restrictive network can fail. To make those calls connect, run a TURN relay and point
-the gateway at it by setting `TURN_URL` and `TURN_SECRET` (a coturn shared secret). The
-gateway then hands each client short-lived, HMAC-signed credentials over the
-authenticated connection; it never ships a static password. `docker-compose.full.yml`
-bundles a coturn server configured this way. See
-[SELF_HOSTING.md](SELF_HOSTING.md) for the setup.
+Proxion tries, in order:
+1. **STUN** (a small set of public servers) for a direct path. This is enough for most
+   calls.
+2. **A free default public TURN relay**, so a call still connects on a restrictive network
+   without anyone configuring anything. Proxion does not run this relay; see the runbook
+   below. Users can disable it in Settings > Calls (privacy) or it can be turned off.
+3. **A relay the user added** in Settings > Calls (their provider's TURN, or their own),
+   and any relay a self-hosted gateway configures with `TURN_URL` + `TURN_SECRET` (coturn
+   shared secret; `docker-compose.full.yml` bundles one, see [SELF_HOSTING.md](SELF_HOSTING.md)).
 
-When a call cannot find any path and no relay is configured, it does not fail silently:
-the caller is told the network is blocking a direct connection and a relay is needed,
-which is the actual fix rather than a dead end.
+Settings > Calls also has **Test call connectivity**: it gathers ICE candidates and reports
+whether the network is reachable and whether a relay is available, so a user can diagnose a
+restrictive network before (or after) a call fails, and fix it by adding a relay.
+
+### Maintainer runbook: the default public relay broke
+
+The default public relay in step 2 is a **free, best-effort, third-party service** (like
+the public STUN servers). It will eventually change endpoints, rate-limit, or shut down;
+when it does, users behind restrictive NAT stop being able to connect calls.
+
+- **Where it lives:** one constant, `DEFAULT_TURN`, in
+  [`web/connectivity.js`](../web/connectivity.js). That file has the full inline runbook.
+  Nothing else hard-codes a relay; everything reads `DEFAULT_TURN`.
+- **How to tell it is the cause:** on a restrictive network, Settings > Calls > "Test call
+  connectivity" reports "host only" instead of the "relay" verdict, even with the default
+  relay enabled.
+- **How to fix:** replace `DEFAULT_TURN` with another free/paid provider (Cloudflare TURN,
+  Twilio, Xirsys, metered.ca) or a self-hosted coturn, then ship a release. Verify with the
+  self-test (it should report the "relay" verdict on a restrictive network).
+- **Meanwhile,** affected users can add their own relay in Settings > Calls without waiting
+  for a release.
+
+When a call still cannot find any path and no relay is reachable, it does not fail
+silently: the caller is told the network is blocking a direct connection and a relay is
+needed, which is the actual fix rather than a dead end.
 
 ## Encryption
 

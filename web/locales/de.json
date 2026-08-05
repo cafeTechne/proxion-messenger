@@ -373,6 +373,8 @@
   "conn.test.host": "Anrufe können in diesem Netzwerk fehlschlagen. Füge unten ein Relay hinzu, um das zu beheben.",
   "conn.test.none": "Verbindung konnte nicht getestet werden. Prüfe dein Netzwerk und versuche es erneut.",
   "conn.relay.hint": "In einem eingeschränkten Netzwerk brauchen Anrufe einen Relay-Server (TURN). Füge einen von deinem Anbieter hinzu oder hoste selbst; er wird beim nächsten Anruf genutzt, ohne Neustart.",
+  "conn.relay.useDefault": "Ein kostenloses öffentliches Relay nutzen, damit Anrufe in eingeschränkten Netzwerken verbinden (empfohlen)",
+  "conn.relay.defaultHint": "Nur Anrufe ohne direkten Weg nutzen es, und die Inhalte bleiben Ende-zu-Ende-verschlüsselt. Schalte es aus, um kein Drittanbieter-Relay zu nutzen, oder füge unten dein eigenes hinzu.",
   "conn.relay.urlPlaceholder": "turns:relay.example.com:5349",
   "conn.relay.userPlaceholder": "Benutzername",
   "conn.relay.passPlaceholder": "Passwort",

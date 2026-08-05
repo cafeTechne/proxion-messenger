@@ -406,6 +406,8 @@
   "conn.test.host": "Calls may fail to connect on this network. Add a relay below to fix it.",
   "conn.test.none": "Couldn't test connectivity. Check your network and try again.",
   "conn.relay.hint": "On a restrictive network, calls need a relay (TURN) server to connect. Add one from your provider or self-host; it is used for your next call, no restart needed.",
+  "conn.relay.useDefault": "Use a free public relay so calls connect on restrictive networks (recommended)",
+  "conn.relay.defaultHint": "Only calls with no direct path use it, and media stays end-to-end encrypted. Turn it off to use no third-party relay, or add your own below.",
   "conn.relay.urlPlaceholder": "turns:relay.example.com:5349",
   "conn.relay.userPlaceholder": "username",
   "conn.relay.passPlaceholder": "password",

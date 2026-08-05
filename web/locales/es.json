@@ -373,6 +373,8 @@
   "conn.test.host": "Las llamadas pueden fallar en esta red. Añade un retransmisor abajo para solucionarlo.",
   "conn.test.none": "No se pudo probar la conectividad. Revisa tu red e inténtalo de nuevo.",
   "conn.relay.hint": "En una red restrictiva, las llamadas necesitan un servidor de retransmisión (TURN). Añade uno de tu proveedor o autohospédalo; se usará en tu próxima llamada, sin reiniciar.",
+  "conn.relay.useDefault": "Usar un retransmisor público gratuito para que las llamadas conecten en redes restrictivas (recomendado)",
+  "conn.relay.defaultHint": "Solo lo usan las llamadas sin ruta directa, y el contenido sigue cifrado de extremo a extremo. Desactívalo para no usar ningún retransmisor externo, o añade el tuyo abajo.",
   "conn.relay.urlPlaceholder": "turns:relay.example.com:5349",
   "conn.relay.userPlaceholder": "usuario",
   "conn.relay.passPlaceholder": "contraseña",
