@@ -102,10 +102,17 @@ today.
 On the gateway there is a matching reduction, `_authorized_relationship(from_webid)`, the
 single gate that maps a relayed actor's identity to the relationship that authorizes it
 (returning the cert and OUR cert_id, or None for an unknown, revoked, or blocked actor).
-Every secondary-op relay handler (react, edit, delete, pin, disappear-timer) goes through
-it, so they agree on "may this actor act on a DM with us" instead of each repeating the
-check, which is where the R54 identity-conflation bugs lived.
+Every inbound relay handler that means "may this actor act on a DM with us" goes through
+it: react, edit, delete, pin, disappear-timer, presence, and typing. They agree on the
+answer instead of each repeating the check, which is where the R54 identity-conflation
+bugs lived.
 
-Still to consolidate onto these two reducers: DM fanout, mute keys, and the remaining
-gateway authorization sites (the primary DM path, envelope authz, voice routing), so there
-is one definition of "who is this" per side rather than one per surface.
+One inbound site deliberately does NOT use it: voice-signal relay authorizes on
+relationship OR co-channel membership (a group-call co-member need not be a direct
+friend) and keys on the sending GATEWAY did, so it is a genuinely different model, not the
+same reduction.
+
+Still to consolidate: DM fanout and mute keys (both client-side reductions of a different
+shape), and the outbound primary DM path (which resolves a target, not an inbound actor).
+These are separate designs rather than the same duplicated check, so they are their own
+slices.

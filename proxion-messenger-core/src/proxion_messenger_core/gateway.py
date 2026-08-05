@@ -2374,12 +2374,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
         # Anti-spoof: only accept presence for a peer we hold a relationship
         # with. Without this, any friended gateway could inject presence for ANY
-        # webid (fake a stranger online, or a contact offline). Unknown senders
-        # get 200 (no reveal) but are ignored. Also skip revoked/blocked peers.
-        rel = self._store.get_relationship_by_did(from_webid) if self._store else None
-        if not rel:
-            return "200 OK", '{"status":"received"}'
-        if from_webid in getattr(self, "_revoked_dids", set()) or self.blocklist.is_blocked(from_webid):
+        # webid (fake a stranger online, or a contact offline). Unknown, revoked, or
+        # blocked senders get 200 (no reveal) but are ignored. Same authorization
+        # reduction as the secondary-op relays.
+        if not self._authorized_relationship(from_webid):
             return "200 OK", '{"status":"received"}'
 
         self._user_presence[from_webid] = {
@@ -2416,13 +2414,11 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if not from_webid:
             return "400 Bad Request", '{"error":"missing_from_webid"}'
         # Anti-spoof: only accept typing from a peer we hold a relationship with,
-        # so a gateway can't inject "X is typing" for arbitrary webids. Unknown
-        # senders are ignored (200, no reveal). (Delivery logic below unchanged.)
-        if self._store:
-            if not self._store.get_relationship_by_did(from_webid):
-                return "200 OK", '{"status":"received"}'
-            if from_webid in getattr(self, "_revoked_dids", set()) or self.blocklist.is_blocked(from_webid):
-                return "200 OK", '{"status":"received"}'
+        # so a gateway can't inject "X is typing" for arbitrary webids. Unknown,
+        # revoked, or blocked senders are ignored (200, no reveal). Same authorization
+        # reduction as the secondary-op relays. (Delivery logic below unchanged.)
+        if not self._authorized_relationship(from_webid):
+            return "200 OK", '{"status":"received"}'
         # Find the local user who is in this DM thread. (Was get_dm_threads() with
         # no owner → always empty, so cross-gateway typing never delivered.)
         if self._store and cert_id:
