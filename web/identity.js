@@ -20,6 +20,7 @@ export function createIdentityResolver({
     getAccountDid = () => null,
     getPeerDidToCertId = () => ({}),
     getLocalDmPeers = () => ({}),
+    getPeerDeviceKeys = () => ({}),
     isCallCapablePeer = () => false,
 } = {}) {
     const isDidKey = (s) => typeof s === 'string' && s.startsWith('did:key:');
@@ -79,5 +80,24 @@ export function createIdentityResolver({
         return threadId;
     }
 
-    return { selfDeviceDid, selfAccountDid, contactForCall, peerBindsCalls, serverMuteKey };
+    // Multi-device fanout (R89): which devices a DM is sealed to. The resolver only
+    // decides WHICH devices; the send path still owns the sealing and session handling.
+    //   devicesForPeer  — the peer account's device entries (or []).
+    //   ownOtherDevices — our account's device entries EXCLUDING this device, the self-
+    //                     sync set. The "never seal to yourself" exclusion lives here so
+    //                     it is not re-derived per call site (a device we seal to and then
+    //                     discard poisons its ratchet session). See PLAN_ROUND_89.
+    function devicesForPeer(accountDid) {
+        return (getPeerDeviceKeys() || {})[accountDid] || [];
+    }
+    function ownOtherDevices() {
+        const myDevice = selfDeviceDid();
+        return ((getPeerDeviceKeys() || {})[selfAccountDid()] || [])
+            .filter((d) => d.device_id && d.device_id !== myDevice);
+    }
+
+    return {
+        selfDeviceDid, selfAccountDid, contactForCall, peerBindsCalls, serverMuteKey,
+        devicesForPeer, ownOtherDevices,
+    };
 }

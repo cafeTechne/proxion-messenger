@@ -12,6 +12,7 @@ function make(over = {}) {
         getAccountDid: () => over.accountDid ?? null,
         getPeerDidToCertId: () => over.map ?? {},
         getLocalDmPeers: () => over.localDmPeers ?? {},
+        getPeerDeviceKeys: () => over.peerDeviceKeys ?? {},
         isCallCapablePeer: over.isCallCapablePeer ?? (() => false),
     });
 }
@@ -57,6 +58,34 @@ describe('contactForCall (reduce a call identity to a known contact)', () => {
     it('returns empty when nothing is recognized', () => {
         expect(make().contactForCall(null, { from_webid: GATEWAY })).toBe('');
         expect(make().contactForCall(null, null)).toBe('');
+    });
+});
+
+describe('multi-device fanout (R89)', () => {
+    const dev = (id) => ({ device_id: id, pub_b64u: 'pub-' + id });
+
+    it('devicesForPeer returns the peer account devices, or [] when unknown', () => {
+        const r = make({ peerDeviceKeys: { [PEER]: [dev('d1'), dev('d2')] } });
+        expect(r.devicesForPeer(PEER).map(d => d.device_id)).toEqual(['d1', 'd2']);
+        expect(r.devicesForPeer('did:key:zNobody')).toEqual([]);
+    });
+
+    it('ownOtherDevices excludes THIS device (single-device: account == device did)', () => {
+        // Single device: selfAccountDid == selfDeviceDid == DEV.
+        const r = make({ clientDid: DEV, peerDeviceKeys: { [DEV]: [dev(DEV), dev('other')] } });
+        expect(r.ownOtherDevices().map(d => d.device_id)).toEqual(['other']);
+    });
+
+    it('ownOtherDevices keys by the ACCOUNT and excludes this device (linked device)', () => {
+        // Linked: account is ACCT, this device is DEV; roster is under the account.
+        const r = make({ clientDid: DEV, accountDid: ACCT,
+            peerDeviceKeys: { [ACCT]: [dev(DEV), dev('phone'), dev('laptop')] } });
+        expect(r.ownOtherDevices().map(d => d.device_id)).toEqual(['phone', 'laptop']);
+    });
+
+    it('ownOtherDevices is empty when the roster is unknown or only this device', () => {
+        expect(make({ clientDid: DEV }).ownOtherDevices()).toEqual([]);
+        expect(make({ clientDid: DEV, peerDeviceKeys: { [DEV]: [dev(DEV)] } }).ownOtherDevices()).toEqual([]);
     });
 });
 

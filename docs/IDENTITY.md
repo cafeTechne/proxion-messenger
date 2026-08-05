@@ -120,6 +120,8 @@ different lookup (a passed cert_id first, no webid fallback, because it is feder
 so it stays its own readable block rather than forcing a shared shape.
 
 On the client, `identity.js` (`createIdentityResolver`) answers the client-side identity
-reductions: `contactForCall` (who is this call with), `peerBindsCalls` (R86), and
-`serverMuteKey` (R87: which identity the gateway keys a mute by). Still to move onto it:
-the multi-device fanout device-set selection (which devices to seal a DM to).
+reductions: `contactForCall` (who is this call with), `peerBindsCalls` (R86),
+`serverMuteKey` (R87: which identity the gateway keys a mute by), and the multi-device
+fanout device-set selection `devicesForPeer` / `ownOtherDevices` (R89: which devices to
+seal a DM to, with the "never seal to this device" exclusion in one place). The resolver
+decides WHICH devices; the send path still owns sealing and Double Ratchet sessions.

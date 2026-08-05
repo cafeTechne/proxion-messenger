@@ -467,6 +467,7 @@ import { createIdentityResolver } from './identity.js';
             getAccountDid: () => accountDid,
             getPeerDidToCertId: () => peerDidToCertId,
             getLocalDmPeers: () => localDmPeers,
+            getPeerDeviceKeys: () => _peerDeviceKeys,
             isCallCapablePeer: (did) => certCapableContacts.has(did) || callCapablePins.has(did),
         });
         const voice = createVoice({
@@ -3293,13 +3294,11 @@ import { createIdentityResolver } from './identity.js';
         // self-sync), so a conversation continued on one device appears on all.
         // Returns true if it handled the send, false → normal single send.
         async function _tryDmFanout(peerAccount, plaintext, clientMsgId, replyToId, threadId) {
-            const peerDevs = _peerDeviceKeys[peerAccount] || [];
-            // Our own other devices (exclude the one we're sending from) — a copy
-            // rides along so a conversation stays in sync across all of our devices
-            // (E5 slice 2). These are always same-gateway (our own account), so the
-            // device-key resolution works even when the peer is on another gateway.
-            const ownDevs = (_peerDeviceKeys[selfWebId] || []).filter(
-                d => d.device_id && d.device_id !== clientDid);
+            // Which devices to seal to (R89): the peer's devices, and our OWN other
+            // devices (sender self-sync, this device excluded), resolved in identity.js
+            // so the exclusion rule lives in one place.
+            const peerDevs = identity.devicesForPeer(peerAccount);
+            const ownDevs = identity.ownOtherDevices();
             const myPub = myX25519PubB64u();
             const fanout = [];
             const addEntry = async (account, dev) => {
