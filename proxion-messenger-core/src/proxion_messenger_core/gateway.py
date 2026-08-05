@@ -1913,7 +1913,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             )
             if not (_related or _co_channel):
                 return "202 Accepted", '{"status":"ignored"}'
-            if from_webid in getattr(self, "_revoked_dids", set()) or self.blocklist.is_blocked(from_webid):
+            if from_webid in getattr(self, "_revoked_dids", set()) or self._is_blocked_for(to_webid, from_webid):
                 return "202 Accepted", '{"status":"ignored"}'
 
         target_sockets = self._sockets_for(to_webid)  # _sockets_for handles the own-identity fallback
@@ -2059,10 +2059,55 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         cert_dict = self._store.get_relationship_by_did(from_webid)
         if not cert_dict:
             return None
-        if from_webid in getattr(self, "_revoked_dids", set()) or self.blocklist.is_blocked(from_webid):
+        if from_webid in getattr(self, "_revoked_dids", set()):
+            return None
+        # Block check scoped to the LOCAL owner of this relationship (R90 B), not a
+        # gateway-wide set, so one account's block does not silence another's peer.
+        _owner = ""
+        try:
+            _owner = self._store.get_relationship_owner(from_webid) or ""
+        except Exception:
+            pass
+        if self._is_blocked_for(_owner, from_webid):
             return None
         our_cert_id = cert_dict.get("certificate_id") or cert_dict.get("id") or ""
         return cert_dict, our_cert_id
+
+    def _canonical_block_id(self, ident: str) -> str:
+        """Normalize a block identity to ONE canonical form (the account did:key), so a
+        block set by did matches a check made by pubkey hex and vice versa (R90 B). A
+        did:key passes through; a bare Ed25519 pubkey hex maps to its did:key; anything
+        else is returned unchanged."""
+        if not ident or not isinstance(ident, str):
+            return ident
+        if ident.startswith("did:key:"):
+            return ident
+        try:
+            from .didkey import pub_key_to_did
+            return pub_key_to_did(bytes.fromhex(ident))
+        except Exception:
+            return ident
+
+    def _is_blocked_for(self, recipient_owner: str, sender_id: str) -> bool:
+        """Whether a receive-path sender is blocked FROM THE RECIPIENT'S point of view.
+        The enforcement analogue of _authorized_relationship: one place decides "did this
+        local owner block this sender", scoped per owner instead of a gateway-wide set.
+
+        Checks the recipient's per-owner store blocks, then the legacy owner-less union
+        file as a fallback so no pre-R90 block is ever silently dropped (that file is no
+        longer written by new blocks, so it cannot leak one owner's NEW block onto another;
+        it only carries legacy blocks during the deprecation window). Both sides are
+        canonicalized so did vs pubkey-hex forms match. With no store, only the flat file
+        remains."""
+        canonical = self._canonical_block_id(sender_id)
+        if self._store and recipient_owner:
+            try:
+                if self._store.is_blocked_by(recipient_owner, canonical):
+                    return True
+            except Exception:
+                pass
+        # Legacy union file (owner-less) + raw form, so both stored representations match.
+        return self.blocklist.is_blocked(canonical) or self.blocklist.is_blocked(sender_id)
 
     def _dm_client_for_target(self, target_webid: str):
         """Resolve an outbound DM TARGET to the pod client that can deliver to them, or

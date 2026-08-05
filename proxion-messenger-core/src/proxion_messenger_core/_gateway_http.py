@@ -481,7 +481,9 @@ class HttpEndpointsMixin:
         # avoids revealing to the sender that they've been blocked. Previously the
         # relay receive path never checked the blocklist, so a blocked user's
         # messages still reached the recipient (block only worked on send + pod).
-        if _relay_from and self.blocklist.is_blocked(_relay_from):
+        # Coarse pre-dispatch gate (owner not yet known here; the per-owner check happens
+        # in each content handler). Owner-less keeps the legacy global behavior (R90 B).
+        if _relay_from and self._is_blocked_for("", _relay_from):
             logger.info("Dropped relay content from blocked sender %s", _relay_from[:24])
             return "200 OK", '{"status":"received"}'
 

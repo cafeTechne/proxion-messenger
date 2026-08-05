@@ -44,11 +44,9 @@ class DmHandlerMixin:
             # block list) so one user's block doesn't stop another from messaging
             # the same peer; falls back to the global file when there's no store.
             _sender_wid = self._client_webids.get(websocket, "")
-            _recipient_blocked = (
-                self._store.is_blocked_by(_sender_wid, cert.subject)
-                if (self._store and _sender_wid)
-                else self.blocklist.is_blocked(cert.subject)
-            )
+            # Per-owner + canonicalized (R90 B): cert.subject is a pubkey hex, but blocks
+            # are stored as did:key, so _is_blocked_for normalizes both to match.
+            _recipient_blocked = self._is_blocked_for(_sender_wid, cert.subject)
             if _recipient_blocked:
                 await websocket.send(json.dumps({"type": "error", "message": "Recipient is blocked"}))
                 return
@@ -1115,8 +1113,8 @@ class DmHandlerMixin:
         ):
             return "400 Bad Request", '{"error":"invalid signature"}'
         # Blocked sender: silently accept but don't deliver (no block-reveal),
-        # matching the plain-DM relay path.
-        if self.blocklist.is_blocked(from_webid):
+        # matching the plain-DM relay path. Scoped to the recipient owner (R90 B).
+        if self._is_blocked_for(to_webid, from_webid):
             return "200 OK", '{"status":"received"}'
         # Dedup per transport id (one per device-envelope).
         if self._store:

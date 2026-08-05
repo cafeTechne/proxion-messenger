@@ -121,7 +121,8 @@ class FileTransferMixin:
         if self._store and from_webid:
             if not self._store.get_relationship_by_did(from_webid):
                 return "202 Accepted", '{"status":"ignored"}'
-            if from_webid in getattr(self, "_revoked_dids", set()) or self.blocklist.is_blocked(from_webid):
+            _owner = self._store.get_relationship_owner(from_webid) or ""
+            if from_webid in getattr(self, "_revoked_dids", set()) or self._is_blocked_for(_owner, from_webid):
                 return "202 Accepted", '{"status":"ignored"}'
         if content_type == "file_chunk":
             _c = data.get("data", "")

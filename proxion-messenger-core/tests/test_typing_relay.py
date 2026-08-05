@@ -38,6 +38,9 @@ async def test_typing_relay_delivers_to_local_socket(gateway):
     store.get_all_dm_threads = MagicMock(return_value=[
         {"thread_id": "cert-abc", "peer_webid": local_webid, "owner_webid": "did:key:zRemote"}
     ])
+    # A bare MagicMock returns truthy for is_blocked_by; make block state explicit so the
+    # per-owner block check (R90 B) does not treat the sender as blocked.
+    store.is_blocked_by = MagicMock(return_value=False)
     gateway._store = store
 
     await gateway._handle_typing_relay({

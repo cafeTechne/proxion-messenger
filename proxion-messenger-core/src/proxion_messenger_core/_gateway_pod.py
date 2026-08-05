@@ -717,7 +717,15 @@ class PodSyncMixin:
 
             for entry in new_entries:
                 msg_id = entry.message.message_id
-                if self.blocklist.is_blocked(entry.message.from_pub_hex):
+                # Per-owner + canonicalized (R90 B): from_pub_hex is a pubkey hex; derive
+                # the local owner of the relationship with that sender and normalize forms.
+                _from = entry.message.from_pub_hex
+                _owner = ""
+                try:
+                    _owner = self._store.get_relationship_owner(self._canonical_block_id(_from)) or "" if self._store else ""
+                except Exception:
+                    pass
+                if self._is_blocked_for(_owner, _from):
                     continue
 
                 if self.read_state and self.read_state.is_seen(msg_id):

@@ -53,9 +53,34 @@ def test_store_per_owner_isolation(gateway):
 
 
 @pytest.mark.asyncio
-async def test_global_file_stays_the_union(gateway, monkeypatch):
-    """The legacy global file is the union of all owners' blocks: it drops X only
-    when the LAST owner blocking X unblocks."""
+@pytest.mark.asyncio
+async def test_block_by_did_is_enforced_against_a_pubkey_hex_check(gateway, monkeypatch):
+    """R90 B canonicalization: a block set by did:key must match a check made by pubkey
+    hex (receive paths check cert.subject / from_pub_hex, which are hex). Before this, a
+    block stored as a did silently missed a hex check."""
+    monkeypatch.setenv("PROXION_REQUIRE_AUTH", "0")
+    wsA = _mock_ws()
+    a = _did(Ed25519PrivateKey.generate())
+    await _register(gateway, wsA, a)
+
+    peer = Ed25519PrivateKey.generate()
+    peer_did = _did(peer)
+    peer_hex = peer.public_key().public_bytes_raw().hex()
+
+    await gateway.process_command(wsA, {"cmd": "block", "webid": peer_did})   # blocked by did
+
+    # Enforced whether the receive path presents the did or the pubkey hex.
+    assert gateway._is_blocked_for(a, peer_did) is True
+    assert gateway._is_blocked_for(a, peer_hex) is True   # canonicalized hex -> did
+    # A different owner is unaffected (per-owner isolation, both identity forms).
+    b = _did(Ed25519PrivateKey.generate())
+    assert gateway._is_blocked_for(b, peer_did) is False
+    assert gateway._is_blocked_for(b, peer_hex) is False
+
+
+async def test_blocks_are_per_owner_not_mirrored_to_global_file(gateway, monkeypatch):
+    """R90 B: blocks are stored per owner and are NOT mirrored to the legacy global file
+    (that mirror was the cross-owner leak). Enforcement is per owner via _is_blocked_for."""
     monkeypatch.setenv("PROXION_REQUIRE_AUTH", "0")
     wsA, wsB = _mock_ws(), _mock_ws()
     a, b = _did(Ed25519PrivateKey.generate()), _did(Ed25519PrivateKey.generate())
@@ -64,16 +89,21 @@ async def test_global_file_stays_the_union(gateway, monkeypatch):
 
     await gateway.process_command(wsA, {"cmd": "block", "webid": "X"})
     await gateway.process_command(wsB, {"cmd": "block", "webid": "X"})
-    assert gateway.blocklist.is_blocked("X")  # union has X
 
-    await gateway.process_command(wsA, {"cmd": "unblock", "webid": "X"})
-    # B still blocks X → global file must retain X.
-    assert gateway.blocklist.is_blocked("X"), "global union dropped X while B still blocks it"
-    assert gateway._store.is_blocked_by(a, "X") is False
+    # Stored per owner; the global union file is no longer written.
+    assert gateway._store.is_blocked_by(a, "X") is True
     assert gateway._store.is_blocked_by(b, "X") is True
+    assert not gateway.blocklist.is_blocked("X"), "new blocks must not touch the global file"
 
-    await gateway.process_command(wsB, {"cmd": "unblock", "webid": "X"})
-    assert not gateway.blocklist.is_blocked("X")  # last owner unblocked → union clears
+    # Enforcement is per owner: each owner blocks X, a third owner does not.
+    assert gateway._is_blocked_for(a, "X") is True
+    assert gateway._is_blocked_for(b, "X") is True
+    assert gateway._is_blocked_for("did:key:zStranger", "X") is False
+
+    # A unblocks X: only A is affected; B still blocks X (no cross-owner effect).
+    await gateway.process_command(wsA, {"cmd": "unblock", "webid": "X"})
+    assert gateway._is_blocked_for(a, "X") is False
+    assert gateway._is_blocked_for(b, "X") is True
 
 
 @pytest.mark.asyncio

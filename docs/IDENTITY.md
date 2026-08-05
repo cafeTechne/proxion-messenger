@@ -122,6 +122,16 @@ write-through uses it. The voice-invite pod fallback resolves a target too but w
 different lookup (a passed cert_id first, no webid fallback, because it is federated-only),
 so it stays its own readable block rather than forcing a shared shape.
 
+Block enforcement is its own reduction, `_is_blocked_for(recipient_owner, sender_id)`: is
+this sender blocked FROM THE RECIPIENT'S point of view. It is scoped per owner (using the
+store's `is_blocked_by`), not a gateway-wide set, so on a multi-user gateway one account's
+block does not silence another's peer, and it canonicalizes both sides to one identity form
+(account did) so a block set by did matches a check made by pubkey hex (R90 B). Every
+receive-path check goes through it, deriving the recipient owner from the relationship, the
+`to_webid`, or the pod account. The former gateway-wide `blocklist.json` file is no longer
+written by new blocks; it is read only as a legacy fallback (and for store-less gateways),
+so pre-R90 blocks keep enforcing without leaking a new block across owners.
+
 On the client, `identity.js` (`createIdentityResolver`) answers the client-side identity
 reductions: `contactForCall` (who is this call with), `peerBindsCalls` (R86),
 `serverMuteKey` (R87: which identity the gateway keys a mute by), and the multi-device
