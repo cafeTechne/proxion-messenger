@@ -19,6 +19,7 @@ export function createIdentityResolver({
     getClientDid = () => null,
     getAccountDid = () => null,
     getPeerDidToCertId = () => ({}),
+    getLocalDmPeers = () => ({}),
     isCallCapablePeer = () => false,
 } = {}) {
     const isDidKey = (s) => typeof s === 'string' && s.startsWith('did:key:');
@@ -62,5 +63,21 @@ export function createIdentityResolver({
         return !!(contactDid && isCallCapablePeer(contactDid));
     }
 
-    return { selfDeviceDid, selfAccountDid, contactForCall, peerBindsCalls };
+    // Reduce a sidebar thread id to the identity the gateway keys a mute by. The gateway
+    // mutes by the peer's webid (DMs) or the room_id (rooms) so it can honor mute for
+    // OFFLINE push, where the client's mutedThreads set is invisible and per-side cert_ids
+    // differ. Local DM peer's webid wins; else the peer did whose cert_id equals the
+    // thread id; else the thread id unchanged (a room_id). See PLAN_ROUND_87.
+    function serverMuteKey(threadId) {
+        if (!threadId) return threadId;
+        const dm = (getLocalDmPeers() || {})[threadId];
+        if (dm && dm.peer_webid) return dm.peer_webid;
+        const map = getPeerDidToCertId() || {};
+        for (const peerDid of Object.keys(map)) {
+            if (map[peerDid] === threadId) return peerDid;
+        }
+        return threadId;
+    }
+
+    return { selfDeviceDid, selfAccountDid, contactForCall, peerBindsCalls, serverMuteKey };
 }

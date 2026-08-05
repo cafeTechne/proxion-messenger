@@ -466,6 +466,7 @@ import { createIdentityResolver } from './identity.js';
             getClientDid: () => clientDid,
             getAccountDid: () => accountDid,
             getPeerDidToCertId: () => peerDidToCertId,
+            getLocalDmPeers: () => localDmPeers,
             isCallCapablePeer: (did) => certCapableContacts.has(did) || callCapablePins.has(did),
         });
         const voice = createVoice({
@@ -3768,15 +3769,10 @@ import { createIdentityResolver } from './identity.js';
             menu.style.top  = Math.min(e.clientY, vh - 110) + "px";
         }
         // The gateway keys mute by the PEER's webid (DMs) or room_id (rooms) so it
-        // can honor mute for OFFLINE push (client-side mutedThreads is invisible to
-        // it, and per-side cert_ids differ). Resolve that key from a sidebar id.
+        // can honor mute for OFFLINE push. The thread-id -> identity reduction lives in
+        // the identity resolver (R87); keep the name so _sendServerMute is untouched.
         function _serverMuteKey(threadId) {
-            const dm = localDmPeers[threadId];
-            if (dm && dm.peer_webid) return dm.peer_webid;
-            for (const [peerDid, certId] of Object.entries(peerDidToCertId)) {
-                if (certId === threadId) return peerDid;
-            }
-            return threadId; // treat as a room_id
+            return identity.serverMuteKey(threadId);
         }
         function _sendServerMute(threadId, muted) {
             if (!socket || !threadId) return;

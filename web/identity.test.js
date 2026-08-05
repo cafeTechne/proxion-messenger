@@ -11,6 +11,7 @@ function make(over = {}) {
         getClientDid: () => over.clientDid ?? DEV,
         getAccountDid: () => over.accountDid ?? null,
         getPeerDidToCertId: () => over.map ?? {},
+        getLocalDmPeers: () => over.localDmPeers ?? {},
         isCallCapablePeer: over.isCallCapablePeer ?? (() => false),
     });
 }
@@ -56,6 +57,28 @@ describe('contactForCall (reduce a call identity to a known contact)', () => {
     it('returns empty when nothing is recognized', () => {
         expect(make().contactForCall(null, { from_webid: GATEWAY })).toBe('');
         expect(make().contactForCall(null, null)).toBe('');
+    });
+});
+
+describe('serverMuteKey (R87 mute-key reduction)', () => {
+    it('returns the local DM peer webid for a local-DM thread', () => {
+        const r = make({ localDmPeers: { t1: { peer_webid: PEER } } });
+        expect(r.serverMuteKey('t1')).toBe(PEER);
+    });
+    it('reduces a cert-DM thread id to the peer did', () => {
+        const r = make({ map: { [PEER]: 'cert-9' } });
+        expect(r.serverMuteKey('cert-9')).toBe(PEER);
+    });
+    it('local DM peer wins over a cert-id match', () => {
+        const r = make({ localDmPeers: { x: { peer_webid: PEER } }, map: { [ACCT]: 'x' } });
+        expect(r.serverMuteKey('x')).toBe(PEER);
+    });
+    it('returns the thread id unchanged for a room (no match)', () => {
+        expect(make().serverMuteKey('room-123')).toBe('room-123');
+    });
+    it('is safe for empty input', () => {
+        expect(make().serverMuteKey('')).toBe('');
+        expect(make().serverMuteKey(undefined)).toBe(undefined);
     });
 });
 
