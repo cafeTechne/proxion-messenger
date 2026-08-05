@@ -2059,6 +2059,24 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         our_cert_id = cert_dict.get("certificate_id") or cert_dict.get("id") or ""
         return cert_dict, our_cert_id
 
+    def _dm_client_for_target(self, target_webid: str):
+        """Resolve an outbound DM TARGET to the pod client that can deliver to them, or
+        None. The outbound counterpart to _authorized_relationship: map target_webid ->
+        relationship cert -> pod client, resolving the dm_clients key asymmetry (keyed by
+        cert_id for federated peers, by webid for our own pod) in one place. Returns
+        (cert_dict, cert_id, client_entry). See docs/IDENTITY.md.
+        """
+        if not (self._store and self.dm_clients and target_webid):
+            return None
+        cert_dict = self._store.get_relationship_by_did(target_webid)
+        if not cert_dict:
+            return None
+        cert_id = cert_dict.get("certificate_id")
+        client_entry = self.dm_clients.get(cert_id) or self.dm_clients.get(target_webid)
+        if not client_entry:
+            return None
+        return cert_dict, cert_id, client_entry
+
     async def _handle_dm_disappear_relay(self, data: dict) -> tuple[str, str]:
         """Inbound relayed DM disappear-timer from a peer gateway. Set the timer
         on OUR cert_id so our expiry loop deletes the shared messages too."""

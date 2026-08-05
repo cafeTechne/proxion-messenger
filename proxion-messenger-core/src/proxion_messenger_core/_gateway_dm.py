@@ -571,24 +571,18 @@ class DmHandlerMixin:
         # Write-through for gateway-relayed (non-federated) DMs
         asyncio.create_task(self._sync_local_dm_to_pod(thread_id, event))
 
-        # Write-through to pod if a relationship cert exists for this peer.
-        # dm_clients is keyed by cert_id (federated) OR webid (own pod) —
-        # try both so cross-gateway DMs actually reach the recipient's pod.
-        if self._store and self.dm_clients and target_webid:
-            cert_dict = self._store.get_relationship_by_did(target_webid)
-            if cert_dict:
-                cert_id = cert_dict.get("certificate_id")
-                client_entry = (
-                    self.dm_clients.get(cert_id)
-                    or self.dm_clients.get(target_webid)
+        # Write-through to pod if a relationship cert exists for this peer. The outbound
+        # target -> relationship -> pod client reduction (and the dm_clients cert_id/webid
+        # key asymmetry) lives in _dm_client_for_target.
+        _resolved = self._dm_client_for_target(target_webid)
+        if _resolved:
+            cert_dict, _cert_id, client_entry = _resolved
+            _, pod_client = client_entry
+            asyncio.create_task(
+                self._sync_message_to_pod(
+                    pod_client, cert_dict, content, message_id, sender_webid
                 )
-                if client_entry:
-                    _, pod_client = client_entry
-                    asyncio.create_task(
-                        self._sync_message_to_pod(
-                            pod_client, cert_dict, content, message_id, sender_webid
-                        )
-                    )
+            )
 
         # Echo to sender with own=True (all sender's tabs)
         own_echo = json.dumps({**event, "own": True})

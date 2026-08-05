@@ -112,7 +112,14 @@ relationship OR co-channel membership (a group-call co-member need not be a dire
 friend) and keys on the sending GATEWAY did, so it is a genuinely different model, not the
 same reduction.
 
-Still to consolidate: DM fanout and mute keys (both client-side reductions of a different
-shape), and the outbound primary DM path (which resolves a target, not an inbound actor).
-These are separate designs rather than the same duplicated check, so they are their own
-slices.
+The OUTBOUND counterpart is `_dm_client_for_target(target_webid)`: map a DM target to the
+pod client that can deliver to them, resolving the `dm_clients` key asymmetry (keyed by
+cert_id for federated peers, by webid for our own pod) in one place. The DM send path's pod
+write-through uses it. The voice-invite pod fallback resolves a target too but with a
+different lookup (a passed cert_id first, no webid fallback, because it is federated-only),
+so it stays its own readable block rather than forcing a shared shape.
+
+On the client, `identity.js` (`createIdentityResolver`) answers the client-side identity
+reductions: `contactForCall` (who is this call with), `peerBindsCalls` (R86), and
+`serverMuteKey` (R87: which identity the gateway keys a mute by). Still to move onto it:
+the multi-device fanout device-set selection (which devices to seal a DM to).

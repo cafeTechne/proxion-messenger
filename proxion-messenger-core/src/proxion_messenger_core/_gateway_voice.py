@@ -276,17 +276,16 @@ class VoiceHandlerMixin:
                     )
                 except Exception:
                     pass
-            # Second try: pod write (slower, requires federation cert)
+            # Second try: pod write (slower, requires federation cert). Look up the pod
+            # client by the passed cert_id first, then by the target's relationship cert_id
+            # (voice fallback is federated-only, so no own-pod webid fallback here).
             if not _relayed:
                 try:
-                    client_entry = (self.dm_clients.get(cert_id) if cert_id else None) or (
-                        self._store
-                        and self._store.get_relationship_by_did(target_webid or "")
-                        and self.dm_clients.get(
-                            (self._store.get_relationship_by_did(target_webid or "") or {}).get("certificate_id")
-                        )
-                        if target_webid else None
-                    )
+                    client_entry = self.dm_clients.get(cert_id) if cert_id else None
+                    if not client_entry and target_webid and self._store:
+                        _rel = self._store.get_relationship_by_did(target_webid)
+                        if _rel:
+                            client_entry = self.dm_clients.get(_rel.get("certificate_id"))
                     if client_entry:
                         cert, pod_client = client_entry
                         from .voice import signal_voice_invite

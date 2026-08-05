@@ -444,6 +444,44 @@ def test_authorized_relationship_reduces_and_gates(tmp_path):
     assert gw._authorized_relationship(peer_did) is None
 
 
+def test_dm_client_for_target_resolves_and_reduces(tmp_path):
+    """_dm_client_for_target is the outbound mirror of _authorized_relationship: it maps a
+    DM target to its pod client, resolving the dm_clients cert_id/webid key asymmetry."""
+    from proxion_messenger_core.federation import RelationshipCertificate, Capability
+
+    gw, agent, key, _ = _make_gateway(tmp_path)
+    target = "did:key:zTargetPod"
+    entry = ("CERT_OBJ", "POD_CLIENT")
+
+    # No relationship reduces to None (even with clients present).
+    gw.dm_clients = {"unrelated": entry}
+    assert gw._dm_client_for_target(target) is None
+
+    cert = RelationshipCertificate(
+        issuer=agent.identity_pub_bytes.hex(), subject="tgthex",
+        capabilities=[Capability(with_="stash://dm/", can="crud/write")],
+    )
+    cert.sign(key)
+    cert_dict = cert.to_dict()
+    gw._store.save_relationship(cert_dict, peer_did=target)
+    cert_id = cert_dict["certificate_id"]
+
+    # Relationship exists but no matching client entry reduces to None.
+    gw.dm_clients = {"unrelated": entry}
+    assert gw._dm_client_for_target(target) is None
+
+    # Resolves when the client is keyed by cert_id (federated peer).
+    gw.dm_clients = {cert_id: entry}
+    res = gw._dm_client_for_target(target)
+    assert res is not None
+    _cd, _rid, _entry = res
+    assert _rid == cert_id and _entry == entry
+
+    # Falls back to the webid key (our own pod).
+    gw.dm_clients = {target: entry}
+    assert gw._dm_client_for_target(target)[2] == entry
+
+
 def test_blocklist_anchored_to_data_dir_not_shared(tmp_path):
     """The blocklist lives under the configured data dir, so separate gateways do not
     share block state (fixes the former hardcoded ~/.proxion path)."""
