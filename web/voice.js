@@ -7,6 +7,7 @@ import { extractFingerprint, signFingerprint, classifyPeerSdp } from './callsec.
 import { senderCap, canEnableVideo } from './callquality.js';
 import { mediaConstraints } from './devices.js';
 import { classifyConnection, deriveStats } from './callstats.js';
+import { buildIceServers, probeIceCandidates, classifyConnectivity } from './connectivity.js';
 
 const _dev = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
 
@@ -33,7 +34,7 @@ export function audioLevel(data) {
 
 export function createVoice(deps) {
     const { showToast, renderMessage, showOsNotification, sendCmd, playNotificationSound, normalizeRelayThreadId, stopScreenShare, getSocket, getActiveView, getSelfWebId, getTurnUrl, getTurnSecret, getLocalDmPeers, getCurrentRoomMembers, getIsSharing, getIdentityPrivKey, getClientDid, getExpectedPeerDid, getDeviceCert,
-        getPeerBindsCalls, onPeerVerified } = deps;
+        getPeerBindsCalls, onPeerVerified, getUserRelay } = deps;
     const state = {
             currentCall: null,
             localStream: null,
@@ -488,7 +489,9 @@ export function createVoice(deps) {
         }
 
         async function _getIceServers() {
-            const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+            // Multiple STUN (so STUN is not a single point of failure) plus any relay the
+            // user configured in-app (R91). Gateway-pushed coturn creds are added below.
+            const iceServers = buildIceServers({ turn: getUserRelay?.() || null });
             if (!state._turnIceServer) {
                 try {
                     const _tc = await fetch('/turn-credentials').then(r => r.json());
@@ -514,6 +517,15 @@ export function createVoice(deps) {
                 return urls.some((u) => typeof u === 'string' && /^turns?:/.test(u));
             });
             return iceServers;
+        }
+
+        // R91: probe what candidates this network can gather against the current ICE
+        // config and return a plain verdict, so a user can know BEFORE a call whether it
+        // will connect (and whether they need to add a relay). No signaling, no peer.
+        async function testConnectivity() {
+            const iceServers = await _getIceServers();
+            const counts = await probeIceCandidates(iceServers, { timeoutMs: 5000 });
+            return { counts, verdict: classifyConnectivity(counts), turnConfigured: state._turnConfigured };
         }
 
         async function initWebRTCForPeer(targetWebid, sessionId, isCaller = false, sdpOffer = null, offerMeta = null) {
@@ -1178,6 +1190,7 @@ export function createVoice(deps) {
         initWebRTC,
         initWebRTCForPeer,
         _getIceServers,
+        testConnectivity,
         getMedia,
         toggleCamera,
         recapSenders,

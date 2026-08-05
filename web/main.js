@@ -474,6 +474,11 @@ import { createIdentityResolver } from './identity.js';
             showToast, renderMessage, showOsNotification, sendCmd, playNotificationSound, normalizeRelayThreadId, stopScreenShare,
             getSocket: () => socket, getActiveView: () => activeView, getSelfWebId: () => selfWebId,
             getTurnUrl: () => turnUrl, getTurnSecret: () => turnSecret,
+            // R91: a relay the user added in Settings > Calls (no env vars needed).
+            getUserRelay: () => {
+                try { const r = localStorage.getItem('proxion_user_relay'); return r ? JSON.parse(r) : null; }
+                catch { return null; }
+            },
             getLocalDmPeers: () => localDmPeers, getCurrentRoomMembers: () => currentRoomMembers, getIsSharing: () => media.state.isSharing,
             // R79: end-to-end call authentication — our identity key signs the DTLS
             // fingerprint; the peer's known identity verifies it.
@@ -975,6 +980,18 @@ import { createIdentityResolver } from './identity.js';
                 blocks.requestBlocks();   // R65: refresh the blocked-users list
             }
             blocks.renderBlockedList();   // R65
+            // R91: populate the call-relay inputs from the saved relay, if any.
+            try {
+                const _r = JSON.parse(localStorage.getItem("proxion_user_relay") || "null") || {};
+                const _u = document.getElementById("calls-relay-url");
+                const _un = document.getElementById("calls-relay-user");
+                const _pw = document.getElementById("calls-relay-pass");
+                if (_u) _u.value = _r.url || "";
+                if (_un) _un.value = _r.username || "";
+                if (_pw) _pw.value = _r.password || "";
+                const _res = document.getElementById("calls-test-result");
+                if (_res) _res.style.display = "none";
+            } catch (_) {}
             document.getElementById("settings-modal").style.display = "flex";
             // G1: always open with Advanced collapsed (openSettingsToPod re-expands it).
             document.getElementById("settings-advanced").style.display = "none";
@@ -4251,6 +4268,40 @@ import { createIdentityResolver } from './identity.js';
             // Settings modal: Cancel button
             attachListener('#settings-cancel-btn', 'click', () => {
                 document.getElementById('settings-modal').style.display = 'none';
+            });
+
+            // R91: Calls / connectivity — self-test and in-app relay config.
+            attachListener('#calls-test-btn', 'click', async () => {
+                const res = document.getElementById('calls-test-result');
+                if (res) { res.style.display = ''; res.style.color = 'var(--text-secondary)'; res.textContent = t('conn.test.testing'); }
+                let out;
+                try { out = await voice.testConnectivity(); } catch (_) { out = null; }
+                if (!res) return;
+                const level = out?.verdict?.level || 'none';
+                const color = level === 'relay' ? 'var(--color-success,#4ade80)'
+                    : level === 'stun' ? '#f59e0b'
+                        : 'var(--color-danger,#f87171)';
+                res.style.color = color;
+                res.textContent = t(out?.verdict?.i18nKey || 'conn.test.none');
+            });
+            attachListener('#calls-relay-save', 'click', () => {
+                const url = (document.getElementById('calls-relay-url')?.value || '').trim();
+                const username = (document.getElementById('calls-relay-user')?.value || '').trim();
+                const password = (document.getElementById('calls-relay-pass')?.value || '').trim();
+                if (!/^turns?:/i.test(url)) { showToast(t('conn.relay.badUrl'), 'error'); return; }
+                try {
+                    localStorage.setItem('proxion_user_relay', JSON.stringify({ url, username, password }));
+                    voice.state._turnIceServer = null;   // re-resolve on next call
+                    showToast(t('conn.relay.saved'));
+                } catch (_) {}
+            });
+            attachListener('#calls-relay-clear', 'click', () => {
+                try { localStorage.removeItem('proxion_user_relay'); } catch (_) {}
+                ['calls-relay-url', 'calls-relay-user', 'calls-relay-pass'].forEach(id => {
+                    const el = document.getElementById(id); if (el) el.value = '';
+                });
+                voice.state._turnIceServer = null;
+                showToast(t('conn.relay.cleared'));
             });
 
             // G1: Advanced settings progressive disclosure

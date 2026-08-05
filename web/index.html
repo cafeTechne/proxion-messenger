@@ -1264,6 +1264,24 @@
           </div>
         </div>
 
+        <!-- R91: Calls / connectivity -->
+        <div id="settings-calls-section">
+          <hr style="border-color:var(--slate-700);margin:16px 0 12px;">
+          <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Calls</p>
+          <button id="calls-test-btn" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 14px;border-radius:6px;cursor:pointer;font-size:0.88em;" data-i18n="conn.test.button">Test call connectivity</button>
+          <p id="calls-test-result" role="status" aria-live="polite" style="display:none;margin:8px 0 0;font-size:0.85em;line-height:1.5;"></p>
+          <p style="margin:12px 0 6px;font-size:0.78em;color:var(--text-secondary);line-height:1.5;" data-i18n="conn.relay.hint">On a restrictive network, calls need a relay (TURN) server to connect. Add one from your provider or self-host; it is used for your next call, no restart needed.</p>
+          <input id="calls-relay-url" type="text" autocomplete="off" spellcheck="false" placeholder="turns:relay.example.com:5349" data-i18n-attr="placeholder:conn.relay.urlPlaceholder" style="width:100%;box-sizing:border-box;margin-bottom:6px;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:7px 8px;font-size:0.85em;">
+          <div style="display:flex;gap:6px;margin-bottom:8px;">
+            <input id="calls-relay-user" type="text" autocomplete="off" spellcheck="false" placeholder="username" data-i18n-attr="placeholder:conn.relay.userPlaceholder" style="flex:1;min-width:0;box-sizing:border-box;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:7px 8px;font-size:0.85em;">
+            <input id="calls-relay-pass" type="password" autocomplete="off" placeholder="password" data-i18n-attr="placeholder:conn.relay.passPlaceholder" style="flex:1;min-width:0;box-sizing:border-box;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:7px 8px;font-size:0.85em;">
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button id="calls-relay-save" style="background:var(--accent,#d61f52);border:none;color:#fff;padding:7px 14px;border-radius:6px;cursor:pointer;font-size:0.85em;" data-i18n="conn.relay.save">Save relay</button>
+            <button id="calls-relay-clear" style="background:transparent;border:1px solid var(--slate-700);color:var(--text-secondary);padding:7px 14px;border-radius:6px;cursor:pointer;font-size:0.85em;" data-i18n="conn.relay.clear">Remove relay</button>
+          </div>
+        </div>
+
         <!-- R18.1.3 + R18.3.3: App section (shown only in Tauri desktop app) -->
         <div id="settings-tauri-section" style="display:none;">
           <hr style="border-color:var(--slate-700);margin:16px 0 12px;">
