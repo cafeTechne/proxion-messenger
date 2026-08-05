@@ -61,7 +61,7 @@ async def test_restore_picks_pod_session_when_ahead(gateway):
     )
     mock_client.get = MagicMock(return_value=json.dumps(pod_session).encode())
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
 
     await gateway._restore_e2e_sessions_from_pod()
     sess = gateway._store.get_dm_session_by_id("sess-multi-1")
@@ -89,7 +89,7 @@ async def test_restore_keeps_local_when_ahead_of_pod(gateway):
     )
     mock_client.get = MagicMock(return_value=json.dumps(pod_session).encode())
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
 
     await gateway._restore_e2e_sessions_from_pod()
     sess = gateway._store.get_dm_session_by_id("sess-multi-2")
@@ -126,7 +126,7 @@ async def test_restore_multiple_sessions_independently(gateway):
         return b"{}"
     mock_client.get = MagicMock(side_effect=get_side)
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
 
     await gateway._restore_e2e_sessions_from_pod()
     sess_a = gateway._store.get_dm_session_by_id("sess-a")

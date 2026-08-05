@@ -33,7 +33,7 @@ def _mock_pod_client(gw):
     mock_client.delete = MagicMock(return_value=None)
     mock_client.list = MagicMock(return_value=[])
     gw._pod_webid = "https://pod.example/profile/card#me"
-    gw.dm_clients[gw._pod_webid] = (MagicMock(), mock_client)
+    gw.own_pod_clients[gw._pod_webid] = (MagicMock(), mock_client)
     return mock_client
 
 
@@ -74,7 +74,7 @@ async def test_restore_push_subscriptions_from_pod_populates_sqlite(gateway):
     mock_client.list = MagicMock(return_value=["stash://pod/push/sub-restore-1.json"])
     mock_client.get = MagicMock(return_value=json.dumps(rec).encode())
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
 
     await gateway._restore_push_subscriptions_from_pod()
     subs = gateway._store.get_push_subscriptions("https://alice.pod/profile/card#me")
@@ -99,7 +99,7 @@ async def test_restore_push_subscriptions_skips_existing(gateway):
     mock_client.list = MagicMock(return_value=["stash://pod/push/sub-exists.json"])
     mock_client.get = MagicMock(return_value=json.dumps(rec).encode())
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
 
     await gateway._restore_push_subscriptions_from_pod()
     subs = gateway._store.get_push_subscriptions(owner)

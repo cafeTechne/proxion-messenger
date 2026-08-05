@@ -73,11 +73,16 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         read_state: Optional[ReadState] = None,
     ):
         self.agent = agent
-        # Support both old list-of-tuples and new dict-by-id signatures
+        # Support both old list-of-tuples and new dict-by-id signatures. dm_clients holds
+        # only RELATIONSHIP pod clients, keyed by cert_id, value (cert, pod_client).
         if isinstance(dm_clients, list):
             self.dm_clients = {c.certificate_id: (c, cl) for c, cl in dm_clients}
         else:
             self.dm_clients = dm_clients
+        # OUR OWN pod client(s), keyed by our pod webid, value (creds, client). Split out
+        # of dm_clients (R90 A) so a key means one thing: a webid here can never be
+        # mistaken for a cert_id, and iterations over dm_clients see only relationships.
+        self.own_pod_clients: dict = {}
 
         if isinstance(room_memberships, list):
             # Try to use room_id or id if it's a dict-like or membership
@@ -2066,16 +2071,29 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         cert_id for federated peers, by webid for our own pod) in one place. Returns
         (cert_dict, cert_id, client_entry). See docs/IDENTITY.md.
         """
-        if not (self._store and self.dm_clients and target_webid):
+        # Either kind of client may deliver: a relationship client (dm_clients) or our own
+        # pod (own_pod_clients). Before the R90 split both lived in dm_clients, so require
+        # at least one now to preserve the original "have any client" guard.
+        if not (self._store and (self.dm_clients or self.own_pod_clients) and target_webid):
             return None
         cert_dict = self._store.get_relationship_by_did(target_webid)
         if not cert_dict:
             return None
         cert_id = cert_dict.get("certificate_id")
-        client_entry = self.dm_clients.get(cert_id) or self.dm_clients.get(target_webid)
+        client_entry = self.dm_clients.get(cert_id) or self.own_pod_clients.get(target_webid)
         if not client_entry:
             return None
         return cert_dict, cert_id, client_entry
+
+    def _any_pod_client_entry(self):
+        """First available pod client entry for sites that just need SOME usable pod
+        client (presence write, own SolidStore). Relationship clients first, then our own
+        pod, preserving the historical single-dict insertion order after the R90 split."""
+        for entry in self.dm_clients.values():
+            return entry
+        for entry in self.own_pod_clients.values():
+            return entry
+        return None
 
     async def _handle_dm_disappear_relay(self, data: dict) -> tuple[str, str]:
         """Inbound relayed DM disappear-timer from a peer gateway. Set the timer

@@ -33,7 +33,7 @@ def _mock_pod_client(gw):
     mock_client.list = MagicMock(return_value=[])
     mock_client.get = MagicMock(return_value=b'{}')
     gw._pod_webid = "https://pod.example/profile/card#me"
-    gw.dm_clients[gw._pod_webid] = (MagicMock(), mock_client)
+    gw.own_pod_clients[gw._pod_webid] = (MagicMock(), mock_client)
     return mock_client
 
 
@@ -65,7 +65,7 @@ async def test_restore_peer_gateways_populates_memory_and_sqlite(gateway):
     )
     mock_client.get = MagicMock(return_value=json.dumps(rec).encode())
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
 
     await gateway._restore_peer_gateways_from_pod()
     assert gateway._peer_gateway_urls.get(did) == url
@@ -97,7 +97,7 @@ async def test_restore_peer_gateways_never_overrides_pin(gateway):
     )
     mock_client.get = MagicMock(return_value=json.dumps(rec).encode())
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
 
     await gateway._restore_peer_gateways_from_pod()
     # Pin should not be overridden

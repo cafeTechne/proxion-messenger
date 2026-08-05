@@ -33,7 +33,7 @@ def _mock_pod_client(gw):
     mock_client.list = MagicMock(return_value=[])
     mock_client.get = MagicMock(return_value=b'{}')
     gw._pod_webid = "https://pod.example/profile/card#me"
-    gw.dm_clients[gw._pod_webid] = (MagicMock(), mock_client)
+    gw.own_pod_clients[gw._pod_webid] = (MagicMock(), mock_client)
     return mock_client
 
 
@@ -66,7 +66,7 @@ async def test_restore_verifications_from_pod_saves_to_sqlite(gateway):
     mock_client.list = MagicMock(return_value=[uri])
     mock_client.get = MagicMock(return_value=json.dumps(rec).encode())
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
 
     await gateway._restore_verifications_from_pod()
     result = gateway._store.get_contact_verification(rec["peer_webid"])
@@ -91,7 +91,7 @@ async def test_restore_verifications_skips_existing(gateway):
     )
     mock_client.get = MagicMock(return_value=json.dumps(rec).encode())
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
 
     await gateway._restore_verifications_from_pod()
     all_v = gateway._store.list_contact_verifications("alice")

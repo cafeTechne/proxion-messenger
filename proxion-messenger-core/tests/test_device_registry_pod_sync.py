@@ -33,7 +33,7 @@ def _mock_pod_client(gw):
     mock_client.delete = MagicMock(return_value=None)
     mock_client.list = MagicMock(return_value=[])
     gw._pod_webid = "https://pod.example/profile/card#me"
-    gw.dm_clients[gw._pod_webid] = (MagicMock(), mock_client)
+    gw.own_pod_clients[gw._pod_webid] = (MagicMock(), mock_client)
     return mock_client
 
 
@@ -73,7 +73,7 @@ async def test_restore_devices_from_pod_populates_sqlite(gateway):
     mock_client.list = MagicMock(return_value=["stash://pod/devices/dev-restore-1.json"])
     mock_client.get = MagicMock(return_value=json.dumps(rec).encode())
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
 
     await gateway._restore_devices_from_pod()
     device = gateway._store.get_device("dev-restore-1")
@@ -97,7 +97,7 @@ async def test_restore_devices_skips_existing(gateway):
     mock_client.list = MagicMock(return_value=["stash://pod/devices/dev-exists.json"])
     mock_client.get = MagicMock(return_value=json.dumps(rec).encode())
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
 
     await gateway._restore_devices_from_pod()
     device = gateway._store.get_device("dev-exists")
@@ -111,5 +111,5 @@ async def test_delete_device_tolerates_404(gateway):
     mock_client = MagicMock()
     mock_client.delete = MagicMock(side_effect=SolidError("not found", status_code=404))
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
     await gateway._delete_device_from_pod("dev-404")  # Should not raise

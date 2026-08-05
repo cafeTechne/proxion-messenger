@@ -113,8 +113,11 @@ friend) and keys on the sending GATEWAY did, so it is a genuinely different mode
 same reduction.
 
 The OUTBOUND counterpart is `_dm_client_for_target(target_webid)`: map a DM target to the
-pod client that can deliver to them, resolving the `dm_clients` key asymmetry (keyed by
-cert_id for federated peers, by webid for our own pod) in one place. The DM send path's pod
+pod client that can deliver to them. As of R90 the two kinds of pod client are stored
+separately so a key means one thing: `dm_clients` holds relationship clients keyed by
+cert_id, and `own_pod_clients` holds our own pod client keyed by webid. The reducer checks
+`dm_clients[cert_id]` then `own_pod_clients[target_webid]`, with no type-ambiguous merged
+lookup. The DM send path's pod
 write-through uses it. The voice-invite pod fallback resolves a target too but with a
 different lookup (a passed cert_id first, no webid fallback, because it is federated-only),
 so it stays its own readable block rather than forcing a shared shape.

@@ -33,7 +33,7 @@ def _mock_pod_client(gw):
     mock_client.list = MagicMock(return_value=[])
     mock_client.get = MagicMock(return_value=b'{}')
     gw._pod_webid = "https://pod.example/profile/card#me"
-    gw.dm_clients[gw._pod_webid] = (MagicMock(), mock_client)
+    gw.own_pod_clients[gw._pod_webid] = (MagicMock(), mock_client)
     return mock_client
 
 
@@ -99,7 +99,7 @@ async def test_restore_e2e_sessions_loads_newer_from_pod(gateway):
     )
     mock_client.get = MagicMock(return_value=json.dumps(pod_session).encode())
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
 
     # Local has older state (total=5)
     _make_session(gateway._store, "sess-restore-1", send_count=3, recv_count=2)
@@ -128,7 +128,7 @@ async def test_restore_e2e_sessions_keeps_local_if_newer(gateway):
     )
     mock_client.get = MagicMock(return_value=json.dumps(pod_session).encode())
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
 
     # Local has newer state (total=15 > pod's 3)
     _make_session(gateway._store, "sess-restore-2", send_count=10, recv_count=5)

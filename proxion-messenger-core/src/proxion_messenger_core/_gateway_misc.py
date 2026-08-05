@@ -50,8 +50,9 @@ class MiscHandlerMixin:
             })
 
         from .presence import set_presence
-        if self.dm_clients:
-            _, client = next(iter(self.dm_clients.values()))
+        _pc_entry = self._any_pod_client_entry()
+        if _pc_entry:
+            _, client = _pc_entry
             try:
                 set_presence(client, status, webid if webid else "unknown")
                 logger.info(f"Presence set to: {status}")

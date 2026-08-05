@@ -47,7 +47,7 @@ async def test_backfill_idempotent_via_version_marker(gateway):
     mock_client.put = MagicMock(side_effect=put_side)
     mock_client.list = MagicMock(return_value=[])
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
     gateway._pod_url = "https://pod.example/"
 
     await gateway._run_pod_backfill()
@@ -71,7 +71,7 @@ async def test_restore_devices_idempotent(gateway):
     mock_client.list = MagicMock(return_value=["stash://pod/devices/dev-idem-1.json"])
     mock_client.get = MagicMock(return_value=json.dumps(rec).encode())
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
 
     await gateway._restore_devices_from_pod()
     await gateway._restore_devices_from_pod()  # Second call
@@ -102,7 +102,7 @@ async def test_restore_sender_keys_idempotent(gateway):
     )
     mock_client.get = MagicMock(return_value=json.dumps(rec).encode())
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
 
     await gateway._restore_sender_keys_from_pod()
     await gateway._restore_sender_keys_from_pod()

@@ -50,7 +50,7 @@ def _mock_pod_client(gw, thread_messages: dict):
     mock_client.list = MagicMock(side_effect=list_side_effect)
     mock_client.get = MagicMock(side_effect=get_side_effect)
     gw._pod_webid = "https://pod.example/profile/card#me"
-    gw.dm_clients[gw._pod_webid] = (MagicMock(), mock_client)
+    gw.own_pod_clients[gw._pod_webid] = (MagicMock(), mock_client)
     return mock_client
 
 

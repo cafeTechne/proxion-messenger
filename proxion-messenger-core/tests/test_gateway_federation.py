@@ -472,13 +472,22 @@ def test_dm_client_for_target_resolves_and_reduces(tmp_path):
 
     # Resolves when the client is keyed by cert_id (federated peer).
     gw.dm_clients = {cert_id: entry}
+    gw.own_pod_clients = {}
     res = gw._dm_client_for_target(target)
     assert res is not None
     _cd, _rid, _entry = res
     assert _rid == cert_id and _entry == entry
 
-    # Falls back to the webid key (our own pod).
-    gw.dm_clients = {target: entry}
+    # Falls back to our OWN pod client, now in own_pod_clients (R90 A), keyed by webid.
+    own_entry = ("OWN_CREDS", "OWN_CLIENT")
+    gw.dm_clients = {}
+    gw.own_pod_clients = {target: own_entry}
+    assert gw._dm_client_for_target(target)[2] == own_entry
+
+    # The relationship (cert_id) client wins over an own-pod entry: no cross-hit even if a
+    # webid somehow equalled a cert_id, since they are separate maps now.
+    gw.dm_clients = {cert_id: entry}
+    gw.own_pod_clients = {target: own_entry}
     assert gw._dm_client_for_target(target)[2] == entry
 
 

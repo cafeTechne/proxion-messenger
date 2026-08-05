@@ -94,7 +94,7 @@ class PodSyncMixin:
         """Return the live DPoP SolidClient if a pod is connected, else None."""
         if not self._pod_webid:
             return None
-        entry = self.dm_clients.get(self._pod_webid)
+        entry = self.own_pod_clients.get(self._pod_webid)
         if entry is None:
             return None
         _, client = entry
@@ -320,7 +320,7 @@ class PodSyncMixin:
         mgr = CssAccountManager(css_url)
         creds, pod_url, webid = mgr.connect_agent(self.agent.identity_key, email, password)
         client = build_dpop_client(creds, pod_url)
-        self.dm_clients[webid] = (creds, client)
+        self.own_pod_clients[webid] = (creds, client)   # R90 A: our own pod client
         self._pod_url = pod_url
         self._pod_webid = webid
         logger.info(f"Connected Solid Pod: {pod_url} (webid={webid})")
@@ -379,7 +379,7 @@ class PodSyncMixin:
         pod_url = data["pod_url"]
         webid = data["webid"]
         client = build_dpop_client(creds, pod_url)
-        self.dm_clients[webid] = (creds, client)
+        self.own_pod_clients[webid] = (creds, client)   # R90 A: our own pod client
         self._pod_url = pod_url
         self._pod_webid = webid
         logger.info(f"Auto-reconnected pod from stored credentials: {pod_url}")
@@ -774,8 +774,9 @@ class PodSyncMixin:
 
     def _get_store(self):
         """Return SolidStore if a pod client is available, else a no-op MemoryStore."""
-        if self.dm_clients:
-            _, pod_client = next(iter(self.dm_clients.values()))
+        _pc_entry = self._any_pod_client_entry()
+        if _pc_entry:
+            _, pod_client = _pc_entry
             from .solid_store import SolidStore
             return SolidStore(pod_client)
         from .store import MemoryStore
@@ -822,8 +823,8 @@ class PodSyncMixin:
                     pass
                 try:
                     pod_client = None
-                    if self._pod_webid and self._pod_webid in self.dm_clients:
-                        _, pod_client = self.dm_clients[self._pod_webid]
+                    if self._pod_webid and self._pod_webid in self.own_pod_clients:
+                        _, pod_client = self.own_pod_clients[self._pod_webid]
                     if pod_client and cert.certificate_id:
                         self.dm_clients[cert.certificate_id] = (cert, pod_client)
                 except Exception as exc:
@@ -844,8 +845,8 @@ class PodSyncMixin:
                     asyncio.create_task(self._sync_cert_to_pod(cert.to_dict()))
                     try:
                         pod_client = None
-                        if self._pod_webid and self._pod_webid in self.dm_clients:
-                            _, pod_client = self.dm_clients[self._pod_webid]
+                        if self._pod_webid and self._pod_webid in self.own_pod_clients:
+                            _, pod_client = self.own_pod_clients[self._pod_webid]
                         if pod_client and cert.certificate_id:
                             self.dm_clients[cert.certificate_id] = (cert, pod_client)
                     except Exception as exc:

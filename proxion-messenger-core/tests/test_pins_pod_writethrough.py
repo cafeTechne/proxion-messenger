@@ -34,7 +34,7 @@ def _mock_pod_client(gw):
     mock_client.list = MagicMock(return_value=[])
     mock_client.get = MagicMock(return_value=b'{}')
     gw._pod_webid = "https://pod.example/profile/card#me"
-    gw.dm_clients[gw._pod_webid] = (MagicMock(), mock_client)
+    gw.own_pod_clients[gw._pod_webid] = (MagicMock(), mock_client)
     return mock_client
 
 
@@ -74,7 +74,7 @@ async def test_restore_room_pins_from_pod_saves_to_sqlite(gateway):
     )
     mock_client.get = MagicMock(return_value=json.dumps(pin_record).encode())
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
 
     await gateway._restore_room_pins_from_pod("room-restore")
     pins = gateway._store.get_pins("room-restore")
@@ -95,6 +95,6 @@ async def test_delete_pin_tolerates_404(gateway):
     err = SolidError("not found", status_code=404)
     mock_client.delete = MagicMock(side_effect=err)
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
     # Should not raise
     await gateway._delete_pin_from_pod("room-1", "msg-1")

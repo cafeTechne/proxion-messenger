@@ -35,7 +35,7 @@ async def test_backfill_skips_if_version_marker_present(gateway):
     mock_client.get = MagicMock(return_value=marker)
     mock_client.put = MagicMock(return_value=None)
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
 
     await gateway._run_pod_backfill()
     # put should NOT be called (skipped)
@@ -51,7 +51,7 @@ async def test_backfill_writes_migration_marker_on_completion(gateway):
     mock_client.put = MagicMock(return_value=None)
     mock_client.list = MagicMock(return_value=[])
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
     gateway._pod_url = "https://pod.example/"
 
     await gateway._run_pod_backfill()
@@ -89,7 +89,7 @@ async def test_backfill_queues_cert_sync_tasks(gateway):
     mock_client.put = MagicMock(return_value=None)
     mock_client.list = MagicMock(return_value=[])
     gateway._pod_webid = "https://pod.example/profile/card#me"
-    gateway.dm_clients[gateway._pod_webid] = (MagicMock(), mock_client)
+    gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
     gateway._pod_url = "https://pod.example/"
 
     import asyncio
