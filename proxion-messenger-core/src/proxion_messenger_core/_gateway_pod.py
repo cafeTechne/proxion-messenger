@@ -314,33 +314,52 @@ class PodSyncMixin:
         return format_proxion_address(gateway_did, http_url)
 
     def _connect_css_sync(self, css_url: str, email: str, password: str):
-        """Synchronous pod connect — runs in executor. Returns (creds, pod_url, webid)."""
-        from .css_setup import CssAccountManager, build_dpop_client
+        """Synchronous pod connect — runs in executor. Returns (creds, pod_url, webid).
+
+        Detects the Solid server type and routes accordingly: CSS uses DPoP client
+        credentials; JSS and NSS use the standard-OIDC bearer path. Detection that is
+        inconclusive (server briefly unreachable) falls back to CSS, the historical
+        default, so existing CSS deployments are unaffected.
+        """
         from pathlib import Path
-        mgr = CssAccountManager(css_url)
-        creds, pod_url, webid = mgr.connect_agent(self.agent.identity_key, email, password)
-        client = build_dpop_client(creds, pod_url)
+        from .nss_setup import detect_server_type
+        server_type = detect_server_type(css_url)
+
+        if server_type in ("css", "unknown"):
+            from .css_setup import CssAccountManager, build_dpop_client
+            mgr = CssAccountManager(css_url)
+            creds, pod_url, webid = mgr.connect_agent(self.agent.identity_key, email, password)
+            client = build_dpop_client(creds, pod_url)
+        else:
+            # JSS / NSS: OIDC discovery + bearer token (JSS creates the pod if needed).
+            from .nss_setup import make_pod_client
+            creds, pod_url, webid, client = make_pod_client(
+                css_url, self.agent.identity_key, email, password)
+
         self.own_pod_clients[webid] = (creds, client)   # R90 A: our own pod client
         self._pod_url = pod_url
         self._pod_webid = webid
-        logger.info(f"Connected Solid Pod: {pod_url} (webid={webid})")
+        logger.info(f"Connected Solid Pod ({server_type}): {pod_url} (webid={webid})")
 
         if self.config.db_path:
-            cred_path = Path(self.config.db_path).parent / "pod_creds.json"
-            plaintext = json.dumps({
-                "css_url": css_url,
-                "client_id": creds.client_id,
-                "client_secret": creds.client_secret,
-                "pod_url": pod_url,
-                "webid": webid,
-            }).encode()
-            enc_token = _encrypt_creds(self.agent.identity_key, plaintext)
-            cred_path.write_text(json.dumps({"v": 2, "enc": enc_token}))
-            import stat as _stat
-            try:
-                cred_path.chmod(_stat.S_IRUSR | _stat.S_IWUSR)
-            except OSError:
-                pass  # Windows — chmod not supported
+            # Only CSS creds (client_id/secret) support password-less reconnect from disk;
+            # bearer servers (JSS/NSS) reconnect from config, so persist only for CSS.
+            if server_type in ("css", "unknown"):
+                cred_path = Path(self.config.db_path).parent / "pod_creds.json"
+                plaintext = json.dumps({
+                    "css_url": css_url,
+                    "client_id": creds.client_id,
+                    "client_secret": creds.client_secret,
+                    "pod_url": pod_url,
+                    "webid": webid,
+                }).encode()
+                enc_token = _encrypt_creds(self.agent.identity_key, plaintext)
+                cred_path.write_text(json.dumps({"v": 2, "enc": enc_token}))
+                import stat as _stat
+                try:
+                    cred_path.chmod(_stat.S_IRUSR | _stat.S_IWUSR)
+                except OSError:
+                    pass  # Windows — chmod not supported
             self._rehydrate_relationships(client)
 
         return creds, pod_url, webid

@@ -17,37 +17,44 @@ class NssAuthError(RuntimeError):
 
 
 def detect_server_type(base_url: str) -> str:
-    """Detect whether a Solid server is CSS or NSS.
+    """Detect whether a Solid server is CSS, JSS, or NSS.
 
-    GET {base_url}/.account/ — if 200 + JSON with "controls" key → "css", else → "nss".
-    Timeout 5s, swallow exceptions → "unknown".
+    - CSS exposes an account API at ``/.account/`` returning JSON with a ``controls`` key.
+    - JSS exposes a programmatic-credentials endpoint at ``/idp/credentials`` (email +
+      password -> access_token) that returns 200; CSS uses ``/.account/credentials/`` and
+      NSS has neither, so a 200 there is a reliable JSS signal. (On JSS, ``/.account/``
+      returns 401, so the CSS check correctly falls through.)
+    - Otherwise assume NSS (OIDC password grant, out-of-band accounts).
 
-    Parameters
-    ----------
-    base_url : str
-        The base URL of the Solid server (e.g. https://solidweb.org).
+    Timeout 5s per probe; an unreachable server -> "unknown".
 
     Returns
     -------
     str
-        One of: "css", "nss", "unknown".
+        One of: "css", "jss", "nss", "unknown".
     """
     import httpx
+    base = base_url.rstrip("/")
+    # CSS: /.account/ with a controls object.
     try:
-        resp = httpx.get(f"{base_url.rstrip('/')}/.account/", timeout=5.0)
+        resp = httpx.get(f"{base}/.account/", timeout=5.0)
         if resp.status_code == 200:
             try:
-                body = resp.json()
-                if "controls" in body:
+                if "controls" in resp.json():
                     return "css"
-                else:
-                    return "nss"
             except Exception:
-                return "nss"
-        else:
-            return "nss"
+                pass
     except Exception:
         return "unknown"
+    # JSS: programmatic-credentials endpoint present.
+    try:
+        jss = httpx.get(f"{base}/idp/credentials", timeout=5.0)
+        if jss.status_code == 200:
+            return "jss"
+    except Exception:
+        pass
+    # Fallback: NSS.
+    return "nss"
 
 
 @dataclass
@@ -406,9 +413,20 @@ def make_pod_client(
         client = build_dpop_client(creds, pod_url, stash_owner=stash_owner)
         return creds, pod_url, webid, client
 
+    elif server_type == "jss":
+        from .jss_setup import JssAccountManager, build_jss_client
+        mgr = JssAccountManager(base_url)
+        # setup_agent creates the pod if it does not exist yet, then logs in (bearer).
+        creds, pod_url, webid = mgr.setup_agent(
+            identity_key, username, password
+        )
+        client = build_jss_client(creds, pod_url, stash_owner=stash_owner)
+        return creds, pod_url, webid, client
+
     else:
         raise NssAuthError(
             f"Could not detect Solid server type at {base_url}. "
-            "Tried CSS (/.account/) and NSS (/.well-known/openid-configuration). "
-            "Server may be unreachable or not a Solid server."
+            "Tried CSS (/.account/), JSS (/idp/credentials), and NSS "
+            "(/.well-known/openid-configuration). Server may be unreachable "
+            "or not a Solid server."
         )
