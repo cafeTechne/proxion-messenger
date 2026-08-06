@@ -111,3 +111,54 @@ jobs:
           name: proxion-gateway-${{ matrix.os }}
           path: tauri-app/src-tauri/sidecar/proxion-gateway-*
           if-no-files-found: error
+
+  jss-integration:
+    # Runs the JSS (JavaScript Solid Server) live-integration test against a real JSS,
+    # so the gateway's JSS path is verified on every change. JSS ships as an npm package
+    # (no official Docker image), so it is started as a background step rather than a
+    # `services:` container. Pinned to a known-good version; bump deliberately.
+    name: JSS integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22 (JSS requires Node 22+)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install JSS (pinned)
+        run: npm install -g javascript-solid-server@0.0.220
+
+      - name: Start JSS and wait for readiness
+        run: |
+          nohup jss start --port 4455 --idp > jss.log 2>&1 &
+          echo "Waiting for JSS on :4455 ..."
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null http://127.0.0.1:4455/; then
+              echo "JSS up after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "JSS did not become ready in time"; cat jss.log; exit 1
+
+      - name: Install core deps
+        working-directory: proxion-messenger-core
+        run: pip install -e ".[gateway,test]"
+
+      - name: Run JSS live integration test
+        working-directory: proxion-messenger-core
+        env:
+          PROXION_JSS_URL: http://127.0.0.1:4455
+        run: pytest tests/test_jss_setup.py -m integration -q --tb=short
+
+      - name: Dump JSS log on failure
+        if: failure()
+        run: cat jss.log || true
