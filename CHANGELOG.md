@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.2
+
+Updates itself now. This is the first signed release, which turns on in-app updating.
+
+- **Update from inside the app.** A running desktop install checks for a new signed
+  release, verifies it against a built-in key, and updates in place on your say-so, so you
+  no longer download and reinstall from GitHub by hand. There is a banner when an update is
+  ready and a Check for updates button in Settings, App. Updates are verified with the
+  project's own key, no Apple or Microsoft involved. From this release forward, upgrades
+  are automatic.
+
 ## 0.2.1
 
 Calls that connect and verify. This release makes a first call work on real networks,
