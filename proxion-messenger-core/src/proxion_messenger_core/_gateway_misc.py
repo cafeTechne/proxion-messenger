@@ -245,13 +245,17 @@ class MiscHandlerMixin:
             await websocket.send(json.dumps({"type": "tunnel_status", **st}))
 
     async def _handle_stop_tunnel(self, websocket, data: dict) -> None:
-        """Tear the tunnel down and restore the pre-tunnel public URL + auth mode."""
+        """Tear the tunnel down and restore the pre-tunnel public URL + auth mode.
+
+        Only restores when a tunnel was actually active: otherwise a cold
+        stop_tunnel would clobber a legitimately configured PROXION_PUBLIC_URL
+        (and force_auth) with the init-default None/False."""
         if self._tunnel is not None:
             await self._tunnel.stop()
             self._tunnel = None
-        self.config.public_url = self._tunnel_prev_public_url
-        self._force_auth = self._tunnel_prev_force_auth
-        logger.info("Public tunnel stopped; auth/public_url restored")
+            self.config.public_url = self._tunnel_prev_public_url
+            self._force_auth = self._tunnel_prev_force_auth
+            logger.info("Public tunnel stopped; auth/public_url restored")
         await websocket.send(json.dumps({"type": "tunnel_status", "state": "stopped",
                                          "url": None, "error": None}))
 

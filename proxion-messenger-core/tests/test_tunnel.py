@@ -115,3 +115,28 @@ def test_force_auth_makes_auth_enforced_true(monkeypatch):
     assert gw._auth_enforced() is False       # loopback default skips auth
     gw._force_auth = True
     assert gw._auth_enforced() is True         # a live tunnel forces it on
+
+
+@pytest.mark.asyncio
+async def test_cold_stop_tunnel_does_not_wipe_configured_public_url():
+    """R98: stop_tunnel with no active tunnel must not clobber a configured
+    PROXION_PUBLIC_URL (or force_auth) with the init-default None/False."""
+    from proxion_messenger_core.gateway import ProxionGateway
+    gw = ProxionGateway.__new__(ProxionGateway)
+
+    class _Cfg:
+        public_url = "https://my.configured.example"
+    gw.config = _Cfg()
+    gw._tunnel = None
+    gw._tunnel_prev_public_url = None          # never started a tunnel
+    gw._force_auth = True                        # e.g. explicitly required
+    gw._tunnel_prev_force_auth = False
+
+    sent = []
+    class _WS:
+        async def send(self, m): sent.append(m)
+
+    await gw._handle_stop_tunnel(_WS(), {})
+    assert gw.config.public_url == "https://my.configured.example"  # untouched
+    assert gw._force_auth is True                                    # untouched
+    assert any("stopped" in m for m in sent)
