@@ -1430,6 +1430,28 @@ import { createIdentityResolver } from './identity.js';
                     }
                     break;
                 }
+                case "tunnel_ready": {
+                    // R97: gateway is now reachable over HTTPS. Point the QR at the
+                    // tunnel URL so a phone can scan it and load the app.
+                    renderMyQR(event.url);
+                    const line = document.getElementById('tunnel-status-line');
+                    if (line) {
+                        line.style.display = 'block';
+                        line.textContent = t('tunnel.ready', { url: event.url });
+                    }
+                    break;
+                }
+                case "tunnel_status": {
+                    const line = document.getElementById('tunnel-status-line');
+                    if (line) {
+                        line.style.display = 'block';
+                        if (event.state === 'absent') line.textContent = event.install_hint || t('tunnel.absent');
+                        else if (event.state === 'failed') line.textContent = t('tunnel.failed');
+                        else if (event.state === 'stopped') line.textContent = '';
+                        else line.textContent = t('tunnel.starting');
+                    }
+                    break;
+                }
                 case "link_preview":
                     renderLinkPreview(event);
                     break;
@@ -4509,6 +4531,12 @@ import { createIdentityResolver } from './identity.js';
                 const link = window.proxionShortInviteUrl || window.proxionInviteLink || '';
                 if (!link) return;
                 navigator.clipboard.writeText(link).then(() => showToast(t('invite.shortLinkCopied')));
+            });
+            // R97: open a public tunnel so a phone can reach this gateway over HTTPS.
+            attachListener('#qr-connect-phone-btn', 'click', () => {
+                const line = document.getElementById('tunnel-status-line');
+                if (line) { line.style.display = 'block'; line.textContent = t('tunnel.starting'); }
+                socketSendOrQueue({ cmd: 'start_tunnel' });
             });
 
             // R17.2: QR scan — decode image and pre-fill add-peer input

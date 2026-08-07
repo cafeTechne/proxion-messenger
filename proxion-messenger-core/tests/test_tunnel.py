@@ -1,0 +1,117 @@
+"""R97: app-driven cloudflared tunnel manager + gateway auth-force invariant."""
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+
+from proxion_messenger_core.tunnel import (
+    TunnelManager, extract_tunnel_url, find_cloudflared,
+)
+
+
+# ── pure URL parsing ────────────────────────────────────────────────────────
+def test_extract_tunnel_url_matches_banner():
+    line = "2026-08-07 INF |  https://calm-forest-1234.trycloudflare.com  |"
+    assert extract_tunnel_url(line) == "https://calm-forest-1234.trycloudflare.com"
+
+
+def test_extract_tunnel_url_ignores_noise():
+    assert extract_tunnel_url("INF Starting tunnel...") is None
+    assert extract_tunnel_url("") is None
+    assert extract_tunnel_url("https://example.com/not-a-tunnel") is None
+
+
+# ── state machine with an injected fake process ─────────────────────────────
+class _FakeStdout:
+    def __init__(self, lines):
+        self._lines = list(lines)
+
+    async def readline(self):
+        if self._lines:
+            return self._lines.pop(0)
+        return b""   # EOF
+
+
+class _FakeProc:
+    def __init__(self, lines):
+        self.stdout = _FakeStdout(lines)
+        self.returncode = None
+        self.terminated = False
+
+    def terminate(self):
+        self.terminated = True
+        self.returncode = 0
+
+    def kill(self):
+        self.returncode = -9
+
+    async def wait(self):
+        self.returncode = self.returncode or 0
+        return self.returncode
+
+
+def _mgr(lines):
+    async def spawn(path, port):
+        return _FakeProc(lines)
+    return TunnelManager(cloudflared_path="/usr/bin/cloudflared", spawn=spawn)
+
+
+@pytest.mark.asyncio
+async def test_start_resolves_url_and_reports_running():
+    mgr = _mgr([b"INF booting\n", b"INF https://abc-def-1.trycloudflare.com\n"])
+    st = await mgr.start(8080)
+    assert st["state"] == "running"
+    assert st["url"] == "https://abc-def-1.trycloudflare.com"
+    await mgr.stop()
+    assert mgr.status()["state"] == "stopped"
+    assert mgr.status()["url"] is None
+
+
+@pytest.mark.asyncio
+async def test_start_fails_when_process_exits_without_url():
+    mgr = _mgr([b"INF booting\n"])   # then EOF, no URL
+    st = await mgr.start(8080)
+    assert st["state"] == "failed"
+    assert st["error"]
+
+
+@pytest.mark.asyncio
+async def test_start_times_out():
+    class _Hang:
+        async def readline(self):
+            await asyncio.sleep(10)
+    class _HangProc:
+        stdout = _Hang(); returncode = None
+        def terminate(self): self.returncode = 0
+        def kill(self): self.returncode = -9
+        async def wait(self): return 0
+    async def spawn(path, port):
+        return _HangProc()
+    mgr = TunnelManager(cloudflared_path="/usr/bin/cloudflared", spawn=spawn)
+    st = await mgr.start(8080, timeout=0.05)
+    assert st["state"] == "failed"
+    assert "timed out" in st["error"]
+
+
+def test_absent_when_binary_missing():
+    mgr = TunnelManager(cloudflared_path=None, spawn=None)
+    # If the host happens to have cloudflared, find_cloudflared() would populate
+    # the path; this test only asserts the absent branch when there is no binary.
+    if find_cloudflared() is None:
+        assert mgr.status()["state"] == "absent"
+
+
+# ── gateway auth-force invariant ────────────────────────────────────────────
+def test_force_auth_makes_auth_enforced_true(monkeypatch):
+    from proxion_messenger_core.gateway import ProxionGateway
+    gw = ProxionGateway.__new__(ProxionGateway)  # no full init needed
+    monkeypatch.delenv("PROXION_REQUIRE_AUTH", raising=False)
+
+    class _Cfg:
+        host = "127.0.0.1"
+    gw.config = _Cfg()
+    gw._force_auth = False
+    assert gw._auth_enforced() is False       # loopback default skips auth
+    gw._force_auth = True
+    assert gw._auth_enforced() is True         # a live tunnel forces it on

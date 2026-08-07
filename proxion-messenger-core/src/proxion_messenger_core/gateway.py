@@ -220,6 +220,13 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         self._pending_auth: dict = {}      # websocket -> {did, webid, display_name, nonce, expires_at}
         self._auth_verified: set = set()   # websockets that have passed DID challenge
         self._auth_fail_counts: dict = {}  # (id(ws), ip) -> {count, first_at}
+        # R97: while a public tunnel is active the gateway is reachable from the
+        # internet, so auth MUST be enforced even on a loopback bind (cloudflared
+        # forwards from localhost). start_tunnel sets this; stop_tunnel restores it.
+        self._force_auth: bool = False
+        self._tunnel = None
+        self._tunnel_prev_public_url = None
+        self._tunnel_prev_force_auth = False
 
         # Disappearing messages: room_id -> ms (0 = disabled) — must init before _hydrate_from_store
         self._room_disappear_timers: dict = {}
@@ -424,6 +431,9 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         just claim the owner DID) AND wrongly rejects the real local user, whose
         browser registers under its own session DID (≠ the gateway/account DID).
         So auth-scoped local participant checks must be gated on this."""
+        # R97: a live public tunnel forces auth regardless of bind address.
+        if getattr(self, "_force_auth", False):
+            return True
         _env = os.environ.get("PROXION_REQUIRE_AUTH", "")
         if _env == "1":
             return True
@@ -1236,6 +1246,12 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_unblock(websocket, data)
             elif cmd == "list_blocks":
                 await self._handle_list_blocks(websocket, data)
+            elif cmd == "start_tunnel":
+                await self._handle_start_tunnel(websocket, data)
+            elif cmd == "stop_tunnel":
+                await self._handle_stop_tunnel(websocket, data)
+            elif cmd == "tunnel_status":
+                await self._handle_tunnel_status(websocket, data)
             elif cmd == "mark_read":
                 await self._handle_mark_read(websocket, data)
             elif cmd == "update_last_read":

@@ -183,7 +183,9 @@ class AuthHandlerMixin:
                 gateway_url = ""
 
         _env_auth = os.environ.get("PROXION_REQUIRE_AUTH", "")
-        if _env_auth == "1":
+        if getattr(self, "_force_auth", False):
+            require_auth = True   # R97: a live public tunnel forces auth on
+        elif _env_auth == "1":
             require_auth = True
         elif _env_auth == "0":
             require_auth = False  # explicitly disabled

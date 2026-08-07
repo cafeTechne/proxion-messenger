@@ -192,6 +192,69 @@ class MiscHandlerMixin:
         webids = self._store.get_blocked_by(owner) if (owner and self._store) else []
         await websocket.send(json.dumps({"type": "blocks", "webids": webids}))
 
+    async def _handle_tunnel_status(self, websocket, data: dict) -> None:
+        """Report the public-tunnel state so the client can offer / reflect it."""
+        from .tunnel import find_cloudflared
+        if self._tunnel is not None:
+            st = self._tunnel.status()
+        else:
+            st = {"state": "stopped" if find_cloudflared() else "absent",
+                  "url": None, "error": None}
+        await websocket.send(json.dumps({"type": "tunnel_status", **st}))
+
+    async def _handle_start_tunnel(self, websocket, data: dict) -> None:
+        """Open a cloudflared quick tunnel so a phone can reach this gateway over
+        HTTPS, then hand back the URL + address. SECURITY (R97): auth is forced on
+        BEFORE the tunnel becomes reachable, because cloudflared forwards from
+        localhost and the loopback default would otherwise skip auth."""
+        from .tunnel import TunnelManager, find_cloudflared
+        caller = self._client_webids.get(websocket, "")
+        if not caller:
+            await websocket.send(json.dumps({"type": "error", "message": "not_registered"}))
+            return
+        if self._tunnel is not None and self._tunnel.status().get("state") == "running":
+            st = self._tunnel.status()
+            await websocket.send(json.dumps({
+                "type": "tunnel_ready", "url": st["url"],
+                "ws_url": self._ws_public_url(), "address": self._proxion_address()}))
+            return
+        if not find_cloudflared():
+            await websocket.send(json.dumps({
+                "type": "tunnel_status", "state": "absent", "url": None,
+                "install_hint": "Install cloudflared to connect a phone."}))
+            return
+        # Force auth on and snapshot prior state BEFORE the tunnel goes live.
+        self._tunnel_prev_force_auth = self._force_auth
+        self._tunnel_prev_public_url = self.config.public_url
+        self._force_auth = True
+        self._tunnel = TunnelManager()
+        port = self.config.http_port or 8080
+        st = await self._tunnel.start(port)
+        if st.get("state") == "running":
+            self.config.public_url = st["url"]
+            logger.info("Public tunnel up at %s (auth forced on)", st["url"])
+            await websocket.send(json.dumps({
+                "type": "tunnel_ready", "url": st["url"],
+                "ws_url": self._ws_public_url(), "address": self._proxion_address()}))
+        else:
+            # Tunnel never came up: roll back the forced auth + public_url so we
+            # do not leave auth forced with nothing exposed.
+            self._force_auth = self._tunnel_prev_force_auth
+            self.config.public_url = self._tunnel_prev_public_url
+            self._tunnel = None
+            await websocket.send(json.dumps({"type": "tunnel_status", **st}))
+
+    async def _handle_stop_tunnel(self, websocket, data: dict) -> None:
+        """Tear the tunnel down and restore the pre-tunnel public URL + auth mode."""
+        if self._tunnel is not None:
+            await self._tunnel.stop()
+            self._tunnel = None
+        self.config.public_url = self._tunnel_prev_public_url
+        self._force_auth = self._tunnel_prev_force_auth
+        logger.info("Public tunnel stopped; auth/public_url restored")
+        await websocket.send(json.dumps({"type": "tunnel_status", "state": "stopped",
+                                         "url": None, "error": None}))
+
     async def _handle_set_thread_mute(self, websocket, data: dict) -> None:
         """Record a thread mute server-side so OFFLINE push respects it. mute_key is
         the peer's webid (DM) or room_id (room)."""
