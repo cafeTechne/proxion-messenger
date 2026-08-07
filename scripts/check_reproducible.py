@@ -95,6 +95,19 @@ def format_report(rep: dict) -> str:
     return "\n".join(lines)
 
 
+def format_expect_report(got: str, expected: str) -> str:
+    """Report for the --expect cross-machine check. Pure/testable."""
+    if got == expected:
+        return f"MATCH: your build matches the published digest.\n  sha256: {got}"
+    return (
+        "MISMATCH: your build does not match the published digest.\n"
+        f"  expected: {expected}\n"
+        f"  got:      {got}\n"
+        "  This can mean a different toolchain version (pin PyInstaller and Python\n"
+        "  to the documented versions), or a genuine content difference."
+    )
+
+
 def _build_once(dest: Path) -> Path:
     """Run build_sidecar.build() and return the produced sidecar, copied to dest."""
     sys.path.insert(0, str(ROOT))
@@ -115,12 +128,25 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Measure sidecar build reproducibility.")
     ap.add_argument("--compare", nargs=2, metavar=("A", "B"),
                     help="compare two existing files instead of building")
+    ap.add_argument("--expect", metavar="SHA256",
+                    help="build once and assert the sidecar matches this published "
+                         "digest (cross-machine reproducibility check)")
     args = ap.parse_args(argv)
 
     if args.compare:
         rep = compare_files(*args.compare)
         print(format_report(rep))
         return 0 if rep["match"] else 2
+
+    if args.expect:
+        expected = args.expect.strip().lower()
+        tmp = ROOT / "build" / "reproducible"
+        if tmp.exists():
+            shutil.rmtree(tmp, ignore_errors=True)
+        built = _build_once(tmp / "verify.bin")
+        got = _sha256(built)
+        print(format_expect_report(got, expected))
+        return 0 if got == expected else 2
 
     tmp = ROOT / "build" / "reproducible"
     if tmp.exists():

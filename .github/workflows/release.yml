@@ -70,13 +70,13 @@ jobs:
       - name: Build gateway sidecar
         if: matrix.os != 'macos-15-intel'
         # Bounded PyInstaller for build consistency across the matrix (E4).
-        run: pip install "pyinstaller>=6.10,<7" && pip install -e "./proxion-messenger-core[gateway]" && python build_sidecar.py
+        run: pip install "pyinstaller==6.19.0" && pip install -e "./proxion-messenger-core[gateway]" && python build_sidecar.py
 
       - name: Build gateway sidecar (Catalina-compatible)
         if: matrix.os == 'macos-15-intel'
         # python3 -m pip: the python.org framework install ships python3/pip3
         # only (no bare `python`), unlike actions/setup-python.
-        run: python3 -m pip install "pyinstaller>=6.10,<7" && python3 -m pip install -e "./proxion-messenger-core[gateway]" && python3 build_sidecar.py
+        run: python3 -m pip install "pyinstaller==6.19.0" && python3 -m pip install -e "./proxion-messenger-core[gateway]" && python3 build_sidecar.py
 
       - name: Set up Node
         uses: actions/setup-node@v4

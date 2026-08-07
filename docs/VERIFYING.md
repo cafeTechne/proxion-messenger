@@ -70,21 +70,27 @@ python scripts/check_reproducible.py
 ```
 
 It builds the sidecar twice and compares the two binaries. CI runs the same
-check on every change and publishes the result to the run summary. A recent
-Windows build produced two byte-identical sidecars (matching SHA-256 over about
-150 MB).
+check on every change and publishes the result to the run summary.
+
+Two builds of the same commit are byte-identical (matching SHA-256 over about
+150 MB), and the build path is not embedded in the binary, so the result does not
+depend on where it was built. With the toolchain pinned (Python 3.12 and
+PyInstaller 6.19.0), a rebuild on a different machine is expected to match. To
+check your own build against a published reference digest:
+
+```sh
+python scripts/check_reproducible.py --expect <sha256>
+```
 
 ## What this does *not* claim
 
 Two limits remain, and the provenance attestation (layer 2) is the compensating
 control for both:
 
-- **Cross-environment reproducibility.** The check above rebuilds on a single
-  machine, so it proves the build is stable across time and process runs, not
-  that a third party on a different OS, build path, or toolchain version will get
-  the same bytes. PyInstaller can embed absolute build paths and is sensitive to
-  its own version, so an independent rebuild may still differ. Normalizing that
-  is the remaining reproducibility work.
+- **Toolchain sensitivity.** Reproducibility holds for the pinned toolchain
+  (Python 3.12, PyInstaller 6.19.0). A different Python or PyInstaller version
+  can produce different bytes, so match the pinned versions before comparing
+  digests. The pin is bumped deliberately.
 - **The OS installer.** The Tauri bundling step embeds signing material and
   timestamps, so the final installer is not bit-for-bit reproducible. Verify it
   through the checksums (layer 1) and the attestation (layer 2), not by

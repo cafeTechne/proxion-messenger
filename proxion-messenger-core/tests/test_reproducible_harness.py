@@ -66,3 +66,12 @@ def test_empty_files_match(tmp_path):
     rep = cr.compare_files(a, b)
     assert rep["match"] is True
     assert rep["differing_bytes"] == 0
+
+
+def test_expect_report_match_and_mismatch():
+    sha = "a" * 64
+    assert "MATCH" in cr.format_expect_report(sha, sha)
+    out = cr.format_expect_report("b" * 64, sha)
+    assert "MISMATCH" in out
+    assert sha in out            # shows the expected digest
+    assert "b" * 64 in out        # and what was actually built

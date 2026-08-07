@@ -91,7 +91,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install pyinstaller && pip install -e "./proxion-messenger-core[gateway]"
+        run: pip install pyinstaller==6.19.0 && pip install -e "./proxion-messenger-core[gateway]"
 
       - name: Build sidecar
         run: python build_sidecar.py
@@ -183,7 +183,7 @@ jobs:
           cache: pip
 
       - name: Install build deps
-        run: pip install pyinstaller && pip install -e "./proxion-messenger-core[gateway]"
+        run: pip install pyinstaller==6.19.0 && pip install -e "./proxion-messenger-core[gateway]"
 
       - name: Build twice and compare
         run: python scripts/check_reproducible.py | tee reproducible-report.txt
