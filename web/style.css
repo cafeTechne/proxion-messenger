@@ -769,3 +769,565 @@ button:hover { background: var(--accent-hover); }
 @media (max-width: 768px) {
   #voice-channel-videos .vc-video-tile.vc-speaking { width: 70vw; max-height: 42vh; }
 }
+
+
+/* ── Merged from the former inline <style> block in index.html (R95/F2a).
+   Kept at the end so the cascade order (style.css then this block) is unchanged. ── */
+        #voice-banner {
+            display: none;
+            background: var(--accent);
+            color: white;
+            padding: 10px 20px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+        }
+        #voice-banner button {
+            background: white;
+            color: var(--accent);
+            margin: 0 10px;
+            padding: 5px 15px;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .attachment {
+            display: inline-block;
+            background: #1a1a2e;
+            padding: 5px 10px;
+            border-radius: 4px;
+            margin-top: 5px;
+            font-size: 0.9em;
+        }
+        #file-input { display: none; }
+        .paperclip {
+            cursor: pointer;
+            font-size: 1.2em;
+            margin-right: 10px;
+            color: var(--text-secondary);
+        }
+        #search-box {
+            padding: 10px;
+            border-bottom: 1px solid #1a1a2e;
+        }
+        #search-input {
+            width: 100%;
+            padding: 8px;
+            background: #1a1a2e;
+            border: 1px solid #1a1a2e;
+            color: white;
+            border-radius: 4px;
+        }
+        .search-match {
+            background: #1a2a4a;
+            border-left: 4px solid var(--accent);
+        }
+        .search-match b { color: var(--accent); }
+        .voice-channel { color: var(--color-success-soft); cursor: pointer; padding: 5px 0; }
+        .voice-channel:hover { text-decoration: underline; }
+        .avatar {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            vertical-align: middle;
+            margin-right: 8px;
+            display: inline-block;
+            position: relative;
+        }
+        .avatar.placeholder {
+            background: var(--accent);
+            color: white;
+            text-align: center;
+            line-height: 24px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .avatar-presence {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            bottom: -1px;
+            right: -1px;
+            border: 2px solid var(--slate-900);
+            background: var(--slate-500);  /* offline (grey) */
+        }
+        .avatar-presence.online {
+            background: var(--color-success);  /* online (green) */
+        }
+        .avatar-presence.away {
+            background: #eab308;  /* away (yellow) */
+        }
+        .avatar-presence.busy {
+            background: var(--color-danger);  /* busy (red) */
+        }
+        .reactions {
+            display: flex;
+            gap: 5px;
+            margin-top: 5px;
+            flex-wrap: wrap;
+        }
+        .reaction {
+            background: rgba(255,255,255,0.1);
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 0.8em;
+            cursor: pointer;
+            border: 1px solid transparent;
+        }
+        .reaction.active {
+            border-color: var(--accent);
+            background: rgba(233, 69, 96, 0.2);
+        }
+        /* D3: pop a reaction pill when it is added */
+        @keyframes reaction-pop {
+            0%   { transform: scale(0.6); }
+            55%  { transform: scale(1.3); }
+            100% { transform: scale(1); }
+        }
+        .reaction.reaction-anim {
+            animation: reaction-pop 0.28s cubic-bezier(0.2, 0.7, 0.3, 1.35);
+        }
+        /* F4: honour reduced-motion globally — covers the reaction pop, skeleton
+           shimmer, popover fade, recording pulse, every token transition, and
+           smooth scrolling, not just the one reaction rule it replaced. */
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.001ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.001ms !important;
+                scroll-behavior: auto !important;
+            }
+        }
+        .emoji-picker {
+            display: none;
+            position: absolute;
+            background: #16213e;
+            border: 1px solid #0f3460;
+            padding: 8px;
+            border-radius: 8px;
+            z-index: 1000;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 5px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+        .emoji-picker button {
+            cursor: pointer;
+            font-size: 1.2em;
+            padding: 4px;
+            border-radius: 4px;
+            background: transparent;
+            border: none;
+            color: inherit;
+            line-height: 1;
+        }
+        .emoji-picker button:hover,
+        .emoji-picker button:focus-visible { background: rgba(255,255,255,0.1); }
+        /* R58: GIF tray — composer popover of starred images */
+        .gif-tray-btn {
+            background: transparent; border: 1px solid var(--slate-600);
+            color: var(--text-secondary); border-radius: 4px; cursor: pointer;
+            font-size: 0.68rem; font-weight: 700; letter-spacing: 0.03em;
+            padding: 4px 6px; min-width: 36px; min-height: 28px; flex-shrink: 0;
+        }
+        .gif-tray-btn:hover, .gif-tray-btn:focus-visible { color: var(--slate-50); border-color: var(--slate-500); }
+        #gif-tray {
+            position: absolute; bottom: 62px; left: 8px; right: 8px;
+            max-width: 420px; max-height: 300px; overflow-y: auto;
+            background: var(--slate-800); border: 1px solid var(--slate-600);
+            border-radius: 8px; padding: 10px; z-index: 1000;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+        .gif-tray-title {
+            margin: 0 0 8px; font-size: 0.72em; color: var(--text-secondary);
+            text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;
+        }
+        .gif-tray-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; }
+        .gif-tray-empty { margin: 4px 0; font-size: 0.85em; color: var(--text-secondary); grid-column: 1 / -1; }
+        .gif-cell { position: relative; }
+        .gif-send {
+            display: block; width: 100%; padding: 0; border: 1px solid var(--slate-700);
+            border-radius: 6px; background: var(--slate-900); cursor: pointer; overflow: hidden;
+        }
+        .gif-send img { display: block; width: 100%; height: 76px; object-fit: cover; }
+        .gif-send:hover, .gif-send:focus-visible { border-color: var(--accent); }
+        .gif-remove {
+            position: absolute; top: 2px; inset-inline-end: 2px; min-width: 22px; min-height: 22px;
+            border: none; border-radius: 4px; background: rgba(0,0,0,0.65);
+            color: var(--slate-50); cursor: pointer; font-size: 0.9em; line-height: 1;
+        }
+        .gif-remove:hover, .gif-remove:focus-visible { background: var(--color-danger, #b91c1c); }
+        /* R58: drag-drop target highlight */
+        .drop-active { outline: 2px dashed var(--accent); outline-offset: -6px; }
+        /* R59C: composer emoji insert-panel */
+        .composer-emoji-panel {
+            position: absolute; bottom: 62px; left: 8px; right: 8px;
+            max-width: 420px; max-height: 260px; overflow-y: auto;
+            background: var(--slate-800); border: 1px solid var(--slate-600);
+            border-radius: 8px; padding: 8px; z-index: 1000;
+            grid-template-columns: repeat(auto-fill, minmax(36px, 1fr)); gap: 2px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+        .composer-emoji-panel button {
+            background: transparent; border: none; cursor: pointer;
+            font-size: 1.25em; padding: 4px; border-radius: 4px; line-height: 1;
+            min-width: 32px; min-height: 32px;
+        }
+        .composer-emoji-panel button:hover,
+        .composer-emoji-panel button:focus-visible { background: rgba(255,255,255,0.1); }
+        .mention { background: rgba(88,101,242,0.3); border-radius: 3px; padding: 0 2px; }
+        .link-preview {
+            border-left: 3px solid var(--accent);
+            background: rgba(0,0,0,0.1);
+            padding: 10px;
+            margin-top: 8px;
+            border-radius: 0 4px 4px 0;
+            font-size: 0.9em;
+        }
+        .preview-title { font-weight: bold; margin-bottom: 4px; }
+        .preview-desc { color: var(--text-secondary); margin-bottom: 4px; }
+        .preview-url { font-size: 0.8em; color: #5865f2; }
+        
+        #reply-bar {
+            display: none;
+            background: var(--bg-secondary);
+            padding: 8px 20px;
+            border-top: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.9em;
+        }
+        .reply-preview { color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .cancel-reply { cursor: pointer; color: var(--accent); font-weight: bold; }
+        
+        .quoted-context {
+            font-size: 0.85em;
+            color: var(--text-secondary);
+            border-left: 2px solid var(--border);
+            padding-left: 8px;
+            margin-bottom: 4px;
+            cursor: pointer;
+        }
+        .quoted-context:hover { color: var(--text-primary); }
+        
+        /* Link Previews */
+        .link-preview {
+            margin-top: 10px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            max-width: 500px;
+            font-size: 0.9em;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .link-preview img {
+            width: 120px;
+            height: 100%;
+            min-height: 100px;
+            object-fit: cover;
+            border-right: 1px solid var(--border);
+        }
+        .preview-info {
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .preview-title { font-weight: bold; color: var(--accent); }
+        .preview-title a { color: inherit; text-decoration: none; }
+        .preview-title a:hover { text-decoration: underline; }
+        .preview-desc { color: var(--text-secondary); font-size: 0.85em; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .preview-url { font-size: 0.75em; color: var(--text-secondary); opacity: 0.7; }
+
+        /* â"€â"€ Round 31: Messaging Fundamentals â"€â"€ */
+
+        /* Message grouping */
+        .message.msg-grouped { margin-top: 0; padding-top: 2px; }
+
+        /* Date divider */
+        .date-divider {
+            text-align: center; margin: 12px 0 8px; position: relative;
+            color: var(--text-secondary, #94a3b8); font-size: 0.78em; user-select: none;
+        }
+        .date-divider::before, .date-divider::after {
+            content: ''; position: absolute; top: 50%;
+            width: 38%; height: 1px; background: var(--slate-700);
+        }
+        .date-divider::before { left: 0; }
+        .date-divider::after { right: 0; }
+
+        /* Unread divider */
+        .unread-divider {
+            text-align: center; margin: 8px 0; color: var(--accent); font-size: 0.78em;
+            user-select: none; border-top: 1px solid var(--accent); padding-top: 6px;
+        }
+
+        /* Markdown */
+        .code-block { background: var(--slate-900); border-radius: 4px; padding: 8px 12px;
+            margin: 4px 0; overflow-x: auto; font-family: monospace;
+            font-size: 0.85em; white-space: pre; display: block; }
+        .inline-code { background: var(--slate-800); border-radius: 3px; padding: 1px 4px;
+            font-family: monospace; font-size: 0.9em; }
+
+        /* Scroll-to-bottom button */
+        #scroll-bottom-btn {
+            display: none; position: absolute; bottom: 80px; right: 20px;
+            background: var(--accent, #e94560); color: #fff; border: none;
+            border-radius: 20px; padding: 6px 14px; cursor: pointer;
+            font-size: 0.85em; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,.4);
+        }
+
+        /* Timestamp tooltip */
+        .msg-time { cursor: default; color: var(--text-secondary, #94a3b8); font-size: 0.75em; }
+        .msg-time:hover { text-decoration: underline dotted; }
+
+        /* Loading skeleton */
+        .skeleton-msg {
+            height: 38px; background: linear-gradient(90deg,var(--slate-800) 25%,#2d3f55 50%,var(--slate-800) 75%);
+            background-size: 200% 100%; animation: shimmer 1.4s infinite;
+            border-radius: 6px; margin: 8px 12px;
+        }
+        .skeleton-msg.short { width: 55%; }
+        @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+        /* Empty state */
+        .empty-state { text-align: center; color: var(--text-secondary); padding: 48px 24px; line-height: 1.8; }
+        .empty-state-icon { opacity: 0.3; }
+        .empty-state-hint { font-size: 0.85em; color: var(--slate-500); margin-top: 4px; }
+        /* F3: consistent inline empty/loading/error notice for lists & popovers */
+        .state-msg { color: var(--text-secondary); text-align: center; padding: 12px 8px; font-size: 0.9em; margin: 0; }
+        .state-msg.state-error { color: var(--color-danger-soft); }
+        /* Solid conversations (cross-app shared chats) */
+        #solidchat-list { list-style: none; margin: 0; padding: 0; }
+        .solidchat-item { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+            width: 100%; text-align: left; background: transparent; border: none; color: inherit;
+            cursor: pointer; padding: 6px 8px; border-radius: 4px; font: inherit; }
+        .solidchat-item:hover, .solidchat-item:focus-visible { background: var(--slate-800, #1e293b); }
+        .solidchat-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .solidchat-item-role { font-size: 0.68em; color: var(--text-secondary, #94a3b8); flex-shrink: 0; }
+        .solidchat-empty { list-style: none; padding: 6px 8px; font-size: 0.8em; color: var(--text-secondary, #94a3b8); }
+        .solidchat-badge { font-size: 0.66em; text-transform: uppercase; letter-spacing: 0.04em;
+            background: var(--slate-700, #334155); color: var(--slate-200, #e2e8f0);
+            padding: 2px 7px; border-radius: 10px; flex-shrink: 0; }
+        .solidchat-msg { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; max-width: 78%; }
+        .solidchat-msg.mine { margin-left: auto; align-items: flex-end; }
+        .solidchat-author { font-size: 0.72em; color: var(--text-secondary, #94a3b8); }
+        .solidchat-body { background: var(--slate-800, #1e293b); padding: 7px 11px; border-radius: 10px;
+            white-space: pre-wrap; word-break: break-word; }
+        .solidchat-msg.mine .solidchat-body { background: var(--accent, #d61f52); color: #fff; }
+
+        /* G3/G4: actionable empty-state CTA in the sidebar lists */
+        .sidebar-empty { list-style: none; padding: 8px 4px 12px; text-align: center; }
+        .sidebar-empty .state-msg { padding: 4px 8px; }
+        .state-cta { background: var(--slate-700); border: none; color: var(--slate-50);
+            padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85em;
+            transition: background var(--transition-fast); }
+        .state-cta:hover { background: var(--slate-600); }
+
+        /* Connection banner */
+        #conn-banner {
+            display: none; background: var(--color-warning-bg); color: var(--color-warning-text); text-align: center;
+            padding: 5px 12px; font-size: 0.82em; z-index: 5; flex-shrink: 0;
+        }
+
+        /* Profile card popover (B2) */
+        .profile-popover {
+            display: none;
+            position: fixed;
+            background: var(--bg-secondary, #1a1f35);
+            border: 1px solid var(--border, #334155);
+            border-radius: 12px;
+            padding: 16px;
+            min-width: 280px;
+            z-index: 1001;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+            animation: popoverFadeIn 0.15s ease-out;
+        }
+        @keyframes popoverFadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .profile-popover.show { display: block; }
+        .profile-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .profile-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 16px;
+            color: white;
+            position: relative;
+        }
+        .profile-info {
+            flex: 1;
+        }
+        .profile-name {
+            font-weight: bold;
+            font-size: 1em;
+            color: var(--text-primary, #f8fafc);
+            margin-bottom: 4px;
+        }
+        .profile-webid {
+            font-family: monospace;
+            font-size: 0.8em;
+            color: var(--text-secondary, #94a3b8);
+            word-break: break-all;
+        }
+        .profile-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin: 10px 0;
+            font-size: 0.85em;
+            color: var(--text-secondary, #94a3b8);
+        }
+        .profile-status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--slate-500);
+        }
+        .profile-status-dot.online { background: var(--color-success); }
+        .profile-status-dot.away { background: #eab308; }
+        .profile-status-dot.busy { background: var(--color-danger); }
+        .profile-custom-status {
+            font-size: 0.8em;
+            color: var(--text-secondary, #94a3b8);
+            font-style: italic;
+            margin: 8px 0;
+            padding: 6px 0;
+            border-top: 1px solid var(--border, #334155);
+            border-bottom: 1px solid var(--border, #334155);
+            min-height: 16px;
+        }
+        .profile-divider {
+            height: 1px;
+            background: var(--border, #334155);
+            margin: 10px 0;
+        }
+        .profile-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .profile-btn {
+            flex: 1;
+            background: var(--accent, #e94560);
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 500;
+            transition: all var(--transition-base);
+        }
+        .profile-btn:hover {
+            background: #d63550;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(233, 69, 96, 0.3);
+        }
+        .profile-btn:active { transform: translateY(0); }
+        /* R65: block/unblock action in the profile card */
+        .profile-btn-danger { background: var(--slate-700); color: var(--color-danger-soft, #f87171); }
+        .profile-btn-danger:hover { background: var(--slate-600); box-shadow: none; }
+
+        /* msg-meta wrapper (avatar + name on first in group) */
+        .msg-meta { display: inline; }
+
+        /* Round 60: Read Receipts */
+        /* Delivery tick: inline at the end of the message's last text line
+           (rendering.js places it inside .msg-content), WhatsApp-style — close
+           to the content instead of floating at the feed's far edge, and never
+           costing its own line. */
+        .read-receipt { margin-left: 6px; font-size: 0.68em; color: var(--slate-600); user-select: none; }
+        .read-receipt.read { color: var(--color-success-soft); }
+
+        /* Round 62: Voice Messages */
+        .voice-record-btn { background: transparent; border: none; color: var(--text-secondary); font-size: 1.3em; cursor: pointer; padding: 0 8px; flex-shrink: 0; }
+        .voice-record-btn.recording { color: var(--accent); }
+        .voice-recording-bar { display: none; align-items: center; gap: 10px; padding: 8px 16px; background: var(--bg-secondary,var(--slate-800)); flex: 1; color: var(--text-primary,var(--slate-50)); }
+        .voice-recording-bar.active { display: flex; }
+        .recording-dot { color: var(--accent); font-size: 1.1em; animation: pulse 0.8s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        .audio-message { margin-top: 4px; }
+        .audio-message audio { max-width: 280px; height: 36px; }
+        .audio-duration { font-size: 0.78em; color: var(--text-secondary); margin-left: 6px; }
+
+        /* Round 47: Message context menu + sidebar context menu */
+        .ctx-menu { position: fixed; background: var(--slate-800); border: 1px solid var(--slate-700); border-radius: 6px; z-index: 1300; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,.5); min-width: 160px; }
+        .ctx-menu button { display: block; width: 100%; background: none; border: none; color: var(--slate-50); padding: 9px 16px; cursor: pointer; text-align: left; font-size: 0.9em; white-space: nowrap; }
+        .ctx-menu button:hover { background: var(--slate-700); }
+        .ctx-menu button.danger { color: var(--color-danger); }
+        .ctx-menu hr { border: none; border-top: 1px solid var(--slate-700); margin: 2px 0; }
+
+        /* Round 63: Delete submenu */
+        .delete-submenu { position: fixed; background: var(--slate-800); border: 1px solid var(--slate-700); border-radius: 6px; z-index: 1200; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,.4); }
+        .delete-submenu button { display: block; width: 100%; background: none; border: none; color: var(--slate-50); padding: 9px 18px; cursor: pointer; text-align: left; font-size: 0.9em; }
+        .delete-submenu button:hover { background: var(--slate-700); }
+        .delete-submenu button.danger { color: var(--color-danger); }
+
+        /* Round 64: Role badges */
+        .role-badge { font-size: 0.65rem; font-weight: 700; border-radius: 3px; padding: 1px 5px; margin-left: 4px; letter-spacing: 0.04em; vertical-align: middle; }
+        .role-badge.role-admin { background: #7c3aed; color: white; }
+        .role-badge.role-mod { background: #0891b2; color: white; }
+        .member-context-menu { position: fixed; background: var(--slate-800); border: 1px solid var(--slate-700); border-radius: 6px; z-index: 1200; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,.4); }
+        .member-context-menu button { display: block; width: 100%; background: none; border: none; color: var(--slate-50); padding: 9px 18px; cursor: pointer; text-align: left; font-size: 0.9em; }
+        .member-context-menu button:hover { background: var(--slate-700); }
+        .member-context-menu hr { border: none; border-top: 1px solid var(--slate-700); margin: 2px 0; }
+        .member-context-menu button.danger { color: var(--color-danger); }
+
+        /* Round 65: Disappearing messages */
+        .disappear-banner { background: var(--slate-800); color: var(--text-secondary); font-size: 0.8em; text-align: center; padding: 4px 12px; border-bottom: 1px solid var(--slate-700); align-items: center; justify-content: center; gap: 6px; display: none; }
+        .disappear-banner.active { display: flex; }
+        .disappear-timer-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; font-size: 0.9em; }
+        .disappear-timer-row select { background: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-50); padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+
+        /* Round 66: Session management */
+        .session-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--slate-700); font-size: 0.85em; gap: 8px; }
+        .session-info { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+        .session-ip { font-family: monospace; font-size: 0.9em; color: var(--text-secondary); }
+        .session-time { font-size: 0.8em; color: var(--slate-500); }
+        .session-current { color: var(--color-success-soft); font-size: 0.8em; font-weight: 600; }
+        .session-revoke-btn { background: #7f1d1d; border: none; color: #fca5a5; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.8em; }
+
+        /* Round 68: Forward messages */
+        .forwarded-banner { font-size: 0.8em; color: var(--text-secondary); margin-bottom: 3px; font-style: italic; }
+
+        /* Round 69: Schedule picker */
+        .schedule-picker { position: absolute; bottom: 64px; right: 12px; background: var(--slate-800); border: 1px solid var(--slate-700); border-radius: 8px; padding: 14px; z-index: 200; display: flex; flex-direction: column; gap: 10px; min-width: 240px; box-shadow: 0 4px 20px rgba(0,0,0,.5); }
+        .schedule-picker input[type="datetime-local"] { background: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-50); padding: 6px 8px; border-radius: 4px; font-size: 0.9em; width: 100%; box-sizing: border-box; }
+        .schedule-picker label { font-size: 0.85em; color: var(--text-secondary); }
+        .schedule-btn { background: transparent; border: none; color: var(--text-secondary); font-size: 1.2em; cursor: pointer; padding: 0 6px; flex-shrink: 0; }
+
+        /* Round 70: Bot/Webhook */
+        .bot-badge { font-size: 0.65rem; font-weight: 700; background: var(--accent,var(--accent)); color: white; border-radius: 3px; padding: 1px 5px; margin-left: 6px; vertical-align: middle; letter-spacing: 0.05em; }
+        .copyable-code { display: block; background: var(--slate-900); padding: 10px; border-radius: 6px; font-size: 0.85rem; word-break: break-all; margin: 8px 0; user-select: all; font-family: monospace; border: 1px solid var(--slate-700); }
+        .room-integrations-btn { background: transparent; border: none; color: var(--text-secondary); font-size: 1em; cursor: pointer; padding: 0 4px; }
+
+/* ── Component classes (R95/F2b): de-inlined from the repeated style= clusters
+   in index.html. Declarations match the former inline values exactly, so this
+   is pixel-preserving; it just gives each repeated pattern one home. Size
+   modifiers come after the base so they win on equal specificity. ── */
+.btn { border: none; border-radius: 4px; cursor: pointer; padding: 7px 16px; }
+.btn--accent { background: var(--accent); color: #fff; }
+.btn--slate  { background: var(--slate-700); color: var(--slate-50); }
+.btn--lg { padding: 8px 16px; }
+.btn--sm { padding: 4px 10px; font-size: 0.8em; flex-shrink: 0; }
+.btn-row { display: flex; gap: 8px; justify-content: flex-end; }
+.field-divider { border-color: var(--slate-700); margin: 16px 0 12px; }
+.section-label { margin: 0 0 8px; font-size: 0.8em; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
