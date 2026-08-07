@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.4
+
+Connect your phone, with the gateway hardened for it.
+
+- **Connect a phone.** A new button opens a secure public link to your gateway and
+  shows a QR code your phone scans to start chatting over HTTPS, no port forwarding or
+  reverse proxy to set up. When a message cannot go through, the app now also tells you how
+  long the other side has been offline.
+- **Hardened for exposure.** Opening the link forces sign-in verification on, so the
+  gateway is never reachable without it, and only you can open or close your own link.
+- **Reproducible across machines.** With the pinned toolchain the gateway builds
+  byte-for-byte identically on any machine, and you can check your own build against a
+  published digest.
+
 ## 0.2.3
 
 Talks to more servers, and tells you when a message is really stuck.
