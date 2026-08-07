@@ -11,8 +11,10 @@ loopback-skips-auth default.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import shutil
+import sys
 from typing import Awaitable, Callable, Optional
 
 # cloudflared prints a line like:  https://calm-forest-1234.trycloudflare.com
@@ -27,8 +29,31 @@ def extract_tunnel_url(line: str) -> Optional[str]:
     return m.group(0) if m else None
 
 
+def _bundled_cloudflared_dirs() -> list[str]:
+    """Locations a build may have bundled cloudflared into (R97/R98).
+
+    PyInstaller onefile extracts --add-binary payloads to ``sys._MEIPASS``; a
+    non-frozen or sibling layout keeps it next to the executable. Checked before
+    PATH so a shipped install is turnkey without a separate cloudflared install.
+    """
+    dirs: list[str] = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        dirs.append(meipass)
+    try:
+        dirs.append(os.path.dirname(os.path.abspath(sys.executable)))
+    except Exception:
+        pass
+    return dirs
+
+
 def find_cloudflared() -> Optional[str]:
-    """Absolute path to cloudflared on PATH, or None if not installed."""
+    """Path to cloudflared: a bundled copy if present (turnkey), else PATH."""
+    name = "cloudflared.exe" if sys.platform == "win32" else "cloudflared"
+    for d in _bundled_cloudflared_dirs():
+        cand = os.path.join(d, name)
+        if os.path.isfile(cand):
+            return cand
     return shutil.which("cloudflared")
 
 

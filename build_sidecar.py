@@ -15,12 +15,14 @@ Output:
 Tauri picks this up automatically via externalBin in tauri.conf.json.
 """
 
+import hashlib
 import os
 import platform
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 # Rust target triples by (OS, machine) — extend as needed
 TRIPLE_MAP: dict[tuple[str, str], str] = {
@@ -88,6 +90,110 @@ def build_env() -> dict:
     # Stable string hashing so any hash-ordered output is build-invariant.
     env.setdefault("PYTHONHASHSEED", "0")
     return env
+
+
+# ── cloudflared bundling (R97/R98): make the "Connect a phone" tunnel turnkey ──
+# Bundle a verified cloudflared into the sidecar so the tunnel works out of the
+# box, with no separate install. The binary is downloaded from Cloudflare's
+# official releases, pinned by version, and verified against a pinned SHA-256.
+# If the pin is not set (or verification fails) we build WITHOUT it: the gateway
+# then falls back to detect-on-PATH and the UI guides the user to install it, so
+# an unverified binary is never shipped.
+_CLOUDFLARED_ASSET: dict[str, str] = {
+    "x86_64-pc-windows-msvc":    "cloudflared-windows-amd64.exe",
+    "aarch64-pc-windows-msvc":   "cloudflared-windows-arm64.exe",
+    "x86_64-apple-darwin":       "cloudflared-darwin-amd64.tgz",
+    "aarch64-apple-darwin":      "cloudflared-darwin-arm64.tgz",
+    "x86_64-unknown-linux-gnu":  "cloudflared-linux-amd64",
+    "aarch64-unknown-linux-gnu": "cloudflared-linux-arm64",
+}
+
+
+def cloudflared_asset_name(triple: str) -> Optional[str]:
+    """The Cloudflare release asset for a target triple, or None if unknown.
+    Pure; unit-tested."""
+    return _CLOUDFLARED_ASSET.get(triple)
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def fetch_cloudflared(triple: str) -> Optional[Path]:
+    """Download + verify the pinned cloudflared for *triple*, returning the path
+    to the ready-to-bundle binary, or None to build without it (detect-only
+    fallback). NEVER returns an unverified binary.
+
+    Pinning is via the environment so the release workflow controls it without a
+    code change: ``PROXION_CLOUDFLARED_VERSION`` (e.g. ``2024.12.2``) and
+    ``PROXION_CLOUDFLARED_SHA256`` (the hex digest of the asset for this triple).
+    """
+    # Pin source: environment first (a local/one-off build), else the committed
+    # cloudflared.lock (version + per-triple sha256) so CI bundles automatically
+    # once a maintainer fills it in. No pin anywhere => detect-only.
+    version = os.environ.get("PROXION_CLOUDFLARED_VERSION", "").strip()
+    expected = os.environ.get("PROXION_CLOUDFLARED_SHA256", "").strip().lower()
+    if not version or not expected:
+        lock = ROOT / "cloudflared.lock"
+        if lock.exists():
+            try:
+                import json
+                data = json.loads(lock.read_text())
+                version = version or str(data.get("version", "")).strip()
+                expected = expected or str(
+                    data.get("sha256", {}).get(triple, "")).strip().lower()
+            except Exception as exc:
+                print(f"[cloudflared] could not read cloudflared.lock ({exc})")
+    if not version or not expected:
+        print("[cloudflared] not pinned (set PROXION_CLOUDFLARED_VERSION + "
+              "PROXION_CLOUDFLARED_SHA256, or fill cloudflared.lock); "
+              "building detect-only")
+        return None
+    asset = cloudflared_asset_name(triple)
+    if not asset:
+        print(f"[cloudflared] no known asset for {triple}; detect-only")
+        return None
+    url = (f"https://github.com/cloudflare/cloudflared/releases/download/"
+           f"{version}/{asset}")
+    dest_dir = BUILD_DIR / "cloudflared"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dl = dest_dir / asset
+    print(f"[cloudflared] downloading {url}")
+    import urllib.request
+    try:
+        urllib.request.urlretrieve(url, dl)
+    except Exception as exc:
+        print(f"[cloudflared] download failed ({exc}); detect-only")
+        return None
+    got = _sha256_file(dl)
+    if got != expected:
+        print(f"[cloudflared] SHA-256 mismatch (expected {expected}, got {got}); "
+              "refusing to bundle")
+        return None
+    is_win = triple.endswith("windows-msvc")
+    out = dest_dir / ("cloudflared.exe" if is_win else "cloudflared")
+    if asset.endswith(".tgz"):
+        import tarfile
+        with tarfile.open(dl) as tf:
+            member = next(
+                (m for m in tf.getmembers()
+                 if m.name.split("/")[-1] == "cloudflared"), None)
+            if member is None:
+                print("[cloudflared] binary not found inside the archive; detect-only")
+                return None
+            src = tf.extractfile(member)      # extract by stream, no path traversal
+            with open(out, "wb") as w:
+                shutil.copyfileobj(src, w)
+    else:
+        shutil.copy2(dl, out)
+    if not is_win:
+        os.chmod(out, 0o755)
+    print(f"[cloudflared] bundled {out} (sha256 verified)")
+    return out
 
 
 # All proxion_messenger_core sub-modules that are imported dynamically at runtime.
@@ -188,6 +294,11 @@ def build() -> None:
         cmd += ["--add-data", f"{WEB_DIR}{sep}web"]
     else:
         print(f"[warn] {WEB_DIR} not found — gateway won't serve web UI from bundle")
+
+    # R97/R98: bundle a verified cloudflared so the phone tunnel is turnkey.
+    cf = fetch_cloudflared(triple)
+    if cf:
+        cmd += ["--add-binary", f"{cf}{sep}."]
 
     # R18.3.4: embed version.txt so gateway_version is available at runtime
     version_file = ROOT / "version.txt"

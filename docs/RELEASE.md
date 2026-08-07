@@ -115,3 +115,22 @@ entries. `proxion-messenger-core/tests/test_updater_manifest.py` validates the s
   (key ID `529EEA89E67E1E6E`).
 - ⏳ REQUIRED before the next release: add the `TAURI_PRIVATE_KEY` /
   `TAURI_KEY_PASSWORD` repo secrets, or the signed build fails (see above).
+
+## Bundling cloudflared (turnkey "Connect a phone")
+
+The "Connect a phone" tunnel uses cloudflared. By default the build ships
+detect-only: if cloudflared is on PATH the tunnel works, otherwise the app tells
+the user to install it. To make it fully turnkey (no separate install), bundle a
+verified cloudflared into the sidecar:
+
+1. Pick a Cloudflare release tag (e.g. `2024.12.2`).
+2. Fill `cloudflared.lock` at the repo root: set `version`, and for each triple
+   set `sha256` to that release asset's hex digest (verify against Cloudflare's
+   published checksums). Windows/Linux assets are the binary; macOS assets are a
+   `.tgz` that `build_sidecar.py` extracts.
+3. Commit the lock. CI then downloads over HTTPS, verifies the SHA-256, and
+   `--add-binary`s it into the onefile; a mismatch refuses to bundle rather than
+   ship an unverified binary. For a one-off local build, set
+   `PROXION_CLOUDFLARED_VERSION` and `PROXION_CLOUDFLARED_SHA256` instead.
+
+An empty `version` keeps detect-only. Bump the pin deliberately, like the JSS pin.

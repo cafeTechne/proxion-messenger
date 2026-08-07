@@ -1,0 +1,12 @@
+{
+  "_README": "Pins the cloudflared bundled into the sidecar for the turnkey 'Connect a phone' tunnel (R97/R98). Fill 'version' with a Cloudflare release tag (e.g. 2024.12.2) and each triple's 'sha256' with the hex digest of that release's asset (verify against Cloudflare's published checksums). build_sidecar.py downloads over HTTPS and refuses to bundle on any mismatch. An empty version means detect-only: no binary is bundled and the app guides the user to install cloudflared. PROXION_CLOUDFLARED_VERSION / PROXION_CLOUDFLARED_SHA256 env vars override this file for one-off builds.",
+  "version": "",
+  "sha256": {
+    "x86_64-pc-windows-msvc": "",
+    "aarch64-pc-windows-msvc": "",
+    "x86_64-apple-darwin": "",
+    "aarch64-apple-darwin": "",
+    "x86_64-unknown-linux-gnu": "",
+    "aarch64-unknown-linux-gnu": ""
+  }
+}

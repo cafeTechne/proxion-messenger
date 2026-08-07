@@ -102,6 +102,32 @@ def test_absent_when_binary_missing():
         assert mgr.status()["state"] == "absent"
 
 
+# ── bundled cloudflared preference (R97/R98 turnkey) ────────────────────────
+def test_find_cloudflared_prefers_bundled(tmp_path, monkeypatch):
+    """A bundled binary (e.g. PyInstaller _MEIPASS) is used before PATH so a
+    shipped install is turnkey without a separate cloudflared install."""
+    import proxion_messenger_core.tunnel as tunnelmod
+    name = "cloudflared.exe" if __import__("sys").platform == "win32" else "cloudflared"
+    bundled = tmp_path / name
+    bundled.write_bytes(b"#!fake cloudflared\n")
+    monkeypatch.setattr(tunnelmod, "_bundled_cloudflared_dirs", lambda: [str(tmp_path)])
+    assert tunnelmod.find_cloudflared() == str(bundled)
+
+
+def test_cloudflared_asset_name_mapping():
+    """Build-side asset mapping for each release triple (pure)."""
+    import importlib.util
+    from pathlib import Path
+    bs_path = Path(__file__).resolve().parents[2] / "build_sidecar.py"
+    spec = importlib.util.spec_from_file_location("build_sidecar", bs_path)
+    bs = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bs)
+    assert bs.cloudflared_asset_name("x86_64-pc-windows-msvc") == "cloudflared-windows-amd64.exe"
+    assert bs.cloudflared_asset_name("aarch64-apple-darwin") == "cloudflared-darwin-arm64.tgz"
+    assert bs.cloudflared_asset_name("x86_64-unknown-linux-gnu") == "cloudflared-linux-amd64"
+    assert bs.cloudflared_asset_name("nonexistent-triple") is None
+
+
 # ── gateway auth-force invariant ────────────────────────────────────────────
 def test_force_auth_makes_auth_enforced_true(monkeypatch):
     from proxion_messenger_core.gateway import ProxionGateway
