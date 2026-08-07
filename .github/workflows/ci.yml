@@ -162,3 +162,38 @@ jobs:
       - name: Dump JSS log on failure
         if: failure()
         run: cat jss.log || true
+
+  reproducible-check:
+    # Informational (E4): builds the sidecar twice and reports how reproducible
+    # it is. Non-blocking (continue-on-error) until the sidecar is reliably
+    # bit-for-bit identical; flip to a hard gate once it is. See docs/VERIFYING.md.
+    name: Reproducible build check
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need the commit for SOURCE_DATE_EPOCH
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install build deps
+        run: pip install pyinstaller && pip install -e "./proxion-messenger-core[gateway]"
+
+      - name: Build twice and compare
+        run: python scripts/check_reproducible.py | tee reproducible-report.txt
+
+      - name: Publish report to the run summary
+        if: always()
+        run: |
+          {
+            echo '### Reproducible build report'
+            echo '```'
+            cat reproducible-report.txt || echo "(no report produced)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

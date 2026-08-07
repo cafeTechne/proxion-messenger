@@ -15,6 +15,7 @@ Output:
 Tauri picks this up automatically via externalBin in tauri.conf.json.
 """
 
+import os
 import platform
 import shutil
 import subprocess
@@ -48,6 +49,45 @@ def get_triple() -> str:
         raise SystemExit(f"Unsupported platform: {key[0]} / {key[1]}\n"
                          f"Supported: {list(TRIPLE_MAP.keys())}")
     return TRIPLE_MAP[key]
+
+
+# 1980-01-01, the floor ZIP/PyInstaller archive timestamps can represent.
+_EPOCH_FLOOR = "315532800"
+
+
+def source_date_epoch() -> str:
+    """A fixed build timestamp for reproducibility (E4).
+
+    Toolchains that honor SOURCE_DATE_EPOCH embed this instead of the wall-clock
+    build time, so two builds of the same commit agree on archive metadata. We
+    derive it from the commit timestamp; without git we fall back to the ZIP
+    epoch floor. Overridable via the environment for a caller that wants to pin
+    a specific value.
+    """
+    env = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
+    if env.isdigit():
+        return env
+    try:
+        out = subprocess.run(
+            ["git", "log", "-1", "--format=%ct"],
+            cwd=ROOT, capture_output=True, text=True, check=True,
+        )
+        ts = out.stdout.strip()
+        if ts.isdigit():
+            return ts
+    except Exception:
+        pass
+    return _EPOCH_FLOOR
+
+
+def build_env() -> dict:
+    """Environment for the PyInstaller subprocess, with determinism knobs set
+    (E4). Kept separate so the reproducibility harness can reuse it."""
+    env = dict(os.environ)
+    env["SOURCE_DATE_EPOCH"] = source_date_epoch()
+    # Stable string hashing so any hash-ordered output is build-invariant.
+    env.setdefault("PYTHONHASHSEED", "0")
+    return env
 
 
 # All proxion_messenger_core sub-modules that are imported dynamically at runtime.
@@ -156,16 +196,20 @@ def build() -> None:
     else:
         print("[warn] version.txt not found — /.well-known/proxion will report 0.1.0")
 
-    for mod in HIDDEN_IMPORTS:
+    # Sorted so the build inputs are in a stable order regardless of how the
+    # list is maintained (E4 determinism).
+    for mod in sorted(HIDDEN_IMPORTS):
         cmd += ["--hidden-import", mod]
 
     cmd.append(str(ENTRY))
 
+    env = build_env()
     print(f"Building proxion-gateway sidecar for {triple}...")
     print(f"  entry:   {ENTRY}")
     print(f"  dist:    {DIST_DIR}")
+    print(f"  SOURCE_DATE_EPOCH: {env['SOURCE_DATE_EPOCH']}")
     print()
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, env=env)
 
     src = DIST_DIR / f"proxion-gateway{exe_suffix}"
     dst = SIDECAR_DIR / f"proxion-gateway-{triple}{exe_suffix}"
