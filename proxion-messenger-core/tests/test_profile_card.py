@@ -50,12 +50,14 @@ def _get_web_content():
 
     The profile-card JS was extracted from main.js into profile.js during the
     R40 modularization; include the relevant modules so these content checks
-    follow the code instead of asserting on main.js alone.
+    follow the code instead of asserting on main.js alone. R95 moved the inline
+    <style> block from index.html into style.css, so include the stylesheet too
+    or the CSS assertions here would follow the rules to the wrong file.
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
     web_dir = os.path.join(script_dir, "..", "..", "web")
     content = ""
-    for fname in ("index.html", "main.js", "profile.js", "view.js"):
+    for fname in ("index.html", "style.css", "main.js", "profile.js", "view.js"):
         fpath = os.path.join(web_dir, fname)
         try:
             with open(fpath, "r", encoding="utf-8") as f:
