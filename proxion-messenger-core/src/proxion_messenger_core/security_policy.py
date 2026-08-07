@@ -110,6 +110,10 @@ _OWNER_ONLY_COMMANDS: set[str] = {
     "run_recovery_drill",
     "list_recovery_drill_templates",
     "get_recovery_drill_report",
+    # R97/R98: opening or closing the public tunnel exposes/retracts the whole
+    # gateway, so only the owner may control it (a party reaching a live tunnel
+    # can register a self-claimed did:key but must not be able to start/stop it).
+    "start_tunnel", "stop_tunnel",
 }
 
 _RESTRICTED_HTTP_PATHS: set[str] = {

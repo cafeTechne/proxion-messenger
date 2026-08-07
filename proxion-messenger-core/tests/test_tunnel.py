@@ -117,6 +117,15 @@ def test_force_auth_makes_auth_enforced_true(monkeypatch):
     assert gw._auth_enforced() is True         # a live tunnel forces it on
 
 
+def test_tunnel_control_is_owner_only():
+    """R98: opening/closing the public tunnel exposes/retracts the gateway, so a
+    party reaching a live tunnel (who can register a self-claimed did:key) must
+    not be able to control it. tunnel_status stays open (benign)."""
+    from proxion_messenger_core.security_policy import _OWNER_ONLY_COMMANDS
+    assert "start_tunnel" in _OWNER_ONLY_COMMANDS
+    assert "stop_tunnel" in _OWNER_ONLY_COMMANDS
+
+
 @pytest.mark.asyncio
 async def test_cold_stop_tunnel_does_not_wipe_configured_public_url():
     """R98: stop_tunnel with no active tunnel must not clobber a configured
