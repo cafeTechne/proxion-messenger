@@ -389,6 +389,8 @@
   "conn.lost": "Connection lost. Reconnecting…",
   "conn.offline": "Offline",
   "conn.gatewayOffline": "Gateway offline",
+  "relay.failed": "Couldn't deliver: the recipient's gateway is unreachable.",
+  "relay.failedOfflineSince": "Couldn't deliver: the recipient's gateway has been offline since {since}.",
   "time.justNow": "Just now",
   "members.online.one": "Online, {count}",
   "members.online.other": "Online, {count}",

@@ -244,6 +244,20 @@ class _StoreBase(object):
                 CREATE INDEX IF NOT EXISTS idx_pending_relays_status
                     ON pending_relays(status, last_attempt_at);
 
+                -- Per-destination-gateway reachability health (R94). Lets the
+                -- sender's "queued, will retry" surface say *how long* a peer
+                -- gateway has been unreachable ("offline since ...") instead of
+                -- a generic pending state. down_since holds the start of the
+                -- current outage and is cleared on the next success.
+                CREATE TABLE IF NOT EXISTS peer_gateway_health (
+                    gateway_url          TEXT PRIMARY KEY,
+                    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+                    last_success_at      REAL,
+                    last_failure_at      REAL,
+                    last_error           TEXT,
+                    down_since           REAL
+                );
+
                 CREATE TABLE IF NOT EXISTS revocations (
                     cert_id    TEXT PRIMARY KEY,
                     peer_did   TEXT NOT NULL,

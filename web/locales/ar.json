@@ -363,6 +363,8 @@
   "conn.lost": "انقطع الاتصال. تجري إعادة الاتصال…",
   "conn.offline": "غير متصل",
   "conn.gatewayOffline": "البوابة غير متصلة",
+  "relay.failed": "تعذّر التسليم: بوابة المستلم غير قابلة للوصول.",
+  "relay.failedOfflineSince": "تعذّر التسليم: بوابة المستلم غير متصلة منذ {since}.",
   "time.justNow": "الآن",
   "members.online.one": "متصل, {count}",
   "members.online.two": "متصلان, {count}",

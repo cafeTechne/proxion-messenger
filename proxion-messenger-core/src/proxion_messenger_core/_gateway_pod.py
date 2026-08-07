@@ -639,6 +639,18 @@ class PodSyncMixin:
 
                 _peer_did_chain = payload.get("to_webid", "") or ""
 
+                # R94: peer-gateway health reflects DIRECT reachability. Record it
+                # from the direct-relay result, before the mailbox fallback runs — a
+                # message saved by the fallback still means the destination gateway
+                # itself is unreachable, and "offline since ..." should say so.
+                try:
+                    if delivered:
+                        self._store.record_peer_gateway_success(relay["to_gateway_url"])
+                    else:
+                        self._store.record_peer_gateway_failure(relay["to_gateway_url"], "relay_post_failed")
+                except Exception:
+                    pass
+
                 # R38: if direct delivery failed, try the sealed relay-node mailbox
                 # (works when the recipient gateway is unreachable / behind CGNAT).
                 if not delivered and _peer_did_chain:
@@ -675,6 +687,20 @@ class PodSyncMixin:
                     except Exception:
                         pass
                     logger.warning("Pending relay %s permanently failed after 10 attempts", relay["id"])
+                    # R94: tell the sender how long the destination has been down.
+                    try:
+                        _health = self._store.get_peer_gateway_health(relay["to_gateway_url"]) or {}
+                        sender_webid = payload.get("from_webid", "")
+                        if sender_webid:
+                            await self._send_to_identity(sender_webid, json.dumps({
+                                "type": "relay_failed",
+                                "message_id": relay["id"],
+                                "to_webid": _peer_did_chain,
+                                "down_since": _health.get("down_since"),
+                                "consecutive_failures": _health.get("consecutive_failures"),
+                            }))
+                    except Exception:
+                        pass
                 else:
                     try:
                         self._store.append_relay_delivery_event(relay["id"], _peer_did_chain, "failed")

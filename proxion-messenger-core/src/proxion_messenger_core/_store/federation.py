@@ -268,6 +268,77 @@ class FederationStoreMixin(object):
                 "UPDATE pending_relays SET status = 'failed' WHERE id = ?",
                 (relay_id,),
             )
+
+    # ── Per-destination-gateway reachability health (R94) ──────────────────
+    def record_peer_gateway_success(self, gateway_url: str) -> None:
+        """A relay to *gateway_url* succeeded: clear the failure streak and the
+        current outage marker."""
+        if not gateway_url:
+            return
+        now = time.time()
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO peer_gateway_health
+                    (gateway_url, consecutive_failures, last_success_at,
+                     last_failure_at, last_error, down_since)
+                VALUES (?, 0, ?, NULL, NULL, NULL)
+                ON CONFLICT(gateway_url) DO UPDATE SET
+                    consecutive_failures = 0,
+                    last_success_at      = excluded.last_success_at,
+                    down_since           = NULL
+                """,
+                (gateway_url, now),
+            )
+
+    def record_peer_gateway_failure(self, gateway_url: str, error: str = "") -> None:
+        """A relay to *gateway_url* failed: bump the streak, stamp the failure,
+        and start the outage clock (down_since) if one is not already running."""
+        if not gateway_url:
+            return
+        now = time.time()
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO peer_gateway_health
+                    (gateway_url, consecutive_failures, last_success_at,
+                     last_failure_at, last_error, down_since)
+                VALUES (?, 1, NULL, ?, ?, ?)
+                ON CONFLICT(gateway_url) DO UPDATE SET
+                    consecutive_failures = peer_gateway_health.consecutive_failures + 1,
+                    last_failure_at      = excluded.last_failure_at,
+                    last_error           = excluded.last_error,
+                    down_since           = COALESCE(peer_gateway_health.down_since,
+                                                    excluded.down_since)
+                """,
+                (gateway_url, now, str(error)[:200], now),
+            )
+
+    def get_peer_gateway_health(self, gateway_url: str) -> dict | None:
+        """Return the health row for *gateway_url*, or None if never recorded."""
+        if not gateway_url:
+            return None
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM peer_gateway_health WHERE gateway_url = ?",
+                (gateway_url,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_unhealthy_peer_gateways(self, min_failures: int = 1) -> list[dict]:
+        """All gateways currently in an outage (>= *min_failures* consecutive
+        failures and no success since), most-failures first."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM peer_gateway_health
+                WHERE consecutive_failures >= ?
+                ORDER BY consecutive_failures DESC
+                """,
+                (min_failures,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def record_peer_gateway_change_request(
         self,
         id: str,

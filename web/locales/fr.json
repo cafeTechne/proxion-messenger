@@ -356,6 +356,8 @@
   "conn.lost": "Connexion perdue. Reconnexion…",
   "conn.offline": "Hors ligne",
   "conn.gatewayOffline": "Passerelle hors ligne",
+  "relay.failed": "Échec de la remise : la passerelle du destinataire est injoignable.",
+  "relay.failedOfflineSince": "Échec de la remise : la passerelle du destinataire est hors ligne depuis {since}.",
   "time.justNow": "À l'instant",
   "members.online.one": "En ligne, {count}",
   "members.online.other": "En ligne, {count}",

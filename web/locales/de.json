@@ -356,6 +356,8 @@
   "conn.lost": "Verbindung verloren. Verbinde neu…",
   "conn.offline": "Offline",
   "conn.gatewayOffline": "Gateway offline",
+  "relay.failed": "Zustellung fehlgeschlagen: das Gateway des Empfängers ist nicht erreichbar.",
+  "relay.failedOfflineSince": "Zustellung fehlgeschlagen: das Gateway des Empfängers ist seit {since} offline.",
   "time.justNow": "Gerade eben",
   "members.online.one": "Online, {count}",
   "members.online.other": "Online, {count}",

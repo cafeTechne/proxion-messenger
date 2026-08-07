@@ -1404,6 +1404,32 @@ import { createIdentityResolver } from './identity.js';
                     }
                     break;
                 }
+                case "relay_failed": {
+                    // R94: retries exhausted. Flip the pending badge to a failed
+                    // state and, when we know how long the destination gateway has
+                    // been unreachable, say so ("offline since ...") instead of a
+                    // generic failure.
+                    const msgEl = document.querySelector(`[data-message-id="${event.message_id}"]`);
+                    if (msgEl) {
+                        const badge = msgEl.querySelector('.relay-pending-badge')
+                            || (() => {
+                                const b = document.createElement("span");
+                                b.className = "relay-pending-badge";
+                                msgEl.appendChild(b);
+                                return b;
+                            })();
+                        badge.textContent = '⚠';
+                        badge.classList.remove('relay-pending', 'relay-delivered');
+                        badge.classList.add('relay-failed');
+                        let title = t('relay.failed');
+                        if (event.down_since) {
+                            const since = new Date(event.down_since * 1000).toLocaleString();
+                            title = t('relay.failedOfflineSince', { since });
+                        }
+                        badge.title = title;
+                    }
+                    break;
+                }
                 case "link_preview":
                     renderLinkPreview(event);
                     break;

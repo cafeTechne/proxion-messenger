@@ -567,6 +567,7 @@ button:hover { background: var(--accent-hover); }
 }
 
 .relay-pending-badge { margin-inline-start: 4px; font-size: 0.75em; opacity: 0.7; vertical-align: middle; }
+.relay-pending-badge.relay-failed { color: var(--danger, #c0392b); opacity: 0.9; cursor: help; }
 
 /* ── R13: Round 13 additions ── */
 

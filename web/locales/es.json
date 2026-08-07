@@ -356,6 +356,8 @@
   "conn.lost": "Conexión perdida. Reconectando…",
   "conn.offline": "Desconectado",
   "conn.gatewayOffline": "Gateway desconectado",
+  "relay.failed": "No se pudo entregar: el gateway del destinatario no está accesible.",
+  "relay.failedOfflineSince": "No se pudo entregar: el gateway del destinatario está desconectado desde {since}.",
   "time.justNow": "Ahora mismo",
   "members.online.one": "En línea, {count}",
   "members.online.other": "En línea, {count}",
