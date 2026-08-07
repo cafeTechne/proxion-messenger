@@ -8,6 +8,34 @@ after a full codebase review. This sits above the thematic roadmaps:
 
 ---
 
+## Status (updated 2026-08)
+
+Phases A through E are substantially complete. This document is kept for its
+rationale and sequencing, but the **as-built code is the source of truth**; the
+"current state" and "weaknesses" written below describe the mid-2026 starting
+point, not today. Verify against the code before treating any item here as open.
+
+- **Phase A (download-and-go):** signed, auto-updating installers ship (0.2.2);
+  sealed managed-relay plus mailbox fallback cover non-UPnP networks;
+  invite-link-first onboarding with a gateway-served `/i/<token>` landing.
+- **Phase B (architecture hygiene):** all three monoliths decomposed
+  (`local_store` into a `_store/` package, `gateway.py` into mixins, `main.js`
+  into ES modules); governance right-sized; docs reconciled; the backend dir
+  renamed to `proxion-messenger-core`.
+- **Phase C (federation):** ban/mute federation, chunked large files (50 MB),
+  room-history pagination, an optional `did:web` resolver, and relay
+  backoff/jitter with per-peer gateway health are all done.
+- **Phase D (social parity):** background push, voice quality (noise
+  suppression, speaking indicators), rich media, plus custom emoji, GIFs, memes,
+  polls, spoilers, and bookmarks.
+- **Phase E (durability):** identity backup/recovery UX, multi-device, opt-in
+  pod archive for DMs/bookmarks/settings/GIFs/mutes/blocks, and reproducible
+  sidecar builds measured in CI.
+
+Solid-server support extended beyond CSS to JSS and NSS (auto-detected). The
+polish program (Phases F through L) lives in `docs/ROADMAP_2.md`, also largely
+complete; the largest remaining frontier is a native mobile client.
+
 ## The product thesis (what we are actually building)
 
 > A sovereign Discord/Signal for small trusted groups (2–6 people). Download

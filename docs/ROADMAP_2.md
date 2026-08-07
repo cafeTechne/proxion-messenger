@@ -16,6 +16,30 @@ hardened the backend. The findings below are specific and measured, not vibes.
 
 ---
 
+## Status (updated 2026-08)
+
+Phases F through L are substantially complete. The "current state" assessment
+below describes the starting point when this roadmap was written, not today;
+treat the code as the source of truth and verify before assuming any item is
+open.
+
+- **F (design system):** token scale, stylesheet consolidation (the inline
+  `<style>` block merged into `style.css`, repeated inline styles moved to
+  semantic classes), state design, and micro-interaction polish are done.
+- **G (usability):** settings triage, the invite landing, sidebar empty-state
+  CTAs, and orphan-feature fixes are done; a command palette and contextual
+  tooltips remain optional.
+- **H (reliability):** a cold-path CI gate (ruff F821/F822), user-journey plus
+  federation plus visual smokes, and silent-send-failure recovery are done.
+- **I (accessibility):** a WCAG 2.2 AA pass, five-locale i18n with a
+  pseudo-locale, and RTL are done; only a manual NVDA spot-check remains.
+- **J (voice and calls):** speaking indicators, call-quality stats, device
+  pickers, video, screen share, and end-to-end call authentication are done.
+- **K (mobile):** an installable PWA (iOS and Android home-screen, PNG icons,
+  safe-area insets, focus-trap) is done; a native app-store build without the
+  Python sidecar remains deferred and is the largest open item.
+- **L (durability):** folded into `docs/ROADMAP.md` Phase E, done.
+
 ## Current state — honest assessment
 
 **Genuinely strong**
