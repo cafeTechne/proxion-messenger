@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.3
+
+Talks to more servers, and tells you when a message is really stuck.
+
+- **JSS pods now work.** The gateway connects to a JavaScript Solid Server the same way it
+  connects to a Community Solid Server, with the server auto-detected from its URL. You can
+  now point Proxion at CSS, JSS, or NSS.
+- **Honest delivery status.** When a message cannot reach a contact, the app tells you how
+  long their gateway has been unreachable instead of leaving it in a silent pending state.
+- **Reproducible builds.** The bundled gateway builds byte-for-byte identically from the
+  same source, and CI checks this on every change. See docs/VERIFYING.md.
+- The gateway now reports its real version, and the web styles were consolidated for
+  consistency.
+
 ## 0.2.2
 
 Updates itself now. This is the first signed release, which turns on in-app updating.
