@@ -99,9 +99,10 @@ def build_env() -> dict:
 # If the pin is not set (or verification fails) we build WITHOUT it: the gateway
 # then falls back to detect-on-PATH and the UI guides the user to install it, so
 # an unverified binary is never shipped.
+# Cloudflare ships no Windows ARM64 cloudflared, so aarch64-pc-windows-msvc is
+# intentionally absent: that triple falls back to detect-on-PATH (no bundle).
 _CLOUDFLARED_ASSET: dict[str, str] = {
     "x86_64-pc-windows-msvc":    "cloudflared-windows-amd64.exe",
-    "aarch64-pc-windows-msvc":   "cloudflared-windows-arm64.exe",
     "x86_64-apple-darwin":       "cloudflared-darwin-amd64.tgz",
     "aarch64-apple-darwin":      "cloudflared-darwin-arm64.tgz",
     "x86_64-unknown-linux-gnu":  "cloudflared-linux-amd64",
