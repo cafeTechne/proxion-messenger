@@ -27,10 +27,11 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | Web Access Control | v1.0.0 | Compliant (structure), Partial (ACL discovery) | yes (B3) |
 | Access Control Policy | v0.9.0 | Missing (R100 A2, blocks ESS) | yes (B3) |
 | Authorization Use Cases | ED | N-A (informational) | yes (B3) |
-| Solid Notifications Protocol | v0.3.0 | pending | B4 |
-| WebSocket/Webhook Channel 2023 | ED | pending | B4 |
-| StreamingHTTP/EventSource/LDN Channel 2023 | ED | pending | B4 |
-| Solid-PREP | ED | pending | B4 |
+| Solid Notifications Protocol | v0.3.0 | Compliant (+ polling fallback) | yes (B4) |
+| WebSocketChannel2023 / WebhookChannel2023 / LDNChannel2023 | ED / v1.0.0 | Compliant | yes (B4) |
+| StreamingHTTPChannel2023 | ED | Missing (minor) | yes (B4) |
+| EventSourceChannel2023 | ED | N-A (WebSocket covers it) | yes (B4) |
+| Solid-PREP | ED | Missing (emerging) | yes (B4) |
 | Solid Application Interoperability (+ primers) | v0.1.0 | pending (adapter gated off) | B5 |
 | Solid QA | v0.3.0 | pending | B5 |
 | Solid Security Considerations | v0.1.0 | pending | B5 |
@@ -132,6 +133,35 @@ WAC is structurally compliant, with one real conformance gap (ACL discovery by `
 convention rather than the `Link: rel=acl` header). ACP is the biggest ecosystem gap and is
 the R100 A2 item: supporting Inrupt ESS needs BOTH ACP authoring AND header-based ACR
 discovery, not `.acl` guessing. This sharpens A2's scope.
+
+## B4. Notifications
+
+### Solid Notifications Protocol (v0.3.0)
+| Requirement | Status | Evidence / note |
+|---|---|---|
+| Discover the subscription service via storage description / `describedby` | Compliant | reads the storage description; speaks v0.3 directly (not `@inrupt/solid-client-notifications`, which mis-detects CSS 7). See `NOTIFICATIONS.md` |
+| POST a subscription (`application/ld+json`, `topic`, channel type) | Compliant | `notify.js`, `notify.test.js` |
+| Receive Activity Streams notifications | Compliant | `podcanonical-notify-live` |
+| Polling fallback | Extension | the spec defines none; Proxion adds polling for servers offering no service (behind-NAT / no-push) |
+
+### Notification channels
+| Channel | Status | Evidence / note |
+|---|---|---|
+| WebSocketChannel2023 | Compliant | live-update subscription for new posts |
+| WebhookChannel2023 | Compliant | closed-app path: Webhook to gateway to Web Push (`NOTIFICATIONS.md`) |
+| LDNChannel2023 (LDN inbox) | Compliant | inbox invitations produced/consumed (`ldn.js`, `podcanonical-ldn-live`) |
+| StreamingHTTPChannel2023 | Missing | newer channel CSS is adopting; minor follow-up if CSS deprecates WebSocket |
+| EventSourceChannel2023 | N-A | WebSocket covers the same need |
+
+### Solid-PREP (Editor's Draft)
+| Requirement | Status | Evidence / note |
+|---|---|---|
+| Per-resource events via Fetch (lightweight SNP complement) | Missing | emerging (new-work-item stage); our SNP WebSocket + Webhook + poll already cover real-time. Watch, do not build yet. |
+
+## B4 verdict
+Notifications is a strong, spec-conformant area: v0.3 discovery + WebSocket + Webhook + LDN,
+plus a polling fallback the spec does not require. Only StreamingHTTPChannel2023 (minor) and
+the emerging Solid-PREP are unimplemented; neither is a current gap.
 
 ## Follow-ups surfaced by B1
 1. **PATCH format** (Protocol): our writes use `application/sparql-update`; add N3 Patch (or Accept-Patch negotiation) for servers that do not accept SPARQL Update.
