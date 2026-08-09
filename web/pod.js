@@ -13,6 +13,7 @@ import { parseRoomDescriptor } from './roomdesc.js';
 import {
     buildInviteNotification, parseInboxListing, parseInviteNotification, INBOX_PRED,
 } from './ldn.js';
+import { accessControlUrl, detectAclModel } from './acl.js';
 
 const SAFE_ID_RE = /^[\w-]{1,128}$/;
 
@@ -234,6 +235,23 @@ function buildWacAcl(ownerWebId, memberWebIds, containerUrl) {
     );
 }
 
+/**
+ * Discover a resource's access-control resource URL and model from its `Link`
+ * header (R100 A2), falling back to the `.acl` convention + WAC when the server
+ * advertises nothing (e.g. the resource does not exist yet, or is CSS/NSS). On
+ * CSS this returns the same `${url}.acl` it always did, so behaviour is unchanged;
+ * on servers that advertise a different ACL/ACR location it targets the right one.
+ */
+export async function discoverAccessControl(resourceUrl) {
+    try {
+        const res = await solidSession.fetch(resourceUrl, { method: 'HEAD' });
+        const link = (res && res.headers && res.headers.get) ? res.headers.get('link') : null;
+        const url = accessControlUrl(link, resourceUrl);
+        if (url) return { url, model: detectAclModel(link) || 'wac' };
+    } catch (_) { /* fall through to the convention */ }
+    return { url: resourceUrl + '.acl', model: 'wac' };
+}
+
 export async function podSetContainerAcl(containerPath, ownerWebId, memberWebIds) {
     const root = podStorageRoot();
     if (!root) return;
@@ -247,7 +265,8 @@ export async function podSetContainerAcl(containerPath, ownerWebId, memberWebIds
         return;
     }
     try {
-        await solidSession.fetch(containerUrl + '.acl', {
+        const { url } = await discoverAccessControl(containerUrl);
+        await solidSession.fetch(url, {
             method: 'PUT',
             headers: { 'Content-Type': 'text/turtle' },
             body: acl,
