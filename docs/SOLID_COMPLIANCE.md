@@ -17,7 +17,7 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | Spec | Version | Overall | Audited |
 |---|---|---|---|
 | Solid Protocol | v0.11.0 | Compliant (core), Partial (PATCH format, ACP) | yes (B1) |
-| Solid Chat (Long Chat) | v1.0.0 | Compliant (core), Partial (replies, reactions) | yes (B1) |
+| Solid Chat (Long Chat) | v1.0.0 | Compliant (core + replies); reactions Partial | yes (B1) |
 | Type Indexes | v1.0.0 | Compliant (public); private index N-A | yes (B1) |
 | Shape Trees | ED | Missing (low priority) | yes (B1) |
 | Solid WebID Profile | v1.0.0 | Compliant (pod users); N-A for did:key-only users | yes (B2) |
@@ -60,7 +60,7 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | Date-partitioned message files | Compliant | `podWriteLongChatMessage` layout |
 | Deletes (`schema:dateDeleted`) | Compliant | tombstone emitted; renders in SolidOS |
 | Edits | Compliant | in-place `sioc:content` swap (`buildEditPatch`), so any Long Chat reader shows the latest text; chosen deliberately over `dct:isReplacedBy` (unverified reader support), with `px:` keeping full history. `solidos-render-edits.test.js` |
-| Replies via `sioc:has_reply` | **Partial** | Proxion stores reply context in `px:`, so other apps do not see threading. Follow-up: also emit `sioc:has_reply`. |
+| Replies via `sioc:has_reply` | Compliant | R101.1: the pod append emits `<parent> sioc:has_reply <reply>` (parent timestamp threaded from the client so the parent's date-partitioned IRI is known), alongside the richer `px:` context. `longchat.test.js` |
 | Reactions via `schema:Action` subclasses | **Partial** | Proxion stores reactions in `px:`, so other apps do not see them. Follow-up: also emit `schema:LikeAction` etc. |
 
 ### Type Indexes (v1.0.0)
@@ -205,9 +205,10 @@ gaps are a small, honest set, and several are by design.
    authoring (A2.2) are implemented and structurally tested; the remaining step is running a
    real ESS grant/read to confirm the ACR shape, then flipping ACP from Partial to Compliant.
    Needs an Inrupt PodSpaces account.
-2. **Long Chat replies + reactions in standard predicates** (B1): also emit
-   `sioc:has_reply` and `schema:Action` so other Solid apps see threading and reactions.
-   Cheap, high interop value.
+2. **Long Chat reactions in `schema:Action`** (B1): replies now emit `sioc:has_reply`
+   (R101.1); reactions still live in `px:` only. Emitting `schema:LikeAction` needs the
+   reacted-to message's date-partitioned IRI at react time (same target-IRI plumbing as
+   replies), so it is moderate, not cheap.
 3. **PATCH via N3 Patch (or Accept-Patch negotiation)** (B1): for servers that do not accept
    SPARQL Update. (R101.3)
 4. **StreamingHTTPChannel2023** (B4): minor; add if CSS deprecates WebSocket. (R101.4)

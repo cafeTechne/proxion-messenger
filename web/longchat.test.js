@@ -149,6 +149,15 @@ describe('buildAppendPatch', () => {
         expect(body).toContain(`<${P.content}>`);
     });
 
+    it('links a reply to its parent with sioc:has_reply when replyToIri is given (R101.1)', () => {
+        const parent = `${ROOT}proxion/rooms/general/2026/07/21/chat.ttl#p0`;
+        const body = buildAppendPatch({ ...base, replyToIri: parent });
+        expect(body).toContain(`<${parent}> <${P.hasReply}> <${base.messageIri}> .`);
+        expect(P.hasReply).toBe('http://rdfs.org/sioc/ns#has_reply');
+        // absent when not a reply
+        expect(buildAppendPatch(base)).not.toContain(P.hasReply);
+    });
+
     it('an injection attempt in the message text yields no extra triples', () => {
         const body = buildAppendPatch({
             ...base,

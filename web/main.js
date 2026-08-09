@@ -2783,6 +2783,9 @@ import { createIdentityResolver } from './identity.js';
             if (!msg) return;
             replyingTo = {
                 id: msgId,
+                // R101.1: the parent's timestamp, so a pod write can build the
+                // parent's date-partitioned IRI for sioc:has_reply.
+                ts: msg.timestamp || null,
                 name: msg.from_display_name || msg.from_webid.slice(0, 8),
                 content: msg.content.slice(0, 60) + (msg.content.length > 60 ? "..." : "")
             };
@@ -3543,6 +3546,7 @@ import { createIdentityResolver } from './identity.js';
                         from_display_name: localStorage.getItem('proxion_display_name') || '',
                         timestamp: new Date().toISOString(),
                         reply_to_id: replyingTo?.id || null,
+                        reply_to_timestamp: replyingTo?.ts || null,   // R101.1
                     };
                     // D2 write-through + D3 durable queue: the send is not durably
                     // done until the pod write lands. Track it (shows a "not saved to

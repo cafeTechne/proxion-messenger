@@ -52,6 +52,9 @@ export const P = Object.freeze({
     // Phase B: the two SAFE edit/delete terms. A soft-delete is a schema.org
     // dateDeleted tombstone (the message node stays; readers hide its content).
     dateDeleted: NS.schema + 'dateDeleted',
+    // R101.1: standard reply threading, so other Solid apps (SolidOS, etc.) show a
+    // reply as a reply. Emitted parent-to-reply alongside our px: reply context.
+    hasReply: NS.sioc + 'has_reply',
     // D4: a per-message monotonic order hint (px:, ours only) so a user's devices
     // agree on order despite client clock skew. Not part of the shared vocabulary.
     seq: NS.px + 'seq',
@@ -174,7 +177,7 @@ export function buildIndexTurtle(title) {
  * SolidOS appends. Absolute IRIs throughout, so relative-reference resolution
  * inside a PATCH body cannot vary between servers.
  */
-export function buildAppendPatch({ channelIri, messageIri, content, createdIso, makerIri, seq }) {
+export function buildAppendPatch({ channelIri, messageIri, content, createdIso, makerIri, seq, replyToIri }) {
     const triples = [
         // Both link predicates: wf:message for the SolidOS databrowser,
         // meeting:message for the written spec and POD-CHAT.
@@ -193,6 +196,13 @@ export function buildAppendPatch({ channelIri, messageIri, content, createdIso, 
     // regardless of client clock skew. Omitted when not known yet (set on echo).
     if (Number.isFinite(seq)) {
         triples.push(`  ${iriRef(messageIri)} ${iriRef(P.seq)} ${Math.trunc(seq)} .`);
+    }
+    // R101.1: link the parent message to this reply with sioc:has_reply, so a
+    // reader following the standard predicate shows threading. Placed in this day
+    // file; a Long Chat reader unions all day files, so the triple about the parent
+    // is seen regardless of which file the parent itself lives in.
+    if (replyToIri) {
+        triples.push(`  ${iriRef(replyToIri)} ${iriRef(P.hasReply)} ${iriRef(messageIri)} .`);
     }
     return `INSERT DATA {\n${triples.join('\n')}\n}\n`;
 }

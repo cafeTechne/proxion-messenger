@@ -439,12 +439,21 @@ export async function podWriteChatMessageAt(containerUrl, messageId, msg) {
     if (!containerUrl || !solidSession?.info?.isLoggedIn) return false;
     const timestamp = msg.timestamp || new Date().toISOString();
     await ensureChatIndexAt(containerUrl, msg.room_name);
+    // R101.1: if this is a reply and we know the parent's timestamp (threaded from
+    // the client, which has it locally), build the parent's pod IRI so the append
+    // can add sioc:has_reply. Message IRIs are date-partitioned, so the parent
+    // timestamp is required; without it we simply omit the standard reply link.
+    let replyToIri = null;
+    if (msg.reply_to_id && msg.reply_to_timestamp) {
+        replyToIri = messageIriAt(containerUrl, msg.reply_to_id, msg.reply_to_timestamp);
+    }
     const body = buildAppendPatch({
         channelIri: channelIriAt(containerUrl),
         messageIri: messageIriAt(containerUrl, messageId, timestamp),
         content: msg.content || '',
         createdIso: timestamp,
         makerIri: msg.from_webid || '',
+        replyToIri,
     });
     try {
         const res = await solidSession.fetch(dayFileAt(containerUrl, timestamp), {
