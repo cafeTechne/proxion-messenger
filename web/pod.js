@@ -1,8 +1,8 @@
 import { solidSession, podStorageRoot } from './auth.js';
 import {
     chatRootUrl, indexUrlAt, channelIriAt, dayFileAt, messageIriAt,
-    buildIndexTurtle, buildAppendPatch, buildEditPatch, buildDeletePatch,
-    buildSeqPatch, buildChatAcl, roomIdFromChatContainer,
+    buildIndexTurtle, appendOps, editOps, deleteOps, seqOps,
+    buildChatAcl, roomIdFromChatContainer,
     parseLongChatJsonLd, mergeLongChatMessages, reactionActionTriples,
 } from './longchat.js';
 import {
@@ -447,7 +447,7 @@ export async function podWriteChatMessageAt(containerUrl, messageId, msg) {
     if (msg.reply_to_id && msg.reply_to_timestamp) {
         replyToIri = messageIriAt(containerUrl, msg.reply_to_id, msg.reply_to_timestamp);
     }
-    const body = buildAppendPatch({
+    const ops = appendOps({
         channelIri: channelIriAt(containerUrl),
         messageIri: messageIriAt(containerUrl, messageId, timestamp),
         content: msg.content || '',
@@ -456,11 +456,7 @@ export async function podWriteChatMessageAt(containerUrl, messageId, msg) {
         replyToIri,
     });
     try {
-        const res = await solidSession.fetch(dayFileAt(containerUrl, timestamp), {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/sparql-update' },
-            body,
-        });
+        const res = await podRdfPatch(dayFileAt(containerUrl, timestamp), ops);
         return !!(res && res.ok);
     } catch (err) {
         console.warn('[pod] podWriteChatMessageAt failed:', err);
@@ -494,16 +490,12 @@ export async function podReadChatDayAt(containerUrl, date, threadId = '') {
  */
 export async function podEditChatMessageAt(containerUrl, messageId, date, newContent) {
     if (!containerUrl || !solidSession?.info?.isLoggedIn) return false;
-    const body = buildEditPatch({
+    const ops = editOps({
         messageIri: messageIriAt(containerUrl, messageId, date),
         newContent: newContent || '',
     });
     try {
-        const res = await solidSession.fetch(dayFileAt(containerUrl, date), {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/sparql-update' },
-            body,
-        });
+        const res = await podRdfPatch(dayFileAt(containerUrl, date), ops);
         return !!(res && res.ok);
     } catch (err) {
         console.warn('[pod] podEditChatMessageAt failed:', err);
@@ -518,16 +510,12 @@ export async function podEditChatMessageAt(containerUrl, messageId, date, newCon
  */
 export async function podSoftDeleteChatMessageAt(containerUrl, messageId, date, deletedIso) {
     if (!containerUrl || !solidSession?.info?.isLoggedIn) return false;
-    const body = buildDeletePatch({
+    const ops = deleteOps({
         messageIri: messageIriAt(containerUrl, messageId, date),
         deletedIso: deletedIso || new Date().toISOString(),
     });
     try {
-        const res = await solidSession.fetch(dayFileAt(containerUrl, date), {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/sparql-update' },
-            body,
-        });
+        const res = await podRdfPatch(dayFileAt(containerUrl, date), ops);
         return !!(res && res.ok);
     } catch (err) {
         console.warn('[pod] podSoftDeleteChatMessageAt failed:', err);
@@ -544,14 +532,10 @@ export async function podSoftDeleteChatMessageAt(containerUrl, messageId, date, 
  */
 export async function podSetChatSeqAt(containerUrl, messageId, date, seq) {
     if (!containerUrl || !solidSession?.info?.isLoggedIn || !Number.isFinite(seq)) return false;
-    const body = buildSeqPatch({ messageIri: messageIriAt(containerUrl, messageId, date), seq });
-    if (!body) return false;
+    const ops = seqOps({ messageIri: messageIriAt(containerUrl, messageId, date), seq });
+    if (!ops.inserts.length) return false;
     try {
-        const res = await solidSession.fetch(dayFileAt(containerUrl, date), {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/sparql-update' },
-            body,
-        });
+        const res = await podRdfPatch(dayFileAt(containerUrl, date), ops);
         return !!(res && res.ok);
     } catch (err) {
         console.warn('[pod] podSetChatSeqAt failed:', err);

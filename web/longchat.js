@@ -182,35 +182,39 @@ export function buildIndexTurtle(title) {
  * SolidOS appends. Absolute IRIs throughout, so relative-reference resolution
  * inside a PATCH body cannot vary between servers.
  */
-export function buildAppendPatch({ channelIri, messageIri, content, createdIso, makerIri, seq, replyToIri }) {
-    const triples = [
-        // Both link predicates: wf:message for the SolidOS databrowser,
-        // meeting:message for the written spec and POD-CHAT.
-        `  ${iriRef(channelIri)} ${iriRef(P.message)} ${iriRef(messageIri)} .`,
-        `  ${iriRef(channelIri)} ${iriRef(P.wfMessage)} ${iriRef(messageIri)} .`,
-        `  ${iriRef(messageIri)} ${iriRef(P.created)} "${escapeTurtleLiteral(createdIso)}"^^${iriRef(P.dateTime)} .`,
-        `  ${iriRef(messageIri)} ${iriRef(P.content)} "${escapeTurtleLiteral(content)}" .`,
+export function appendOps({ channelIri, messageIri, content, createdIso, makerIri, seq, replyToIri }) {
+    // Both link predicates: wf:message for the SolidOS databrowser, meeting:message
+    // for the written spec and POD-CHAT. Absolute IRIs throughout.
+    const inserts = [
+        `${iriRef(channelIri)} ${iriRef(P.message)} ${iriRef(messageIri)} .`,
+        `${iriRef(channelIri)} ${iriRef(P.wfMessage)} ${iriRef(messageIri)} .`,
+        `${iriRef(messageIri)} ${iriRef(P.created)} "${escapeTurtleLiteral(createdIso)}"^^${iriRef(P.dateTime)} .`,
+        `${iriRef(messageIri)} ${iriRef(P.content)} "${escapeTurtleLiteral(content)}" .`,
     ];
-    // foaf:maker is an IRI node. Omit it entirely rather than emit an empty or
-    // literal value when the author has no WebID or did.
-    if (makerIri) {
-        triples.push(`  ${iriRef(messageIri)} ${iriRef(P.maker)} ${iriRef(makerIri)} .`);
-    }
-    // D4: a monotonic order hint (the gateway's server-clock time as epoch ms), so
-    // this device's messages order correctly against the SAME user's other devices
-    // regardless of client clock skew. Omitted when not known yet (set on echo).
-    if (Number.isFinite(seq)) {
-        triples.push(`  ${iriRef(messageIri)} ${iriRef(P.seq)} ${Math.trunc(seq)} .`);
-    }
-    // R101.1: link the parent message to this reply with sioc:has_reply, so a
-    // reader following the standard predicate shows threading. Placed in this day
-    // file; a Long Chat reader unions all day files, so the triple about the parent
-    // is seen regardless of which file the parent itself lives in.
-    if (replyToIri) {
-        triples.push(`  ${iriRef(replyToIri)} ${iriRef(P.hasReply)} ${iriRef(messageIri)} .`);
-    }
-    return `INSERT DATA {\n${triples.join('\n')}\n}\n`;
+    // foaf:maker is an IRI node; omit rather than emit an empty value.
+    if (makerIri) inserts.push(`${iriRef(messageIri)} ${iriRef(P.maker)} ${iriRef(makerIri)} .`);
+    // D4: monotonic order hint (server-clock ms); omitted until known (set on echo).
+    if (Number.isFinite(seq)) inserts.push(`${iriRef(messageIri)} ${iriRef(P.seq)} ${Math.trunc(seq)} .`);
+    // R101.1: parent-to-reply sioc:has_reply (readers union the day files).
+    if (replyToIri) inserts.push(`${iriRef(replyToIri)} ${iriRef(P.hasReply)} ${iriRef(messageIri)} .`);
+    return { inserts };
 }
+
+// Serialize {inserts, deletes, where} triple-string arrays to a SPARQL-Update
+// body. build*Patch keep their original output via this; pod.js's podRdfPatch
+// serializes the SAME ops to N3 Patch when the server advertises it (R101).
+function _sparqlFromOps({ inserts = [], deletes = [], where = [] }) {
+    if (where.length) {
+        return `DELETE { ${deletes.join(' ')} }\nINSERT { ${inserts.join(' ')} }\nWHERE  { ${where.join(' ')} }\n`;
+    }
+    const parts = [];
+    if (deletes.length) parts.push(`DELETE DATA {\n  ${deletes.join('\n  ')}\n}`);
+    if (inserts.length) parts.push(`INSERT DATA {\n  ${inserts.join('\n  ')}\n}`);
+    return parts.join(' ;\n') + '\n';
+}
+
+/** SPARQL-Update body appending one message to a day file (delegates to appendOps). */
+export function buildAppendPatch(args) { return _sparqlFromOps(appendOps(args)); }
 
 /**
  * Triples for a reaction as a schema:LikeAction targeting a message (R101). The
@@ -236,9 +240,13 @@ export function reactionActionTriples({ actionIri, msgIri, agentIri, emoji }) {
  * the same triple twice is a no-op in RDF; a caller that re-stamps a different seq
  * should DELETE first, but in practice the server order for a message is stable.
  */
-export function buildSeqPatch({ messageIri, seq }) {
-    if (!Number.isFinite(seq)) return '';
-    return `INSERT DATA {\n  ${iriRef(messageIri)} ${iriRef(P.seq)} ${Math.trunc(seq)} .\n}\n`;
+export function seqOps({ messageIri, seq }) {
+    if (!Number.isFinite(seq)) return { inserts: [] };
+    return { inserts: [`${iriRef(messageIri)} ${iriRef(P.seq)} ${Math.trunc(seq)} .`] };
+}
+export function buildSeqPatch(args) {
+    const ops = seqOps(args);
+    return ops.inserts.length ? _sparqlFromOps(ops) : '';
 }
 
 /**
@@ -268,16 +276,15 @@ export function compareByOrder(a, b) {
  * unverified (the R67 wf:message lesson: do not assume a reader honours the
  * spec). The px: layer keeps full edit history; the shared copy just stays current.
  */
-export function buildEditPatch({ messageIri, newContent }) {
-    const m = iriRef(messageIri);
-    const c = iriRef(P.content);
-    return [
-        `DELETE { ${m} ${c} ?old . }`,
-        `INSERT { ${m} ${c} "${escapeTurtleLiteral(newContent)}" . }`,
-        `WHERE  { ${m} ${c} ?old . }`,
-        '',
-    ].join('\n');
+export function editOps({ messageIri, newContent }) {
+    const m = iriRef(messageIri), c = iriRef(P.content);
+    return {
+        deletes: [`${m} ${c} ?old .`],
+        inserts: [`${m} ${c} "${escapeTurtleLiteral(newContent)}" .`],
+        where: [`${m} ${c} ?old .`],
+    };
 }
+export function buildEditPatch(args) { return _sparqlFromOps(editOps(args)); }
 
 /**
  * A SPARQL-Update body that soft-deletes a message (Phase B: deletes).
@@ -286,12 +293,12 @@ export function buildEditPatch({ messageIri, newContent }) {
  * append-only day file stays valid and other Solid apps can see the message was
  * withdrawn. Our reader blanks the content of a tombstoned message on read.
  */
-export function buildDeletePatch({ messageIri, deletedIso }) {
-    return (
-        `INSERT DATA {\n  ${iriRef(messageIri)} ${iriRef(P.dateDeleted)} ` +
-        `"${escapeTurtleLiteral(deletedIso)}"^^${iriRef(P.dateTime)} .\n}\n`
-    );
+export function deleteOps({ messageIri, deletedIso }) {
+    return {
+        inserts: [`${iriRef(messageIri)} ${iriRef(P.dateDeleted)} "${escapeTurtleLiteral(deletedIso)}"^^${iriRef(P.dateTime)} .`],
+    };
 }
+export function buildDeletePatch(args) { return _sparqlFromOps(deleteOps(args)); }
 
 /**
  * WAC ACL for a shared chat container. Owner gets full control; each participant

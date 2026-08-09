@@ -16,7 +16,7 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 
 | Spec | Version | Overall | Audited |
 |---|---|---|---|
-| Solid Protocol | v0.11.0 | Compliant (core); card patches negotiate N3, chat patches SPARQL-only | yes (B1) |
+| Solid Protocol | v0.11.0 | Compliant (core; all patches negotiate N3) | yes (B1) |
 | Solid Chat (Long Chat) | v1.0.0 | Compliant (core + replies + reactions) | yes (B1) |
 | Type Indexes | v1.0.0 | Compliant (public); private index N-A | yes (B1) |
 | Shape Trees | ED | Missing (low priority) | yes (B1) |
@@ -46,7 +46,7 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | GET/HEAD for reads, PUT/POST/PATCH/DELETE for writes | Compliant | `pod.js`, `solid_client.py` |
 | Discover storage root (pim:storage / Link rel type Storage) | Compliant | `podStorageRoot`, storage description read for notifications |
 | text/turtle + application/ld+json | Compliant | reads/writes both |
-| PATCH format is N3 Patch (server advertises text/n3 in Accept-Patch) | Compliant (card writes); Partial (chat) | R101.3: `podRdfPatch` negotiates on `Accept-Patch` and sends N3 Patch (the mandated format) when advertised, else SPARQL Update. Applied to the WebID-card writes (profile name, type-index link). The chat day-file append/edit patches remain SPARQL Update; they target our own room containers on CSS, so lower priority. |
+| PATCH format is N3 Patch (server advertises text/n3 in Accept-Patch) | Compliant | R101.3 + follow-up: `podRdfPatch` negotiates on `Accept-Patch` and sends N3 Patch (the mandated format) when advertised, else SPARQL Update. Applied to every RDF PATCH we issue: WebID-card writes, reaction actions, and the chat day-file append/edit/delete/seq patches (via `appendOps`/`editOps`/`deleteOps`/`seqOps` shared with the SPARQL builders). |
 | Container creation | Compliant | PUT creates intermediate containers on CSS |
 | Auth: Solid-OIDC / WebID-TLS | Compliant | browser uses `@inrupt/solid-client-authn` (Solid-OIDC); gateway uses Solid-OIDC client-credentials + DPoP |
 | Access control: WAC or ACP | **Partial** | WAC only; ACP not written (R100 A2, blocks ESS) |
@@ -200,16 +200,31 @@ Long Chat, Type Indexes, WebID Profile, Solid-OIDC + DPoP, WAC (structure), and 
 Notifications Protocol with WebSocket/Webhook/LDN channels plus a polling fallback. The
 gaps are a small, honest set, and several are by design.
 
+### Deeper normative review (2026-08)
+A second pass read the finer normative text of the core specs (not just the requirement
+summaries) and found no new client MUSTs unmet:
+- **Conditional requests** (Protocol): using `If-None-Match: "*"` on `PUT`/`PATCH` is
+  *encouraged*, not required. Low relevance to our writes (we PATCH the day files/card and
+  PUT unique per-message resources, so there is no lost-update surface). Optional hardening,
+  not a gap.
+- **PATCH creates the resource** from an empty dataset when absent: our day-file append
+  relies on this and it works on CSS (verified live).
+- **N3 Patch 422/409** failures: we surface a write failure via the send-status retry rather
+  than distinguishing codes; the spec requires servers, not clients, to emit them.
+- **Security Considerations** (v0.1.0) is itself thin and partly open; we already meet its
+  covered points (DPoP, not rewriting others' WebID cards) and our own posture (XSS-sink
+  audit, non-extractable keys, origin checks) exceeds it. CSP-sandbox is a server duty.
+
 ### Actionable follow-ups (ranked)
-1. **Chat day-file append/edit patches via N3 Patch** (B1): the card writes and reaction
-   actions negotiate N3 (via `podRdfPatch`); the message append/edit patches on our own room
-   containers still send SPARQL Update. Low priority (our own containers on CSS).
+None outstanding. Every client-facing requirement Proxion exercises is Compliant or N-A by
+design; the deferred items below are emerging specs we intentionally do not build yet.
 
 Done since the audit: header-based ACL discovery at every write site (R101.2), replies in
 `sioc:has_reply` (R101.1), N3-Patch negotiation on the WebID-card writes (R101.3), the
-StreamingHTTPChannel2023 fallback (R101.4), reactions as `schema:LikeAction` (R101), and
-ACP authoring + discovery verified live against CSS-ACP (A2.3), which also fixed ACP
-detection of a `.acr` ACR advertised via `rel="acl"`.
+StreamingHTTPChannel2023 fallback (R101.4), reactions as `schema:LikeAction` (R101),
+ACP authoring + discovery verified live against CSS-ACP (A2.3, which also fixed ACP
+detection of a `.acr` ACR advertised via `rel="acl"`), and N3-Patch negotiation extended to
+every RDF PATCH including the chat day-file writes.
 
 ### Deferred by design / emerging (watch, do not build)
 did:solid alignment, SAI + Shape Trees, Solid-PREP, HTTPSig. did:key-only users having no
