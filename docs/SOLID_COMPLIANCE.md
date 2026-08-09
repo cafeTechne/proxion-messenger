@@ -201,17 +201,17 @@ Notifications Protocol with WebSocket/Webhook/LDN channels plus a polling fallba
 gaps are a small, honest set, and several are by design.
 
 ### Actionable follow-ups (ranked)
-1. **ACP authoring + header-based ACR discovery** (B3) — the biggest ecosystem gap; unblocks
+1. **ACP authoring + header-based ACR discovery** (B3): the biggest ecosystem gap; unblocks
    Inrupt ESS. This is R100 A2, now with sharpened scope (ACP write AND `Link`-based
    discovery, not `.acl` guessing).
-2. **Long Chat replies + reactions in standard predicates** (B1) — also emit
+2. **Long Chat replies + reactions in standard predicates** (B1): also emit
    `sioc:has_reply` and `schema:Action` so other Solid apps see threading and reactions.
    Cheap, high interop value.
-3. **WAC ACL discovery via `Link: rel=acl`** (B3) — stop deriving `.acl` by string; read the
+3. **WAC ACL discovery via `Link: rel=acl`** (B3): stop deriving `.acl` by string; read the
    header. Pairs with follow-up 1.
-4. **PATCH via N3 Patch (or Accept-Patch negotiation)** (B1) — for servers that do not accept
+4. **PATCH via N3 Patch (or Accept-Patch negotiation)** (B1): for servers that do not accept
    SPARQL Update.
-5. **StreamingHTTPChannel2023** (B4) — minor; add if CSS deprecates WebSocket.
+5. **StreamingHTTPChannel2023** (B4): minor; add if CSS deprecates WebSocket.
 
 ### Deferred by design / emerging (watch, do not build)
 did:solid alignment, SAI + Shape Trees, Solid-PREP, HTTPSig. did:key-only users having no
