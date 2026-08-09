@@ -24,8 +24,8 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | Solid-OIDC (+ Primer) | v0.1.0 | Compliant | yes (B2) |
 | HTTPSig Authentication | CG-draft | N-A by design (we use Solid-OIDC/DPoP) | yes (B2) |
 | Solid DID Method (did:solid) | Unofficial | Divergent by design (we use did:key) | yes (B2) |
-| Web Access Control | v1.0.0 | Compliant (structure), Partial (ACL discovery) | yes (B3) |
-| Access Control Policy | v0.9.0 | Missing (R100 A2, blocks ESS) | yes (B3) |
+| Web Access Control | v1.0.0 | Compliant (structure + main-path discovery); setup ACLs still append .acl | yes (B3) |
+| Access Control Policy | v0.9.0 | Partial (authored + routed; unverified vs live ESS) | yes (B3) |
 | Authorization Use Cases | ED | N-A (informational) | yes (B3) |
 | Solid Notifications Protocol | v0.3.0 | Compliant (+ polling fallback) | yes (B4) |
 | WebSocketChannel2023 / WebhookChannel2023 / LDNChannel2023 | ED / v1.0.0 | Compliant | yes (B4) |
@@ -115,13 +115,13 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | `acl:accessTo` / `acl:default` (container inheritance) | Compliant | container ACLs use `acl:default`; rooms grant members |
 | `acl:mode` Read/Write/Append/Control; owner keeps Control | Compliant | owner Read/Write/Control on every resource we create |
 | Serve ACL as `text/turtle` | Compliant | all ACL writes are turtle |
-| **Discover the ACL URL from `Link: rel=acl` (never derive by string)** | **Partial** | Proxion always appends `.acl` (6 sites), never reads the `Link` header. Works on CSS/NSS (`.acl` convention) but is not spec-conformant discovery and can target the wrong URL on other servers. Follow-up: read `Link: rel=acl`. |
+| Discover the ACL URL from `Link: rel=acl` (never derive by string) | **Partial** | R100 A2.1: the main grant path (`podSetContainerAcl`) now reads the `Link` header (`discoverAccessControl`, `acl.js`), falling back to `.acl`. The type-index/inbox setup ACLs (5 sites) still append `.acl`. Follow-up: route those through discovery too. |
 
 ### Access Control Policy (v0.9.0)
 | Requirement | Status | Evidence / note |
 |---|---|---|
-| Author Access Control Resources (Policies + Matchers) to grant access | **Missing** | Proxion writes WAC only. The `@inrupt/solid-client-access-grants` adapter exists but is gated off. This is why participant grants do not work on Inrupt ESS (which uses ACP). R100 A2. |
-| Discover the ACR via the resource's `Link` (acp) header | Missing | tied to the same discovery gap above |
+| Author Access Control Resources (Policies + Matchers) to grant access | **Partial** | R100 A2.2: `buildAcpAcr` authors an ACR (AccessControl + Policy + Matcher, owner control + member read, with `acp:memberAccessControl` for inheritance), and `podSetContainerAcl` routes to it when the server advertises ACP. Structurally unit-tested. **NOT yet verified against a live Inrupt ESS**, so treat as best-effort until tested. Only activates on ACP servers, so no CSS risk. |
+| Discover the ACR via the resource's `Link` header | Compliant | `detectAclModel` / `accessControlUrl` handle the ACP accessControl relation (A2.1) |
 
 ### Authorization Use Cases and Requirements (Editor's Draft)
 | Requirement | Status | Evidence / note |
@@ -201,14 +201,15 @@ Notifications Protocol with WebSocket/Webhook/LDN channels plus a polling fallba
 gaps are a small, honest set, and several are by design.
 
 ### Actionable follow-ups (ranked)
-1. **ACP authoring + header-based ACR discovery** (B3): the biggest ecosystem gap; unblocks
-   Inrupt ESS. This is R100 A2, now with sharpened scope (ACP write AND `Link`-based
-   discovery, not `.acl` guessing).
+1. **Verify ACP against a live Inrupt ESS** (A2): header-based discovery (A2.1) and ACP ACR
+   authoring (A2.2) are implemented and structurally tested; the remaining step is running a
+   real ESS grant/read to confirm the ACR shape, then flipping ACP from Partial to Compliant.
+   Needs an Inrupt PodSpaces account.
 2. **Long Chat replies + reactions in standard predicates** (B1): also emit
    `sioc:has_reply` and `schema:Action` so other Solid apps see threading and reactions.
    Cheap, high interop value.
-3. **WAC ACL discovery via `Link: rel=acl`** (B3): stop deriving `.acl` by string; read the
-   header. Pairs with follow-up 1.
+3. **Route the setup ACLs (type index, inbox) through discovery too** (A2.1): the main grant
+   path reads `Link: rel=acl`; five setup-ACL sites still append `.acl`.
 4. **PATCH via N3 Patch (or Accept-Patch negotiation)** (B1): for servers that do not accept
    SPARQL Update.
 5. **StreamingHTTPChannel2023** (B4): minor; add if CSS deprecates WebSocket.

@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import {
-    parseLinkHeader, accessControlUrl, detectAclModel, ACP_ACCESS_CONTROL_REL,
+    parseLinkHeader, accessControlUrl, detectAclModel, buildAcpAcr, ACP_ACCESS_CONTROL_REL,
 } from './acl.js';
 
 const RES = 'https://alice.example/proxion/rooms/r1/';
@@ -47,14 +47,43 @@ describe('detectAclModel', () => {
     });
 });
 
-// ── discoverAccessControl (network wrapper in pod.js) ───────────────────────
+describe('buildAcpAcr', () => {
+    const OWNER = 'https://alice.example/profile/card#me';
+    const M1 = 'https://bob.example/profile/card#me';
+
+    it('grants the owner full control and binds the resource', () => {
+        const acr = buildAcpAcr(OWNER, [], RES);
+        expect(acr).toContain('a acp:AccessControlResource');
+        expect(acr).toContain(`acp:resource <${RES}>`);
+        expect(acr).toContain(`<#owner-matcher> a acp:Matcher; acp:agent <${OWNER}>`);
+        expect(acr).toMatch(/acp:allow acl:Read, acl:Write, acl:Control/);
+        expect(acr).toContain('acp:memberAccessControl');   // inheritance to members
+    });
+
+    it('grants members read when present, and omits the block otherwise', () => {
+        const withM = buildAcpAcr(OWNER, [M1], RES);
+        expect(withM).toContain('<#members-matcher> a acp:Matcher; acp:agent <' + M1 + '>');
+        expect(withM).toMatch(/<#members-policy> a acp:Policy; acp:allow acl:Read/);
+        const noM = buildAcpAcr(OWNER, [], RES);
+        expect(noM).not.toContain('members-ac');
+    });
+
+    it('filters non-WebID members and rejects a bad owner', () => {
+        const acr = buildAcpAcr(OWNER, ['not-a-webid', M1], RES);
+        expect(acr).toContain(`<${M1}>`);
+        expect(acr).not.toContain('not-a-webid');
+        expect(() => buildAcpAcr('nope', [], RES)).toThrow();
+    });
+});
+
+// ── discoverAccessControl + grant routing (network wrapper in pod.js) ────────
 let _session = null;
 vi.mock('./auth.js', () => ({
     get solidSession() { return _session; },
     podStorageRoot: () => 'https://alice.example/',
 }));
 
-import { discoverAccessControl } from './pod.js';
+import { discoverAccessControl, podSetContainerAcl } from './pod.js';
 
 describe('discoverAccessControl', () => {
     beforeEach(() => { _session = null; });
@@ -89,5 +118,37 @@ describe('discoverAccessControl', () => {
         _session = { info: { isLoggedIn: true }, fetch: vi.fn(async () => { throw new Error('down'); }) };
         const { url } = await discoverAccessControl(RES);
         expect(url).toBe(RES + '.acl');
+    });
+});
+
+describe('podSetContainerAcl routing by model', () => {
+    const OWNER = 'https://alice.example/profile/card#me';
+
+    function sessionFor(linkHeader) {
+        const puts = [];
+        _session = {
+            info: { isLoggedIn: true, webId: OWNER },
+            fetch: vi.fn(async (url, opts) => {
+                if (opts && opts.method === 'PUT') { puts.push({ url, body: opts.body }); return { ok: true }; }
+                return { headers: { get: () => linkHeader } };   // HEAD
+            }),
+        };
+        return puts;
+    }
+
+    it('writes an ACP ACR when the server advertises ACP', async () => {
+        const puts = sessionFor(`<acr>; rel="${ACP_ACCESS_CONTROL_REL}"`);
+        await podSetContainerAcl('proxion/rooms/r1/', OWNER, []);
+        expect(puts).toHaveLength(1);
+        expect(puts[0].url).toBe('https://alice.example/proxion/rooms/r1/acr');
+        expect(puts[0].body).toContain('acp:AccessControlResource');
+    });
+
+    it('writes WAC turtle when the server advertises rel=acl', async () => {
+        const puts = sessionFor('<r1.acl>; rel="acl"');
+        await podSetContainerAcl('proxion/rooms/r1/', OWNER, []);
+        expect(puts).toHaveLength(1);
+        expect(puts[0].body).toContain('acl:Authorization');
+        expect(puts[0].body).not.toContain('acp:AccessControlResource');
     });
 });

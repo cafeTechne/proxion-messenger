@@ -13,7 +13,7 @@ import { parseRoomDescriptor } from './roomdesc.js';
 import {
     buildInviteNotification, parseInboxListing, parseInviteNotification, INBOX_PRED,
 } from './ldn.js';
-import { accessControlUrl, detectAclModel } from './acl.js';
+import { accessControlUrl, detectAclModel, buildAcpAcr } from './acl.js';
 
 const SAFE_ID_RE = /^[\w-]{1,128}$/;
 
@@ -257,22 +257,22 @@ export async function podSetContainerAcl(containerPath, ownerWebId, memberWebIds
     if (!root) return;
     const containerUrl = root + containerPath;
     if (!containerUrl.startsWith(root)) return;
-    let acl;
     try {
-        acl = buildWacAcl(ownerWebId, memberWebIds, containerUrl);
-    } catch (err) {
-        console.warn('ACL build failed:', err.message);
-        return;
-    }
-    try {
-        const { url } = await discoverAccessControl(containerUrl);
+        const { url, model } = await discoverAccessControl(containerUrl);
+        // Route by the server's access-control model: ACP for ESS-style servers,
+        // WAC otherwise (CSS/NSS). ACP authoring is unverified against live ESS
+        // (R100 A2.2); it only runs when the server advertises ACP, so it cannot
+        // affect WAC servers.
+        const body = model === 'acp'
+            ? buildAcpAcr(ownerWebId, memberWebIds, containerUrl)
+            : buildWacAcl(ownerWebId, memberWebIds, containerUrl);
         await solidSession.fetch(url, {
             method: 'PUT',
             headers: { 'Content-Type': 'text/turtle' },
-            body: acl,
+            body,
         });
     } catch (err) {
-        console.warn('WAC ACL write failed:', err);
+        console.warn('access-control write failed:', err);
     }
 }
 
