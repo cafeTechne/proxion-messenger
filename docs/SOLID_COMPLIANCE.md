@@ -20,10 +20,10 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | Solid Chat (Long Chat) | v1.0.0 | Compliant (core), Partial (replies, reactions) | yes (B1) |
 | Type Indexes | v1.0.0 | Compliant (public); private index N-A | yes (B1) |
 | Shape Trees | ED | Missing (low priority) | yes (B1) |
-| Solid WebID Profile | v1.0.0 | Compliant (name via A1); pending full audit | partial |
-| Solid-OIDC (+ Primer) | v0.1.0 | pending | B2 |
-| HTTPSig Authentication | CG-draft | pending | B2 |
-| Solid DID Method (did:solid) | Unofficial | pending | B2 |
+| Solid WebID Profile | v1.0.0 | Compliant (pod users); N-A for did:key-only users | yes (B2) |
+| Solid-OIDC (+ Primer) | v0.1.0 | Compliant | yes (B2) |
+| HTTPSig Authentication | CG-draft | N-A by design (we use Solid-OIDC/DPoP) | yes (B2) |
+| Solid DID Method (did:solid) | Unofficial | Divergent by design (we use did:key) | yes (B2) |
 | Web Access Control | v1.0.0 | pending | B3 |
 | Access Control Policy | v0.9.0 | pending (known gap, R100 A2) | B3 |
 | Authorization Use Cases | ED | pending | B3 |
@@ -75,10 +75,46 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 |---|---|---|
 | Shape Tree locators / data organization by shape | Missing | Not implemented. Low priority: emerging spec, little adoption; our data is already typed RDF other apps read. |
 
+## B2. Identity and authentication
+
+### Solid WebID Profile (v1.0.0)
+| Requirement | Status | Evidence / note |
+|---|---|---|
+| Card is `foaf:Agent`, GET as turtle/JSON-LD, `pim:preferencesFile` | Compliant | CSS/JSS create the card; we read/augment it |
+| `solid:oidcIssuer`, `pim:storage` present | Compliant | provided by the pod's default card; not clobbered |
+| `foaf:name` so other apps show a name | Compliant | R100 A1 upsert (`podEnsureProfileName`); `profile-card.test.js` |
+| `ldp:inbox` advertised | Compliant | we create + link an inbox for LDN invites (`inboxacl`, `ldn.js`) |
+| `solid:publicTypeIndex` linked | Compliant | `podEnsurePublicTypeIndex` (see B1) |
+| A did:key-only user is discoverable/named | N-A by design | no pod means no dereferenceable card; such a user shows as an id (documented in `INTEROP.md`) |
+
+### Solid-OIDC (v0.1.0)
+| Requirement | Status | Evidence / note |
+|---|---|---|
+| Auth Code + PKCE, `webid` claim (interactive) | Compliant | browser uses `@inrupt/solid-client-authn` (`solid-authn.bundle.js`) |
+| DPoP-bound tokens (required) | Compliant | `dpop.py`; DPoP on pod I/O |
+| Headless/backend agent auth | Compliant | gateway uses Solid-OIDC client credentials against CSS/JSS (`css_auth.py`, `jss_setup.py`) |
+| Client Identifier Document | N-A | registrationless/ephemeral client (a spec-endorsed option); no hosted Client ID doc |
+
+### HTTPSig Authentication (CG-draft)
+| Requirement | Status | Evidence / note |
+|---|---|---|
+| HTTP Message Signatures auth | N-A by design | Proxion uses Solid-OIDC + DPoP, the mainstream path; HTTPSig is an alternative not needed |
+
+### Solid DID Method / did:solid (Unofficial Draft)
+| Requirement | Status | Evidence / note |
+|---|---|---|
+| `did:solid` identity resolving to a WebID profile | Divergent by design | Proxion identity is `did:key` (self-certifying, no resolution). `did:solid` is an Unofficial Draft; aligning would be a future identity-model decision, not a current compliance gap. Spec issue solid/specification#217 tracks DIDs-alongside-WebIDs. |
+
 ## Follow-ups surfaced by B1
 1. **PATCH format** (Protocol): our writes use `application/sparql-update`; add N3 Patch (or Accept-Patch negotiation) for servers that do not accept SPARQL Update.
 2. **Long Chat replies** (Chat): also emit `sioc:has_reply` so reply threading is visible to other Solid apps.
 3. **Long Chat reactions** (Chat): also emit `schema:Action` subclasses so reactions are visible to other Solid apps.
 4. **ACP** (Protocol auth): the known R100 A2 item (blocks Inrupt ESS).
 
-_(B2 identity/auth, B3 authorization, B4 notifications, B5 interop/process to follow.)_
+## B2 verdict
+Identity and auth are compliant for pod-connected users (browser Solid-OIDC + DPoP, WebID
+card augmented with name/inbox/type-index). The one honest limit is by design: a did:key-only
+user has no dereferenceable card, and Proxion's did:key identity diverges from the emerging
+did:solid method. No new actionable gaps beyond that strategic choice.
+
+_(B3 authorization, B4 notifications, B5 interop/process to follow.)_
