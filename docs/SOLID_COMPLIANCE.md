@@ -24,7 +24,7 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | Solid-OIDC (+ Primer) | v0.1.0 | Compliant | yes (B2) |
 | HTTPSig Authentication | CG-draft | N-A by design (we use Solid-OIDC/DPoP) | yes (B2) |
 | Solid DID Method (did:solid) | Unofficial | Divergent by design (we use did:key) | yes (B2) |
-| Web Access Control | v1.0.0 | Compliant (structure + main-path discovery); setup ACLs still append .acl | yes (B3) |
+| Web Access Control | v1.0.0 | Compliant (structure + header discovery) | yes (B3) |
 | Access Control Policy | v0.9.0 | Partial (authored + routed; unverified vs live ESS) | yes (B3) |
 | Authorization Use Cases | ED | N-A (informational) | yes (B3) |
 | Solid Notifications Protocol | v0.3.0 | Compliant (+ polling fallback) | yes (B4) |
@@ -115,7 +115,7 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | `acl:accessTo` / `acl:default` (container inheritance) | Compliant | container ACLs use `acl:default`; rooms grant members |
 | `acl:mode` Read/Write/Append/Control; owner keeps Control | Compliant | owner Read/Write/Control on every resource we create |
 | Serve ACL as `text/turtle` | Compliant | all ACL writes are turtle |
-| Discover the ACL URL from `Link: rel=acl` (never derive by string) | **Partial** | R100 A2.1: the main grant path (`podSetContainerAcl`) now reads the `Link` header (`discoverAccessControl`, `acl.js`), falling back to `.acl`. The type-index/inbox setup ACLs (5 sites) still append `.acl`. Follow-up: route those through discovery too. |
+| Discover the ACL URL from `Link: rel=acl` (never derive by string) | Compliant | R100 A2.1 + R101.2: every ACL write site (`podSetContainerAcl`, `podGrantChatParticipants`, `ensureProxionContainer`, type index, inbox) reads the `Link` header via `discoverAccessControl` (`acl.js`), falling back to `.acl` only when the server advertises nothing. |
 
 ### Access Control Policy (v0.9.0)
 | Requirement | Status | Evidence / note |
@@ -208,11 +208,11 @@ gaps are a small, honest set, and several are by design.
 2. **Long Chat replies + reactions in standard predicates** (B1): also emit
    `sioc:has_reply` and `schema:Action` so other Solid apps see threading and reactions.
    Cheap, high interop value.
-3. **Route the setup ACLs (type index, inbox) through discovery too** (A2.1): the main grant
-   path reads `Link: rel=acl`; five setup-ACL sites still append `.acl`.
-4. **PATCH via N3 Patch (or Accept-Patch negotiation)** (B1): for servers that do not accept
-   SPARQL Update.
-5. **StreamingHTTPChannel2023** (B4): minor; add if CSS deprecates WebSocket.
+3. **PATCH via N3 Patch (or Accept-Patch negotiation)** (B1): for servers that do not accept
+   SPARQL Update. (R101.3)
+4. **StreamingHTTPChannel2023** (B4): minor; add if CSS deprecates WebSocket. (R101.4)
+
+Done since the audit: header-based ACL discovery at every write site (R101.2).
 
 ### Deferred by design / emerging (watch, do not build)
 did:solid alignment, SAI + Shape Trees, Solid-PREP, HTTPSig. did:key-only users having no

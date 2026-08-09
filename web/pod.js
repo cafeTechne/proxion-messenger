@@ -290,7 +290,8 @@ export async function ensureProxionContainer() {
             headers: { 'Content-Type': 'text/turtle' },
             body: '',
         });
-        await solidSession.fetch(`${uri}.acl`, {
+        const { url: aclUrl } = await discoverAccessControl(uri);
+        await solidSession.fetch(aclUrl, {
             method: 'PUT',
             headers: { 'Content-Type': 'text/turtle' },
             // acl:default, NOT acl:defaultForNew. The latter is a deprecated
@@ -557,7 +558,8 @@ export async function podSetChatSeqAt(containerUrl, messageId, date, seq) {
 export async function podGrantChatParticipants(containerUrl, ownerWebId, participantWebIds) {
     if (!containerUrl || !solidSession?.info?.isLoggedIn) return false;
     try {
-        const res = await solidSession.fetch(containerUrl + '.acl', {
+        const { url: aclUrl } = await discoverAccessControl(containerUrl);
+        const res = await solidSession.fetch(aclUrl, {
             method: 'PUT',
             headers: { 'Content-Type': 'text/turtle' },
             body: buildChatAcl(ownerWebId, participantWebIds, containerUrl),
@@ -701,7 +703,8 @@ export async function podEnsurePublicTypeIndex() {
         // full control. Without this the index is owner-only and discovery silently
         // fails cross-identity.
         try {
-            await solidSession.fetch(indexUrl + '.acl', {
+            const { url: idxAclUrl } = await discoverAccessControl(indexUrl);
+            await solidSession.fetch(idxAclUrl, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'text/turtle' },
                 body: `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n@prefix foaf: <http://xmlns.com/foaf/0.1/>.\n`
@@ -951,7 +954,8 @@ export async function podEnsureInbox() {
         // Public-Append ACL: owner full control (and default over children so we can
         // read/delete the notifications inside); everyone else may only Append.
         try {
-            await solidSession.fetch(inboxUrl + '.acl', {
+            const { url: inboxAclUrl } = await discoverAccessControl(inboxUrl);
+            await solidSession.fetch(inboxAclUrl, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'text/turtle' },
                 body: buildInboxAcl(inboxUrl, webId, []),
@@ -1001,7 +1005,8 @@ export async function podGrantInboxReader(readerWebId) {
     const inbox = await podEnsureInbox();
     if (!inbox) return false;
     try {
-        const res = await solidSession.fetch(inbox + '.acl', {
+        const { url: inboxAclUrl } = await discoverAccessControl(inbox);
+        const res = await solidSession.fetch(inboxAclUrl, {
             method: 'PUT',
             headers: { 'Content-Type': 'text/turtle' },
             body: buildInboxAcl(inbox, me, [readerWebId]),
