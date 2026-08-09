@@ -83,8 +83,10 @@ read and join it.
 
 Shared rooms are open by design so other apps can read them; private direct messages are
 end-to-end encrypted and deliberately readable only by the people in them. The full data
-format is documented in [docs/POD_DATA_MODEL.md](docs/POD_DATA_MODEL.md), and the
-app-by-app compatibility picture in [docs/INTEROP.md](docs/INTEROP.md).
+format is documented in [docs/POD_DATA_MODEL.md](docs/POD_DATA_MODEL.md), the
+app-by-app compatibility picture in [docs/INTEROP.md](docs/INTEROP.md), and a
+per-requirement audit against the Solid spec suite in
+[docs/SOLID_COMPLIANCE.md](docs/SOLID_COMPLIANCE.md).
 
 ## Private by design
 

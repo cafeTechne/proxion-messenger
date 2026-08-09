@@ -4,6 +4,10 @@ This is the honest, specific picture of what Proxion interoperates with, how, an
 where the edges are. Every capability listed here is backed by a test in the repo,
 named so you can run it yourself.
 
+For a per-requirement audit against the full Solid specification suite (Compliant /
+Partial / Missing / N-A by design, with citations), see
+[SOLID_COMPLIANCE.md](SOLID_COMPLIANCE.md).
+
 ## What interoperates, and what does not
 
 - **Rooms and shared conversations interoperate.** They are shared by design, so

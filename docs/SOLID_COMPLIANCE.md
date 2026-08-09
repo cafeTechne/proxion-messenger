@@ -32,10 +32,10 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | StreamingHTTPChannel2023 | ED | Missing (minor) | yes (B4) |
 | EventSourceChannel2023 | ED | N-A (WebSocket covers it) | yes (B4) |
 | Solid-PREP | ED | Missing (emerging) | yes (B4) |
-| Solid Application Interoperability (+ primers) | v0.1.0 | pending (adapter gated off) | B5 |
-| Solid QA | v0.3.0 | pending | B5 |
-| Solid Security Considerations | v0.1.0 | pending | B5 |
-| Solid ERP | WIP | note only | B5 |
+| Solid Application Interoperability (+ primers) | v0.1.0 | Missing (emerging; depends on Shape Trees) | yes (B5) |
+| Solid QA | v0.3.0 | N-A (process); our test discipline aligns | yes (B5) |
+| Solid Security Considerations | v0.1.0 | Aligned | yes (B5) |
+| Solid ERP | WIP | Note only | yes (B5) |
 
 ## B1. Core and data
 
@@ -163,11 +163,59 @@ Notifications is a strong, spec-conformant area: v0.3 discovery + WebSocket + We
 plus a polling fallback the spec does not require. Only StreamingHTTPChannel2023 (minor) and
 the emerging Solid-PREP are unimplemented; neither is a current gap.
 
-## Follow-ups surfaced by B1
-1. **PATCH format** (Protocol): our writes use `application/sparql-update`; add N3 Patch (or Accept-Patch negotiation) for servers that do not accept SPARQL Update.
-2. **Long Chat replies** (Chat): also emit `sioc:has_reply` so reply threading is visible to other Solid apps.
-3. **Long Chat reactions** (Chat): also emit `schema:Action` subclasses so reactions are visible to other Solid apps.
-4. **ACP** (Protocol auth): the known R100 A2 item (blocks Inrupt ESS).
+## B5. Interoperability and process
+
+### Solid Application Interoperability (v0.1.0, + primers)
+| Requirement | Status | Evidence / note |
+|---|---|---|
+| Registry set from WebID; Data Registrations by shape tree; Access Need Groups; Authorization Agent; Access Grants | Missing | Proxion has a gated-off `@inrupt/solid-client-access-grants` adapter (VC access grants) but implements none of the SAI panel model, which also depends on Shape Trees (also Missing). Large and still evolving (CG draft). Watch; revisit when it stabilizes. |
+
+### Solid Security Considerations (v0.1.0)
+| Recommendation | Status | Evidence / note |
+|---|---|---|
+| DPoP-bound tokens | Aligned | `dpop.py` |
+| Trust anchors: verify OIDC issuer; do not let apps rewrite WebID cards | Aligned | issuer handled by `solid-client-authn`; we only augment our own card, never others' |
+| Treat pod data as untrusted; sanitize rendered content | Aligned | markdown/render escaping; XSS-sink audit hardened `innerHTML` uses |
+| Protect credentials / private keys | Aligned | non-extractable device keys (WebCrypto); updater key git-excluded |
+| CSP sandbox for pod-served HTML | N-A | Proxion renders pod content as escaped text, it does not serve pod-hosted HTML |
+| Origin checks on privileged endpoints | Aligned | `/setup/pod` rejects untrusted origins (`test_security_hardening.py`) |
+
+### Solid QA (v0.3.0) and Solid ERP (WIP)
+| Item | Status | Evidence / note |
+|---|---|---|
+| Solid QA (test/conformance process) | N-A (process) | not a client-normative spec; our unit + e2e + live-CSS integration + smoke gates align with its intent |
+| Solid ERP | Note only | early/work-in-progress; nothing to implement |
+
+## B5 verdict
+Interop-and-process is either intentionally deferred (SAI, which is emerging and Shape-Tree
+dependent) or already aligned (Security Considerations) or non-normative (QA, ERP). No new
+actionable gaps.
+
+---
+
+## Audit complete: overall picture
+
+Proxion is **substantially spec-conformant** on the parts of Solid it uses: Protocol CRUD,
+Long Chat, Type Indexes, WebID Profile, Solid-OIDC + DPoP, WAC (structure), and the
+Notifications Protocol with WebSocket/Webhook/LDN channels plus a polling fallback. The
+gaps are a small, honest set, and several are by design.
+
+### Actionable follow-ups (ranked)
+1. **ACP authoring + header-based ACR discovery** (B3) — the biggest ecosystem gap; unblocks
+   Inrupt ESS. This is R100 A2, now with sharpened scope (ACP write AND `Link`-based
+   discovery, not `.acl` guessing).
+2. **Long Chat replies + reactions in standard predicates** (B1) — also emit
+   `sioc:has_reply` and `schema:Action` so other Solid apps see threading and reactions.
+   Cheap, high interop value.
+3. **WAC ACL discovery via `Link: rel=acl`** (B3) — stop deriving `.acl` by string; read the
+   header. Pairs with follow-up 1.
+4. **PATCH via N3 Patch (or Accept-Patch negotiation)** (B1) — for servers that do not accept
+   SPARQL Update.
+5. **StreamingHTTPChannel2023** (B4) — minor; add if CSS deprecates WebSocket.
+
+### Deferred by design / emerging (watch, do not build)
+did:solid alignment, SAI + Shape Trees, Solid-PREP, HTTPSig. did:key-only users having no
+dereferenceable card is a stated design limit.
 
 ## B2 verdict
 Identity and auth are compliant for pod-connected users (browser Solid-OIDC + DPoP, WebID
