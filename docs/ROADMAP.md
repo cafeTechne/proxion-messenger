@@ -36,6 +36,15 @@ Solid-server support extended beyond CSS to JSS and NSS (auto-detected). The
 polish program (Phases F through L) lives in `docs/ROADMAP_2.md`, also largely
 complete; the largest remaining frontier is a native mobile client.
 
+**Solid ecosystem (R100, 2026-08).** A full per-requirement audit against the Solid
+spec suite is recorded in `docs/SOLID_COMPLIANCE.md`. Proxion is substantially
+conformant on what it uses (Protocol, Long Chat, Type Indexes, WebID Profile,
+Solid-OIDC + DPoP, WAC, Notifications v0.3). Shipped in R100: WebID Profile name
+publishing, header-based ACL/ACR discovery, and ACP authoring routed by server
+model (built and unit-tested, live Inrupt ESS verification pending an account).
+The remaining low-value interop follow-ups the audit surfaced are tracked in
+`PLAN_ROUND_101` and the matrix's follow-up list.
+
 ## The product thesis (what we are actually building)
 
 > A sovereign Discord/Signal for small trusted groups (2–6 people). Download
