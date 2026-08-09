@@ -709,6 +709,75 @@ export async function podEnsurePublicTypeIndex() {
     }
 }
 
+// ── WebID profile name (R100/A1, Solid WebID Profile v1.0.0) ─────────────────
+// A did:key-only user has no dereferenceable card, but a pod-connected user does,
+// and by default it carries no name, so other Solid apps (SolidOS, etc.) show an
+// opaque id. Publish the user's Proxion display name as foaf:name + vcard:fn via a
+// non-destructive SPARQL-update upsert. Best-effort, same idiom as the type-index
+// profile link above. (_FOAF_NAME / _VCARD_FN are declared once in the contacts
+// section below and reused here.)
+function _sparqlLiteral(s) {
+    return '"' + String(s)
+        .replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+        .replace(/\n/g, '\\n').replace(/\r/g, '\\r') + '"';
+}
+
+/** Build a SPARQL-update that sets the profile name, deleting a prior one if
+ *  given (so re-runs update rather than accumulate). Pure; unit-tested. */
+export function buildProfileNamePatch({ webId, name, prevName }) {
+    const w = `<${webId}>`;
+    const lit = _sparqlLiteral(name);
+    let out = '';
+    if (prevName) {
+        const p = _sparqlLiteral(prevName);
+        out += `DELETE DATA {\n  ${w} <${_FOAF_NAME}> ${p} .\n  ${w} <${_VCARD_FN}> ${p} .\n} ;\n`;
+    }
+    out += `INSERT DATA {\n  ${w} <${_FOAF_NAME}> ${lit} .\n  ${w} <${_VCARD_FN}> ${lit} .\n}\n`;
+    return out;
+}
+
+/** Read the current foaf:name for webId from a JSON-LD card, or null. Pure. */
+export function extractFoafName(json, webId) {
+    const nodes = Array.isArray(json)
+        ? json
+        : (Array.isArray(json?.['@graph']) ? json['@graph'] : [json]);
+    for (const n of nodes) {
+        if (!n) continue;
+        const id = n['@id'];
+        if (id !== webId && !(typeof id === 'string' && id.endsWith('#me'))) continue;
+        const v = n[_FOAF_NAME] ?? n['foaf:name'] ?? n.name;
+        if (v == null) continue;
+        const first = Array.isArray(v) ? v[0] : v;
+        if (first && typeof first === 'object') return first['@value'] ?? null;
+        if (typeof first === 'string') return first;
+    }
+    return null;
+}
+
+/** Upsert the pod WebID card's name to displayName. Best-effort; no-op when not
+ *  pod-connected or the name is already correct. */
+export async function podEnsureProfileName(displayName) {
+    const webId = solidSession?.info?.webId;
+    if (!webId || !displayName || !solidSession?.info?.isLoggedIn) return false;
+    let prevName = null;
+    try {
+        const res = await solidSession.fetch(webId, { headers: { Accept: 'application/ld+json' } });
+        if (res && res.ok) prevName = extractFoafName(await res.json(), webId);
+    } catch (_) { /* card unreadable: fall through to a plain insert */ }
+    if (prevName === displayName) return true;
+    try {
+        const r = await solidSession.fetch(webId.split('#')[0], {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/sparql-update' },
+            body: buildProfileNamePatch({ webId, name: displayName, prevName }),
+        });
+        return !!(r && r.ok);
+    } catch (err) {
+        console.warn('[pod] profile name patch failed:', err);
+        return false;
+    }
+}
+
 /** Register a chat container as a meeting:LongChat instance (discoverable). */
 export async function podRegisterChat(containerUrl) {
     if (!containerUrl || !solidSession?.info?.isLoggedIn) return false;

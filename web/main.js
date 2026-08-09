@@ -20,7 +20,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podReadLongChatRecent, podEditLongChatMessage,
          podSoftDeleteLongChatMessage, podSetLongChatSeq,
          reconcileRoomHistory, podWriteRoomDescriptor, podReadRoomDescriptor,
-         podListOwnedRoomDescriptors } from './pod.js';
+         podListOwnedRoomDescriptors, podEnsureProfileName } from './pod.js';
 import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
 import { buildRoomDescriptor, withMembers, descriptorSigningBytes } from './roomdesc.js';
 import {
@@ -1069,6 +1069,9 @@ import { createIdentityResolver } from './identity.js';
                     socket.send(JSON.stringify({cmd: "set_identity", display_name: displayName}));
                 }
                 podWriteProfile({ displayName }).catch(() => {});
+                // R100/A1: also publish the name into the standard WebID card so
+                // other Solid apps show a name, not an opaque id.
+                podEnsureProfileName(displayName).catch(() => {});
             }
             const statusMessage = document.getElementById("settings-status-message").value.trim();
             localStorage.setItem("proxion_status_message", statusMessage);
