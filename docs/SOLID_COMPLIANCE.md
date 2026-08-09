@@ -25,7 +25,7 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | HTTPSig Authentication | CG-draft | N-A by design (we use Solid-OIDC/DPoP) | yes (B2) |
 | Solid DID Method (did:solid) | Unofficial | Divergent by design (we use did:key) | yes (B2) |
 | Web Access Control | v1.0.0 | Compliant (structure + header discovery) | yes (B3) |
-| Access Control Policy | v0.9.0 | Partial (authored + routed; unverified vs live ESS) | yes (B3) |
+| Access Control Policy | v0.9.0 | Compliant (verified live vs CSS-ACP) | yes (B3) |
 | Authorization Use Cases | ED | N-A (informational) | yes (B3) |
 | Solid Notifications Protocol | v0.3.0 | Compliant (+ polling fallback) | yes (B4) |
 | WebSocketChannel2023 / WebhookChannel2023 / LDNChannel2023 | ED / v1.0.0 | Compliant | yes (B4) |
@@ -120,8 +120,8 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 ### Access Control Policy (v0.9.0)
 | Requirement | Status | Evidence / note |
 |---|---|---|
-| Author Access Control Resources (Policies + Matchers) to grant access | **Partial** | R100 A2.2: `buildAcpAcr` authors an ACR (AccessControl + Policy + Matcher, owner control + member read, with `acp:memberAccessControl` for inheritance), and `podSetContainerAcl` routes to it when the server advertises ACP. Structurally unit-tested. **Live-ESS verification (A2.3):** run `scripts/verify_ess_acp.mjs` against a pod.inrupt.com pod (client credentials) to confirm ESS accepts the ACR; until that passes this stays Partial. Only activates on ACP servers, so no CSS risk. |
-| Discover the ACR via the resource's `Link` header | Compliant | `detectAclModel` / `accessControlUrl` handle the ACP accessControl relation (A2.1) |
+| Author Access Control Resources (Policies + Matchers) to grant access | Compliant | R100 A2.2: `buildAcpAcr` authors an ACR (AccessControl + Policy + Matcher, owner control + member read, with `acp:memberAccessControl` for inheritance), and `podSetContainerAcl` routes to it when the server advertises ACP. **A2.3 verified live against CSS in ACP mode** (`config/file-acp.json`): CSS accepts and persists our ACR (HTTP 201). Verify yourself with `scripts/verify_ess_acp.mjs`. (Inrupt's free ESS/PodSpaces is gone as of 2026, now enterprise wallets, so CSS-ACP is the conformant ACP server we verify against.) |
+| Discover the ACR via the resource's `Link` header | Compliant | `accessControlUrl` reads the link; `detectAclModel` recognizes ACP via the `acp#accessControl` rel OR a `.acr` ACR advertised through `rel="acl"` (how CSS-ACP exposes it, found during A2.3 and fixed). |
 
 ### Authorization Use Cases and Requirements (Editor's Draft)
 | Requirement | Status | Evidence / note |
@@ -201,22 +201,15 @@ Notifications Protocol with WebSocket/Webhook/LDN channels plus a polling fallba
 gaps are a small, honest set, and several are by design.
 
 ### Actionable follow-ups (ranked)
-1. **Verify ACP against a live Inrupt ESS** (A2): header-based discovery (A2.1) and ACP ACR
-   authoring (A2.2) are implemented and structurally tested; the remaining step is running a
-   real ESS grant/read to confirm the ACR shape, then flipping ACP from Partial to Compliant.
-   Needs an Inrupt PodSpaces account.
-2. **Long Chat reactions in `schema:Action`** (B1): replies now emit `sioc:has_reply`
-   (R101.1); reactions still live in `px:` only. Emitting `schema:LikeAction` needs the
-   reacted-to message's date-partitioned IRI at react time (same target-IRI plumbing as
-   replies), so it is moderate, not cheap.
-3. **Chat day-file patches via N3 Patch** (B1): the card writes negotiate N3 (R101.3); the
-   append/edit/reaction patches on our own room containers still send SPARQL Update by
-   default (they negotiate too, via `podRdfPatch`, only for the reaction actions). Low
-   priority.
+1. **Chat day-file append/edit patches via N3 Patch** (B1): the card writes and reaction
+   actions negotiate N3 (via `podRdfPatch`); the message append/edit patches on our own room
+   containers still send SPARQL Update. Low priority (our own containers on CSS).
 
 Done since the audit: header-based ACL discovery at every write site (R101.2), replies in
 `sioc:has_reply` (R101.1), N3-Patch negotiation on the WebID-card writes (R101.3), the
-StreamingHTTPChannel2023 fallback (R101.4), and reactions as `schema:LikeAction` (R101).
+StreamingHTTPChannel2023 fallback (R101.4), reactions as `schema:LikeAction` (R101), and
+ACP authoring + discovery verified live against CSS-ACP (A2.3), which also fixed ACP
+detection of a `.acr` ACR advertised via `rel="acl"`.
 
 ### Deferred by design / emerging (watch, do not build)
 did:solid alignment, SAI + Shape Trees, Solid-PREP, HTTPSig. did:key-only users having no

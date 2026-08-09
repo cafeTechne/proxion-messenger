@@ -61,14 +61,18 @@ export function accessControlUrl(linkHeader, resourceUrl) {
 }
 
 /**
- * Which access-control model the server uses for a resource, from its Link
- * header: 'acp' if it advertises the ACP accessControl relation, else 'wac' if it
- * advertises rel="acl", else null (unknown; caller falls back to the .acl
- * convention + WAC).
+ * Which access-control model the server uses for a resource, from its Link header
+ * (and the discovered ACR URL): 'acp' if it advertises the ACP accessControl
+ * relation OR the access-control resource is a `.acr` (how CSS-ACP exposes it, via
+ * rel="acl"); else 'wac' if it advertises rel="acl"; else null (caller falls back
+ * to the .acl convention + WAC). Verified against a live CSS-ACP server: it
+ * advertises `<...foo.acr>; rel="acl"`, so the rel alone cannot distinguish ACP
+ * from WAC and the `.acr` suffix is the reliable signal.
  */
-export function detectAclModel(linkHeader) {
+export function detectAclModel(linkHeader, acrUrl) {
     const links = parseLinkHeader(linkHeader);
     if (links.some((l) => l.rel === ACP_ACCESS_CONTROL_REL)) return 'acp';
+    if (acrUrl && /\.acr(?:$|[?#])/.test(acrUrl)) return 'acp';
     if (links.some((l) => l.rel === 'acl')) return 'wac';
     return null;
 }

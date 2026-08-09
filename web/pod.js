@@ -247,7 +247,7 @@ export async function discoverAccessControl(resourceUrl) {
         const res = await solidSession.fetch(resourceUrl, { method: 'HEAD' });
         const link = (res && res.headers && res.headers.get) ? res.headers.get('link') : null;
         const url = accessControlUrl(link, resourceUrl);
-        if (url) return { url, model: detectAclModel(link) || 'wac' };
+        if (url) return { url, model: detectAclModel(link, url) || 'wac' };
     } catch (_) { /* fall through to the convention */ }
     return { url: resourceUrl + '.acl', model: 'wac' };
 }

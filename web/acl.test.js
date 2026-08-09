@@ -45,6 +45,13 @@ describe('detectAclModel', () => {
         expect(detectAclModel('<r1.acl>; rel="acl"')).toBe('wac');
         expect(detectAclModel('<desc>; rel="describedby"')).toBeNull();
     });
+
+    it('detects ACP from a .acr ACR advertised via rel="acl" (CSS-ACP, verified live)', () => {
+        // CSS in ACP mode advertises <...foo.acr>; rel="acl", so the rel alone
+        // says wac; the .acr suffix is the reliable ACP signal.
+        expect(detectAclModel('<foo.acr>; rel="acl"', 'https://p/foo.acr')).toBe('acp');
+        expect(detectAclModel('<foo.acl>; rel="acl"', 'https://p/foo.acl')).toBe('wac');
+    });
 });
 
 describe('buildAcpAcr', () => {

@@ -1,26 +1,34 @@
 #!/usr/bin/env node
 /**
  * A2.3: verify Proxion's ACP authoring + Link-header discovery against a LIVE
- * Inrupt ESS pod (pod.inrupt.com), which uses Access Control Policy.
+ * Access-Control-Policy server. Works against any ACP server via env vars
+ * (oidcIssuer, client credentials, storage root).
  *
- * You run this (not the assistant): per Inrupt's warning, your CLIENT_SECRET must
- * not be shared. Steps:
- *   1. Create a free pod at https://signup.pod.inrupt.com/
- *   2. Register a client at https://login.inrupt.com/registration.html
- *      -> gives a Client ID + Client Secret.
- *   3. Find your pod storage root (https://storage.inrupt.com/<id>/); the pod
- *      browser at https://podbrowser.inrupt.com shows it, or read pim:storage
- *      from your WebID https://id.inrupt.com/<username>.
- *   4. Install the auth lib and run:
- *        npm i @inrupt/solid-client-authn-node
+ * PRIMARY PATH (reproducible, no account needed): the Community Solid Server in
+ * ACP mode. This is what A2.3 was verified against (Inrupt's free ESS/PodSpaces
+ * was retired in 2026 in favor of enterprise wallets). Recipe:
+ *   1. In a scratch dir:  npm i @solid/community-server @inrupt/solid-client-authn-node
+ *   2. Start CSS in ACP mode:
+ *        npx @solid/community-server -c @css:config/file-acp.json -p 3456 -f ./cssdata -b http://localhost:3456/
+ *   3. Provision an account + client credentials (Python, uses our css_setup):
+ *        from proxion_messenger_core.css_setup import CssAccountManager
+ *        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+ *        c,pod,wid = CssAccountManager('http://localhost:3456').connect_agent(
+ *            Ed25519PrivateKey.generate(),'a@example.org','pw12345678')
+ *        # -> c.client_id, c.client_secret, pod
+ *   4. Run:
  *        PROXION_ESS_CLIENT_ID=... PROXION_ESS_CLIENT_SECRET=... \
- *        PROXION_ESS_STORAGE=https://storage.inrupt.com/<id>/ \
+ *        PROXION_ESS_OIDC_ISSUER=http://localhost:3456/ \
+ *        PROXION_ESS_STORAGE=http://localhost:3456/<account>/ \
  *        node scripts/verify_ess_acp.mjs
- *   5. Paste the output back; it never prints your secret.
+ *
+ * INRUPT ESS (if you have enterprise access): set OIDC_ISSUER=https://login.inrupt.com,
+ * register a client there, and point STORAGE at your storage root.
  *
  * The ACP-authoring/discovery logic below is inlined from web/acl.js verbatim so
- * this file is self-contained. If ESS rejects the ACR, the error + our ACR body
- * are printed so the shape can be fixed, then acl.js updated to match.
+ * this file is self-contained. If the server rejects the ACR, the error + our ACR
+ * body are printed so the shape can be fixed, then acl.js updated to match.
+ * Do not share your CLIENT_SECRET; the harness never prints it.
  */
 import { Session } from '@inrupt/solid-client-authn-node';
 
@@ -51,9 +59,10 @@ function accessControlUrl(linkHeader, resourceUrl) {
     const acl = links.find((l) => l.rel === 'acl');
     return acl ? resolveAgainst(acl.uri, resourceUrl) : null;
 }
-function detectAclModel(linkHeader) {
+function detectAclModel(linkHeader, acrUrl) {
     const links = parseLinkHeader(linkHeader);
     if (links.some((l) => l.rel === ACP_ACCESS_CONTROL_REL)) return 'acp';
+    if (acrUrl && /\.acr(?:$|[?#])/.test(acrUrl)) return 'acp';   // CSS-ACP: .acr via rel="acl"
     if (links.some((l) => l.rel === 'acl')) return 'wac';
     return null;
 }
@@ -109,7 +118,7 @@ try {
     const head = await session.fetch(container, { method: 'HEAD' });
     const link = head.headers.get('link');
     const acrUrl = accessControlUrl(link, container);
-    const model = detectAclModel(link);
+    const model = detectAclModel(link, acrUrl);
     step(model === 'acp', 'discover access-control model is ACP', `model=${model}`);
     step(!!acrUrl, 'discover ACR URL from Link header', acrUrl || '(none)');
     if (!acrUrl) throw new Error('no ACR URL advertised');
