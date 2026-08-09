@@ -24,9 +24,9 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | Solid-OIDC (+ Primer) | v0.1.0 | Compliant | yes (B2) |
 | HTTPSig Authentication | CG-draft | N-A by design (we use Solid-OIDC/DPoP) | yes (B2) |
 | Solid DID Method (did:solid) | Unofficial | Divergent by design (we use did:key) | yes (B2) |
-| Web Access Control | v1.0.0 | pending | B3 |
-| Access Control Policy | v0.9.0 | pending (known gap, R100 A2) | B3 |
-| Authorization Use Cases | ED | pending | B3 |
+| Web Access Control | v1.0.0 | Compliant (structure), Partial (ACL discovery) | yes (B3) |
+| Access Control Policy | v0.9.0 | Missing (R100 A2, blocks ESS) | yes (B3) |
+| Authorization Use Cases | ED | N-A (informational) | yes (B3) |
 | Solid Notifications Protocol | v0.3.0 | pending | B4 |
 | WebSocket/Webhook Channel 2023 | ED | pending | B4 |
 | StreamingHTTP/EventSource/LDN Channel 2023 | ED | pending | B4 |
@@ -104,6 +104,34 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | Requirement | Status | Evidence / note |
 |---|---|---|
 | `did:solid` identity resolving to a WebID profile | Divergent by design | Proxion identity is `did:key` (self-certifying, no resolution). `did:solid` is an Unofficial Draft; aligning would be a future identity-model decision, not a current compliance gap. Spec issue solid/specification#217 tracks DIDs-alongside-WebIDs. |
+
+## B3. Authorization
+
+### Web Access Control (v1.0.0)
+| Requirement | Status | Evidence / note |
+|---|---|---|
+| `acl:Authorization` with `acl:agent` / `acl:agentClass foaf:Agent` (public) | Compliant | `buildWacAcl` (`pod.js`); public read on the type index |
+| `acl:accessTo` / `acl:default` (container inheritance) | Compliant | container ACLs use `acl:default`; rooms grant members |
+| `acl:mode` Read/Write/Append/Control; owner keeps Control | Compliant | owner Read/Write/Control on every resource we create |
+| Serve ACL as `text/turtle` | Compliant | all ACL writes are turtle |
+| **Discover the ACL URL from `Link: rel=acl` (never derive by string)** | **Partial** | Proxion always appends `.acl` (6 sites), never reads the `Link` header. Works on CSS/NSS (`.acl` convention) but is not spec-conformant discovery and can target the wrong URL on other servers. Follow-up: read `Link: rel=acl`. |
+
+### Access Control Policy (v0.9.0)
+| Requirement | Status | Evidence / note |
+|---|---|---|
+| Author Access Control Resources (Policies + Matchers) to grant access | **Missing** | Proxion writes WAC only. The `@inrupt/solid-client-access-grants` adapter exists but is gated off. This is why participant grants do not work on Inrupt ESS (which uses ACP). R100 A2. |
+| Discover the ACR via the resource's `Link` (acp) header | Missing | tied to the same discovery gap above |
+
+### Authorization Use Cases and Requirements (Editor's Draft)
+| Requirement | Status | Evidence / note |
+|---|---|---|
+| (requirements/use-cases document, not client-normative) | N-A | informational; nothing to implement |
+
+## B3 verdict
+WAC is structurally compliant, with one real conformance gap (ACL discovery by `.acl`
+convention rather than the `Link: rel=acl` header). ACP is the biggest ecosystem gap and is
+the R100 A2 item: supporting Inrupt ESS needs BOTH ACP authoring AND header-based ACR
+discovery, not `.acl` guessing. This sharpens A2's scope.
 
 ## Follow-ups surfaced by B1
 1. **PATCH format** (Protocol): our writes use `application/sparql-update`; add N3 Patch (or Accept-Patch negotiation) for servers that do not accept SPARQL Update.
