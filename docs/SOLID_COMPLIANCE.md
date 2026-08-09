@@ -120,7 +120,7 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 ### Access Control Policy (v0.9.0)
 | Requirement | Status | Evidence / note |
 |---|---|---|
-| Author Access Control Resources (Policies + Matchers) to grant access | **Partial** | R100 A2.2: `buildAcpAcr` authors an ACR (AccessControl + Policy + Matcher, owner control + member read, with `acp:memberAccessControl` for inheritance), and `podSetContainerAcl` routes to it when the server advertises ACP. Structurally unit-tested. **NOT yet verified against a live Inrupt ESS**, so treat as best-effort until tested. Only activates on ACP servers, so no CSS risk. |
+| Author Access Control Resources (Policies + Matchers) to grant access | **Partial** | R100 A2.2: `buildAcpAcr` authors an ACR (AccessControl + Policy + Matcher, owner control + member read, with `acp:memberAccessControl` for inheritance), and `podSetContainerAcl` routes to it when the server advertises ACP. Structurally unit-tested. **Live-ESS verification (A2.3):** run `scripts/verify_ess_acp.mjs` against a pod.inrupt.com pod (client credentials) to confirm ESS accepts the ACR; until that passes this stays Partial. Only activates on ACP servers, so no CSS risk. |
 | Discover the ACR via the resource's `Link` header | Compliant | `detectAclModel` / `accessControlUrl` handle the ACP accessControl relation (A2.1) |
 
 ### Authorization Use Cases and Requirements (Editor's Draft)
