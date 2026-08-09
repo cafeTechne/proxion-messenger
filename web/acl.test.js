@@ -85,8 +85,45 @@ vi.mock('./auth.js', () => ({
 
 import {
     discoverAccessControl, podSetContainerAcl,
-    buildSparqlUpdate, buildN3Patch, patchFormatFor, podRdfPatch,
+    buildSparqlUpdate, buildN3Patch, patchFormatFor, podRdfPatch, podWriteReactionAction,
 } from './pod.js';
+
+describe('podWriteReactionAction (R101 reaction interop)', () => {
+    function patchSession() {
+        const patches = [];
+        _session = {
+            info: { isLoggedIn: true },
+            fetch: vi.fn(async (url, opts) => {
+                if (opts && opts.method === 'PATCH') { patches.push({ url, body: opts.body }); return { ok: true }; }
+                return { headers: { get: () => null } };   // HEAD: no Accept-Patch -> SPARQL
+            }),
+        };
+        return patches;
+    }
+
+    it('inserts a schema:LikeAction on add, into the message day file', async () => {
+        const p = patchSession();
+        const ok = await podWriteReactionAction('r1', 'm1', '2026-08-08T10:00:00Z',
+            '👍', 'https://alice.example/profile/card#me', true);
+        expect(ok).toBe(true);
+        expect(p).toHaveLength(1);
+        expect(p[0].url).toContain('/2026/08/08/');    // date-partitioned day file
+        expect(p[0].body).toContain('INSERT DATA');
+        expect(p[0].body).toContain('http://schema.org/LikeAction');
+    });
+
+    it('deletes the same triples on un-react', async () => {
+        const p = patchSession();
+        await podWriteReactionAction('r1', 'm1', '2026-08-08T10:00:00Z', '👍', null, false);
+        expect(p[0].body).toContain('DELETE DATA');
+    });
+
+    it('is a no-op without the message timestamp', async () => {
+        const p = patchSession();
+        expect(await podWriteReactionAction('r1', 'm1', null, '👍', null, true)).toBe(false);
+        expect(p).toHaveLength(0);
+    });
+});
 
 describe('RDF patch builders (R101.3)', () => {
     const T = ['<a> <b> "c" .'];

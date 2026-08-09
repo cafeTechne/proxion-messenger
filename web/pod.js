@@ -3,7 +3,7 @@ import {
     chatRootUrl, indexUrlAt, channelIriAt, dayFileAt, messageIriAt,
     buildIndexTurtle, buildAppendPatch, buildEditPatch, buildDeletePatch,
     buildSeqPatch, buildChatAcl, roomIdFromChatContainer,
-    parseLongChatJsonLd, mergeLongChatMessages,
+    parseLongChatJsonLd, mergeLongChatMessages, reactionActionTriples,
 } from './longchat.js';
 import {
     buildEmptyTypeIndex, buildRegisterPatch, buildDeregisterPatch,
@@ -1314,6 +1314,31 @@ export async function podWriteReactions(roomId, messageId, reactions) {
         });
     } catch (err) {
         console.warn('[pod] podWriteReactions failed:', err);
+    }
+}
+
+/**
+ * R101: mirror one reaction into the Long Chat day file as a schema:LikeAction
+ * targeting the message, so other Solid apps see reactions (not just our px:
+ * ReactionSet). Add inserts the action, un-react deletes the same triples. Needs
+ * the message's timestamp (threaded from the client) to build its date-partitioned
+ * IRI; a no-op without it. Best-effort, additive.
+ */
+export async function podWriteReactionAction(roomId, messageId, messageTimestamp, emoji, reactorWebId, add) {
+    const root = podStorageRoot();
+    if (!root || !messageTimestamp || !solidSession?.info?.isLoggedIn) return false;
+    const container = chatRootUrl(root, roomId);
+    const msgIri = messageIriAt(container, messageId, messageTimestamp);
+    const dayFile = dayFileAt(container, messageTimestamp);
+    const actionIri = `${dayFile}#react-${encodeURIComponent(messageId)}`
+        + `-${encodeURIComponent(reactorWebId || 'anon')}-${encodeURIComponent(emoji)}`;
+    const triples = reactionActionTriples({ actionIri, msgIri, agentIri: reactorWebId, emoji });
+    try {
+        const r = await podRdfPatch(dayFile, add ? { inserts: triples } : { deletes: triples });
+        return !!(r && r.ok);
+    } catch (err) {
+        console.warn('[pod] podWriteReactionAction failed:', err);
+        return false;
     }
 }
 

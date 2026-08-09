@@ -7,6 +7,7 @@ import {
     chatIndexUrl, chatChannelIri, chatDayUrl, messageIriFor,
     chatRootUrl, roomIdFromChatContainer,
     buildIndexTurtle, buildAppendPatch, parseLongChatJsonLd, mergeLongChatMessages,
+    reactionActionTriples,
 } from './longchat.js';
 
 describe('roomIdFromChatContainer (inverse of chatRootUrl)', () => {
@@ -156,6 +157,24 @@ describe('buildAppendPatch', () => {
         expect(P.hasReply).toBe('http://rdfs.org/sioc/ns#has_reply');
         // absent when not a reply
         expect(buildAppendPatch(base)).not.toContain(P.hasReply);
+    });
+
+    it('reactionActionTriples emits a schema:LikeAction targeting the message (R101)', () => {
+        const t = reactionActionTriples({
+            actionIri: `${base.messageIri}-react`,
+            msgIri: base.messageIri,
+            agentIri: ALICE,
+            emoji: '👍',
+        });
+        const joined = t.join('\n');
+        expect(joined).toContain(`a <${P.likeAction}> .`);
+        expect(joined).toContain(`<${P.target}> <${base.messageIri}> .`);
+        expect(joined).toContain(`<${P.agent}> <${ALICE}> .`);
+        expect(joined).toContain(`<${P.content}> "👍" .`);
+        expect(P.likeAction).toBe('http://schema.org/LikeAction');
+        // agent omitted when unknown
+        expect(reactionActionTriples({ actionIri: 'x', msgIri: 'y', emoji: 'z' }).join('\n'))
+            .not.toContain(P.agent);
     });
 
     it('an injection attempt in the message text yields no extra triples', () => {

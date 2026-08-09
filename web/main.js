@@ -528,6 +528,9 @@ import { createIdentityResolver } from './identity.js';
                 // R60A: ":name:" reaction keys resolve via the room's custom emoji
                 getRoomEmojiMap: () => (activeView && activeView.type !== 'dm' && activeView.type !== 'local_dm')
                     ? getRoomEmoji(activeView.id) : {},
+                // R101: the reacted-to message's timestamp, to build its pod IRI
+                // for the schema:LikeAction interop mirror.
+                getMessageTs: (mid) => messageMap[mid]?.timestamp || null,
             });
         // Standalone modals (forward / schedule / integrations / search results).
         const { openForwardModal, openSchedulePicker, openIntegrationsPanel, renderSearchResults } =

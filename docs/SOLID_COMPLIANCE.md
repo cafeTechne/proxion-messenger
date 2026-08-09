@@ -17,7 +17,7 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | Spec | Version | Overall | Audited |
 |---|---|---|---|
 | Solid Protocol | v0.11.0 | Compliant (core); card patches negotiate N3, chat patches SPARQL-only | yes (B1) |
-| Solid Chat (Long Chat) | v1.0.0 | Compliant (core + replies); reactions Partial | yes (B1) |
+| Solid Chat (Long Chat) | v1.0.0 | Compliant (core + replies + reactions) | yes (B1) |
 | Type Indexes | v1.0.0 | Compliant (public); private index N-A | yes (B1) |
 | Shape Trees | ED | Missing (low priority) | yes (B1) |
 | Solid WebID Profile | v1.0.0 | Compliant (pod users); N-A for did:key-only users | yes (B2) |
@@ -61,7 +61,7 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | Deletes (`schema:dateDeleted`) | Compliant | tombstone emitted; renders in SolidOS |
 | Edits | Compliant | in-place `sioc:content` swap (`buildEditPatch`), so any Long Chat reader shows the latest text; chosen deliberately over `dct:isReplacedBy` (unverified reader support), with `px:` keeping full history. `solidos-render-edits.test.js` |
 | Replies via `sioc:has_reply` | Compliant | R101.1: the pod append emits `<parent> sioc:has_reply <reply>` (parent timestamp threaded from the client so the parent's date-partitioned IRI is known), alongside the richer `px:` context. `longchat.test.js` |
-| Reactions via `schema:Action` subclasses | **Partial** | Proxion stores reactions in `px:`, so other apps do not see them. Follow-up: also emit `schema:LikeAction` etc. |
+| Reactions via `schema:Action` subclasses | Compliant | R101: each reaction is mirrored into the chat day file as a `schema:LikeAction` (`schema:agent` reactor, `schema:target` message IRI, `sioc:content` emoji) via `podWriteReactionAction`, inserted on react and deleted on un-react, alongside the `px:` ReactionSet. `longchat.test.js`, `acl.test.js` |
 
 ### Type Indexes (v1.0.0)
 | Requirement | Status | Evidence / note |
@@ -209,14 +209,14 @@ gaps are a small, honest set, and several are by design.
    (R101.1); reactions still live in `px:` only. Emitting `schema:LikeAction` needs the
    reacted-to message's date-partitioned IRI at react time (same target-IRI plumbing as
    replies), so it is moderate, not cheap.
-3. **Reactions in `schema:Action`** (B1): needs the reacted-to message's date-partitioned
-   IRI at react time (same target-IRI plumbing as replies). Moderate.
-4. **Chat day-file patches via N3 Patch** (B1): the card writes negotiate N3 (R101.3); the
-   append/edit patches on our own room containers still send SPARQL Update. Low priority.
+3. **Chat day-file patches via N3 Patch** (B1): the card writes negotiate N3 (R101.3); the
+   append/edit/reaction patches on our own room containers still send SPARQL Update by
+   default (they negotiate too, via `podRdfPatch`, only for the reaction actions). Low
+   priority.
 
 Done since the audit: header-based ACL discovery at every write site (R101.2), replies in
-`sioc:has_reply` (R101.1), N3-Patch negotiation on the WebID-card writes (R101.3), and the
-StreamingHTTPChannel2023 fallback (R101.4).
+`sioc:has_reply` (R101.1), N3-Patch negotiation on the WebID-card writes (R101.3), the
+StreamingHTTPChannel2023 fallback (R101.4), and reactions as `schema:LikeAction` (R101).
 
 ### Deferred by design / emerging (watch, do not build)
 did:solid alignment, SAI + Shape Trees, Solid-PREP, HTTPSig. did:key-only users having no

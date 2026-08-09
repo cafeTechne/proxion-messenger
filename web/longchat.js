@@ -55,6 +55,11 @@ export const P = Object.freeze({
     // R101.1: standard reply threading, so other Solid apps (SolidOS, etc.) show a
     // reply as a reply. Emitted parent-to-reply alongside our px: reply context.
     hasReply: NS.sioc + 'has_reply',
+    // R101 reactions: a reaction as a schema.org social action targeting the
+    // message, so other Solid apps see reactions (not just our px: ReactionSet).
+    likeAction: NS.schema + 'LikeAction',
+    agent: NS.schema + 'agent',
+    target: NS.schema + 'target',
     // D4: a per-message monotonic order hint (px:, ours only) so a user's devices
     // agree on order despite client clock skew. Not part of the shared vocabulary.
     seq: NS.px + 'seq',
@@ -205,6 +210,23 @@ export function buildAppendPatch({ channelIri, messageIri, content, createdIso, 
         triples.push(`  ${iriRef(replyToIri)} ${iriRef(P.hasReply)} ${iriRef(messageIri)} .`);
     }
     return `INSERT DATA {\n${triples.join('\n')}\n}\n`;
+}
+
+/**
+ * Triples for a reaction as a schema:LikeAction targeting a message (R101). The
+ * action node has a deterministic IRI so the exact same triples can be inserted
+ * on react and deleted on un-react. Returns an array of triple strings for the
+ * generic patch builders. Pure.
+ */
+export function reactionActionTriples({ actionIri, msgIri, agentIri, emoji }) {
+    const a = iriRef(actionIri);
+    const triples = [
+        `${a} a ${iriRef(P.likeAction)} .`,
+        `${a} ${iriRef(P.target)} ${iriRef(msgIri)} .`,
+        `${a} ${iriRef(P.content)} "${escapeTurtleLiteral(emoji)}" .`,
+    ];
+    if (agentIri) triples.push(`${a} ${iriRef(P.agent)} ${iriRef(agentIri)} .`);
+    return triples;
 }
 
 /**
