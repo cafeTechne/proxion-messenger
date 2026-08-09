@@ -16,7 +16,7 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 
 | Spec | Version | Overall | Audited |
 |---|---|---|---|
-| Solid Protocol | v0.11.0 | Compliant (core), Partial (PATCH format, ACP) | yes (B1) |
+| Solid Protocol | v0.11.0 | Compliant (core); card patches negotiate N3, chat patches SPARQL-only | yes (B1) |
 | Solid Chat (Long Chat) | v1.0.0 | Compliant (core + replies); reactions Partial | yes (B1) |
 | Type Indexes | v1.0.0 | Compliant (public); private index N-A | yes (B1) |
 | Shape Trees | ED | Missing (low priority) | yes (B1) |
@@ -46,7 +46,7 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | GET/HEAD for reads, PUT/POST/PATCH/DELETE for writes | Compliant | `pod.js`, `solid_client.py` |
 | Discover storage root (pim:storage / Link rel type Storage) | Compliant | `podStorageRoot`, storage description read for notifications |
 | text/turtle + application/ld+json | Compliant | reads/writes both |
-| PATCH format is N3 Patch (server advertises text/n3 in Accept-Patch) | **Partial** | Proxion sends `application/sparql-update` (works on CSS). A server that only accepts N3 Patch would reject our profile/type-index patches. Follow-up: send N3 Patch, or content-negotiate on Accept-Patch. |
+| PATCH format is N3 Patch (server advertises text/n3 in Accept-Patch) | Compliant (card writes); Partial (chat) | R101.3: `podRdfPatch` negotiates on `Accept-Patch` and sends N3 Patch (the mandated format) when advertised, else SPARQL Update. Applied to the WebID-card writes (profile name, type-index link). The chat day-file append/edit patches remain SPARQL Update; they target our own room containers on CSS, so lower priority. |
 | Container creation | Compliant | PUT creates intermediate containers on CSS |
 | Auth: Solid-OIDC / WebID-TLS | Compliant | browser uses `@inrupt/solid-client-authn` (Solid-OIDC); gateway uses Solid-OIDC client-credentials + DPoP |
 | Access control: WAC or ACP | **Partial** | WAC only; ACP not written (R100 A2, blocks ESS) |
@@ -209,11 +209,12 @@ gaps are a small, honest set, and several are by design.
    (R101.1); reactions still live in `px:` only. Emitting `schema:LikeAction` needs the
    reacted-to message's date-partitioned IRI at react time (same target-IRI plumbing as
    replies), so it is moderate, not cheap.
-3. **PATCH via N3 Patch (or Accept-Patch negotiation)** (B1): for servers that do not accept
-   SPARQL Update. (R101.3)
-4. **StreamingHTTPChannel2023** (B4): minor; add if CSS deprecates WebSocket. (R101.4)
+3. **StreamingHTTPChannel2023** (B4): minor; add if CSS deprecates WebSocket. (R101.4)
+4. **Chat day-file patches via N3 Patch** (B1): the card writes negotiate N3 (R101.3); the
+   append/edit patches on our own room containers still send SPARQL Update. Low priority.
 
-Done since the audit: header-based ACL discovery at every write site (R101.2).
+Done since the audit: header-based ACL discovery at every write site (R101.2), replies in
+`sioc:has_reply` (R101.1), N3-Patch negotiation on the WebID-card writes (R101.3).
 
 ### Deferred by design / emerging (watch, do not build)
 did:solid alignment, SAI + Shape Trees, Solid-PREP, HTTPSig. did:key-only users having no

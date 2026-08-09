@@ -6,7 +6,7 @@ import {
     parseLongChatJsonLd, mergeLongChatMessages,
 } from './longchat.js';
 import {
-    buildEmptyTypeIndex, buildRegisterPatch, buildDeregisterPatch, buildProfileLinkPatch,
+    buildEmptyTypeIndex, buildRegisterPatch, buildDeregisterPatch,
     parsePublicTypeIndex, parseRegisteredContainers,
 } from './typeindex.js';
 import { parseRoomDescriptor } from './roomdesc.js';
@@ -723,12 +723,11 @@ export async function podEnsurePublicTypeIndex() {
         } catch (err) {
             console.warn('[pod] type index public ACL failed:', err);
         }
-        // Link it from the profile so other apps can discover it.
+        // Link it from the profile so other apps can discover it (R101.3: N3 Patch
+        // when the server advertises it, else SPARQL Update).
         try {
-            await solidSession.fetch(webId.split('#')[0], {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/sparql-update' },
-                body: buildProfileLinkPatch({ webId, indexUrl }),
+            await podRdfPatch(webId.split('#')[0], {
+                inserts: [`<${webId}> <http://www.w3.org/ns/solid/terms#publicTypeIndex> <${indexUrl}> .`],
             });
         } catch (err) {
             console.warn('[pod] type index created but profile link failed:', err);
@@ -753,18 +752,66 @@ function _sparqlLiteral(s) {
         .replace(/\n/g, '\\n').replace(/\r/g, '\\r') + '"';
 }
 
-/** Build a SPARQL-update that sets the profile name, deleting a prior one if
- *  given (so re-runs update rather than accumulate). Pure; unit-tested. */
-export function buildProfileNamePatch({ webId, name, prevName }) {
+// ── Generic RDF PATCH (R101.3) ───────────────────────────────────────────────
+// N3 Patch is the Solid-Protocol-mandated PATCH format (SPARQL Update is only
+// recommended), so negotiate on the resource's Accept-Patch and prefer N3 Patch
+// where advertised. `inserts`/`deletes`/`where` are arrays of triple strings.
+export function buildSparqlUpdate({ inserts = [], deletes = [], where = [] }) {
+    if (where.length) {
+        const parts = [];
+        if (deletes.length) parts.push(`DELETE {\n  ${deletes.join('\n  ')}\n}`);
+        if (inserts.length) parts.push(`INSERT {\n  ${inserts.join('\n  ')}\n}`);
+        parts.push(`WHERE {\n  ${where.join('\n  ')}\n}`);
+        return parts.join('\n') + '\n';
+    }
+    const ops = [];
+    if (deletes.length) ops.push(`DELETE DATA {\n  ${deletes.join('\n  ')}\n}`);
+    if (inserts.length) ops.push(`INSERT DATA {\n  ${inserts.join('\n  ')}\n}`);
+    return ops.join(' ;\n') + '\n';
+}
+
+export function buildN3Patch({ inserts = [], deletes = [], where = [] }) {
+    const clauses = ['[] a solid:InsertDeletePatch'];
+    if (where.length)   clauses.push(`  solid:where { ${where.join(' ')} }`);
+    if (deletes.length) clauses.push(`  solid:deletes { ${deletes.join(' ')} }`);
+    if (inserts.length) clauses.push(`  solid:inserts { ${inserts.join(' ')} }`);
+    return `@prefix solid: <http://www.w3.org/ns/solid/terms#>.\n` + clauses.join(';\n') + '.\n';
+}
+
+/** Prefer N3 Patch when the server advertises it in Accept-Patch, else SPARQL. Pure. */
+export function patchFormatFor(acceptPatch) {
+    return (acceptPatch && /text\/n3/i.test(acceptPatch)) ? 'n3' : 'sparql';
+}
+
+/** PATCH an RDF resource, negotiating N3 Patch vs SPARQL Update from Accept-Patch. */
+export async function podRdfPatch(resourceUrl, ops) {
+    let acceptPatch = null;
+    try {
+        const res = await solidSession.fetch(resourceUrl, { method: 'HEAD' });
+        acceptPatch = res?.headers?.get?.('accept-patch') || null;
+    } catch (_) { /* default to SPARQL below */ }
+    const fmt = patchFormatFor(acceptPatch);
+    const body = fmt === 'n3' ? buildN3Patch(ops) : buildSparqlUpdate(ops);
+    const ct = fmt === 'n3' ? 'text/n3' : 'application/sparql-update';
+    return solidSession.fetch(resourceUrl, {
+        method: 'PATCH', headers: { 'Content-Type': ct }, body,
+    });
+}
+
+/** The foaf:name + vcard:fn triples to set (and, if replacing, delete). */
+function _profileNameOps(webId, name, prevName) {
     const w = `<${webId}>`;
     const lit = _sparqlLiteral(name);
-    let out = '';
-    if (prevName) {
-        const p = _sparqlLiteral(prevName);
-        out += `DELETE DATA {\n  ${w} <${_FOAF_NAME}> ${p} .\n  ${w} <${_VCARD_FN}> ${p} .\n} ;\n`;
-    }
-    out += `INSERT DATA {\n  ${w} <${_FOAF_NAME}> ${lit} .\n  ${w} <${_VCARD_FN}> ${lit} .\n}\n`;
-    return out;
+    const inserts = [`${w} <${_FOAF_NAME}> ${lit} .`, `${w} <${_VCARD_FN}> ${lit} .`];
+    const deletes = prevName
+        ? [`${w} <${_FOAF_NAME}> ${_sparqlLiteral(prevName)} .`, `${w} <${_VCARD_FN}> ${_sparqlLiteral(prevName)} .`]
+        : [];
+    return { inserts, deletes };
+}
+
+/** SPARQL-update form of the profile-name patch (kept for callers/tests). Pure. */
+export function buildProfileNamePatch({ webId, name, prevName }) {
+    return buildSparqlUpdate(_profileNameOps(webId, name, prevName));
 }
 
 /** Read the current foaf:name for webId from a JSON-LD card, or null. Pure. */
@@ -797,11 +844,7 @@ export async function podEnsureProfileName(displayName) {
     } catch (_) { /* card unreadable: fall through to a plain insert */ }
     if (prevName === displayName) return true;
     try {
-        const r = await solidSession.fetch(webId.split('#')[0], {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/sparql-update' },
-            body: buildProfileNamePatch({ webId, name: displayName, prevName }),
-        });
+        const r = await podRdfPatch(webId.split('#')[0], _profileNameOps(webId, displayName, prevName));
         return !!(r && r.ok);
     } catch (err) {
         console.warn('[pod] profile name patch failed:', err);

@@ -83,7 +83,63 @@ vi.mock('./auth.js', () => ({
     podStorageRoot: () => 'https://alice.example/',
 }));
 
-import { discoverAccessControl, podSetContainerAcl } from './pod.js';
+import {
+    discoverAccessControl, podSetContainerAcl,
+    buildSparqlUpdate, buildN3Patch, patchFormatFor, podRdfPatch,
+} from './pod.js';
+
+describe('RDF patch builders (R101.3)', () => {
+    const T = ['<a> <b> "c" .'];
+    it('buildSparqlUpdate: INSERT/DELETE DATA for concrete triples', () => {
+        expect(buildSparqlUpdate({ inserts: T })).toContain('INSERT DATA {');
+        const both = buildSparqlUpdate({ inserts: T, deletes: ['<a> <b> "old" .'] });
+        expect(both).toMatch(/DELETE DATA[\s\S]*"old"[\s\S]*INSERT DATA[\s\S]*"c"/);
+    });
+    it('buildSparqlUpdate: DELETE/INSERT ... WHERE when where is given', () => {
+        const b = buildSparqlUpdate({ inserts: T, deletes: ['<a> <b> ?o .'], where: ['<a> <b> ?o .'] });
+        expect(b).toContain('WHERE {');
+        expect(b).not.toContain('DELETE DATA');
+    });
+    it('buildN3Patch: solid:InsertDeletePatch with the right clauses', () => {
+        const b = buildN3Patch({ inserts: T, deletes: ['<a> <b> "old" .'], where: ['<a> <b> ?o .'] });
+        expect(b).toContain('a solid:InsertDeletePatch');
+        expect(b).toContain('solid:inserts {');
+        expect(b).toContain('solid:deletes {');
+        expect(b).toContain('solid:where {');
+        expect(b).toContain('@prefix solid:');
+    });
+    it('patchFormatFor prefers n3 only when advertised', () => {
+        expect(patchFormatFor('text/n3, application/sparql-update')).toBe('n3');
+        expect(patchFormatFor('application/sparql-update')).toBe('sparql');
+        expect(patchFormatFor(null)).toBe('sparql');
+    });
+});
+
+describe('podRdfPatch negotiation', () => {
+    function patchSession(acceptPatch) {
+        const calls = [];
+        _session = {
+            info: { isLoggedIn: true },
+            fetch: vi.fn(async (url, opts) => {
+                if (opts && opts.method === 'PATCH') { calls.push(opts); return { ok: true }; }
+                return { headers: { get: (k) => (k.toLowerCase() === 'accept-patch' ? acceptPatch : null) } };
+            }),
+        };
+        return calls;
+    }
+    it('sends N3 Patch when the server advertises text/n3', async () => {
+        const calls = patchSession('text/n3');
+        await podRdfPatch('https://x/card', { inserts: ['<a> <b> "c" .'] });
+        expect(calls[0].headers['Content-Type']).toBe('text/n3');
+        expect(calls[0].body).toContain('solid:InsertDeletePatch');
+    });
+    it('falls back to SPARQL Update otherwise', async () => {
+        const calls = patchSession('application/sparql-update');
+        await podRdfPatch('https://x/card', { inserts: ['<a> <b> "c" .'] });
+        expect(calls[0].headers['Content-Type']).toBe('application/sparql-update');
+        expect(calls[0].body).toContain('INSERT DATA');
+    });
+});
 
 describe('discoverAccessControl', () => {
     beforeEach(() => { _session = null; });
