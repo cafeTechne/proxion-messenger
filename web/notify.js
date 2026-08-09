@@ -18,6 +18,7 @@ import { solidSession } from './auth.js';
 const NS = 'http://www.w3.org/ns/solid/notifications#';
 const WS_CHANNEL = NS + 'WebSocketChannel2023';
 const WEBHOOK_CHANNEL = NS + 'WebhookChannel2023';
+const STREAMING_CHANNEL = NS + 'StreamingHTTPChannel2023';
 const CHANNEL_TYPE = NS + 'channelType';
 const STORAGE_DESCRIPTION = 'http://www.w3.org/ns/solid/terms#storageDescription';
 
@@ -99,6 +100,37 @@ export async function subscribeWebSocket(resourceUrl) {
     }
 }
 
+/** The StreamingHTTPChannel2023 subscription-service URL for a resource, or null. */
+export function discoverStreamingService(resourceUrl) {
+    return _discoverChannelService(resourceUrl, STREAMING_CHANNEL);
+}
+
+/**
+ * Subscribe to StreamingHTTPChannel2023 notifications for a resource; returns the
+ * `receiveFrom` stream URL, or null. A newer real-time channel CSS is adopting; a
+ * fallback for servers that offer it but not WebSocket. (R101.4)
+ */
+export async function subscribeStreamingHttp(resourceUrl) {
+    const service = await discoverStreamingService(resourceUrl);
+    if (!service) return null;
+    try {
+        const res = await solidSession.fetch(service, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/ld+json' },
+            body: JSON.stringify({
+                '@context': ['https://www.w3.org/ns/solid/notification/v1'],
+                type: STREAMING_CHANNEL,
+                topic: resourceUrl,
+            }),
+        });
+        if (!res.ok) return null;
+        const body = await res.json();
+        return body.receiveFrom || null;
+    } catch {
+        return null;
+    }
+}
+
 /**
  * Subscribe `resourceUrl` to the WebhookChannel2023 so the server POSTs a
  * notification to `sendTo` when the resource changes (R77 — closed-app inbox push).
@@ -124,9 +156,8 @@ export async function subscribeWebhook(resourceUrl, sendTo) {
     }
 }
 
-// Default connector: subscribe, then open the native WebSocket. Returns a close()
-// function, or null when notifications are unavailable (caller keeps polling).
-async function _solidConnect(url, { onOpen, onMessage, onClose, onError }) {
+// Open the native WebSocket channel, or null if unavailable.
+async function _connectWebSocket(url, { onOpen, onMessage, onClose, onError }) {
     const receiveFrom = await subscribeWebSocket(url);
     if (!receiveFrom || typeof WebSocket === 'undefined') return null;
     const sock = new WebSocket(receiveFrom);
@@ -135,6 +166,38 @@ async function _solidConnect(url, { onOpen, onMessage, onClose, onError }) {
     sock.onclose = () => onClose();
     sock.onerror = () => onError();
     return () => { try { sock.close(); } catch { /* ignore */ } };
+}
+
+// R101.4: StreamingHTTPChannel2023 fallback. Fetch the receiveFrom stream and
+// fire onMessage per chunk (each chunk is one notification; like the WS handler,
+// we only signal "changed" and let the caller re-read). Closable via abort.
+async function _connectStreamingHttp(url, { onOpen, onMessage, onClose, onError }) {
+    const receiveFrom = await subscribeStreamingHttp(url);
+    if (!receiveFrom || typeof AbortController === 'undefined') return null;
+    const ac = new AbortController();
+    (async () => {
+        try {
+            const res = await solidSession.fetch(receiveFrom, { signal: ac.signal });
+            if (!res || !res.ok || !res.body || !res.body.getReader) { onError(); return; }
+            onOpen();
+            const reader = res.body.getReader();
+            for (;;) {
+                const { done } = await reader.read();
+                if (done) break;
+                onMessage();
+            }
+            onClose();
+        } catch {
+            if (!ac.signal.aborted) onError();
+        }
+    })();
+    return () => { try { ac.abort(); } catch { /* ignore */ } };
+}
+
+// Default connector: prefer WebSocket, fall back to StreamingHTTP, else null (the
+// caller keeps polling). Returns a close() function or null.
+async function _solidConnect(url, handlers) {
+    return (await _connectWebSocket(url, handlers)) || (await _connectStreamingHttp(url, handlers));
 }
 
 /**

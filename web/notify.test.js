@@ -8,7 +8,8 @@ vi.mock('./auth.js', () => ({
     solidSession: { fetch: h.fetch, info: { isLoggedIn: true } },
 }));
 
-import { watchResource, discoverWebSocketService, subscribeWebSocket, subscribeWebhook } from './notify.js';
+import { watchResource, discoverWebSocketService, subscribeWebSocket, subscribeWebhook,
+         discoverStreamingService, subscribeStreamingHttp } from './notify.js';
 
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 
@@ -132,6 +133,37 @@ describe('direct v0.3 discovery + subscribe', () => {
             return { ok: true, json: async () => DESC };
         });
         expect(await subscribeWebSocket('https://p/d/chat.ttl')).toBe(null);
+    });
+});
+
+describe('StreamingHTTPChannel2023 (R101.4)', () => {
+    const LINK = '<https://p/.well-known/solid>; rel="http://www.w3.org/ns/solid/terms#storageDescription"';
+    const STREAM = 'http://www.w3.org/ns/solid/notifications#StreamingHTTPChannel2023';
+    const CT = 'http://www.w3.org/ns/solid/notifications#channelType';
+    const DESC = { '@graph': [{ '@id': 'https://p/.notifications/StreamingHTTPChannel2023/', [CT]: [{ '@id': STREAM }] }] };
+
+    beforeEach(() => h.fetch.mockReset());
+
+    it('discovers the streaming service and subscribes with the right channel type', async () => {
+        h.fetch.mockImplementation(async (url, opts) => {
+            if ((opts?.method) === 'HEAD') return { headers: { get: () => LINK } };
+            if ((opts?.method) === 'POST') {
+                expect(String(opts.body)).toContain(STREAM);
+                return { ok: true, json: async () => ({ receiveFrom: 'https://p/rx/stream' }) };
+            }
+            return { ok: true, json: async () => DESC };
+        });
+        expect(await discoverStreamingService('https://p/d/chat.ttl'))
+            .toBe('https://p/.notifications/StreamingHTTPChannel2023/');
+        expect(await subscribeStreamingHttp('https://p/d/chat.ttl')).toBe('https://p/rx/stream');
+    });
+
+    it('returns null when the server offers no streaming channel', async () => {
+        h.fetch.mockImplementation(async (url, opts) => {
+            if ((opts?.method) === 'HEAD') return { headers: { get: () => LINK } };
+            return { ok: true, json: async () => ({ '@graph': [] }) };
+        });
+        expect(await subscribeStreamingHttp('https://p/d/chat.ttl')).toBe(null);
     });
 });
 

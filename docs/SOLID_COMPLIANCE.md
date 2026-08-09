@@ -29,7 +29,7 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | Authorization Use Cases | ED | N-A (informational) | yes (B3) |
 | Solid Notifications Protocol | v0.3.0 | Compliant (+ polling fallback) | yes (B4) |
 | WebSocketChannel2023 / WebhookChannel2023 / LDNChannel2023 | ED / v1.0.0 | Compliant | yes (B4) |
-| StreamingHTTPChannel2023 | ED | Missing (minor) | yes (B4) |
+| StreamingHTTPChannel2023 | ED | Compliant (WebSocket fallback) | yes (B4) |
 | EventSourceChannel2023 | ED | N-A (WebSocket covers it) | yes (B4) |
 | Solid-PREP | ED | Missing (emerging) | yes (B4) |
 | Solid Application Interoperability (+ primers) | v0.1.0 | Missing (emerging; depends on Shape Trees) | yes (B5) |
@@ -150,7 +150,7 @@ discovery, not `.acl` guessing. This sharpens A2's scope.
 | WebSocketChannel2023 | Compliant | live-update subscription for new posts |
 | WebhookChannel2023 | Compliant | closed-app path: Webhook to gateway to Web Push (`NOTIFICATIONS.md`) |
 | LDNChannel2023 (LDN inbox) | Compliant | inbox invitations produced/consumed (`ldn.js`, `podcanonical-ldn-live`) |
-| StreamingHTTPChannel2023 | Missing | newer channel CSS is adopting; minor follow-up if CSS deprecates WebSocket |
+| StreamingHTTPChannel2023 | Compliant | R101.4: `subscribeStreamingHttp` + a streaming connector used as a fallback after WebSocket (`notify.js`); keeps real-time working if a server offers streaming but not WebSocket |
 | EventSourceChannel2023 | N-A | WebSocket covers the same need |
 
 ### Solid-PREP (Editor's Draft)
@@ -209,12 +209,14 @@ gaps are a small, honest set, and several are by design.
    (R101.1); reactions still live in `px:` only. Emitting `schema:LikeAction` needs the
    reacted-to message's date-partitioned IRI at react time (same target-IRI plumbing as
    replies), so it is moderate, not cheap.
-3. **StreamingHTTPChannel2023** (B4): minor; add if CSS deprecates WebSocket. (R101.4)
+3. **Reactions in `schema:Action`** (B1): needs the reacted-to message's date-partitioned
+   IRI at react time (same target-IRI plumbing as replies). Moderate.
 4. **Chat day-file patches via N3 Patch** (B1): the card writes negotiate N3 (R101.3); the
    append/edit patches on our own room containers still send SPARQL Update. Low priority.
 
 Done since the audit: header-based ACL discovery at every write site (R101.2), replies in
-`sioc:has_reply` (R101.1), N3-Patch negotiation on the WebID-card writes (R101.3).
+`sioc:has_reply` (R101.1), N3-Patch negotiation on the WebID-card writes (R101.3), and the
+StreamingHTTPChannel2023 fallback (R101.4).
 
 ### Deferred by design / emerging (watch, do not build)
 did:solid alignment, SAI + Shape Trees, Solid-PREP, HTTPSig. did:key-only users having no
