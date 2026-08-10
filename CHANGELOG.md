@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.5
+
+Plays well with the rest of the Solid world.
+
+- **Your identity shows a name in other Solid apps.** When your pod is connected, Proxion
+  writes your display name to your WebID profile, so apps like SolidOS show a person, not an
+  opaque id.
+- **Rooms are more interoperable.** Replies and reactions in shared rooms are now written in
+  the standard Solid terms other apps understand, so a room opened in another Solid app shows
+  its threading and reactions, not just plain messages.
+- **Works with more servers.** Proxion now speaks Access Control Policy, so it can grant
+  access on ACP-based Solid servers, not only Web Access Control ones. Access-control
+  resources are discovered from the server rather than guessed, and edits are sent in the
+  Solid-standard patch format.
+- **More resilient real-time.** Live updates fall back to an HTTP streaming channel where a
+  server offers it, in addition to WebSockets.
+- The project now ships a cited, per-requirement Solid specification compliance report
+  (docs/SOLID_COMPLIANCE.md), and accessibility is checked automatically, including the call
+  screens.
+
 ## 0.2.4
 
 Connect your phone, with the gateway hardened for it.
