@@ -8,6 +8,24 @@ release, focused on the surfaces automation reaches least: calls and cross-app i
 Run with NVDA on Windows (Firefox or Chrome) and, if available, VoiceOver on macOS
 (Safari). Record the date, the tool and version, and any issue found.
 
+## Programmatic verification (2026-08)
+
+Beyond axe, an accessibility-tree audit (Chrome's a11y snapshot, what a screen reader
+consumes) was run on the reachable surfaces. Results, so the manual pass can skip them:
+
+- **Main shell**, **Settings dialog**, and the **New Solid conversation dialog** expose
+  zero unnamed interactive controls and correct headings (Proxion / ROOMS / DMS / SOLID
+  CHATS / Welcome / Settings / New Solid conversation). So checklist item 7's fields are
+  confirmed named at the tree level; the manual pass only needs to confirm they read well in
+  order.
+- axe (WCAG 2.2 AA) is clean on welcome, room-with-messages, settings, members-panel,
+  emoji-picker, shortcut-modal, and onboarding.
+
+What the tree audit could NOT reach headless: the **call surfaces** (they render only in a
+live call) and, by nature, whether the app is *pleasant to listen to* (reading order, and
+whether the `aria-live` regions actually announce audibly on change). Those are the focus of
+the manual NVDA run below.
+
 ## What is already wired for screen readers
 
 - Call state, the on-air capture indicator, the connection-quality indicator, and the
