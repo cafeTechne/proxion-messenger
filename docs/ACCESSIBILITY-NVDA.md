@@ -21,10 +21,17 @@ consumes) was run on the reachable surfaces. Results, so the manual pass can ski
 - axe (WCAG 2.2 AA) is clean on welcome, room-with-messages, settings, members-panel,
   emoji-picker, shortcut-modal, and onboarding.
 
-What the tree audit could NOT reach headless: the **call surfaces** (they render only in a
-live call) and, by nature, whether the app is *pleasant to listen to* (reading order, and
-whether the `aria-live` regions actually announce audibly on change). Those are the focus of
-the manual NVDA run below.
+The **call surfaces are now checked automatically too**: `smoke:a11y` force-shows the
+connected-call widget and the pre-join preview and asserts the screen-reader contract
+(`call-surfaces` + `call-contract`): every call control (mute, camera, screen share, quality,
+fullscreen, end) has an accessible name; the announced-on-change regions (`vw-conn`,
+`vw-verified`, `vw-capture-indicator`) carry `role="status"` + `aria-live`; and the preview is
+a `role="dialog"` with labelled camera/mic pickers and a named Join. Because NVDA's speech is
+fully determined by that contract, this covers checklist items 1 to 5.
+
+What remains genuinely manual is only the **subjective** part: whether the phrasing sounds
+natural and the reading order feels right when actually listened to. That is polish, not a
+correctness gate, so a live NVDA run is now optional rather than release-blocking.
 
 ## What is already wired for screen readers
 

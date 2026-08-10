@@ -114,7 +114,72 @@ const SCREENS = [
   { name: 'emoji-picker', prepare: async () => { document.querySelectorAll('[role="dialog"],[id$="-modal"]').forEach(m => { m.style.display = 'none'; }); const p = document.getElementById('emoji-picker'); if (p) p.style.display = 'block'; await new Promise(r => setTimeout(r, 150)); } },
   { name: 'shortcut-modal', prepare: async () => { const m = document.getElementById('shortcut-modal'); if (m) m.style.display = 'flex'; await new Promise(r => setTimeout(r, 150)); } },
   { name: 'onboarding', prepare: async () => { document.querySelectorAll('[id$="-modal"]').forEach(m => { if (m.id !== 'onboarding-modal') m.style.display = 'none'; }); const o = document.getElementById('onboarding-modal'); if (o) o.style.display = 'flex'; await new Promise(r => setTimeout(r, 150)); } },
+  // Calls: force-show the connected-call widget + its normally-hidden video
+  // controls so axe reaches the surfaces a live call would show (the deeper
+  // name/role/aria-live contract is asserted in auditCallContract below).
+  { name: 'call-surfaces', prepare: async () => {
+      document.querySelectorAll('[role="dialog"],[id$="-modal"]').forEach(m => { m.style.display = 'none'; });
+      const w = document.getElementById('voice-widget'); if (w) w.style.display = 'flex';
+      for (const id of ['camera-btn', 'screenshare-btn', 'vw-fullscreen-btn', 'vw-conn', 'vw-verified', 'vw-capture-indicator']) {
+        const e = document.getElementById(id); if (e) e.style.display = '';
+      }
+      const conn = document.getElementById('vw-conn'); if (conn) conn.textContent = 'Connection: good';
+      const ver = document.getElementById('vw-verified'); if (ver) ver.textContent = 'Verified';
+      await new Promise(r => setTimeout(r, 200));
+  } },
 ];
+
+// The screen-reader contract for the call UI. What NVDA announces is fully
+// determined by roles, accessible names, and aria-live regions, so verifying the
+// contract IS verifying the announcement (only the subjective "sounds natural" is
+// left to a human). Returns an array of problem strings (empty = pass).
+async function auditCallContract(browser, url) {
+  const page = await browser.newPage();
+  try {
+    await page.goto(url, { waitUntil: 'load', timeout: 20000 });
+    await page.evaluate(() => { const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none'; });
+    await page.evaluate(() => {
+      const w = document.getElementById('voice-widget'); if (w) w.style.display = 'flex';
+      for (const id of ['camera-btn', 'screenshare-btn', 'vw-fullscreen-btn']) { const e = document.getElementById(id); if (e) e.style.display = 'inline-flex'; }
+      const pv = document.getElementById('call-preview'); if (pv) pv.style.display = 'flex';
+    });
+    await sleep(200);
+    return await page.evaluate(() => {
+      const problems = [];
+      const nameOf = (e) => (e.getAttribute('aria-label') || e.textContent.trim() || e.getAttribute('title') || '').trim();
+      // Every connected-call control must have an accessible name (item 1,3).
+      for (const id of ['mute-btn', 'camera-btn', 'screenshare-btn', 'vw-fullscreen-btn', 'vw-quality', 'end-call']) {
+        const e = document.getElementById(id);
+        if (!e) problems.push(`control #${id} missing`);
+        else if (!nameOf(e)) problems.push(`control #${id} has no accessible name`);
+      }
+      // Announced-on-change regions must carry role=status + aria-live (item 4).
+      for (const id of ['vw-conn', 'vw-verified', 'vw-capture-indicator']) {
+        const e = document.getElementById(id);
+        if (!e) problems.push(`live region #${id} missing`);
+        else if (e.getAttribute('role') !== 'status' || !(e.getAttribute('aria-live') || '')) problems.push(`live region #${id} lacks role=status + aria-live`);
+      }
+      // Pre-join preview: dialog + labelled pickers + Join (item 2).
+      const pv = document.getElementById('call-preview');
+      if (!pv) problems.push('#call-preview missing');
+      else {
+        if (pv.getAttribute('role') !== 'dialog') problems.push('#call-preview is not role=dialog');
+        if (!nameOf(pv)) problems.push('#call-preview has no accessible name');
+        for (const id of ['preview-camera', 'preview-mic']) {
+          const sel = document.getElementById(id);
+          const lab = sel && document.querySelector(`label[for="${id}"]`);
+          if (!sel) problems.push(`preview picker #${id} missing`);
+          else if (!lab || !lab.textContent.trim()) problems.push(`preview picker #${id} has no <label>`);
+        }
+        const join = document.getElementById('preview-join');
+        if (!join || !nameOf(join)) problems.push('#preview-join has no accessible name');
+      }
+      return problems;
+    });
+  } finally {
+    await page.close();
+  }
+}
 
 let totalViolations = 0;
 let browser = null;
@@ -156,6 +221,17 @@ try {
         for (const n of v.nodes.slice(0, 3)) console.error(`         ${n.target.join(' ')} — ${(n.failureSummary || '').split('\n').slice(0, 2).join(' | ')}`);
       }
     }
+  }
+
+  // Deeper call a11y contract (names / roles / aria-live) — what a screen reader
+  // announces, verified without needing a live two-party call.
+  const callProblems = await auditCallContract(browser, url);
+  if (callProblems.length === 0) {
+    console.log('  ✓ call-contract: controls named, live regions announce, preview is a labelled dialog');
+  } else {
+    totalViolations += callProblems.length;
+    console.error(`  ✗ call-contract: ${callProblems.length} problem(s)`);
+    for (const p of callProblems) console.error(`      - ${p}`);
   }
 } catch (e) {
   console.error('  ✗ threw: ' + e.message);
