@@ -8,6 +8,8 @@ Chat, voice, and video with real end-to-end encryption, where your conversations
 storage you control instead of a company's servers. Built on the open
 [Solid](https://solidproject.org) standard. No phone number, no signup, no company in the middle.
 
+**Read this in your language:** English · [Español](README.es.md) · [Deutsch](README.de.md) · [Français](README.fr.md) · [العربية](README.ar.md)
+
 [![CI](https://github.com/cafeTechne/proxion-messenger/actions/workflows/ci.yml/badge.svg)](https://github.com/cafeTechne/proxion-messenger/actions/workflows/ci.yml)
 ![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Solid Protocol](https://img.shields.io/badge/built%20on-Solid%20Protocol-7c4dff)
