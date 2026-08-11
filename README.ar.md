@@ -8,7 +8,7 @@
 بدلاً من خوادم شركة ما. مبني على معيار [Solid](https://solidproject.org) المفتوح. بلا رقم هاتف،
 وبلا تسجيل، وبلا أي شركة في المنتصف.
 
-**اقرأ هذا بلغتك:** [English](README.md) · [Español](README.es.md) · [Deutsch](README.de.md) · [Français](README.fr.md) · العربية
+**اقرأ هذا بلغتك:** [English](README.md) · [日本語](README.ja.md) · [中文（简体）](README.zh-Hans.md) · [中文（繁體）](README.zh-Hant.md) · [한국어](README.ko.md) · [Deutsch](README.de.md) · [Français](README.fr.md) · [Español](README.es.md) · [Português](README.pt.md) · [Русский](README.ru.md) · [Italiano](README.it.md) · [Polski](README.pl.md) · [Türkçe](README.tr.md) · [Tiếng Việt](README.vi.md) · [Bahasa Indonesia](README.id.md) · العربية
 
 [![CI](https://github.com/cafeTechne/proxion-messenger/actions/workflows/ci.yml/badge.svg)](https://github.com/cafeTechne/proxion-messenger/actions/workflows/ci.yml)
 ![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)

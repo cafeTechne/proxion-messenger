@@ -9,7 +9,7 @@ un almacenamiento que tú controlas, no en los servidores de una empresa. Constr
 estándar abierto [Solid](https://solidproject.org). Sin número de teléfono, sin registro, sin
 ninguna empresa de por medio.
 
-**Léelo en tu idioma:** [English](README.md) · Español · [Deutsch](README.de.md) · [Français](README.fr.md) · [العربية](README.ar.md)
+**Léelo en tu idioma:** [English](README.md) · [日本語](README.ja.md) · [中文（简体）](README.zh-Hans.md) · [中文（繁體）](README.zh-Hant.md) · [한국어](README.ko.md) · [Deutsch](README.de.md) · [Français](README.fr.md) · Español · [Português](README.pt.md) · [Русский](README.ru.md) · [Italiano](README.it.md) · [Polski](README.pl.md) · [Türkçe](README.tr.md) · [Tiếng Việt](README.vi.md) · [Bahasa Indonesia](README.id.md) · [العربية](README.ar.md)
 
 [![CI](https://github.com/cafeTechne/proxion-messenger/actions/workflows/ci.yml/badge.svg)](https://github.com/cafeTechne/proxion-messenger/actions/workflows/ci.yml)
 ![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)

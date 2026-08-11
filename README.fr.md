@@ -9,7 +9,7 @@ un stockage que vous contrôlez plutôt que sur les serveurs d'une entreprise. C
 standard ouvert [Solid](https://solidproject.org). Pas de numéro de téléphone, pas
 d'inscription, aucune entreprise au milieu.
 
-**Lisez ceci dans votre langue :** [English](README.md) · [Español](README.es.md) · [Deutsch](README.de.md) · Français · [العربية](README.ar.md)
+**Lisez ceci dans votre langue :** [English](README.md) · [日本語](README.ja.md) · [中文（简体）](README.zh-Hans.md) · [中文（繁體）](README.zh-Hant.md) · [한국어](README.ko.md) · [Deutsch](README.de.md) · Français · [Español](README.es.md) · [Português](README.pt.md) · [Русский](README.ru.md) · [Italiano](README.it.md) · [Polski](README.pl.md) · [Türkçe](README.tr.md) · [Tiếng Việt](README.vi.md) · [Bahasa Indonesia](README.id.md) · [العربية](README.ar.md)
 
 [![CI](https://github.com/cafeTechne/proxion-messenger/actions/workflows/ci.yml/badge.svg)](https://github.com/cafeTechne/proxion-messenger/actions/workflows/ci.yml)
 ![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)
