@@ -34,10 +34,16 @@
   a { color: var(--accent-soft); }
   a:focus-visible, button:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 3px; border-radius: 4px; }
   img { max-width: 100%; height: auto; display: block; }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
-  section { padding: 72px 0; }
-  h2 { font-size: clamp(1.6rem, 3.5vw, 2.2rem); letter-spacing: -0.02em; line-height: 1.2; margin-bottom: 12px; }
-  .lead { color: var(--muted); font-size: 1.08rem; max-width: 640px; }
+  /* horizontal padding only: vertical padding is owned by `section` below.
+     (Using the `padding` shorthand here would zero out the section padding,
+     since a class selector outranks the `section` element selector.) */
+  .wrap { max-width: 1080px; margin: 0 auto; padding-left: 24px; padding-right: 24px; }
+  section { padding: 84px 0; }
+  h2 { font-size: clamp(1.75rem, 3.7vw, 2.45rem); letter-spacing: -0.025em; line-height: 1.15; margin-bottom: 14px; }
+  .lead { color: var(--muted); font-size: 1.1rem; max-width: 660px; }
+  /* section kicker: small-caps label above an h2, anchors the eye and unifies hierarchy */
+  .kicker { display: inline-block; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.09em;
+            text-transform: uppercase; color: var(--accent-soft); margin-bottom: 14px; }
 
   /* ── nav ── */
   nav { display: flex; align-items: center; gap: 24px; padding: 20px 0; }
@@ -79,7 +85,7 @@
   .after-shot { padding-top: 150px; }
 
   /* ── pillars ── */
-  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 36px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 46px; }
   @media (max-width: 820px) { .grid3 { grid-template-columns: 1fr; } }
   .card { background: var(--card); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 26px; }
   .card h3 { font-size: 1.12rem; margin-bottom: 8px; }
@@ -87,12 +93,13 @@
   .glyph { font-size: 1.5rem; margin-bottom: 14px; display: block; }
 
   /* ── solid section ── */
-  .solid-band { background: linear-gradient(180deg, var(--bg-soft), var(--bg));
+  .solid-band { background: var(--bg-soft);
                 border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
   .solid-flex { display: flex; gap: 48px; align-items: flex-start; margin-top: 10px; }
   @media (max-width: 860px) { .solid-flex { flex-direction: column; } }
   .solid-flex > div { flex: 1; }
-  .solid-badge { color: var(--solid-soft); font-weight: 600; font-size: 0.9rem; letter-spacing: 0.06em; text-transform: uppercase; }
+  .solid-badge { color: var(--solid-soft); font-weight: 700; font-size: 0.78rem; letter-spacing: 0.09em;
+                 text-transform: uppercase; display: inline-block; margin-bottom: 14px; }
   .pods { list-style: none; padding: 0; margin-top: 18px; display: grid; gap: 12px; }
   .pods li { background: var(--card); border: 1px solid var(--line-soft); border-radius: 10px; padding: 14px 18px; }
   .pods b { display: block; }
@@ -101,16 +108,23 @@
   .solid-points h3 { font-size: 1.05rem; }
   .solid-points p { color: var(--muted); font-size: 0.95rem; }
 
+  /* ── interop proof shot ── */
+  .interop-shot { margin: 34px 0 4px; }
+  .interop-shot .frame { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
+                         box-shadow: 0 18px 50px rgba(0,0,0,0.45); background: #0f1729; }
+  .interop-shot figcaption { color: var(--dim); font-size: 0.88rem; margin-top: 12px; text-align: center; }
+
   /* ── features ── */
-  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 36px; }
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 46px; }
   @media (max-width: 980px) { .grid4 { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 560px) { .grid4 { grid-template-columns: 1fr; } }
+  #features { border-top: 1px solid var(--line-soft); }
   .feat { background: var(--card); border: 1px solid var(--line-soft); border-radius: 12px; padding: 20px; }
   .feat h3 { font-size: 1rem; margin-bottom: 6px; }
   .feat p { color: var(--muted); font-size: 0.88rem; }
 
   /* ── how it works ── */
-  .steps-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 36px; counter-reset: step; }
+  .steps-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 46px; counter-reset: step; }
   @media (max-width: 820px) { .steps-grid { grid-template-columns: 1fr; } }
   .step { background: var(--card); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 26px; }
   .step::before { counter-increment: step; content: counter(step);
@@ -126,6 +140,35 @@
   .honest p, .honest li { color: var(--muted); font-size: 0.93rem; }
   .honest code { background: #0b1220; padding: 1px 7px; border-radius: 4px; color: #cbd5e1; }
   .honest .os-steps { margin-top: 14px; }
+
+  /* ── download ── */
+  .dl-band { background: var(--bg-soft);
+             border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+  .dl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 34px; }
+  @media (max-width: 820px) { .dl-grid { grid-template-columns: 1fr; } }
+  .dl-card { background: var(--card); border: 1px solid var(--line-soft); border-radius: var(--radius);
+             padding: 24px; display: flex; flex-direction: column; position: relative; }
+  .dl-card.current { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .dl-card .badge-you { position: absolute; top: -11px; left: 24px; background: var(--accent); color: #fff;
+                        font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+                        padding: 3px 10px; border-radius: 999px; }
+  .dl-card .os { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.12rem; }
+  .dl-card .os svg { width: 22px; height: 22px; flex-shrink: 0; }
+  .dl-card .req { color: var(--dim); font-size: 0.82rem; margin: 4px 0 18px; }
+  .dl-opts { display: grid; gap: 8px; margin-top: auto; }
+  .dl-opt { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+            text-decoration: none; padding: 11px 15px; border-radius: 9px; border: 1px solid var(--line);
+            background: rgba(255,255,255,0.02); color: var(--fg); font-size: 0.94rem; font-weight: 600; }
+  .dl-opt:first-child { background: rgba(233,69,96,0.10); border-color: rgba(233,69,96,0.4); }
+  .dl-opt:hover { border-color: var(--accent-soft); }
+  .dl-opt .fmt { color: var(--dim); font-weight: 400; font-size: 0.8rem; }
+  .dl-card .brew { margin-top: 12px; font-size: 0.8rem; color: var(--dim); }
+  .dl-card .brew code { background: #0b1220; padding: 1px 7px; border-radius: 4px; color: #cbd5e1; }
+  .dl-meta { display: flex; gap: 10px 22px; flex-wrap: wrap; align-items: center; margin-top: 28px;
+             color: var(--dim); font-size: 0.9rem; }
+  .dl-meta a { color: var(--muted); text-decoration: none; }
+  .dl-meta a:hover { color: var(--fg); text-decoration: underline; }
+  .dl-meta .sep { color: var(--line); }
 
   footer { border-top: 1px solid var(--line-soft); padding: 40px 0 56px; color: var(--dim); font-size: 0.88rem; }
   footer .cols { display: flex; gap: 40px; flex-wrap: wrap; justify-content: space-between; }
@@ -143,7 +186,7 @@
     <div class="links">
       <a href="#solid" class="hide-sm">Why Solid</a>
       <a href="#features" class="hide-sm">Features</a>
-      <a href="#how">How it works</a>
+      <a href="#download">Download</a>
       <a id="nav-github" href="#">GitHub</a>
     </div>
   </nav>
@@ -177,6 +220,7 @@
   </div>
 
   <section class="after-shot wrap" aria-labelledby="pillars-h">
+    <span class="kicker">Why Proxion</span>
     <h2 id="pillars-h">Chat apps made you the product. This one makes you the owner.</h2>
     <p class="lead">Every mainstream messenger stores your conversations in someone else's data center,
     under someone else's terms. Proxion inverts that.</p>
@@ -185,7 +229,7 @@
         <span class="glyph" aria-hidden="true">🗄️</span>
         <h3>Your data, in your pod</h3>
         <p>Message history is written to a <a href="https://solidproject.org" rel="noopener">Solid</a> pod
-        that <em>you</em> choose: a free community provider, Inrupt's PodSpaces, or a server in your closet.
+        that <em>you</em> choose: a free community provider, a server in your closet, or no pod at all.
         Leave any time and the data goes with you.</p>
       </div>
       <div class="card">
@@ -236,9 +280,9 @@
         <div>
           <p class="solid-badge" style="color: var(--dim)">Works with</p>
           <ul class="pods">
-            <li><b>Inrupt PodSpaces</b><span>Enterprise Solid Server from Inrupt, the company founded by Tim Berners-Lee. Free tier.</span></li>
-            <li><b>solidcommunity.net</b><span>Free pods run by the Solid community.</span></li>
-            <li><b>Your own server</b><span>Self-hosted Community Solid Server: full sovereignty, one command to start.</span></li>
+            <li><b>solidcommunity.net</b><span>Free pods run by the Solid community. No cost, sign up in a minute.</span></li>
+            <li><b>Your own server</b><span>Self-host the Community, JS, or Node Solid Server: full sovereignty, one command to start.</span></li>
+            <li><b>Any spec-compliant pod</b><span>WebID and DPoP with WAC or ACP access control, so enterprise Solid servers work too.</span></li>
           </ul>
         </div>
       </div>
@@ -251,6 +295,15 @@
     <p class="lead">A Proxion room is standard Solid Long Chat, so the rest of the Solid
     ecosystem can read and write it. Each of these is checked in CI against the real
     apps, not claimed from a spec.</p>
+
+    <figure class="interop-shot">
+      <div class="frame">
+        <img src="assets/interop-sidebyside.png" width="2400" height="960"
+             alt="The same room, named Solid demo, shown side by side: open in Proxion on the left and in the SolidOS databrowser on the right, both displaying the same three messages read from the same Solid pod.">
+      </div>
+      <figcaption>One room, two apps, one pod. What Proxion writes is standard Solid data, so another Solid app reads it with no export or migration step.</figcaption>
+    </figure>
+
     <div class="grid4">
       <div class="feat"><h3>Opens in SolidOS</h3><p>Point the SolidOS databrowser at a Proxion room and it shows as a chat, every message and author intact.</p></div>
       <div class="feat"><h3>Discoverable</h3><p>Each room registers in your pod's type index, so another Solid app finds your chats without being handed a URL.</p></div>
@@ -261,6 +314,7 @@
   </section>
 
   <section class="wrap" id="features" aria-labelledby="feat-h">
+    <span class="kicker">Features</span>
     <h2 id="feat-h">A complete messenger, not a compromise</h2>
     <p class="lead">Sovereignty doesn't mean settling for less.</p>
     <div class="grid4">
@@ -275,7 +329,53 @@
     </div>
   </section>
 
+  <div class="dl-band">
+    <section class="wrap" id="download" aria-labelledby="dl-h">
+      <span class="kicker">Download</span>
+      <h2 id="dl-h">Download Proxion</h2>
+      <p class="lead">Free and open source. One native app that is also its own server: no account,
+      no Docker, no config. Pick your platform, or open it in any browser as a PWA.</p>
+      <div class="dl-grid">
+        <div class="dl-card" id="card-windows">
+          <div class="os">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3V5.5Zm0 13L10.5 19.6v-7H3v6ZM11.5 4.25 21 3v8.5h-9.5V4.25Zm0 15.5L21 21v-8.5h-9.5v7.25Z"/></svg>
+            Windows
+          </div>
+          <div class="req">Windows 10 and 11 · x64 and ARM64</div>
+          <div class="dl-opts" id="opts-windows"></div>
+        </div>
+        <div class="dl-card" id="card-macos">
+          <div class="os">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.7c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.8-.8-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7 1.4 0 1.8.7 3 .7 1.2 0 2-1.1 2.8-2.2.9-1.3 1.2-2.5 1.3-2.6-.1 0-2.5-1-2.5-3.8Zm-2.3-7c.6-.8 1.1-1.9 1-3-.9 0-2.1.6-2.7 1.4-.6.7-1.1 1.8-1 2.9 1 .1 2-.5 2.7-1.3Z"/></svg>
+            macOS
+          </div>
+          <div class="req">macOS 10.15+ · Apple Silicon and Intel</div>
+          <div class="dl-opts" id="opts-macos"></div>
+          <div class="brew">or <code>brew install cafeTechne/proxion/proxion</code></div>
+        </div>
+        <div class="dl-card" id="card-linux">
+          <div class="os">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2c-1.7 0-2.9 1.6-2.9 3.6 0 1 .1 1.7.1 2.6 0 .7-.6 1.3-1.2 2.3-.7 1-1.9 2.5-2.4 4.3-.3.9-.3 1.7-.1 2.3-.2.2-.3.5-.3.9 0 .6.3.9.8 1.2.4.2.9.3 1.4.6.5.3.9.7 1.6.8.3 0 .7 0 1-.3.4-.3.5-.7.5-1.1.7-.5 1.5-.8 2.4-.8.9 0 1.7.3 2.4.8 0 .4.1.8.5 1.1.3.3.7.3 1 .3.7-.1 1.1-.5 1.6-.8.5-.3 1-.4 1.4-.6.5-.3.8-.6.8-1.2 0-.4-.1-.7-.3-.9.2-.6.2-1.4-.1-2.3-.5-1.8-1.7-3.3-2.4-4.3-.6-1-1.2-1.6-1.2-2.3 0-.9.1-1.6.1-2.6C14.9 3.6 13.7 2 12 2Z"/></svg>
+            Linux
+          </div>
+          <div class="req">x64 and ARM64</div>
+          <div class="dl-opts" id="opts-linux"></div>
+        </div>
+      </div>
+      <div class="dl-meta">
+        <span id="dl-version">Loading latest release…</span>
+        <span class="sep" aria-hidden="true">·</span>
+        <a id="dl-changelog" href="#">What's new</a>
+        <span class="sep" aria-hidden="true">·</span>
+        <a id="dl-verify" href="#">Verify your download</a>
+        <span class="sep" aria-hidden="true">·</span>
+        <a id="dl-all" href="#">All releases and checksums</a>
+      </div>
+    </section>
+  </div>
+
   <section class="wrap" id="how" aria-labelledby="how-h">
+    <span class="kicker">Getting started</span>
     <h2 id="how-h">Running in two minutes</h2>
     <div class="steps-grid">
       <div class="step">
@@ -343,6 +443,9 @@ for (const id of ["repo-link", "nav-github", "gh-btn"]) $(id).href = REPO_URL;
 $("all-releases").href = `${REPO_URL}/releases/latest`;
 $("selfhost-link").href = `${REPO_URL}/blob/main/docs/SELF_HOSTING.md`;
 $("verify-link").href = `${REPO_URL}/blob/main/docs/VERIFYING.md`;
+$("dl-all").href = `${REPO_URL}/releases/latest`;
+$("dl-verify").href = `${REPO_URL}/blob/main/docs/VERIFYING.md`;
+$("dl-changelog").href = `${REPO_URL}/blob/main/CHANGELOG.md`;
 
 function detectOS() {
   const p = (navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || "").toLowerCase();
@@ -379,6 +482,45 @@ function findMacIntel(assets) {
 
 const OS_LABEL = { windows: "Windows", macos: "macOS", linux: "Linux", unknown: "your system" };
 
+// Per-platform install formats, in the order shown on the download cards.
+// The first present option in each list is styled as the recommended pick.
+const PLATFORM_OPTS = {
+  windows: [
+    { label: "Installer", fmt: ".exe", match: (n) => n.endsWith("-setup.exe") },
+    { label: "MSI package", fmt: ".msi", match: (n) => n.endsWith(".msi") },
+  ],
+  macos: [
+    { label: "Apple Silicon", fmt: ".dmg", match: (n) => n.endsWith("aarch64.dmg") },
+    { label: "Intel", fmt: ".dmg", match: (n) => /x(86_)?64\.dmg$/.test(n) },
+  ],
+  linux: [
+    { label: "AppImage", fmt: "portable", match: (n) => n.endsWith(".appimage") },
+    { label: "Debian / Ubuntu", fmt: ".deb", match: (n) => n.endsWith(".deb") },
+    { label: "Fedora / RHEL", fmt: ".rpm", match: (n) => n.endsWith(".rpm") },
+  ],
+};
+
+function fillCards(assets, currentOs) {
+  for (const os of ["windows", "macos", "linux"]) {
+    const links = [];
+    for (const opt of PLATFORM_OPTS[os]) {
+      const hit = assets.find((a) => opt.match(a.name.toLowerCase()));
+      if (!hit) continue;
+      links.push(
+        `<a class="dl-opt" href="${hit.browser_download_url}">` +
+        `<span>${opt.label}</span><span class="fmt">${opt.fmt}</span></a>`);
+    }
+    $("opts-" + os).innerHTML = links.length ? links.join("") :
+      `<a class="dl-opt" href="${REPO_URL}/releases/latest">` +
+      `<span>Download</span><span class="fmt">releases</span></a>`;
+    if (os === currentOs) {
+      const card = $("card-" + os);
+      card.classList.add("current");
+      card.insertAdjacentHTML("afterbegin", '<span class="badge-you">Your system</span>');
+    }
+  }
+}
+
 const STEPS = {
   windows: `<h3>First launch on Windows</h3>
     <p>If SmartScreen shows <em>"Windows protected your PC"</em>, click
@@ -403,7 +545,13 @@ async function init() {
     if (!res.ok) throw new Error("no release");
     const rel = await res.json();
     const assets = rel.assets || [];
-    $("ver").textContent = `Latest: ${rel.tag_name || rel.name || ""}`;
+    const tag = rel.tag_name || rel.name || "";
+    $("ver").textContent = `Latest: ${tag}`;
+    fillCards(assets, os);
+    const when = rel.published_at
+      ? new Date(rel.published_at).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+      : "";
+    $("dl-version").textContent = tag ? (when ? `${tag}, released ${when}` : tag) : "Latest release";
 
     const primary = pickAsset(assets, os);
     const dl = $("dl");
@@ -429,6 +577,8 @@ async function init() {
     dl.href = `${REPO_URL}/releases/latest`;
     dl.textContent = `Download for ${OS_LABEL[os]}, free`;
     $("ver").textContent = "";
+    fillCards([], os);
+    $("dl-version").innerHTML = `<a href="${REPO_URL}/releases/latest">See all releases on GitHub</a>`;
   }
 }
 init();
