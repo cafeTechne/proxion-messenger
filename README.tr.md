@@ -63,7 +63,7 @@ Linux hiçbir uyarı göstermez.
 - **Solid üzerindeki herkese ulaşın.** Yalnızca diğer Proxion kullanıcılarına değil, daha geniş
   Solid ekosistemindeki kişilere ulaşın ve onları davet edin.
 - **Her yerde kullanın.** Masaüstü, tarayıcı ve telefon; çevrimdışı çalışabilen, sağdan sola
-  yazılan Arapça dahil altı dilde ve yalnızca ekran okuyucu ve klavyeyle çalışacak biçimde
+  yazılan Arapça dahil 16 dilde ve yalnızca ekran okuyucu ve klavyeyle çalışacak biçimde
   tasarlanmış.
 
 <p align="center">

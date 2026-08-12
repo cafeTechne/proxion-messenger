@@ -60,7 +60,7 @@ Proxion은 Apple이나 Microsoft의 서명을 받지 않았기 때문에(당신�
 - **Solid의 누구에게나 연결.** Proxion 사용자뿐 아니라 더 넓은 Solid 생태계의 사람들을 찾아
   초대할 수 있습니다.
 - **어디서나 사용.** 데스크톱, 브라우저, 모바일, 오프라인 지원, 오른쪽에서 왼쪽으로 쓰는
-  아랍어를 포함한 6개 언어, 그리고 스크린 리더와 키보드만으로도 작동하도록 만들어졌습니다.
+  아랍어를 포함한 16개 언어, 그리고 스크린 리더와 키보드만으로도 작동하도록 만들어졌습니다.
 
 <p align="center">
   <img src="landing/assets/screenshot-mobile.png" alt="휴대폰에서 실행 중인 Proxion" width="240">

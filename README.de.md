@@ -62,7 +62,7 @@ ausführen*; unter macOS *Rechtsklick und dann Öffnen*; Linux zeigt keine Meldu
   du wirklich mit deinem Kontakt sprichst. Anrufe sind genauso verschlüsselt.
 - **Erreiche jeden auf Solid.** Finde und lade Menschen aus dem gesamten Solid-Ökosystem ein,
   nicht nur andere Proxion-Nutzer.
-- **Nutze es überall.** Desktop, Browser und Handy, offlinefähig, in sechs Sprachen inklusive
+- **Nutze es überall.** Desktop, Browser und Handy, offlinefähig, in 16 Sprachen inklusive
   Arabisch von rechts nach links, und gebaut, um allein mit Screenreader und Tastatur zu
   funktionieren.
 

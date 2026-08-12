@@ -63,7 +63,7 @@ Linux không hiện lời nhắc nào.
 - **Kết nối bất kỳ ai trên Solid.** Tìm và mời mọi người trên khắp hệ sinh thái Solid rộng lớn
   hơn, không chỉ những người dùng Proxion khác.
 - **Dùng ở bất cứ đâu.** Máy tính, trình duyệt và điện thoại, có thể hoạt động ngoại tuyến, bằng
-  sáu ngôn ngữ bao gồm tiếng Ả Rập viết từ phải sang trái, và được thiết kế để hoạt động chỉ với
+  16 ngôn ngữ bao gồm tiếng Ả Rập viết từ phải sang trái, và được thiết kế để hoạt động chỉ với
   trình đọc màn hình và bàn phím.
 
 <p align="center">

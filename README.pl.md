@@ -62,7 +62,7 @@ pierwszym otwarciu. W Windows wybierz *Więcej informacji, a potem Uruchom mimo 
   odczytujecie na głos razem. Połączenia są szyfrowane tak samo.
 - **Dotrzyj do każdego w Solid.** Znajduj i zapraszaj osoby z całego ekosystemu Solid, nie tylko
   innych użytkowników Proxion.
-- **Używaj wszędzie.** Komputer, przeglądarka i telefon, z działaniem offline, w sześciu
+- **Używaj wszędzie.** Komputer, przeglądarka i telefon, z działaniem offline, w 16
   językach, w tym arabskim pisanym od prawej do lewej, i zbudowany tak, aby działać przy użyciu
   samego czytnika ekranu i klawiatury.
 

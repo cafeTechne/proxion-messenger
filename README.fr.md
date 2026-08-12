@@ -64,7 +64,7 @@ avertissement.
 - **Joindre n'importe qui sur Solid.** Trouvez et invitez des personnes dans tout l'écosystème
   Solid, pas seulement d'autres utilisateurs de Proxion.
 - **L'utiliser partout.** Ordinateur, navigateur et mobile, capable de fonctionner hors ligne,
-  en six langues dont l'arabe de droite à gauche, et conçu pour fonctionner au seul lecteur
+  en 16 langues dont l'arabe de droite à gauche, et conçu pour fonctionner au seul lecteur
   d'écran et clavier.
 
 <p align="center">

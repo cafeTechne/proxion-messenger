@@ -63,7 +63,7 @@ en macOS *clic derecho y luego Abrir*; en Linux no hay ningún aviso.
 - **Llega a cualquiera en Solid.** Encuentra e invita a personas de todo el ecosistema Solid,
   no solo a otros usuarios de Proxion.
 - **Úsalo en cualquier parte.** Escritorio, navegador y móvil, con capacidad sin conexión, en
-  seis idiomas incluido el árabe de derecha a izquierda, y pensado para funcionar solo con
+  16 idiomas incluido el árabe de derecha a izquierda, y pensado para funcionar solo con
   lector de pantalla y teclado.
 
 <p align="center">

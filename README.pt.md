@@ -62,7 +62,7 @@ mesmo*; no macOS *clique com o botão direito e depois Abrir*; o Linux não most
   que vocês leem em voz alta juntos. As chamadas são criptografadas da mesma forma.
 - **Alcance qualquer pessoa no Solid.** Encontre e convide pessoas de todo o ecossistema Solid,
   não só outros usuários do Proxion.
-- **Use em qualquer lugar.** Desktop, navegador e celular, com funcionamento offline, em seis
+- **Use em qualquer lugar.** Desktop, navegador e celular, com funcionamento offline, em 16
   idiomas incluindo o árabe da direita para a esquerda, e feito para funcionar só com leitor de
   tela e teclado.
 

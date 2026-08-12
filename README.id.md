@@ -63,7 +63,7 @@ Tetap jalankan*; di macOS *klik kanan lalu Buka*; Linux tidak menampilkan pering
   singkat yang Anda baca bersama dengan lantang. Panggilan dienkripsi dengan cara yang sama.
 - **Jangkau siapa pun di Solid.** Temukan dan undang orang di seluruh ekosistem Solid yang lebih
   luas, bukan hanya sesama pengguna Proxion.
-- **Pakai di mana saja.** Desktop, peramban, dan ponsel, mampu bekerja luring, dalam enam bahasa
+- **Pakai di mana saja.** Desktop, peramban, dan ponsel, mampu bekerja luring, dalam 16 bahasa
   termasuk bahasa Arab dari kanan ke kiri, dan dibuat untuk bekerja hanya dengan pembaca layar
   dan papan ketik.
 

@@ -62,7 +62,7 @@ destro e poi Apri*; Linux non mostra alcun avviso.
   leggete ad alta voce insieme. Le chiamate sono crittografate allo stesso modo.
 - **Raggiungi chiunque su Solid.** Trova e invita persone in tutto l'ecosistema Solid, non solo
   altri utenti di Proxion.
-- **Usalo ovunque.** Desktop, browser e cellulare, con funzionamento offline, in sei lingue tra
+- **Usalo ovunque.** Desktop, browser e cellulare, con funzionamento offline, in 16 lingue tra
   cui l'arabo da destra a sinistra, e pensato per funzionare con solo screen reader e tastiera.
 
 <p align="center">
