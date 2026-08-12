@@ -23,13 +23,32 @@
 // endonym (name in its own language) and a draft flag for the picker.
 export const LOCALE_META = {
     en: { name: 'English', draft: false },
-    es: { name: 'Español', draft: true },
+    ja: { name: '日本語', draft: true },
+    'zh-hans': { name: '中文（简体）', draft: true },
+    'zh-hant': { name: '中文（繁體）', draft: true },
+    ko: { name: '한국어', draft: true },
     de: { name: 'Deutsch', draft: true },
     fr: { name: 'Français', draft: true },
+    es: { name: 'Español', draft: true },
+    pt: { name: 'Português', draft: true },
+    ru: { name: 'Русский', draft: true },
+    it: { name: 'Italiano', draft: true },
+    pl: { name: 'Polski', draft: true },
+    tr: { name: 'Türkçe', draft: true },
+    vi: { name: 'Tiếng Việt', draft: true },
+    id: { name: 'Bahasa Indonesia', draft: true },
     ar: { name: 'العربية', draft: true },
 };
 export const SUPPORTED_LOCALES = Object.keys(LOCALE_META);
 const RTL_LANGS = ['ar', 'he', 'fa', 'ur'];
+
+// Chinese has no single base tag: map region/script variants to our two files.
+// zh, zh-CN, zh-SG, zh-Hans* → Simplified; zh-TW, zh-HK, zh-MO, zh-Hant* → Traditional.
+function _zhScript(lc) {
+    if (!lc.startsWith('zh')) return null;
+    if (lc.includes('hant') || /-(tw|hk|mo)\b/.test(lc)) return 'zh-hant';
+    return 'zh-hans';
+}
 
 let _locale = 'en';
 let _messages = {};     // active-locale flat map
@@ -53,6 +72,8 @@ function _resolveLocale() {
     for (const cand of _navLocales()) {
         const lc = String(cand).toLowerCase();
         if (SUPPORTED_LOCALES.includes(lc)) return lc;
+        const zh = _zhScript(lc);
+        if (zh && SUPPORTED_LOCALES.includes(zh)) return zh;
         const base = lc.split('-')[0];
         if (SUPPORTED_LOCALES.includes(base)) return base;
     }

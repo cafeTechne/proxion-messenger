@@ -1,4 +1,4 @@
-const CACHE = "proxion-shell-v181";
+const CACHE = "proxion-shell-v182";
 const SHELL = [
   "/",
   "/index.html",
@@ -6,9 +6,20 @@ const SHELL = [
   "/main.js",
   "/i18n.js",
   "/locales/en.json",
-  "/locales/es.json",
+  "/locales/ja.json",
+  "/locales/zh-hans.json",
+  "/locales/zh-hant.json",
+  "/locales/ko.json",
   "/locales/de.json",
   "/locales/fr.json",
+  "/locales/es.json",
+  "/locales/pt.json",
+  "/locales/ru.json",
+  "/locales/it.json",
+  "/locales/pl.json",
+  "/locales/tr.json",
+  "/locales/vi.json",
+  "/locales/id.json",
   "/locales/ar.json",
   "/util.js",
   "/filetransfer.js",

@@ -59,7 +59,7 @@ has no prompt.
   together. Calls are encrypted the same way.
 - **Reach anyone on Solid.** Find and invite people across the wider Solid ecosystem, not
   just other Proxion users.
-- **Use it anywhere.** Desktop, browser, and mobile, offline-capable, in six languages
+- **Use it anywhere.** Desktop, browser, and mobile, offline-capable, in 16 languages
   including right-to-left Arabic, and built to work with a screen reader and keyboard alone.
 
 <p align="center">
