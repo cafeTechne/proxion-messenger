@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
     detectMode, createTransport, createGatewayTransport, createPodTransport,
-    NotSupported, FEATURES,
+    NotSupported, FEATURES, gatedControlIds, applyTransportGating,
 } from './transport.js';
 
 // The module reads window/document/localStorage defensively. Provide/withdraw
@@ -114,6 +114,39 @@ describe('PodTransport', () => {
     it('connect/flushPending/forceReconnect are safe no-ops', () => {
         const t = createPodTransport();
         expect(() => { t.connect(); t.flushPending(); t.forceReconnect(); }).not.toThrow();
+    });
+});
+
+describe('UI gating', () => {
+    it('gates nothing in gateway mode', () => {
+        const connection = { socketSendOrQueue: () => {} };
+        expect(gatedControlIds(createGatewayTransport({ connection }))).toEqual([]);
+    });
+
+    it('gates DM and call entry points in the Phase 1 web build', () => {
+        const ids = gatedControlIds(createPodTransport());
+        expect(ids).toContain('add-peer-btn');
+        expect(ids).toContain('start-call-btn');
+        expect(ids).toContain('start-video-call-btn');
+    });
+
+    it('applyTransportGating hides the gated controls in a document', () => {
+        const els = {
+            'add-peer-btn': { style: {}, setAttribute(k, v) { this[k] = v; } },
+            'start-call-btn': { style: {}, setAttribute(k, v) { this[k] = v; } },
+            'start-video-call-btn': { style: {}, setAttribute(k, v) { this[k] = v; } },
+        };
+        const doc = { getElementById: (id) => els[id] || null };
+        const hidden = applyTransportGating(createPodTransport(), doc);
+        expect(hidden.sort()).toEqual(['add-peer-btn', 'start-call-btn', 'start-video-call-btn']);
+        expect(els['add-peer-btn'].style.display).toBe('none');
+        expect(els['add-peer-btn']['aria-hidden']).toBe('true');
+    });
+
+    it('applyTransportGating is a no-op in gateway mode', () => {
+        const connection = { socketSendOrQueue: () => {} };
+        const doc = { getElementById: () => ({ style: {} }) };
+        expect(applyTransportGating(createGatewayTransport({ connection }), doc)).toEqual([]);
     });
 });
 

@@ -48,7 +48,7 @@ import { createFriendRequests } from './friend-requests.js';
 import { createE2EStatus } from './e2e-status.js';
 import { createStatusBanners } from './status-banners.js';
 import { createConnection } from './connection.js';
-import { createTransport, detectMode } from './transport.js';
+import { createTransport, detectMode, applyTransportGating } from './transport.js';
 import { createRendering } from './rendering.js';
 import { createView } from './view.js';
 import { createInvite } from './invite.js';
@@ -747,6 +747,9 @@ import { createIdentityResolver } from './identity.js';
             connection: { socketSendOrQueue, forceReconnect, connect, flushPending },
         });
         window.proxionTransport = transport;   // consulted by UI gating + smokes
+        // Hide realtime-only controls the current transport cannot back (web
+        // build: DM and call entry points). No-op in gateway mode.
+        applyTransportGating(transport);
         // View switching + sidebar list building (core slice 3). Reassigns the
         // central activeView/messageMap/allMessages/currentRoomMembers via setters;
         // mutate-in-place host maps injected by reference; socket resolved fresh per

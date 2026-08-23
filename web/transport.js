@@ -121,6 +121,42 @@ export function createPodTransport() {
     };
 }
 
+// UI gating (R102.4): the controls that must be hidden when the current
+// transport does not support their feature. Rooms/history/invites work in both
+// modes, so their controls are never gated; DM and call entry points are hidden
+// in the Phase 1 web build (they light up in R103/R105).
+const _FEATURE_CONTROLS = {
+    dm: ['add-peer-btn'],
+    calls: ['start-call-btn', 'start-video-call-btn'],
+};
+
+// Pure: the element ids to hide for this transport, given what it supports.
+export function gatedControlIds(transport) {
+    const ids = [];
+    for (const [feature, controls] of Object.entries(_FEATURE_CONTROLS)) {
+        if (!transport.supports(feature)) ids.push(...controls);
+    }
+    return ids;
+}
+
+// Hide the gated controls in the given document (defaults to the live document).
+// Returns the ids actually hidden. Safe to call in any mode: in gateway mode
+// nothing is gated, so it is a no-op.
+export function applyTransportGating(transport, doc) {
+    const d = doc || (typeof document !== 'undefined' ? document : undefined);
+    if (!d || !d.getElementById) return [];
+    const hidden = [];
+    for (const id of gatedControlIds(transport)) {
+        const el = d.getElementById(id);
+        if (el) {
+            if (el.style) el.style.display = 'none';
+            if (el.setAttribute) el.setAttribute('aria-hidden', 'true');
+            hidden.push(id);
+        }
+    }
+    return hidden;
+}
+
 // Build the transport for the current page. `connection` is required only for
 // gateway mode (the web build does not create one).
 export function createTransport({ mode, connection } = {}) {
