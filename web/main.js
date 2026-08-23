@@ -49,6 +49,7 @@ import { createE2EStatus } from './e2e-status.js';
 import { createStatusBanners } from './status-banners.js';
 import { createConnection } from './connection.js';
 import { createTransport, detectMode, applyTransportGating } from './transport.js';
+import { createPodSocket } from './podtransport.js';
 import { createRendering } from './rendering.js';
 import { createView } from './view.js';
 import { createInvite } from './invite.js';
@@ -5348,6 +5349,27 @@ import { createIdentityResolver } from './identity.js';
                 }
             });
 
-            // Gateway mode: open the WS. Web mode: no gateway, this is a no-op.
-            transport.connect();
+            if (transport.mode === 'web') {
+                // Gateway-less browser build: no WebSocket. If signed in to a pod,
+                // install a PodSocket that backs the command protocol with pod.js,
+                // then drive the app's post-auth init (which loads rooms). If not
+                // signed in, show onboarding so the user can sign in with their pod.
+                if (solidSession.info.isLoggedIn) {
+                    socket = createPodSocket({
+                        getSelfWebId: () => selfWebId,
+                        handleEvent: (ev) => _handleEventAsync(ev),
+                        pod: { podListOwnedRoomDescriptors },
+                    });
+                    document.querySelector(".dot").className = "dot online";
+                    _handleEventAsync({ type: 'registered' });
+                } else {
+                    showOnboarding();
+                }
+                // Deterministic sign-in entry for the web build (used by power users
+                // and the acceptance smoke): window.proxionWebLogin(issuer).
+                window.proxionWebLogin = (issuer) => solidLogin(issuer);
+            } else {
+                // Gateway mode: open the WS.
+                transport.connect();
+            }
         })();
