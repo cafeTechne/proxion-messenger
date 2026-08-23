@@ -1124,6 +1124,112 @@ export async function podDeleteInboxNotification(url) {
     }
 }
 
+// ── Gateway-free DM delivery (R103) ──────────────────────────────────────────
+//
+// Without a gateway to relay ciphertext, a DM is delivered by dropping the
+// ratchet-encrypted envelope into the recipient's pod. Each user exposes
+// proxion/dm-inbox/ as public-Append (anyone may POST an envelope; only the
+// owner can list, read, and delete). The envelope is opaque to pod.js: the
+// caller builds it from e2e.js output (ciphertext, nonce, ratchet_pub, msg_num,
+// pn, sender key + WebID). The pod stores only ciphertext.
+
+const DM_INBOX_PATH = 'proxion/dm-inbox/';
+const MAX_DM_DROPS = 200;
+
+/** The recipient's DM drop-box URL, from their pod storage root. */
+export function dmInboxUrlFor(podRoot) {
+    if (!podRoot) return null;
+    return podRoot.replace(/\/?$/, '/') + DM_INBOX_PATH;
+}
+
+/** Ensure OUR DM drop-box exists and is public-Append (owner read/write/control). */
+export async function podEnsureDmInbox() {
+    const root = podStorageRoot();
+    const webId = solidSession?.info?.webId;
+    if (!root || !webId || !solidSession?.info?.isLoggedIn) return null;
+    const inboxUrl = root.replace(/\/?$/, '/') + DM_INBOX_PATH;
+    try {
+        const put = await solidSession.fetch(inboxUrl, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'text/turtle',
+                Link: '<http://www.w3.org/ns/ldp#BasicContainer>; rel="type"',
+            },
+            body: '',
+        });
+        if (!put || !(put.ok || put.status === 409 || put.status === 405)) return null;
+        try {
+            const { url: aclUrl } = await discoverAccessControl(inboxUrl);
+            await solidSession.fetch(aclUrl, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'text/turtle' },
+                body: buildInboxAcl(inboxUrl, webId, []),
+            });
+        } catch (err) {
+            console.warn('[pod] DM inbox ACL failed:', err);
+        }
+        return inboxUrl;
+    } catch (err) {
+        console.warn('[pod] podEnsureDmInbox failed:', err);
+        return null;
+    }
+}
+
+/** Drop an encrypted DM envelope into a recipient's public-Append DM inbox. */
+export async function podDropDm(recipientPodRoot, envelope) {
+    const inbox = dmInboxUrlFor(recipientPodRoot);
+    if (!inbox || !envelope || !solidSession?.info?.isLoggedIn) return false;
+    try {
+        const res = await solidSession.fetch(inbox, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(envelope),
+        });
+        return !!(res && res.ok);
+    } catch (err) {
+        console.warn('[pod] podDropDm failed:', err);
+        return false;
+    }
+}
+
+/** Read our own DM inbox: returns [{ url, envelope }] for each dropped envelope. */
+export async function podReadDmDrops() {
+    const root = podStorageRoot();
+    if (!root || !solidSession?.info?.isLoggedIn) return [];
+    const inbox = root.replace(/\/?$/, '/') + DM_INBOX_PATH;
+    let urls = [];
+    try {
+        const res = await solidSession.fetch(inbox, { headers: { Accept: 'application/ld+json' } });
+        if (!res || !res.ok) return [];
+        urls = parseInboxListing(await res.json(), inbox);
+    } catch (err) {
+        console.warn('[pod] podReadDmDrops listing failed:', err);
+        return [];
+    }
+    if (urls.length > MAX_DM_DROPS) urls = urls.slice(0, MAX_DM_DROPS);
+    const out = [];
+    for (const url of urls) {
+        try {
+            const r = await solidSession.fetch(url, { headers: { Accept: 'application/json' } });
+            if (!r || !r.ok) continue;
+            out.push({ url, envelope: await r.json() });
+        } catch { /* skip one unreadable drop */ }
+    }
+    return out;
+}
+
+/** Delete a consumed DM envelope from our inbox. */
+export async function podDeleteDmDrop(url) {
+    if (!url || !solidSession?.info?.isLoggedIn) return false;
+    try {
+        const res = await solidSession.fetch(url, { method: 'DELETE' });
+        return !!(res && (res.ok || res.status === 404));
+    } catch (err) {
+        console.warn('[pod] podDeleteDmDrop failed:', err);
+        return false;
+    }
+}
+
 // ── Solid social graph (contact import) ──────────────────────────────────────
 //
 // Reading who a Solid user knows so you can start a conversation with them. Uses
