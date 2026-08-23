@@ -48,6 +48,7 @@ import { createFriendRequests } from './friend-requests.js';
 import { createE2EStatus } from './e2e-status.js';
 import { createStatusBanners } from './status-banners.js';
 import { createConnection } from './connection.js';
+import { createTransport, detectMode } from './transport.js';
 import { createRendering } from './rendering.js';
 import { createView } from './view.js';
 import { createInvite } from './invite.js';
@@ -735,6 +736,17 @@ import { createIdentityResolver } from './identity.js';
             getClientDid: () => clientDid,
             generateOrLoadIdentity, handleEventAsync: _handleEventAsync,
         });
+        // Transport seam (R102): the desktop/self-host build talks to a gateway
+        // (GatewayTransport, a faithful wrapper of the connection above); the
+        // gateway-less browser build (PROXION_MODE=web) talks to the pod directly.
+        // Defaults to gateway, so this changes nothing for the desktop app. UI
+        // gates realtime-only features on transport.supports(...) (see below).
+        const proxionMode = detectMode();
+        const transport = createTransport({
+            mode: proxionMode,
+            connection: { socketSendOrQueue, forceReconnect, connect, flushPending },
+        });
+        window.proxionTransport = transport;   // consulted by UI gating + smokes
         // View switching + sidebar list building (core slice 3). Reassigns the
         // central activeView/messageMap/allMessages/currentRoomMembers via setters;
         // mutate-in-place host maps injected by reference; socket resolved fresh per
@@ -5333,5 +5345,6 @@ import { createIdentityResolver } from './identity.js';
                 }
             });
 
-            connect();
+            // Gateway mode: open the WS. Web mode: no gateway, this is a no-op.
+            transport.connect();
         })();
