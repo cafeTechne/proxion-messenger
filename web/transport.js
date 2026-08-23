@@ -22,7 +22,10 @@
 // in both modes; realtime features are gateway-only until the later phases.
 export const FEATURES = ['rooms', 'history', 'invites', 'dm', 'presence', 'calls'];
 
-const _WEB_ONLY_SUPPORTED = new Set(['rooms', 'history', 'invites']);
+// Web build capabilities: pod-backed rooms/history/invites (R102) plus DMs
+// delivered through the pod drop box (R103). Presence and calls arrive in
+// R104/R105 and stay gated until then.
+const _WEB_ONLY_SUPPORTED = new Set(['rooms', 'history', 'invites', 'dm']);
 
 export class NotSupported extends Error {
     constructor(op) {

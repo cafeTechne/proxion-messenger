@@ -41,10 +41,33 @@ export function roomsFromDescriptors(descs, selfWebId) {
 // Build a PodSocket. Dependencies are injected so this is unit-testable without
 // a browser: getSelfWebId(), handleEvent(event), and a pod facade exposing
 // podListOwnedRoomDescriptors(webId).
-export function createPodSocket({ getSelfWebId, handleEvent, pod }) {
+export function createPodSocket({ getSelfWebId, handleEvent, pod, dm }) {
+    // Echo a just-sent DM back so its optimistic render is confirmed (pending
+    // cleared) and dedups by message_id. No `local` flag: the ciphertext content
+    // must not reach the DM preview; the plaintext optimistic copy already shows.
+    function _echoDm(cmd) {
+        handleEvent({
+            type: 'message',
+            message_id: cmd.message_id,
+            thread_id: cmd.target_webid || cmd.cert_id,
+            from_webid: getSelfWebId(),
+            content: cmd.content,
+            timestamp: new Date().toISOString(),
+            source: 'local_dm',
+        });
+    }
+
     async function route(cmd) {
         try {
             switch (cmd && cmd.cmd) {
+                case 'local_dm':
+                case 'send_dm': {
+                    // main.js already ratchet-encrypted the payload; drop it into
+                    // the recipient's pod, then confirm the optimistic render.
+                    if (dm) await dm.dropDm(cmd);
+                    _echoDm(cmd);
+                    break;
+                }
                 case 'get_rooms': {
                     const self = getSelfWebId();
                     const descs = self ? await pod.podListOwnedRoomDescriptors(self) : [];

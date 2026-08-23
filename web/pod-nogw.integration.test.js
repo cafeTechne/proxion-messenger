@@ -32,6 +32,7 @@ import {
     podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop,
 } from './pod.js';
 import { buildRoomDescriptor } from './roomdesc.js';
+import { createWebDm } from './webdm.js';
 
 const LIVE = !!process.env.PROXION_LIVE_POD;
 const uid = (p) => `${p}-${Math.random().toString(36).slice(2, 9)}`;
@@ -99,5 +100,40 @@ describe.skipIf(!LIVE)('gateway-free pod round-trips (live CSS)', () => {
         expect(await podDeleteDmDrop(got.url)).toBe(true);          // consume it
         const after = await podReadDmDrops();
         expect(after.some((d) => d.url === got.url)).toBe(false);
+    });
+
+    it('R103 engine: webdm.dropDm delivers and drainOnce receives + deletes (no gateway)', async () => {
+        // Real pod, real pod.js; a stub ratchet so we assert the engine end to end
+        // (the two-party ratchet itself is covered by unit tests + the browser smoke,
+        // since e2e.js is a single-identity module).
+        const podFns = { podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop };
+        const e2eStub = { cachePeerPub() {}, ratchetDecrypt: async () => { throw new Error('unused'); } };
+
+        asBob();
+        const bobDm = createWebDm({
+            pod: podFns, e2e: e2eStub, notify: null,
+            handleEvent: () => {}, getSelfWebId: () => bob.webId, getDisplayName: () => 'Bob',
+        });
+        expect(await bobDm.start()).toBeTruthy();   // ensures Bob's inbox
+
+        asAlice();
+        const aliceDm = createWebDm({
+            pod: podFns, e2e: e2eStub, notify: null,
+            handleEvent: () => {}, getSelfWebId: () => alice.webId, getDisplayName: () => 'Alice',
+        });
+        const text = 'plain-' + uid('t');
+        expect(await aliceDm.dropDm({ target_webid: bob.webId, message_id: uid('m'), content: text, e2e: false })).toBe(true);
+
+        asBob();
+        const received = [];
+        const bobDm2 = createWebDm({
+            pod: podFns, e2e: e2eStub, notify: null,
+            handleEvent: (ev) => received.push(ev), getSelfWebId: () => bob.webId, getDisplayName: () => 'Bob',
+        });
+        await bobDm2.drainOnce();
+        const msg = received.find((e) => e.type === 'message' && e.content === text);
+        expect(msg).toBeTruthy();
+        expect(msg).toMatchObject({ from_webid: alice.webId, source: 'local_dm', _persistDm: true });
+        expect((await podReadDmDrops()).length).toBe(0);   // consumed
     });
 });

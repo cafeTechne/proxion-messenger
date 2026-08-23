@@ -91,13 +91,13 @@ describe('GatewayTransport', () => {
 });
 
 describe('PodTransport', () => {
-    it('supports only pod-backed features in Phase 1', () => {
+    it('supports pod-backed rooms/history/invites and DMs (R102+R103)', () => {
         const t = createPodTransport();
         expect(t.mode).toBe('web');
         expect(t.supports('rooms')).toBe(true);
         expect(t.supports('history')).toBe(true);
         expect(t.supports('invites')).toBe(true);
-        expect(t.supports('dm')).toBe(false);
+        expect(t.supports('dm')).toBe(true);
         expect(t.supports('presence')).toBe(false);
         expect(t.supports('calls')).toBe(false);
     });
@@ -123,9 +123,9 @@ describe('UI gating', () => {
         expect(gatedControlIds(createGatewayTransport({ connection }))).toEqual([]);
     });
 
-    it('gates DM and call entry points in the Phase 1 web build', () => {
+    it('gates call entry points but not DMs in the web build (R103)', () => {
         const ids = gatedControlIds(createPodTransport());
-        expect(ids).toContain('add-peer-btn');
+        expect(ids).not.toContain('add-peer-btn');   // DMs supported now
         expect(ids).toContain('start-call-btn');
         expect(ids).toContain('start-video-call-btn');
     });
@@ -138,9 +138,9 @@ describe('UI gating', () => {
         };
         const doc = { getElementById: (id) => els[id] || null };
         const hidden = applyTransportGating(createPodTransport(), doc);
-        expect(hidden.sort()).toEqual(['add-peer-btn', 'start-call-btn', 'start-video-call-btn']);
-        expect(els['add-peer-btn'].style.display).toBe('none');
-        expect(els['add-peer-btn']['aria-hidden']).toBe('true');
+        expect(hidden.sort()).toEqual(['start-call-btn', 'start-video-call-btn']);
+        expect(els['start-call-btn'].style.display).toBe('none');
+        expect(els['add-peer-btn'].style.display).toBeUndefined();   // DM entry stays visible
     });
 
     it('applyTransportGating is a no-op in gateway mode', () => {

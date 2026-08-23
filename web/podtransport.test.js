@@ -76,6 +76,21 @@ describe('PodSocket', () => {
         });
     });
 
+    it('local_dm drops the envelope and echoes to clear pending', async () => {
+        const events = [];
+        const dropped = [];
+        const dm = { dropDm: vi.fn(async (cmd) => { dropped.push(cmd); return true; }) };
+        const sock = createPodSocket({
+            getSelfWebId: () => 'https://me', handleEvent: (e) => events.push(e),
+            pod: { podListOwnedRoomDescriptors: vi.fn() }, dm,
+        });
+        await sock._route({ cmd: 'local_dm', target_webid: 'https://bob', message_id: 'm1', content: 'CT', e2e: true });
+        expect(dm.dropDm).toHaveBeenCalledOnce();
+        expect(dropped[0].target_webid).toBe('https://bob');
+        expect(events[0]).toMatchObject({ type: 'message', message_id: 'm1', thread_id: 'https://bob', source: 'local_dm' });
+        expect(events[0].local).toBeUndefined();   // ciphertext echo must not touch the DM preview
+    });
+
     it('get_dms emits empty dm lists (no gateway DMs in web mode)', async () => {
         const { sock, events } = harness();
         await sock._route({ cmd: 'get_dms' });
@@ -84,8 +99,8 @@ describe('PodSocket', () => {
 
     it('ignores unsupported commands without throwing', async () => {
         const { sock, events } = harness();
-        await sock._route({ cmd: 'send_dm', content: 'x' });
         await sock._route({ cmd: 'start_tunnel' });
+        await sock._route({ cmd: 'set_presence', status: 'online' });
         expect(events).toEqual([]);
     });
 

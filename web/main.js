@@ -20,7 +20,8 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podReadLongChatRecent, podEditLongChatMessage,
          podSoftDeleteLongChatMessage, podSetLongChatSeq,
          reconcileRoomHistory, podWriteRoomDescriptor, podReadRoomDescriptor,
-         podListOwnedRoomDescriptors, podEnsureProfileName } from './pod.js';
+         podListOwnedRoomDescriptors, podEnsureProfileName,
+         podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop } from './pod.js';
 import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
 import { buildRoomDescriptor, withMembers, descriptorSigningBytes } from './roomdesc.js';
 import {
@@ -54,7 +55,8 @@ import { createRendering } from './rendering.js';
 import { createView } from './view.js';
 import { createInvite } from './invite.js';
 import { createPush, closedAppPushStatus } from './push.js';
-import { subscribeWebhook } from './notify.js';
+import { subscribeWebhook, watchResource } from './notify.js';
+import { createWebDm } from './webdm.js';
 import { createPairing } from './pairing.js';
 import { createRecovery } from './recovery.js';
 import { createGifTray, saveFavorite, pushAllGifsToPod } from './gifs.js';
@@ -5355,13 +5357,26 @@ import { createIdentityResolver } from './identity.js';
                 // then drive the app's post-auth init (which loads rooms). If not
                 // signed in, show onboarding so the user can sign in with their pod.
                 if (solidSession.info.isLoggedIn) {
+                    // R103: gateway-free DM engine — drops encrypted envelopes into
+                    // the peer's pod on send, and watches our own drop box to receive.
+                    const webDm = createWebDm({
+                        pod: { podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop },
+                        e2e: { cachePeerPub, ratchetDecrypt },
+                        notify: { watchResource },
+                        handleEvent: (ev) => _handleEventAsync(ev),
+                        getSelfWebId: () => selfWebId,
+                        getDisplayName: () => localStorage.getItem('proxion_display_name') || '',
+                    });
                     socket = createPodSocket({
                         getSelfWebId: () => selfWebId,
                         handleEvent: (ev) => _handleEventAsync(ev),
                         pod: { podListOwnedRoomDescriptors },
+                        dm: webDm,
                     });
                     document.querySelector(".dot").className = "dot online";
                     _handleEventAsync({ type: 'registered' });
+                    webDm.start().catch(() => {});   // ensure inbox + drain + subscribe
+                    window.proxionWebDm = webDm;      // for smokes / power users
                 } else {
                     showOnboarding();
                 }
