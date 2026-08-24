@@ -16,7 +16,7 @@
 // Exit 0 = all executed assertions met (Tier 2 skipped counts as pass), non-zero
 // = a step failed. Like the other smokes it needs Chrome and is a local gate.
 
-import { existsSync, mkdtempSync, rmSync, readFileSync, statSync } from 'fs';
+import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync, statSync } from 'fs';
 import { spawn } from 'child_process';
 import { createServer } from 'http';
 import { createServer as netServer, connect as netConnect } from 'net';
@@ -24,6 +24,7 @@ import { tmpdir } from 'os';
 import { join, resolve, extname, normalize } from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
+import { startCss, provisionAccount } from './scripts/css-harness.mjs';
 
 const HERE = resolve(fileURLToPath(new URL('.', import.meta.url)));   // web/
 const CHROME = [
@@ -48,18 +49,6 @@ function freePort() {
     s.on('error', rej);
   });
 }
-function waitForPort(port, timeoutMs) {
-  return new Promise((res, rej) => {
-    const deadline = Date.now() + timeoutMs;
-    const tryOnce = () => {
-      const c = netConnect(port, '127.0.0.1');
-      c.once('connect', () => { c.destroy(); res(); });
-      c.once('error', () => { c.destroy(); Date.now() > deadline ? rej(new Error(`port ${port} idle`)) : setTimeout(tryOnce, 300); });
-    };
-    tryOnce();
-  });
-}
-
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
   '.json': 'application/json', '.jsonld': 'application/ld+json', '.css': 'text/css',
@@ -82,33 +71,12 @@ function staticServer(rootDir, port) {
   return new Promise((r) => srv.listen(port, '127.0.0.1', () => r(srv)));
 }
 
-// Best-effort CSS pod for Tier 2; returns null if it cannot be started.
-async function startCss() {
-  try {
-    const port = await freePort();
-    const seedDir = mkdtempSync(join(tmpdir(), 'proxion-css-'));
-    const proc = spawn('npx', ['-y', '@solid/community-server', '-p', String(port), '-l', 'warn'],
-      { cwd: seedDir, shell: process.platform === 'win32' });
-    let log = '';
-    proc.stdout.on('data', d => { log += d; });
-    proc.stderr.on('data', d => { log += d; });
-    const deadline = Date.now() + 90000;   // npx may download first
-    while (Date.now() < deadline) {
-      if (/listening|started|Running at/i.test(log)) break;
-      if (proc.exitCode !== null) return null;
-      await new Promise(r => setTimeout(r, 500));
-    }
-    await waitForPort(port, 10000).catch(() => null);
-    return { proc, port, url: `http://localhost:${port}/`, seedDir };
-  } catch { return null; }
-}
-
 let browser = null, server = null, css = null, buildDir = null;
 async function cleanup() {
   try { if (browser) await browser.close(); } catch {}
   try { if (server) server.close(); } catch {}
-  try { if (css?.proc) css.proc.kill(); } catch {}
-  for (const d of [buildDir, css?.seedDir]) { try { if (d) rmSync(d, { recursive: true, force: true }); } catch {} }
+  try { if (css) css.stop(); } catch {}
+  try { if (buildDir) rmSync(buildDir, { recursive: true, force: true }); } catch {}
 }
 
 try {
@@ -167,20 +135,41 @@ try {
   if (errors.length) fail('page errors during boot:\n    ' + errors.join('\n    '));
   else ok('web build booted with no page/console errors');
 
-  // ── Tier 2: live pod flow (OIDC login -> create room -> post -> reload) ──
-  step = 'tier2-css';
-  css = await startCss();
+  // Tier 2: real OIDC integration against a live pod. Verifies OUR sign-in code
+  // end to end (hosted client-id doc, mode detection, redirect) lands the browser
+  // on the pod's real OIDC auth endpoint with the correct client_id, redirect_uri,
+  // and PKCE challenge. The CSS login FORM is the pod server's own UI (a JS SPA
+  // needing a browser account cookie), so filling it is a manual check.
+  step = 'tier2-oidc';
+  css = await startCss().catch(() => null);
   if (!css) {
-    console.log('  \u2013 Tier 2 skipped: no CSS pod available (offline / npx blocked).');
+    console.log('  - Tier 2 skipped: no CSS pod available (offline / npx blocked).');
   } else {
-    ok(`CSS pod up at ${css.url}`);
-    // Tier 2 requires a seeded account + automating the CSS OIDC login page,
-    // which is CSS-version specific. It is exercised in the dev/CI environment
-    // that provisions a pod; here we assert the pod is reachable and leave the
-    // interactive OIDC drive to that environment.
-    console.log('  \u2013 Tier 2 interactive OIDC drive runs where a seeded pod is provisioned.');
+    await provisionAccount(css.url, { email: `smoke-${Date.now()}@test.example`, password: 'pw-12345678', label: 'smoke' });
+    // The test pod is http://localhost, so relax the production https-only CSP for
+    // this run, and point the client-id doc at the local serve origin so it is
+    // self-consistent (client_id === its URL, redirect_uri === app origin).
+    const idxPath = join(buildDir, 'index.html');
+    writeFileSync(idxPath, readFileSync(idxPath, 'utf8').replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, ''));
+    writeFileSync(join(buildDir, 'clientid.jsonld'), JSON.stringify({
+      '@context': ['https://www.w3.org/ns/solid/oidc-context.jsonld'],
+      client_id: appUrl + 'clientid.jsonld', client_name: 'Proxion', client_uri: appUrl,
+      redirect_uris: [appUrl], scope: 'openid profile offline_access webid',
+      grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'],
+      token_endpoint_auth_method: 'none',
+    }));
+    await page.goto(appUrl + '?mode=web', { waitUntil: 'networkidle2', timeout: 30000 });
+    await new Promise((r) => setTimeout(r, 700));
+    await page.evaluate((u) => { document.getElementById('web-signin-url').value = u; window.proxionWebLogin(u); }, css.url);
+    await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+    const authUrl = page.url();
+    const okRedirect = authUrl.startsWith(css.url + '/.oidc/auth')
+      && authUrl.includes('client_id=' + encodeURIComponent(appUrl + 'clientid.jsonld'))
+      && authUrl.includes('redirect_uri=' + encodeURIComponent(appUrl))
+      && authUrl.includes('code_challenge=');
+    if (okRedirect) ok('sign-in redirects to the pod OIDC endpoint with the right client-id + PKCE');
+    else fail(`OIDC redirect wrong: ${authUrl.slice(0, 160)}`);
   }
-
   console.log(process.exitCode ? '\nSMOKE FAILED' : '\nSMOKE PASSED');
 } catch (e) {
   step = step || 'run';
