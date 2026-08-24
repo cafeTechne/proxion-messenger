@@ -98,7 +98,7 @@ describe('PodTransport', () => {
         expect(t.supports('history')).toBe(true);
         expect(t.supports('invites')).toBe(true);
         expect(t.supports('dm')).toBe(true);
-        expect(t.supports('presence')).toBe(false);
+        expect(t.supports('presence')).toBe(true);
         expect(t.supports('calls')).toBe(false);
     });
 

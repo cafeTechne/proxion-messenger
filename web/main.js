@@ -21,7 +21,8 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podSoftDeleteLongChatMessage, podSetLongChatSeq,
          reconcileRoomHistory, podWriteRoomDescriptor, podReadRoomDescriptor,
          podListOwnedRoomDescriptors, podEnsureProfileName,
-         podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop } from './pod.js';
+         podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop,
+         podWritePresence, podReadPresence, presenceUrlFor } from './pod.js';
 import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
 import { buildRoomDescriptor, withMembers, descriptorSigningBytes } from './roomdesc.js';
 import {
@@ -57,6 +58,7 @@ import { createInvite } from './invite.js';
 import { createPush, closedAppPushStatus } from './push.js';
 import { subscribeWebhook, watchResource } from './notify.js';
 import { createWebDm, peerPodRootFromWebId } from './webdm.js';
+import { createWebPresence } from './webpresence.js';
 import { createPairing } from './pairing.js';
 import { createRecovery } from './recovery.js';
 import { createGifTray, saveFavorite, pushAllGifsToPod } from './gifs.js';
@@ -3783,6 +3785,7 @@ import { createIdentityResolver } from './identity.js';
                 localDmPeers[webid] = { display_name: name, peer_webid: webid };
                 renderDmSidebar();
                 openLocalDmThread(webid, name, webid);
+                window.proxionWebPresence?.subscribeContact(webid);   // watch their heartbeat
                 document.getElementById("add-peer-modal").style.display = "none";
                 return;
             }
@@ -5401,6 +5404,17 @@ import { createIdentityResolver } from './identity.js';
                     _handleEventAsync({ type: 'registered' });
                     webDm.start().catch(() => {});   // ensure inbox + drain + subscribe
                     window.proxionWebDm = webDm;      // for smokes / power users
+                    // R104: gateway-free presence — publish a heartbeat and watch
+                    // contacts' heartbeats, deriving online/away/offline from freshness.
+                    const webPresence = createWebPresence({
+                        pod: { podWritePresence, podReadPresence, presenceUrlFor },
+                        notify: { watchResource },
+                        handleEvent: (ev) => _handleEventAsync(ev),
+                        getContacts: () => Object.keys(localDmPeers || {}),
+                        peerPodRoot: (webid) => peerPodRootFromWebId(webid),
+                    });
+                    webPresence.start();
+                    window.proxionWebPresence = webPresence;
                 } else {
                     showOnboarding();
                 }

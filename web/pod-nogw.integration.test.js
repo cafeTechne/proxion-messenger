@@ -30,9 +30,11 @@ import {
     podWriteRoomDescriptor, podReadRoomDescriptor,
     podWriteMessageJsonLd, podReadLongChatRecent,
     podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop,
+    podWritePresence, podReadPresence,
 } from './pod.js';
 import { buildRoomDescriptor } from './roomdesc.js';
 import { createWebDm } from './webdm.js';
+import { statusFromHeartbeat } from './webpresence.js';
 
 const LIVE = !!process.env.PROXION_LIVE_POD;
 const uid = (p) => `${p}-${Math.random().toString(36).slice(2, 9)}`;
@@ -135,5 +137,19 @@ describe.skipIf(!LIVE)('gateway-free pod round-trips (live CSS)', () => {
         expect(msg).toBeTruthy();
         expect(msg).toMatchObject({ from_webid: alice.webId, source: 'local_dm', _persistDm: true });
         expect((await podReadDmDrops()).length).toBe(0);   // consumed
+    });
+
+    it('R104: publishes a presence heartbeat a peer reads as online (no gateway)', async () => {
+        asAlice();
+        expect(await podWritePresence('online')).toBe(true);   // Alice publishes, public-read
+
+        asBob();                                               // Bob reads Alice's heartbeat
+        const doc = await podReadPresence(alice.storageRoot);
+        expect(doc).toBeTruthy();
+        expect(doc.status).toBe('online');
+        expect(doc.heartbeat).toBeGreaterThan(0);
+        expect(statusFromHeartbeat(doc, Date.now()).status).toBe('online');
+        // A stale heartbeat decays to offline.
+        expect(statusFromHeartbeat(doc, doc.heartbeat + 10 * 60 * 1000).status).toBe('offline');
     });
 });

@@ -1230,6 +1230,69 @@ export async function podDeleteDmDrop(url) {
     }
 }
 
+// ── Presence (R104): a public-read heartbeat peers poll or subscribe to ───────
+//
+// Without a gateway to fan out presence, each user publishes a small public-read
+// proxion/presence.json ({ status, heartbeat }) refreshed on a timer. Contacts
+// derive online/away/offline from how fresh the heartbeat is (see webpresence.js).
+
+const PRESENCE_PATH = 'proxion/presence.json';
+let _presenceAclWritten = false;
+
+/** The presence resource URL for a pod storage root. */
+export function presenceUrlFor(podRoot) {
+    if (!podRoot) return null;
+    return podRoot.replace(/\/?$/, '/') + PRESENCE_PATH;
+}
+
+/** Publish our presence heartbeat. Writes a public-read ACL once. */
+export async function podWritePresence(status) {
+    const root = podStorageRoot();
+    const webId = solidSession?.info?.webId;
+    if (!root || !webId || !solidSession?.info?.isLoggedIn) return false;
+    const url = root.replace(/\/?$/, '/') + PRESENCE_PATH;
+    try {
+        const res = await solidSession.fetch(url, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ v: 1, status, heartbeat: Date.now() }),
+        });
+        if (!res || !res.ok) return false;
+        if (!_presenceAclWritten) {
+            try {
+                const { url: aclUrl } = await discoverAccessControl(url);
+                await solidSession.fetch(aclUrl, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'text/turtle' },
+                    body: `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n@prefix foaf: <http://xmlns.com/foaf/0.1/>.\n`
+                        + `<#owner> a acl:Authorization; acl:agent <${webId}>; acl:accessTo <${url}>; acl:mode acl:Read, acl:Write, acl:Control.\n`
+                        + `<#public> a acl:Authorization; acl:agentClass foaf:Agent; acl:accessTo <${url}>; acl:mode acl:Read.\n`,
+                });
+                _presenceAclWritten = true;
+            } catch (err) {
+                console.warn('[pod] presence ACL failed:', err);
+            }
+        }
+        return true;
+    } catch (err) {
+        console.warn('[pod] podWritePresence failed:', err);
+        return false;
+    }
+}
+
+/** Read a peer's presence: { status, heartbeat } or null. */
+export async function podReadPresence(peerPodRoot) {
+    const url = presenceUrlFor(peerPodRoot);
+    if (!url || !solidSession?.info?.isLoggedIn) return null;
+    try {
+        const res = await solidSession.fetch(url, { headers: { Accept: 'application/json' } });
+        if (!res || !res.ok) return null;
+        const d = await res.json();
+        if (d && typeof d.status === 'string') return { status: d.status, heartbeat: Number(d.heartbeat) || 0 };
+    } catch { /* peer has no presence / offline */ }
+    return null;
+}
+
 // ── Solid social graph (contact import) ──────────────────────────────────────
 //
 // Reading who a Solid user knows so you can start a conversation with them. Uses
