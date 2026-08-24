@@ -28,7 +28,7 @@ describe('envelopeFromDmPayload', () => {
     });
 });
 
-function harness({ drops = [] } = {}) {
+function harness({ drops = [], myDevice = 'dev-me' } = {}) {
     const events = [];
     const dropped = [];
     const deleted = [];
@@ -46,6 +46,7 @@ function harness({ drops = [] } = {}) {
     const dm = createWebDm({
         pod, e2e, notify, handleEvent: (e) => events.push(e),
         getSelfWebId: () => 'https://me/profile/card#me', getDisplayName: () => 'Me',
+        getMyDeviceId: () => myDevice,
     });
     return { dm, pod, e2e, notify, events, dropped, deleted };
 }
@@ -67,6 +68,43 @@ describe('createWebDm.dropDm', () => {
         const { dm, dropped } = harness();
         expect(await dm.dropDm({ cmd: 'local_dm', message_id: 'm' })).toBe(false);
         expect(dropped).toHaveLength(0);
+    });
+});
+
+describe('createWebDm.dropFanout', () => {
+    it('drops one envelope per recipient/own device to their pods', async () => {
+        const { dm, dropped } = harness();
+        const ok = await dm.dropFanout({
+            cmd: 'send_dm_fanout', message_id: 'm1', fanout: [
+                { to_webid: 'https://bob.example/profile/card#me', to_device_id: 'bob-1', payload: { content: 'CT1', e2e: true } },
+                { to_webid: 'https://me.example/profile/card#me', to_device_id: 'my-2', payload: { content: 'CT2', e2e: true } },
+            ],
+        });
+        expect(ok).toBe(true);
+        expect(dropped).toHaveLength(2);
+        expect(dropped[0]).toMatchObject({ root: 'https://bob.example/' });
+        expect(dropped[0].env).toMatchObject({ kind: 'fanout', message_id: 'm1', to_device_id: 'bob-1', from_webid: 'https://me/profile/card#me' });
+        expect(dropped[1].env.to_device_id).toBe('my-2');
+    });
+});
+
+describe('createWebDm fanout receive', () => {
+    it('claims the fanout copy for this device and dispatches dm_fanout', async () => {
+        const { dm, events, deleted } = harness({ myDevice: 'dev-me', drops: [
+            { url: 'u1', envelope: { kind: 'fanout', from_webid: 'https://bob', message_id: 'm', to_device_id: 'dev-me', payload: { content: 'CT', e2e: true, from_device_id: 'bob-1' } } },
+        ] });
+        await dm.drainOnce();
+        expect(events[0]).toMatchObject({ type: 'dm_fanout', to_device_id: 'dev-me', from_webid: 'https://bob', message_id: 'm' });
+        expect(deleted).toEqual(['u1']);
+    });
+
+    it('leaves a sibling device fanout copy untouched', async () => {
+        const { dm, events, deleted } = harness({ myDevice: 'dev-me', drops: [
+            { url: 'sib', envelope: { kind: 'fanout', from_webid: 'https://bob', message_id: 'm', to_device_id: 'other-device', payload: {} } },
+        ] });
+        await dm.drainOnce();
+        expect(events).toHaveLength(0);
+        expect(deleted).toHaveLength(0);
     });
 });
 

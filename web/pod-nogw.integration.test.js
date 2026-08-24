@@ -140,6 +140,32 @@ describe.skipIf(!LIVE)('gateway-free pod round-trips (live CSS)', () => {
         expect((await podReadDmDrops()).length).toBe(0);   // consumed
     });
 
+    it('R103 multi-device: fanout drops one envelope per device; each device claims its own', async () => {
+        const podFns = { podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop };
+        const e2eStub = { cachePeerPub() {}, ratchetDecrypt: async () => 'x' };
+        asBob();
+        const bobDm = createWebDm({ pod: podFns, e2e: e2eStub, notify: null, handleEvent: () => {}, getSelfWebId: () => bob.webId, getMyDeviceId: () => 'bob-A' });
+        await bobDm.start();
+
+        asAlice();   // Alice fans out to two of Bob's devices
+        const aliceDm = createWebDm({ pod: podFns, e2e: e2eStub, notify: null, handleEvent: () => {}, getSelfWebId: () => alice.webId, getMyDeviceId: () => 'alice-1' });
+        const mid = uid('m');
+        await aliceDm.dropFanout({ message_id: mid, fanout: [
+            { to_webid: bob.webId, to_device_id: 'bob-A', payload: { content: 'ctA', e2e: false } },
+            { to_webid: bob.webId, to_device_id: 'bob-B', payload: { content: 'ctB', e2e: false } },
+        ] });
+
+        asBob();     // device bob-A claims only its own copy, leaving bob-B's
+        const seen = [];
+        const bobA = createWebDm({ pod: podFns, e2e: e2eStub, notify: null, handleEvent: (e) => seen.push(e), getSelfWebId: () => bob.webId, getMyDeviceId: () => 'bob-A' });
+        await bobA.drainOnce();
+        expect(seen.filter((e) => e.type === 'dm_fanout' && e.message_id === mid)).toHaveLength(1);
+        expect(seen[0].to_device_id).toBe('bob-A');
+        const left = await podReadDmDrops();
+        expect(left.some((d) => d.envelope.to_device_id === 'bob-B')).toBe(true);   // sibling copy remains
+        expect(left.some((d) => d.envelope.to_device_id === 'bob-A')).toBe(false);  // ours consumed
+    });
+
     it('R104: publishes a presence heartbeat a peer reads as online (no gateway)', async () => {
         asAlice();
         expect(await podWritePresence('online')).toBe(true);   // Alice publishes, public-read

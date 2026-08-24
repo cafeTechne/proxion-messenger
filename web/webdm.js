@@ -38,7 +38,7 @@ export function envelopeFromDmPayload(payload, selfWebId, displayName = '') {
     };
 }
 
-export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDisplayName }) {
+export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDisplayName, getMyDeviceId }) {
     let _unsub = null;
 
     // Drop an (already-encrypted) DM to the recipient's pod inbox.
@@ -51,9 +51,41 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
         return pod.podDropDm(root, env);
     }
 
+    // Multi-device send: one per-device encrypted entry per recipient device (and
+    // our own other devices). Each entry goes to that WebID's pod inbox, tagged
+    // with to_device_id so the right device claims it (devices share a pod inbox).
+    async function dropFanout(cmd) {
+        const entries = cmd && cmd.fanout;
+        if (!Array.isArray(entries)) return false;
+        let anyOk = false;
+        for (const e of entries) {
+            if (!e || !e.to_webid) continue;
+            const root = peerPodRootFromWebId(e.to_webid);
+            if (!root) continue;
+            const envelope = {
+                v: 1, kind: 'fanout', from_webid: getSelfWebId(),
+                message_id: cmd.message_id, to_device_id: e.to_device_id, payload: e.payload,
+            };
+            if (await pod.podDropDm(root, envelope)) anyOk = true;
+        }
+        return anyOk;
+    }
+
     async function _handleEnvelope(url, env) {
         const from = env && env.from_webid;
         if (!from) return;
+        // Multi-device fanout copy: only the one addressed to THIS device is ours
+        // (devices share a pod inbox). Leave a sibling's copy for that device to
+        // claim. Reuse the app's dm_fanout handler for the per-device decrypt.
+        if (env.kind === 'fanout') {
+            if (getMyDeviceId && env.to_device_id && env.to_device_id !== getMyDeviceId()) return;
+            handleEvent({
+                type: 'dm_fanout', to_device_id: env.to_device_id,
+                from_webid: env.from_webid, message_id: env.message_id, payload: env.payload,
+            });
+            await pod.podDeleteDmDrop(url);
+            return;
+        }
         let content = env.content;
         try {
             if (env.e2e) {
@@ -104,5 +136,5 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
         if (_unsub) { try { _unsub(); } catch { /* ignore */ } _unsub = null; }
     }
 
-    return { dropDm, drainOnce, start, stop };
+    return { dropDm, dropFanout, drainOnce, start, stop };
 }

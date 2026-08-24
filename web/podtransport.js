@@ -75,6 +75,12 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls }) {
                     _echoDm(cmd);
                     break;
                 }
+                case 'send_dm_fanout': {
+                    // Multi-device: one per-device envelope per recipient/own device.
+                    if (dm && dm.dropFanout) await dm.dropFanout(cmd);
+                    _echoDm({ message_id: cmd.message_id });
+                    break;
+                }
                 case 'get_rooms': {
                     const self = getSelfWebId();
                     const descs = self ? await pod.podListOwnedRoomDescriptors(self) : [];

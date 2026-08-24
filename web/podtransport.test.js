@@ -91,6 +91,18 @@ describe('PodSocket', () => {
         expect(events[0].local).toBeUndefined();   // ciphertext echo must not touch the DM preview
     });
 
+    it('routes send_dm_fanout to the DM engine and echoes to clear pending', async () => {
+        const events = [];
+        const dm = { dropDm: vi.fn(), dropFanout: vi.fn(async () => true) };
+        const sock = createPodSocket({
+            getSelfWebId: () => 'https://me', handleEvent: (e) => events.push(e),
+            pod: { podListOwnedRoomDescriptors: vi.fn() }, dm,
+        });
+        await sock._route({ cmd: 'send_dm_fanout', message_id: 'm7', fanout: [{ to_webid: 'https://bob', to_device_id: 'd1', payload: {} }] });
+        expect(dm.dropFanout).toHaveBeenCalledOnce();
+        expect(events[0]).toMatchObject({ type: 'message', message_id: 'm7' });
+    });
+
     it('routes voice signaling to the call engine, emitting no event', async () => {
         const events = [];
         const calls = { sendSignal: vi.fn(async () => true) };

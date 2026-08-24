@@ -5395,6 +5395,7 @@ import { createIdentityResolver } from './identity.js';
                         handleEvent: (ev) => _handleEventAsync(ev),
                         getSelfWebId: () => selfWebId,
                         getDisplayName: () => localStorage.getItem('proxion_display_name') || '',
+                        getMyDeviceId: () => clientDid,
                     });
                     // R105: gateway-free call signaling over the pod call-inbox.
                     const webCalls = createWebCalls({
