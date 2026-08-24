@@ -56,7 +56,7 @@ import { createView } from './view.js';
 import { createInvite } from './invite.js';
 import { createPush, closedAppPushStatus } from './push.js';
 import { subscribeWebhook, watchResource } from './notify.js';
-import { createWebDm } from './webdm.js';
+import { createWebDm, peerPodRootFromWebId } from './webdm.js';
 import { createPairing } from './pairing.js';
 import { createRecovery } from './recovery.js';
 import { createGifTray, saveFavorite, pushAllGifsToPod } from './gifs.js';
@@ -3457,6 +3457,12 @@ import { createIdentityResolver } from './identity.js';
                 if (activeView.type === "local_dm") {
                     const peerWebid = activeView.peerWebid || activeView.id;
                     let sendContent = content;
+                    // Web build: with no gateway to carry the peer's key, discover it
+                    // from their pod now so the FIRST message encrypts (else it would
+                    // fall back to plaintext because isE2EEnabled is still false).
+                    if (transport.mode === 'web' && !isE2EEnabled(peerWebid) && peerWebid?.startsWith('https://')) {
+                        await fetchAndCachePeerPub(peerWebid, peerPodRootFromWebId(peerWebid)).catch(() => {});
+                    }
                     payload = {
                         cmd: "local_dm",
                         target_webid: peerWebid,
@@ -3762,6 +3768,24 @@ import { createIdentityResolver } from './identity.js';
             const errEl = document.getElementById("add-peer-error");
             const submitBtn = document.getElementById("add-peer-submit-btn");
             if (!raw) { errEl.textContent = t('contact.enterAddress'); return; }
+            // Web build: no gateway friend-request handshake. A peer is just a Solid
+            // WebID; discover their pod-published E2E key and open a DM directly.
+            if (transport.mode === 'web') {
+                if (raw.startsWith('http')) {
+                    try { const p = new URL(raw).searchParams.get('from'); if (p) raw = p; } catch (_) {}
+                }
+                if (!raw.startsWith('https://')) { errEl.textContent = t('contact.enterAddress'); return; }
+                const webid = raw;
+                if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = t('contact.lookingUp'); }
+                await fetchAndCachePeerPub(webid, peerPodRootFromWebId(webid)).catch(() => {});
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = t('contact.sendRequest'); }
+                const name = webid.replace(/^https?:\/\//, '').split('/')[0];
+                localDmPeers[webid] = { display_name: name, peer_webid: webid };
+                renderDmSidebar();
+                openLocalDmThread(webid, name, webid);
+                document.getElementById("add-peer-modal").style.display = "none";
+                return;
+            }
             if (!socket || socket.readyState !== WebSocket.OPEN) {
                 errEl.textContent = t('conn.notConnectedGateway'); return;
             }
