@@ -15,6 +15,20 @@ below are grounded in that code, not in the (historically stale) roadmap docs.
 Treat the code as the source of truth and verify before assuming any item is
 open.
 
+## Status
+
+All four phases are implemented on branch `web-phase1` (not yet merged): the
+transport seam and static Pages build (R102), gateway-free DMs over a pod drop
+box (R103), heartbeat presence (R104), and 1:1 call signaling over the pod
+(R105). The web build reports the full feature set. Verification is layered:
+unit tests for every engine, an automated live-CSS integration suite
+(`npm run test:integration`) covering rooms, DM delivery, presence, and call
+signaling against a real pod, and a browser smoke (`npm run smoke:web`) that
+boots the built site with no gateway. The one gap is a two-party browser
+end-to-end (real OIDC + ratchet + media), deferred because it needs OIDC-UI
+automation; the crypto itself is covered by `e2e.test.js` and delivery by the
+live integration suite.
+
 ---
 
 ## Why this is feasible: what already runs in the browser

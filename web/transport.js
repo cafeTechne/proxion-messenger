@@ -23,8 +23,9 @@
 export const FEATURES = ['rooms', 'history', 'invites', 'dm', 'presence', 'calls'];
 
 // Web build capabilities: pod-backed rooms/history/invites (R102), DMs through
-// the pod drop box (R103), and heartbeat presence (R104). Calls arrive in R105.
-const _WEB_ONLY_SUPPORTED = new Set(['rooms', 'history', 'invites', 'dm', 'presence']);
+// the pod drop box (R103), heartbeat presence (R104), and 1:1 call signaling
+// over the pod (R105). The full gateway-free feature set.
+const _WEB_ONLY_SUPPORTED = new Set(['rooms', 'history', 'invites', 'dm', 'presence', 'calls']);
 
 export class NotSupported extends Error {
     constructor(op) {

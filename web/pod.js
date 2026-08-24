@@ -1134,20 +1134,17 @@ export async function podDeleteInboxNotification(url) {
 // pn, sender key + WebID). The pod stores only ciphertext.
 
 const DM_INBOX_PATH = 'proxion/dm-inbox/';
-const MAX_DM_DROPS = 200;
+const CALL_INBOX_PATH = 'proxion/call-inbox/';
+const MAX_DROPS = 200;
 
-/** The recipient's DM drop-box URL, from their pod storage root. */
-export function dmInboxUrlFor(podRoot) {
-    if (!podRoot) return null;
-    return podRoot.replace(/\/?$/, '/') + DM_INBOX_PATH;
-}
+const _dropBoxUrl = (podRoot, path) => (podRoot ? podRoot.replace(/\/?$/, '/') + path : null);
 
-/** Ensure OUR DM drop-box exists and is public-Append (owner read/write/control). */
-export async function podEnsureDmInbox() {
+/** Ensure OUR drop-box at `path` exists and is public-Append (owner full control). */
+async function _ensureDropBox(path, label) {
     const root = podStorageRoot();
     const webId = solidSession?.info?.webId;
     if (!root || !webId || !solidSession?.info?.isLoggedIn) return null;
-    const inboxUrl = root.replace(/\/?$/, '/') + DM_INBOX_PATH;
+    const inboxUrl = root.replace(/\/?$/, '/') + path;
     try {
         const put = await solidSession.fetch(inboxUrl, {
             method: 'PUT',
@@ -1166,69 +1163,92 @@ export async function podEnsureDmInbox() {
                 body: buildInboxAcl(inboxUrl, webId, []),
             });
         } catch (err) {
-            console.warn('[pod] DM inbox ACL failed:', err);
+            console.warn(`[pod] ${label} ACL failed:`, err);
         }
         return inboxUrl;
     } catch (err) {
-        console.warn('[pod] podEnsureDmInbox failed:', err);
+        console.warn(`[pod] ensure ${label} failed:`, err);
         return null;
     }
 }
 
-/** Drop an encrypted DM envelope into a recipient's public-Append DM inbox. */
-export async function podDropDm(recipientPodRoot, envelope) {
-    const inbox = dmInboxUrlFor(recipientPodRoot);
-    if (!inbox || !envelope || !solidSession?.info?.isLoggedIn) return false;
+/** POST a JSON object into a peer's public-Append drop-box at `path`. */
+async function _dropTo(peerPodRoot, path, obj) {
+    const inbox = _dropBoxUrl(peerPodRoot, path);
+    if (!inbox || !obj || !solidSession?.info?.isLoggedIn) return false;
     try {
         const res = await solidSession.fetch(inbox, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(envelope),
+            body: JSON.stringify(obj),
         });
         return !!(res && res.ok);
     } catch (err) {
-        console.warn('[pod] podDropDm failed:', err);
+        console.warn('[pod] drop failed:', err);
         return false;
     }
 }
 
-/** Read our own DM inbox: returns [{ url, envelope }] for each dropped envelope. */
-export async function podReadDmDrops() {
+/** Read our own drop-box at `path`: returns [{ url, item }] for each object. */
+async function _readDropBox(path) {
     const root = podStorageRoot();
     if (!root || !solidSession?.info?.isLoggedIn) return [];
-    const inbox = root.replace(/\/?$/, '/') + DM_INBOX_PATH;
+    const inbox = root.replace(/\/?$/, '/') + path;
     let urls = [];
     try {
         const res = await solidSession.fetch(inbox, { headers: { Accept: 'application/ld+json' } });
         if (!res || !res.ok) return [];
         urls = parseInboxListing(await res.json(), inbox);
     } catch (err) {
-        console.warn('[pod] podReadDmDrops listing failed:', err);
+        console.warn('[pod] drop-box listing failed:', err);
         return [];
     }
-    if (urls.length > MAX_DM_DROPS) urls = urls.slice(0, MAX_DM_DROPS);
+    if (urls.length > MAX_DROPS) urls = urls.slice(0, MAX_DROPS);
     const out = [];
     for (const url of urls) {
         try {
             const r = await solidSession.fetch(url, { headers: { Accept: 'application/json' } });
             if (!r || !r.ok) continue;
-            out.push({ url, envelope: await r.json() });
+            out.push({ url, item: await r.json() });
         } catch { /* skip one unreadable drop */ }
     }
     return out;
 }
 
-/** Delete a consumed DM envelope from our inbox. */
-export async function podDeleteDmDrop(url) {
+/** Delete a consumed drop by URL. */
+async function _deleteDrop(url) {
     if (!url || !solidSession?.info?.isLoggedIn) return false;
     try {
         const res = await solidSession.fetch(url, { method: 'DELETE' });
         return !!(res && (res.ok || res.status === 404));
     } catch (err) {
-        console.warn('[pod] podDeleteDmDrop failed:', err);
+        console.warn('[pod] delete drop failed:', err);
         return false;
     }
 }
+
+// ── DM delivery drop-box (R103) ──
+/** The recipient's DM drop-box URL, from their pod storage root. */
+export function dmInboxUrlFor(podRoot) { return _dropBoxUrl(podRoot, DM_INBOX_PATH); }
+export function podEnsureDmInbox() { return _ensureDropBox(DM_INBOX_PATH, 'DM inbox'); }
+export function podDropDm(recipientPodRoot, envelope) { return _dropTo(recipientPodRoot, DM_INBOX_PATH, envelope); }
+/** Read our DM inbox: returns [{ url, envelope }]. */
+export async function podReadDmDrops() {
+    return (await _readDropBox(DM_INBOX_PATH)).map(({ url, item }) => ({ url, envelope: item }));
+}
+export function podDeleteDmDrop(url) { return _deleteDrop(url); }
+
+// ── Call signaling drop-box (R105) ──
+/** The callee's call-signaling drop-box URL, from their pod storage root. */
+export function callInboxUrlFor(podRoot) { return _dropBoxUrl(podRoot, CALL_INBOX_PATH); }
+export function podEnsureCallInbox() { return _ensureDropBox(CALL_INBOX_PATH, 'call inbox'); }
+/** Drop a WebRTC signaling message (offer/answer/ICE/hangup) into a peer's call inbox. */
+export function podDropSignal(peerPodRoot, signal) { return _dropTo(peerPodRoot, CALL_INBOX_PATH, signal); }
+/** Read our call inbox: returns [{ url, signal }]. */
+export async function podReadSignals() {
+    return (await _readDropBox(CALL_INBOX_PATH)).map(({ url, item }) => ({ url, signal: item }));
+}
+export function podDeleteSignal(url) { return _deleteDrop(url); }
 
 // ── Presence (R104): a public-read heartbeat peers poll or subscribe to ───────
 //

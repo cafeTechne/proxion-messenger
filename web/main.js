@@ -22,7 +22,8 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          reconcileRoomHistory, podWriteRoomDescriptor, podReadRoomDescriptor,
          podListOwnedRoomDescriptors, podEnsureProfileName,
          podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop,
-         podWritePresence, podReadPresence, presenceUrlFor } from './pod.js';
+         podWritePresence, podReadPresence, presenceUrlFor,
+         podEnsureCallInbox, podDropSignal, podReadSignals, podDeleteSignal } from './pod.js';
 import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
 import { buildRoomDescriptor, withMembers, descriptorSigningBytes } from './roomdesc.js';
 import {
@@ -59,6 +60,7 @@ import { createPush, closedAppPushStatus } from './push.js';
 import { subscribeWebhook, watchResource } from './notify.js';
 import { createWebDm, peerPodRootFromWebId } from './webdm.js';
 import { createWebPresence } from './webpresence.js';
+import { createWebCalls } from './webcalls.js';
 import { createPairing } from './pairing.js';
 import { createRecovery } from './recovery.js';
 import { createGifTray, saveFavorite, pushAllGifsToPod } from './gifs.js';
@@ -5394,16 +5396,28 @@ import { createIdentityResolver } from './identity.js';
                         getSelfWebId: () => selfWebId,
                         getDisplayName: () => localStorage.getItem('proxion_display_name') || '',
                     });
+                    // R105: gateway-free call signaling over the pod call-inbox.
+                    const webCalls = createWebCalls({
+                        pod: { podEnsureCallInbox, podDropSignal, podReadSignals, podDeleteSignal },
+                        notify: { watchResource },
+                        handleEvent: (ev) => _handleEventAsync(ev),
+                        getSelfWebId: () => selfWebId,
+                        getDisplayName: () => localStorage.getItem('proxion_display_name') || '',
+                        peerPodRoot: (webid) => peerPodRootFromWebId(webid),
+                    });
                     socket = createPodSocket({
                         getSelfWebId: () => selfWebId,
                         handleEvent: (ev) => _handleEventAsync(ev),
                         pod: { podListOwnedRoomDescriptors },
                         dm: webDm,
+                        calls: webCalls,
                     });
                     document.querySelector(".dot").className = "dot online";
                     _handleEventAsync({ type: 'registered' });
                     webDm.start().catch(() => {});   // ensure inbox + drain + subscribe
+                    webCalls.start().catch(() => {}); // ensure call inbox + drain + subscribe
                     window.proxionWebDm = webDm;      // for smokes / power users
+                    window.proxionWebCalls = webCalls;
                     // R104: gateway-free presence — publish a heartbeat and watch
                     // contacts' heartbeats, deriving online/away/offline from freshness.
                     const webPresence = createWebPresence({

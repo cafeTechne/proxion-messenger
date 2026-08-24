@@ -91,6 +91,20 @@ describe('PodSocket', () => {
         expect(events[0].local).toBeUndefined();   // ciphertext echo must not touch the DM preview
     });
 
+    it('routes voice signaling to the call engine, emitting no event', async () => {
+        const events = [];
+        const calls = { sendSignal: vi.fn(async () => true) };
+        const sock = createPodSocket({
+            getSelfWebId: () => 'https://me', handleEvent: (e) => events.push(e),
+            pod: { podListOwnedRoomDescriptors: vi.fn() }, calls,
+        });
+        for (const c of ['voice_invite', 'voice_answer', 'ice_candidate', 'voice_hangup']) {
+            await sock._route({ cmd: c, target_webid: 'https://bob' });
+        }
+        expect(calls.sendSignal).toHaveBeenCalledTimes(4);
+        expect(events).toEqual([]);   // signaling is dropped to the pod, not echoed
+    });
+
     it('get_dms emits empty dm lists (no gateway DMs in web mode)', async () => {
         const { sock, events } = harness();
         await sock._route({ cmd: 'get_dms' });

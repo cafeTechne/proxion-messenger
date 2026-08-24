@@ -149,18 +149,13 @@ try {
   if (!wsAttempt) ok('no gateway WebSocket was attempted');
   else fail(`web build tried a gateway socket: ${wsAttempt}`);
 
-  const gating = await page.evaluate(() => {
-    const isHidden = (id) => {
-      const el = document.getElementById(id);
-      if (!el) return true;                     // absent counts as hidden
-      const s = getComputedStyle(el);
-      return s.display === 'none' || el.getAttribute('aria-hidden') === 'true';
-    };
-    return { call: isHidden('start-call-btn'), video: isHidden('start-video-call-btn') };
+  const caps = await page.evaluate(() => {
+    const t = window.proxionTransport;
+    return t ? ['rooms', 'history', 'invites', 'dm', 'presence', 'calls'].map((f) => t.supports(f)) : null;
   });
-  // Calls are gated (R105 not done); DMs are supported (R103), so the DM entry is not gated.
-  if (gating.call && gating.video) ok('call controls hidden by gating (DMs enabled)');
-  else fail(`gating did not hide call controls: ${JSON.stringify(gating)}`);
+  // R105: the web build now supports the full feature set (rooms, DMs, presence, calls).
+  if (caps && caps.every(Boolean)) ok('web build reports the full gateway-free feature set');
+  else fail(`unexpected web capabilities: ${JSON.stringify(caps)}`);
 
   const loginPromptShown = await page.evaluate(() => {
     const ob = document.getElementById('onboarding-modal');

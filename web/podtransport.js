@@ -41,7 +41,9 @@ export function roomsFromDescriptors(descs, selfWebId) {
 // Build a PodSocket. Dependencies are injected so this is unit-testable without
 // a browser: getSelfWebId(), handleEvent(event), and a pod facade exposing
 // podListOwnedRoomDescriptors(webId).
-export function createPodSocket({ getSelfWebId, handleEvent, pod, dm }) {
+const _SIGNAL_CMDS = new Set(['voice_invite', 'voice_answer', 'ice_candidate', 'voice_hangup']);
+
+export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls }) {
     // Echo a just-sent DM back so its optimistic render is confirmed (pending
     // cleared) and dedups by message_id. No `local` flag: the ciphertext content
     // must not reach the DM preview; the plaintext optimistic copy already shows.
@@ -59,6 +61,11 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm }) {
 
     async function route(cmd) {
         try {
+            // WebRTC call signaling (R105): drop to the callee's pod call-inbox.
+            if (cmd && _SIGNAL_CMDS.has(cmd.cmd)) {
+                if (calls) await calls.sendSignal(cmd);
+                return;
+            }
             switch (cmd && cmd.cmd) {
                 case 'local_dm':
                 case 'send_dm': {

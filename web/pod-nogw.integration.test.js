@@ -31,6 +31,7 @@ import {
     podWriteMessageJsonLd, podReadLongChatRecent,
     podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop,
     podWritePresence, podReadPresence,
+    podEnsureCallInbox, podDropSignal, podReadSignals, podDeleteSignal,
 } from './pod.js';
 import { buildRoomDescriptor } from './roomdesc.js';
 import { createWebDm } from './webdm.js';
@@ -151,5 +152,22 @@ describe.skipIf(!LIVE)('gateway-free pod round-trips (live CSS)', () => {
         expect(statusFromHeartbeat(doc, Date.now()).status).toBe('online');
         // A stale heartbeat decays to offline.
         expect(statusFromHeartbeat(doc, doc.heartbeat + 10 * 60 * 1000).status).toBe('offline');
+    });
+
+    it('R105: drops a call signal to a peer inbox and reads it back (no gateway)', async () => {
+        asBob();
+        expect(await podEnsureCallInbox()).toBeTruthy();       // Bob exposes his call inbox
+
+        asAlice();                                             // Alice sends an offer signal
+        const offer = { type: 'voice_invite', from_webid: alice.webId, caller_webid: alice.webId, sdp_offer: 'SDP-' + uid('o'), fp_sig: 'SIG' };
+        expect(await podDropSignal(bob.storageRoot, offer)).toBe(true);
+
+        asBob();                                               // Bob receives it from his pod
+        const sigs = await podReadSignals();
+        const got = sigs.find((s) => s.signal && s.signal.sdp_offer === offer.sdp_offer);
+        expect(got).toBeTruthy();
+        expect(got.signal).toMatchObject({ type: 'voice_invite', from_webid: alice.webId, fp_sig: 'SIG' });
+        expect(await podDeleteSignal(got.url)).toBe(true);
+        expect((await podReadSignals()).some((s) => s.url === got.url)).toBe(false);
     });
 });
