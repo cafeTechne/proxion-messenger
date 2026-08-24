@@ -5430,7 +5430,25 @@ import { createIdentityResolver } from './identity.js';
                     webPresence.start();
                     window.proxionWebPresence = webPresence;
                 } else {
-                    showOnboarding();
+                    // Signed out in the browser build: show the pod sign-in, not the
+                    // desktop onboarding wizard (its pod step needs the gateway).
+                    const _wsm = document.getElementById('web-signin-modal');
+                    if (_wsm) {
+                        _wsm.style.display = 'flex';
+                        const _err = document.getElementById('web-signin-error');
+                        const _go = () => {
+                            const url = (document.getElementById('web-signin-url').value || '').trim();
+                            if (!url.startsWith('https://')) { if (_err) _err.textContent = 'Enter your pod provider URL (https://...).'; return; }
+                            if (_err) _err.textContent = '';
+                            Promise.resolve(solidLogin(url)).catch(() => {
+                                if (_err) _err.textContent = 'Could not start sign-in. Check the provider URL.';
+                            });
+                        };
+                        document.getElementById('web-signin-btn').onclick = _go;
+                        document.getElementById('web-signin-url').onkeydown = (e) => { if (e.key === 'Enter') _go(); };
+                    } else {
+                        showOnboarding();
+                    }
                 }
                 // Deterministic sign-in entry for the web build (used by power users
                 // and the acceptance smoke): window.proxionWebLogin(issuer).

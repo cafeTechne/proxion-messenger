@@ -1001,6 +1001,24 @@
       </div>
     </div>
 
+    <!-- Web build sign-in (shown in gateway-less browser mode instead of the wizard) -->
+    <div id="web-signin-modal" role="dialog" aria-modal="true" aria-label="Sign in to Proxion" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1002; align-items:center; justify-content:center;">
+      <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:10px; padding:28px; max-width:420px; width:calc(100vw - 32px); color:var(--text-primary,var(--slate-50));">
+        <h2 style="margin:0 0 8px;">Sign in with your Solid pod</h2>
+        <p style="color:var(--text-secondary); font-size:0.9em; margin:0 0 16px;">
+          Proxion Web keeps your messages in your own Solid pod. Enter your pod provider to sign in.
+        </p>
+        <label for="web-signin-url" style="display:block; font-size:0.85em; color:var(--text-secondary); margin-bottom:4px;">Pod provider</label>
+        <input id="web-signin-url" type="url" value="https://solidcommunity.net" autocomplete="url" style="width:100%; box-sizing:border-box; padding:9px 10px; border-radius:4px; border:1px solid var(--slate-700); background:var(--slate-900); color:var(--text-primary); margin-bottom:6px;">
+        <p id="web-signin-error" style="color:var(--color-danger); font-size:0.82em; min-height:1em; margin:0 0 10px;"></p>
+        <button id="web-signin-btn" style="background:var(--accent); border:none; color:#fff; padding:10px 24px; border-radius:4px; cursor:pointer; font-size:1em; width:100%;">Sign in</button>
+        <p style="margin:14px 0 0; font-size:0.83em; color:var(--text-secondary);">
+          No pod yet? Get one free at
+          <a href="https://solidcommunity.net/.account/login/password/register/" target="_blank" rel="noopener" style="color:var(--accent-text);">solidcommunity.net</a>.
+        </p>
+      </div>
+    </div>
+
     <!-- Onboarding wizard -->
     <div id="onboarding-modal" role="dialog" aria-modal="true" aria-label="Welcome to Proxion" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1001; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.welcomeProxion">
       <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:10px; padding:32px; min-width:380px; max-width:480px; color:var(--text-primary,var(--slate-50));">

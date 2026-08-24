@@ -158,10 +158,10 @@ try {
   else fail(`unexpected web capabilities: ${JSON.stringify(caps)}`);
 
   const loginPromptShown = await page.evaluate(() => {
-    const ob = document.getElementById('onboarding-modal');
-    return !!ob && getComputedStyle(ob).display !== 'none';
+    const el = document.getElementById('web-signin-modal');
+    return !!el && getComputedStyle(el).display !== 'none' && !!document.getElementById('web-signin-btn');
   });
-  if (loginPromptShown) ok('signed-out web build shows the sign-in / onboarding prompt');
+  if (loginPromptShown) ok('signed-out web build shows the pod sign-in prompt');
   else fail('signed-out web build showed no sign-in prompt');
 
   if (errors.length) fail('page errors during boot:\n    ' + errors.join('\n    '));
