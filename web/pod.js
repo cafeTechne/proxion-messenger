@@ -1124,6 +1124,195 @@ export async function podDeleteInboxNotification(url) {
     }
 }
 
+// ── Gateway-free DM delivery (R103) ──────────────────────────────────────────
+//
+// Without a gateway to relay ciphertext, a DM is delivered by dropping the
+// ratchet-encrypted envelope into the recipient's pod. Each user exposes
+// proxion/dm-inbox/ as public-Append (anyone may POST an envelope; only the
+// owner can list, read, and delete). The envelope is opaque to pod.js: the
+// caller builds it from e2e.js output (ciphertext, nonce, ratchet_pub, msg_num,
+// pn, sender key + WebID). The pod stores only ciphertext.
+
+const DM_INBOX_PATH = 'proxion/dm-inbox/';
+const CALL_INBOX_PATH = 'proxion/call-inbox/';
+const MAX_DROPS = 200;
+
+const _dropBoxUrl = (podRoot, path) => (podRoot ? podRoot.replace(/\/?$/, '/') + path : null);
+
+/** Ensure OUR drop-box at `path` exists and is public-Append (owner full control). */
+async function _ensureDropBox(path, label) {
+    const root = podStorageRoot();
+    const webId = solidSession?.info?.webId;
+    if (!root || !webId || !solidSession?.info?.isLoggedIn) return null;
+    const inboxUrl = root.replace(/\/?$/, '/') + path;
+    try {
+        const put = await solidSession.fetch(inboxUrl, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'text/turtle',
+                Link: '<http://www.w3.org/ns/ldp#BasicContainer>; rel="type"',
+            },
+            body: '',
+        });
+        if (!put || !(put.ok || put.status === 409 || put.status === 405)) return null;
+        try {
+            const { url: aclUrl } = await discoverAccessControl(inboxUrl);
+            await solidSession.fetch(aclUrl, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'text/turtle' },
+                body: buildInboxAcl(inboxUrl, webId, []),
+            });
+        } catch (err) {
+            console.warn(`[pod] ${label} ACL failed:`, err);
+        }
+        return inboxUrl;
+    } catch (err) {
+        console.warn(`[pod] ensure ${label} failed:`, err);
+        return null;
+    }
+}
+
+/** POST a JSON object into a peer's public-Append drop-box at `path`. */
+async function _dropTo(peerPodRoot, path, obj) {
+    const inbox = _dropBoxUrl(peerPodRoot, path);
+    if (!inbox || !obj || !solidSession?.info?.isLoggedIn) return false;
+    try {
+        const res = await solidSession.fetch(inbox, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(obj),
+        });
+        return !!(res && res.ok);
+    } catch (err) {
+        console.warn('[pod] drop failed:', err);
+        return false;
+    }
+}
+
+/** Read our own drop-box at `path`: returns [{ url, item }] for each object. */
+async function _readDropBox(path) {
+    const root = podStorageRoot();
+    if (!root || !solidSession?.info?.isLoggedIn) return [];
+    const inbox = root.replace(/\/?$/, '/') + path;
+    let urls = [];
+    try {
+        const res = await solidSession.fetch(inbox, { headers: { Accept: 'application/ld+json' } });
+        if (!res || !res.ok) return [];
+        urls = parseInboxListing(await res.json(), inbox);
+    } catch (err) {
+        console.warn('[pod] drop-box listing failed:', err);
+        return [];
+    }
+    if (urls.length > MAX_DROPS) urls = urls.slice(0, MAX_DROPS);
+    const out = [];
+    for (const url of urls) {
+        try {
+            const r = await solidSession.fetch(url, { headers: { Accept: 'application/json' } });
+            if (!r || !r.ok) continue;
+            out.push({ url, item: await r.json() });
+        } catch { /* skip one unreadable drop */ }
+    }
+    return out;
+}
+
+/** Delete a consumed drop by URL. */
+async function _deleteDrop(url) {
+    if (!url || !solidSession?.info?.isLoggedIn) return false;
+    try {
+        const res = await solidSession.fetch(url, { method: 'DELETE' });
+        return !!(res && (res.ok || res.status === 404));
+    } catch (err) {
+        console.warn('[pod] delete drop failed:', err);
+        return false;
+    }
+}
+
+// ── DM delivery drop-box (R103) ──
+/** The recipient's DM drop-box URL, from their pod storage root. */
+export function dmInboxUrlFor(podRoot) { return _dropBoxUrl(podRoot, DM_INBOX_PATH); }
+export function podEnsureDmInbox() { return _ensureDropBox(DM_INBOX_PATH, 'DM inbox'); }
+export function podDropDm(recipientPodRoot, envelope) { return _dropTo(recipientPodRoot, DM_INBOX_PATH, envelope); }
+/** Read our DM inbox: returns [{ url, envelope }]. */
+export async function podReadDmDrops() {
+    return (await _readDropBox(DM_INBOX_PATH)).map(({ url, item }) => ({ url, envelope: item }));
+}
+export function podDeleteDmDrop(url) { return _deleteDrop(url); }
+
+// ── Call signaling drop-box (R105) ──
+/** The callee's call-signaling drop-box URL, from their pod storage root. */
+export function callInboxUrlFor(podRoot) { return _dropBoxUrl(podRoot, CALL_INBOX_PATH); }
+export function podEnsureCallInbox() { return _ensureDropBox(CALL_INBOX_PATH, 'call inbox'); }
+/** Drop a WebRTC signaling message (offer/answer/ICE/hangup) into a peer's call inbox. */
+export function podDropSignal(peerPodRoot, signal) { return _dropTo(peerPodRoot, CALL_INBOX_PATH, signal); }
+/** Read our call inbox: returns [{ url, signal }]. */
+export async function podReadSignals() {
+    return (await _readDropBox(CALL_INBOX_PATH)).map(({ url, item }) => ({ url, signal: item }));
+}
+export function podDeleteSignal(url) { return _deleteDrop(url); }
+
+// ── Presence (R104): a public-read heartbeat peers poll or subscribe to ───────
+//
+// Without a gateway to fan out presence, each user publishes a small public-read
+// proxion/presence.json ({ status, heartbeat }) refreshed on a timer. Contacts
+// derive online/away/offline from how fresh the heartbeat is (see webpresence.js).
+
+const PRESENCE_PATH = 'proxion/presence.json';
+let _presenceAclWritten = false;
+
+/** The presence resource URL for a pod storage root. */
+export function presenceUrlFor(podRoot) {
+    if (!podRoot) return null;
+    return podRoot.replace(/\/?$/, '/') + PRESENCE_PATH;
+}
+
+/** Publish our presence heartbeat. Writes a public-read ACL once. */
+export async function podWritePresence(status) {
+    const root = podStorageRoot();
+    const webId = solidSession?.info?.webId;
+    if (!root || !webId || !solidSession?.info?.isLoggedIn) return false;
+    const url = root.replace(/\/?$/, '/') + PRESENCE_PATH;
+    try {
+        const res = await solidSession.fetch(url, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ v: 1, status, heartbeat: Date.now() }),
+        });
+        if (!res || !res.ok) return false;
+        if (!_presenceAclWritten) {
+            try {
+                const { url: aclUrl } = await discoverAccessControl(url);
+                await solidSession.fetch(aclUrl, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'text/turtle' },
+                    body: `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n@prefix foaf: <http://xmlns.com/foaf/0.1/>.\n`
+                        + `<#owner> a acl:Authorization; acl:agent <${webId}>; acl:accessTo <${url}>; acl:mode acl:Read, acl:Write, acl:Control.\n`
+                        + `<#public> a acl:Authorization; acl:agentClass foaf:Agent; acl:accessTo <${url}>; acl:mode acl:Read.\n`,
+                });
+                _presenceAclWritten = true;
+            } catch (err) {
+                console.warn('[pod] presence ACL failed:', err);
+            }
+        }
+        return true;
+    } catch (err) {
+        console.warn('[pod] podWritePresence failed:', err);
+        return false;
+    }
+}
+
+/** Read a peer's presence: { status, heartbeat } or null. */
+export async function podReadPresence(peerPodRoot) {
+    const url = presenceUrlFor(peerPodRoot);
+    if (!url || !solidSession?.info?.isLoggedIn) return null;
+    try {
+        const res = await solidSession.fetch(url, { headers: { Accept: 'application/json' } });
+        if (!res || !res.ok) return null;
+        const d = await res.json();
+        if (d && typeof d.status === 'string') return { status: d.status, heartbeat: Number(d.heartbeat) || 0 };
+    } catch { /* peer has no presence / offline */ }
+    return null;
+}
+
 // ── Solid social graph (contact import) ──────────────────────────────────────
 //
 // Reading who a Solid user knows so you can start a conversation with them. Uses

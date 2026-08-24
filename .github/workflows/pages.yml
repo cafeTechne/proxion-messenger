@@ -1,17 +1,20 @@
-name: Deploy landing page
+name: Deploy landing page and web app
 
-# Publishes landing/ to GitHub Pages — the public "install off GitHub" front door.
-# The page reads the latest GitHub Release via the public API at view time, so it
-# stays current without a rebuild on every release.
+# Publishes two things to GitHub Pages:
+#   /      -> landing/  (the public "install off GitHub" front door; reads the
+#             latest Release via the public API at view time, no rebuild needed)
+#   /app/  -> web/      (Proxion Web: the gateway-less browser build, assembled
+#             by scripts/build-web.mjs which injects web mode + a CSP)
 #
-# One-time setup (done): Pages source = "GitHub Actions"; REPO const set in
-# landing/index.html. Live at https://cafetechne.github.io/proxion-messenger/
+# One-time setup (done): Pages source = "GitHub Actions". Live at
+# https://cafetechne.github.io/proxion-messenger/ (landing) and /app/ (web app).
 
 on:
   push:
     branches: [main]
     paths:
       - "landing/**"
+      - "web/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -32,9 +35,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Assemble site (landing at root, web app under /app)
+        run: |
+          mkdir -p _site
+          cp -r landing/. _site/
+          node web/scripts/build-web.mjs web _site/app
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: landing
+          path: _site
       - id: deployment
         uses: actions/deploy-pages@v4

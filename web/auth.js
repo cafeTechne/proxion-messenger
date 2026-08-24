@@ -1,4 +1,5 @@
 import solidAuthn from './solid-authn.bundle.js';
+import { detectMode } from './transport.js';
 const { Session } = solidAuthn;
 
 export const solidSession = new Session({ restorePreviousSession: true });
@@ -32,11 +33,18 @@ export async function initSolidAuth() {
 }
 
 export async function solidLogin(issuer) {
-    await solidSession.login({
+    const opts = {
         oidcIssuer: issuer,
         redirectUrl: window.location.origin + window.location.pathname,
         clientName: 'Proxion',
-    });
+    };
+    // Web build (R102): present a hosted Solid-OIDC Client Identifier Document so
+    // we have a stable client identity and the redirect returns to this static
+    // origin. Gateway/desktop keeps dynamic registration via clientName.
+    if (detectMode() === 'web') {
+        opts.clientId = new URL('clientid.jsonld', window.location.href).href;
+    }
+    await solidSession.login(opts);
 }
 
 export async function solidLogout() {

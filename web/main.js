@@ -20,7 +20,10 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podReadLongChatRecent, podEditLongChatMessage,
          podSoftDeleteLongChatMessage, podSetLongChatSeq,
          reconcileRoomHistory, podWriteRoomDescriptor, podReadRoomDescriptor,
-         podListOwnedRoomDescriptors, podEnsureProfileName } from './pod.js';
+         podListOwnedRoomDescriptors, podEnsureProfileName,
+         podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop,
+         podWritePresence, podReadPresence, presenceUrlFor,
+         podEnsureCallInbox, podDropSignal, podReadSignals, podDeleteSignal } from './pod.js';
 import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
 import { buildRoomDescriptor, withMembers, descriptorSigningBytes } from './roomdesc.js';
 import {
@@ -48,11 +51,16 @@ import { createFriendRequests } from './friend-requests.js';
 import { createE2EStatus } from './e2e-status.js';
 import { createStatusBanners } from './status-banners.js';
 import { createConnection } from './connection.js';
+import { createTransport, detectMode, applyTransportGating } from './transport.js';
+import { createPodSocket } from './podtransport.js';
 import { createRendering } from './rendering.js';
 import { createView } from './view.js';
 import { createInvite } from './invite.js';
 import { createPush, closedAppPushStatus } from './push.js';
-import { subscribeWebhook } from './notify.js';
+import { subscribeWebhook, watchResource } from './notify.js';
+import { createWebDm, peerPodRootFromWebId } from './webdm.js';
+import { createWebPresence } from './webpresence.js';
+import { createWebCalls } from './webcalls.js';
 import { createPairing } from './pairing.js';
 import { createRecovery } from './recovery.js';
 import { createGifTray, saveFavorite, pushAllGifsToPod } from './gifs.js';
@@ -735,6 +743,20 @@ import { createIdentityResolver } from './identity.js';
             getClientDid: () => clientDid,
             generateOrLoadIdentity, handleEventAsync: _handleEventAsync,
         });
+        // Transport seam (R102): the desktop/self-host build talks to a gateway
+        // (GatewayTransport, a faithful wrapper of the connection above); the
+        // gateway-less browser build (PROXION_MODE=web) talks to the pod directly.
+        // Defaults to gateway, so this changes nothing for the desktop app. UI
+        // gates realtime-only features on transport.supports(...) (see below).
+        const proxionMode = detectMode();
+        const transport = createTransport({
+            mode: proxionMode,
+            connection: { socketSendOrQueue, forceReconnect, connect, flushPending },
+        });
+        window.proxionTransport = transport;   // consulted by UI gating + smokes
+        // Hide realtime-only controls the current transport cannot back (web
+        // build: DM and call entry points). No-op in gateway mode.
+        applyTransportGating(transport);
         // View switching + sidebar list building (core slice 3). Reassigns the
         // central activeView/messageMap/allMessages/currentRoomMembers via setters;
         // mutate-in-place host maps injected by reference; socket resolved fresh per
@@ -3439,6 +3461,12 @@ import { createIdentityResolver } from './identity.js';
                 if (activeView.type === "local_dm") {
                     const peerWebid = activeView.peerWebid || activeView.id;
                     let sendContent = content;
+                    // Web build: with no gateway to carry the peer's key, discover it
+                    // from their pod now so the FIRST message encrypts (else it would
+                    // fall back to plaintext because isE2EEnabled is still false).
+                    if (transport.mode === 'web' && !isE2EEnabled(peerWebid) && peerWebid?.startsWith('https://')) {
+                        await fetchAndCachePeerPub(peerWebid, peerPodRootFromWebId(peerWebid)).catch(() => {});
+                    }
                     payload = {
                         cmd: "local_dm",
                         target_webid: peerWebid,
@@ -3744,6 +3772,25 @@ import { createIdentityResolver } from './identity.js';
             const errEl = document.getElementById("add-peer-error");
             const submitBtn = document.getElementById("add-peer-submit-btn");
             if (!raw) { errEl.textContent = t('contact.enterAddress'); return; }
+            // Web build: no gateway friend-request handshake. A peer is just a Solid
+            // WebID; discover their pod-published E2E key and open a DM directly.
+            if (transport.mode === 'web') {
+                if (raw.startsWith('http')) {
+                    try { const p = new URL(raw).searchParams.get('from'); if (p) raw = p; } catch (_) {}
+                }
+                if (!raw.startsWith('https://')) { errEl.textContent = t('contact.enterAddress'); return; }
+                const webid = raw;
+                if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = t('contact.lookingUp'); }
+                await fetchAndCachePeerPub(webid, peerPodRootFromWebId(webid)).catch(() => {});
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = t('contact.sendRequest'); }
+                const name = webid.replace(/^https?:\/\//, '').split('/')[0];
+                localDmPeers[webid] = { display_name: name, peer_webid: webid };
+                renderDmSidebar();
+                openLocalDmThread(webid, name, webid);
+                window.proxionWebPresence?.subscribeContact(webid);   // watch their heartbeat
+                document.getElementById("add-peer-modal").style.display = "none";
+                return;
+            }
             if (!socket || socket.readyState !== WebSocket.OPEN) {
                 errEl.textContent = t('conn.notConnectedGateway'); return;
             }
@@ -5333,5 +5380,63 @@ import { createIdentityResolver } from './identity.js';
                 }
             });
 
-            connect();
+            if (transport.mode === 'web') {
+                // Gateway-less browser build: no WebSocket. If signed in to a pod,
+                // install a PodSocket that backs the command protocol with pod.js,
+                // then drive the app's post-auth init (which loads rooms). If not
+                // signed in, show onboarding so the user can sign in with their pod.
+                if (solidSession.info.isLoggedIn) {
+                    // R103: gateway-free DM engine — drops encrypted envelopes into
+                    // the peer's pod on send, and watches our own drop box to receive.
+                    const webDm = createWebDm({
+                        pod: { podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop },
+                        e2e: { cachePeerPub, ratchetDecrypt },
+                        notify: { watchResource },
+                        handleEvent: (ev) => _handleEventAsync(ev),
+                        getSelfWebId: () => selfWebId,
+                        getDisplayName: () => localStorage.getItem('proxion_display_name') || '',
+                    });
+                    // R105: gateway-free call signaling over the pod call-inbox.
+                    const webCalls = createWebCalls({
+                        pod: { podEnsureCallInbox, podDropSignal, podReadSignals, podDeleteSignal },
+                        notify: { watchResource },
+                        handleEvent: (ev) => _handleEventAsync(ev),
+                        getSelfWebId: () => selfWebId,
+                        getDisplayName: () => localStorage.getItem('proxion_display_name') || '',
+                        peerPodRoot: (webid) => peerPodRootFromWebId(webid),
+                    });
+                    socket = createPodSocket({
+                        getSelfWebId: () => selfWebId,
+                        handleEvent: (ev) => _handleEventAsync(ev),
+                        pod: { podListOwnedRoomDescriptors },
+                        dm: webDm,
+                        calls: webCalls,
+                    });
+                    document.querySelector(".dot").className = "dot online";
+                    _handleEventAsync({ type: 'registered' });
+                    webDm.start().catch(() => {});   // ensure inbox + drain + subscribe
+                    webCalls.start().catch(() => {}); // ensure call inbox + drain + subscribe
+                    window.proxionWebDm = webDm;      // for smokes / power users
+                    window.proxionWebCalls = webCalls;
+                    // R104: gateway-free presence — publish a heartbeat and watch
+                    // contacts' heartbeats, deriving online/away/offline from freshness.
+                    const webPresence = createWebPresence({
+                        pod: { podWritePresence, podReadPresence, presenceUrlFor },
+                        notify: { watchResource },
+                        handleEvent: (ev) => _handleEventAsync(ev),
+                        getContacts: () => Object.keys(localDmPeers || {}),
+                        peerPodRoot: (webid) => peerPodRootFromWebId(webid),
+                    });
+                    webPresence.start();
+                    window.proxionWebPresence = webPresence;
+                } else {
+                    showOnboarding();
+                }
+                // Deterministic sign-in entry for the web build (used by power users
+                // and the acceptance smoke): window.proxionWebLogin(issuer).
+                window.proxionWebLogin = (issuer) => solidLogin(issuer);
+            } else {
+                // Gateway mode: open the WS.
+                transport.connect();
+            }
         })();
