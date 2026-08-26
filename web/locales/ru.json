@@ -602,5 +602,10 @@
   "web.signin.badUrl": "Введите URL вашего провайдера пода (https://...).",
   "web.signin.failed": "Не удалось начать вход. Проверьте URL провайдера.",
   "presence.lastSeen": "был(а) в сети {time}",
-  "settings.webidShareHint": "Поделитесь этим WebID, чтобы вам могли писать."
+  "settings.webidShareHint": "Поделитесь этим WebID, чтобы вам могли писать.",
+  "join.approvePrompt": "{who} хочет присоединиться к {room}. Впустить?",
+  "join.approved": "{who} одобрен",
+  "join.joined": "Вы присоединились к {room}",
+  "join.requestSent": "Запрос на вступление отправлен. Ожидание одобрения владельца.",
+  "join.invalidInvite": "Это не похоже на действительное приглашение в комнату."
 }

@@ -611,5 +611,10 @@
   "web.signin.badUrl": "أدخل عنوان URL لمزوّد الحافظة (https://...).",
   "web.signin.failed": "تعذّر بدء تسجيل الدخول. تحقّق من عنوان المزوّد.",
   "presence.lastSeen": "آخر ظهور {time}",
-  "settings.webidShareHint": "شارك معرّف WebID هذا حتى يتمكن الآخرون من مراسلتك."
+  "settings.webidShareHint": "شارك معرّف WebID هذا حتى يتمكن الآخرون من مراسلتك.",
+  "join.approvePrompt": "يريد {who} الانضمام إلى {room}. هل تسمح له؟",
+  "join.approved": "تمت الموافقة على {who}",
+  "join.joined": "انضممت إلى {room}",
+  "join.requestSent": "تم إرسال طلب الانضمام. في انتظار موافقة المالك.",
+  "join.invalidInvite": "لا يبدو أن هذه دعوة غرفة صالحة."
 }

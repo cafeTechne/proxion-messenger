@@ -43,7 +43,9 @@ export function roomsFromDescriptors(descs, selfWebId) {
 // podListOwnedRoomDescriptors(webId).
 const _SIGNAL_CMDS = new Set(['voice_invite', 'voice_answer', 'ice_candidate', 'voice_hangup']);
 
-export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls }) {
+import { parseInvite } from './webjoin.js';
+
+export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, join, makeRoomInvite }) {
     // Echo a just-sent DM back so its optimistic render is confirmed (pending
     // cleared) and dedups by message_id. No `local` flag: the ciphertext content
     // must not reach the DM preview; the plaintext optimistic copy already shows.
@@ -95,13 +97,14 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls }) {
                 case 'chat_room_create': {
                     const roomId = genRoomId();
                     // The room_created handler writes the descriptor, ACL, members,
-                    // and room index to the pod and opens the room.
+                    // and room index to the pod and opens the room. The invite link
+                    // (room id + our WebID) lets someone request to join (R106).
                     handleEvent({
                         type: 'room_created',
                         room_id: roomId,
                         name: cmd.name,
                         code: roomId,
-                        invite_url: '',
+                        invite_url: makeRoomInvite ? makeRoomInvite(roomId) : '',
                     });
                     break;
                 }
@@ -119,6 +122,14 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls }) {
                         timestamp: new Date().toISOString(),
                         local: true,
                     });
+                    break;
+                }
+                case 'join_room': {
+                    // The invite code is a web invite (room id + owner WebID).
+                    // Drop a join request into the owner's pod; approval arrives async.
+                    const inv = join && cmd.code ? parseInvite(cmd.code) : null;
+                    if (inv) { await join.requestJoin(inv.roomId, inv.ownerWebId); handleEvent({ type: 'join_request_sent', room_id: inv.roomId }); }
+                    else handleEvent({ type: 'join_invalid_invite' });
                     break;
                 }
                 case 'get_dms':

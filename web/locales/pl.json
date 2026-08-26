@@ -602,5 +602,10 @@
   "web.signin.badUrl": "Podaj adres URL swojego dostawcy poda (https://...).",
   "web.signin.failed": "Nie udało się rozpocząć logowania. Sprawdź adres URL dostawcy.",
   "presence.lastSeen": "ostatnio widziany(a) {time}",
-  "settings.webidShareHint": "Udostępnij ten WebID, aby inni mogli do Ciebie pisać."
+  "settings.webidShareHint": "Udostępnij ten WebID, aby inni mogli do Ciebie pisać.",
+  "join.approvePrompt": "{who} chce dołączyć do {room}. Wpuścić?",
+  "join.approved": "Zatwierdzono {who}",
+  "join.joined": "Dołączono do {room}",
+  "join.requestSent": "Prośba o dołączenie wysłana. Oczekiwanie na zgodę właściciela.",
+  "join.invalidInvite": "To nie wygląda na prawidłowe zaproszenie do pokoju."
 }

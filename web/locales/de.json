@@ -598,5 +598,10 @@
   "web.signin.badUrl": "Gib die URL deines Pod-Anbieters ein (https://...).",
   "web.signin.failed": "Anmeldung konnte nicht gestartet werden. Prüfe die Anbieter-URL.",
   "presence.lastSeen": "zuletzt gesehen {time}",
-  "settings.webidShareHint": "Teile diese WebID, damit dir andere schreiben können."
+  "settings.webidShareHint": "Teile diese WebID, damit dir andere schreiben können.",
+  "join.approvePrompt": "{who} möchte {room} beitreten. Zulassen?",
+  "join.approved": "{who} zugelassen",
+  "join.joined": "{room} beigetreten",
+  "join.requestSent": "Beitrittsanfrage gesendet. Warte auf die Freigabe des Eigentümers.",
+  "join.invalidInvite": "Das sieht nicht nach einer gültigen Raum-Einladung aus."
 }

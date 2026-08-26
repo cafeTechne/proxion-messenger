@@ -598,5 +598,10 @@
   "web.signin.badUrl": "Nhập URL nhà cung cấp pod của bạn (https://...).",
   "web.signin.failed": "Không thể bắt đầu đăng nhập. Hãy kiểm tra URL nhà cung cấp.",
   "presence.lastSeen": "xem lần cuối {time}",
-  "settings.webidShareHint": "Chia sẻ WebID này để mọi người có thể nhắn tin cho bạn."
+  "settings.webidShareHint": "Chia sẻ WebID này để mọi người có thể nhắn tin cho bạn.",
+  "join.approvePrompt": "{who} muốn tham gia {room}. Cho vào chứ?",
+  "join.approved": "Đã chấp nhận {who}",
+  "join.joined": "Đã tham gia {room}",
+  "join.requestSent": "Đã gửi yêu cầu tham gia. Đang chờ chủ phòng phê duyệt.",
+  "join.invalidInvite": "Đây không giống một lời mời phòng hợp lệ."
 }

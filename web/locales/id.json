@@ -598,5 +598,10 @@
   "web.signin.badUrl": "Masukkan URL penyedia pod Anda (https://...).",
   "web.signin.failed": "Tidak dapat memulai proses masuk. Periksa URL penyedia.",
   "presence.lastSeen": "terakhir dilihat {time}",
-  "settings.webidShareHint": "Bagikan WebID ini agar orang bisa mengirimi Anda pesan."
+  "settings.webidShareHint": "Bagikan WebID ini agar orang bisa mengirimi Anda pesan.",
+  "join.approvePrompt": "{who} ingin bergabung ke {room}. Izinkan?",
+  "join.approved": "{who} disetujui",
+  "join.joined": "Bergabung ke {room}",
+  "join.requestSent": "Permintaan bergabung terkirim. Menunggu persetujuan pemilik.",
+  "join.invalidInvite": "Itu sepertinya bukan undangan ruang yang valid."
 }

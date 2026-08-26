@@ -598,5 +598,10 @@
   "web.signin.badUrl": "Saisis l'URL de ton fournisseur de pod (https://...).",
   "web.signin.failed": "Impossible de démarrer la connexion. Vérifie l'URL du fournisseur.",
   "presence.lastSeen": "vu pour la dernière fois {time}",
-  "settings.webidShareHint": "Partage ce WebID pour que les gens puissent t'écrire."
+  "settings.webidShareHint": "Partage ce WebID pour que les gens puissent t'écrire.",
+  "join.approvePrompt": "{who} veut rejoindre {room}. Autoriser ?",
+  "join.approved": "{who} autorisé",
+  "join.joined": "Vous avez rejoint {room}",
+  "join.requestSent": "Demande envoyée. En attente de l'approbation du propriétaire.",
+  "join.invalidInvite": "Cela ne ressemble pas à une invitation de salon valide."
 }

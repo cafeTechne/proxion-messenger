@@ -598,5 +598,10 @@
   "web.signin.badUrl": "Pod sağlayıcının URL adresini gir (https://...).",
   "web.signin.failed": "Oturum açma başlatılamadı. Sağlayıcı URL adresini denetle.",
   "presence.lastSeen": "son görülme {time}",
-  "settings.webidShareHint": "Bu WebID'yi paylaş ki sana mesaj gönderebilsinler."
+  "settings.webidShareHint": "Bu WebID'yi paylaş ki sana mesaj gönderebilsinler.",
+  "join.approvePrompt": "{who}, {room} odasına katılmak istiyor. İzin verilsin mi?",
+  "join.approved": "{who} onaylandı",
+  "join.joined": "{room} odasına katıldın",
+  "join.requestSent": "Katılma isteği gönderildi. Sahibinin onayı bekleniyor.",
+  "join.invalidInvite": "Bu geçerli bir oda daveti gibi görünmüyor."
 }

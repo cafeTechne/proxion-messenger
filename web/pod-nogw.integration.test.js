@@ -33,8 +33,10 @@ import {
     podWritePresence, podReadPresence,
     podEnsureCallInbox, podDropSignal, podReadSignals, podDeleteSignal,
     podEnsureJoinInbox, podDropJoin, podReadJoins, podDeleteJoin,
+    podGrantChatParticipants, podWriteChatMessageAt, podReadChatRecentAt,
 } from './pod.js';
 import { buildRoomDescriptor } from './roomdesc.js';
+import { chatRootUrl } from './longchat.js';
 import { createWebDm } from './webdm.js';
 import { statusFromHeartbeat } from './webpresence.js';
 import { createWebJoin } from './webjoin.js';
@@ -208,6 +210,25 @@ describe.skipIf(!LIVE)('gateway-free pod round-trips (live CSS)', () => {
         expect(appr).toBeTruthy();
         expect(appr.owner_webid).toBe(alice.webId);
         expect(appr.owner_pod_root).toBe(alice.storageRoot);       // so Bob knows where the room lives
+    });
+
+    it('R106: after approval a joiner can read AND post to the owner room (no gateway)', async () => {
+        asAlice();
+        const roomId = uid('room');
+        const chat = chatRootUrl(alice.storageRoot, roomId);
+        // Owner seeds the room (creating the chat container) and posts.
+        expect(await podWriteChatMessageAt(chat, uid('m'), { content: 'from alice', from_webid: alice.webId, timestamp: new Date().toISOString() })).not.toBe(false);
+        // Owner grants the joiner read+append on the chat container.
+        await podGrantChatParticipants(chat, alice.webId, [bob.webId]);
+
+        asBob();
+        const bobsRead = await podReadChatRecentAt(chat);          // joiner can read
+        expect(bobsRead.some((m) => m.content === 'from alice')).toBe(true);
+        expect(await podWriteChatMessageAt(chat, uid('m'), { content: 'from bob', from_webid: bob.webId, timestamp: new Date().toISOString() })).not.toBe(false);   // joiner can post
+
+        asAlice();
+        const alicesRead = await podReadChatRecentAt(chat);        // owner sees the joiner's message
+        expect(alicesRead.some((m) => m.content === 'from bob')).toBe(true);
     });
 
     it('R104: publishes a presence heartbeat a peer reads as online (no gateway)', async () => {

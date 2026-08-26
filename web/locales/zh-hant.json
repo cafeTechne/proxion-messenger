@@ -598,5 +598,10 @@
   "web.signin.badUrl": "請輸入你的 pod 供應商網址 (https://...)。",
   "web.signin.failed": "無法開始登入。請檢查供應商網址。",
   "presence.lastSeen": "最後上線 {time}",
-  "settings.webidShareHint": "分享此 WebID，別人就能給你發訊息。"
+  "settings.webidShareHint": "分享此 WebID，別人就能給你發訊息。",
+  "join.approvePrompt": "{who} 想加入 {room}。允許嗎？",
+  "join.approved": "已批准 {who}",
+  "join.joined": "已加入 {room}",
+  "join.requestSent": "加入請求已送出。等待房主批准。",
+  "join.invalidInvite": "這看起來不是有效的房間邀請。"
 }

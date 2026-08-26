@@ -598,5 +598,10 @@
   "web.signin.badUrl": "Inserisci l'URL del tuo provider di pod (https://...).",
   "web.signin.failed": "Impossibile avviare l'accesso. Controlla l'URL del provider.",
   "presence.lastSeen": "visto l'ultima volta {time}",
-  "settings.webidShareHint": "Condividi questo WebID così possono scriverti."
+  "settings.webidShareHint": "Condividi questo WebID così possono scriverti.",
+  "join.approvePrompt": "{who} vuole entrare in {room}. Far entrare?",
+  "join.approved": "{who} approvato",
+  "join.joined": "Sei entrato in {room}",
+  "join.requestSent": "Richiesta inviata. In attesa dell'approvazione del proprietario.",
+  "join.invalidInvite": "Questo non sembra un invito a una stanza valido."
 }

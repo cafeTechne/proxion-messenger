@@ -598,5 +598,10 @@
   "web.signin.badUrl": "ポッドプロバイダーの URL を入力してください (https://...)。",
   "web.signin.failed": "サインインを開始できませんでした。プロバイダーの URL を確認してください。",
   "presence.lastSeen": "最終オンライン {time}",
-  "settings.webidShareHint": "この WebID を共有すると、他の人があなたにメッセージを送れます。"
+  "settings.webidShareHint": "この WebID を共有すると、他の人があなたにメッセージを送れます。",
+  "join.approvePrompt": "{who} が {room} への参加を希望しています。許可しますか？",
+  "join.approved": "{who} を承認しました",
+  "join.joined": "{room} に参加しました",
+  "join.requestSent": "参加リクエストを送信しました。オーナーの承認を待っています。",
+  "join.invalidInvite": "有効なルーム招待ではないようです。"
 }

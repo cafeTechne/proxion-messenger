@@ -598,5 +598,10 @@
   "web.signin.badUrl": "Enter your pod provider URL (https://...).",
   "web.signin.failed": "Could not start sign-in. Check the provider URL.",
   "presence.lastSeen": "last seen {time}",
-  "settings.webidShareHint": "Share this WebID so people can message you."
+  "settings.webidShareHint": "Share this WebID so people can message you.",
+  "join.approvePrompt": "{who} wants to join {room}. Let them in?",
+  "join.approved": "Approved {who}",
+  "join.joined": "Joined {room}",
+  "join.requestSent": "Join request sent. Waiting for the owner to approve.",
+  "join.invalidInvite": "That does not look like a valid room invite."
 }

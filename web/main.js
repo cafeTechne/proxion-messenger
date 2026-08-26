@@ -23,7 +23,10 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podListOwnedRoomDescriptors, podEnsureProfileName,
          podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop,
          podWritePresence, podReadPresence, presenceUrlFor,
-         podEnsureCallInbox, podDropSignal, podReadSignals, podDeleteSignal } from './pod.js';
+         podEnsureCallInbox, podDropSignal, podReadSignals, podDeleteSignal,
+         podEnsureJoinInbox, podDropJoin, podReadJoins, podDeleteJoin,
+         podReadRoomDescriptorAt, podReadChatRecentAt, podWriteChatMessageAt,
+         podGrantChatParticipants } from './pod.js';
 import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
 import { buildRoomDescriptor, withMembers, descriptorSigningBytes } from './roomdesc.js';
 import {
@@ -61,6 +64,8 @@ import { subscribeWebhook, watchResource } from './notify.js';
 import { createWebDm, peerPodRootFromWebId } from './webdm.js';
 import { createWebPresence } from './webpresence.js';
 import { createWebCalls } from './webcalls.js';
+import { createWebJoin, makeInvite, parseInvite } from './webjoin.js';
+import { chatRootUrl } from './longchat.js';
 import { createPairing } from './pairing.js';
 import { createRecovery } from './recovery.js';
 import { createGifTray, saveFavorite, pushAllGifsToPod } from './gifs.js';
@@ -830,6 +835,10 @@ import { createIdentityResolver } from './identity.js';
         let hiddenDms = new Set(JSON.parse(localStorage.getItem("proxion_hidden_dms") || "[]"));
         localStorage.removeItem("theme"); // stale key from removed light-mode feature
         const _local_rooms = {};
+        // R106: rooms we JOINED (they live on the owner's pod). roomId ->
+        // { ownerPodRoot, container (Long Chat URL), title, unwatch }. History and
+        // sends for these route to the owner's container via the *At pod helpers.
+        const _remoteRooms = {};
         const _podReadLastFetch = {};
         const POD_READ_DEBOUNCE_MS = 30000;
 
@@ -1709,6 +1718,13 @@ import { createIdentityResolver } from './identity.js';
                             if (li) li.click();
                         }, 50);
                     }
+                    break;
+                case "join_request_sent":
+                    showToast(t('join.requestSent'));
+                    { const _jm = document.getElementById("join-room-modal"); if (_jm) _jm.style.display = "none"; }
+                    break;
+                case "join_invalid_invite":
+                    showToast(t('join.invalidInvite'), 'error');
                     break;
                 case "room_joined":
                     document.getElementById("room-create-modal").style.display = "none";
@@ -2850,13 +2866,17 @@ import { createIdentityResolver } from './identity.js';
             if ((now - last) < POD_READ_DEBOUNCE_MS) return;
             _podReadLastFetch[threadId] = now;
             setPodSyncIndicator(true);
-            // Two reads in parallel: the px: index (our own format) and the
-            // standard Long Chat (what SolidOS / POD-CHAT write into the same
-            // container). allSettled so one read failing keeps the other.
-            Promise.allSettled([
-                podReadMessages(threadId),
-                podReadLongChatRecent(threadId),
-            ])
+            // A joined room lives on the OWNER's pod (R106): read its Long Chat
+            // straight from that container. Our own rooms read from our pod: the
+            // px: index (our format) plus the standard Long Chat (what SolidOS /
+            // POD-CHAT write into the same container). allSettled so one read
+            // failing keeps the other.
+            const _remote = _remoteRooms[threadId];
+            Promise.allSettled(
+                _remote
+                    ? [podReadChatRecentAt(_remote.container)]
+                    : [podReadMessages(threadId), podReadLongChatRecent(threadId)]
+            )
                 .then((results) => {
                     setPodSyncIndicator(false);
                     // D1: the pod is the durable log, so reconcile pod-authoritative
@@ -2883,6 +2903,51 @@ import { createIdentityResolver } from './identity.js';
                     renderMessages();
                 })
                 .catch(() => setPodSyncIndicator(false));
+        }
+
+        // R106 room-join callbacks (web mode). Owner approves a request by granting
+        // the joiner ACL on the room container; the joiner registers the room, which
+        // lives on the owner's pod, and reads/writes it there.
+        async function _onWebJoinRequest(req) {
+            if (!req || !req.room_id || !req.from_webid) return;
+            const roomId = req.room_id;
+            const desc = await podReadRoomDescriptor(roomId);
+            if (!desc) return;   // not one of our rooms
+            const who = req.from_display_name || req.from_webid.slice(0, 40);
+            showConfirm(t('join.approvePrompt', { who, room: desc.title || roomId }), async () => {
+                const members = (desc.members || []).map(m => m.webid).filter(Boolean);
+                if (!members.includes(req.from_webid)) members.push(req.from_webid);
+                // Grant read + append on the Long Chat container so the joiner can
+                // SEE and POST messages (they write to it directly, gateway-free).
+                // The room's read-only member ACL (rooms/) is for the gateway model;
+                // here participants write to the owner's chat container themselves.
+                const chatContainer = chatRootUrl(podStorageRoot(), roomId);
+                await podGrantChatParticipants(chatContainer, selfWebId, members.filter(w => w !== selfWebId)).catch(() => {});
+                await podWriteRoomMembers(roomId, members.map(w => ({ webid: w, role: w === selfWebId ? 'admin' : 'member' }))).catch(() => {});
+                if (_local_rooms[roomId]) {
+                    _local_rooms[roomId].memberWebIds = _local_rooms[roomId].memberWebIds || new Set();
+                    _local_rooms[roomId].memberWebIds.add(req.from_webid);
+                }
+                await window.proxionWebJoin?.sendApproval(req.from_webid, roomId, desc.title || '');
+                showToast(t('join.approved', { who }));
+            });
+        }
+
+        async function _onWebJoinApproved(appr) {
+            if (!appr || !appr.room_id || !appr.owner_pod_root) return;
+            const roomId = appr.room_id;
+            const desc = await podReadRoomDescriptorAt(appr.owner_pod_root, roomId);
+            const container = (desc && desc.long_chat) || chatRootUrl(appr.owner_pod_root, roomId);
+            const title = (desc && desc.title) || appr.title || roomId;
+            if (_remoteRooms[roomId]) return;
+            _remoteRooms[roomId] = { ownerPodRoot: appr.owner_pod_root, container, title };
+            addRoomToSidebar(roomId, title, '');
+            try {
+                _remoteRooms[roomId].unwatch = watchResource(container, () => {
+                    if (activeView && activeView.id === roomId) loadRoomHistory(roomId);
+                });
+            } catch (_) { /* watchResource falls back to polling */ }
+            showToast(t('join.joined', { room: title }));
         }
 
         // Merge locally-cached plaintext DM history over whatever the server/pod
@@ -3579,25 +3644,33 @@ import { createIdentityResolver } from './identity.js';
                         reply_to_id: replyingTo?.id || null,
                         reply_to_timestamp: replyingTo?.ts || null,   // R101.1
                     };
-                    // D2 write-through + D3 durable queue: the send is not durably
-                    // done until the pod write lands. Track it (shows a "not saved to
-                    // your pod" retry on failure) and, if it fails, persist it to the
-                    // offline queue so a reload/offline does not lose it; it flushes
-                    // in order on reconnect. Remove on success (idempotent re-run).
-                    sendStatus.trackPodWrite(clientMsgId, async () => {
-                        const ok = await podWriteMessageJsonLd(_roomId, clientMsgId, _podMsg, true);
-                        if (ok) podQueueRemove(clientMsgId);
-                        else podQueueAdd({ message_id: clientMsgId, room_id: _roomId, msg: _podMsg });
-                        return ok;
-                    });
-                    podWriteMessageWithIndex(_roomId, {
-                        message_id: clientMsgId,
-                        room_id: _roomId,
-                        from_webid: selfWebId,
-                        display_name: localStorage.getItem('proxion_display_name') || '',
-                        content: content,
-                        timestamp: _podMsg.timestamp,
-                    }).catch(() => {});
+                    const _remoteRoom = _remoteRooms[_roomId];
+                    if (_remoteRoom) {
+                        // R106: a joined room lives on the owner's pod. We have ACL,
+                        // so write the message straight into their Long Chat container.
+                        sendStatus.trackPodWrite(clientMsgId, async () =>
+                            podWriteChatMessageAt(_remoteRoom.container, clientMsgId, _podMsg));
+                    } else {
+                        // D2 write-through + D3 durable queue: the send is not durably
+                        // done until the pod write lands. Track it (shows a "not saved to
+                        // your pod" retry on failure) and, if it fails, persist it to the
+                        // offline queue so a reload/offline does not lose it; it flushes
+                        // in order on reconnect. Remove on success (idempotent re-run).
+                        sendStatus.trackPodWrite(clientMsgId, async () => {
+                            const ok = await podWriteMessageJsonLd(_roomId, clientMsgId, _podMsg, true);
+                            if (ok) podQueueRemove(clientMsgId);
+                            else podQueueAdd({ message_id: clientMsgId, room_id: _roomId, msg: _podMsg });
+                            return ok;
+                        });
+                        podWriteMessageWithIndex(_roomId, {
+                            message_id: clientMsgId,
+                            room_id: _roomId,
+                            from_webid: selfWebId,
+                            display_name: localStorage.getItem('proxion_display_name') || '',
+                            content: content,
+                            timestamp: _podMsg.timestamp,
+                        }).catch(() => {});
+                    }
                 }
 
                 input.value = "";
@@ -5412,19 +5485,36 @@ import { createIdentityResolver } from './identity.js';
                         getDisplayName: () => localStorage.getItem('proxion_display_name') || '',
                         peerPodRoot: (webid) => peerPodRootFromWebId(webid),
                     });
+                    // R106: gateway-free room join. Owner approves a join request
+                    // (granting the joiner ACL on the room container); the joiner
+                    // registers the room, which lives on the owner's pod.
+                    const webJoin = createWebJoin({
+                        pod: { podEnsureJoinInbox, podDropJoin, podReadJoins, podDeleteJoin },
+                        notify: { watchResource },
+                        getSelfWebId: () => selfWebId,
+                        getDisplayName: () => localStorage.getItem('proxion_display_name') || '',
+                        getSelfPodRoot: () => podStorageRoot(),
+                        peerPodRoot: (webid) => peerPodRootFromWebId(webid),
+                        onJoinRequest: (req) => _onWebJoinRequest(req),
+                        onApproved: (appr) => _onWebJoinApproved(appr),
+                    });
                     socket = createPodSocket({
                         getSelfWebId: () => selfWebId,
                         handleEvent: (ev) => _handleEventAsync(ev),
                         pod: { podListOwnedRoomDescriptors },
                         dm: webDm,
                         calls: webCalls,
+                        join: webJoin,
+                        makeRoomInvite: (roomId) => makeInvite(roomId, selfWebId, window.location.href),
                     });
                     document.querySelector(".dot").className = "dot online";
                     _handleEventAsync({ type: 'registered' });
                     webDm.start().catch(() => {});   // ensure inbox + drain + subscribe
                     webCalls.start().catch(() => {}); // ensure call inbox + drain + subscribe
+                    webJoin.start().catch(() => {});  // ensure join inbox + drain + subscribe
                     window.proxionWebDm = webDm;      // for smokes / power users
                     window.proxionWebCalls = webCalls;
+                    window.proxionWebJoin = webJoin;
                     // R104: gateway-free presence — publish a heartbeat and watch
                     // contacts' heartbeats, deriving online/away/offline from freshness.
                     const webPresence = createWebPresence({
