@@ -10,10 +10,11 @@ describe('invite encoding', () => {
     it('parses a raw token too', () => {
         expect(parseInvite('r2~https://o.example/#me')).toEqual({ roomId: 'r2', ownerWebId: 'https://o.example/#me' });
     });
-    it('rejects malformed or non-https invites', () => {
+    it('accepts http(s) WebIDs but rejects malformed invites', () => {
         expect(parseInvite('')).toBe(null);
         expect(parseInvite('nosep')).toBe(null);
-        expect(parseInvite('r~http://insecure')).toBe(null);
+        expect(parseInvite('r~ftp://nope')).toBe(null);
+        expect(parseInvite('r~http://dev.pod/#me')).toEqual({ roomId: 'r', ownerWebId: 'http://dev.pod/#me' });
     });
 });
 
@@ -66,6 +67,21 @@ describe('createWebJoin', () => {
         expect(requests).toHaveLength(1);
         expect(requests[0].from_webid).toBe('https://bob');
         expect(deleted).toEqual(['u1']);
+    });
+
+    it('drain keeps a request the owner could not consume yet (handler returns false)', async () => {
+        const { pod, deleted } = harness({ joins: [
+            { url: 'keep', msg: { kind: 'join_request', room_id: 'r', from_webid: 'https://bob' } },
+        ] });
+        const join = createWebJoin({
+            pod, notify: { watchResource: vi.fn(() => () => {}) },
+            getSelfWebId: () => 'https://me/#me', getDisplayName: () => 'Me',
+            getSelfPodRoot: () => 'https://me.example/', peerPodRoot: (w) => w,
+            onJoinRequest: () => false,   // e.g. room descriptor not readable yet
+            onApproved: () => {},
+        });
+        await join.drainOnce();
+        expect(deleted).toEqual([]);   // left in the inbox for a later retry
     });
 
     it('drain routes approvals to the joiner callback', async () => {

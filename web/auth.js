@@ -56,20 +56,37 @@ export async function solidLogout() {
     _cachedStorageRoot = null;
 }
 
+// Derive a pod's storage root from its WebID by stripping the profile document
+// path (…/alice/profile/card#me → …/alice/). This mirrors the sender-side
+// peerPodRootFromWebId so a recipient's OWN root matches the root a peer derives
+// from that same WebID; without this an account-based server (WebID under
+// /<account>/) would have the two disagree and every cross-account drop would
+// miss. Falls back to the origin for a root-hosted WebID (…/profile/card#me).
+function _rootFromWebId(webId) {
+    try {
+        const noFrag = String(webId).split('#')[0];
+        const i = noFrag.indexOf('/profile/');
+        if (i > 0) return noFrag.slice(0, i + 1);
+        return new URL(webId).origin + '/';
+    } catch { return null; }
+}
+
 export async function discoverStorageRoot() {
     if (_cachedStorageRoot) return _cachedStorageRoot;
-    const lsCache = localStorage.getItem('proxion_storage_root');
+    const lsCache = localStorage.getItem('proxion_storage_root_v2');
     if (lsCache) {
         // Reject cached values ending with /proxion/ — old incorrect format.
-        if (lsCache.startsWith('https://') && !_isPrivateIp(lsCache) && !lsCache.endsWith('/proxion/')) {
+        if (/^https?:\/\//.test(lsCache) && !lsCache.endsWith('/proxion/')) {
             _cachedStorageRoot = lsCache;
             return _cachedStorageRoot;
         }
-        localStorage.removeItem('proxion_storage_root');
+        localStorage.removeItem('proxion_storage_root_v2');
     }
     if (!solidSession.info.isLoggedIn) return null;
     const webId = solidSession.info.webId;
-    if (!webId || !webId.startsWith('https://')) return null;
+    if (!webId || !/^https?:\/\//.test(webId)) return null;
+    // Same-origin, account-aware fallback for when the profile omits pim:storage.
+    const fromWebId = _rootFromWebId(webId);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -94,29 +111,30 @@ export async function discoverStorageRoot() {
                 break;
             }
         }
-        if (!storageRoot) storageRoot = new URL(webId).origin + '/';
-        if (!storageRoot.startsWith('https://') || _isPrivateIp(storageRoot)) {
-            storageRoot = new URL(webId).origin + '/';
+        // Trust an https pim:storage claim (it may be cross-origin, as with Inrupt
+        // PodSpaces), but reject a non-https or private-IP claim and derive the root
+        // from the WebID path instead of collapsing to the bare origin.
+        if (storageRoot && (!storageRoot.startsWith('https://') || _isPrivateIp(storageRoot))) {
+            storageRoot = null;
         }
+        if (!storageRoot) storageRoot = fromWebId;
         _cachedStorageRoot = storageRoot; // bare root — pod.js owns the proxion/ prefix
-        localStorage.setItem('proxion_storage_root', _cachedStorageRoot);
+        localStorage.setItem('proxion_storage_root_v2', _cachedStorageRoot);
         return _cachedStorageRoot;
     } catch {
         clearTimeout(timeout);
-        const fallback = new URL(webId).origin + '/';
-        _cachedStorageRoot = fallback;
-        return fallback;
+        _cachedStorageRoot = fromWebId;
+        return fromWebId;
     }
 }
 
 export function podStorageRoot() {
     if (_cachedStorageRoot) return _cachedStorageRoot;
-    const lsCache = localStorage.getItem('proxion_storage_root');
-    if (lsCache && lsCache.startsWith('https://') && !_isPrivateIp(lsCache) && !lsCache.endsWith('/proxion/')) {
+    const lsCache = localStorage.getItem('proxion_storage_root_v2');
+    if (lsCache && /^https?:\/\//.test(lsCache) && !lsCache.endsWith('/proxion/')) {
         _cachedStorageRoot = lsCache;
         return _cachedStorageRoot;
     }
     if (!solidSession.info.isLoggedIn) return null;
-    const origin = new URL(solidSession.info.webId).origin;
-    return `${origin}/`;
+    return _rootFromWebId(solidSession.info.webId);
 }

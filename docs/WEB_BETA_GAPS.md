@@ -21,18 +21,33 @@ asserts the signed-in boot runs clean, then creates a room, posts a message, and
 reloads, all with no page errors. It works headlessly by serving the app over
 https with a self-signed cert (so OIDC accepts the client-id doc), letting CSS
 trust that cert, and seeding CSS's account cookie to authorize the consent
-screen. Still only partly automated: the room-join UI flow (invite copy, paste,
-approve prompt) is not yet in that smoke, though its pod mechanics are covered by
-the integration suite.
+screen.
 
-### Manual checklist (only the parts not yet in the signed-in smoke)
-The signed-in smoke covers sign-in, room create, post, and reload. Still worth a
-human pass on the live deploy for the multi-party bits:
-1. Copy your WebID from Settings, have a second pod DM you, confirm it arrives.
+The two-party room-join UI flow is now automated too: `npm run smoke:web-join`
+signs in two accounts in isolated browser contexts, has the owner create a room
+and share the invite, the joiner request to join, the owner approve the prompt,
+and asserts the room appears for the joiner. Building it surfaced a real
+cross-account delivery bug (below).
+
+### Storage-root mismatch broke every cross-account drop (fixed)
+Found by the two-party smoke. A sender derives a recipient's pod root from their
+WebID path (`.../<account>/profile/card#me` -> `.../<account>/`), but the
+recipient resolved their OWN root via `discoverStorageRoot()`, which bailed out
+for non-https WebIDs and otherwise fell back to the bare origin (`.../`). On any
+account-based server whose profile does not advertise `pim:storage`, the two
+disagreed: the sender dropped into `.../<account>/proxion/<box>/` while the
+recipient listened at `.../proxion/<box>/`. Every cross-account DM, call signal,
+and join request missed, and two accounts on one server collided on a single
+origin-root inbox. Fixed in `auth.js` by deriving the own-root from the WebID
+path the same way the sender does, keeping an https `pim:storage` claim when the
+profile provides one (including cross-origin, as Inrupt PodSpaces uses).
+
+### Manual checklist (only the parts not yet in a smoke)
+The signed-in and join smokes now cover sign-in, room create, post, reload, and
+the full join handshake. Still worth a human pass on the live deploy for:
+1. Copy your WebID from Settings, have a second pod DM you, confirm it arrives
+   (the storage-root fix above should make this work; verify on the live deploy).
 2. Check presence shows, and a 1:1 call at least starts signaling.
-3. From a second pod, paste your room invite to request to join; approve the
-   prompt on the first account; confirm the room appears for the joiner and both
-   can post.
 
 Verification note that shapes everything here: the browser smoke
 (`smoke_web_nogw.mjs`) only covers the signed-**out** boot. The signed-**in**

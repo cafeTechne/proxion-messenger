@@ -31,7 +31,9 @@ export function parseInvite(str) {
     if (i < 0) return null;
     const roomId = decodeURIComponent(token.slice(0, i));
     const ownerWebId = decodeURIComponent(token.slice(i + 1));
-    if (!roomId || !ownerWebId.startsWith('https://')) return null;
+    // Accept http(s) WebIDs: production pods are https, but a local/dev pod may be
+    // http, and the owner's WebID is where the join request is delivered.
+    if (!roomId || !/^https?:\/\//.test(ownerWebId)) return null;
     return { roomId, ownerWebId };
 }
 
@@ -70,13 +72,19 @@ export function createWebJoin({
     async function drainOnce() {
         const joins = await pod.podReadJoins();
         for (const { url, msg } of joins) {
+            // Default: remove a handled or unrecognized message. A handler that
+            // returns exactly `false` (e.g. the owner's room descriptor is not
+            // readable yet) keeps the message so a later drain can retry, rather
+            // than silently consuming a request the owner never got to act on.
+            let consumed = true;
             try {
-                if (msg && msg.kind === 'join_request' && onJoinRequest) onJoinRequest(msg);
-                else if (msg && msg.kind === 'join_approved' && onApproved) onApproved(msg);
+                if (msg && msg.kind === 'join_request' && onJoinRequest) consumed = (await onJoinRequest(msg)) !== false;
+                else if (msg && msg.kind === 'join_approved' && onApproved) consumed = (await onApproved(msg)) !== false;
             } catch (err) {
                 console.warn('[webjoin] handling failed:', err);
+                consumed = false;
             }
-            await pod.podDeleteJoin(url);
+            if (consumed) await pod.podDeleteJoin(url);
         }
     }
 

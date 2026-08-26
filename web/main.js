@@ -2909,10 +2909,12 @@ import { createIdentityResolver } from './identity.js';
         // the joiner ACL on the room container; the joiner registers the room, which
         // lives on the owner's pod, and reads/writes it there.
         async function _onWebJoinRequest(req) {
-            if (!req || !req.room_id || !req.from_webid) return;
+            if (!req || !req.room_id || !req.from_webid) return true;   // malformed: discard
             const roomId = req.room_id;
             const desc = await podReadRoomDescriptor(roomId);
-            if (!desc) return;   // not one of our rooms
+            // Null can mean "not our room" OR "descriptor not readable yet"; keep the
+            // request (return false) so a later drain retries instead of dropping it.
+            if (!desc) return false;
             const who = req.from_display_name || req.from_webid.slice(0, 40);
             showConfirm(t('join.approvePrompt', { who, room: desc.title || roomId }), async () => {
                 const members = (desc.members || []).map(m => m.webid).filter(Boolean);
