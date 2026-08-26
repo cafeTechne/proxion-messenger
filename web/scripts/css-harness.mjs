@@ -37,7 +37,7 @@ function waitForPort(port, timeoutMs) {
 
 // Start CSS (in-memory backend) on a free port. Returns { url, port, stop() } or
 // throws/returns null if CSS cannot be launched (offline, npx blocked).
-export async function startCss({ readyTimeoutMs = 120000 } = {}) {
+export async function startCss({ readyTimeoutMs = 120000, allowSelfSignedClientId = false } = {}) {
     const port = await freePort();
     // Sanitize the child env. Under vitest, NODE_ENV=test makes a CSS dependency
     // reference a `jest` global (500s with "jest is not defined"), and the vitest
@@ -48,6 +48,10 @@ export async function startCss({ readyTimeoutMs = 120000 } = {}) {
     delete env.VITEST_MODE;
     delete env.VITEST_POOL_ID;
     delete env.VITEST_WORKER_ID;
+    // Test-only: let CSS's server-side fetch retrieve a self-signed https client-id
+    // document (the browser E2E serves the app over https so OIDC accepts the
+    // client_id). This throwaway CSS never handles real traffic.
+    if (allowSelfSignedClientId) env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
     const proc = spawn(
         'npx', ['-y', '@solid/community-server', '-p', String(port), '-l', 'warn'],
         { shell: process.platform === 'win32', env },
@@ -201,5 +205,10 @@ export async function provisionAccount(cssUrl, { email, password, label = 'proxi
         podUrl,
         webId,
         storageRoot: podUrl.replace(/\/?$/, '/'),
+        email,
+        password,
+        // The account-session cookies (e.g. css-account); seeding these into a
+        // browser lets the OIDC login complete headlessly (the login UI is a SPA).
+        cookies: { ...jar.cookies },
     };
 }
