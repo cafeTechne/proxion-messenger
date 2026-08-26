@@ -601,5 +601,6 @@
   "web.signin.noPod": "Nie masz jeszcze poda? Zdobądź go za darmo na",
   "web.signin.badUrl": "Podaj adres URL swojego dostawcy poda (https://...).",
   "web.signin.failed": "Nie udało się rozpocząć logowania. Sprawdź adres URL dostawcy.",
-  "presence.lastSeen": "ostatnio widziany(a) {time}"
+  "presence.lastSeen": "ostatnio widziany(a) {time}",
+  "settings.webidShareHint": "Udostępnij ten WebID, aby inni mogli do Ciebie pisać."
 }

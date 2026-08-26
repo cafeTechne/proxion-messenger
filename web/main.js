@@ -4718,6 +4718,12 @@ import { createIdentityResolver } from './identity.js';
                 else { pw.type = 'password'; btn.textContent = 'Show'; }
             });
 
+            // Click your WebID to copy it, so you can share it and be messaged.
+            attachListener('#settings-pod-webid', 'click', () => {
+                const w = document.getElementById('settings-pod-webid')?.textContent?.trim();
+                if (w) navigator.clipboard.writeText(w).then(() => showToast(t('common.copied'))).catch(() => {});
+            });
+
             // Settings: OIDC sign-in buttons
             attachListener('#settings-solid-solidcommunity', 'click', () => solidLogin('https://solidcommunity.net'));
             attachListener('#settings-solid-inrupt', 'click', () => solidLogin('https://inrupt.net'));

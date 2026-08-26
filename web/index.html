@@ -622,10 +622,12 @@
         <!-- Connected state (hidden until pod auth) -->
         <div id="settings-pod-connected" style="display:none;">
           <p style="margin:0 0 4px;font-size:0.85em;color:var(--color-success-soft);">● Connected</p>
-          <div id="settings-pod-webid"
+          <div id="settings-pod-webid" title="Click to copy"
+               data-i18n-attr="title:ui.clickCopy"
                style="font-size:0.72em;color:var(--text-secondary);word-break:break-all;
-                      margin-bottom:10px;padding:4px 6px;background:var(--slate-900);
-                      border-radius:3px;user-select:all;cursor:text;"></div>
+                      margin-bottom:4px;padding:4px 6px;background:var(--slate-900);
+                      border-radius:3px;user-select:all;cursor:pointer;"></div>
+          <p style="margin:0 0 10px;font-size:0.72em;color:var(--slate-500);" data-i18n="settings.webidShareHint">Share this WebID so people can message you.</p>
           <button id="settings-pod-logout-btn"
                   style="background:var(--slate-700);border:none;color:var(--color-danger-soft);
                          padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:12px;" data-i18n="btn.signOutPod">

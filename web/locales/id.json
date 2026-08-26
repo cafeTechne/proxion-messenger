@@ -597,5 +597,6 @@
   "web.signin.noPod": "Belum punya pod? Dapatkan gratis di",
   "web.signin.badUrl": "Masukkan URL penyedia pod Anda (https://...).",
   "web.signin.failed": "Tidak dapat memulai proses masuk. Periksa URL penyedia.",
-  "presence.lastSeen": "terakhir dilihat {time}"
+  "presence.lastSeen": "terakhir dilihat {time}",
+  "settings.webidShareHint": "Bagikan WebID ini agar orang bisa mengirimi Anda pesan."
 }

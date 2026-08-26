@@ -597,5 +597,6 @@
   "web.signin.noPod": "Chưa có pod? Nhận một cái miễn phí tại",
   "web.signin.badUrl": "Nhập URL nhà cung cấp pod của bạn (https://...).",
   "web.signin.failed": "Không thể bắt đầu đăng nhập. Hãy kiểm tra URL nhà cung cấp.",
-  "presence.lastSeen": "xem lần cuối {time}"
+  "presence.lastSeen": "xem lần cuối {time}",
+  "settings.webidShareHint": "Chia sẻ WebID này để mọi người có thể nhắn tin cho bạn."
 }

@@ -597,5 +597,6 @@
   "web.signin.noPod": "¿Aún no tienes un pod? Consigue uno gratis en",
   "web.signin.badUrl": "Introduce la URL de tu proveedor de pod (https://...).",
   "web.signin.failed": "No se pudo iniciar sesión. Comprueba la URL del proveedor.",
-  "presence.lastSeen": "visto por última vez {time}"
+  "presence.lastSeen": "visto por última vez {time}",
+  "settings.webidShareHint": "Comparte este WebID para que puedan enviarte mensajes."
 }

@@ -597,5 +597,6 @@
   "web.signin.noPod": "Henüz podun yok mu? Ücretsiz edin:",
   "web.signin.badUrl": "Pod sağlayıcının URL adresini gir (https://...).",
   "web.signin.failed": "Oturum açma başlatılamadı. Sağlayıcı URL adresini denetle.",
-  "presence.lastSeen": "son görülme {time}"
+  "presence.lastSeen": "son görülme {time}",
+  "settings.webidShareHint": "Bu WebID'yi paylaş ki sana mesaj gönderebilsinler."
 }

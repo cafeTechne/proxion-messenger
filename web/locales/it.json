@@ -597,5 +597,6 @@
   "web.signin.noPod": "Non hai ancora un pod? Ottienine uno gratis su",
   "web.signin.badUrl": "Inserisci l'URL del tuo provider di pod (https://...).",
   "web.signin.failed": "Impossibile avviare l'accesso. Controlla l'URL del provider.",
-  "presence.lastSeen": "visto l'ultima volta {time}"
+  "presence.lastSeen": "visto l'ultima volta {time}",
+  "settings.webidShareHint": "Condividi questo WebID così possono scriverti."
 }
