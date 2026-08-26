@@ -15,24 +15,24 @@ handshake; a joiner reads and posts to the owner's room after approval, verified
 against a live pod). Corrected: the connectivity/health block already has a
 `.catch`, and pod-disconnect falls through to `logout()` on a 404, so the P2
 "gateway-only endpoints" item is cosmetic (a blank federation panel and a wasted
-request), not an error. Still open: the signed-in browser boot is unverified
-(P0 item 3, see the manual checklist below), which now also covers the room-join
-UI flow (invite copy, paste, approve prompt, room appears) since only its pod
-mechanics are automated.
+request), not an error. The signed-in browser boot (P0 item 3) is now AUTOMATED:
+`npm run smoke:web-signedin` completes a real OIDC login against a live CSS pod,
+asserts the signed-in boot runs clean, then creates a room, posts a message, and
+reloads, all with no page errors. It works headlessly by serving the app over
+https with a self-signed cert (so OIDC accepts the client-id doc), letting CSS
+trust that cert, and seeding CSS's account cookie to authorize the consent
+screen. Still only partly automated: the room-join UI flow (invite copy, paste,
+approve prompt) is not yet in that smoke, though its pod mechanics are covered by
+the integration suite.
 
-### Manual sign-in checklist (P0 item 3, until automated)
-Before widening the beta, one human pass on the live deploy:
-1. Open `/app/`, sign in with a real pod, confirm the redirect returns you
-   logged in with no error screen.
-2. Open the browser console: no uncaught errors during boot.
-3. Create a room, post a message, reload: the room and message are still there.
-4. Copy your WebID from Settings, have a second pod DM you, confirm it arrives.
-5. Check presence shows, and a 1:1 call at least starts signaling.
-6. From a second pod, paste your room invite to request to join; approve the
+### Manual checklist (only the parts not yet in the signed-in smoke)
+The signed-in smoke covers sign-in, room create, post, and reload. Still worth a
+human pass on the live deploy for the multi-party bits:
+1. Copy your WebID from Settings, have a second pod DM you, confirm it arrives.
+2. Check presence shows, and a 1:1 call at least starts signaling.
+3. From a second pod, paste your room invite to request to join; approve the
    prompt on the first account; confirm the room appears for the joiner and both
    can post.
-A single throw in the signed-in boot breaks the whole session, so this pass is
-the current safety net.
 
 Verification note that shapes everything here: the browser smoke
 (`smoke_web_nogw.mjs`) only covers the signed-**out** boot. The signed-**in**
