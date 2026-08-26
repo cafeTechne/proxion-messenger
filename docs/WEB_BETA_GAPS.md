@@ -6,6 +6,28 @@ after tracing the real signed-in flows and checking the live deploy. Grouped by
 severity, with the fix for each. The app works as a website today; the items
 below are the rough edges a tester will hit.
 
+## Status (updated)
+
+Sequenced and tracked in `PLAN_ROUND_106.md`. Resolved and deployed so far:
+the silent DM loss (P0 item 1), the subpath PWA breakage (P1), and click-to-copy
+for your own WebID (P1 gap). Corrected: the connectivity/health block already
+has a `.catch`, and pod-disconnect falls through to `logout()` on a 404, so the
+P2 "gateway-only endpoints" item is cosmetic (a blank federation panel and a
+wasted request), not an error. Still open: the signed-in browser boot is
+unverified (P0 item 3, see the manual checklist below), and gateway-free room
+join (P1) is the largest remaining gap.
+
+### Manual sign-in checklist (P0 item 3, until automated)
+Before widening the beta, one human pass on the live deploy:
+1. Open `/app/`, sign in with a real pod, confirm the redirect returns you
+   logged in with no error screen.
+2. Open the browser console: no uncaught errors during boot.
+3. Create a room, post a message, reload: the room and message are still there.
+4. Copy your WebID from Settings, have a second pod DM you, confirm it arrives.
+5. Check presence shows, and a 1:1 call at least starts signaling.
+A single throw in the signed-in boot breaks the whole session, so this pass is
+the current safety net.
+
 Verification note that shapes everything here: the browser smoke
 (`smoke_web_nogw.mjs`) only covers the signed-**out** boot. The signed-**in**
 path (PodSocket, `postAuthInit`, room/DM/presence/call engines) has unit tests
