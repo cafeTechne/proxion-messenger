@@ -9,13 +9,16 @@ below are the rough edges a tester will hit.
 ## Status (updated)
 
 Sequenced and tracked in `PLAN_ROUND_106.md`. Resolved and deployed so far:
-the silent DM loss (P0 item 1), the subpath PWA breakage (P1), and click-to-copy
-for your own WebID (P1 gap). Corrected: the connectivity/health block already
-has a `.catch`, and pod-disconnect falls through to `logout()` on a 404, so the
-P2 "gateway-only endpoints" item is cosmetic (a blank federation panel and a
-wasted request), not an error. Still open: the signed-in browser boot is
-unverified (P0 item 3, see the manual checklist below), and gateway-free room
-join (P1) is the largest remaining gap.
+the silent DM loss (P0 item 1), the subpath PWA breakage (P1), click-to-copy
+for your own WebID (P1 gap), and gateway-free room join (P1, the request/approve
+handshake; a joiner reads and posts to the owner's room after approval, verified
+against a live pod). Corrected: the connectivity/health block already has a
+`.catch`, and pod-disconnect falls through to `logout()` on a 404, so the P2
+"gateway-only endpoints" item is cosmetic (a blank federation panel and a wasted
+request), not an error. Still open: the signed-in browser boot is unverified
+(P0 item 3, see the manual checklist below), which now also covers the room-join
+UI flow (invite copy, paste, approve prompt, room appears) since only its pod
+mechanics are automated.
 
 ### Manual sign-in checklist (P0 item 3, until automated)
 Before widening the beta, one human pass on the live deploy:
@@ -25,6 +28,9 @@ Before widening the beta, one human pass on the live deploy:
 3. Create a room, post a message, reload: the room and message are still there.
 4. Copy your WebID from Settings, have a second pod DM you, confirm it arrives.
 5. Check presence shows, and a 1:1 call at least starts signaling.
+6. From a second pod, paste your room invite to request to join; approve the
+   prompt on the first account; confirm the room appears for the joiner and both
+   can post.
 A single throw in the signed-in boot breaks the whole session, so this pass is
 the current safety net.
 
