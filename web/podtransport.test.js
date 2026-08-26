@@ -91,6 +91,29 @@ describe('PodSocket', () => {
         expect(events[0].local).toBeUndefined();   // ciphertext echo must not touch the DM preview
     });
 
+    it('does NOT echo when a DM drop fails (so it surfaces as not delivered)', async () => {
+        const events = [];
+        const dm = { dropDm: vi.fn(async () => false) };   // e.g. recipient has no inbox
+        const sock = createPodSocket({
+            getSelfWebId: () => 'https://me', handleEvent: (e) => events.push(e),
+            pod: { podListOwnedRoomDescriptors: vi.fn() }, dm,
+        });
+        await sock._route({ cmd: 'local_dm', target_webid: 'https://bob', message_id: 'm1', content: 'CT' });
+        expect(dm.dropDm).toHaveBeenCalledOnce();
+        expect(events).toEqual([]);   // no echo -> stays pending -> send-status marks it failed
+    });
+
+    it('does NOT echo a fanout when nothing was dropped', async () => {
+        const events = [];
+        const dm = { dropFanout: vi.fn(async () => false) };
+        const sock = createPodSocket({
+            getSelfWebId: () => 'https://me', handleEvent: (e) => events.push(e),
+            pod: { podListOwnedRoomDescriptors: vi.fn() }, dm,
+        });
+        await sock._route({ cmd: 'send_dm_fanout', message_id: 'm2', fanout: [{ to_webid: 'https://bob', to_device_id: 'd', payload: {} }] });
+        expect(events).toEqual([]);
+    });
+
     it('routes send_dm_fanout to the DM engine and echoes to clear pending', async () => {
         const events = [];
         const dm = { dropDm: vi.fn(), dropFanout: vi.fn(async () => true) };

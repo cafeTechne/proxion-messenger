@@ -140,6 +140,14 @@ describe.skipIf(!LIVE)('gateway-free pod round-trips (live CSS)', () => {
         expect((await podReadDmDrops()).length).toBe(0);   // consumed
     });
 
+    it('R103: a drop to a peer with no DM inbox fails (surfaces as not delivered)', async () => {
+        // Alice never created her DM inbox in this suite, so Bob messaging her is
+        // a POST into a missing container: CSS returns 404 and podDropDm reports
+        // false, which is what stops the PodSocket from echoing a false success.
+        asBob();
+        expect(await podDropDm(alice.storageRoot, { from_webid: bob.webId, content: 'ct', e2e: false })).toBe(false);
+    });
+
     it('R103 multi-device: fanout drops one envelope per device; each device claims its own', async () => {
         const podFns = { podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop };
         const e2eStub = { cachePeerPub() {}, ratchetDecrypt: async () => 'x' };

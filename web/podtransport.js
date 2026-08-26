@@ -70,15 +70,20 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls }) {
                 case 'local_dm':
                 case 'send_dm': {
                     // main.js already ratchet-encrypted the payload; drop it into
-                    // the recipient's pod, then confirm the optimistic render.
-                    if (dm) await dm.dropDm(cmd);
-                    _echoDm(cmd);
+                    // the recipient's pod. Echo (which clears the optimistic
+                    // "pending" state) ONLY when the drop succeeded. A failed drop
+                    // (e.g. the recipient has never opened Proxion, so their DM
+                    // inbox does not exist yet) stays pending, and send-status.js
+                    // marks it "Not delivered / Retry" instead of a silent success.
+                    const okDm = dm ? await dm.dropDm(cmd) : true;
+                    if (okDm) _echoDm(cmd);
                     break;
                 }
                 case 'send_dm_fanout': {
-                    // Multi-device: one per-device envelope per recipient/own device.
-                    if (dm && dm.dropFanout) await dm.dropFanout(cmd);
-                    _echoDm({ message_id: cmd.message_id });
+                    // Multi-device: one per-device envelope per recipient/own
+                    // device. Echo only if at least one copy was dropped.
+                    const okFan = (dm && dm.dropFanout) ? await dm.dropFanout(cmd) : true;
+                    if (okFan) _echoDm({ message_id: cmd.message_id });
                     break;
                 }
                 case 'get_rooms': {
