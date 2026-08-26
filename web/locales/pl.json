@@ -593,5 +593,12 @@
   "solidchat.noChatsFound": "Nie znaleziono czatów dla tego WebID.",
   "solidchat.noInvites": "Brak oczekujących zaproszeń.",
   "solidchat.inviteFrom": "{title} od {who}",
-  "voice.videoFull": "Wideo jest pełne: zbyt wiele osób już udostępnia wideo"
+  "voice.videoFull": "Wideo jest pełne: zbyt wiele osób już udostępnia wideo",
+  "web.signin.title": "Zaloguj się swoim podem Solid",
+  "web.signin.body": "Proxion Web przechowuje Twoje wiadomości w Twoim własnym podzie Solid. Podaj swojego dostawcę poda, aby się zalogować.",
+  "web.signin.provider": "Dostawca poda",
+  "web.signin.button": "Zaloguj się",
+  "web.signin.noPod": "Nie masz jeszcze poda? Zdobądź go za darmo na",
+  "web.signin.badUrl": "Podaj adres URL swojego dostawcy poda (https://...).",
+  "web.signin.failed": "Nie udało się rozpocząć logowania. Sprawdź adres URL dostawcy."
 }

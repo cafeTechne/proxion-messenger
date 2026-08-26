@@ -593,5 +593,12 @@
   "solidchat.noChatsFound": "Для этого WebID чаты не найдены.",
   "solidchat.noInvites": "Нет ожидающих приглашений.",
   "solidchat.inviteFrom": "{title} от {who}",
-  "voice.videoFull": "Видео заполнено: слишком много людей уже делятся видео"
+  "voice.videoFull": "Видео заполнено: слишком много людей уже делятся видео",
+  "web.signin.title": "Вход через ваш Solid-под",
+  "web.signin.body": "Proxion Web хранит ваши сообщения в вашем собственном Solid-поде. Введите вашего провайдера пода, чтобы войти.",
+  "web.signin.provider": "Провайдер пода",
+  "web.signin.button": "Войти",
+  "web.signin.noPod": "Ещё нет пода? Получите бесплатно на",
+  "web.signin.badUrl": "Введите URL вашего провайдера пода (https://...).",
+  "web.signin.failed": "Не удалось начать вход. Проверьте URL провайдера."
 }

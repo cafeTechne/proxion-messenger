@@ -589,5 +589,12 @@
   "solidchat.noChatsFound": "그 WebID의 채팅을 찾을 수 없습니다.",
   "solidchat.noInvites": "보류 중인 초대가 없습니다.",
   "solidchat.inviteFrom": "{who} 님의 {title}",
-  "voice.videoFull": "영상이 가득 찼습니다: 이미 너무 많은 사람이 영상을 공유하고 있습니다"
+  "voice.videoFull": "영상이 가득 찼습니다: 이미 너무 많은 사람이 영상을 공유하고 있습니다",
+  "web.signin.title": "Solid 팟으로 로그인",
+  "web.signin.body": "Proxion Web은 메시지를 사용자 본인의 Solid 팟에 보관합니다. 로그인하려면 팟 제공자를 입력하세요.",
+  "web.signin.provider": "팟 제공자",
+  "web.signin.button": "로그인",
+  "web.signin.noPod": "아직 팟이 없나요? 무료로 받으세요:",
+  "web.signin.badUrl": "팟 제공자 URL을 입력하세요 (https://...).",
+  "web.signin.failed": "로그인을 시작할 수 없습니다. 제공자 URL을 확인하세요."
 }

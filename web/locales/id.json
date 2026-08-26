@@ -589,5 +589,12 @@
   "solidchat.noChatsFound": "Tidak ada obrolan ditemukan untuk WebID itu.",
   "solidchat.noInvites": "Tidak ada undangan tertunda.",
   "solidchat.inviteFrom": "{title} dari {who}",
-  "voice.videoFull": "Video penuh: terlalu banyak orang yang sudah berbagi video"
+  "voice.videoFull": "Video penuh: terlalu banyak orang yang sudah berbagi video",
+  "web.signin.title": "Masuk dengan pod Solid Anda",
+  "web.signin.body": "Proxion Web menyimpan pesan Anda di pod Solid Anda sendiri. Masukkan penyedia pod Anda untuk masuk.",
+  "web.signin.provider": "Penyedia pod",
+  "web.signin.button": "Masuk",
+  "web.signin.noPod": "Belum punya pod? Dapatkan gratis di",
+  "web.signin.badUrl": "Masukkan URL penyedia pod Anda (https://...).",
+  "web.signin.failed": "Tidak dapat memulai proses masuk. Periksa URL penyedia."
 }

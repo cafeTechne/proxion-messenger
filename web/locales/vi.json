@@ -589,5 +589,12 @@
   "solidchat.noChatsFound": "Không tìm thấy cuộc trò chuyện nào cho WebID đó.",
   "solidchat.noInvites": "Không có lời mời đang chờ.",
   "solidchat.inviteFrom": "{title} từ {who}",
-  "voice.videoFull": "Video đã đầy: đã có quá nhiều người đang chia sẻ video"
+  "voice.videoFull": "Video đã đầy: đã có quá nhiều người đang chia sẻ video",
+  "web.signin.title": "Đăng nhập bằng pod Solid của bạn",
+  "web.signin.body": "Proxion Web giữ tin nhắn của bạn trong pod Solid của riêng bạn. Nhập nhà cung cấp pod của bạn để đăng nhập.",
+  "web.signin.provider": "Nhà cung cấp pod",
+  "web.signin.button": "Đăng nhập",
+  "web.signin.noPod": "Chưa có pod? Nhận một cái miễn phí tại",
+  "web.signin.badUrl": "Nhập URL nhà cung cấp pod của bạn (https://...).",
+  "web.signin.failed": "Không thể bắt đầu đăng nhập. Hãy kiểm tra URL nhà cung cấp."
 }

@@ -589,5 +589,12 @@
   "solidchat.noChatsFound": "その WebID のチャットは見つかりませんでした。",
   "solidchat.noInvites": "保留中の招待はありません。",
   "solidchat.inviteFrom": "{who} からの {title}",
-  "voice.videoFull": "ビデオがいっぱいです: すでに多くの人がビデオを共有しています"
+  "voice.videoFull": "ビデオがいっぱいです: すでに多くの人がビデオを共有しています",
+  "web.signin.title": "あなたの Solid ポッドでサインイン",
+  "web.signin.body": "Proxion Web はメッセージをあなた自身の Solid ポッドに保存します。サインインするにはポッドプロバイダーを入力してください。",
+  "web.signin.provider": "ポッドプロバイダー",
+  "web.signin.button": "サインイン",
+  "web.signin.noPod": "まだポッドがありませんか？無料で取得できます:",
+  "web.signin.badUrl": "ポッドプロバイダーの URL を入力してください (https://...)。",
+  "web.signin.failed": "サインインを開始できませんでした。プロバイダーの URL を確認してください。"
 }

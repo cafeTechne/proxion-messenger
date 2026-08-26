@@ -5439,10 +5439,10 @@ import { createIdentityResolver } from './identity.js';
                         const _err = document.getElementById('web-signin-error');
                         const _go = () => {
                             const url = (document.getElementById('web-signin-url').value || '').trim();
-                            if (!url.startsWith('https://')) { if (_err) _err.textContent = 'Enter your pod provider URL (https://...).'; return; }
+                            if (!url.startsWith('https://')) { if (_err) _err.textContent = t('web.signin.badUrl'); return; }
                             if (_err) _err.textContent = '';
                             Promise.resolve(solidLogin(url)).catch(() => {
-                                if (_err) _err.textContent = 'Could not start sign-in. Check the provider URL.';
+                                if (_err) _err.textContent = t('web.signin.failed');
                             });
                         };
                         document.getElementById('web-signin-btn').onclick = _go;

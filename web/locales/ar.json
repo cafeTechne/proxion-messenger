@@ -602,5 +602,12 @@
   "solidchat.noChatsFound": "لم يتم العثور على محادثات لهذا الـ WebID.",
   "solidchat.noInvites": "لا توجد دعوات معلقة.",
   "solidchat.inviteFrom": "{title} من {who}",
-  "voice.videoFull": "الفيديو ممتلئ: عدد كبير جدًا يشاركون الفيديو بالفعل"
+  "voice.videoFull": "الفيديو ممتلئ: عدد كبير جدًا يشاركون الفيديو بالفعل",
+  "web.signin.title": "سجّل الدخول باستخدام حافظة Solid الخاصة بك",
+  "web.signin.body": "يحتفظ Proxion Web برسائلك في حافظة Solid الخاصة بك. أدخل مزوّد الحافظة لتسجيل الدخول.",
+  "web.signin.provider": "مزوّد الحافظة",
+  "web.signin.button": "تسجيل الدخول",
+  "web.signin.noPod": "ليس لديك حافظة بعد؟ احصل على واحدة مجانًا من",
+  "web.signin.badUrl": "أدخل عنوان URL لمزوّد الحافظة (https://...).",
+  "web.signin.failed": "تعذّر بدء تسجيل الدخول. تحقّق من عنوان المزوّد."
 }

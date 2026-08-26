@@ -589,5 +589,12 @@
   "solidchat.noChatsFound": "O WebID için sohbet bulunamadı.",
   "solidchat.noInvites": "Bekleyen davet yok.",
   "solidchat.inviteFrom": "{who} kişisinden {title}",
-  "voice.videoFull": "Video dolu: zaten çok fazla kişi video paylaşıyor"
+  "voice.videoFull": "Video dolu: zaten çok fazla kişi video paylaşıyor",
+  "web.signin.title": "Solid podunla oturum aç",
+  "web.signin.body": "Proxion Web mesajlarını kendi Solid podunda saklar. Oturum açmak için pod sağlayıcını gir.",
+  "web.signin.provider": "Pod sağlayıcısı",
+  "web.signin.button": "Oturum aç",
+  "web.signin.noPod": "Henüz podun yok mu? Ücretsiz edin:",
+  "web.signin.badUrl": "Pod sağlayıcının URL adresini gir (https://...).",
+  "web.signin.failed": "Oturum açma başlatılamadı. Sağlayıcı URL adresini denetle."
 }

@@ -589,5 +589,12 @@
   "solidchat.noChatsFound": "Keine Chats für diese WebID gefunden.",
   "solidchat.noInvites": "Keine ausstehenden Einladungen.",
   "solidchat.inviteFrom": "{title} von {who}",
-  "voice.videoFull": "Video ist voll: zu viele Personen teilen bereits Video"
+  "voice.videoFull": "Video ist voll: zu viele Personen teilen bereits Video",
+  "web.signin.title": "Mit deinem Solid-Pod anmelden",
+  "web.signin.body": "Proxion Web speichert deine Nachrichten in deinem eigenen Solid-Pod. Gib deinen Pod-Anbieter ein, um dich anzumelden.",
+  "web.signin.provider": "Pod-Anbieter",
+  "web.signin.button": "Anmelden",
+  "web.signin.noPod": "Noch kein Pod? Hol dir kostenlos einen bei",
+  "web.signin.badUrl": "Gib die URL deines Pod-Anbieters ein (https://...).",
+  "web.signin.failed": "Anmeldung konnte nicht gestartet werden. Prüfe die Anbieter-URL."
 }

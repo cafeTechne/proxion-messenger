@@ -589,5 +589,12 @@
   "solidchat.noChatsFound": "找不到该 WebID 的聊天。",
   "solidchat.noInvites": "没有待处理的邀请。",
   "solidchat.inviteFrom": "来自 {who} 的 {title}",
-  "voice.videoFull": "视频已满：已有太多人在共享视频"
+  "voice.videoFull": "视频已满：已有太多人在共享视频",
+  "web.signin.title": "使用你的 Solid pod 登录",
+  "web.signin.body": "Proxion Web 将你的消息保存在你自己的 Solid pod 中。输入你的 pod 提供商以登录。",
+  "web.signin.provider": "Pod 提供商",
+  "web.signin.button": "登录",
+  "web.signin.noPod": "还没有 pod？免费获取一个:",
+  "web.signin.badUrl": "请输入你的 pod 提供商网址 (https://...)。",
+  "web.signin.failed": "无法开始登录。请检查提供商网址。"
 }
