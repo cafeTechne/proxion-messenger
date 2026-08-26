@@ -32,10 +32,12 @@ import {
     podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop,
     podWritePresence, podReadPresence,
     podEnsureCallInbox, podDropSignal, podReadSignals, podDeleteSignal,
+    podEnsureJoinInbox, podDropJoin, podReadJoins, podDeleteJoin,
 } from './pod.js';
 import { buildRoomDescriptor } from './roomdesc.js';
 import { createWebDm } from './webdm.js';
 import { statusFromHeartbeat } from './webpresence.js';
+import { createWebJoin } from './webjoin.js';
 
 const LIVE = !!process.env.PROXION_LIVE_POD;
 const uid = (p) => `${p}-${Math.random().toString(36).slice(2, 9)}`;
@@ -172,6 +174,40 @@ describe.skipIf(!LIVE)('gateway-free pod round-trips (live CSS)', () => {
         const left = await podReadDmDrops();
         expect(left.some((d) => d.envelope.to_device_id === 'bob-B')).toBe(true);   // sibling copy remains
         expect(left.some((d) => d.envelope.to_device_id === 'bob-A')).toBe(false);  // ours consumed
+    });
+
+    it('R106: room-join request/approve handshake over the pod (no gateway)', async () => {
+        const podFns = { podEnsureJoinInbox, podDropJoin, podReadJoins, podDeleteJoin };
+        const peerRoot = (w) => w.replace(/profile\/card#me$/, '');
+        const roomId = uid('room');
+        const requests = [];
+        const approvals = [];
+
+        const aliceJoin = createWebJoin({   // owner
+            pod: podFns, notify: null, getSelfWebId: () => alice.webId, getDisplayName: () => 'Alice',
+            getSelfPodRoot: () => alice.storageRoot, peerPodRoot: peerRoot, onJoinRequest: (m) => requests.push(m),
+        });
+        const bobJoin = createWebJoin({     // joiner
+            pod: podFns, notify: null, getSelfWebId: () => bob.webId, getDisplayName: () => 'Bob',
+            getSelfPodRoot: () => bob.storageRoot, peerPodRoot: peerRoot, onApproved: (m) => approvals.push(m),
+        });
+
+        asAlice(); expect(await aliceJoin.start()).toBeTruthy();   // owner's join inbox
+        asBob(); expect(await bobJoin.start()).toBeTruthy();       // joiner's join inbox
+
+        asBob(); expect(await bobJoin.requestJoin(roomId, alice.webId)).toBe(true);   // Bob asks
+
+        asAlice(); await aliceJoin.drainOnce();                    // Alice sees the request
+        const req = requests.find((r) => r.room_id === roomId);
+        expect(req).toBeTruthy();
+        expect(req.from_webid).toBe(bob.webId);
+        await aliceJoin.sendApproval(bob.webId, roomId, 'General');   // Alice approves
+
+        asBob(); await bobJoin.drainOnce();                        // Bob gets the approval
+        const appr = approvals.find((a) => a.room_id === roomId);
+        expect(appr).toBeTruthy();
+        expect(appr.owner_webid).toBe(alice.webId);
+        expect(appr.owner_pod_root).toBe(alice.storageRoot);       // so Bob knows where the room lives
     });
 
     it('R104: publishes a presence heartbeat a peer reads as online (no gateway)', async () => {

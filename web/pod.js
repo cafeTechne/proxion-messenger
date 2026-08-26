@@ -1135,6 +1135,7 @@ export async function podDeleteInboxNotification(url) {
 
 const DM_INBOX_PATH = 'proxion/dm-inbox/';
 const CALL_INBOX_PATH = 'proxion/call-inbox/';
+const JOIN_INBOX_PATH = 'proxion/join-inbox/';
 const MAX_DROPS = 200;
 
 const _dropBoxUrl = (podRoot, path) => (podRoot ? podRoot.replace(/\/?$/, '/') + path : null);
@@ -1249,6 +1250,35 @@ export async function podReadSignals() {
     return (await _readDropBox(CALL_INBOX_PATH)).map(({ url, item }) => ({ url, signal: item }));
 }
 export function podDeleteSignal(url) { return _deleteDrop(url); }
+
+// ── Room-join handshake drop-box (R106) ──
+// Both join requests (to a room owner) and approvals (back to a joiner) travel
+// through this one public-Append box, distinguished by a `kind` field.
+/** The recipient's join-inbox URL, from their pod storage root. */
+export function joinInboxUrlFor(podRoot) { return _dropBoxUrl(podRoot, JOIN_INBOX_PATH); }
+export function podEnsureJoinInbox() { return _ensureDropBox(JOIN_INBOX_PATH, 'join inbox'); }
+/** Drop a join request or approval into a peer's join inbox. */
+export function podDropJoin(recipientPodRoot, obj) { return _dropTo(recipientPodRoot, JOIN_INBOX_PATH, obj); }
+/** Read our join inbox: returns [{ url, msg }]. */
+export async function podReadJoins() {
+    return (await _readDropBox(JOIN_INBOX_PATH)).map(({ url, item }) => ({ url, msg: item }));
+}
+export function podDeleteJoin(url) { return _deleteDrop(url); }
+
+/** Read a room descriptor from a specific owner's pod (not our own). */
+export async function podReadRoomDescriptorAt(ownerPodRoot, roomId) {
+    if (!roomId || !SAFE_ID_RE.test(roomId) || !ownerPodRoot || !solidSession?.info?.isLoggedIn) return null;
+    try {
+        const res = await solidSession.fetch(`${ownerPodRoot.replace(/\/?$/, '/')}rooms/${roomId}/room.json`);
+        if (!res || !res.ok) return null;
+        const text = await res.text();
+        if (text.length > 65536) return null;
+        return parseRoomDescriptor(JSON.parse(text));
+    } catch (err) {
+        console.warn('[pod] podReadRoomDescriptorAt failed:', err);
+        return null;
+    }
+}
 
 // ── Presence (R104): a public-read heartbeat peers poll or subscribe to ───────
 //
