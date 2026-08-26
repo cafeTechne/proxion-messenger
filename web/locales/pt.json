@@ -596,5 +596,6 @@
   "web.signin.button": "Entrar",
   "web.signin.noPod": "Ainda não tem um pod? Obtenha um grátis em",
   "web.signin.badUrl": "Insira a URL do seu provedor de pod (https://...).",
-  "web.signin.failed": "Não foi possível iniciar o login. Verifique a URL do provedor."
+  "web.signin.failed": "Não foi possível iniciar o login. Verifique a URL do provedor.",
+  "presence.lastSeen": "visto pela última vez {time}"
 }

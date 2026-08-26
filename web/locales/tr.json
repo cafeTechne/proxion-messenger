@@ -596,5 +596,6 @@
   "web.signin.button": "Oturum aç",
   "web.signin.noPod": "Henüz podun yok mu? Ücretsiz edin:",
   "web.signin.badUrl": "Pod sağlayıcının URL adresini gir (https://...).",
-  "web.signin.failed": "Oturum açma başlatılamadı. Sağlayıcı URL adresini denetle."
+  "web.signin.failed": "Oturum açma başlatılamadı. Sağlayıcı URL adresini denetle.",
+  "presence.lastSeen": "son görülme {time}"
 }

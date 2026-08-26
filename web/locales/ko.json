@@ -596,5 +596,6 @@
   "web.signin.button": "로그인",
   "web.signin.noPod": "아직 팟이 없나요? 무료로 받으세요:",
   "web.signin.badUrl": "팟 제공자 URL을 입력하세요 (https://...).",
-  "web.signin.failed": "로그인을 시작할 수 없습니다. 제공자 URL을 확인하세요."
+  "web.signin.failed": "로그인을 시작할 수 없습니다. 제공자 URL을 확인하세요.",
+  "presence.lastSeen": "마지막 접속 {time}"
 }

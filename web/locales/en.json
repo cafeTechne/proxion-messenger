@@ -596,5 +596,6 @@
   "web.signin.button": "Sign in",
   "web.signin.noPod": "No pod yet? Get one free at",
   "web.signin.badUrl": "Enter your pod provider URL (https://...).",
-  "web.signin.failed": "Could not start sign-in. Check the provider URL."
+  "web.signin.failed": "Could not start sign-in. Check the provider URL.",
+  "presence.lastSeen": "last seen {time}"
 }

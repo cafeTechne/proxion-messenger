@@ -609,5 +609,6 @@
   "web.signin.button": "تسجيل الدخول",
   "web.signin.noPod": "ليس لديك حافظة بعد؟ احصل على واحدة مجانًا من",
   "web.signin.badUrl": "أدخل عنوان URL لمزوّد الحافظة (https://...).",
-  "web.signin.failed": "تعذّر بدء تسجيل الدخول. تحقّق من عنوان المزوّد."
+  "web.signin.failed": "تعذّر بدء تسجيل الدخول. تحقّق من عنوان المزوّد.",
+  "presence.lastSeen": "آخر ظهور {time}"
 }

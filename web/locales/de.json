@@ -596,5 +596,6 @@
   "web.signin.button": "Anmelden",
   "web.signin.noPod": "Noch kein Pod? Hol dir kostenlos einen bei",
   "web.signin.badUrl": "Gib die URL deines Pod-Anbieters ein (https://...).",
-  "web.signin.failed": "Anmeldung konnte nicht gestartet werden. Prüfe die Anbieter-URL."
+  "web.signin.failed": "Anmeldung konnte nicht gestartet werden. Prüfe die Anbieter-URL.",
+  "presence.lastSeen": "zuletzt gesehen {time}"
 }

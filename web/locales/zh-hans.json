@@ -596,5 +596,6 @@
   "web.signin.button": "登录",
   "web.signin.noPod": "还没有 pod？免费获取一个:",
   "web.signin.badUrl": "请输入你的 pod 提供商网址 (https://...)。",
-  "web.signin.failed": "无法开始登录。请检查提供商网址。"
+  "web.signin.failed": "无法开始登录。请检查提供商网址。",
+  "presence.lastSeen": "最后在线 {time}"
 }

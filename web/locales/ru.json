@@ -600,5 +600,6 @@
   "web.signin.button": "Войти",
   "web.signin.noPod": "Ещё нет пода? Получите бесплатно на",
   "web.signin.badUrl": "Введите URL вашего провайдера пода (https://...).",
-  "web.signin.failed": "Не удалось начать вход. Проверьте URL провайдера."
+  "web.signin.failed": "Не удалось начать вход. Проверьте URL провайдера.",
+  "presence.lastSeen": "был(а) в сети {time}"
 }

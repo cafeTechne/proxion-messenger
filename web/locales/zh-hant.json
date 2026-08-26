@@ -596,5 +596,6 @@
   "web.signin.button": "登入",
   "web.signin.noPod": "還沒有 pod？免費取得一個:",
   "web.signin.badUrl": "請輸入你的 pod 供應商網址 (https://...)。",
-  "web.signin.failed": "無法開始登入。請檢查供應商網址。"
+  "web.signin.failed": "無法開始登入。請檢查供應商網址。",
+  "presence.lastSeen": "最後上線 {time}"
 }

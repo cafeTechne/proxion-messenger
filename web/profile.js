@@ -8,7 +8,7 @@
 // webidColor is imported. Returned functions are destructured into same-named
 // bindings in main.js so the dispatch and listener wiring keep working.
 import { t } from './i18n.js';
-import { webidColor } from './util.js';
+import { webidColor, timeAgo } from './util.js';
 
 export function createProfile({ getSocket, showToast, getUserPresence, getMessageMap, isBlocked }) {
     const state = { profileCardActive: null };
@@ -52,7 +52,18 @@ export function createProfile({ getSocket, showToast, getUserPresence, getMessag
         // Update card contents
         document.getElementById("profile-name").textContent = displayName || webid.slice(0, 12);
         document.getElementById("profile-webid").textContent = webid;
-        document.getElementById("profile-status-text").textContent = presenceData.status || "offline";
+        // Heartbeat presence (R104) is coarse: for a contact who is not currently
+        // online, show "last seen <time>" from their last heartbeat rather than a
+        // bare "offline", so the staleness is honest.
+        {
+            const _st = presenceData.status || "offline";
+            const _statusEl = document.getElementById("profile-status-text");
+            if ((_st === "offline" || _st === "away") && presenceData.updated_at) {
+                _statusEl.textContent = t('presence.lastSeen', { time: timeAgo(presenceData.updated_at) });
+            } else {
+                _statusEl.textContent = _st;
+            }
+        }
 
         // Display custom status message if available
         const customStatusEl = document.getElementById("profile-custom-status");

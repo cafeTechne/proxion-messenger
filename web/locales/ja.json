@@ -596,5 +596,6 @@
   "web.signin.button": "サインイン",
   "web.signin.noPod": "まだポッドがありませんか？無料で取得できます:",
   "web.signin.badUrl": "ポッドプロバイダーの URL を入力してください (https://...)。",
-  "web.signin.failed": "サインインを開始できませんでした。プロバイダーの URL を確認してください。"
+  "web.signin.failed": "サインインを開始できませんでした。プロバイダーの URL を確認してください。",
+  "presence.lastSeen": "最終オンライン {time}"
 }
