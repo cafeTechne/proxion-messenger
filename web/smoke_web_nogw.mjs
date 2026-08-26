@@ -170,6 +170,50 @@ try {
     if (okRedirect) ok('sign-in redirects to the pod OIDC endpoint with the right client-id + PKCE');
     else fail(`OIDC redirect wrong: ${authUrl.slice(0, 160)}`);
   }
+  // ── Tier 3: subpath deploy (Pages serves the app under a nested path, not
+  // the origin root). Catches origin-absolute paths that break there: the SW
+  // must still register and the manifest + icons must still load. ──
+  step = 'tier3-subpath';
+  const PREFIX = '/proj/app/';
+  const subServer = createServer((req, res) => {
+    try {
+      let p = decodeURIComponent(req.url.split('?')[0]);
+      if (!p.startsWith(PREFIX)) { res.writeHead(404); res.end(); return; }
+      let rel = p.slice(PREFIX.length) || 'index.html';
+      if (rel.endsWith('/')) rel += 'index.html';
+      const fp = normalize(join(buildDir, rel));
+      if (!fp.startsWith(buildDir) || !existsSync(fp) || statSync(fp).isDirectory()) { res.writeHead(404); res.end(); return; }
+      res.writeHead(200, { 'Content-Type': MIME[extname(fp)] || 'application/octet-stream' });
+      res.end(readFileSync(fp));
+    } catch (e) { res.writeHead(500); res.end(String(e)); }
+  });
+  const subPort = await freePort();
+  await new Promise((r) => subServer.listen(subPort, '127.0.0.1', r));
+  try {
+    const subUrl = `http://127.0.0.1:${subPort}${PREFIX}`;
+    const subPage = await browser.newPage();
+    const subErrs = [];
+    subPage.on('pageerror', (e) => subErrs.push(e.message));
+    await subPage.goto(subUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+    await new Promise((r) => setTimeout(r, 900));
+    const subMode = await subPage.evaluate(() => window.proxionTransport && window.proxionTransport.mode);
+    const swScope = await subPage.evaluate(async () => {
+      try { const r = await navigator.serviceWorker.getRegistration(); return r ? r.scope : null; } catch { return null; }
+    });
+    const assets = await subPage.evaluate(async () => ({
+      manifest: await fetch('manifest.json').then((r) => r.status).catch(() => 0),
+      icon: await fetch('icons/icon-192.png').then((r) => r.status).catch(() => 0),
+    }));
+    if (subMode === 'web') ok('subpath: app boots in web mode under a nested path');
+    else fail(`subpath: expected web mode, got ${subMode}`);
+    if (swScope && swScope.includes(PREFIX)) ok(`subpath: service worker registered under the app path`);
+    else fail(`subpath: service worker did not register under the app path (scope=${swScope})`);
+    if (assets.manifest === 200 && assets.icon === 200) ok('subpath: manifest + icon load via relative paths');
+    else fail(`subpath: manifest/icon not served: ${JSON.stringify(assets)}`);
+    if (!subErrs.length) ok('subpath: no page errors');
+    else fail('subpath page errors: ' + subErrs.join('; '));
+  } finally { subServer.close(); }
+
   console.log(process.exitCode ? '\nSMOKE FAILED' : '\nSMOKE PASSED');
 } catch (e) {
   step = step || 'run';
