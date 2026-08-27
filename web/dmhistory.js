@@ -49,12 +49,16 @@ function _open() {
 // Persist one DM message's PLAINTEXT. `msg` must have message_id, thread_id,
 // content (plaintext), from_webid, timestamp; reply_to_id/from_display_name
 // optional. Silently no-ops if the record isn't a usable DM message or IDB fails.
+// Returns true when there is nothing durable to keep (history off, or an
+// intentionally-skipped ciphertext/placeholder) OR the write committed, and
+// false only when an enabled write actually failed — so a caller that must not
+// discard the source (a consumed pod drop) can tell a real failure from a no-op.
 export async function dmHistorySave(msg) {
-    if (!_enabled) return;
-    if (!msg || !msg.message_id || !msg.thread_id) return;
+    if (!_enabled) return true;
+    if (!msg || !msg.message_id || !msg.thread_id) return true;
     // Never persist ciphertext or undecryptable placeholders.
-    if (msg.e2e) return;
-    if (msg.content === '[could not decrypt]' || msg.content === '[decryption error]') return;
+    if (msg.e2e) return true;
+    if (msg.content === '[could not decrypt]' || msg.content === '[decryption error]') return true;
     try {
         const db = await _open();
         await new Promise((resolve, reject) => {
@@ -72,7 +76,8 @@ export async function dmHistorySave(msg) {
             tx.onerror = () => reject(tx.error);
         });
         await _enforceCap(db, msg.thread_id);
-    } catch (_) { /* best-effort cache */ }
+        return true;
+    } catch (_) { return false; /* best-effort cache; report failure to callers that care */ }
 }
 
 // Given all rows for a thread and a cap, return the message_ids to evict

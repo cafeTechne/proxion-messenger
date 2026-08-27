@@ -70,22 +70,37 @@ found more issues. Fixed in this round:
   private host only when it is the user's own pod origin (so local/dev and
   self-hosted single-server still work). The host check covers IPv4 private
   ranges, IPv6 loopback/ULA/link-local, and IPv4-mapped IPv6.
+- **Presence `start()` leaked on reconnect.** It stacked a second heartbeat timer
+  and re-registered the window listeners each call, and `stop()` could not remove
+  the anonymous listeners. `start()` is now idempotent, and `stop()` removes named
+  listeners and re-enables a later `start()`.
+- **Presence clock-skew.** Freshness was reader-clock minus the writer's
+  self-reported heartbeat, so a skewed writer shifted online/away/offline (a
+  crashed peer with a fast clock read "online" for the skew duration). Freshness
+  now uses the presence resource's `Last-Modified` (a CORS-safelisted header, so
+  one trusted server clock) when present, falling back to the heartbeat; the
+  heartbeat is still shown as last-seen. (The unload offline write still cannot
+  use `sendBeacon` — an authenticated pod PUT needs DPoP headers it cannot carry —
+  and the freshness decay already covers a missed unload write.)
+- **DM receive deleted the drop before a durable write.** The receive path fired
+  the message event (which persists to the local DM history) fire-and-forget and
+  then deleted the only ciphertext copy; the ratchet had already advanced, so a
+  failed write meant permanent loss with no possible re-decrypt. `dmHistorySave`
+  now reports success/failure, and the receive path persists (awaited) before
+  deleting the drop, keeping the drop for a later retry when the write fails.
 - Smaller: per-drop error isolation in the DM drain, a re-entrancy guard on the
   call-signal drain, and a guarded invite-token decode.
 
-Deferred (tracked, lower severity or higher risk):
-- **ACP servers.** `podGrantChatParticipants` and the inbox/presence ACL writers
-  always PUT WAC turtle; on an ACP server (ESS) sharing silently fails. Route them
-  through the `model === 'acp'` branch `podSetContainerAcl` already uses.
-- **DM receive deletes before durable persist.** Await the handler and delete only
-  on confirmed success, mirroring the send-side ratchet guard.
-- **Presence:** clock-skew freshness (use `Last-Modified`), a non-idempotent
-  `start()` that leaks a timer + listeners on reconnect, and an unload offline
-  write that should use `sendBeacon`.
-- **Drop-box ACL failures return success:** treat an ACL-write failure as a
-  provisioning failure so a non-public-Append inbox is not reported ready.
-- **`clientid.jsonld`:** add the `index.html` redirect variant and fix `logo_uri`.
-- **PWA shell:** precache the vendored QR scripts and the maskable icon.
+Deferred (tracked, with the blocker that keeps each out of the quick rounds):
+- **ACP servers.** `podGrantChatParticipants` always PUTs WAC turtle; on an ACP
+  server sharing fails. Not a one-line reuse of `podSetContainerAcl`'s ACP branch:
+  its `buildAcpAcr` grants members read-only, but a chat participant needs
+  Read+Write+Append, so it needs a new ACP builder plus verification against a
+  live ESS (no ESS test account available, per the interop notes).
+- **Drop-box ACL failures return success.** Hard-failing provisioning on an ACL
+  write error risks breaking the owner's own inbox on a transient hiccup; the
+  safer fix is a post-create verify/retry of the public-Append grant, which is
+  more than a one-liner.
 
 `callsec.js` (the DTLS-fingerprint call auth) was reviewed and is fail-closed: a
 MitM that rewrites the fingerprint is refused, and verification errors reject

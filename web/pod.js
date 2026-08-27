@@ -1342,7 +1342,18 @@ export async function podReadPresence(peerPodRoot) {
         const res = await solidSession.fetch(url, { headers: { Accept: 'application/json' } });
         if (!res || !res.ok) return null;
         const d = await res.json();
-        if (d && typeof d.status === 'string') return { status: d.status, heartbeat: Number(d.heartbeat) || 0 };
+        if (d && typeof d.status === 'string') {
+            // Capture the server's Last-Modified (a CORS-safelisted header, readable
+            // cross-origin) so freshness can be judged against one trusted clock
+            // rather than the writer's self-reported, possibly-skewed, heartbeat.
+            const lm = res.headers && res.headers.get && res.headers.get('Last-Modified');
+            const serverMs = lm ? Date.parse(lm) : NaN;
+            return {
+                status: d.status,
+                heartbeat: Number(d.heartbeat) || 0,
+                serverMs: Number.isFinite(serverMs) ? serverMs : null,
+            };
+        }
     } catch { /* peer has no presence / offline */ }
     return null;
 }

@@ -28,10 +28,11 @@ describe('envelopeFromDmPayload', () => {
     });
 });
 
-function harness({ drops = [], myDevice = 'dev-me' } = {}) {
+function harness({ drops = [], myDevice = 'dev-me', persistMessage } = {}) {
     const events = [];
     const dropped = [];
     const deleted = [];
+    const persisted = [];
     const pod = {
         podEnsureDmInbox: vi.fn(async () => 'https://me/proxion/dm-inbox/'),
         podDropDm: vi.fn(async (root, env) => { dropped.push({ root, env }); return true; }),
@@ -47,8 +48,9 @@ function harness({ drops = [], myDevice = 'dev-me' } = {}) {
         pod, e2e, notify, handleEvent: (e) => events.push(e),
         getSelfWebId: () => 'https://me/profile/card#me', getDisplayName: () => 'Me',
         getMyDeviceId: () => myDevice,
+        persistMessage: persistMessage && ((m) => { persisted.push(m); return persistMessage(m); }),
     });
-    return { dm, pod, e2e, notify, events, dropped, deleted };
+    return { dm, pod, e2e, notify, events, dropped, deleted, persisted };
 }
 
 describe('createWebDm.dropDm', () => {
@@ -170,6 +172,28 @@ describe('createWebDm receive', () => {
         await dm.drainOnce();
         expect(e2e.ratchetDecrypt).not.toHaveBeenCalled();
         expect(events[0].content).toBe('hello');
+    });
+
+    it('persists durably before deleting, and emits after a successful persist', async () => {
+        const { dm, events, deleted, persisted } = harness({
+            persistMessage: async () => true,
+            drops: [{ url: 'u1', envelope: { from_webid: 'https://bob', message_id: 'm', content: 'hi', e2e: false } }],
+        });
+        await dm.drainOnce();
+        expect(persisted).toHaveLength(1);
+        expect(persisted[0]).toMatchObject({ message_id: 'm', thread_id: 'https://bob', content: 'hi' });
+        expect(events).toHaveLength(1);
+        expect(deleted).toEqual(['u1']);
+    });
+
+    it('keeps the drop (no delete, no render) when the durable persist fails', async () => {
+        const { dm, events, deleted } = harness({
+            persistMessage: async () => false,   // e.g. IndexedDB write failed
+            drops: [{ url: 'u2', envelope: { from_webid: 'https://bob', message_id: 'm', content: 'hi', e2e: false } }],
+        });
+        await dm.drainOnce();
+        expect(events).toHaveLength(0);
+        expect(deleted).toHaveLength(0);
     });
 
     it('start() ensures the inbox, drains, and subscribes', async () => {

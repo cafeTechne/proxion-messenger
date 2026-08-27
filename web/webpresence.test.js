@@ -21,6 +21,17 @@ describe('statusFromHeartbeat', () => {
     it('reports lastSeen as the heartbeat time', () => {
         expect(statusFromHeartbeat({ status: 'online', heartbeat: 42 }, now).lastSeen).toBe(42);
     });
+    it('prefers the server time (serverMs) over a skewed heartbeat for freshness', () => {
+        // Writer clock is 10 min ahead: heartbeat looks fresh, but the server wrote
+        // it 10 min ago, so it should read offline. lastSeen stays the heartbeat.
+        const doc = { status: 'online', heartbeat: now + 600_000, serverMs: now - 600_000 };
+        const r = statusFromHeartbeat(doc, now);
+        expect(r.status).toBe('offline');
+        expect(r.lastSeen).toBe(now + 600_000);
+    });
+    it('falls back to the heartbeat when there is no server time', () => {
+        expect(statusFromHeartbeat({ status: 'online', heartbeat: now - 1000, serverMs: null }, now).status).toBe('online');
+    });
 });
 
 function harness({ presence = {}, contacts = [] } = {}) {
@@ -79,6 +90,26 @@ describe('createWebPresence', () => {
         eng.start();
         expect(written[0]).toBe('online');
         expect(pod.podReadPresence).toHaveBeenCalledTimes(2);
+        eng.stop();
+    });
+
+    it('start() is idempotent: a second call does not re-beat or start a second timer', () => {
+        const { eng, written } = harness();
+        const setSpy = vi.spyOn(globalThis, 'setInterval');
+        eng.start();
+        eng.start();   // e.g. a reconnect calling start again
+        expect(written).toEqual(['online']);       // only the first start's beat
+        expect(setSpy).toHaveBeenCalledTimes(1);   // one heartbeat timer, not two
+        eng.stop();
+        setSpy.mockRestore();
+    });
+
+    it('stop() re-enables a subsequent start (not permanently disabled)', () => {
+        const { eng, written } = harness();
+        eng.start();
+        eng.stop();
+        eng.start();
+        expect(written).toEqual(['online', 'online']);   // a real beat on each start
         eng.stop();
     });
 

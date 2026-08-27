@@ -38,7 +38,7 @@ export function envelopeFromDmPayload(payload, selfWebId, displayName = '') {
     };
 }
 
-export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDisplayName, getMyDeviceId }) {
+export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDisplayName, getMyDeviceId, persistMessage }) {
     let _unsub = null;
 
     // Drop an (already-encrypted) DM to the recipient's pod inbox.
@@ -104,7 +104,7 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
             console.warn('[webdm] decrypt failed, leaving drop for retry:', err);
             return;
         }
-        handleEvent({
+        const message = {
             type: 'message',
             message_id: env.message_id,
             thread_id: from,
@@ -116,7 +116,17 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
             source: 'local_dm',
             local: true,
             _persistDm: true,
-        });
+        };
+        // Persist durably BEFORE deleting the only ciphertext copy. The ratchet has
+        // already advanced inside ratchetDecrypt, so a re-decrypt on a later drain
+        // would fail; if the durable write fails, keep the drop rather than lose the
+        // message. A no-op (history disabled / nothing to keep) reports success.
+        if (persistMessage) {
+            let saved = false;
+            try { saved = await persistMessage(message); } catch { saved = false; }
+            if (!saved) { console.warn('[webdm] durable persist failed, leaving drop for retry'); return; }
+        }
+        handleEvent(message);
         await pod.podDeleteDmDrop(url);
     }
 

@@ -5477,6 +5477,9 @@ import { createIdentityResolver } from './identity.js';
                         getSelfWebId: () => selfWebId,
                         getDisplayName: () => localStorage.getItem('proxion_display_name') || '',
                         getMyDeviceId: () => clientDid,
+                        // Durable local persist before the pod drop is deleted, so a
+                        // received DM is never lost if the write fails after decrypt.
+                        persistMessage: (m) => dmHistorySave({ ...m, thread_id: m.thread_id }),
                     });
                     // R105: gateway-free call signaling over the pod call-inbox.
                     const webCalls = createWebCalls({
