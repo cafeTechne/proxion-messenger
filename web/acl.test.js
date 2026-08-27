@@ -81,6 +81,21 @@ describe('buildAcpAcr', () => {
         expect(acr).not.toContain('not-a-webid');
         expect(() => buildAcpAcr('nope', [], RES)).toThrow();
     });
+
+    it('grants members the requested modes (chat participants get read/write/append)', () => {
+        const acr = buildAcpAcr(OWNER, [M1], RES, 'acl:Read, acl:Write, acl:Append');
+        expect(acr).toMatch(/<#members-policy> a acp:Policy; acp:allow acl:Read, acl:Write, acl:Append/);
+        // owner still full control
+        expect(acr).toMatch(/acp:allow acl:Read, acl:Write, acl:Control/);
+    });
+
+    it('adds a public grant (inbox drop-boxes: public Append) via acp:PublicAgent', () => {
+        const acr = buildAcpAcr(OWNER, [], RES, 'acl:Read', 'acl:Append');
+        expect(acr).toContain('<#public-matcher> a acp:Matcher; acp:agent acp:PublicAgent');
+        expect(acr).toMatch(/<#public-policy> a acp:Policy; acp:allow acl:Append/);
+        expect(acr).toContain('<#public-ac>');           // wired into the controls
+        expect(acr).not.toContain('members-ac');         // no members here
+    });
 });
 
 // ── discoverAccessControl + grant routing (network wrapper in pod.js) ────────

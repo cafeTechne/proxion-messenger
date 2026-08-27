@@ -88,15 +88,23 @@ found more issues. Fixed in this round:
   failed write meant permanent loss with no possible re-decrypt. `dmHistorySave`
   now reports success/failure, and the receive path persists (awaited) before
   deleting the drop, keeping the drop for a later retry when the write fails.
+- **ACP servers: room-join grant (authored, pending live verification).**
+  `podGrantChatParticipants` now branches on the discovered access-control model:
+  on an ACP server it PUTs an ACR granting participants Read+Write+Append
+  (`buildAcpAcr` gained a `memberModes` argument; the chat grant passes
+  `acl:Read, acl:Write, acl:Append`), instead of WAC turtle that grants nothing
+  there. The drop-box inboxes (DM/call/join) and the LDN inbox likewise author an
+  ACR on an ACP server: owner full control, a public-Append policy via
+  `acp:PublicAgent`, and any reader agents (the gateway poller) as Read, through a
+  model-aware `_inboxAclBody` helper (`buildAcpAcr` gained a `publicModes`
+  argument). All spec-authored and structurally unit-tested; the ACP path only
+  activates when the server advertises ACP, so WAC servers (CSS) are unaffected.
+  Still needs validation against a live Inrupt ESS (no ESS test account
+  available), and the public type index is not yet ACP-authored.
 - Smaller: per-drop error isolation in the DM drain, a re-entrancy guard on the
   call-signal drain, and a guarded invite-token decode.
 
 Deferred (tracked, with the blocker that keeps each out of the quick rounds):
-- **ACP servers.** `podGrantChatParticipants` always PUTs WAC turtle; on an ACP
-  server sharing fails. Not a one-line reuse of `podSetContainerAcl`'s ACP branch:
-  its `buildAcpAcr` grants members read-only, but a chat participant needs
-  Read+Write+Append, so it needs a new ACP builder plus verification against a
-  live ESS (no ESS test account available, per the interop notes).
 - **Drop-box ACL failures return success.** Hard-failing provisioning on an ACL
   write error risks breaking the owner's own inbox on a transient hiccup; the
   safer fix is a post-create verify/retry of the public-Append grant, which is

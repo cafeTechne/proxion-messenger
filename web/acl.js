@@ -84,8 +84,10 @@ function _isWebId(w) {
 
 /**
  * Build an ACP Access Control Resource (turtle) granting the owner full control
- * and each member read, over the resource and its members (the ACP analogue of
- * WAC acl:default). Access Control Policy v0.9.0.
+ * and each member the modes in `memberModes` (default acl:Read), over the
+ * resource and its members (the ACP analogue of WAC acl:default). Access Control
+ * Policy v0.9.0. For a shared chat container, pass `acl:Read, acl:Write,
+ * acl:Append` so participants can POST (the ACP analogue of buildChatAcl).
  *
  * NOTE (R100 A2): authored from the spec and structurally unit-tested, but NOT
  * yet verified against a live Inrupt ESS. The exact ACR association (acp:resource
@@ -93,18 +95,26 @@ function _isWebId(w) {
  * adjustment once tested on a real ACP server. Until then this only activates
  * when a server advertises the ACP model, so it cannot affect WAC servers (CSS).
  */
-export function buildAcpAcr(ownerWebId, memberWebIds, resourceUrl) {
+export function buildAcpAcr(ownerWebId, memberWebIds, resourceUrl, memberModes = 'acl:Read', publicModes = null) {
     if (!_isWebId(ownerWebId)) throw new Error('Invalid owner WebID');
     const members = (memberWebIds || []).filter(_isWebId);
     const memberAgents = members.map((w) => `<${w}>`).join(', ');
     const membersBlock = members.length > 0
         ? `\n<#members-ac> a acp:AccessControl; acp:apply <#members-policy>.\n` +
-          `<#members-policy> a acp:Policy; acp:allow acl:Read; acp:anyOf <#members-matcher>.\n` +
+          `<#members-policy> a acp:Policy; acp:allow ${memberModes}; acp:anyOf <#members-matcher>.\n` +
           `<#members-matcher> a acp:Matcher; acp:agent ${memberAgents}.\n`
         : '';
-    const controls = members.length > 0
-        ? '<#owner-ac>, <#members-ac>'
-        : '<#owner-ac>';
+    // Optional public grant (the ACP analogue of WAC's foaf:Agent authorization):
+    // a matcher on acp:PublicAgent. Used for the public-Append drop-box inboxes.
+    const publicBlock = publicModes
+        ? `\n<#public-ac> a acp:AccessControl; acp:apply <#public-policy>.\n` +
+          `<#public-policy> a acp:Policy; acp:allow ${publicModes}; acp:anyOf <#public-matcher>.\n` +
+          `<#public-matcher> a acp:Matcher; acp:agent acp:PublicAgent.\n`
+        : '';
+    const controls = ['<#owner-ac>',
+        ...(members.length > 0 ? ['<#members-ac>'] : []),
+        ...(publicModes ? ['<#public-ac>'] : []),
+    ].join(', ');
     return (
         `@prefix acp: <http://www.w3.org/ns/solid/acp#>.\n` +
         `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n\n` +
@@ -117,6 +127,7 @@ export function buildAcpAcr(ownerWebId, memberWebIds, resourceUrl) {
         `   acp:allow acl:Read, acl:Write, acl:Control;\n` +
         `   acp:anyOf <#owner-matcher>.\n` +
         `<#owner-matcher> a acp:Matcher; acp:agent <${ownerWebId}>.\n` +
-        membersBlock
+        membersBlock +
+        publicBlock
     );
 }

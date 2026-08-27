@@ -552,11 +552,18 @@ export async function podSetChatSeqAt(containerUrl, messageId, date, seq) {
 export async function podGrantChatParticipants(containerUrl, ownerWebId, participantWebIds) {
     if (!containerUrl || !solidSession?.info?.isLoggedIn) return false;
     try {
-        const { url: aclUrl } = await discoverAccessControl(containerUrl);
+        const { url: aclUrl, model } = await discoverAccessControl(containerUrl);
+        // On an ACP server (ESS) the WAC turtle would not grant anything; author an
+        // ACR that gives participants Read+Write+Append instead. (ACP path is spec
+        // -authored, not yet live-verified; it only activates when the server
+        // advertises ACP, so WAC servers such as CSS are unaffected.)
+        const body = model === 'acp'
+            ? buildAcpAcr(ownerWebId, participantWebIds, containerUrl, 'acl:Read, acl:Write, acl:Append')
+            : buildChatAcl(ownerWebId, participantWebIds, containerUrl);
         const res = await solidSession.fetch(aclUrl, {
             method: 'PUT',
             headers: { 'Content-Type': 'text/turtle' },
-            body: buildChatAcl(ownerWebId, participantWebIds, containerUrl),
+            body,
         });
         return !!(res && res.ok);
     } catch (err) {
@@ -991,11 +998,11 @@ export async function podEnsureInbox() {
         // Public-Append ACL: owner full control (and default over children so we can
         // read/delete the notifications inside); everyone else may only Append.
         try {
-            const { url: inboxAclUrl } = await discoverAccessControl(inboxUrl);
+            const { url: inboxAclUrl, model } = await discoverAccessControl(inboxUrl);
             await solidSession.fetch(inboxAclUrl, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'text/turtle' },
-                body: buildInboxAcl(inboxUrl, webId, []),
+                body: _inboxAclBody(model, inboxUrl, webId, []),
             });
         } catch (err) {
             console.warn('[pod] inbox ACL failed:', err);
@@ -1031,6 +1038,17 @@ export function buildInboxAcl(inboxUrl, ownerWebId, readerWebIds = []) {
     return ttl;
 }
 
+// The inbox/drop-box ACL body for the discovered access-control model: WAC turtle,
+// or on an ACP server (ESS) an ACR with the same shape (owner full control, public
+// Append, optional reader agents Read). ACP path is spec-authored, not yet
+// live-verified; it only activates when the server advertises ACP, so WAC servers
+// (CSS) are unaffected.
+function _inboxAclBody(model, inboxUrl, ownerWebId, readerWebIds = []) {
+    return model === 'acp'
+        ? buildAcpAcr(ownerWebId, readerWebIds, inboxUrl, 'acl:Read', 'acl:Append')
+        : buildInboxAcl(inboxUrl, ownerWebId, readerWebIds);
+}
+
 /**
  * Grant a WebID read-only access to our inbox (R78 L2), so an always-on gateway that
  * is not publicly reachable can poll it for invitations and push us. Read-only and
@@ -1042,11 +1060,11 @@ export async function podGrantInboxReader(readerWebId) {
     const inbox = await podEnsureInbox();
     if (!inbox) return false;
     try {
-        const { url: inboxAclUrl } = await discoverAccessControl(inbox);
+        const { url: inboxAclUrl, model } = await discoverAccessControl(inbox);
         const res = await solidSession.fetch(inboxAclUrl, {
             method: 'PUT',
             headers: { 'Content-Type': 'text/turtle' },
-            body: buildInboxAcl(inbox, me, [readerWebId]),
+            body: _inboxAclBody(model, inbox, me, [readerWebId]),
         });
         return !!(res && res.ok);
     } catch (err) {
@@ -1159,11 +1177,11 @@ async function _ensureDropBox(path, label) {
         });
         if (!put || !(put.ok || put.status === 409 || put.status === 405)) return null;
         try {
-            const { url: aclUrl } = await discoverAccessControl(inboxUrl);
+            const { url: aclUrl, model } = await discoverAccessControl(inboxUrl);
             await solidSession.fetch(aclUrl, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'text/turtle' },
-                body: buildInboxAcl(inboxUrl, webId, []),
+                body: _inboxAclBody(model, inboxUrl, webId, []),
             });
         } catch (err) {
             console.warn(`[pod] ${label} ACL failed:`, err);
