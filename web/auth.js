@@ -54,6 +54,19 @@ export async function solidLogout() {
         console.warn('OIDC logout failed:', e);
     }
     _cachedStorageRoot = null;
+    // Clear the persisted root too, so the next account signed in on this browser
+    // does not inherit the previous account's pod root.
+    try { localStorage.removeItem('proxion_storage_root_v2'); } catch { /* ignore */ }
+}
+
+// Is `root` safe to trust as THIS WebID's storage root? Require same origin as the
+// WebID, so a stale (other-account) or poisoned (foreign-origin) localStorage value
+// cannot redirect authenticated pod writes to somewhere else. A legitimately
+// cross-origin pim:storage (e.g. Inrupt PodSpaces) is never persisted (see
+// discoverStorageRoot) and is re-derived from the WebID card each session instead.
+function _rootTrustedFor(root, webId) {
+    if (!root || !/^https?:\/\//.test(root) || root.endsWith('/proxion/')) return false;
+    try { return new URL(root).origin === new URL(webId).origin; } catch { return false; }
 }
 
 // Derive a pod's storage root from its WebID by stripping the profile document
@@ -73,20 +86,20 @@ function _rootFromWebId(webId) {
 
 export async function discoverStorageRoot() {
     if (_cachedStorageRoot) return _cachedStorageRoot;
-    const lsCache = localStorage.getItem('proxion_storage_root_v2');
-    if (lsCache) {
-        // Reject cached values ending with /proxion/ — old incorrect format.
-        if (/^https?:\/\//.test(lsCache) && !lsCache.endsWith('/proxion/')) {
-            _cachedStorageRoot = lsCache;
-            return _cachedStorageRoot;
-        }
-        localStorage.removeItem('proxion_storage_root_v2');
-    }
     if (!solidSession.info.isLoggedIn) return null;
     const webId = solidSession.info.webId;
     if (!webId || !/^https?:\/\//.test(webId)) return null;
     // Same-origin, account-aware fallback for when the profile omits pim:storage.
     const fromWebId = _rootFromWebId(webId);
+    // Trust the persisted root only if it is bound to THIS WebID's origin.
+    const lsCache = localStorage.getItem('proxion_storage_root_v2');
+    if (lsCache) {
+        if (_rootTrustedFor(lsCache, webId)) {
+            _cachedStorageRoot = lsCache;
+            return _cachedStorageRoot;
+        }
+        localStorage.removeItem('proxion_storage_root_v2');
+    }
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -119,7 +132,12 @@ export async function discoverStorageRoot() {
         }
         if (!storageRoot) storageRoot = fromWebId;
         _cachedStorageRoot = storageRoot; // bare root — pod.js owns the proxion/ prefix
-        localStorage.setItem('proxion_storage_root_v2', _cachedStorageRoot);
+        // Persist only a same-origin root as the fast-path cache; a cross-origin
+        // pim:storage stays in memory and is re-derived (authoritatively) next
+        // session so a persisted value can never point off the WebID's origin.
+        if (_rootTrustedFor(storageRoot, webId)) {
+            localStorage.setItem('proxion_storage_root_v2', storageRoot);
+        }
         return _cachedStorageRoot;
     } catch {
         clearTimeout(timeout);
@@ -130,11 +148,15 @@ export async function discoverStorageRoot() {
 
 export function podStorageRoot() {
     if (_cachedStorageRoot) return _cachedStorageRoot;
+    if (!solidSession.info.isLoggedIn) return null;
+    const webId = solidSession.info.webId;
     const lsCache = localStorage.getItem('proxion_storage_root_v2');
-    if (lsCache && /^https?:\/\//.test(lsCache) && !lsCache.endsWith('/proxion/')) {
+    if (lsCache && _rootTrustedFor(lsCache, webId)) {
         _cachedStorageRoot = lsCache;
         return _cachedStorageRoot;
     }
-    if (!solidSession.info.isLoggedIn) return null;
-    return _rootFromWebId(solidSession.info.webId);
+    // Derive from the WebID (un-poisonable). A cross-origin pim:storage pod fills
+    // _cachedStorageRoot via discoverStorageRoot, which onPodLoggedIn awaits before
+    // any pod I/O, so the sync fallback here is only used pre-discovery.
+    return _rootFromWebId(webId);
 }

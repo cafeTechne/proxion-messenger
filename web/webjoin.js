@@ -29,8 +29,11 @@ export function parseInvite(str) {
     }
     const i = token.indexOf(SEP);
     if (i < 0) return null;
-    const roomId = decodeURIComponent(token.slice(0, i));
-    const ownerWebId = decodeURIComponent(token.slice(i + 1));
+    let roomId, ownerWebId;
+    try {
+        roomId = decodeURIComponent(token.slice(0, i));
+        ownerWebId = decodeURIComponent(token.slice(i + 1));
+    } catch { return null; }   // malformed percent-encoding
     // Accept http(s) WebIDs: production pods are https, but a local/dev pod may be
     // http, and the owner's WebID is where the join request is delivered.
     if (!roomId || !/^https?:\/\//.test(ownerWebId)) return null;

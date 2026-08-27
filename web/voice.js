@@ -47,6 +47,7 @@ export function createVoice(deps) {
             currentCallSessionId: null,
             isMuted: false,
             _pendingCandidates: [],
+            _pendingRemoteCandidates: [],
             _remoteDescSet: false,
             _callTimeoutId: null,
             _callState: CallState.IDLE,
@@ -486,6 +487,16 @@ export function createVoice(deps) {
                 }));
             }
             state._pendingCandidates = [];
+            // Apply any inbound candidates that arrived before the remote description
+            // was set. In gateway mode signaling is ordered, but over the pod (R105)
+            // signals are unordered/batched, so a candidate can land before the
+            // answer/offer; without this buffer it would throw and be lost.
+            const buffered = state._pendingRemoteCandidates;
+            state._pendingRemoteCandidates = [];
+            for (const c of buffered) {
+                try { await state.pc.addIceCandidate(c); }
+                catch (e) { console.warn("buffered ICE error", e); }
+            }
         }
 
         async function _getIceServers() {
@@ -840,6 +851,7 @@ export function createVoice(deps) {
             const iceServers = await _getIceServers();
             state.pc = new RTCPeerConnection({ iceServers: iceServers });
             state._pendingCandidates = [];
+            state._pendingRemoteCandidates = [];
             state._remoteDescSet = false;
             state.currentCallSessionId = sessionId;
             state._verifyState = 'unverified';
@@ -1046,6 +1058,7 @@ export function createVoice(deps) {
             stopRingTone();
             _clearCallTimeout();
             state._pendingCandidates = [];
+            state._pendingRemoteCandidates = [];
             state._remoteDescSet = false;
             state.isMuted = false;
             state.currentCallSessionId = null;
@@ -1142,15 +1155,22 @@ export function createVoice(deps) {
         }
 
         async function handleIceCandidate(event) {
-            if (state.pc) {
-                try {
-                    await state.pc.addIceCandidate({
-                        candidate: event.candidate,
-                        sdpMid: event.sdp_mid,
-                        sdpMLineIndex: event.sdp_mline_index
-                    });
-                } catch (e) { console.warn("ICE error", e); }
+            if (!state.pc) return;
+            const cand = {
+                candidate: event.candidate,
+                sdpMid: event.sdp_mid,
+                sdpMLineIndex: event.sdp_mline_index
+            };
+            // Buffer until the remote description is set, else addIceCandidate throws
+            // and the candidate (possibly the only srflx/relay one) is lost. Flushed
+            // by _setRemoteAndDrainCandidates. Matters over the pod, where signals can
+            // arrive out of order.
+            if (!state._remoteDescSet) {
+                state._pendingRemoteCandidates.push(cand);
+                return;
             }
+            try { await state.pc.addIceCandidate(cand); }
+            catch (e) { console.warn("ICE error", e); }
         }
 
         async function handleGroupVoiceAnswer(event) {
@@ -1184,7 +1204,7 @@ export function createVoice(deps) {
         function _doHangup() {
             setCallState(CallState.ENDING);
             if (state.currentCallSessionId && getSocket() && getSocket().readyState === WebSocket.OPEN) {
-                getSocket().send(JSON.stringify({cmd: "voice_hangup", session_id: state.currentCallSessionId}));
+                getSocket().send(JSON.stringify({cmd: "voice_hangup", session_id: state.currentCallSessionId, target_webid: state._callPeerWebid || undefined}));
             }
             hangupCleanup();
         }

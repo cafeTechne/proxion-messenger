@@ -3435,7 +3435,7 @@ import { createIdentityResolver } from './identity.js';
         // Send voice_hangup when tab/window closes mid-call
         window.addEventListener("beforeunload", () => {
             if (voice.state.currentCallSessionId && socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({cmd: "voice_hangup", session_id: voice.state.currentCallSessionId}));
+                socket.send(JSON.stringify({cmd: "voice_hangup", session_id: voice.state.currentCallSessionId, target_webid: voice.state._callPeerWebid || undefined}));
             }
         });
 

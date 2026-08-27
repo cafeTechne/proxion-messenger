@@ -57,18 +57,24 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
     async function dropFanout(cmd) {
         const entries = cmd && cmd.fanout;
         if (!Array.isArray(entries)) return false;
-        let anyOk = false;
+        // Delivery is only real when a copy reaches one of the RECIPIENT's devices.
+        // The fanout also carries self-sync copies to our own other devices; those
+        // land in our own inbox and must not be counted as delivery, or a DM that
+        // reached none of the peer's devices would falsely clear its pending state.
+        const self = getSelfWebId();
+        let anyRecipientOk = false;
         for (const e of entries) {
             if (!e || !e.to_webid) continue;
             const root = peerPodRootFromWebId(e.to_webid);
             if (!root) continue;
             const envelope = {
-                v: 1, kind: 'fanout', from_webid: getSelfWebId(),
+                v: 1, kind: 'fanout', from_webid: self,
                 message_id: cmd.message_id, to_device_id: e.to_device_id, payload: e.payload,
             };
-            if (await pod.podDropDm(root, envelope)) anyOk = true;
+            const ok = await pod.podDropDm(root, envelope);
+            if (ok && e.to_webid !== self) anyRecipientOk = true;
         }
-        return anyOk;
+        return anyRecipientOk;
     }
 
     async function _handleEnvelope(url, env) {
@@ -118,7 +124,10 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
     async function drainOnce() {
         const drops = await pod.podReadDmDrops();
         for (const d of drops) {
-            if (d && d.envelope) await _handleEnvelope(d.url, d.envelope);
+            if (!d || !d.envelope) continue;
+            // Isolate per-drop failures so one bad envelope cannot block the rest.
+            try { await _handleEnvelope(d.url, d.envelope); }
+            catch (err) { console.warn('[webdm] drop handling failed:', err); }
         }
     }
 

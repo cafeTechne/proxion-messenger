@@ -42,6 +42,50 @@ origin-root inbox. Fixed in `auth.js` by deriving the own-root from the WebID
 path the same way the sender does, keeping an https `pim:storage` claim when the
 profile provides one (including cross-origin, as Inrupt PodSpaces uses).
 
+### Audit pass (three reviewers) — fixed and deferred
+
+A focused review of the gateway-free surfaces (delivery, calls/presence, auth/ACL)
+found more issues. Fixed in this round:
+- **Fanout falsely reported delivery.** A DM's optimistic "pending" state cleared
+  when a self-sync copy to one of the sender's OWN devices dropped, even if no
+  copy reached the recipient. `dropFanout` now counts only drops to a non-self
+  WebID as delivery, so an undelivered DM stays "Not delivered / Retry".
+- **`voice_hangup` never reached the peer in web mode** (no `target_webid`, so the
+  pod signaler dropped it): the callee's connection hung open until ICE failed.
+  Hangup now carries the call peer.
+- **Inbound ICE candidates were not buffered.** Over the pod, signals arrive
+  unordered/batched, so a candidate landing before the remote description was set
+  threw and was discarded, failing calls on NAT that need trickle. Candidates now
+  buffer until the remote description is applied.
+- **Storage-root cache was not bound to the WebID.** It is now trusted only when
+  same-origin as the logged-in WebID, cleared on logout, and a cross-origin
+  `pim:storage` is never persisted (re-derived each session). Stops a shared
+  browser inheriting the previous account's root and blunts localStorage
+  poisoning.
+- Smaller: per-drop error isolation in the DM drain, a re-entrancy guard on the
+  call-signal drain, and a guarded invite-token decode.
+
+Deferred (tracked, lower severity or higher risk):
+- **SSRF guard on the peer pod root.** A contact WebID at a private IP would draw
+  authenticated fetches to internal hosts. The fix needs a dev/prod-aware
+  allowlist (local pods are http/loopback), so it is not a one-liner.
+- **ACP servers.** `podGrantChatParticipants` and the inbox/presence ACL writers
+  always PUT WAC turtle; on an ACP server (ESS) sharing silently fails. Route them
+  through the `model === 'acp'` branch `podSetContainerAcl` already uses.
+- **DM receive deletes before durable persist.** Await the handler and delete only
+  on confirmed success, mirroring the send-side ratchet guard.
+- **Presence:** clock-skew freshness (use `Last-Modified`), a non-idempotent
+  `start()` that leaks a timer + listeners on reconnect, and an unload offline
+  write that should use `sendBeacon`.
+- **Drop-box ACL failures return success:** treat an ACL-write failure as a
+  provisioning failure so a non-public-Append inbox is not reported ready.
+- **`clientid.jsonld`:** add the `index.html` redirect variant and fix `logo_uri`.
+- **PWA shell:** precache the vendored QR scripts and the maskable icon.
+
+`callsec.js` (the DTLS-fingerprint call auth) was reviewed and is fail-closed: a
+MitM that rewrites the fingerprint is refused, and verification errors reject
+rather than allow.
+
 ### Manual checklist (only the parts not yet in a smoke)
 The signed-in and join smokes now cover sign-in, room create, post, reload, and
 the full join handshake. Still worth a human pass on the live deploy for:

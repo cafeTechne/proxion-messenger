@@ -86,6 +86,30 @@ describe('createWebDm.dropFanout', () => {
         expect(dropped[0].env).toMatchObject({ kind: 'fanout', message_id: 'm1', to_device_id: 'bob-1', from_webid: 'https://me/profile/card#me' });
         expect(dropped[1].env.to_device_id).toBe('my-2');
     });
+
+    it('does not report delivery when only self-sync copies dropped', async () => {
+        // A fanout to our OWN other devices only (single-device peer path) must not
+        // clear the message's pending state: no recipient device received it.
+        const { dm, dropped } = harness();
+        const ok = await dm.dropFanout({
+            cmd: 'send_dm_fanout', message_id: 'm2', fanout: [
+                { to_webid: 'https://me/profile/card#me', to_device_id: 'my-2', payload: { content: 'CT' } },
+            ],
+        });
+        expect(ok).toBe(false);
+        expect(dropped).toHaveLength(1);   // the self-sync copy still went out
+    });
+
+    it('reports delivery when at least one recipient device got a copy', async () => {
+        const { dm } = harness();
+        const ok = await dm.dropFanout({
+            cmd: 'send_dm_fanout', message_id: 'm3', fanout: [
+                { to_webid: 'https://bob.example/profile/card#me', to_device_id: 'bob-1', payload: { content: 'CT' } },
+                { to_webid: 'https://me/profile/card#me', to_device_id: 'my-2', payload: { content: 'CT' } },
+            ],
+        });
+        expect(ok).toBe(true);
+    });
 });
 
 describe('createWebDm fanout receive', () => {

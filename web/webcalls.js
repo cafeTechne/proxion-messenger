@@ -16,6 +16,8 @@ export const SIGNAL_CMDS = new Set(['voice_invite', 'voice_answer', 'ice_candida
 
 export function createWebCalls({ pod, notify, handleEvent, getSelfWebId, getDisplayName, peerPodRoot }) {
     let _unsub = null;
+    let _draining = false;
+    let _drainAgain = false;
 
     // Turn an outbound voice.js command into a signal and drop it to the callee.
     // The gateway would normally stamp the sender; here we add from/caller_webid
@@ -36,14 +38,27 @@ export function createWebCalls({ pod, notify, handleEvent, getSelfWebId, getDisp
     // Read pending signals, hand each to the app's event dispatch, and delete it
     // (signals are transient; a consumed one must not be replayed).
     async function drainOnce() {
-        const sigs = await pod.podReadSignals();
-        for (const { url, signal } of sigs) {
-            try {
-                if (signal && signal.type) handleEvent(signal);
-            } catch (err) {
-                console.warn('[webcalls] signal handling failed:', err);
-            }
-            await pod.podDeleteSignal(url);
+        // Coalesce concurrent drains: two pod-change notifications close together
+        // would otherwise both read the same not-yet-deleted signals and dispatch
+        // each one twice (duplicate ringing / duplicate offer). Run one at a time,
+        // and re-run once if a notification arrived mid-drain.
+        if (_draining) { _drainAgain = true; return; }
+        _draining = true;
+        try {
+            do {
+                _drainAgain = false;
+                const sigs = await pod.podReadSignals();
+                for (const { url, signal } of sigs) {
+                    try {
+                        if (signal && signal.type) handleEvent(signal);
+                    } catch (err) {
+                        console.warn('[webcalls] signal handling failed:', err);
+                    }
+                    await pod.podDeleteSignal(url);
+                }
+            } while (_drainAgain);
+        } finally {
+            _draining = false;
         }
     }
 
