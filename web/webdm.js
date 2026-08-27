@@ -117,16 +117,15 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
             local: true,
             _persistDm: true,
         };
-        // Persist durably BEFORE deleting the only ciphertext copy. The ratchet has
-        // already advanced inside ratchetDecrypt, so a re-decrypt on a later drain
-        // would fail; if the durable write fails, keep the drop rather than lose the
-        // message. A no-op (history disabled / nothing to keep) reports success.
-        if (persistMessage) {
-            let saved = false;
-            try { saved = await persistMessage(message); } catch { saved = false; }
-            if (!saved) { console.warn('[webdm] durable persist failed, leaving drop for retry'); return; }
-        }
+        // Deliver live first: a successful decrypt has already advanced the ratchet,
+        // so this message can never be re-decrypted — it must be shown now, and the
+        // drop must go (retaining spent ciphertext buys nothing and would wedge the
+        // inbox). Persist to local history as a best effort, awaited so it lands
+        // before the drop is deleted, but NEVER gate delivery or deletion on it: a
+        // cache write failure (quota, private mode) must not hide the message or
+        // leave an undeletable, undecryptable drop.
         handleEvent(message);
+        if (persistMessage) { try { await persistMessage(message); } catch { /* best-effort cache */ } }
         await pod.podDeleteDmDrop(url);
     }
 

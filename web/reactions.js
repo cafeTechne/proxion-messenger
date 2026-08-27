@@ -6,9 +6,9 @@
 // getMessageReactions() and mutated in place — it is never reassigned wholesale.
 // lastEmojiMsgId is owned entirely by this cluster, so it lives in `state`.
 // The returned functions are destructured into same-named bindings in main.js.
-import { podWriteReactions, podWriteReactionAction } from './pod.js';
+import { podWriteReactions, podWriteReactionAction, podWriteReactionActionAt } from './pod.js';
 
-export function createReactions({ getSocket, getActiveView, getSelfWebId, getMessageReactions, getRoomEmojiMap, getMessageTs }) {
+export function createReactions({ getSocket, getActiveView, getSelfWebId, getMessageReactions, getRoomEmojiMap, getMessageTs, getRemoteRoom }) {
     const state = { lastEmojiMsgId: null };
 
     // R60A: a reaction key like ":name:" refers to the room's custom emoji.
@@ -45,7 +45,12 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
             // timestamp to build its pod IRI; a no-op if we do not have it.
             const ts = getMessageTs?.(message_id);
             if (ts) {
-                podWriteReactionAction(activeView.id, message_id, ts, emoji, from_webid, action === 'add')
+                // A joined room lives on the owner's pod; write the LikeAction into
+                // their container so participants actually see it (the self-pod
+                // wrapper would mirror it into the reactor's own pod, unseen).
+                const _rr = getRemoteRoom?.(activeView.id);
+                (_rr ? podWriteReactionActionAt(_rr.container, message_id, ts, emoji, from_webid, action === 'add')
+                     : podWriteReactionAction(activeView.id, message_id, ts, emoji, from_webid, action === 'add'))
                     .catch(() => {});
             }
         }

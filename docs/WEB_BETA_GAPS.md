@@ -118,6 +118,66 @@ against an Inrupt ESS (no test account), and ACP-author the public type index.
 MitM that rewrites the fingerprint is refused, and verification errors reject
 rather than allow.
 
+## Round 2 audit (fresh eyes: crypto, rendering, room correctness, regressions)
+
+Fixed:
+- **XSS/HTML-injection in the message renderer.** `rendering.js` interpolated a
+  file attachment's `data_b64` into five `innerHTML` `src=`/`href=` attributes, a
+  sender's `from_webid` into a `data-webid` attribute, and a peer's presence
+  `status` into a `title` attribute, all unescaped — attacker-controlled in web
+  mode. Now routed through the same `b64attr`/`escHtml` helpers the file already
+  uses elsewhere. (Today's CSP `script-src 'self'` blocked inline handlers, so
+  this was content/DOM injection, not arbitrary JS — but it defeated the escaping
+  contract and would become stored XSS under any CSP relaxation.)
+- **Received-DM persist gate (regression from the previous round).** The receive
+  path had been gating BOTH the live render and the drop deletion on the
+  best-effort history write; since a successful decrypt already advanced the
+  ratchet, a cache-write failure (quota, private mode) permanently lost the
+  message and wedged the drop. Now it renders and deletes unconditionally after
+  decrypt and persists best-effort, non-gating.
+- **Joined-room edit/delete/reaction/seq wrote to the wrong pod.** These secondary
+  ops used the self-pod wrappers, so on a room hosted by another user they patched
+  the editor's OWN pod (a no-op / phantom container) and never reached the shared
+  copy. They now mirror the send path: a `_remoteRooms` room is written through
+  the container-addressed helpers (`podEditChatMessageAt`,
+  `podSoftDeleteChatMessageAt`, `podSetChatSeqAt`, `podWriteReactionActionAt`).
+- **`voice_hangup` before answer.** `_callPeerWebid` is now set at invite receipt,
+  so declining or closing a ringing call routes the hangup in web mode too.
+
+Pending (need a design decision or a focused round, not quick fixes):
+- **First-contact DM authorship is spoofable.** The web-mode DM envelope carries
+  no signature and the ratchet's initial handshake is an unauthenticated DH
+  against the recipient's public key, so anyone who can write to the recipient's
+  public DM inbox can forge a first message as any `from_webid` (established
+  sessions resist this via the root key). Fix: sign the envelope with the sender's
+  Ed25519 identity key and verify before caching keys / decrypting (gateway mode
+  does this per R55; the web path dropped it). Its own round — wire-format change,
+  interop with gateway mode.
+- **Verified safety-number not pinned to the key.** After a user verifies a peer,
+  a later wire `x25519_pub` overwrites the pinned key without clearing the verified
+  flag, so the badge can lie. Fix: key the flag by a key fingerprint; on change,
+  clear it and warn.
+- **Ratchet-state read-modify-write race.** A concurrent send and pod-drain
+  receive can wholesale-overwrite each other's saved ratchet state and roll a
+  chain back (the "already consumed" / dropped-message class). Fix: serialize
+  ratchet ops per peer.
+- **Plaintext fallback on encrypt failure.** `main.js` sends cleartext to the
+  untrusted pod if `ratchetEncrypt` throws — a silent confidentiality downgrade.
+  Fail closed for E2E-capable peers.
+- **Identity X25519 key is extractable in localStorage** (and the state key
+  derives from it), so any XSS exfiltrates the identity and all ratchet state.
+  Fix: non-extractable CryptoKey in IndexedDB. A key-storage refactor.
+- **Participant `acl:Write` allows tampering.** The Long Chat grant gives every
+  participant Write on the shared container, so a participant can overwrite/delete
+  others' messages or the index. Inherent to pure-WAC shared containers (dropping
+  Write breaks legitimate edit/delete); needs a server-side `foaf:maker` check or
+  a per-participant sub-container layout.
+- **Cross-UTC-day edit/delete.** Edit/delete address the day file from the echo
+  (server-clock) timestamp, not the client timestamp the message was written
+  under, so a message sent seconds either side of 00:00 UTC is patched in the
+  wrong `YYYY/MM/DD` file. Fix: preserve the client write timestamp as the stable
+  pod-partition key across the echo merge.
+
 ### Manual checklist (only the parts not yet in a smoke)
 The signed-in and join smokes now cover sign-in, room create, post, reload, and
 the full join handshake. Still worth a human pass on the live deploy for:

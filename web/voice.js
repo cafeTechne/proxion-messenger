@@ -210,6 +210,9 @@ export function createVoice(deps) {
 
         function showVoiceBanner(invite) {
             state.currentCall = invite;
+            // Set the call peer now (refined in initWebRTC on answer) so a decline or
+            // tab-close BEFORE answering can still route voice_hangup in web mode.
+            state._callPeerWebid = invite.caller_webid || invite.from_webid || state._callPeerWebid;
             setCallState(CallState.RINGING);
             const banner = document.getElementById("voice-banner");
             document.getElementById("voice-msg").innerText =

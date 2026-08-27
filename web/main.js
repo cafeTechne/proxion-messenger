@@ -26,6 +26,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podEnsureCallInbox, podDropSignal, podReadSignals, podDeleteSignal,
          podEnsureJoinInbox, podDropJoin, podReadJoins, podDeleteJoin,
          podReadRoomDescriptorAt, podReadChatRecentAt, podWriteChatMessageAt,
+         podEditChatMessageAt, podSoftDeleteChatMessageAt, podSetChatSeqAt,
          podGrantChatParticipants } from './pod.js';
 import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
 import { buildRoomDescriptor, withMembers, descriptorSigningBytes } from './roomdesc.js';
@@ -544,6 +545,9 @@ import { createIdentityResolver } from './identity.js';
                 // R101: the reacted-to message's timestamp, to build its pod IRI
                 // for the schema:LikeAction interop mirror.
                 getMessageTs: (mid) => messageMap[mid]?.timestamp || null,
+                // R106: a joined room lives on the owner's pod; this returns its
+                // { container } so the reaction mirror targets the right pod.
+                getRemoteRoom: (id) => _remoteRooms[id],
             });
         // Standalone modals (forward / schedule / integrations / search results).
         const { openForwardModal, openSchedulePicker, openIntegrationsPanel, renderSearchResults } =
@@ -1358,7 +1362,10 @@ import { createIdentityResolver } from './identity.js';
                         && msg.from_webid && msg.from_webid === selfWebId) {
                         const _seq = Date.parse(msg.timestamp);
                         if (Number.isFinite(_seq)) {
-                            podSetLongChatSeq(id, msg.message_id, msg.timestamp, _seq).catch(() => {});
+                            // Joined room: stamp the order hint on the owner's container.
+                            const _rr = _remoteRooms[id];
+                            (_rr ? podSetChatSeqAt(_rr.container, msg.message_id, msg.timestamp, _seq)
+                                 : podSetLongChatSeq(id, msg.message_id, msg.timestamp, _seq)).catch(() => {});
                         }
                     }
 
@@ -1601,7 +1608,11 @@ import { createIdentityResolver } from './identity.js';
                     // see the latest text. Rooms only; DMs are E2E, never mirrored.
                     if (event.thread_id && _editedTs && activeView
                         && activeView.type === "local_room" && activeView.id === event.thread_id) {
-                        podEditLongChatMessage(event.thread_id, event.message_id, _editedTs, event.new_content)
+                        // A joined room lives on the owner's pod; edit their container
+                        // directly (self-pod wrapper would patch the editor's own pod).
+                        const _rr = _remoteRooms[event.thread_id];
+                        (_rr ? podEditChatMessageAt(_rr.container, event.message_id, _editedTs, event.new_content)
+                             : podEditLongChatMessage(event.thread_id, event.message_id, _editedTs, event.new_content))
                             .catch(() => {});
                     }
                     break;
@@ -2145,8 +2156,12 @@ import { createIdentityResolver } from './identity.js';
                             podDeleteMessage(event.thread_id, event.message_id, true).catch(() => {});
                             // Soft-delete the Long Chat copy so other Solid apps see
                             // the message was withdrawn rather than keeping stale text.
+                            // A joined room lives on the owner's pod — tombstone their
+                            // container, not the deleter's own (which would be a no-op).
                             if (_deletedTs) {
-                                podSoftDeleteLongChatMessage(event.thread_id, event.message_id, _deletedTs)
+                                const _rr = _remoteRooms[event.thread_id];
+                                (_rr ? podSoftDeleteChatMessageAt(_rr.container, event.message_id, _deletedTs)
+                                     : podSoftDeleteLongChatMessage(event.thread_id, event.message_id, _deletedTs))
                                     .catch(() => {});
                             }
                         } else {

@@ -174,7 +174,7 @@ describe('createWebDm receive', () => {
         expect(events[0].content).toBe('hello');
     });
 
-    it('persists durably before deleting, and emits after a successful persist', async () => {
+    it('renders and persists to history, then deletes the drop', async () => {
         const { dm, events, deleted, persisted } = harness({
             persistMessage: async () => true,
             drops: [{ url: 'u1', envelope: { from_webid: 'https://bob', message_id: 'm', content: 'hi', e2e: false } }],
@@ -186,14 +186,16 @@ describe('createWebDm receive', () => {
         expect(deleted).toEqual(['u1']);
     });
 
-    it('keeps the drop (no delete, no render) when the durable persist fails', async () => {
+    it('still renders and deletes when the best-effort history write fails', async () => {
+        // A decrypt advances the ratchet, so the message can never be re-decrypted:
+        // a cache-write failure must NOT hide it or wedge the drop.
         const { dm, events, deleted } = harness({
-            persistMessage: async () => false,   // e.g. IndexedDB write failed
+            persistMessage: async () => false,   // e.g. IndexedDB quota / private mode
             drops: [{ url: 'u2', envelope: { from_webid: 'https://bob', message_id: 'm', content: 'hi', e2e: false } }],
         });
         await dm.drainOnce();
-        expect(events).toHaveLength(0);
-        expect(deleted).toHaveLength(0);
+        expect(events).toHaveLength(1);
+        expect(deleted).toEqual(['u2']);
     });
 
     it('start() ensures the inbox, drains, and subscribes', async () => {

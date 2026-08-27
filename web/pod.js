@@ -1575,10 +1575,11 @@ export async function podWriteReactions(roomId, messageId, reactions) {
  * the message's timestamp (threaded from the client) to build its date-partitioned
  * IRI; a no-op without it. Best-effort, additive.
  */
-export async function podWriteReactionAction(roomId, messageId, messageTimestamp, emoji, reactorWebId, add) {
-    const root = podStorageRoot();
-    if (!root || !messageTimestamp || !solidSession?.info?.isLoggedIn) return false;
-    const container = chatRootUrl(root, roomId);
+// Mirror a reaction as a schema:LikeAction into a specific chat container's day
+// file, so other Solid apps (and, for a joined room, the other participants
+// reading the owner's pod) see it.
+export async function podWriteReactionActionAt(container, messageId, messageTimestamp, emoji, reactorWebId, add) {
+    if (!container || !messageTimestamp || !solidSession?.info?.isLoggedIn) return false;
     const msgIri = messageIriAt(container, messageId, messageTimestamp);
     const dayFile = dayFileAt(container, messageTimestamp);
     const actionIri = `${dayFile}#react-${encodeURIComponent(messageId)}`
@@ -1591,6 +1592,12 @@ export async function podWriteReactionAction(roomId, messageId, messageTimestamp
         console.warn('[pod] podWriteReactionAction failed:', err);
         return false;
     }
+}
+
+export function podWriteReactionAction(roomId, messageId, messageTimestamp, emoji, reactorWebId, add) {
+    const root = podStorageRoot();
+    if (!root) return Promise.resolve(false);
+    return podWriteReactionActionAt(chatRootUrl(root, roomId), messageId, messageTimestamp, emoji, reactorWebId, add);
 }
 
 // --- Read State ---
