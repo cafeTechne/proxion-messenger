@@ -8,6 +8,7 @@
  * Phase 1 states (no rootKey field) are silently discarded on load.
  */
 import { solidSession, podStorageRoot } from './auth.js';
+import { isPeerPodRootAllowed } from './ssrf.js';
 
 export class E2EDecryptError extends Error {
     constructor(msg) { super(msg); this.name = 'E2EDecryptError'; }
@@ -195,6 +196,7 @@ export function isE2EEnabled(peerId) {
 
 export async function fetchAndCachePeerPub(peerId, peerPodRoot) {
     if (!peerPodRoot || !solidSession?.info?.isLoggedIn) return false;
+    if (!isPeerPodRootAllowed(peerPodRoot, podStorageRoot())) return false;   // SSRF gate, see ssrf.js
     try {
         const res = await solidSession.fetch(peerPodRoot + 'proxion/identity/x25519-pub.json');
         if (!res.ok) return false;

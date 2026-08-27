@@ -1,25 +1,14 @@
 import solidAuthn from './solid-authn.bundle.js';
 import { detectMode } from './transport.js';
+import { isPrivatePodHost } from './ssrf.js';
 const { Session } = solidAuthn;
 
 export const solidSession = new Session({ restorePreviousSession: true });
 let _cachedStorageRoot = null;
 
-function _isPrivateIp(url) {
-    try {
-        const host = new URL(url).hostname;
-        return (
-            /^127\./.test(host) ||
-            /^10\./.test(host) ||
-            /^192\.168\./.test(host) ||
-            /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
-            host === 'localhost' ||
-            host === '::1'
-        );
-    } catch {
-        return true;
-    }
-}
+// Reject an untrustworthy pim:storage claim on a private/loopback host (the SSRF
+// host check lives in ssrf.js so it stays dependency-free and shared with pod.js).
+const _isPrivateIp = isPrivatePodHost;
 
 export async function initSolidAuth() {
     await solidSession.handleIncomingRedirect({

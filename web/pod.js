@@ -1,4 +1,5 @@
 import { solidSession, podStorageRoot } from './auth.js';
+import { isPeerPodRootAllowed } from './ssrf.js';
 import {
     chatRootUrl, indexUrlAt, channelIriAt, dayFileAt, messageIriAt,
     buildIndexTurtle, appendOps, editOps, deleteOps, seqOps,
@@ -1139,6 +1140,7 @@ const JOIN_INBOX_PATH = 'proxion/join-inbox/';
 const MAX_DROPS = 200;
 
 const _dropBoxUrl = (podRoot, path) => (podRoot ? podRoot.replace(/\/?$/, '/') + path : null);
+const _peerRootAllowed = (peerRoot) => isPeerPodRootAllowed(peerRoot, podStorageRoot());   // SSRF gate
 
 /** Ensure OUR drop-box at `path` exists and is public-Append (owner full control). */
 async function _ensureDropBox(path, label) {
@@ -1177,6 +1179,7 @@ async function _ensureDropBox(path, label) {
 async function _dropTo(peerPodRoot, path, obj) {
     const inbox = _dropBoxUrl(peerPodRoot, path);
     if (!inbox || !obj || !solidSession?.info?.isLoggedIn) return false;
+    if (!_peerRootAllowed(peerPodRoot)) { console.warn('[pod] refusing drop to unsafe peer root:', peerPodRoot); return false; }
     try {
         const res = await solidSession.fetch(inbox, {
             method: 'POST',
@@ -1332,6 +1335,7 @@ export async function podWritePresence(status) {
 
 /** Read a peer's presence: { status, heartbeat } or null. */
 export async function podReadPresence(peerPodRoot) {
+    if (!_peerRootAllowed(peerPodRoot)) return null;
     const url = presenceUrlFor(peerPodRoot);
     if (!url || !solidSession?.info?.isLoggedIn) return null;
     try {

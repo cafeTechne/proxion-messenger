@@ -62,13 +62,18 @@ found more issues. Fixed in this round:
   `pim:storage` is never persisted (re-derived each session). Stops a shared
   browser inheriting the previous account's root and blunts localStorage
   poisoning.
+- **SSRF guard on the peer pod root.** A contact WebID resolving to a private /
+  loopback / link-local host would have drawn authenticated (token-bearing)
+  fetches to internal services. Every peer-pod request (DM/call/join drops,
+  presence reads, E2E key discovery) now goes through `isPeerPodRootAllowed`
+  (`ssrf.js`): public https peers are always allowed (cross-pod federation), a
+  private host only when it is the user's own pod origin (so local/dev and
+  self-hosted single-server still work). The host check covers IPv4 private
+  ranges, IPv6 loopback/ULA/link-local, and IPv4-mapped IPv6.
 - Smaller: per-drop error isolation in the DM drain, a re-entrancy guard on the
   call-signal drain, and a guarded invite-token decode.
 
 Deferred (tracked, lower severity or higher risk):
-- **SSRF guard on the peer pod root.** A contact WebID at a private IP would draw
-  authenticated fetches to internal hosts. The fix needs a dev/prod-aware
-  allowlist (local pods are http/loopback), so it is not a one-liner.
 - **ACP servers.** `podGrantChatParticipants` and the inbox/presence ACL writers
   always PUT WAC turtle; on an ACP server (ESS) sharing silently fails. Route them
   through the `model === 'acp'` branch `podSetContainerAcl` already uses.
