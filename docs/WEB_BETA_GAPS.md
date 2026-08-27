@@ -101,14 +101,18 @@ found more issues. Fixed in this round:
   activates when the server advertises ACP, so WAC servers (CSS) are unaffected.
   Still needs validation against a live Inrupt ESS (no ESS test account
   available), and the public type index is not yet ACP-authored.
+- **Drop-box ACL write was not checked.** `_ensureDropBox` / `podEnsureInbox`
+  PUT the public-Append ACL but ignored the response, so a 403/500 was treated as
+  success and the box stayed owner-only (peers' drops 403'd invisibly). The ACL
+  write now checks the response, retries once on failure, and logs clearly when
+  the grant could not be placed. It stays best-effort (still returns the inbox so
+  the owner is not blocked on their own resource by a transient hiccup) rather
+  than hard-failing provisioning.
 - Smaller: per-drop error isolation in the DM drain, a re-entrancy guard on the
   call-signal drain, and a guarded invite-token decode.
 
-Deferred (tracked, with the blocker that keeps each out of the quick rounds):
-- **Drop-box ACL failures return success.** Hard-failing provisioning on an ACL
-  write error risks breaking the owner's own inbox on a transient hiccup; the
-  safer fix is a post-create verify/retry of the public-Append grant, which is
-  more than a one-liner.
+Remaining follow-ups need external resources, not code: live-verify the ACP paths
+against an Inrupt ESS (no test account), and ACP-author the public type index.
 
 `callsec.js` (the DTLS-fingerprint call auth) was reviewed and is fail-closed: a
 MitM that rewrites the fingerprint is refused, and verification errors reject

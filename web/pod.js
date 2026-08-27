@@ -999,11 +999,7 @@ export async function podEnsureInbox() {
         // read/delete the notifications inside); everyone else may only Append.
         try {
             const { url: inboxAclUrl, model } = await discoverAccessControl(inboxUrl);
-            await solidSession.fetch(inboxAclUrl, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'text/turtle' },
-                body: _inboxAclBody(model, inboxUrl, webId, []),
-            });
+            await _putInboxAcl(inboxAclUrl, _inboxAclBody(model, inboxUrl, webId, []), 'inbox');
         } catch (err) {
             console.warn('[pod] inbox ACL failed:', err);
         }
@@ -1047,6 +1043,29 @@ function _inboxAclBody(model, inboxUrl, ownerWebId, readerWebIds = []) {
     return model === 'acp'
         ? buildAcpAcr(ownerWebId, readerWebIds, inboxUrl, 'acl:Read', 'acl:Append')
         : buildInboxAcl(inboxUrl, ownerWebId, readerWebIds);
+}
+
+// PUT an inbox/drop-box ACL, retrying once on a non-ok response. Without checking
+// the response, a 403/500 was treated as success and the box stayed owner-only, so
+// peers' drops 403'd invisibly. Best effort: logs clearly and returns whether the
+// public-Append grant is in place; the caller still returns the inbox so the owner
+// is not blocked on their own resource by a transient ACL hiccup.
+async function _putInboxAcl(aclUrl, body, label) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            const res = await solidSession.fetch(aclUrl, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'text/turtle' },
+                body,
+            });
+            if (res && res.ok) return true;
+            console.warn(`[pod] ${label} ACL write returned ${res && res.status}${attempt === 0 ? ', retrying' : ''}`);
+        } catch (err) {
+            console.warn(`[pod] ${label} ACL write failed${attempt === 0 ? ', retrying' : ''}:`, err);
+        }
+    }
+    console.warn(`[pod] ${label} may not be publicly appendable; peers' drops could be refused`);
+    return false;
 }
 
 /**
@@ -1178,11 +1197,7 @@ async function _ensureDropBox(path, label) {
         if (!put || !(put.ok || put.status === 409 || put.status === 405)) return null;
         try {
             const { url: aclUrl, model } = await discoverAccessControl(inboxUrl);
-            await solidSession.fetch(aclUrl, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'text/turtle' },
-                body: _inboxAclBody(model, inboxUrl, webId, []),
-            });
+            await _putInboxAcl(aclUrl, _inboxAclBody(model, inboxUrl, webId, []), label);
         } catch (err) {
             console.warn(`[pod] ${label} ACL failed:`, err);
         }
