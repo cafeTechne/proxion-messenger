@@ -1365,10 +1365,14 @@ import { createIdentityResolver } from './identity.js';
                         && msg.from_webid && msg.from_webid === selfWebId) {
                         const _seq = Date.parse(msg.timestamp);
                         if (Number.isFinite(_seq)) {
-                            // Joined room: stamp the order hint on the owner's container.
+                            // Address the day file by the client pod-partition timestamp
+                            // (where the message was written), not the echo's clock; the
+                            // seq value itself stays the order hint. Joined room writes
+                            // to the owner's container.
+                            const _seqTs = messageMap[msg.message_id]?.pod_ts || msg.timestamp;
                             const _rr = _remoteRooms[id];
-                            (_rr ? podSetChatSeqAt(_rr.container, msg.message_id, msg.timestamp, _seq)
-                                 : podSetLongChatSeq(id, msg.message_id, msg.timestamp, _seq)).catch(() => {});
+                            (_rr ? podSetChatSeqAt(_rr.container, msg.message_id, _seqTs, _seq)
+                                 : podSetLongChatSeq(id, msg.message_id, _seqTs, _seq)).catch(() => {});
                         }
                     }
 
@@ -1602,7 +1606,7 @@ import { createIdentityResolver } from './identity.js';
                 case "message_edited": {
                     // Read the original send time BEFORE handleMessageEdited runs,
                     // so we know which UTC day file the Long Chat copy lives in.
-                    const _editedTs = messageMap[event.message_id]?.timestamp;
+                    const _editedTs = messageMap[event.message_id]?.pod_ts || messageMap[event.message_id]?.timestamp;
                     handleMessageEdited(event);
                     if (event.message_id && event.new_content != null) {
                         dmHistoryUpdateContent(event.message_id, event.new_content);
@@ -2147,7 +2151,7 @@ import { createIdentityResolver } from './identity.js';
                 case "message_deleted": {
                     // Original send time, before the local record is dropped: it
                     // says which UTC day file the Long Chat copy lives in.
-                    const _deletedTs = messageMap[event.message_id]?.timestamp;
+                    const _deletedTs = messageMap[event.message_id]?.pod_ts || messageMap[event.message_id]?.timestamp;
                     const el = document.getElementById(`msg-${event.message_id}`);
                     if (el) el.remove();
                     allMessages = allMessages.filter(m => m.message_id !== event.message_id);
@@ -3547,6 +3551,11 @@ import { createIdentityResolver } from './identity.js';
                 const clientMsgId = (typeof crypto !== 'undefined' && crypto.randomUUID)
                     ? crypto.randomUUID()
                     : Math.random().toString(36).slice(2);
+                // One client timestamp for this send: it is the pod day-file partition
+                // key the room message is written under, so the optimistic render
+                // carries it as pod_ts and later edit/delete/seq address the SAME day
+                // file (the server echo's clock can fall on a different UTC day).
+                const _clientTs = new Date().toISOString();
                 if (activeView.type === "local_dm") {
                     const peerWebid = activeView.peerWebid || activeView.id;
                     let sendContent = content;
@@ -3637,7 +3646,10 @@ import { createIdentityResolver } from './identity.js';
                     from_webid: selfWebId,
                     from_display_name: localStorage.getItem('proxion_display_name') || '',
                     content: content,
-                    timestamp: new Date().toISOString(),
+                    timestamp: _clientTs,
+                    // Stable pod day-file key for a room message, preserved across the
+                    // server echo so edit/delete/seq patch the file it was written to.
+                    pod_ts: activeView.type === 'local_room' ? _clientTs : undefined,
                     reply_to_id: payload.reply_to_id || null,
                     local: true,
                 });
@@ -3665,7 +3677,7 @@ import { createIdentityResolver } from './identity.js';
                         content: content,
                         from_webid: selfWebId,
                         from_display_name: localStorage.getItem('proxion_display_name') || '',
-                        timestamp: new Date().toISOString(),
+                        timestamp: _clientTs,   // same key the optimistic render carries as pod_ts
                         reply_to_id: replyingTo?.id || null,
                         reply_to_timestamp: replyingTo?.ts || null,   // R101.1
                     };

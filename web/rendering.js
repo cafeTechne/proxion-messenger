@@ -90,6 +90,11 @@ export function createRendering({
         if (!allMessages.find(m => m.message_id === msg.message_id)) {
             allMessages.push(msg);
         }
+        // Carry the client pod-partition timestamp across the server echo, so a later
+        // edit/delete/seq addresses the day file the message was actually written to
+        // (the echo's server clock can land on a different UTC day).
+        const _prevPodTs = messageMap[msg.message_id]?.pod_ts;
+        if (_prevPodTs && !msg.pod_ts) msg.pod_ts = _prevPodTs;
         messageMap[msg.message_id] = msg;
         // Only append DOM element if within the render window
         if (allMessages.length <= RENDER_WINDOW || allMessages.indexOf(msg) >= allMessages.length - RENDER_WINDOW) {

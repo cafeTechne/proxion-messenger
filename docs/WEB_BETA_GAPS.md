@@ -177,11 +177,12 @@ Fixed:
   others' messages or the index. Inherent to pure-WAC shared containers (dropping
   Write breaks legitimate edit/delete); needs a server-side `foaf:maker` check or
   a per-participant sub-container layout.
-- **Cross-UTC-day edit/delete.** Edit/delete address the day file from the echo
-  (server-clock) timestamp, not the client timestamp the message was written
-  under, so a message sent seconds either side of 00:00 UTC is patched in the
-  wrong `YYYY/MM/DD` file. Fix: preserve the client write timestamp as the stable
-  pod-partition key across the echo merge.
+- **Cross-UTC-day edit/delete (fixed).** A room message now carries one client
+  timestamp (`pod_ts`) as its pod day-file partition key: the send uses it for the
+  pod write and the optimistic render, the render preserves it across the server
+  echo, and edit/delete/seq address the day file by it. So a message sent seconds
+  either side of 00:00 UTC (or on a skewed client clock) is edited/deleted in the
+  file it was actually written to, not the echo-clock's day.
 
 ### Manual checklist (only the parts not yet in a smoke)
 The signed-in and join smokes now cover sign-in, room create, post, reload, and
