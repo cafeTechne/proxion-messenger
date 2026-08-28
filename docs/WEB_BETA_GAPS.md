@@ -170,9 +170,13 @@ Fixed:
   for an E2E-capable peer (one with a published key), `main.js` no longer downgrades
   to cleartext on the untrusted pod: the fanout skips that device, and the single
   send stays pending with a retry that re-encrypts, instead of leaking plaintext.
-- **Identity X25519 key is extractable in localStorage** (and the state key
-  derives from it), so any XSS exfiltrates the identity and all ratchet state.
-  Fix: non-extractable CryptoKey in IndexedDB. A key-storage refactor.
+- **Identity X25519 key extractable in localStorage (fixed).** The X25519 identity
+  key and the ratchet state-encryption key are now non-extractable CryptoKeys in
+  IndexedDB, so an XSS can no longer exfiltrate the private scalar (the way it could
+  from the old localStorage JWK the state key derived from). An existing localStorage
+  keypair is migrated once — the state key is imported at its EXISTING value so
+  stored ratchet state still decrypts — then the scalar is removed. When IndexedDB
+  is unavailable it falls back to the legacy localStorage keypair so nothing breaks.
 - **Participant `acl:Write` allows tampering (documented limitation).** The Long
   Chat grant gives every participant Write on the shared container, so a
   participant can overwrite/delete others' messages or the index. Inherent to

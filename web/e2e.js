@@ -21,7 +21,6 @@ export const MAX_SKIP = 20;
 export let e2eSupported = false;
 
 let _myPrivKey   = null;  // CryptoKey (X25519, non-extractable, deriveBits)
-let _myPrivJwk   = null;  // JWK { kty, crv, x, d }
 let _myPubB64u   = null;  // base64url-encoded 32-byte X25519 public key
 let _stateEncKey = null;  // CryptoKey AES-256-GCM (for encrypting ratchet state)
 let _initDone    = false;
@@ -39,6 +38,46 @@ function _serialize(peerId, fn) {
     const run = prev.catch(() => {}).then(fn);   // wait for prev to settle, then run
     _peerQueues[peerId] = run.catch(() => {});    // a failed op must not poison the chain
     return run;                                    // caller gets fn's real result/rejection
+}
+
+// ── Key store (R110): non-extractable identity + state key in IndexedDB ───────
+// CryptoKeys stored here are structured-cloned and non-extractable, so an XSS
+// cannot exfiltrate the X25519 private scalar the way it could from the old
+// localStorage JWK (and the state-encryption key derived from it). Falls back to
+// the legacy localStorage keypair when IndexedDB is unavailable.
+const _KEY_DB = 'proxion-e2e-keys';
+const _KEY_STORE = 'keys';
+let _keyDbPromise = null;
+function _openKeyDb() {
+    if (_keyDbPromise) return _keyDbPromise;
+    _keyDbPromise = new Promise((resolve, reject) => {
+        if (typeof indexedDB === 'undefined') { reject(new Error('no-indexeddb')); return; }
+        const req = indexedDB.open(_KEY_DB, 1);
+        req.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains(_KEY_STORE)) db.createObjectStore(_KEY_STORE);
+        };
+        req.onsuccess = (e) => resolve(e.target.result);
+        req.onerror = (e) => reject(e.target.error);
+    }).catch((err) => { _keyDbPromise = null; throw err; });
+    return _keyDbPromise;
+}
+async function _idbGetKeys() {
+    const db = await _openKeyDb();
+    return new Promise((resolve, reject) => {
+        const r = db.transaction(_KEY_STORE, 'readonly').objectStore(_KEY_STORE).get('self');
+        r.onsuccess = () => resolve(r.result || null);
+        r.onerror = () => reject(r.error);
+    });
+}
+async function _idbPutKeys(rec) {
+    const db = await _openKeyDb();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(_KEY_STORE, 'readwrite');
+        tx.objectStore(_KEY_STORE).put(rec, 'self');
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => reject(tx.error);
+    });
 }
 
 // ── Encoding helpers (exported for tests) ─────────────────────────────────────
@@ -140,39 +179,67 @@ async function _doInit() {
         return;
     }
 
-    const savedJwk = localStorage.getItem('proxion_e2e_x25519_priv_jwk');
-    const savedPub = localStorage.getItem('proxion_e2e_x25519_pub_b64u');
-    let loaded = false;
-
-    if (savedJwk && savedPub) {
-        try {
-            const jwk = JSON.parse(savedJwk);
-            _myPrivKey = await crypto.subtle.importKey(
-                'jwk', jwk, { name: 'X25519' }, false, ['deriveBits']);
-            _myPrivJwk = jwk;
-            _myPubB64u = savedPub;
-            loaded = true;
-        } catch {
-            localStorage.removeItem('proxion_e2e_x25519_priv_jwk');
-            localStorage.removeItem('proxion_e2e_x25519_pub_b64u');
+    // Preferred path: keep the identity key and state key as non-extractable
+    // CryptoKeys in IndexedDB. Migrate an existing localStorage keypair once
+    // (deriving the state key at its EXISTING value so stored state still
+    // decrypts), then drop the scalar. Fall back to the legacy localStorage
+    // keypair only when IndexedDB is unavailable.
+    let usedIdb = false;
+    try {
+        const rec = await _idbGetKeys();
+        if (rec && rec.x25519Priv && rec.stateKey && rec.x25519Pub) {
+            _myPrivKey = rec.x25519Priv;
+            _myPubB64u = rec.x25519Pub;
+            _stateEncKey = rec.stateKey;
+            usedIdb = true;
+        } else {
+            const savedJwk = localStorage.getItem('proxion_e2e_x25519_priv_jwk');
+            const savedPub = localStorage.getItem('proxion_e2e_x25519_pub_b64u');
+            let priv = null, pub = null, stateKey = null;
+            if (savedJwk && savedPub) {
+                try {
+                    const jwk = JSON.parse(savedJwk);
+                    priv = await crypto.subtle.importKey('jwk', jwk, { name: 'X25519' }, false, ['deriveBits']);
+                    pub = savedPub;
+                    // Preserve the exact state key value so existing state decrypts.
+                    const raw = await hkdf(b64uDec(jwk.d), 'proxion-e2e-state-v1', '', 256);
+                    stateKey = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+                } catch { priv = null; }
+            }
+            if (!priv) {
+                const kp = await crypto.subtle.generateKey({ name: 'X25519' }, false, ['deriveBits']);
+                const pubJwk = await crypto.subtle.exportKey('jwk', kp.publicKey);   // public export is allowed
+                priv = kp.privateKey; pub = pubJwk.x;
+                stateKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+            }
+            await _idbPutKeys({ x25519Priv: priv, x25519Pub: pub, stateKey });
+            _myPrivKey = priv; _myPubB64u = pub; _stateEncKey = stateKey;
+            usedIdb = true;
+            // The scalar is safely in IndexedDB now; remove it from localStorage.
+            try { localStorage.removeItem('proxion_e2e_x25519_priv_jwk'); } catch { /* ignore */ }
+            try { localStorage.setItem('proxion_e2e_x25519_pub_b64u', pub); } catch { /* ignore */ }
         }
-    }
+    } catch { usedIdb = false; }
 
-    if (!loaded) {
-        const kp = await crypto.subtle.generateKey(
-            { name: 'X25519' }, true, ['deriveBits']);
-        const privJwk = await crypto.subtle.exportKey('jwk', kp.privateKey);
-        const pubJwk  = await crypto.subtle.exportKey('jwk', kp.publicKey);
-        _myPrivJwk = privJwk;
-        _myPubB64u = pubJwk.x;
-        _myPrivKey = await crypto.subtle.importKey(
-            'jwk', privJwk, { name: 'X25519' }, false, ['deriveBits']);
-        localStorage.setItem('proxion_e2e_x25519_priv_jwk', JSON.stringify(privJwk));
-        localStorage.setItem('proxion_e2e_x25519_pub_b64u', _myPubB64u);
+    if (!usedIdb) {
+        // Legacy fallback (no IndexedDB): keep the extractable JWK in localStorage
+        // so the key persists at all. Less private, but preserves functionality.
+        const savedJwk = localStorage.getItem('proxion_e2e_x25519_priv_jwk');
+        const savedPub = localStorage.getItem('proxion_e2e_x25519_pub_b64u');
+        let jwk = null;
+        if (savedJwk && savedPub) { try { jwk = JSON.parse(savedJwk); _myPubB64u = savedPub; } catch { jwk = null; } }
+        if (!jwk) {
+            const kp = await crypto.subtle.generateKey({ name: 'X25519' }, true, ['deriveBits']);
+            jwk = await crypto.subtle.exportKey('jwk', kp.privateKey);
+            const pubJwk = await crypto.subtle.exportKey('jwk', kp.publicKey);
+            _myPubB64u = pubJwk.x;
+            localStorage.setItem('proxion_e2e_x25519_priv_jwk', JSON.stringify(jwk));
+            localStorage.setItem('proxion_e2e_x25519_pub_b64u', _myPubB64u);
+        }
+        _myPrivKey = await crypto.subtle.importKey('jwk', jwk, { name: 'X25519' }, false, ['deriveBits']);
+        const raw = await hkdf(b64uDec(jwk.d), 'proxion-e2e-state-v1', '', 256);
+        _stateEncKey = await _aesKey(raw);
     }
-
-    const stateKeyRaw = await hkdf(b64uDec(_myPrivJwk.d), 'proxion-e2e-state-v1', '', 256);
-    _stateEncKey = await _aesKey(stateKeyRaw);
 
     _initDone = true;
     e2eSupported = true;
@@ -547,11 +614,12 @@ async function _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ra
 
 export function _resetForTesting() {
     _myPrivKey = null;
-    _myPrivJwk = null;
     _myPubB64u = null;
     _stateEncKey = null;
     _initDone = false;
     _initPromise = null;
     e2eSupported = false;
+    _keyDbPromise = null;
     for (const k in _stateCache) delete _stateCache[k];
+    for (const k in _peerQueues) delete _peerQueues[k];
 }
