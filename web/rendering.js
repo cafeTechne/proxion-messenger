@@ -420,8 +420,10 @@ export function createRendering({
                 ? `<span title="${t('msg.identityUnverified')}" style="color:#8091a7;margin-left:4px;font-size:0.85em;">&#x1F6E1;</span>`
                 : "";
             // R107: incoming gateway-free DM whose signature did not verify against
-            // the sender's published identity — surfaced, not blocked.
-            const dmAuthHtml = (msg.source === 'local_dm' && msg.from_webid && msg.from_webid !== selfWebId && msg.sender_verified === false)
+            // the sender's published identity — surfaced, not blocked. The
+            // sender_verified===false flag is only set on the gateway-free DM paths
+            // (single + fanout), so it already scopes this to those messages.
+            const dmAuthHtml = (msg.sender_verified === false && msg.from_webid && msg.from_webid !== selfWebId)
                 ? `<span title="${t('msg.senderUnverified')}" style="color:#e0a458;margin-left:4px;font-size:0.85em;">&#x26A0;&#xFE0F;</span>`
                 : "";
             // R11.1.3: expiry countdown label

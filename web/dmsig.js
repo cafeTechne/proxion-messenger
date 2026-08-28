@@ -48,9 +48,13 @@ function _b64dec(s) { const bin = atob(s); const u = new Uint8Array(bin.length);
 // tampered or replayed-under-a-different-claim envelope fails. The order and the
 // length-prefixed framing must stay stable or signatures won't verify cross-client.
 const SIGNED_FIELDS = ['from_webid', 'message_id', 'content', 'nonce', 'msg_num', 'pn', 'ratchet_pub', 'x25519_pub', 'timestamp'];
+// A multi-device fanout copy signs the same material plus its to_device_id (so a
+// copy cannot be redirected to another device), reading the ciphertext/key fields
+// from the nested payload rather than the envelope top level.
+const SIGNED_FIELDS_FANOUT = ['from_webid', 'message_id', 'to_device_id', 'content', 'nonce', 'msg_num', 'pn', 'ratchet_pub', 'x25519_pub'];
 
-export function canonicalDmBytes(env) {
-    const parts = SIGNED_FIELDS.map((k) => _ENC.encode(env && env[k] != null ? String(env[k]) : ''));
+function _canonical(fields, obj) {
+    const parts = fields.map((k) => _ENC.encode(obj && obj[k] != null ? String(obj[k]) : ''));
     const chunks = parts.map((p) => {
         const c = new Uint8Array(2 + p.length);
         c[0] = (p.length >> 8) & 0xff;
@@ -65,24 +69,39 @@ export function canonicalDmBytes(env) {
     return out;
 }
 
-// Sign an envelope; returns { signer, sig } to merge into it, or null if we cannot
-// sign (no key). `privKey` is a non-extractable Ed25519 CryptoKey; `signerDid` is
-// its did:key.
-export async function signDm(env, privKey, signerDid) {
+export function canonicalDmBytes(env) { return _canonical(SIGNED_FIELDS, env); }
+
+export function canonicalFanoutBytes(env) {
+    const p = (env && env.payload) || {};
+    return _canonical(SIGNED_FIELDS_FANOUT, {
+        from_webid: env && env.from_webid, message_id: env && env.message_id, to_device_id: env && env.to_device_id,
+        content: p.content, nonce: p.nonce, msg_num: p.msg_num, pn: p.pn, ratchet_pub: p.ratchet_pub, x25519_pub: p.x25519_pub,
+    });
+}
+
+async function _sign(bytes, privKey, signerDid) {
     if (!privKey || !signerDid) return null;
     try {
-        const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', privKey, canonicalDmBytes(env)));
+        const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', privKey, bytes));
         return { signer: signerDid, sig: _b64(sig) };
     } catch { return null; }
 }
+async function _verify(env, bytes) {
+    try {
+        if (!env || !env.signer || !env.sig) return false;
+        const pub = await crypto.subtle.importKey('raw', didToEd25519Pub(env.signer), { name: 'Ed25519' }, false, ['verify']);
+        return await crypto.subtle.verify('Ed25519', pub, _b64dec(env.sig), bytes);
+    } catch { return false; }
+}
+
+// Sign an envelope; returns { signer, sig } to merge into it, or null if we cannot
+// sign (no key). `privKey` is a non-extractable Ed25519 CryptoKey; `signerDid` is
+// its did:key.
+export function signDm(env, privKey, signerDid) { return _sign(canonicalDmBytes(env), privKey, signerDid); }
+export function signFanout(env, privKey, signerDid) { return _sign(canonicalFanoutBytes(env), privKey, signerDid); }
 
 // True iff env.sig is a valid signature by env.signer over the canonical bytes.
 // Never throws. Does NOT decide authorization (whether env.signer may speak for
 // env.from_webid) — the caller does that against the sender's published identity.
-export async function verifyDmSig(env) {
-    try {
-        if (!env || !env.signer || !env.sig) return false;
-        const pub = await crypto.subtle.importKey('raw', didToEd25519Pub(env.signer), { name: 'Ed25519' }, false, ['verify']);
-        return await crypto.subtle.verify('Ed25519', pub, _b64dec(env.sig), canonicalDmBytes(env));
-    } catch { return false; }
-}
+export function verifyDmSig(env) { return _verify(env, canonicalDmBytes(env)); }
+export function verifyFanoutSig(env) { return _verify(env, canonicalFanoutBytes(env)); }

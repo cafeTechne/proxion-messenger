@@ -28,7 +28,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podReadRoomDescriptorAt, podReadChatRecentAt, podWriteChatMessageAt,
          podEditChatMessageAt, podSoftDeleteChatMessageAt, podSetChatSeqAt,
          podGrantChatParticipants, podPublishSigner, podFetchPeerSigner } from './pod.js';
-import { signDm, verifyDmSig } from './dmsig.js';
+import { signDm, verifyDmSig, signFanout, verifyFanoutSig } from './dmsig.js';
 import { verifyDeviceCert } from './device-cert.js';
 import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
 import { buildRoomDescriptor, withMembers, descriptorSigningBytes } from './roomdesc.js';
@@ -1309,6 +1309,9 @@ import { createIdentityResolver } from './identity.js';
                     e2e: false,
                     reply_to_id: p.reply_to_id || null,
                     timestamp: new Date().toISOString(),
+                    // R107: a peer fanout copy carries the sender-signature result; a
+                    // self-sync copy is our own message, so leave it unmarked.
+                    sender_verified: isSelfCopy ? undefined : !!event.sender_verified,
                     // Persist plaintext locally unless decryption failed.
                     _persistDm: text !== '[could not decrypt]' && text !== '[decryption error]',
                 });
@@ -5519,7 +5522,9 @@ import { createIdentityResolver } from './identity.js';
                         // attaching the account cert (if linked) for multi-device auth.
                         signEnvelope: async (env) => {
                             if (!_identityPrivKey || !clientDid) return null;
-                            const s = await signDm(env, _identityPrivKey, clientDid);
+                            const s = env && env.kind === 'fanout'
+                                ? await signFanout(env, _identityPrivKey, clientDid)
+                                : await signDm(env, _identityPrivKey, clientDid);
                             if (s && _delegationCert) s.cert = _delegationCert;
                             return s;
                         },
@@ -5529,7 +5534,8 @@ import { createIdentityResolver } from './identity.js';
                         // by their published account). Non-gating (marks, never drops).
                         verifySender: async (env) => {
                             if (!env || !env.from_webid || !env.signer || !env.sig) return false;
-                            if (!(await verifyDmSig(env))) return false;
+                            const sigOk = env.kind === 'fanout' ? await verifyFanoutSig(env) : await verifyDmSig(env);
+                            if (!sigOk) return false;
                             const iddoc = await podFetchPeerSigner(peerPodRootFromWebId(env.from_webid));
                             if (!iddoc) return false;
                             if (env.signer === iddoc.signer) return true;

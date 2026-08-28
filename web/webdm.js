@@ -74,6 +74,9 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
                 v: 1, kind: 'fanout', from_webid: self,
                 message_id: cmd.message_id, to_device_id: e.to_device_id, payload: e.payload,
             };
+            // R107: sign each fanout copy (bound to its to_device_id) so the peer's
+            // device can verify it, same as a single-send DM.
+            if (signEnvelope) { try { const _s = await signEnvelope(envelope); if (_s) Object.assign(envelope, _s); } catch { /* deliver unsigned */ } }
             const ok = await pod.podDropDm(root, envelope);
             if (ok && e.to_webid !== self) anyRecipientOk = true;
         }
@@ -88,9 +91,12 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
         // claim. Reuse the app's dm_fanout handler for the per-device decrypt.
         if (env.kind === 'fanout') {
             if (getMyDeviceId && env.to_device_id && env.to_device_id !== getMyDeviceId()) return;
+            let sender_verified = false;
+            if (verifySender) { try { sender_verified = !!(await verifySender(env)); } catch { sender_verified = false; } }
             handleEvent({
                 type: 'dm_fanout', to_device_id: env.to_device_id,
                 from_webid: env.from_webid, message_id: env.message_id, payload: env.payload,
+                sender_verified,
             });
             await pod.podDeleteDmDrop(url);
             return;

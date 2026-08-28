@@ -153,10 +153,11 @@ Fixed:
   attacker forging a "from alice" message cannot write to. Per the chosen
   transition policy it is non-gating: a verified DM shows no marker, an unsigned or
   unverifiable one still delivers but is marked "unverified sender", so nothing
-  breaks for older clients or the gateway path. Follow-ups: sign the multi-device
-  fanout envelope (single-device sends are covered; fanned-out copies currently
-  show unverified), publish a device roster so any of an account's devices verifies
-  without carrying a cert, and later tighten to reject once signing is widespread.
+  breaks for older clients or the gateway path. The multi-device fanout envelope
+  is now signed too (each copy bound to its `to_device_id`), so fanned-out DMs
+  verify like single sends; a linked device's copies authorize via its account
+  device-cert (carried on the envelope), so a separate published roster is not
+  required. Remaining: tighten to reject once signing is widespread.
 - **Verified safety-number pinning (fixed).** `cachePeerPub` now clears the
   "verified" mark for a peer when their key changes (a wire `x25519_pub` different
   from the stored one), so the verified badge cannot carry over to a key the user

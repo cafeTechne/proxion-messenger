@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canonicalDmBytes, signDm, verifyDmSig, didToEd25519Pub } from './dmsig.js';
+import { canonicalDmBytes, signDm, verifyDmSig, didToEd25519Pub, signFanout, verifyFanoutSig } from './dmsig.js';
 
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 function b58encode(bytes) {
@@ -75,5 +75,31 @@ describe('dmsig', () => {
         expect(Array.from(canonicalDmBytes(env))).toEqual(Array.from(canonicalDmBytes({ ...env })));
         // a different field value changes the bytes
         expect(Array.from(canonicalDmBytes(env))).not.toEqual(Array.from(canonicalDmBytes({ ...env, message_id: 'm2' })));
+    });
+});
+
+describe('dmsig fanout', () => {
+    const fEnv = {
+        v: 1, kind: 'fanout', from_webid: 'https://alice.pod/profile/card#me', message_id: 'm1', to_device_id: 'bob-A',
+        payload: { content: 'CIPHER', nonce: 'N', msg_num: 2, pn: 0, ratchet_pub: 'RP', x25519_pub: 'XP' },
+    };
+
+    it('round-trips a signed fanout copy', async () => {
+        const id = await makeIdentity();
+        const s = await signFanout(fEnv, id.priv, id.did);
+        expect(await verifyFanoutSig({ ...fEnv, ...s })).toBe(true);
+    });
+
+    it('rejects a tampered fanout ciphertext', async () => {
+        const id = await makeIdentity();
+        const s = await signFanout(fEnv, id.priv, id.did);
+        const tampered = { ...fEnv, ...s, payload: { ...fEnv.payload, content: 'X' } };
+        expect(await verifyFanoutSig(tampered)).toBe(false);
+    });
+
+    it('rejects a fanout copy redirected to another device (to_device_id bound)', async () => {
+        const id = await makeIdentity();
+        const s = await signFanout(fEnv, id.priv, id.did);
+        expect(await verifyFanoutSig({ ...fEnv, ...s, to_device_id: 'mallory-Z' })).toBe(false);
     });
 });
