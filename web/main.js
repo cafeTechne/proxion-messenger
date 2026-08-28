@@ -27,7 +27,9 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podEnsureJoinInbox, podDropJoin, podReadJoins, podDeleteJoin,
          podReadRoomDescriptorAt, podReadChatRecentAt, podWriteChatMessageAt,
          podEditChatMessageAt, podSoftDeleteChatMessageAt, podSetChatSeqAt,
-         podGrantChatParticipants } from './pod.js';
+         podGrantChatParticipants, podPublishSigner, podFetchPeerSigner } from './pod.js';
+import { signDm, verifyDmSig } from './dmsig.js';
+import { verifyDeviceCert } from './device-cert.js';
 import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
 import { buildRoomDescriptor, withMembers, descriptorSigningBytes } from './roomdesc.js';
 import {
@@ -410,11 +412,12 @@ import { createIdentityResolver } from './identity.js';
         // stays this device's own key — it signs the auth challenge and is this
         // device's id for DM fanout. accountDid is null on a normal single device.
         let accountDid = null;
+        let _delegationCert = null;   // this device's account cert (multi-device DM auth)
         try {
             const _rawCert = localStorage.getItem('proxion_delegation_cert');
             if (_rawCert) {
                 const _c = JSON.parse(_rawCert);
-                if (_c && _c.account_did) { accountDid = _c.account_did; selfWebId = accountDid; }
+                if (_c && _c.account_did) { accountDid = _c.account_did; selfWebId = accountDid; _delegationCert = _c; }
             }
         } catch (_) { /* corrupt cert — treat as unlinked */ }
         // Multi-device: peerAccount -> [{device_id, pub_b64u}], fetched on DM open
@@ -5495,6 +5498,30 @@ import { createIdentityResolver } from './identity.js';
                         // Durable local persist before the pod drop is deleted, so a
                         // received DM is never lost if the write fails after decrypt.
                         persistMessage: (m) => dmHistorySave({ ...m, thread_id: m.thread_id }),
+                        // R107: sign our DM envelopes with this device's identity key,
+                        // attaching the account cert (if linked) for multi-device auth.
+                        signEnvelope: async (env) => {
+                            if (!_identityPrivKey || !clientDid) return null;
+                            const s = await signDm(env, _identityPrivKey, clientDid);
+                            if (s && _delegationCert) s.cert = _delegationCert;
+                            return s;
+                        },
+                        // R107: is this DM's envelope really signed by from_webid's
+                        // owner? Verify the signature, then confirm the signer is one
+                        // the sender published at their OWN pod (or a device certified
+                        // by their published account). Non-gating (marks, never drops).
+                        verifySender: async (env) => {
+                            if (!env || !env.from_webid || !env.signer || !env.sig) return false;
+                            if (!(await verifyDmSig(env))) return false;
+                            const iddoc = await podFetchPeerSigner(peerPodRootFromWebId(env.from_webid));
+                            if (!iddoc) return false;
+                            if (env.signer === iddoc.signer) return true;
+                            if (iddoc.account_did && env.cert) {
+                                const acct = await verifyDeviceCert(env.cert, { expectedAccountDid: iddoc.account_did, expectedDeviceDid: env.signer });
+                                if (acct && acct === iddoc.account_did) return true;
+                            }
+                            return false;
+                        },
                     });
                     // R105: gateway-free call signaling over the pod call-inbox.
                     const webCalls = createWebCalls({
@@ -5532,6 +5559,9 @@ import { createIdentityResolver } from './identity.js';
                     webDm.start().catch(() => {});   // ensure inbox + drain + subscribe
                     webCalls.start().catch(() => {}); // ensure call inbox + drain + subscribe
                     webJoin.start().catch(() => {});  // ensure join inbox + drain + subscribe
+                    // R107: publish this device's DM signer identity so peers can
+                    // verify our DMs really came from us.
+                    if (clientDid) podPublishSigner(clientDid, accountDid).catch(() => {});
                     window.proxionWebDm = webDm;      // for smokes / power users
                     window.proxionWebCalls = webCalls;
                     window.proxionWebJoin = webJoin;

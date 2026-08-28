@@ -28,7 +28,7 @@ describe('envelopeFromDmPayload', () => {
     });
 });
 
-function harness({ drops = [], myDevice = 'dev-me', persistMessage } = {}) {
+function harness({ drops = [], myDevice = 'dev-me', persistMessage, signEnvelope, verifySender } = {}) {
     const events = [];
     const dropped = [];
     const deleted = [];
@@ -49,6 +49,7 @@ function harness({ drops = [], myDevice = 'dev-me', persistMessage } = {}) {
         getSelfWebId: () => 'https://me/profile/card#me', getDisplayName: () => 'Me',
         getMyDeviceId: () => myDevice,
         persistMessage: persistMessage && ((m) => { persisted.push(m); return persistMessage(m); }),
+        signEnvelope, verifySender,
     });
     return { dm, pod, e2e, notify, events, dropped, deleted, persisted };
 }
@@ -70,6 +71,32 @@ describe('createWebDm.dropDm', () => {
         const { dm, dropped } = harness();
         expect(await dm.dropDm({ cmd: 'local_dm', message_id: 'm' })).toBe(false);
         expect(dropped).toHaveLength(0);
+    });
+
+    it('signs the envelope when signEnvelope is provided', async () => {
+        const { dm, dropped } = harness({ signEnvelope: async () => ({ signer: 'did:key:zSIGNER', sig: 'SIG' }) });
+        await dm.dropDm({ cmd: 'local_dm', target_webid: 'https://pod.example/bob/profile/card#me', message_id: 'm', content: 'CT' });
+        expect(dropped[0].env).toMatchObject({ signer: 'did:key:zSIGNER', sig: 'SIG' });
+    });
+});
+
+describe('createWebDm sender verification', () => {
+    it('marks a received DM verified when verifySender approves', async () => {
+        const { dm, events } = harness({
+            verifySender: async () => true,
+            drops: [{ url: 'u', envelope: { from_webid: 'https://bob', message_id: 'm', content: 'hi', e2e: false, signer: 'did:key:z', sig: 'S' } }],
+        });
+        await dm.drainOnce();
+        expect(events[0].sender_verified).toBe(true);
+    });
+
+    it('marks a received DM unverified when verifySender rejects', async () => {
+        const { dm, events } = harness({
+            verifySender: async () => false,
+            drops: [{ url: 'u', envelope: { from_webid: 'https://bob', message_id: 'm', content: 'hi', e2e: false } }],
+        });
+        await dm.drainOnce();
+        expect(events[0].sender_verified).toBe(false);
     });
 });
 

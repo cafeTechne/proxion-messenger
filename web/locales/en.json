@@ -375,6 +375,7 @@
   "msg.loadingReply": "Loading reply context…",
   "msg.forwardedFrom": "Forwarded from {name}",
   "msg.identityUnverified": "Identity not verified, check safety number",
+  "msg.senderUnverified": "Sender identity not verified against their published key",
   "msg.expires": "Expires",
   "msg.editHistory": "Show edit history",
   "msg.edited": "(edited)",

@@ -1264,6 +1264,41 @@ async function _deleteDrop(url) {
     }
 }
 
+// ── DM sender identity (R107) ──
+// Publish this device's signing identity (its did:key, and the account did it is
+// certified under, if any) next to the public x25519 key. A recipient fetches it
+// from the SENDER's pod to decide whether a DM's envelope signer is allowed to
+// speak for that WebID — an attacker cannot write here, so it is the trust anchor.
+export async function podPublishSigner(signerDid, accountDid) {
+    const root = podStorageRoot();
+    if (!root || !signerDid || !solidSession?.info?.isLoggedIn) return false;
+    try {
+        const res = await solidSession.fetch(root.replace(/\/?$/, '/') + 'proxion/identity/signer.json', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ version: 1, signer: signerDid, account_did: accountDid || null }),
+        });
+        return !!(res && res.ok);
+    } catch (err) {
+        console.warn('[pod] podPublishSigner failed:', err);
+        return false;
+    }
+}
+
+/** Fetch a peer's published signer identity, or null. Guarded against SSRF. */
+export async function podFetchPeerSigner(peerPodRoot) {
+    if (!peerPodRoot || !isPeerPodRootAllowed(peerPodRoot, podStorageRoot()) || !solidSession?.info?.isLoggedIn) return null;
+    try {
+        const res = await solidSession.fetch(peerPodRoot.replace(/\/?$/, '/') + 'proxion/identity/signer.json', { headers: { Accept: 'application/json' } });
+        if (!res || !res.ok) return null;
+        const d = await res.json();
+        if (d && typeof d.signer === 'string') {
+            return { signer: d.signer, account_did: typeof d.account_did === 'string' ? d.account_did : null };
+        }
+    } catch { /* peer has not published a signer identity */ }
+    return null;
+}
+
 // ── DM delivery drop-box (R103) ──
 /** The recipient's DM drop-box URL, from their pod storage root. */
 export function dmInboxUrlFor(podRoot) { return _dropBoxUrl(podRoot, DM_INBOX_PATH); }

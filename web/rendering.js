@@ -414,13 +414,18 @@ export function createRendering({
             const shieldHtml = (!isVerified && msg.from_webid && msg.from_webid.startsWith("did:key:"))
                 ? `<span title="${t('msg.identityUnverified')}" style="color:#8091a7;margin-left:4px;font-size:0.85em;">&#x1F6E1;</span>`
                 : "";
+            // R107: incoming gateway-free DM whose signature did not verify against
+            // the sender's published identity — surfaced, not blocked.
+            const dmAuthHtml = (msg.source === 'local_dm' && msg.from_webid && msg.from_webid !== selfWebId && msg.sender_verified === false)
+                ? `<span title="${t('msg.senderUnverified')}" style="color:#e0a458;margin-left:4px;font-size:0.85em;">&#x26A0;&#xFE0F;</span>`
+                : "";
             // R11.1.3: expiry countdown label
             let expireHtml = "";
             if (currentDisappearMs > 0 && msg.timestamp) {
                 const expiresAt = new Date(msg.timestamp).getTime() + currentDisappearMs;
                 expireHtml = `<span class="msg-expire-countdown" style="font-size:0.7em;color:#8091a7;margin-left:6px;" title="${t('msg.expires')}">⏱ ${_expireLabel(expiresAt - Date.now())}</span>`;
             }
-            body.innerHTML += `<div class="msg-header"><span class="msg-sender" style="color:${avatarColor}">${escHtml(name)}${botBadge}${suffixHtml}${shieldHtml}</span><span class="msg-ts-header" title="${exactTs}">${timeAgo(msg.timestamp)}${importedBadge}${expireHtml}</span></div>`;
+            body.innerHTML += `<div class="msg-header"><span class="msg-sender" style="color:${avatarColor}">${escHtml(name)}${botBadge}${suffixHtml}${shieldHtml}${dmAuthHtml}</span><span class="msg-ts-header" title="${exactTs}">${timeAgo(msg.timestamp)}${importedBadge}${expireHtml}</span></div>`;
         }
 
         // Content

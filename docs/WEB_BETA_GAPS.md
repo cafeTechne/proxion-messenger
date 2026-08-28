@@ -143,16 +143,20 @@ Fixed:
   `podSoftDeleteChatMessageAt`, `podSetChatSeqAt`, `podWriteReactionActionAt`).
 - **`voice_hangup` before answer.** `_callPeerWebid` is now set at invite receipt,
   so declining or closing a ringing call routes the hangup in web mode too.
-
-Pending (need a design decision or a focused round, not quick fixes):
-- **First-contact DM authorship is spoofable.** The web-mode DM envelope carries
-  no signature and the ratchet's initial handshake is an unauthenticated DH
-  against the recipient's public key, so anyone who can write to the recipient's
-  public DM inbox can forge a first message as any `from_webid` (established
-  sessions resist this via the root key). Fix: sign the envelope with the sender's
-  Ed25519 identity key and verify before caching keys / decrypting (gateway mode
-  does this per R55; the web path dropped it). Its own round — wire-format change,
-  interop with gateway mode.
+- **First-contact DM authorship signing (R107).** The web-mode DM envelope now
+  carries an Ed25519 signature over its canonical bytes (`from_webid`, message id,
+  ciphertext, ratchet/key material, timestamp), signed by the sender's device
+  `did:key` (`dmsig.js`). Each device publishes its signer identity at its own pod
+  (`proxion/identity/signer.json`), and on receipt the recipient verifies the
+  signature and confirms the signer is the one published at the SENDER's pod (or a
+  device certified by the published account, via `device-cert.js`) — an anchor an
+  attacker forging a "from alice" message cannot write to. Per the chosen
+  transition policy it is non-gating: a verified DM shows no marker, an unsigned or
+  unverifiable one still delivers but is marked "unverified sender", so nothing
+  breaks for older clients or the gateway path. Follow-ups: sign the multi-device
+  fanout envelope (single-device sends are covered; fanned-out copies currently
+  show unverified), publish a device roster so any of an account's devices verifies
+  without carrying a cert, and later tighten to reject once signing is widespread.
 - **Verified safety-number not pinned to the key.** After a user verifies a peer,
   a later wire `x25519_pub` overwrites the pinned key without clearing the verified
   flag, so the badge can lie. Fix: key the flag by a key fingerprint; on change,

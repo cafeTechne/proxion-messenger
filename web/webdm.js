@@ -38,7 +38,7 @@ export function envelopeFromDmPayload(payload, selfWebId, displayName = '') {
     };
 }
 
-export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDisplayName, getMyDeviceId, persistMessage }) {
+export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDisplayName, getMyDeviceId, persistMessage, signEnvelope, verifySender }) {
     let _unsub = null;
 
     // Drop an (already-encrypted) DM to the recipient's pod inbox.
@@ -48,6 +48,9 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
         const root = peerPodRootFromWebId(to);
         if (!root) return false;
         const env = envelopeFromDmPayload(payload, getSelfWebId(), getDisplayName ? getDisplayName() : '');
+        // R107: sign the envelope so the recipient can confirm it really came from
+        // this WebID's owner (best effort — an unsigned drop still delivers).
+        if (signEnvelope) { try { const _s = await signEnvelope(env); if (_s) Object.assign(env, _s); } catch { /* deliver unsigned */ } }
         return pod.podDropDm(root, env);
     }
 
@@ -104,6 +107,11 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
             console.warn('[webdm] decrypt failed, leaving drop for retry:', err);
             return;
         }
+        // R107: was this envelope really signed by from_webid's owner? Verified
+        // against the sender's published signer identity; non-gating (an unsigned
+        // or unverifiable message still shows, just marked unverified).
+        let sender_verified = false;
+        if (verifySender) { try { sender_verified = !!(await verifySender(env)); } catch { sender_verified = false; } }
         const message = {
             type: 'message',
             message_id: env.message_id,
@@ -116,6 +124,7 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
             source: 'local_dm',
             local: true,
             _persistDm: true,
+            sender_verified,
         };
         // Deliver live first: a successful decrypt has already advanced the ratchet,
         // so this message can never be re-decrypted — it must be shown now, and the
