@@ -3499,7 +3499,11 @@ import { createIdentityResolver } from './identity.js';
                     entry = { content: enc.ciphertext, e2e: true, nonce: enc.nonce,
                               msg_num: enc.msgNum, pn: enc.pn, ratchet_pub: enc.ratchetPub };
                 } catch (err) {
-                    entry = { content: plaintext, e2e: false }; // best-effort to this device
+                    // This device has a published key (required above), so it is
+                    // E2E-capable: never write plaintext to the untrusted pod. Skip
+                    // it rather than downgrade confidentiality.
+                    console.warn('[dm] ratchetEncrypt failed for', pid, '- skipping (no plaintext fallback)');
+                    return;
                 }
                 entry.from_device_id = clientDid;
                 // Self-sync copies need the thread: from_webid alone can't locate it
@@ -3602,23 +3606,24 @@ import { createIdentityResolver } from './identity.js';
                     if (_fanoutResult && typeof _fanoutResult === 'object') _resendPayload = _fanoutResult;
                 }
                 if (!_sentViaFanout) {
-                    // Deferred plain-path E2E: only mutate the plain-pid ratchet
-                    // when this payload is actually going out (see note above).
+                    // Deferred plain-path E2E: only mutate the plain-pid ratchet when
+                    // this payload actually goes out (see note above). For an
+                    // E2E-capable peer we encrypt or do NOT send — never plaintext to
+                    // the untrusted pod — and the retry re-encrypts on each attempt.
                     if (_e2ePlainTarget) {
-                        try {
-                            const enc = await ratchetEncrypt(_e2ePlainTarget, content);
-                            payload.content     = enc.ciphertext;
-                            payload.e2e         = true;
-                            payload.nonce       = enc.nonce;
-                            payload.msg_num     = enc.msgNum;
-                            payload.pn          = enc.pn;
-                            payload.ratchet_pub = enc.ratchetPub;
-                        } catch (err) {
-                            console.warn('[e2e] encrypt failed, sending plaintext:', err);
-                        }
+                        const _encryptedSend = async () => {
+                            let enc;
+                            try { enc = await ratchetEncrypt(_e2ePlainTarget, content); }
+                            catch (err) { console.warn('[e2e] encrypt failed; not sending plaintext to a keyed peer:', err); return; }
+                            socketSendOrQueue({ ...payload, content: enc.ciphertext, e2e: true,
+                                nonce: enc.nonce, msg_num: enc.msgNum, pn: enc.pn, ratchet_pub: enc.ratchetPub });
+                        };
+                        await _encryptedSend();
+                        _resendPayload = _encryptedSend;   // R66 (a function: re-encrypts)
+                    } else {
+                        socketSendOrQueue(payload);
+                        _resendPayload = payload;   // R66
                     }
-                    socketSendOrQueue(payload);
-                    _resendPayload = payload;   // R66
                 }
 
                 // Optimistic render: show the message instantly instead of waiting for
@@ -3638,7 +3643,7 @@ import { createIdentityResolver } from './identity.js';
                 });
                 document.getElementById('msg-' + clientMsgId)?.classList.add('msg-pending');
                 // R66: track the optimistic send; if unconfirmed, mark it failed + offer retry.
-                if (_resendPayload) sendStatus.track(clientMsgId, () => socketSendOrQueue(_resendPayload));
+                if (_resendPayload) sendStatus.track(clientMsgId, typeof _resendPayload === 'function' ? _resendPayload : () => socketSendOrQueue(_resendPayload));
 
                 // Cache the sent DM's plaintext locally so it survives reopen — for
                 // E2E DMs the server only stores ciphertext we can't re-decrypt.

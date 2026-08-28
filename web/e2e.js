@@ -28,6 +28,19 @@ let _initDone    = false;
 let _initPromise = null;
 const _stateCache = {};   // peerId -> state (in-memory, cleared on reset)
 
+// Per-peer serialization. ratchetEncrypt/ratchetDecrypt each load -> mutate ->
+// saveRatchetState (a wholesale replace of the cached state); if a send and a
+// pod-drain receive for the same peer interleave across awaits, the later save
+// reverts the other's advance, corrupting the chain ("already consumed" /
+// dropped messages). Run one ratchet op per peer at a time via a promise chain.
+const _peerQueues = {};   // peerId -> tail promise of the queue
+function _serialize(peerId, fn) {
+    const prev = _peerQueues[peerId] || Promise.resolve();
+    const run = prev.catch(() => {}).then(fn);   // wait for prev to settle, then run
+    _peerQueues[peerId] = run.catch(() => {});    // a failed op must not poison the chain
+    return run;                                    // caller gets fn's real result/rejection
+}
+
 // ── Encoding helpers (exported for tests) ─────────────────────────────────────
 export function b64uEnc(bytes) {
     return btoa(String.fromCharCode(...bytes))
@@ -183,6 +196,14 @@ export function myX25519PubB64u() { return _myPubB64u; }
 
 export function cachePeerPub(peerId, pubB64u) {
     if (!peerId || !pubB64u || typeof pubB64u !== 'string') return;
+    const prev = localStorage.getItem('proxion_e2e_peer_pub_' + peerId);
+    if (prev && prev !== pubB64u) {
+        // The peer's key changed. Any prior "verified" mark applied to the OLD key
+        // (its safety number), so it must not carry over to the new one, or the
+        // verified badge would lie. Clear it; the user re-verifies the new key.
+        try { localStorage.removeItem('proxion_e2e_verified_' + peerId); } catch { /* ignore */ }
+        console.warn('[e2e] peer key changed for', peerId, '- verification cleared');
+    }
     localStorage.setItem('proxion_e2e_peer_pub_' + peerId, pubB64u);
 }
 
@@ -425,7 +446,10 @@ async function _dhRatchetSend(state) {
 
 // ── ratchetEncrypt ────────────────────────────────────────────────────────────
 
-export async function ratchetEncrypt(peerId, plaintext) {
+export function ratchetEncrypt(peerId, plaintext) {
+    return _serialize(peerId, () => _ratchetEncryptImpl(peerId, plaintext));
+}
+async function _ratchetEncryptImpl(peerId, plaintext) {
     if (!_initDone) await initE2E();
     if (!e2eSupported) throw new Error('E2E not supported in this browser');
 
@@ -459,7 +483,10 @@ export async function ratchetEncrypt(peerId, plaintext) {
 
 // ── ratchetDecrypt ────────────────────────────────────────────────────────────
 
-export async function ratchetDecrypt(peerId, ciphertextB64u, nonceB64u, msgNum, ratchetPubB64u, pn = 0) {
+export function ratchetDecrypt(peerId, ciphertextB64u, nonceB64u, msgNum, ratchetPubB64u, pn = 0) {
+    return _serialize(peerId, () => _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ratchetPubB64u, pn));
+}
+async function _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ratchetPubB64u, pn = 0) {
     if (!_initDone) await initE2E();
     if (!e2eSupported) throw new E2EDecryptError('E2E not supported');
     if (!ratchetPubB64u) throw new E2EDecryptError('ratchet_pub required');

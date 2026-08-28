@@ -157,17 +157,18 @@ Fixed:
   fanout envelope (single-device sends are covered; fanned-out copies currently
   show unverified), publish a device roster so any of an account's devices verifies
   without carrying a cert, and later tighten to reject once signing is widespread.
-- **Verified safety-number not pinned to the key.** After a user verifies a peer,
-  a later wire `x25519_pub` overwrites the pinned key without clearing the verified
-  flag, so the badge can lie. Fix: key the flag by a key fingerprint; on change,
-  clear it and warn.
-- **Ratchet-state read-modify-write race.** A concurrent send and pod-drain
-  receive can wholesale-overwrite each other's saved ratchet state and roll a
-  chain back (the "already consumed" / dropped-message class). Fix: serialize
-  ratchet ops per peer.
-- **Plaintext fallback on encrypt failure.** `main.js` sends cleartext to the
-  untrusted pod if `ratchetEncrypt` throws — a silent confidentiality downgrade.
-  Fail closed for E2E-capable peers.
+- **Verified safety-number pinning (fixed).** `cachePeerPub` now clears the
+  "verified" mark for a peer when their key changes (a wire `x25519_pub` different
+  from the stored one), so the verified badge cannot carry over to a key the user
+  never checked; unchanged keys keep the mark.
+- **Ratchet-state race (fixed).** `ratchetEncrypt`/`ratchetDecrypt` are now
+  serialized per peer through a promise-chain mutex, so a concurrent send and
+  pod-drain receive can no longer wholesale-overwrite each other's saved state and
+  roll a chain back (the "already consumed" / dropped-message class).
+- **Plaintext fallback on encrypt failure (fixed).** When `ratchetEncrypt` throws
+  for an E2E-capable peer (one with a published key), `main.js` no longer downgrades
+  to cleartext on the untrusted pod: the fanout skips that device, and the single
+  send stays pending with a retry that re-encrypts, instead of leaking plaintext.
 - **Identity X25519 key is extractable in localStorage** (and the state key
   derives from it), so any XSS exfiltrates the identity and all ratchet state.
   Fix: non-extractable CryptoKey in IndexedDB. A key-storage refactor.

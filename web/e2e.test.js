@@ -217,6 +217,15 @@ describe('Alice→Bob ratchet (Phase 2)', () => {
         expect(r1.msgNum).toBe(1);
     });
 
+    it('serializes concurrent ratchet ops on the same peer (unique msgNum, no race)', async () => {
+        cachePeerPub('bob-concurrent', bob.pubB64u);
+        // Fire several encrypts at once. Without per-peer serialization they would
+        // read the same sendMsgNum and collide; serialized they are 0..4.
+        const results = await Promise.all([0, 1, 2, 3, 4].map(() => ratchetEncrypt('bob-concurrent', 'm')));
+        const nums = results.map((r) => r.msgNum).sort((a, b) => a - b);
+        expect(nums).toEqual([0, 1, 2, 3, 4]);
+    });
+
     it('Bob decrypts Alice first message via ratchetDecrypt', async () => {
         cachePeerPub('bob-rt', bob.pubB64u);
         const enc = await ratchetEncrypt('bob-rt', 'hello bob');
@@ -554,5 +563,18 @@ describe('state persistence', () => {
         const r2 = await ratchetEncrypt('bob-persist', 'msg1');
         expect(r2.msgNum).toBe(1);
         expect(r2.ratchetPub).toBeTruthy();
+    });
+});
+
+describe('cachePeerPub verified-flag pinning', () => {
+    it('clears the verified mark when a peer key changes, keeps it when unchanged', () => {
+        localStorage.clear();
+        cachePeerPub('alice', 'KEY_A');
+        localStorage.setItem('proxion_e2e_verified_alice', '1');
+        cachePeerPub('alice', 'KEY_A');   // same key → verification stands
+        expect(localStorage.getItem('proxion_e2e_verified_alice')).toBe('1');
+        cachePeerPub('alice', 'KEY_B');   // key changed → verification cleared
+        expect(localStorage.getItem('proxion_e2e_verified_alice')).toBe(null);
+        expect(localStorage.getItem('proxion_e2e_peer_pub_alice')).toBe('KEY_B');
     });
 });
