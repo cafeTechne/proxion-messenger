@@ -173,11 +173,14 @@ Fixed:
 - **Identity X25519 key is extractable in localStorage** (and the state key
   derives from it), so any XSS exfiltrates the identity and all ratchet state.
   Fix: non-extractable CryptoKey in IndexedDB. A key-storage refactor.
-- **Participant `acl:Write` allows tampering.** The Long Chat grant gives every
-  participant Write on the shared container, so a participant can overwrite/delete
-  others' messages or the index. Inherent to pure-WAC shared containers (dropping
-  Write breaks legitimate edit/delete); needs a server-side `foaf:maker` check or
-  a per-participant sub-container layout.
+- **Participant `acl:Write` allows tampering (documented limitation).** The Long
+  Chat grant gives every participant Write on the shared container, so a
+  participant can overwrite/delete others' messages or the index. Inherent to
+  pure-WAC shared containers: Write is required for a participant to edit/delete
+  their OWN messages, and WAC cannot scope a write to a `foaf:maker`. Closing it
+  needs a server-side maker check or a per-participant sub-container layout,
+  neither expressible client-side. Captured as a KNOWN LIMITATION note on
+  `buildChatAcl`.
 - **Cross-UTC-day edit/delete (fixed).** A room message now carries one client
   timestamp (`pod_ts`) as its pod day-file partition key: the send uses it for the
   pod write and the optimistic render, the render preserves it across the server

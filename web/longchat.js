@@ -308,6 +308,13 @@ export function buildDeletePatch(args) { return _sparqlFromOps(deleteOps(args));
  * acl:default propagates the grant to contained resources (the day files),
  * including ones a participant creates on a new UTC day. This is the difference
  * between "can read the chat" and "can take part in the conversation".
+ *
+ * KNOWN LIMITATION (integrity): acl:Write is required for a participant to edit or
+ * delete their OWN messages (the DELETE/INSERT patches), but WAC cannot scope a
+ * write to a foaf:maker, so it also lets a participant overwrite or delete other
+ * participants' messages or the container index. This is inherent to a shared-
+ * container Long Chat under pure WAC; closing it needs a server-side maker check
+ * or a per-participant sub-container layout, neither of which is expressible here.
  */
 export function buildChatAcl(ownerWebId, participantWebIds, containerUrl) {
     const lines = [
