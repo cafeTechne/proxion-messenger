@@ -100,7 +100,9 @@ found more issues. Fixed in this round:
   argument). All spec-authored and structurally unit-tested; the ACP path only
   activates when the server advertises ACP, so WAC servers (CSS) are unaffected.
   Still needs validation against a live Inrupt ESS (no ESS test account
-  available), and the public type index is not yet ACP-authored.
+  available). The public type index is now ACP-authored too (owner control + a
+  public-Read policy via `acp:PublicAgent`, through a model-aware helper), so all
+  the public resources have an ACP path; still pending live ESS verification.
 - **Drop-box ACL write was not checked.** `_ensureDropBox` / `podEnsureInbox`
   PUT the public-Append ACL but ignored the response, so a 403/500 was treated as
   success and the box stayed owner-only (peers' drops 403'd invisibly). The ACL
@@ -111,8 +113,9 @@ found more issues. Fixed in this round:
 - Smaller: per-drop error isolation in the DM drain, a re-entrancy guard on the
   call-signal drain, and a guarded invite-token decode.
 
-Remaining follow-ups need external resources, not code: live-verify the ACP paths
-against an Inrupt ESS (no test account), and ACP-author the public type index.
+Remaining follow-up needs an external resource, not code: live-verify the ACP
+paths (room-join grant, drop-box/inbox ACLs, public type index) against an Inrupt
+ESS, which needs a test account we do not have.
 
 `callsec.js` (the DTLS-fingerprint call auth) was reviewed and is fail-closed: a
 MitM that rewrites the fingerprint is refused, and verification errors reject

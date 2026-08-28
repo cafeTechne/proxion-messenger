@@ -704,13 +704,11 @@ export async function podEnsurePublicTypeIndex() {
         // full control. Without this the index is owner-only and discovery silently
         // fails cross-identity.
         try {
-            const { url: idxAclUrl } = await discoverAccessControl(indexUrl);
+            const { url: idxAclUrl, model } = await discoverAccessControl(indexUrl);
             await solidSession.fetch(idxAclUrl, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'text/turtle' },
-                body: `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n@prefix foaf: <http://xmlns.com/foaf/0.1/>.\n`
-                    + `<#owner> a acl:Authorization; acl:agent <${webId}>; acl:accessTo <${indexUrl}>; acl:mode acl:Read, acl:Write, acl:Control.\n`
-                    + `<#public> a acl:Authorization; acl:agentClass foaf:Agent; acl:accessTo <${indexUrl}>; acl:mode acl:Read.\n`,
+                body: _publicReadAclBody(model, indexUrl, webId),
             });
         } catch (err) {
             console.warn('[pod] type index public ACL failed:', err);
@@ -1043,6 +1041,17 @@ function _inboxAclBody(model, inboxUrl, ownerWebId, readerWebIds = []) {
     return model === 'acp'
         ? buildAcpAcr(ownerWebId, readerWebIds, inboxUrl, 'acl:Read', 'acl:Append')
         : buildInboxAcl(inboxUrl, ownerWebId, readerWebIds);
+}
+
+// Owner full control + public Read for a discoverable resource (the public type
+// index), as WAC turtle or the ACP analogue (public via acp:PublicAgent). ACP path
+// is spec-authored, not yet live-verified; it activates only when the server
+// advertises ACP, so WAC servers (CSS) are unaffected.
+function _publicReadAclBody(model, resourceUrl, ownerWebId) {
+    if (model === 'acp') return buildAcpAcr(ownerWebId, [], resourceUrl, 'acl:Read', 'acl:Read');
+    return `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n@prefix foaf: <http://xmlns.com/foaf/0.1/>.\n`
+        + `<#owner> a acl:Authorization; acl:agent <${ownerWebId}>; acl:accessTo <${resourceUrl}>; acl:mode acl:Read, acl:Write, acl:Control.\n`
+        + `<#public> a acl:Authorization; acl:agentClass foaf:Agent; acl:accessTo <${resourceUrl}>; acl:mode acl:Read.\n`;
 }
 
 // PUT an inbox/drop-box ACL, retrying once on a non-ok response. Without checking
