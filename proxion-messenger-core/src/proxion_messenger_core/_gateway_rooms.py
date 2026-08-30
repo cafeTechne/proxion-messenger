@@ -853,6 +853,32 @@ class RoomHandlerMixin:
                 for identity in participants_edit:
                     await self._send_to_identity(identity, payload_edit)
 
+    def _actor_participates_in_dm(self, actor: str, thread_id: str) -> bool:
+        """True when *actor* is a party to DM *thread_id*.
+
+        A local_dm thread is keyed by the PEER IDENTITY (did/webid) and each
+        participant owns a dm_threads row for it; a cert-DM thread is keyed by a
+        relationship certificate_id. Without this check an authenticated user
+        could inject a message into another account's DM just by naming that
+        account's identity as target_thread_id (rooms are already membership-
+        checked; only the DM branch was missing a guard)."""
+        if not actor or not thread_id or not self._store:
+            return False
+        # local_dm: actor owns a dm_threads row keyed by the peer identity.
+        for t in self._store.get_dm_threads(owner_webid=actor):
+            if t.get("thread_id") == thread_id:
+                return True
+        # explicit participant binding (thread_participant_bindings)
+        if self._store.is_thread_participant_binding(thread_id, actor):
+            return True
+        # cert-DM: the relationship for this cert_id belongs to the actor, or
+        # the actor holds a relationship with this peer identity.
+        if self._store.get_relationship_owner_by_cert_id(thread_id) == actor:
+            return True
+        if self._store.get_relationship_owner(thread_id) == actor:
+            return True
+        return False
+
     async def _handle_forward_message(self, websocket, data: dict) -> None:
         source_msg_id = data.get("message_id", "")
         target_thread_id = data.get("target_thread_id", "")
@@ -911,6 +937,13 @@ class RoomHandlerMixin:
                 except Exception:
                     pass
         else:
+            # DM target: target_thread_id is a peer identity / cert_id, NOT a
+            # room. Require the actor to actually participate in that DM thread,
+            # else an authenticated user could inject into another account's DM.
+            if not self._actor_participates_in_dm(actor, target_thread_id):
+                await websocket.send(json.dumps({
+                    "type": "error", "message": "Not a participant in target thread"}))
+                return
             for ws in (websocket, self._any_socket(target_thread_id)):
                 if ws:
                     try:

@@ -1013,6 +1013,19 @@ class HttpEndpointsMixin:
                 _peer_info = writer.get_extra_info("peername")
                 peer_ip = _peer_info[0] if isinstance(_peer_info, tuple) and _peer_info else ""
 
+                def _gated_acao() -> bytes:
+                    """ACAO header for sensitive, same-origin-only endpoints.
+
+                    Same-origin requests do not use CORS, so no header is needed for the
+                    gateway-served web app. Cross-origin reads are only allowed for trusted
+                    origins (localhost/127.0.0.1 on the gateway port and the Tauri shell),
+                    which get the origin echoed back; any other website gets no ACAO and the
+                    browser blocks it from reading the response. Returns b"" when untrusted.
+                    """
+                    if self._is_trusted_origin(origin_header, http_port, peer_ip):
+                        return b"Access-Control-Allow-Origin: " + (origin_header or b"null") + b"\r\n"
+                    return b""
+
                 def _check_http_rate(ip: str, group: str) -> bool:
                     """Returns True if rate limit exceeded."""
                     if not ip:
@@ -1181,8 +1194,8 @@ class HttpEndpointsMixin:
                     _turn_body = json.dumps(_turn_creds if _turn_creds else {"urls": []}).encode()
                     writer.write(
                         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                        b"Access-Control-Allow-Origin: *\r\n"
-                        b"Cache-Control: no-store\r\n"
+                        + _gated_acao()
+                        + b"Cache-Control: no-store\r\n"
                         b"Content-Length: " + str(len(_turn_body)).encode() + b"\r\n\r\n" + _turn_body
                     )
                     await writer.drain()
@@ -1232,8 +1245,8 @@ class HttpEndpointsMixin:
                     writer.write(
                         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                         + _SEC_HDR + _NO_STORE_HDR
-                        + b"Access-Control-Allow-Origin: *\r\n"
-                        b"Content-Length: " + str(len(health_body)).encode() + b"\r\n\r\n" + health_body
+                        + _gated_acao()
+                        + b"Content-Length: " + str(len(health_body)).encode() + b"\r\n\r\n" + health_body
                     )
                     await writer.drain()
                     return
@@ -1254,8 +1267,8 @@ class HttpEndpointsMixin:
                     writer.write(
                         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                         + _SEC_HDR + _NO_STORE_HDR
-                        + b"Access-Control-Allow-Origin: *\r\n"
-                        b"Content-Length: " + str(len(conn_body)).encode() + b"\r\n\r\n" + conn_body
+                        + _gated_acao()
+                        + b"Content-Length: " + str(len(conn_body)).encode() + b"\r\n\r\n" + conn_body
                     )
                     await writer.drain()
                     return
@@ -1386,8 +1399,8 @@ class HttpEndpointsMixin:
                     writer.write(
                         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                         + _SEC_HDR + _NO_STORE_HDR
-                        + b"Access-Control-Allow-Origin: *\r\n"
-                        b"Content-Length: " + str(len(_prof_bytes)).encode() + b"\r\n\r\n" + _prof_bytes
+                        + _gated_acao()
+                        + b"Content-Length: " + str(len(_prof_bytes)).encode() + b"\r\n\r\n" + _prof_bytes
                     )
                     await writer.drain()
                     return
@@ -1712,7 +1725,8 @@ class HttpEndpointsMixin:
                     }).encode()
                     writer.write(
                         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                        b"Access-Control-Allow-Origin: *\r\nContent-Length: "
+                        + _gated_acao()
+                        + b"Content-Length: "
                         + str(len(status_data)).encode() + b"\r\n\r\n" + status_data
                     )
                     await writer.drain()

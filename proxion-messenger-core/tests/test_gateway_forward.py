@@ -210,6 +210,71 @@ async def test_forward_prefers_client_plaintext_over_store_ciphertext(gateway):
 
 
 @pytest.mark.asyncio
+async def test_forward_to_dm_thread_actor_participates_allowed(gateway):
+    """Actor forwarding into a DM thread they own (local_dm keys the thread by
+    the peer identity and stores a dm_threads row owned by the actor) is allowed
+    and the forwarded copy is saved."""
+    ws = _mock_ws()
+    await _register(gateway, ws)
+    actor = gateway._client_webids[ws]
+    peer = "https://bob.pod/profile/card#me"
+    # Simulate a local_dm having created the thread: keyed by the peer, owned by actor.
+    gateway._store.save_dm_thread(peer, peer, "Bob", owner_webid=actor)
+
+    import uuid
+    msg_id = str(uuid.uuid4())
+    gateway._store.save_message(msg_id, peer, "dm", actor, "Alice",
+                                "orig dm", "2026-01-01T00:00:00Z")
+    ws.send.reset_mock()
+    await gateway.process_command(ws, {
+        "cmd": "forward_message", "message_id": msg_id,
+        "target_thread_id": peer, "content": "forwarded",
+    })
+    calls = [json.loads(c[0][0]) for c in ws.send.call_args_list]
+    assert any(e.get("forwarded") is True for e in calls), \
+        "actor who participates in the DM thread should receive the forwarded echo"
+    assert not any(e.get("type") == "error" for e in calls)
+    # The forwarded copy is persisted.
+    saved = gateway._store.get_messages(peer, None, None, 100)
+    assert any(m.get("content") == "forwarded" for m in saved)
+
+
+@pytest.mark.asyncio
+async def test_forward_to_dm_thread_no_relationship_rejected(gateway):
+    """Injecting a message into another account's DM: the actor names a peer
+    identity as target_thread_id with which they have NO dm_thread/relationship.
+    Must be rejected AND nothing delivered to the victim or saved."""
+    ws_attacker = _mock_ws("https://attacker.pod/profile/card#me")
+    ws_victim = _mock_ws("https://victim.pod/profile/card#me")
+    await _register(gateway, ws_attacker, "https://attacker.pod/profile/card#me", "Mallory")
+    await _register(gateway, ws_victim, "https://victim.pod/profile/card#me", "Victim")
+    victim_webid = "https://victim.pod/profile/card#me"
+
+    import uuid
+    msg_id = str(uuid.uuid4())
+    # Attacker has some message of their own to forward.
+    gateway._store.save_message(msg_id, "room-x", "local_room",
+                                gateway._client_webids[ws_attacker], "Mallory",
+                                "malicious", "2026-01-01T00:00:00Z")
+    ws_attacker.send.reset_mock()
+    ws_victim.send.reset_mock()
+
+    await gateway.process_command(ws_attacker, {
+        "cmd": "forward_message", "message_id": msg_id,
+        "target_thread_id": victim_webid, "content": "malicious",
+    })
+
+    # Attacker gets an error; victim receives nothing.
+    attacker_calls = [json.loads(c[0][0]) for c in ws_attacker.send.call_args_list]
+    assert any(e.get("type") == "error" for e in attacker_calls)
+    assert not any(e.get("forwarded") for e in attacker_calls)
+    assert ws_victim.send.call_count == 0, "victim must not receive the injected message"
+    # Nothing saved to the victim's thread.
+    saved = gateway._store.get_messages(victim_webid, None, None, 100)
+    assert saved == [] or not any(m.get("content") == "malicious" for m in saved)
+
+
+@pytest.mark.asyncio
 async def test_forward_content_too_large_rejected(gateway):
     ws = _mock_ws()
     await _register(gateway, ws)
