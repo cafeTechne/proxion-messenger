@@ -128,13 +128,21 @@ class CssClientCredentials:
                 migration_store.set_auth_mode("legacy_fallback")
 
         if not self.token_endpoint_url:
+            _default_te = f"{self.css_base_url}/.oidc/token"
             try:
                 import httpx as _httpx_disc
+                from urllib.parse import urlparse as _up
                 _disc = _httpx_disc.get(f"{self.css_base_url}/.well-known/openid-configuration", timeout=5)
                 _disc.raise_for_status()
-                self.token_endpoint_url = _disc.json()["token_endpoint"]
+                _te = _disc.json().get("token_endpoint", "") or ""
+                # Only trust a token_endpoint on the SAME origin as the pod. A
+                # malicious/compromised pod could otherwise point it at an attacker
+                # host to capture the posted client_id/client_secret.
+                _b = _up(self.css_base_url)
+                _t = _up(_te)
+                self.token_endpoint_url = _te if (_te and _t.scheme == _b.scheme and _t.netloc == _b.netloc) else _default_te
             except Exception:
-                self.token_endpoint_url = f"{self.css_base_url}/.oidc/token"
+                self.token_endpoint_url = _default_te
         token_url = self.token_endpoint_url
         nonce = self._last_nonce
         resp = None

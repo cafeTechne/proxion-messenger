@@ -577,7 +577,12 @@ class HttpEndpointsMixin:
             if _ct in _SELF_SIGNED_TYPES:
                 _bound = (_signer == _from)
             elif _ct in _MEMBER_SIGNED_TYPES:
-                _bound = self._relay_sender_gateway_ok(_from, _signer)
+                # Privileged room-admin relays (moderation/emoji) must not be
+                # authorized by a first-use TOFU binding — that lets an attacker
+                # grab the owner's never-inbound-relayed identity. Require the
+                # signer binding to already be established by prior normal traffic.
+                _privileged = _ct in ("room_moderation", "room_emoji")
+                _bound = self._relay_sender_gateway_ok(_from, _signer, require_established=_privileged)
             else:  # _CHANNEL_SIGNED_TYPES — bind the signer to a channel participant
                 _bound = self._voice_channel_gateway_ok(data.get("channel_id", ""), _signer)
             if not _bound or not verify_relay_envelope(data):

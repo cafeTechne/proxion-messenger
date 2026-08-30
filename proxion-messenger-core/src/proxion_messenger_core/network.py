@@ -15,7 +15,7 @@ import json
 import os
 import socket
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 try:
     import httpx
@@ -25,6 +25,7 @@ except ImportError:
 
 _DEFAULT_TIMEOUT = 5.0
 _DEFAULT_MAX_BYTES = 1_048_576  # 1 MB
+_MAX_REDIRECTS = 5             # bounded, re-validated per hop (SSRF-safe)
 
 # Optional audit callback: set via set_audit_fn() to route blocked-URL events
 # to a persistent store.  Signature: fn(event_type: str, severity: str, detail: str)
@@ -149,33 +150,43 @@ def safe_get(
     if not _HTTPX_AVAILABLE:
         raise NetworkError("httpx is required for network operations")
 
-    resolved_ip = _resolve_safe_ip(url)
-    if resolved_ip is None:
-        if _audit_fn:
-            try:
-                _audit_fn("ssrf_blocked", "warning", url)
-            except Exception:
-                pass
-        raise NetworkError(f"blocked or unresolvable URL: {url!r}")
-
-    pinned_url, extra_headers = _pin_url(url, resolved_ip)
-    req_headers = {**(headers or {}), **extra_headers}
-
     try:
-        with httpx.Client(timeout=timeout, follow_redirects=True, verify=_make_tls_context()) as client:
-            with client.stream("GET", pinned_url, headers=req_headers) as resp:
-                if resp.status_code < 200 or resp.status_code >= 300:
-                    raise NetworkError(f"GET {url}: HTTP {resp.status_code}")
-                chunks: list[bytes] = []
-                received = 0
-                for chunk in resp.iter_bytes(chunk_size=65_536):
-                    received += len(chunk)
-                    if received > max_bytes:
-                        raise NetworkError(
-                            f"GET {url}: response exceeds {max_bytes // 1024} KB"
-                        )
-                    chunks.append(chunk)
-                return b"".join(chunks)
+        # Follow redirects manually so EVERY hop's host is re-validated + re-pinned.
+        # httpx's own follow_redirects would resolve the Location without our SSRF
+        # check, letting a public host 302 to an internal/loopback target.
+        with httpx.Client(timeout=timeout, follow_redirects=False, verify=_make_tls_context()) as client:
+            current = url
+            for _hop in range(_MAX_REDIRECTS + 1):
+                resolved_ip = _resolve_safe_ip(current)
+                if resolved_ip is None:
+                    if _audit_fn:
+                        try:
+                            _audit_fn("ssrf_blocked", "warning", current)
+                        except Exception:
+                            pass
+                    raise NetworkError(f"blocked or unresolvable URL: {current!r}")
+                pinned_url, extra_headers = _pin_url(current, resolved_ip)
+                req_headers = {**(headers or {}), **extra_headers}
+                with client.stream("GET", pinned_url, headers=req_headers) as resp:
+                    if 300 <= resp.status_code < 400:
+                        loc = resp.headers.get("location")
+                        if not loc:
+                            raise NetworkError(f"GET {url}: HTTP {resp.status_code} without Location")
+                        current = urljoin(current, loc)
+                        continue
+                    if resp.status_code < 200 or resp.status_code >= 300:
+                        raise NetworkError(f"GET {url}: HTTP {resp.status_code}")
+                    chunks: list[bytes] = []
+                    received = 0
+                    for chunk in resp.iter_bytes(chunk_size=65_536):
+                        received += len(chunk)
+                        if received > max_bytes:
+                            raise NetworkError(
+                                f"GET {url}: response exceeds {max_bytes // 1024} KB"
+                            )
+                        chunks.append(chunk)
+                    return b"".join(chunks)
+            raise NetworkError(f"GET {url}: too many redirects")
     except NetworkError:
         raise
     except Exception as exc:
@@ -196,33 +207,41 @@ async def async_safe_get(
     if not _HTTPX_AVAILABLE:
         raise NetworkError("httpx is required for network operations")
 
-    resolved_ip = _resolve_safe_ip(url)
-    if resolved_ip is None:
-        if _audit_fn:
-            try:
-                _audit_fn("ssrf_blocked", "warning", url)
-            except Exception:
-                pass
-        raise NetworkError(f"blocked or unresolvable URL: {url!r}")
-
-    pinned_url, extra_headers = _pin_url(url, resolved_ip)
-    req_headers = {**(headers or {}), **extra_headers}
-
     try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=_make_tls_context()) as client:
-            async with client.stream("GET", pinned_url, headers=req_headers) as resp:
-                if resp.status_code < 200 or resp.status_code >= 300:
-                    raise NetworkError(f"GET {url}: HTTP {resp.status_code}")
-                chunks: list[bytes] = []
-                received = 0
-                async for chunk in resp.aiter_bytes(chunk_size=65_536):
-                    received += len(chunk)
-                    if received > max_bytes:
-                        raise NetworkError(
-                            f"GET {url}: response exceeds {max_bytes // 1024} KB"
-                        )
-                    chunks.append(chunk)
-                return b"".join(chunks)
+        # Manual redirect following so each hop is re-validated + re-pinned (see safe_get).
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, verify=_make_tls_context()) as client:
+            current = url
+            for _hop in range(_MAX_REDIRECTS + 1):
+                resolved_ip = _resolve_safe_ip(current)
+                if resolved_ip is None:
+                    if _audit_fn:
+                        try:
+                            _audit_fn("ssrf_blocked", "warning", current)
+                        except Exception:
+                            pass
+                    raise NetworkError(f"blocked or unresolvable URL: {current!r}")
+                pinned_url, extra_headers = _pin_url(current, resolved_ip)
+                req_headers = {**(headers or {}), **extra_headers}
+                async with client.stream("GET", pinned_url, headers=req_headers) as resp:
+                    if 300 <= resp.status_code < 400:
+                        loc = resp.headers.get("location")
+                        if not loc:
+                            raise NetworkError(f"GET {url}: HTTP {resp.status_code} without Location")
+                        current = urljoin(current, loc)
+                        continue
+                    if resp.status_code < 200 or resp.status_code >= 300:
+                        raise NetworkError(f"GET {url}: HTTP {resp.status_code}")
+                    chunks: list[bytes] = []
+                    received = 0
+                    async for chunk in resp.aiter_bytes(chunk_size=65_536):
+                        received += len(chunk)
+                        if received > max_bytes:
+                            raise NetworkError(
+                                f"GET {url}: response exceeds {max_bytes // 1024} KB"
+                            )
+                        chunks.append(chunk)
+                    return b"".join(chunks)
+            raise NetworkError(f"GET {url}: too many redirects")
     except NetworkError:
         raise
     except Exception as exc:

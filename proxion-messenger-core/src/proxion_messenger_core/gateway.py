@@ -443,7 +443,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # Only genuine loopback skips auth; wildcard (0.0.0.0/::) is routable → auth.
         return _host not in ("127.0.0.1", "localhost", "::1")
 
-    def _relay_sender_gateway_ok(self, from_webid: str, relay_sig_did: str) -> bool:
+    def _relay_sender_gateway_ok(self, from_webid: str, relay_sig_did: str,
+                                 require_established: bool = False) -> bool:
         """TOFU continuity binding for ephemeral room/voice/file relays.
 
         The envelope signature only proves *some* gateway (relay_sig_did) signed the
@@ -471,6 +472,15 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         try:
             _hist = self._store.get_identity_key_history(_key)
             if not _hist:
+                # Empty slot. A privileged op (moderation/emoji) must NOT be
+                # authorized by a first-use TOFU seed: a room's owner is never
+                # legitimately first-seen via an inbound privileged relay on the
+                # gateway where they are local, so the first (attacker) POST would
+                # otherwise grab the owner's binding and impersonate them. Require an
+                # ALREADY-established binding (seeded by the owner's prior normal
+                # traffic) for privileged ops; keep TOFU for ordinary relays.
+                if require_established:
+                    return False
                 self._store.record_identity_key_seen(_key, gw_pub_hex, trusted=True)
                 return True
             if any(h.get("pubkey_hex") == gw_pub_hex for h in _hist):
@@ -2171,6 +2181,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if not rel:
             return "200 OK", '{"status":"received"}'
         cert_dict, our_cert_id = rel
+        # Deliver to the LOCAL owner who actually has this peer as a contact, not the
+        # attacker-chosen to_webid on the wire (which could push a spurious event to a
+        # different local user). Same derivation presence relay uses.
+        _deliver = (self._store.get_relationship_owner(from_webid) if self._store else "") or to_webid
         if our_cert_id:
             self._dm_disappear_timers[our_cert_id] = ms
             if self._store:
@@ -2178,7 +2192,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                     self._store.set_dm_disappear_timer(our_cert_id, ms)
                 except Exception:
                     pass
-            await self._send_to_identity(to_webid, json.dumps({
+            await self._send_to_identity(_deliver, json.dumps({
                 "type": "disappear_timer_updated", "room_id": our_cert_id, "ms": ms,
             }))
         return "200 OK", '{"status":"received"}'
@@ -2196,6 +2210,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if not rel:
             return "200 OK", '{"status":"received"}'
         cert_dict, our_cert_id = rel
+        # Deliver to the LOCAL owner who actually has this peer as a contact, not the
+        # attacker-chosen to_webid on the wire (which could push a spurious event to a
+        # different local user). Same derivation presence relay uses.
+        _deliver = (self._store.get_relationship_owner(from_webid) if self._store else "") or to_webid
         if self._store and our_cert_id:
             try:
                 if action == "unpin":
@@ -2206,7 +2224,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                     self._store.save_pin(our_cert_id, message_id, from_webid, _c)
             except Exception:
                 pass
-        await self._send_to_identity(to_webid, json.dumps({
+        await self._send_to_identity(_deliver, json.dumps({
             "type": "unpinned" if action == "unpin" else "message_pinned",
             "thread_id": our_cert_id,
             "message_id": message_id,
@@ -2226,6 +2244,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if not rel:
             return "200 OK", '{"status":"received"}'
         cert_dict, our_cert_id = rel
+        # Deliver to the LOCAL owner who actually has this peer as a contact, not the
+        # attacker-chosen to_webid on the wire (which could push a spurious event to a
+        # different local user). Same derivation presence relay uses.
+        _deliver = (self._store.get_relationship_owner(from_webid) if self._store else "") or to_webid
         # Only let a peer delete a message THEY authored (if we have it stored).
         if self._store:
             try:
@@ -2235,7 +2257,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 self._store.delete_message(message_id)
             except Exception:
                 pass
-        await self._send_to_identity(to_webid, json.dumps({
+        await self._send_to_identity(_deliver, json.dumps({
             "type": "message_deleted",
             "thread_id": our_cert_id,
             "message_id": message_id,
@@ -2258,13 +2280,23 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if not rel:
             return "200 OK", '{"status":"received"}'
         cert_dict, our_cert_id = rel
+        # Deliver to the LOCAL owner who actually has this peer as a contact, not the
+        # attacker-chosen to_webid on the wire (which could push a spurious event to a
+        # different local user). Same derivation presence relay uses.
+        _deliver = (self._store.get_relationship_owner(from_webid) if self._store else "") or to_webid
+        # Only let a peer edit a message THEY authored (mirror the delete relay).
+        # update_message is a global UPDATE by message_id, so without this any
+        # friended peer could rewrite ANY stored message's content by id.
         if self._store:
             try:
+                _sender = self._store.get_message_sender(message_id)
+                if _sender and _sender != from_webid:
+                    return "200 OK", '{"status":"received"}'
                 self._store.update_message(message_id, new_content,
                                            edited_at=datetime.now(timezone.utc).isoformat())
             except Exception:
                 pass
-        await self._send_to_identity(to_webid, json.dumps({
+        await self._send_to_identity(_deliver, json.dumps({
             "type": "message_edited",
             "thread_id": our_cert_id,
             "message_id": message_id,
@@ -2291,6 +2323,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if not rel:
             return "200 OK", '{"status":"received"}'
         cert_dict, our_cert_id = rel
+        # Deliver to the LOCAL owner who actually has this peer as a contact, not the
+        # attacker-chosen to_webid on the wire (which could push a spurious event to a
+        # different local user). Same derivation presence relay uses.
+        _deliver = (self._store.get_relationship_owner(from_webid) if self._store else "") or to_webid
         if self._store and our_cert_id:
             try:
                 if action == "remove":
@@ -2306,7 +2342,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             "emoji": emoji,
             "from_webid": from_webid,
         })
-        await self._send_to_identity(to_webid, event)
+        await self._send_to_identity(_deliver, event)
         return "200 OK", '{"status":"received"}'
 
     async def _handle_room_reaction_relay(self, data: dict) -> tuple[str, str]:
