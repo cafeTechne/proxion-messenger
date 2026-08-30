@@ -17,6 +17,10 @@ storage you control instead of a company's servers. Built on the open
 ![WCAG 2.2 AA](https://img.shields.io/badge/accessibility-WCAG%202.2%20AA-4ade80)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux%20%C2%B7%20PWA-8598ae)
 
+### [Try Proxion in your browser](https://cafetechne.github.io/proxion-messenger/app/)
+
+No install. Open the app, sign in with your Solid pod, and start messaging.
+
 <img src="landing/assets/screenshot-chat.png" alt="Proxion desktop: an end-to-end encrypted conversation, with rooms and contacts in the sidebar" width="800">
 
 </div>
