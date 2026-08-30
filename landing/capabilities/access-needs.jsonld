@@ -1,0 +1,114 @@
+{
+  "@context": {
+    "interop": "http://www.w3.org/ns/solid/interop#",
+    "acl": "http://www.w3.org/ns/auth/acl#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "applicationName": "interop:applicationName",
+    "applicationDescription": "interop:applicationDescription",
+    "applicationAuthor": { "@id": "interop:applicationAuthor", "@type": "@id" },
+    "hasAccessNeedGroup": { "@id": "interop:hasAccessNeedGroup", "@type": "@id" },
+    "accessNecessity": { "@id": "interop:accessNecessity", "@type": "@id" },
+    "accessScenario": { "@id": "interop:accessScenario", "@type": "@id" },
+    "authenticatesAs": { "@id": "interop:authenticatesAs", "@type": "@id" },
+    "hasAccessNeed": { "@id": "interop:hasAccessNeed", "@type": "@id" },
+    "accessMode": { "@id": "interop:accessMode", "@type": "@id" },
+    "seeAlso": { "@id": "rdfs:seeAlso", "@type": "@id" },
+    "comment": "rdfs:comment",
+    "label": "rdfs:label"
+  },
+  "@graph": [
+    {
+      "@id": "https://cafetechne.github.io/proxion-messenger/capabilities/access-needs.jsonld#proxion",
+      "@type": "interop:Application",
+      "applicationName": "Proxion",
+      "applicationDescription": "A Solid-native private messenger. Rooms are open, interoperable Long Chat; direct messages are end-to-end encrypted and not third-party readable.",
+      "applicationAuthor": "https://cafetechne.github.io/proxion-messenger/id/#me",
+      "seeAlso": "https://cafetechne.github.io/proxion-messenger/app/clientid.jsonld",
+      "hasAccessNeedGroup": "https://cafetechne.github.io/proxion-messenger/capabilities/access-needs.jsonld#group"
+    },
+    {
+      "@id": "https://cafetechne.github.io/proxion-messenger/capabilities/access-needs.jsonld#group",
+      "@type": "interop:AccessNeedGroup",
+      "label": "Proxion access needs",
+      "accessNecessity": "interop:AccessRequired",
+      "accessScenario": "interop:PersonalAccess",
+      "authenticatesAs": "interop:SocialAgent",
+      "seeAlso": "https://github.com/cafeTechne/proxion-messenger/blob/main/docs/POD_DATA_MODEL.md",
+      "hasAccessNeed": [
+        "https://cafetechne.github.io/proxion-messenger/capabilities/access-needs.jsonld#rooms",
+        "https://cafetechne.github.io/proxion-messenger/capabilities/access-needs.jsonld#typeindex",
+        "https://cafetechne.github.io/proxion-messenger/capabilities/access-needs.jsonld#inbox",
+        "https://cafetechne.github.io/proxion-messenger/capabilities/access-needs.jsonld#presence",
+        "https://cafetechne.github.io/proxion-messenger/capabilities/access-needs.jsonld#identity",
+        "https://cafetechne.github.io/proxion-messenger/capabilities/access-needs.jsonld#dropboxes",
+        "https://cafetechne.github.io/proxion-messenger/capabilities/access-needs.jsonld#personal",
+        "https://cafetechne.github.io/proxion-messenger/capabilities/access-needs.jsonld#optional"
+      ]
+    },
+    {
+      "@id": "https://cafetechne.github.io/proxion-messenger/capabilities/access-needs.jsonld#rooms",
+      "@type": "interop:AccessNeed",
+      "label": "Rooms (Long Chat)",
+      "accessNecessity": "interop:AccessRequired",
+      "accessMode": ["acl:Read", "acl:Write", "acl:Append"],
+      "comment": "Group conversations under proxion/rooms/, written as a standard Solid Long Chat (meeting:LongChat, sioc:content, foaf:maker, dct:created) plus px: terms for reply context, reactions, and order. Shape: solid.github.io/chat and proxion.dev/vocab/v1#."
+    },
+    {
+      "@id": "https://cafetechne.github.io/proxion-messenger/capabilities/access-needs.jsonld#typeindex",
+      "@type": "interop:AccessNeed",
+      "label": "Public type index",
+      "accessNecessity": "interop:AccessRequired",
+      "accessMode": ["acl:Read", "acl:Write"],
+      "comment": "Registers each room as a solid:TypeRegistration for meeting:LongChat so other apps and people can discover it."
+    },
+    {
+      "@id": "https://cafetechne.github.io/proxion-messenger/capabilities/access-needs.jsonld#inbox",
+      "@type": "interop:AccessNeed",
+      "label": "LDN inbox",
+      "accessNecessity": "interop:AccessRequired",
+      "accessMode": ["acl:Read", "acl:Append"],
+      "comment": "ActivityStreams Invite notifications (Linked Data Notifications) to invite a contact to a room (Append to theirs) and to receive invitations (Read own)."
+    },
+    {
+      "@id": "https://cafetechne.github.io/proxion-messenger/capabilities/access-needs.jsonld#presence",
+      "@type": "interop:AccessNeed",
+      "label": "Presence heartbeat",
+      "accessNecessity": "interop:AccessRequired",
+      "accessMode": ["acl:Read", "acl:Write"],
+      "comment": "proxion/presence.json, a public-read heartbeat (px:) so contacts can see online / away / offline."
+    },
+    {
+      "@id": "https://cafetechne.github.io/proxion-messenger/capabilities/access-needs.jsonld#identity",
+      "@type": "interop:AccessNeed",
+      "label": "Public identity keys",
+      "accessNecessity": "interop:AccessRequired",
+      "accessMode": ["acl:Read", "acl:Write"],
+      "comment": "proxion/identity/: an X25519 public key for E2E and, in the gateway-free web build, an Ed25519 signer identity so a contact can verify your messages. Public keys only."
+    },
+    {
+      "@id": "https://cafetechne.github.io/proxion-messenger/capabilities/access-needs.jsonld#dropboxes",
+      "@type": "interop:AccessNeed",
+      "label": "Delivery drop boxes",
+      "accessNecessity": "interop:AccessOptional",
+      "accessMode": ["acl:Read", "acl:Append"],
+      "comment": "proxion/dm-inbox/, call-inbox/, join-inbox/: public-append drop boxes for gateway-free delivery. Contents are ciphertext or transient signaling; direct-message plaintext is never written to a pod."
+    },
+    {
+      "@id": "https://cafetechne.github.io/proxion-messenger/capabilities/access-needs.jsonld#personal",
+      "@type": "interop:AccessNeed",
+      "label": "Profile, contacts, read state",
+      "accessNecessity": "interop:AccessRequired",
+      "accessMode": ["acl:Read", "acl:Write"],
+      "comment": "proxion/profile/ (display name, avatar), proxion/contacts/, proxion/readstate/. All px: shapes documented in POD_DATA_MODEL.md."
+    },
+    {
+      "@id": "https://cafetechne.github.io/proxion-messenger/capabilities/access-needs.jsonld#optional",
+      "@type": "interop:AccessNeed",
+      "label": "Opt-in sync",
+      "accessNecessity": "interop:AccessOptional",
+      "accessMode": ["acl:Read", "acl:Write"],
+      "comment": "Written only when you enable the feature: proxion/dm/ (DM plaintext archive), saved/, gifs/, settings.jsonld, mutes.jsonld, blocks.jsonld, scheduled/, webhooks/."
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Proxion - Application Capability Description</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" type="application/ld+json" href="access-needs.jsonld" title="Machine-readable access needs">
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.6 system-ui, sans-serif; max-width: 52rem; margin: 2.5rem auto; padding: 0 1.25rem; }
+  h1 { margin-bottom: .2rem; }
+  .sub { color: #8091a7; margin-top: 0; }
+  code { background: rgba(127,127,127,.18); padding: .1em .4em; border-radius: 4px; font-size: .9em; }
+  a { color: #7c4dff; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; display: block; overflow-x: auto; }
+  th, td { border: 1px solid rgba(127,127,127,.3); padding: .5rem .6rem; text-align: left; vertical-align: top; font-size: .95em; }
+  th { background: rgba(127,127,127,.12); }
+  .modes { white-space: nowrap; font-variant: small-caps; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Proxion: what it does with your pod</h1>
+  <p class="sub">An application capability description. A machine-readable version is at
+    <a href="access-needs.jsonld">access-needs.jsonld</a>.</p>
+
+  <p>Proxion is a Solid-native messenger. Everything it stores for you lives under a
+    single container, <code>{pod}/proxion/</code>, as plain typed JSON-LD using a
+    documented vocabulary (<a href="https://github.com/cafeTechne/proxion-messenger/blob/main/docs/POD_DATA_MODEL.md">POD_DATA_MODEL.md</a>),
+    so any Solid app you authorize can read and reuse it. Rooms are open and
+    interoperable; direct messages are end-to-end encrypted in transit and are
+    deliberately not third-party readable.</p>
+
+  <h2>Access it needs</h2>
+  <table>
+    <thead><tr><th>Resource</th><th class="modes">Modes</th><th>Purpose and shape</th></tr></thead>
+    <tbody>
+      <tr><td><code>proxion/rooms/</code> and its day files</td><td class="modes">Read, Write, Append</td>
+          <td>Group conversations, written as a standard Solid <a href="https://solid.github.io/chat/">Long Chat</a>
+              (<code>meeting:LongChat</code>, <code>sioc:content</code>, <code>foaf:maker</code>,
+              <code>dct:created</code>) plus Proxion's <code>px:</code> terms for reply context, reactions, and order.</td></tr>
+      <tr><td>The public type index</td><td class="modes">Read, Write</td>
+          <td>Registers each room as a <code>solid:TypeRegistration</code> for
+              <code>meeting:LongChat</code> so other apps and people can discover it.</td></tr>
+      <tr><td><code>ldp:inbox</code></td><td class="modes">Append (to others), Read (own)</td>
+          <td>ActivityStreams <code>Invite</code> notifications (Linked Data Notifications) to invite a
+              contact to a room, and to receive invitations.</td></tr>
+      <tr><td><code>proxion/presence.json</code></td><td class="modes">Read, Write</td>
+          <td>A public-read heartbeat (<code>px:</code>) so contacts can see online / away / offline.</td></tr>
+      <tr><td><code>proxion/identity/</code></td><td class="modes">Read, Write</td>
+          <td>Public keys a contact needs to reach you: an X25519 public key for E2E and, in the
+              gateway-free web build, an Ed25519 signer identity to verify your messages.</td></tr>
+      <tr><td><code>proxion/dm-inbox/</code>, <code>call-inbox/</code>, <code>join-inbox/</code></td><td class="modes">Append (peers), Read (own)</td>
+          <td>Public-append drop boxes for gateway-free delivery. Contents are ciphertext or
+              transient signaling; the pod never sees direct-message plaintext.</td></tr>
+      <tr><td><code>proxion/profile/</code>, <code>contacts/</code>, <code>readstate/</code></td><td class="modes">Read, Write</td>
+          <td>Your display name and avatar, contact list, and per-thread read markers.</td></tr>
+      <tr><td><code>proxion/dm/</code>, <code>saved/</code>, <code>gifs/</code>, <code>settings.jsonld</code>,
+              <code>mutes.jsonld</code>, <code>blocks.jsonld</code>, <code>scheduled/</code>, <code>webhooks/</code></td>
+          <td class="modes">Read, Write</td>
+          <td>Optional, opt-in sync: DM plaintext archive, bookmarks, favorite GIFs, settings, mute and
+              block lists, scheduled messages, and webhooks. Written only when you enable them.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>What it does not do</h2>
+  <ul>
+    <li>It writes only under <code>proxion/</code> (plus the standard type index and inbox); it does not touch
+      the rest of your pod.</li>
+    <li>Direct-message plaintext is never written to any pod. The pod holds only ciphertext for DMs.</li>
+    <li>All access modes above are Web Access Control (<code>acl:</code>) modes the app requests only when the
+      feature is used.</li>
+  </ul>
+
+  <p><a href="https://cafetechne.github.io/proxion-messenger/">Proxion home</a> ·
+     <a href="https://cafetechne.github.io/proxion-messenger/app/">web app</a> ·
+     <a href="https://github.com/cafeTechne/proxion-messenger/blob/main/docs/INTEROP.md">interoperability, with tests</a></p>
+</main>
+</body>
+</html>

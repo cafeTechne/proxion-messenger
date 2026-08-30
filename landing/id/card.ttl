@@ -1,0 +1,14 @@
+@prefix foaf:   <http://xmlns.com/foaf/0.1/> .
+@prefix schema: <http://schema.org/> .
+
+<https://cafetechne.github.io/proxion-messenger/id/>
+    a foaf:PersonalProfileDocument ;
+    foaf:primaryTopic <https://cafetechne.github.io/proxion-messenger/id/#me> .
+
+<https://cafetechne.github.io/proxion-messenger/id/#me>
+    a foaf:Person ;
+    foaf:name "cafeTechne" ;
+    foaf:nick "cafeTechne" ;
+    foaf:homepage <https://cafetechne.github.io/proxion-messenger/> ;
+    foaf:isPrimaryTopicOf <https://cafetechne.github.io/proxion-messenger/id/> ;
+    schema:author <https://cafetechne.github.io/proxion-messenger/app/clientid.jsonld> .

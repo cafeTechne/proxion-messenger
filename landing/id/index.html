@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>cafeTechne - WebID</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" type="text/turtle" href="card.ttl">
+<script type="application/ld+json">
+{
+  "@context": {
+    "foaf": "http://xmlns.com/foaf/0.1/",
+    "schema": "http://schema.org/",
+    "primaryTopic": { "@id": "foaf:primaryTopic", "@type": "@id" },
+    "homepage": { "@id": "foaf:homepage", "@type": "@id" },
+    "isPrimaryTopicOf": { "@id": "foaf:isPrimaryTopicOf", "@type": "@id" }
+  },
+  "@graph": [
+    {
+      "@id": "https://cafetechne.github.io/proxion-messenger/id/",
+      "@type": "foaf:PersonalProfileDocument",
+      "primaryTopic": "https://cafetechne.github.io/proxion-messenger/id/#me"
+    },
+    {
+      "@id": "https://cafetechne.github.io/proxion-messenger/id/#me",
+      "@type": "foaf:Person",
+      "foaf:name": "cafeTechne",
+      "foaf:nick": "cafeTechne",
+      "homepage": "https://cafetechne.github.io/proxion-messenger/",
+      "isPrimaryTopicOf": "https://cafetechne.github.io/proxion-messenger/id/",
+      "schema:author": { "@id": "https://cafetechne.github.io/proxion-messenger/app/clientid.jsonld" }
+    }
+  ]
+}
+</script>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.6 system-ui, sans-serif; max-width: 42rem; margin: 3rem auto; padding: 0 1.25rem; }
+  code { background: rgba(127,127,127,.18); padding: .1em .4em; border-radius: 4px; font-size: .9em; word-break: break-all; }
+  a { color: #7c4dff; }
+  h1 { margin-bottom: .2rem; }
+  .sub { color: #8091a7; margin-top: 0; }
+  ul { padding-left: 1.1rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>cafeTechne</h1>
+  <p class="sub">Author of <a href="https://cafetechne.github.io/proxion-messenger/">Proxion</a>, a Solid-native private messenger.</p>
+  <p>This document is my public WebID profile. My WebID is:</p>
+  <p><code>https://cafetechne.github.io/proxion-messenger/id/#me</code></p>
+  <ul>
+    <li><a href="https://cafetechne.github.io/proxion-messenger/">Proxion home</a></li>
+    <li><a href="https://cafetechne.github.io/proxion-messenger/app/">Proxion web app</a></li>
+    <li><a href="https://github.com/cafeTechne/proxion-messenger">Source on GitHub</a></li>
+    <li><a href="card.ttl">This profile as Turtle</a></li>
+  </ul>
+</main>
+</body>
+</html>
