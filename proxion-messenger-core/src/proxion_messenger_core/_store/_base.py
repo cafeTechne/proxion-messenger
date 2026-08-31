@@ -20,9 +20,56 @@ logger = logging.getLogger(__name__)
 
 
 class _StoreBase(object):
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, db_wrap_key: "bytes | None" = None):
         self.db_path = str(db_path)
+        self._db_wrap_key = db_wrap_key
         self._init_db()
+
+    def _wrap_secret(self, raw_b64: "str | None") -> "str | None":
+        """Encrypt a raw base64 secret into an envelope JSON string.
+
+        With no wrap key configured (or an empty value) the secret is stored
+        raw, preserving legacy behaviour. Otherwise it is wrapped with
+        AES-256-GCM and serialised as a JSON envelope beginning with ``{``.
+        """
+        if not self._db_wrap_key or not raw_b64:
+            return raw_b64
+        from ..key_envelope import encrypt_key_bundle
+
+        envelope = encrypt_key_bundle({"k": raw_b64}, self._db_wrap_key)
+        return json.dumps(envelope)
+
+    def _unwrap_secret(self, stored: "str | None") -> "str | None":
+        """Decrypt a value previously produced by :meth:`_wrap_secret`.
+
+        A legacy raw base64 value is returned unchanged. An envelope written
+        while no wrap key is configured cannot be unwrapped: that is a
+        misconfiguration, so it is logged and ``None`` is returned rather than
+        raising.
+        """
+        if not stored:
+            return stored
+        if isinstance(stored, str) and stored.startswith("{"):
+            try:
+                obj = json.loads(stored)
+            except Exception:
+                return stored
+            if isinstance(obj, dict) and "nonce_b64" in obj and "ciphertext_b64" in obj:
+                if not self._db_wrap_key:
+                    logger.warning(
+                        "LocalStore secret is wrapped but no db_wrap_key is configured; cannot unwrap"
+                    )
+                    return None
+                from ..key_envelope import decrypt_key_bundle
+
+                try:
+                    bundle = decrypt_key_bundle(obj, self._db_wrap_key)
+                    return bundle.get("k")
+                except Exception:
+                    logger.warning("LocalStore secret failed to unwrap (wrong db_wrap_key?)")
+                    return None
+            return stored
+        return stored
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row

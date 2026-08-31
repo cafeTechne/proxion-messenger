@@ -263,6 +263,29 @@ class AgentState:
         """Raw 32-byte Ed25519 private key — for use as ``signing_key`` in token APIs."""
         return self.identity_key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
 
+    def db_wrap_key(self) -> Optional[bytes]:
+        """Derive a deterministic 32-byte key for encrypting LocalStore secrets at rest.
+
+        The key is bound to the unlocked identity key via HKDF-SHA256, so it
+        exists only while the identity is unlocked and is never persisted on its
+        own. The identity key is used rather than the store key so that a routine
+        store-key rotation (``rotate_store_key``, forward secrecy of the sealed
+        mailbox) does not orphan the wrapped rows. Returns ``None`` when the
+        identity key is unavailable (local-only mode).
+        """
+        if getattr(self, "identity_key", None) is None:
+            return None
+        from cryptography.hazmat.primitives.hashes import SHA256
+        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+        ikm = self.identity_key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+        return HKDF(
+            algorithm=SHA256(),
+            length=32,
+            salt=None,
+            info=b"proxion-localstore-wrap-v1",
+        ).derive(ikm)
+
     # ------------------------------------------------------------------
     # Factory
     # ------------------------------------------------------------------

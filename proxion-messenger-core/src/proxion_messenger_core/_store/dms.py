@@ -252,9 +252,9 @@ class DmStoreMixin(object):
                     session["session_id"],
                     session["peer_webid"],
                     session["owner_webid"],
-                    session["root_key"],
-                    session["send_chain_key"],
-                    session["recv_chain_key"],
+                    self._wrap_secret(session["root_key"]),
+                    self._wrap_secret(session["send_chain_key"]),
+                    self._wrap_secret(session["recv_chain_key"]),
                     session.get("send_count", 0),
                     session.get("recv_count", 0),
                     time.time(),
@@ -278,9 +278,9 @@ class DmStoreMixin(object):
                     "session_id": d["session_id"],
                     "peer_webid": d["peer_webid"],
                     "owner_webid": d["owner_webid"],
-                    "root_key": d["root_key_b64"],
-                    "send_chain_key": d["send_chain_key_b64"],
-                    "recv_chain_key": d["recv_chain_key_b64"],
+                    "root_key": self._unwrap_secret(d["root_key_b64"]),
+                    "send_chain_key": self._unwrap_secret(d["send_chain_key_b64"]),
+                    "recv_chain_key": self._unwrap_secret(d["recv_chain_key_b64"]),
                     "send_count": d["send_count"],
                     "recv_count": d["recv_count"],
                 }
@@ -299,7 +299,8 @@ class DmStoreMixin(object):
                 """INSERT OR REPLACE INTO dm_prekeys
                    (prekey_id, owner_webid, pub_b64, priv_wrapped_b64, one_time, used, created_at)
                    VALUES (?, ?, ?, ?, ?, 0, ?)""",
-                (prekey_id, owner_webid, pub_b64, priv_wrapped_b64, 1 if one_time else 0, time.time()),
+                (prekey_id, owner_webid, pub_b64, self._wrap_secret(priv_wrapped_b64),
+                 1 if one_time else 0, time.time()),
             )
     def get_signed_prekey(self, owner_webid: str) -> dict | None:
         """Return the stored signed prekey (one_time=0) for an owner."""
@@ -309,7 +310,11 @@ class DmStoreMixin(object):
                     "SELECT * FROM dm_prekeys WHERE owner_webid=? AND one_time=0 ORDER BY created_at DESC LIMIT 1",
                     (owner_webid,),
                 ).fetchone()
-                return dict(row) if row else None
+                if row is None:
+                    return None
+                d = dict(row)
+                d["priv_wrapped_b64"] = self._unwrap_secret(d.get("priv_wrapped_b64"))
+                return d
             except Exception:
                 return None
     def claim_one_time_prekey(self, owner_webid: str) -> dict | None:
@@ -326,7 +331,9 @@ class DmStoreMixin(object):
                     "UPDATE dm_prekeys SET used=1 WHERE prekey_id=?",
                     (row["prekey_id"],),
                 )
-                return dict(row)
+                d = dict(row)
+                d["priv_wrapped_b64"] = self._unwrap_secret(d.get("priv_wrapped_b64"))
+                return d
             except Exception:
                 return None
     def get_prekey_bundle(self, owner_webid: str) -> dict | None:
@@ -377,9 +384,9 @@ class DmStoreMixin(object):
                     "session_id": d["session_id"],
                     "peer_webid": d["peer_webid"],
                     "owner_webid": d["owner_webid"],
-                    "root_key": d["root_key_b64"],
-                    "send_chain_key": d["send_chain_key_b64"],
-                    "recv_chain_key": d["recv_chain_key_b64"],
+                    "root_key": self._unwrap_secret(d["root_key_b64"]),
+                    "send_chain_key": self._unwrap_secret(d["send_chain_key_b64"]),
+                    "recv_chain_key": self._unwrap_secret(d["recv_chain_key_b64"]),
                     "send_count": d["send_count"],
                     "recv_count": d["recv_count"],
                     "updated_at": d["updated_at"],
@@ -527,7 +534,12 @@ class DmStoreMixin(object):
                              AND spk_created_at > 0 AND spk_created_at < ?""",
                     (owner_webid, cutoff),
                 ).fetchall()
-                return [dict(r) for r in rows]
+                result = []
+                for r in rows:
+                    d = dict(r)
+                    d["priv_wrapped_b64"] = self._unwrap_secret(d.get("priv_wrapped_b64"))
+                    result.append(d)
+                return result
             except Exception:
                 return []
     def mark_prekey_expired(self, prekey_id: int) -> None:
@@ -557,7 +569,7 @@ class DmStoreMixin(object):
                     created_at, spk_created_at, expired)
                    VALUES (?, ?, ?, ?, ?, 0, ?, ?, 0)""",
                 (
-                    prekey_id, owner_webid, pub_b64, priv_wrapped_b64,
+                    prekey_id, owner_webid, pub_b64, self._wrap_secret(priv_wrapped_b64),
                     1 if one_time else 0, time.time(),
                     spk_created_at or time.time(),
                 ),

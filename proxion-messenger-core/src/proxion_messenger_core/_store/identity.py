@@ -526,7 +526,7 @@ class IdentityStoreMixin(object):
                        VALUES (1, ?, ?, COALESCE(
                            (SELECT created_at FROM wg_local_identity WHERE id=1), ?
                        ))""",
-                    (pubkey_b64, priv_wrapped_b64, time.time()),
+                    (pubkey_b64, self._wrap_secret(priv_wrapped_b64), time.time()),
                 )
             except Exception:
                 pass
@@ -536,7 +536,11 @@ class IdentityStoreMixin(object):
                 row = conn.execute(
                     "SELECT * FROM wg_local_identity WHERE id=1"
                 ).fetchone()
-                return dict(row) if row else None
+                if row is None:
+                    return None
+                d = dict(row)
+                d["priv_wrapped_b64"] = self._unwrap_secret(d.get("priv_wrapped_b64"))
+                return d
             except Exception:
                 return None
     def upsert_wg_peer(

@@ -291,7 +291,14 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         self._store = None
         if config.db_path:
             from .local_store import LocalStore
-            self._store = LocalStore(config.db_path)
+            self._store = LocalStore(
+                config.db_path,
+                db_wrap_key=(
+                    self.agent.db_wrap_key()
+                    if getattr(self, "agent", None) and getattr(self.agent, "identity_key", None)
+                    else None
+                ),
+            )
             self._hydrate_from_store()
             self._peer_gateway_urls.update(self._store.get_all_peer_gateways())
 
