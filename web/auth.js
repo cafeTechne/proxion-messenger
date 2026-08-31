@@ -6,6 +6,8 @@ const { Session } = solidAuthn;
 export const solidSession = new Session({ restorePreviousSession: true });
 let _cachedStorageRoot = null;
 
+const _ROOT_KEY = 'proxion_storage_root_v2';
+
 // Reject an untrustworthy pim:storage claim on a private/loopback host (the SSRF
 // host check lives in ssrf.js so it stays dependency-free and shared with pod.js).
 const _isPrivateIp = isPrivatePodHost;
@@ -45,7 +47,7 @@ export async function solidLogout() {
     _cachedStorageRoot = null;
     // Clear the persisted root too, so the next account signed in on this browser
     // does not inherit the previous account's pod root.
-    try { localStorage.removeItem('proxion_storage_root_v2'); } catch { /* ignore */ }
+    try { localStorage.removeItem(_ROOT_KEY); } catch { /* ignore */ }
 }
 
 // Is `root` safe to trust as THIS WebID's storage root? Require same origin as the
@@ -56,6 +58,28 @@ export async function solidLogout() {
 function _rootTrustedFor(root, webId) {
     if (!root || !/^https?:\/\//.test(root) || root.endsWith('/proxion/')) return false;
     try { return new URL(root).origin === new URL(webId).origin; } catch { return false; }
+}
+
+// Read the persisted root only when it was stored for THIS exact WebID, not merely
+// the same origin: signing in as a second account on a shared origin (without a
+// logout) must not inherit the first account's root. The entry is {webId, root};
+// a legacy bare-string value (no bound WebID) is treated as untrusted and dropped.
+function _readPersistedRoot(webId) {
+    let raw;
+    try { raw = localStorage.getItem(_ROOT_KEY); } catch { return null; }
+    if (!raw) return null;
+    let entry = null;
+    try { entry = JSON.parse(raw); } catch { /* legacy bare string */ }
+    const root = (entry && typeof entry === 'object') ? entry.root : null;
+    if (root && entry.webId === webId && _rootTrustedFor(root, webId)) return root;
+    try { localStorage.removeItem(_ROOT_KEY); } catch { /* ignore */ }
+    return null;
+}
+
+// Persist a same-origin root bound to its WebID (see _readPersistedRoot).
+function _persistRoot(root, webId) {
+    if (!_rootTrustedFor(root, webId)) return;
+    try { localStorage.setItem(_ROOT_KEY, JSON.stringify({ webId, root })); } catch { /* ignore */ }
 }
 
 // Derive a pod's storage root from its WebID by stripping the profile document
@@ -80,14 +104,11 @@ export async function discoverStorageRoot() {
     if (!webId || !/^https?:\/\//.test(webId)) return null;
     // Same-origin, account-aware fallback for when the profile omits pim:storage.
     const fromWebId = _rootFromWebId(webId);
-    // Trust the persisted root only if it is bound to THIS WebID's origin.
-    const lsCache = localStorage.getItem('proxion_storage_root_v2');
-    if (lsCache) {
-        if (_rootTrustedFor(lsCache, webId)) {
-            _cachedStorageRoot = lsCache;
-            return _cachedStorageRoot;
-        }
-        localStorage.removeItem('proxion_storage_root_v2');
+    // Trust the persisted root only if it is bound to THIS exact WebID.
+    const cached = _readPersistedRoot(webId);
+    if (cached) {
+        _cachedStorageRoot = cached;
+        return _cachedStorageRoot;
     }
 
     const controller = new AbortController();
@@ -121,12 +142,11 @@ export async function discoverStorageRoot() {
         }
         if (!storageRoot) storageRoot = fromWebId;
         _cachedStorageRoot = storageRoot; // bare root — pod.js owns the proxion/ prefix
-        // Persist only a same-origin root as the fast-path cache; a cross-origin
-        // pim:storage stays in memory and is re-derived (authoritatively) next
-        // session so a persisted value can never point off the WebID's origin.
-        if (_rootTrustedFor(storageRoot, webId)) {
-            localStorage.setItem('proxion_storage_root_v2', storageRoot);
-        }
+        // Persist only a same-origin root as the fast-path cache, bound to this
+        // WebID; a cross-origin pim:storage stays in memory and is re-derived
+        // (authoritatively) next session so a persisted value can never point off
+        // the WebID's origin, nor be adopted by a different account.
+        _persistRoot(storageRoot, webId);
         return _cachedStorageRoot;
     } catch {
         clearTimeout(timeout);
@@ -139,9 +159,9 @@ export function podStorageRoot() {
     if (_cachedStorageRoot) return _cachedStorageRoot;
     if (!solidSession.info.isLoggedIn) return null;
     const webId = solidSession.info.webId;
-    const lsCache = localStorage.getItem('proxion_storage_root_v2');
-    if (lsCache && _rootTrustedFor(lsCache, webId)) {
-        _cachedStorageRoot = lsCache;
+    const cached = _readPersistedRoot(webId);
+    if (cached) {
+        _cachedStorageRoot = cached;
         return _cachedStorageRoot;
     }
     // Derive from the WebID (un-poisonable). A cross-origin pim:storage pod fills

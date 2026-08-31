@@ -437,7 +437,7 @@ async function ensureChatIndexAt(containerUrl, title) {
  * against a live pod with a second identity posting to another user's chat.
  */
 export async function podWriteChatMessageAt(containerUrl, messageId, msg) {
-    if (!containerUrl || !solidSession?.info?.isLoggedIn) return false;
+    if (!containerUrl || !_peerRootAllowed(containerUrl) || !solidSession?.info?.isLoggedIn) return false;
     const timestamp = msg.timestamp || new Date().toISOString();
     await ensureChatIndexAt(containerUrl, msg.room_name);
     // R101.1: if this is a reply and we know the parent's timestamp (threaded from
@@ -471,7 +471,7 @@ export async function podWriteChatMessageAt(containerUrl, messageId, msg) {
  * to ship to the browser. Reads chats written by SolidOS and POD-CHAT too.
  */
 export async function podReadChatDayAt(containerUrl, date, threadId = '') {
-    if (!containerUrl || !solidSession?.info?.isLoggedIn) return [];
+    if (!containerUrl || !_peerRootAllowed(containerUrl) || !solidSession?.info?.isLoggedIn) return [];
     try {
         const res = await solidSession.fetch(dayFileAt(containerUrl, date), {
             headers: { Accept: 'application/ld+json' },
@@ -612,6 +612,7 @@ export function podSetLongChatSeq(roomId, messageId, date, seq) {
  * A caller wanting more history pages further back by raising `days`.
  */
 export async function podReadChatRecentAt(containerUrl, days = 7, threadId = '') {
+    if (!_peerRootAllowed(containerUrl)) return [];   // SSRF gate (defence in depth)
     const out = [];
     const seen = new Set();
     const today = Date.now();
@@ -1227,6 +1228,7 @@ async function _dropTo(peerPodRoot, path, obj) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(obj),
+            redirect: 'error',   // never follow a peer redirect off the vetted host
         });
         return !!(res && res.ok);
     } catch (err) {
@@ -1298,7 +1300,7 @@ export async function podPublishSigner(signerDid, accountDid) {
 export async function podFetchPeerSigner(peerPodRoot) {
     if (!peerPodRoot || !isPeerPodRootAllowed(peerPodRoot, podStorageRoot()) || !solidSession?.info?.isLoggedIn) return null;
     try {
-        const res = await solidSession.fetch(peerPodRoot.replace(/\/?$/, '/') + 'proxion/identity/signer.json', { headers: { Accept: 'application/json' } });
+        const res = await solidSession.fetch(peerPodRoot.replace(/\/?$/, '/') + 'proxion/identity/signer.json', { headers: { Accept: 'application/json' }, redirect: 'error' });
         if (!res || !res.ok) return null;
         const d = await res.json();
         if (d && typeof d.signer === 'string') {
@@ -1348,8 +1350,9 @@ export function podDeleteJoin(url) { return _deleteDrop(url); }
 /** Read a room descriptor from a specific owner's pod (not our own). */
 export async function podReadRoomDescriptorAt(ownerPodRoot, roomId) {
     if (!roomId || !SAFE_ID_RE.test(roomId) || !ownerPodRoot || !solidSession?.info?.isLoggedIn) return null;
+    if (!_peerRootAllowed(ownerPodRoot)) return null;   // SSRF gate (defence in depth)
     try {
-        const res = await solidSession.fetch(`${ownerPodRoot.replace(/\/?$/, '/')}rooms/${roomId}/room.json`);
+        const res = await solidSession.fetch(`${ownerPodRoot.replace(/\/?$/, '/')}rooms/${roomId}/room.json`, { redirect: 'error' });
         if (!res || !res.ok) return null;
         const text = await res.text();
         if (text.length > 65536) return null;
@@ -1391,14 +1394,16 @@ export async function podWritePresence(status) {
         if (!_presenceAclWritten) {
             try {
                 const { url: aclUrl } = await discoverAccessControl(url);
-                await solidSession.fetch(aclUrl, {
+                const aclRes = await solidSession.fetch(aclUrl, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'text/turtle' },
                     body: `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n@prefix foaf: <http://xmlns.com/foaf/0.1/>.\n`
                         + `<#owner> a acl:Authorization; acl:agent <${webId}>; acl:accessTo <${url}>; acl:mode acl:Read, acl:Write, acl:Control.\n`
                         + `<#public> a acl:Authorization; acl:agentClass foaf:Agent; acl:accessTo <${url}>; acl:mode acl:Read.\n`,
                 });
-                _presenceAclWritten = true;
+                // Only latch on success, else a failed ACL PUT is never retried and
+                // peers see the user permanently offline (mirrors _putInboxAcl).
+                if (aclRes && aclRes.ok) _presenceAclWritten = true;
             } catch (err) {
                 console.warn('[pod] presence ACL failed:', err);
             }
@@ -1416,7 +1421,7 @@ export async function podReadPresence(peerPodRoot) {
     const url = presenceUrlFor(peerPodRoot);
     if (!url || !solidSession?.info?.isLoggedIn) return null;
     try {
-        const res = await solidSession.fetch(url, { headers: { Accept: 'application/json' } });
+        const res = await solidSession.fetch(url, { headers: { Accept: 'application/json' }, redirect: 'error' });
         if (!res || !res.ok) return null;
         const d = await res.json();
         if (d && typeof d.status === 'string') {

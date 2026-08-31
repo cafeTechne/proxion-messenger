@@ -64,6 +64,7 @@ import { createView } from './view.js';
 import { createInvite } from './invite.js';
 import { createPush, closedAppPushStatus } from './push.js';
 import { subscribeWebhook, watchResource } from './notify.js';
+import { isPeerPodRootAllowed } from './ssrf.js';
 import { createWebDm, peerPodRootFromWebId } from './webdm.js';
 import { createWebPresence } from './webpresence.js';
 import { createWebCalls } from './webcalls.js';
@@ -1835,7 +1836,7 @@ import { createIdentityResolver } from './identity.js';
                     if (voice.state._inVoiceChannel && event.caller_webid) {
                         voice._addChannelParticipant(event.caller_webid);
                         voice.initWebRTCForPeer(event.caller_webid, event.session_id, false, event.sdp_offer,
-                            { session_id: event.session_id, fp_sig: event.fp_sig, fp_signer: event.fp_signer })
+                            { session_id: event.session_id, fp_sig: event.fp_sig, fp_signer: event.fp_signer, fp_cert: event.fp_cert })
                             .catch(console.warn);
                     } else {
                         voice.showVoiceBanner(event);
@@ -2962,6 +2963,13 @@ import { createIdentityResolver } from './identity.js';
 
         async function _onWebJoinApproved(appr) {
             if (!appr || !appr.room_id || !appr.owner_pod_root) return;
+            // owner_pod_root rides in an attacker-writable public-Append join drop, so
+            // gate it before any authenticated fetch/watch: refuse a private/loopback
+            // host (SSRF), and bind it to the approver — an approver can only vouch for
+            // their OWN pod, so the claimed root must match the one derived from their
+            // WebID (the approver's WebID is carried as owner_webid).
+            if (!isPeerPodRootAllowed(appr.owner_pod_root, podStorageRoot())) return;
+            if (!appr.owner_webid || peerPodRootFromWebId(appr.owner_webid) !== appr.owner_pod_root) return;
             const roomId = appr.room_id;
             const desc = await podReadRoomDescriptorAt(appr.owner_pod_root, roomId);
             const container = (desc && desc.long_chat) || chatRootUrl(appr.owner_pod_root, roomId);

@@ -1075,6 +1075,17 @@ export function createVoice(deps) {
         }
 
         function handleVoiceHangup(event) {
+            // Only the active call may be torn down. A stale duplicate carries an older
+            // session_id and must not drop a newer call; over the public-Append pod
+            // call-inbox anyone who knows our WebID could otherwise POST a hangup, but
+            // the session_id is a secret they cannot read from a write-only inbox.
+            if (event.session_id && event.session_id !== state.currentCallSessionId) return;
+            // Pod-mode hangups stamp the sender's own account WebID; require it to be
+            // the peer we are actually in a call with. Gateway-relayed hangups are
+            // authenticated server-side (_fromGateway) and carry the gateway did, so
+            // they are exempt from this account-WebID check.
+            if (event.from_webid && !event._fromGateway && state._callPeerWebid
+                && event.from_webid !== state._callPeerWebid) return;
             if (state._callState !== CallState.IDLE) setCallState(CallState.ENDING);
             hangupCleanup();
         }
@@ -1082,7 +1093,11 @@ export function createVoice(deps) {
         function handleVoiceSignalRelay(event) {
             const st = event.signal_type;
             const sd = event.signal_data || {};
-            const merged = { session_id: event.session_id, from_webid: event.from_webid, ...sd };
+            // Signals arriving here come via the gateway's authenticated relay
+            // (envelope-signed, sender-enforced), and from_webid is the relaying
+            // GATEWAY did, not the peer's account webid. Mark them so the account-webid
+            // binding below (which guards the untrusted pod call-inbox path) exempts them.
+            const merged = { session_id: event.session_id, from_webid: event.from_webid, ...sd, _fromGateway: true };
             const isGroupPeer = event.from_webid && state.peerConnections[event.from_webid];
             if (st === "answer") {
                 isGroupPeer ? handleGroupVoiceAnswer(merged) : handleVoiceAnswer(merged);
@@ -1144,6 +1159,12 @@ export function createVoice(deps) {
         }
 
         async function handleVoiceAnswer(event) {
+            // Bind to the call peer set at invite/offer time (not to CONNECTED state, so
+            // legitimate setup signals still pass). A pod-mode signal stamps the sender's
+            // account WebID; drop one that names anyone but our peer. Gateway-relayed
+            // signals (_fromGateway) carry the gateway did and are exempt.
+            if (event.from_webid && !event._fromGateway && state._callPeerWebid
+                && event.from_webid !== state._callPeerWebid) return;
             if (state.pc) {
                 // Authenticate the answerer's media channel before accepting it.
                 if (!(await _verifyPeerSdp(event.sdp_answer, 'answer', event))) {
@@ -1159,6 +1180,12 @@ export function createVoice(deps) {
 
         async function handleIceCandidate(event) {
             if (!state.pc) return;
+            // Bind to the call peer set at invite/offer time. A pod-mode candidate stamps
+            // the sender's account WebID; drop one from anyone but our peer so an injected
+            // candidate cannot steer our connection. Gateway-relayed candidates
+            // (_fromGateway) carry the gateway did and are exempt.
+            if (event.from_webid && !event._fromGateway && state._callPeerWebid
+                && event.from_webid !== state._callPeerWebid) return;
             const cand = {
                 candidate: event.candidate,
                 sdpMid: event.sdp_mid,

@@ -1,5 +1,30 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { isPrivatePodHost, isPeerPodRootAllowed } from './ssrf.js';
+
+// Stub the browser auth bundle so auth.js imports with a controllable session in
+// the node test env (its Session is otherwise the real solid-client-authn one).
+vi.mock('./solid-authn.bundle.js', () => ({
+    default: {
+        Session: class {
+            constructor() { this.info = { isLoggedIn: true, webId: null }; }
+            async handleIncomingRedirect() {}
+            async login() {}
+            async logout() {}
+            async fetch() { return { ok: false, status: 404 }; }
+        },
+    },
+}));
+
+import { solidSession, podStorageRoot, solidLogout } from './auth.js';
+
+function memLocalStorage() {
+    const s = {};
+    return {
+        getItem: (k) => (k in s ? s[k] : null),
+        setItem: (k, v) => { s[k] = String(v); },
+        removeItem: (k) => { delete s[k]; },
+    };
+}
 
 describe('isPrivatePodHost', () => {
     it('flags loopback / private / link-local hosts', () => {
@@ -35,5 +60,38 @@ describe('isPeerPodRootAllowed', () => {
     });
     it('refuses an empty root', () => {
         expect(isPeerPodRootAllowed('', 'https://me.pod.example/')).toBe(false);
+    });
+});
+
+describe('persisted storage root is bound per-WebID (no same-origin cache poisoning)', () => {
+    const ALICE = 'https://shared.pod.example/alice/profile/card#me';
+    const BOB = 'https://shared.pod.example/bob/profile/card#me';
+    const ALICE_ROOT = 'https://shared.pod.example/alice/';
+
+    beforeEach(async () => {
+        globalThis.localStorage = memLocalStorage();
+        await solidLogout();                 // resets the in-memory root cache + clears storage
+        globalThis.localStorage = memLocalStorage();
+    });
+
+    it('does not return WebID A\'s cached root when signed in as WebID B on the same origin', () => {
+        // Alice's root is cached; signing in as Bob (same origin, no logout) must not adopt it.
+        localStorage.setItem('proxion_storage_root_v2', JSON.stringify({ webId: ALICE, root: ALICE_ROOT }));
+        solidSession.info.webId = BOB;
+        expect(podStorageRoot()).toBe('https://shared.pod.example/bob/');   // derived, not Alice's
+        expect(localStorage.getItem('proxion_storage_root_v2')).toBe(null); // poisoned entry dropped
+    });
+
+    it('still returns a root cached for the same WebID', () => {
+        localStorage.setItem('proxion_storage_root_v2', JSON.stringify({ webId: ALICE, root: ALICE_ROOT }));
+        solidSession.info.webId = ALICE;
+        expect(podStorageRoot()).toBe(ALICE_ROOT);
+    });
+
+    it('drops a legacy bare-string entry (no bound WebID)', () => {
+        localStorage.setItem('proxion_storage_root_v2', ALICE_ROOT);
+        solidSession.info.webId = ALICE;
+        expect(podStorageRoot()).toBe(ALICE_ROOT);                         // re-derived, still correct
+        expect(localStorage.getItem('proxion_storage_root_v2')).toBe(null); // untrusted legacy value dropped
     });
 });

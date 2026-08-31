@@ -2271,7 +2271,13 @@ class HttpEndpointsMixin:
                                 b"Content-Length: " + str(len(dry_resp)).encode() + b"\r\n\r\n" + dry_resp
                             )
                         else:
-                            counts = self._store.import_data(import_data, owner_pub_hex=self.agent.identity_pub_bytes.hex())
+                            from .didkey import pub_key_to_did as _p2d_imp
+                            _import_owner = _p2d_imp(self.agent.identity_pub_bytes)
+                            counts = self._store.import_data(
+                                import_data,
+                                owner_pub_hex=self.agent.identity_pub_bytes.hex(),
+                                owner_webid=_import_owner,
+                            )
                             await self.broadcast({"type": "import_complete", "counts": counts})
                             # R7: Save import provenance
                             if self._store:

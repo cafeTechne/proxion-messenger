@@ -310,6 +310,70 @@ describe('ICE-failure handling (silent-drop regressions)', () => {
   });
 });
 
+describe('inbound signal binding (pod call-inbox is untrusted)', () => {
+  function inActiveCall(voice, { session = 'sess1', peer = 'did:key:zPeer' } = {}) {
+    voice.state.currentCallSessionId = session;
+    voice.state._callPeerWebid = peer;
+    voice.setCallState(CallState.CALLING);      // IDLE → CALLING → CONNECTED (valid path)
+    voice.setCallState(CallState.CONNECTED);
+  }
+  const stillUp = (voice, session = 'sess1') =>
+    voice.state.currentCallSessionId === session && voice.state._callState === CallState.CONNECTED;
+
+  it('hangup: a matching session_id + peer tears the call down', () => {
+    const { voice } = makeVoice();
+    inActiveCall(voice);
+    voice.handleVoiceHangup({ session_id: 'sess1', from_webid: 'did:key:zPeer' });
+    expect(voice.state.currentCallSessionId).toBe(null);
+    expect(voice.state._callState).toBe(CallState.IDLE);
+  });
+
+  it('hangup: a stale/other session_id does NOT tear down the active call', () => {
+    const { voice } = makeVoice();
+    inActiveCall(voice);
+    voice.handleVoiceHangup({ session_id: 'old-session', from_webid: 'did:key:zPeer' });
+    expect(stillUp(voice)).toBe(true);
+  });
+
+  it('hangup: a pod signal from the WRONG WebID does NOT tear down the call', () => {
+    const { voice } = makeVoice();
+    inActiveCall(voice);
+    voice.handleVoiceHangup({ session_id: 'sess1', from_webid: 'did:key:zAttacker' });
+    expect(stillUp(voice)).toBe(true);
+  });
+
+  it('hangup: an authenticated gateway relay (gateway did, _fromGateway) still tears down', () => {
+    const { voice } = makeVoice();
+    inActiveCall(voice);
+    // Cross-gateway relay stamps the relaying gateway did, not the peer account webid.
+    voice.handleVoiceHangup({ session_id: 'sess1', from_webid: 'did:key:zGateway', _fromGateway: true });
+    expect(voice.state.currentCallSessionId).toBe(null);
+    expect(voice.state._callState).toBe(CallState.IDLE);
+  });
+
+  it('hangup: a same-gateway hangup (no from_webid) still tears down', () => {
+    const { voice } = makeVoice();
+    inActiveCall(voice);
+    voice.handleVoiceHangup({ session_id: 'sess1' });
+    expect(voice.state.currentCallSessionId).toBe(null);
+    expect(voice.state._callState).toBe(CallState.IDLE);
+  });
+
+  it('ice: a candidate from a non-peer WebID is ignored', async () => {
+    const { voice } = makeVoice();
+    const added = [];
+    voice.state.pc = { addIceCandidate: (c) => { added.push(c); return Promise.resolve(); } };
+    voice.state._remoteDescSet = true;
+    voice.state._callPeerWebid = 'did:key:zPeer';
+
+    await voice.handleIceCandidate({ from_webid: 'did:key:zAttacker', candidate: 'evil' });
+    expect(added).toHaveLength(0);
+
+    await voice.handleIceCandidate({ from_webid: 'did:key:zPeer', candidate: 'legit' });
+    expect(added).toHaveLength(1);
+  });
+});
+
 describe('_getIceServers records whether a relay is available', () => {
   it('STUN-only (no /turn-credentials, no client TURN) → _turnConfigured false', async () => {
     const savedFetch = global.fetch;

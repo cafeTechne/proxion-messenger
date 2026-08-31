@@ -130,7 +130,14 @@ def _pin_url(url: str, resolved_ip: str) -> tuple[str, dict]:
     if parsed.scheme == "http":
         port = parsed.port or 80
         path_qs = (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
-        return f"http://{resolved_ip}:{port}{path_qs}", {"Host": parsed.hostname}
+        # Bracket IPv6 literals so the authority parses (http://[::1]:80/...).
+        ip_authority = f"[{resolved_ip}]" if ":" in resolved_ip else resolved_ip
+        host = parsed.hostname or ""
+        host_header = f"[{host}]" if ":" in host else host
+        # RFC 7230: include the port in Host when it is not the scheme default.
+        if parsed.port and parsed.port != 80:
+            host_header = f"{host_header}:{parsed.port}"
+        return f"http://{ip_authority}:{port}{path_qs}", {"Host": host_header}
     return url, {}
 
 

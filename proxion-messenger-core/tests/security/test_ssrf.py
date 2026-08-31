@@ -171,3 +171,44 @@ class TestRelaySsrf:
         from proxion_messenger_core.relay import post_relay
         result = await post_relay("http://127.0.0.1/relay", {"msg": "test"})
         assert result is False
+
+
+# ---------------------------------------------------------------------------
+# C4: _pin_url IPv6 bracketing + Host port
+# ---------------------------------------------------------------------------
+
+class TestPinUrl:
+    def test_ipv4_default_port(self):
+        from proxion_messenger_core.network import _pin_url
+        pinned, headers = _pin_url("http://peer.example.com/relay", "93.184.216.34")
+        assert pinned == "http://93.184.216.34:80/relay"
+        assert headers["Host"] == "peer.example.com"
+
+    def test_ipv6_literal_is_bracketed(self):
+        from proxion_messenger_core.network import _pin_url
+        pinned, headers = _pin_url("http://peer.example.com/x", "::1")
+        # The IPv6 authority must be bracketed so the URL parses.
+        assert pinned == "http://[::1]:80/x"
+        from urllib.parse import urlparse
+        assert urlparse(pinned).hostname == "::1"
+        assert urlparse(pinned).port == 80
+
+    def test_nondefault_port_in_host_header(self):
+        from proxion_messenger_core.network import _pin_url
+        pinned, headers = _pin_url(
+            "http://peer.example.com:8080/relay?x=1", "93.184.216.34"
+        )
+        assert pinned == "http://93.184.216.34:8080/relay?x=1"
+        assert headers["Host"] == "peer.example.com:8080"
+
+    def test_ipv6_resolved_with_nondefault_port(self):
+        from proxion_messenger_core.network import _pin_url
+        pinned, headers = _pin_url("http://peer.example.com:8443/p", "2001:db8::5")
+        assert pinned == "http://[2001:db8::5]:8443/p"
+        assert headers["Host"] == "peer.example.com:8443"
+
+    def test_https_passthrough(self):
+        from proxion_messenger_core.network import _pin_url
+        pinned, headers = _pin_url("https://peer.example.com/x", "93.184.216.34")
+        assert pinned == "https://peer.example.com/x"
+        assert headers == {}

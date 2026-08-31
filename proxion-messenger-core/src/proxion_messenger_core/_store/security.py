@@ -693,13 +693,19 @@ class SecurityStoreMixin(object):
             "scheduled": scheduled,
             "display_names": display_names,
         }
-    def import_data(self, data: dict, owner_pub_hex: str = "") -> dict:
+    def import_data(
+        self, data: dict, owner_pub_hex: str = "", owner_webid: str = ""
+    ) -> dict:
         """Merge exported data into the store using INSERT OR IGNORE (R14.2).
 
         Enforces the same per-thread quotas as save_message so that the /import
         endpoint cannot be used to bypass storage limits.  When ``owner_pub_hex``
         is provided, relationships where neither party is the gateway owner are
         skipped to prevent injection of third-party contacts.
+
+        Imported relationships are stamped with ``owner_webid`` (the importing
+        account) so they are not left owner-less and therefore globally visible
+        to every account on a multi-account gateway.
         """
         _MAX_MESSAGES_PER_THREAD = 5000
         _MAX_BYTES_PER_THREAD = 50 * 1024 * 1024  # 50 MB
@@ -763,11 +769,12 @@ class SecurityStoreMixin(object):
                             continue  # skip third-party relationships
                     conn.execute(
                         "INSERT OR IGNORE INTO relationships "
-                        "(certificate_id, peer_pub_hex, peer_did, cert_json, created_at, expires_at) "
-                        "VALUES (?,?,?,?,?,?)",
+                        "(certificate_id, peer_pub_hex, peer_did, cert_json, created_at, expires_at, owner_webid) "
+                        "VALUES (?,?,?,?,?,?,?)",
                         (rel.get("certificate_id"), rel.get("peer_pub_hex", ""),
                          rel.get("peer_did"), rel.get("cert_json", "{}"),
-                         rel.get("created_at", 0), rel.get("expires_at", 0)),
+                         rel.get("created_at", 0), rel.get("expires_at", 0),
+                         owner_webid),
                     )
                     counts["relationships"] += conn.execute("SELECT changes()").fetchone()[0]
                     _total_rel_imported += 1
@@ -1263,35 +1270,50 @@ class SecurityStoreMixin(object):
             except Exception:
                 return 0
     def rate_limit_check_and_increment(
-        self, bucket_key: str, limit: int, window_seconds: float
+        self,
+        bucket_key: str,
+        limit: int,
+        window_seconds: float,
+        fail_open: bool = False,
     ) -> bool:
         """Return True if the request is allowed; False if rate-limited.
 
-        Uses a sliding window reset: if the stored window has expired, reset count to 1.
+        Uses a sliding window reset: if the stored window has expired, the count
+        is reset to 1.  The check-and-increment runs as a single atomic UPSERT
+        (INSERT ... ON CONFLICT DO UPDATE ... RETURNING) so concurrent callers on
+        separate connections cannot race past the limit.  On a DB error the
+        bucket fails closed (denies) by default; pass ``fail_open=True`` only for
+        non-security buckets that should degrade to allowing traffic.
         """
         now = time.time()
-        with self._conn() as conn:
-            try:
+        try:
+            with self._conn() as conn:
+                conn.execute("PRAGMA busy_timeout=5000")
                 row = conn.execute(
-                    "SELECT count, window_start FROM rate_limit_buckets WHERE bucket_key=?",
-                    (bucket_key,),
+                    """INSERT INTO rate_limit_buckets
+                           (bucket_key, count, window_start, updated_at)
+                       VALUES (?, 1, ?, ?)
+                       ON CONFLICT(bucket_key) DO UPDATE SET
+                           count = CASE
+                               WHEN ? - window_start >= ? THEN 1
+                               ELSE count + 1
+                           END,
+                           window_start = CASE
+                               WHEN ? - window_start >= ? THEN ?
+                               ELSE window_start
+                           END,
+                           updated_at = ?
+                       RETURNING count""",
+                    (
+                        bucket_key, now, now,
+                        now, window_seconds,
+                        now, window_seconds, now,
+                        now,
+                    ),
                 ).fetchone()
-                if row is None or now - row["window_start"] >= window_seconds:
-                    conn.execute(
-                        """INSERT OR REPLACE INTO rate_limit_buckets
-                           (bucket_key, count, window_start, updated_at) VALUES (?, 1, ?, ?)""",
-                        (bucket_key, now, now),
-                    )
-                    return True
-                if row["count"] >= limit:
-                    return False
-                conn.execute(
-                    "UPDATE rate_limit_buckets SET count=count+1, updated_at=? WHERE bucket_key=?",
-                    (now, bucket_key),
-                )
-                return True
-            except Exception:
-                return True  # fail open on DB error
+            return (row["count"] if row else 1) <= limit
+        except Exception:
+            return True if fail_open else False
     def prune_rate_limit_buckets(self, cutoff_ts: float) -> int:
         """Delete expired rate-limit buckets. Returns number deleted."""
         with self._conn() as conn:

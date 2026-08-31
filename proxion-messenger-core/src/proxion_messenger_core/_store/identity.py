@@ -220,18 +220,29 @@ class IdentityStoreMixin(object):
         self,
         owner_webid: Optional[str] = None,
         include_revoked: bool = False,
+        include_ownerless: bool = True,
     ) -> list[dict]:
         """Returns cert_json dicts (with peer_did injected) ordered by created_at DESC.
 
         Revoked relationships are excluded by default.  Pass
         ``include_revoked=True`` to include them (e.g. for audit displays).
+
+        When *owner_webid* is given, owner-less rows (``owner_webid = ''``) are
+        also returned by default so a single-account gateway keeps seeing certs
+        that were saved without an owner.  Multi-account callers that need strict
+        per-account isolation pass ``include_ownerless=False`` to match only the
+        exact owner.
         """
         revoked_clause = "" if include_revoked else " AND revoked=0"
         with self._conn() as conn:
             if owner_webid is not None:
+                owner_clause = (
+                    "(owner_webid = ? OR owner_webid = '')"
+                    if include_ownerless else "owner_webid = ?"
+                )
                 rows = conn.execute(
                     f"SELECT cert_json, peer_did FROM relationships "
-                    f"WHERE (owner_webid = ? OR owner_webid = ''){revoked_clause} "
+                    f"WHERE {owner_clause}{revoked_clause} "
                     "ORDER BY created_at DESC",
                     (owner_webid,),
                 ).fetchall()
