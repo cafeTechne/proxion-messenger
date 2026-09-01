@@ -1,5 +1,6 @@
 """Tests for room invitation codes."""
 
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
@@ -9,6 +10,29 @@ import pytest
 from proxion_messenger_core.invites import (
     InviteRecord, create_invite, get_invite, use_invite, revoke_invite, list_invites
 )
+
+
+class _MemStash:
+    """In-memory async stash that persists puts, mirroring SimpleStash so the
+    read-check-increment-write cycle in use_invite is exercised realistically."""
+
+    def __init__(self):
+        self._data: dict[str, bytes] = {}
+
+    async def get(self, key):
+        return self._data.get(key)
+
+    async def put(self, key, value):
+        # Yield control so concurrent redemptions can interleave at the write,
+        # exactly where an unlocked check-then-write would race.
+        await asyncio.sleep(0)
+        self._data[key] = value
+
+    async def delete(self, key):
+        self._data.pop(key, None)
+
+    async def list(self, prefix=""):
+        return [k for k in self._data if k.startswith(prefix)]
 
 
 @pytest.fixture
@@ -165,6 +189,56 @@ async def test_use_invite_rejects_expired(mock_stash):
     rec = await use_invite(mock_stash, code)
     
     assert rec is None
+
+
+@pytest.mark.asyncio
+async def test_use_invite_concurrent_respects_max_uses_one():
+    """Two concurrent redemptions of a max_uses=1 code yield exactly one success;
+    the cap cannot be bypassed by interleaving the check-then-write (TOCTOU)."""
+    stash = _MemStash()
+    rec = await create_invite(stash, "room-cc", "https://a.example/#me", max_uses=1)
+
+    results = await asyncio.gather(
+        use_invite(stash, rec.code),
+        use_invite(stash, rec.code),
+    )
+
+    successes = [r for r in results if r is not None]
+    assert len(successes) == 1
+    assert successes[0].use_count == 1
+
+    stored = await get_invite(stash, rec.code)
+    assert stored.use_count == 1
+    assert stored.active is False
+
+
+@pytest.mark.asyncio
+async def test_use_invite_sequential_max_uses_one_second_returns_none():
+    """Sequential behavior is unchanged: first use succeeds, the second is None."""
+    stash = _MemStash()
+    rec = await create_invite(stash, "room-seq", "https://a.example/#me", max_uses=1)
+
+    first = await use_invite(stash, rec.code)
+    second = await use_invite(stash, rec.code)
+
+    assert first is not None
+    assert first.use_count == 1
+    assert second is None
+
+
+@pytest.mark.asyncio
+async def test_use_invite_concurrent_expired_all_rejected():
+    """An expired code is rejected even under concurrent redemption."""
+    stash = _MemStash()
+    rec = await create_invite(
+        stash, "room-exp", "https://a.example/#me", expires_hours=-1
+    )
+
+    results = await asyncio.gather(
+        use_invite(stash, rec.code),
+        use_invite(stash, rec.code),
+    )
+    assert results == [None, None]
 
 
 @pytest.mark.asyncio

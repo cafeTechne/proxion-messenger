@@ -103,15 +103,73 @@ def test_absent_when_binary_missing():
 
 
 # ── bundled cloudflared preference (R97/R98 turnkey) ────────────────────────
-def test_find_cloudflared_prefers_bundled(tmp_path, monkeypatch):
-    """A bundled binary (e.g. PyInstaller _MEIPASS) is used before PATH so a
-    shipped install is turnkey without a separate cloudflared install."""
+def _cf_name():
+    import sys as _sys
+    return "cloudflared.exe" if _sys.platform == "win32" else "cloudflared"
+
+
+def test_find_cloudflared_prefers_meipass(tmp_path, monkeypatch):
+    """The immutable bundled copy in sys._MEIPASS is used and nothing else is
+    consulted, so a planted binary next to the executable cannot shadow it."""
+    import sys
     import proxion_messenger_core.tunnel as tunnelmod
-    name = "cloudflared.exe" if __import__("sys").platform == "win32" else "cloudflared"
-    bundled = tmp_path / name
-    bundled.write_bytes(b"#!fake cloudflared\n")
-    monkeypatch.setattr(tunnelmod, "_bundled_cloudflared_dirs", lambda: [str(tmp_path)])
+    name = _cf_name()
+
+    meipass = tmp_path / "meipass"
+    meipass.mkdir()
+    bundled = meipass / name
+    bundled.write_bytes(b"#!bundled cloudflared\n")
+
+    # A planted binary sitting next to the executable must be ignored.
+    exe_dir = tmp_path / "install"
+    exe_dir.mkdir()
+    (exe_dir / name).write_bytes(b"#!planted cloudflared\n")
+
+    monkeypatch.setattr(sys, "_MEIPASS", str(meipass), raising=False)
+    monkeypatch.setattr(sys, "executable", str(exe_dir / "proxion-gateway"))
+    monkeypatch.setattr(tunnelmod, "_pinned_sha256", lambda: None)
+
     assert tunnelmod.find_cloudflared() == str(bundled)
+
+
+def test_find_cloudflared_rejects_unverified_sibling(tmp_path, monkeypatch):
+    """A cloudflared next to the executable whose hash does not match the pin is
+    refused (planting vector), and with nothing on PATH the result is None."""
+    import sys
+    import proxion_messenger_core.tunnel as tunnelmod
+    name = _cf_name()
+
+    exe_dir = tmp_path / "install"
+    exe_dir.mkdir()
+    (exe_dir / name).write_bytes(b"#!planted cloudflared\n")
+
+    monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+    monkeypatch.setattr(sys, "executable", str(exe_dir / "proxion-gateway"))
+    monkeypatch.setattr(tunnelmod, "_pinned_sha256", lambda: "deadbeef" * 8)
+    monkeypatch.setattr(tunnelmod.shutil, "which", lambda _n: None)
+
+    assert tunnelmod.find_cloudflared() is None
+
+
+def test_find_cloudflared_accepts_verified_sibling(tmp_path, monkeypatch):
+    """A cloudflared next to the executable is used when it matches the pin."""
+    import sys
+    import proxion_messenger_core.tunnel as tunnelmod
+    name = _cf_name()
+
+    exe_dir = tmp_path / "install"
+    exe_dir.mkdir()
+    cand = exe_dir / name
+    payload = b"#!genuine cloudflared\n"
+    cand.write_bytes(payload)
+    good = tunnelmod._sha256_file(str(cand))
+
+    monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+    monkeypatch.setattr(sys, "executable", str(exe_dir / "proxion-gateway"))
+    monkeypatch.setattr(tunnelmod, "_pinned_sha256", lambda: good)
+    monkeypatch.setattr(tunnelmod.shutil, "which", lambda _n: None)
+
+    assert tunnelmod.find_cloudflared() == str(cand)
 
 
 def test_cloudflared_asset_name_mapping():

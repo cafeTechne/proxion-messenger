@@ -7,6 +7,7 @@ granting for each user.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 from dataclasses import dataclass, asdict
@@ -15,6 +16,16 @@ from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .stash import StashClient
+
+
+# Serializes the read-check-increment-write cycle in use_invite so two
+# concurrent redemptions of a max_uses-limited code cannot both pass the cap
+# check before either persists the incremented count. The gateway runs a single
+# SimpleStash in one asyncio process, so a module-level lock closes the race
+# there. It does NOT coordinate separate processes sharing a stash directory:
+# SimpleStash offers no conditional write (ETag/CAS) to guard that, and the
+# gateway does not run in that configuration.
+_use_lock = asyncio.Lock()
 
 
 @dataclass
@@ -131,35 +142,38 @@ async def use_invite(stash, code: str) -> Optional[InviteRecord]:
     Optional[InviteRecord]
         The updated invitation record if successful, None if invalid/expired.
     """
-    rec = await get_invite(stash, code)
-    if not rec:
-        return None
-    
-    # Check if active
-    if not rec.active:
-        return None
-    
-    # Check if expired
-    expires_dt = datetime.fromisoformat(rec.expires_iso)
-    if datetime.now(timezone.utc) > expires_dt:
-        return None
-    
-    # Check if max_uses exceeded
-    if rec.max_uses > 0 and rec.use_count >= rec.max_uses:
-        return None
-    
-    # Increment use count
-    rec.use_count += 1
-    
-    # Deactivate if max_uses reached
-    if rec.max_uses > 0 and rec.use_count >= rec.max_uses:
-        rec.active = False
-    
-    # Persist updated record
-    key = f"invites/{code}.json"
-    await stash.put(key, json.dumps(asdict(rec)).encode())
-    
-    return rec
+    # Hold the lock across read-check-increment-write so the cap check and the
+    # write-back are atomic within this process (see _use_lock).
+    async with _use_lock:
+        rec = await get_invite(stash, code)
+        if not rec:
+            return None
+
+        # Check if active
+        if not rec.active:
+            return None
+
+        # Check if expired
+        expires_dt = datetime.fromisoformat(rec.expires_iso)
+        if datetime.now(timezone.utc) > expires_dt:
+            return None
+
+        # Check if max_uses exceeded
+        if rec.max_uses > 0 and rec.use_count >= rec.max_uses:
+            return None
+
+        # Increment use count
+        rec.use_count += 1
+
+        # Deactivate if max_uses reached
+        if rec.max_uses > 0 and rec.use_count >= rec.max_uses:
+            rec.active = False
+
+        # Persist updated record
+        key = f"invites/{code}.json"
+        await stash.put(key, json.dumps(asdict(rec)).encode())
+
+        return rec
 
 
 async def revoke_invite(stash, code: str) -> bool:

@@ -11,14 +11,33 @@ loopback-skips-auth default.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import logging
 import os
+import platform
 import re
 import shutil
 import sys
+from pathlib import Path
 from typing import Awaitable, Callable, Optional
+
+_log = logging.getLogger(__name__)
 
 # cloudflared prints a line like:  https://calm-forest-1234.trycloudflare.com
 _TUNNEL_URL_RE = re.compile(r"https://[a-z0-9][a-z0-9-]*\.trycloudflare\.com")
+
+# Rust target triples for the host, mirroring build_sidecar.TRIPLE_MAP. Only
+# needed to look up the pin at runtime; the authoritative copy lives in the
+# build script.
+_TRIPLE_MAP: dict[tuple[str, str], str] = {
+    ("Windows", "AMD64"):  "x86_64-pc-windows-msvc",
+    ("Windows", "ARM64"):  "aarch64-pc-windows-msvc",
+    ("Darwin",  "x86_64"): "x86_64-apple-darwin",
+    ("Darwin",  "arm64"):  "aarch64-apple-darwin",
+    ("Linux",   "x86_64"): "x86_64-unknown-linux-gnu",
+    ("Linux",   "aarch64"): "aarch64-unknown-linux-gnu",
+}
 
 
 def extract_tunnel_url(line: str) -> Optional[str]:
@@ -29,32 +48,85 @@ def extract_tunnel_url(line: str) -> Optional[str]:
     return m.group(0) if m else None
 
 
-def _bundled_cloudflared_dirs() -> list[str]:
-    """Locations a build may have bundled cloudflared into (R97/R98).
+def _sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
-    PyInstaller onefile extracts --add-binary payloads to ``sys._MEIPASS``; a
-    non-frozen or sibling layout keeps it next to the executable. Checked before
-    PATH so a shipped install is turnkey without a separate cloudflared install.
+
+def _pinned_sha256() -> Optional[str]:
+    """SHA-256 a fallback cloudflared must match on this host to be trusted.
+
+    Sourced from ``cloudflared.lock`` — the same pin build_sidecar.py verifies
+    against when bundling, so there is a single source of truth rather than a
+    duplicated literal. The lock records the hash of the release *asset*: for
+    Windows and Linux that asset is the raw binary, so it can be compared to a
+    binary on disk. The macOS asset is a ``.tgz`` whose hash is not the extracted
+    binary's, so those triples are treated as unpinned (returns None) instead of
+    verified against the wrong hash. Also returns None when the lock is not on
+    disk (frozen/installed layouts) or holds no usable pin for this host.
     """
-    dirs: list[str] = []
-    meipass = getattr(sys, "_MEIPASS", None)
-    if meipass:
-        dirs.append(meipass)
+    triple = _TRIPLE_MAP.get((platform.system(), platform.machine()))
+    if not triple or "darwin" in triple:
+        return None
+    lock = Path(__file__).resolve().parents[3] / "cloudflared.lock"
     try:
-        dirs.append(os.path.dirname(os.path.abspath(sys.executable)))
+        data = json.loads(lock.read_text())
     except Exception:
-        pass
-    return dirs
+        return None
+    pin = str(data.get("sha256", {}).get(triple, "")).strip().lower()
+    return pin or None
 
 
 def find_cloudflared() -> Optional[str]:
-    """Path to cloudflared: a bundled copy if present (turnkey), else PATH."""
+    """Path to cloudflared, preferring the immutable bundled copy (R97/R98).
+
+    A PyInstaller onefile build extracts the verified-at-build-time binary to
+    ``sys._MEIPASS``; when that copy is present it is used and nothing else is
+    consulted, so a binary planted in a user-writable location cannot shadow it.
+    The remaining locations are fallbacks only for builds that did not bundle
+    cloudflared: a copy sitting next to the executable is user-writable (the
+    planting vector), so it is accepted only when it matches the pinned release
+    hash; a copy on PATH is one the user installed themselves, outside the
+    sidecar directory, so it is used but logged as unverified.
+    """
     name = "cloudflared.exe" if sys.platform == "win32" else "cloudflared"
-    for d in _bundled_cloudflared_dirs():
-        cand = os.path.join(d, name)
+
+    # 1. Immutable bundled copy wins outright.
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        cand = os.path.join(meipass, name)
         if os.path.isfile(cand):
             return cand
-    return shutil.which("cloudflared")
+
+    expected = _pinned_sha256()
+
+    # 2. A copy next to the executable is user-writable; trust it only when it
+    #    matches the pinned release hash.
+    try:
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    except Exception:
+        exe_dir = None
+    if exe_dir:
+        cand = os.path.join(exe_dir, name)
+        if os.path.isfile(cand):
+            if expected and _sha256_file(cand) == expected:
+                return cand
+            _log.warning(
+                "ignoring cloudflared next to the executable (unverified): %s",
+                cand,
+            )
+
+    # 3. PATH: a cloudflared the user installed themselves.
+    which = shutil.which("cloudflared")
+    if which:
+        if expected and _sha256_file(which) == expected:
+            return which
+        _log.warning("using unverified cloudflared from PATH: %s", which)
+        return which
+    return None
 
 
 class TunnelManager:
