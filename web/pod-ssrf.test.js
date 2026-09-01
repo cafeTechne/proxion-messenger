@@ -21,6 +21,9 @@ import {
     podReadPresence,
     podFetchPeerSigner,
     podDropDm,
+    podUploadVoiceAudio,
+    podDeleteVoiceAudio,
+    podUploadFile,
 } from './pod.js';
 
 function makeSession(fetchImpl = null) {
@@ -97,5 +100,31 @@ describe('peer fetches never follow a cross-origin redirect', () => {
         _session = redirectingSession();
         expect(await podDropDm('https://alice.pod.example/', { message_id: 'm' })).toBe(false);
         expect(_calls[0].opts.redirect).toBe('error');
+    });
+});
+
+describe('own-pod file helpers reject an unsafe roomId/messageId (no fetch)', () => {
+    const BAD = '../../etc';   // path-traversal, fails /^[\w-]{1,128}$/
+    const OK = 'room1';
+
+    it('podUploadVoiceAudio returns null and issues no fetch for a bad roomId', async () => {
+        expect(await podUploadVoiceAudio(BAD, OK, new Blob())).toBe(null);
+        expect(_session.fetch).not.toHaveBeenCalled();
+    });
+    it('podUploadVoiceAudio returns null and issues no fetch for a bad messageId', async () => {
+        expect(await podUploadVoiceAudio(OK, BAD, new Blob())).toBe(null);
+        expect(_session.fetch).not.toHaveBeenCalled();
+    });
+    it('podDeleteVoiceAudio is a no-op (no fetch) for an unsafe id', async () => {
+        await podDeleteVoiceAudio(BAD, OK);
+        expect(_session.fetch).not.toHaveBeenCalled();
+    });
+    it('podUploadFile returns null and issues no fetch for an unsafe id', async () => {
+        expect(await podUploadFile(OK, BAD, 'clip.png', new Blob())).toBe(null);
+        expect(_session.fetch).not.toHaveBeenCalled();
+    });
+    it('a safe roomId/messageId still reaches fetch', async () => {
+        expect(await podUploadVoiceAudio(OK, 'msg1', new Blob())).toBe('https://me.pod.example/proxion/rooms/room1/files/msg1.webm');
+        expect(_session.fetch).toHaveBeenCalledTimes(1);
     });
 });

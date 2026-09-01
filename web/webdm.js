@@ -104,7 +104,12 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
         let content = env.content;
         try {
             if (env.e2e) {
-                if (env.x25519_pub) e2e.cachePeerPub(from, env.x25519_pub);
+                // Do NOT cache the peer's long-term x25519_pub yet: an attacker can
+                // drop an e2e envelope into our public-Append inbox, and caching an
+                // unverified key here would pre-seed the trusted send-side key cache
+                // (isE2EEnabled) so our first reply encrypts under the attacker's key.
+                // Decrypt needs only env.ratchet_pub + our own key, never the cached
+                // long-term pub; cache it below, once the signature is verified.
                 content = await e2e.ratchetDecrypt(from, env.content, env.nonce, env.msg_num, env.ratchet_pub, env.pn || 0);
             }
         } catch (err) {
@@ -118,6 +123,10 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
         // or unverifiable message still shows, just marked unverified).
         let sender_verified = false;
         if (verifySender) { try { sender_verified = !!(await verifySender(env)); } catch { sender_verified = false; } }
+        // Only now cache the sender's long-term x25519_pub (a signed field), and only
+        // for a verified envelope: the send path (isE2EEnabled) trusts this cache to
+        // skip the authenticated pod-key fetch, so an unverified key must never land.
+        if (env.e2e && env.x25519_pub && sender_verified) e2e.cachePeerPub(from, env.x25519_pub);
         const message = {
             type: 'message',
             message_id: env.message_id,

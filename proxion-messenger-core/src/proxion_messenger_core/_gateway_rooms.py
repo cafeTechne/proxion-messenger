@@ -573,6 +573,16 @@ class RoomHandlerMixin:
                 return
             if not _in_live and _in_store:
                 self._local_rooms[thread_id]["members"].add(websocket)
+        elif thread_id and self._auth_enforced():
+            # DM / pod-backed-room branch: get_messages(thread_id) has no scoping,
+            # so gate on DM participation or room membership (the _local_rooms
+            # branch above already handles live local rooms).
+            _caller_wid = self._client_webids.get(websocket)
+            if not self._actor_can_read_thread(websocket, _caller_wid, thread_id):
+                await websocket.send(json.dumps({
+                    "type": "local_history", "thread_id": thread_id, "messages": [],
+                }))
+                return
         after_ts = data.get("after_timestamp")
         before_ts = data.get("before_timestamp")
         try:
@@ -876,6 +886,28 @@ class RoomHandlerMixin:
         if self._store.get_relationship_owner_by_cert_id(thread_id) == actor:
             return True
         if self._store.get_relationship_owner(thread_id) == actor:
+            return True
+        return False
+
+    def _actor_can_read_thread(self, websocket, actor: str, thread_id: str) -> bool:
+        """True when *actor* may READ thread *thread_id* — a DM party or a room
+        member. Gate for read-only handlers (history/pins/timer) under
+        ``_auth_enforced()``. Room membership is accepted via the live
+        ``_local_rooms`` websocket set, the federated ``room_memberships`` map,
+        and persistent store membership so a pod-backed room absent from
+        ``_local_rooms`` is covered rather than dropped."""
+        if not actor or not thread_id:
+            return False
+        if self._actor_participates_in_dm(actor, thread_id):
+            return True
+        room_id = self._strip_thread_prefix(thread_id)
+        room = self._local_rooms.get(room_id) or self._local_rooms.get(thread_id)
+        if room is not None and websocket in room.get("members", set()):
+            return True
+        if room_id in self.room_memberships or thread_id in self.room_memberships:
+            return True
+        if self._store and (actor in self._store.get_room_members(room_id)
+                            or actor in self._store.get_room_members(thread_id)):
             return True
         return False
 
@@ -1524,10 +1556,18 @@ class RoomHandlerMixin:
                 _rp[(reader_webid, channel_id)] = time.time()
 
     async def _handle_read_dm(self, websocket, data: dict) -> None:
-        if not self._client_webids.get(websocket):
+        caller = self._client_webids.get(websocket)
+        if not caller:
             await websocket.send(json.dumps({"type": "error", "message": "Not registered"}))
             return
         cert_id = data.get("cert_id", "")
+        # IDOR guard: get_messages(cert_id) is WHERE thread_id=? only, so without
+        # a participant check any registered account could read another's DM by
+        # naming its thread id. Return the same empty-history shape (not a
+        # distinct error) so thread existence is not leaked.
+        if self._auth_enforced() and not self._actor_participates_in_dm(caller, cert_id):
+            await websocket.send(json.dumps({"type": "history", "thread_id": cert_id, "messages": []}))
+            return
         before_ts = data.get("before_timestamp")
         messages = []
         if self._store:
@@ -2135,6 +2175,12 @@ class RoomHandlerMixin:
     async def _handle_get_pins(self, websocket, data: dict) -> None:
         thread_id = data.get("thread_id", "")
         room_id = self._strip_thread_prefix(thread_id)
+        # Pins carry content and pinned_by; gate on DM participation / room
+        # membership so a non-party cannot enumerate another thread's pins.
+        if self._auth_enforced() and not self._actor_can_read_thread(
+                websocket, self._client_webids.get(websocket), thread_id):
+            await websocket.send(json.dumps({"type": "pins", "thread_id": thread_id, "pins": []}))
+            return
         pins = []
         if room_id in self._local_rooms and self._store:
             stored = self._store.get_pins(room_id)
@@ -2274,6 +2320,12 @@ class RoomHandlerMixin:
 
     async def _handle_get_disappear_timer(self, websocket, data: dict) -> None:
         room_id = data.get("room_id", "")
+        if self._auth_enforced() and not self._actor_can_read_thread(
+                websocket, self._client_webids.get(websocket), room_id):
+            await websocket.send(json.dumps({
+                "type": "disappear_timer", "room_id": room_id, "ms": 0,
+            }))
+            return
         ms = self._room_disappear_timers.get(room_id, 0) or self._dm_disappear_timers.get(room_id, 0)
         if not ms and self._store:
             ms = self._store.get_room_disappear_timer(room_id) or self._store.get_dm_disappear_timer(room_id)

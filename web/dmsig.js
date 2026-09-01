@@ -47,19 +47,27 @@ function _b64dec(s) { const bin = atob(s); const u = new Uint8Array(bin.length);
 // (from_webid), the message id, the ciphertext, and the ratchet/key material, so a
 // tampered or replayed-under-a-different-claim envelope fails. The order and the
 // length-prefixed framing must stay stable or signatures won't verify cross-client.
-const SIGNED_FIELDS = ['from_webid', 'message_id', 'content', 'nonce', 'msg_num', 'pn', 'ratchet_pub', 'x25519_pub', 'timestamp'];
+const SIGNED_FIELDS = ['from_webid', 'message_id', 'content', 'nonce', 'msg_num', 'pn', 'ratchet_pub', 'x25519_pub', 'e2e', 'reply_to_id', 'from_display_name', 'timestamp'];
 // A multi-device fanout copy signs the same material plus its to_device_id (so a
 // copy cannot be redirected to another device), reading the ciphertext/key fields
 // from the nested payload rather than the envelope top level.
-const SIGNED_FIELDS_FANOUT = ['from_webid', 'message_id', 'to_device_id', 'content', 'nonce', 'msg_num', 'pn', 'ratchet_pub', 'x25519_pub'];
+const SIGNED_FIELDS_FANOUT = ['from_webid', 'message_id', 'to_device_id', 'content', 'nonce', 'msg_num', 'pn', 'ratchet_pub', 'x25519_pub', 'e2e'];
 
-function _canonical(fields, obj) {
+// LEGACY field lists (pre-R110): the same order without e2e/reply_to_id/
+// from_display_name. Kept only so the deprecation shim in verify can still accept a
+// signature produced by an older client during rollout. Do not sign with these.
+const SIGNED_FIELDS_LEGACY = ['from_webid', 'message_id', 'content', 'nonce', 'msg_num', 'pn', 'ratchet_pub', 'x25519_pub', 'timestamp'];
+const SIGNED_FIELDS_FANOUT_LEGACY = ['from_webid', 'message_id', 'to_device_id', 'content', 'nonce', 'msg_num', 'pn', 'ratchet_pub', 'x25519_pub'];
+
+// Canonical bytes: each field length-prefixed then joined by 0x7c. `prefixLen` is
+// the width of the big-endian length header — 4 bytes in the current scheme (so a
+// field ≥ 64KiB cannot truncate/collide), 2 in the legacy shim below.
+function _canonicalP(fields, obj, prefixLen) {
     const parts = fields.map((k) => _ENC.encode(obj && obj[k] != null ? String(obj[k]) : ''));
     const chunks = parts.map((p) => {
-        const c = new Uint8Array(2 + p.length);
-        c[0] = (p.length >> 8) & 0xff;
-        c[1] = p.length & 0xff;
-        c.set(p, 2);
+        const c = new Uint8Array(prefixLen + p.length);
+        for (let i = 0; i < prefixLen; i++) c[i] = (p.length >> (8 * (prefixLen - 1 - i))) & 0xff;
+        c.set(p, prefixLen);
         return c;
     });
     const total = chunks.reduce((a, c) => a + c.length, 0) + (chunks.length - 1);
@@ -69,15 +77,21 @@ function _canonical(fields, obj) {
     return out;
 }
 
-export function canonicalDmBytes(env) { return _canonical(SIGNED_FIELDS, env); }
+function _canonical(fields, obj) { return _canonicalP(fields, obj, 4); }
+function _canonicalLegacy(fields, obj) { return _canonicalP(fields, obj, 2); }
 
-export function canonicalFanoutBytes(env) {
+function _fanoutObj(env) {
     const p = (env && env.payload) || {};
-    return _canonical(SIGNED_FIELDS_FANOUT, {
+    return {
         from_webid: env && env.from_webid, message_id: env && env.message_id, to_device_id: env && env.to_device_id,
         content: p.content, nonce: p.nonce, msg_num: p.msg_num, pn: p.pn, ratchet_pub: p.ratchet_pub, x25519_pub: p.x25519_pub,
-    });
+        e2e: p.e2e,
+    };
 }
+
+export function canonicalDmBytes(env) { return _canonical(SIGNED_FIELDS, env); }
+
+export function canonicalFanoutBytes(env) { return _canonical(SIGNED_FIELDS_FANOUT, _fanoutObj(env)); }
 
 async function _sign(bytes, privKey, signerDid) {
     if (!privKey || !signerDid) return null;
@@ -103,5 +117,16 @@ export function signFanout(env, privKey, signerDid) { return _sign(canonicalFano
 // True iff env.sig is a valid signature by env.signer over the canonical bytes.
 // Never throws. Does NOT decide authorization (whether env.signer may speak for
 // env.from_webid) — the caller does that against the sender's published identity.
-export function verifyDmSig(env) { return _verify(env, canonicalDmBytes(env)); }
-export function verifyFanoutSig(env) { return _verify(env, canonicalFanoutBytes(env)); }
+//
+// Verify tries the CURRENT canonicalization first, then retries once with the
+// LEGACY (2-byte-prefix, fewer fields) scheme so a message from an older client
+// still verifies during rollout instead of flashing an "unverified" badge. Both are
+// real Ed25519 signatures by the same signer; neither path is weakened.
+export async function verifyDmSig(env) {
+    if (await _verify(env, canonicalDmBytes(env))) return true;
+    return _verify(env, _canonicalLegacy(SIGNED_FIELDS_LEGACY, env));
+}
+export async function verifyFanoutSig(env) {
+    if (await _verify(env, canonicalFanoutBytes(env))) return true;
+    return _verify(env, _canonicalLegacy(SIGNED_FIELDS_FANOUT_LEGACY, _fanoutObj(env)));
+}

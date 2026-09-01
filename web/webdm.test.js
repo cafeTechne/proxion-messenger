@@ -163,10 +163,11 @@ describe('createWebDm fanout receive', () => {
 
 describe('createWebDm receive', () => {
     it('decrypts a drop, emits a message event, and deletes it', async () => {
-        const { dm, e2e, events, deleted } = harness({ drops: [
+        const { dm, e2e, events, deleted } = harness({ verifySender: async () => true, drops: [
             { url: 'https://me/proxion/dm-inbox/d1', envelope: {
                 from_webid: 'https://bob', message_id: 'm9', content: 'CT9', e2e: true,
                 nonce: 'N', msg_num: 0, pn: 0, ratchet_pub: 'RP', x25519_pub: 'XP',
+                signer: 'did:key:z', sig: 'S',
             } },
         ] });
         await dm.drainOnce();
@@ -178,6 +179,31 @@ describe('createWebDm receive', () => {
             from_webid: 'https://bob', content: 'plain:CT9', source: 'local_dm', _persistDm: true,
         });
         expect(deleted).toEqual(['https://me/proxion/dm-inbox/d1']);
+    });
+
+    it('does NOT cache the peer pub for an unverified e2e drop (first-contact MitM)', async () => {
+        // An attacker can drop a signed-looking e2e envelope into our public-Append
+        // inbox. If verifySender rejects it, its x25519_pub must not seed the trusted
+        // send-side key cache, or our first reply would encrypt under the wrong key.
+        const { dm, e2e } = harness({ verifySender: async () => false, drops: [
+            { url: 'u', envelope: {
+                from_webid: 'https://mallory', message_id: 'm', content: 'CT', e2e: true,
+                nonce: 'N', msg_num: 0, pn: 0, ratchet_pub: 'RP', x25519_pub: 'ATTACKER_XP',
+            } },
+        ] });
+        await dm.drainOnce();
+        expect(e2e.cachePeerPub).not.toHaveBeenCalled();
+    });
+
+    it('does NOT cache the peer pub when no verifier is available', async () => {
+        const { dm, e2e } = harness({ drops: [
+            { url: 'u', envelope: {
+                from_webid: 'https://bob', message_id: 'm', content: 'CT', e2e: true,
+                nonce: 'N', msg_num: 0, pn: 0, ratchet_pub: 'RP', x25519_pub: 'XP',
+            } },
+        ] });
+        await dm.drainOnce();
+        expect(e2e.cachePeerPub).not.toHaveBeenCalled();
     });
 
     it('leaves an undecryptable drop in place (no delete, no event)', async () => {

@@ -42,7 +42,7 @@ class CssClientCredentials:
 
     css_base_url: str
     client_id: str
-    client_secret: str
+    client_secret: str = field(repr=False)
     identity_key: Ed25519PrivateKey
     token_endpoint_url: Optional[str] = field(default=None, repr=False)
     # CSS v7 requires ES256 DPoP; generate a dedicated P-256 key at construction

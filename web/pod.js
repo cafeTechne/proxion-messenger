@@ -1691,6 +1691,7 @@ export async function podReadReadState(threadId) {
 export async function podUploadVoiceAudio(roomId, messageId, audioBlob) {
     const root = podStorageRoot();
     if (!root || !solidSession.info.isLoggedIn) return null;
+    if (!SAFE_ID_RE.test(roomId) || !SAFE_ID_RE.test(messageId)) return null;
     const fileUri = `${root}proxion/rooms/${roomId}/files/${messageId}.webm`;
     try {
         await solidSession.fetch(fileUri, {
@@ -1708,6 +1709,7 @@ export async function podUploadVoiceAudio(roomId, messageId, audioBlob) {
 export async function podDeleteVoiceAudio(roomId, messageId) {
     const root = podStorageRoot();
     if (!root || !solidSession.info.isLoggedIn) return;
+    if (!SAFE_ID_RE.test(roomId) || !SAFE_ID_RE.test(messageId)) return;
     try {
         await solidSession.fetch(
             `${root}proxion/rooms/${roomId}/files/${messageId}.webm`,
@@ -1723,6 +1725,7 @@ export async function podDeleteVoiceAudio(roomId, messageId) {
 export async function podUploadFile(roomId, messageId, filename, fileBlob) {
     const root = podStorageRoot();
     if (!root || !solidSession.info.isLoggedIn) return null;
+    if (!SAFE_ID_RE.test(roomId) || !SAFE_ID_RE.test(messageId)) return null;
     const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
     const fileUri = `${root}proxion/rooms/${roomId}/files/${messageId}/${safeName}`;
     try {
