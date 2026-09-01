@@ -176,6 +176,30 @@ describe('avatar XSS hardening', () => {
   });
 });
 
+describe('data-name attribute hardening', () => {
+  it('escapes a malicious display name in the avatar data-name attribute', () => {
+    els['message-feed'] = mkEl({ scrollHeight: 500, clientHeight: 500 });
+    const created = [];
+    const orig = global.document.createElement;
+    global.document.createElement = () => { const el = mkEl(); created.push(el); return el; };
+    try {
+      const r = make();
+      r.renderMessage({
+        message_id: 'n1', thread_id: 'room-1', from_webid: 'did:key:zBob',
+        from_display_name: '"><img src=x onerror=alert(1)>',
+        content: 'hi', timestamp: new Date().toISOString(),
+      });
+      const html = created.map(e => e.innerHTML).join('');
+      expect(html).toContain('data-name="');
+      // The attribute-breakout sequence is neutralized: no raw quote+tag.
+      expect(html).not.toContain('"><img src=x onerror=alert(1)>');
+      expect(html).toContain('&quot;&gt;&lt;img');
+    } finally {
+      global.document.createElement = orig;
+    }
+  });
+});
+
 describe('attachmentKind (R59A pure)', () => {
   it('classifies image, video, audio, and unknown mimes', async () => {
     const { attachmentKind } = await import('./rendering.js');

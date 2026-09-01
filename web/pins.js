@@ -6,6 +6,7 @@
 // working unchanged.
 import { inlineNotice } from './states.js';
 import { t } from './i18n.js';
+import { escHtml } from './util.js';
 
 export function createPins({ getSocket, getActiveView }) {
 
@@ -40,10 +41,10 @@ export function createPins({ getSocket, getActiveView }) {
         pins.forEach(pin => {
             const div = document.createElement("div");
             div.style.cssText = "border-bottom:1px solid #334155;padding:8px 0;color:#f1f5f9;";
-            const pinner = (pin.pinned_by || "").slice(0, 20) || "unknown";
-            const preview = (pin.content || "").slice(0, 80);
+            const pinner = escHtml((pin.pinned_by || "").slice(0, 20)) || "unknown";
+            const preview = escHtml((pin.content || "").slice(0, 80));
             div.innerHTML = `<div style="font-size:0.85em;color:#94a3b8">${pinner}</div>
-                <div style="margin:2px 0;">${preview.replace(/</g,"&lt;")}</div>
+                <div style="margin:2px 0;">${preview}</div>
                 <div style="display:flex;gap:8px;margin-top:4px;">
                     <button data-pin-action="jump" data-msg-id="${pin.message_id}"
                         style="background:transparent;border:none;color:#7dd3fc;cursor:pointer;padding:0;font-size:0.8em;">[Jump]</button>

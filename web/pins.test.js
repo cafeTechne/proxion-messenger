@@ -72,4 +72,27 @@ describe('renderPins', () => {
     ]);
     expect(appended).toHaveLength(2);
   });
+  it('escapes a malicious pinned_by so no element is injected', () => {
+    const { pins } = make();
+    const appended = [];
+    document.getElementById('pin-list').appendChild = (el) => appended.push(el);
+    pins.renderPins([
+      { message_id: 'm1', pinned_by: '<svg/onload=alert(1)>', content: 'ok' },
+    ]);
+    const html = appended[0].innerHTML;
+    // pinned_by is capped at 20 chars (the trailing '>' is sliced off) then escaped.
+    expect(html).not.toContain('<svg/onload=alert(1)');
+    expect(html).toContain('&lt;svg/onload=alert(1)');
+  });
+  it('escapes a malicious pin content preview', () => {
+    const { pins } = make();
+    const appended = [];
+    document.getElementById('pin-list').appendChild = (el) => appended.push(el);
+    pins.renderPins([
+      { message_id: 'm1', pinned_by: 'Bob', content: '<img src=x onerror=alert(1)>' },
+    ]);
+    const html = appended[0].innerHTML;
+    expect(html).not.toContain('<img src=x onerror=alert(1)>');
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+  });
 });

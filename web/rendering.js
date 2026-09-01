@@ -278,7 +278,7 @@ export function createRendering({
             ? `<img src="data:image/png;base64,${b64attr(msg.from_avatar_b64)}" class="avatar" alt="" style="width:40px;height:40px;border-radius:50%;">`
             : `<div class="avatar placeholder" style="background:${avatarColor};width:40px;height:40px;line-height:40px;font-size:16px;font-weight:bold;text-align:center;border-radius:50%;">${(name[0] || "?").toUpperCase()}</div>`;
         const presenceDot = `<div class="avatar-presence ${presenceClass}" title="${escHtml(presenceData.status || '')}" style="bottom:-1px;right:-1px;"></div>`;
-        const avatarHtml = `<div style="position:relative;display:inline-block;cursor:pointer;" data-profile-avatar data-msg-action="profile" data-webid="${escHtml(msg.from_webid || '')}" data-name="${name.replace(/"/g,'&quot;')}">${avatarBase}${presenceDot}</div>`;
+        const avatarHtml = `<div style="position:relative;display:inline-block;cursor:pointer;" data-profile-avatar data-msg-action="profile" data-webid="${escHtml(msg.from_webid || '')}" data-name="${escHtml(name)}">${avatarBase}${presenceDot}</div>`;
 
         // Render text with Markdown and mention highlighting
         let rawText = msg.snippet || msg.content || "";

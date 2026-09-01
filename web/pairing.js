@@ -29,6 +29,18 @@ export function createPairing({
     function _hide(id) { const el = $(id); if (el) el.style.display = 'none'; }
     function _text(id, text) { const el = $(id); if (el) el.textContent = text; }
 
+    // Safety code, computed LOCALLY from a DID — never trusted from the relay.
+    // Matches the gateway's _pairing_safety_code: first 8 hex chars of the
+    // sha256 digest as an int, mod 1e6, zero-padded to 6 digits. Each endpoint
+    // derives it from the DID it can vouch for (the new device from its own
+    // clientDid, the primary from the device_did it is about to sign), so a
+    // relay that substitutes the device_did makes the two codes disagree.
+    async function _safetyCode(did) {
+        const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(did || ''));
+        const hex = [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+        return String(parseInt(hex.slice(0, 8), 16) % 1000000).padStart(6, '0');
+    }
+
     // ---- Primary side --------------------------------------------------------
     function startLinking() {
         const socket = getSocket();
@@ -62,7 +74,8 @@ export function createPairing({
         if (!state.active) return;
         state.active.deviceDid = ev.device_did;
         _text('device-link-status', 'A device wants to link. Confirm this code matches:');
-        _text('device-link-safety', ev.safety_code || '');
+        _text('device-link-safety', '');
+        _safetyCode(ev.device_did).then(code => _text('device-link-safety', code));
         _show('device-link-approve-row');
     }
 
@@ -122,9 +135,10 @@ export function createPairing({
         socket.send(JSON.stringify({ cmd: 'pair_submit', pairing_code: code, device_did: deviceDid }));
     }
 
-    function _onSubmitted(ev) {
+    function _onSubmitted() {
         _text('pair-device-status', 'Waiting for approval. Confirm this code matches your other device:');
-        _text('pair-device-safety', ev.safety_code || '');
+        _text('pair-device-safety', '');
+        _safetyCode(getClientDid()).then(code => _text('pair-device-safety', code));
     }
 
     async function _onApproved(ev) {
@@ -179,5 +193,5 @@ export function createPairing({
         }
     }
 
-    return { startLinking, approve, deny, beginAsNewDevice, handleEvent, closeAll: _closeAll, state };
+    return { startLinking, approve, deny, beginAsNewDevice, handleEvent, closeAll: _closeAll, _safetyCode, state };
 }

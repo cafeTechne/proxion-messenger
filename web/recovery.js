@@ -78,8 +78,8 @@ export function createRecovery({ showToast, showPromptModal }) {
 
     async function _downloadKit(passphrase) {
         try {
-            const resp = await fetch('/backup?passphrase=' + encodeURIComponent(passphrase),
-                { headers: _authHeaders() });
+            const resp = await fetch('/backup',
+                { headers: _authHeaders({ 'x-proxion-passphrase': passphrase }) });
             if (!resp.ok) { showToast(t('backup.failed', { status: resp.status })); return false; }
             const blob = await resp.blob();
             const url = URL.createObjectURL(blob);
@@ -135,9 +135,9 @@ export function createRecovery({ showToast, showPromptModal }) {
         const pp = passphraseFromInput(raw);
         try {
             const data = await file.arrayBuffer();
-            const resp = await fetch('/restore?dry_run=1&passphrase=' + encodeURIComponent(pp), {
+            const resp = await fetch('/restore?dry_run=1', {
                 method: 'POST',
-                headers: _authHeaders({ 'Content-Type': 'application/json' }),
+                headers: _authHeaders({ 'Content-Type': 'application/json', 'x-proxion-passphrase': pp }),
                 body: data,
             });
             const body = await resp.json().catch(() => ({}));
@@ -155,9 +155,9 @@ export function createRecovery({ showToast, showPromptModal }) {
         const pp = passphraseFromInput(raw);
         try {
             const data = await file.arrayBuffer();
-            const resp = await fetch('/restore?passphrase=' + encodeURIComponent(pp), {
+            const resp = await fetch('/restore', {
                 method: 'POST',
-                headers: _authHeaders({ 'Content-Type': 'application/json' }),
+                headers: _authHeaders({ 'Content-Type': 'application/json', 'x-proxion-passphrase': pp }),
                 body: data,
             });
             if (!resp.ok) { showToast(t('restore.failed', { status: resp.status })); return; }

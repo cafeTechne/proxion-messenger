@@ -124,3 +124,54 @@ describe('recovery-kit modal', () => {
         expect(els['recovery-code-display'].textContent).not.toBe(first);
     });
 });
+
+describe('passphrase transport (never in the URL)', () => {
+    let calls;
+    function mockFetch() {
+        calls = [];
+        global.fetch = (url, opts) => {
+            calls.push({ url, opts });
+            return Promise.resolve({
+                ok: true, status: 200,
+                blob: async () => ({}),
+                json: async () => ({ valid: true }),
+            });
+        };
+    }
+
+    it('sends the download passphrase in the x-proxion-passphrase header', async () => {
+        mockFetch();
+        // Anchor + object-URL plumbing for the download path.
+        global.document.createElement = () => ({ href: '', download: '', click() {} });
+        global.URL = { createObjectURL: () => 'blob:x', revokeObjectURL() {} };
+        const recovery = createRecovery({ showToast: () => {}, showPromptModal: async () => null });
+        recovery.wireRecovery({});
+        recovery.openKitModal();
+        const code = els['recovery-code-display'].textContent;
+        await els['recovery-download-btn'].handlers['click']();
+
+        expect(calls).toHaveLength(1);
+        expect(calls[0].url).toBe('/backup');
+        expect(calls[0].url).not.toContain('passphrase=');
+        expect(calls[0].opts.headers['x-proxion-passphrase']).toBe(code);
+    });
+
+    it('sends the restore passphrase in a header, keeping dry_run in the query', async () => {
+        mockFetch();
+        const file = { arrayBuffer: async () => new ArrayBuffer(4) };
+        const recovery = createRecovery({ showToast: () => {}, showPromptModal: async () => 'MYPASSPHRASE' });
+        recovery.wireRecovery({ getSocket: () => null });
+
+        // Verify (dry-run) path.
+        await els['settings-verify-input'].handlers['change']({ target: { files: [file], value: '' } });
+        expect(calls[0].url).toBe('/restore?dry_run=1');
+        expect(calls[0].url).not.toContain('passphrase=');
+        expect(calls[0].opts.headers['x-proxion-passphrase']).toBe('MYPASSPHRASE');
+
+        // Restore path.
+        await els['settings-restore-input'].handlers['change']({ target: { files: [file], value: '' } });
+        expect(calls[1].url).toBe('/restore');
+        expect(calls[1].url).not.toContain('passphrase=');
+        expect(calls[1].opts.headers['x-proxion-passphrase']).toBe('MYPASSPHRASE');
+    });
+});
