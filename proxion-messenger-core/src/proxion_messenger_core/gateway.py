@@ -1903,6 +1903,33 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         }
         return o in trusted
 
+    def _allowed_ws_origins(self) -> list:
+        """Build the WebSocket handshake Origin allowlist.
+
+        WebSocket is exempt from the same-origin policy, so without an allowlist
+        any browser page (including http://evil.com) could complete the handshake
+        and drive the gateway. A missing Origin header (None) is always allowed:
+        gateway-to-gateway federation peers and non-browser/CLI clients send no
+        Origin and are authenticated afterwards by the normal require_auth/cert
+        path. Browser Origins are restricted to the same set trusted by
+        _is_trusted_origin (local build + desktop webview).
+
+        PROXION_ALLOWED_ORIGINS overrides the browser allowlist; None is still
+        appended so federation peers keep connecting.
+        """
+        http_port = self.config.http_port or 8080
+        env = os.environ.get("PROXION_ALLOWED_ORIGINS", "")
+        explicit = [o.strip() for o in env.split(",") if o.strip()]
+        if explicit:
+            return explicit + [None]
+        return [
+            f"http://127.0.0.1:{http_port}",
+            f"http://localhost:{http_port}",
+            "tauri://localhost",
+            "https://tauri.localhost",
+            None,
+        ]
+
     @staticmethod
     def _redact_dict(data: dict, keys: set = None) -> dict:
         """Return a copy of *data* with sensitive keys replaced by '<redacted>'."""
@@ -3063,8 +3090,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         ssl_ctx = self._make_ssl_context()
         scheme = "wss" if ssl_ctx else "ws"
         _max_ws_clients = int(os.environ.get("PROXION_MAX_CLIENTS", "200"))
-        _allowed_origins_env = os.environ.get("PROXION_ALLOWED_ORIGINS", "")
-        _allowed_origins = [o.strip() for o in _allowed_origins_env.split(",") if o.strip()] or None
+        _allowed_origins = self._allowed_ws_origins()
         async with websockets.serve(
             self.handle_client, self.config.host, self.config.port,
             ssl=ssl_ctx, ping_interval=60, ping_timeout=20,

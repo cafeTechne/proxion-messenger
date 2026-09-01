@@ -991,10 +991,18 @@ class HttpEndpointsMixin:
                 # Collect all request headers
                 headers_raw = {}
                 content_length = 0
+                _hdr_count = 0
+                _hdr_bytes = 0
                 while True:
                     line = await asyncio.wait_for(reader.readline(), timeout=5.0)
                     if line.strip() == b"":
                         break
+                    _hdr_count += 1
+                    _hdr_bytes += len(line)
+                    if _hdr_count > 100 or _hdr_bytes > 32768:
+                        writer.write(b"HTTP/1.1 431 Request Header Fields Too Large\r\nContent-Length: 0\r\n\r\n")
+                        await writer.drain()
+                        return
                     if b":" in line:
                         k, _, v = line.partition(b":")
                         headers_raw[k.strip().lower()] = v.strip()

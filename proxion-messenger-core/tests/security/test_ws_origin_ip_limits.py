@@ -116,6 +116,117 @@ async def test_disallowed_origin_rejected_at_handshake(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Default Origin allowlist (Cross-Site WebSocket Hijack fix)
+# ---------------------------------------------------------------------------
+
+
+def test_default_allowed_origins_locks_out_untrusted(monkeypatch):
+    """With PROXION_ALLOWED_ORIGINS unset the allowlist is the trusted browser
+    set plus None (no-Origin), and never a wildcard."""
+    monkeypatch.delenv("PROXION_ALLOWED_ORIGINS", raising=False)
+    agent = AgentState.generate()
+    gw = ProxionGateway(
+        agent=agent, dm_clients=[], room_memberships=[],
+        config=GatewayConfig(port=_free_port(), http_port=8080), read_state=ReadState(),
+    )
+    origins = gw._allowed_ws_origins()
+    assert None in origins  # federation peers / CLI send no Origin
+    assert "tauri://localhost" in origins
+    assert "https://tauri.localhost" in origins
+    assert "http://127.0.0.1:8080" in origins
+    assert "http://localhost:8080" in origins
+    assert "http://evil.com" not in origins
+    assert "*" not in origins
+
+
+def test_default_allowed_origins_tracks_http_port(monkeypatch):
+    """The local-build Origins reflect the configured HTTP port."""
+    monkeypatch.delenv("PROXION_ALLOWED_ORIGINS", raising=False)
+    agent = AgentState.generate()
+    gw = ProxionGateway(
+        agent=agent, dm_clients=[], room_memberships=[],
+        config=GatewayConfig(port=_free_port(), http_port=9191), read_state=ReadState(),
+    )
+    origins = gw._allowed_ws_origins()
+    assert "http://127.0.0.1:9191" in origins
+    assert "http://localhost:9191" in origins
+
+
+def test_explicit_allowed_origins_still_permits_federation(monkeypatch):
+    """An operator override is honored but None is appended so no-Origin
+    federation peers still connect."""
+    monkeypatch.setenv("PROXION_ALLOWED_ORIGINS", "https://a.example, https://b.example")
+    agent = AgentState.generate()
+    gw = ProxionGateway(
+        agent=agent, dm_clients=[], room_memberships=[],
+        config=GatewayConfig(port=_free_port()), read_state=ReadState(),
+    )
+    origins = gw._allowed_ws_origins()
+    assert origins == ["https://a.example", "https://b.example", None]
+
+
+@pytest.mark.asyncio
+async def test_evil_origin_rejected_with_default_allowlist(monkeypatch):
+    """A browser page on http://evil.com cannot complete the handshake under the
+    default (unset PROXION_ALLOWED_ORIGINS) allowlist."""
+    monkeypatch.delenv("PROXION_ALLOWED_ORIGINS", raising=False)
+    agent = AgentState.generate()
+    port = _free_port()
+    gw = ProxionGateway(
+        agent=agent, dm_clients=[], room_memberships=[],
+        config=GatewayConfig(port=port, http_port=8080), read_state=ReadState(),
+    )
+    async with websockets.serve(gw.handle_client, "127.0.0.1", port, origins=gw._allowed_ws_origins()):
+        with pytest.raises(Exception):
+            ws = await websockets.connect(
+                f"ws://127.0.0.1:{port}",
+                additional_headers={"Origin": "http://evil.com"},
+            )
+            await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_tauri_origin_accepted_with_default_allowlist(monkeypatch):
+    """The desktop webview (Origin tauri://localhost) still connects."""
+    monkeypatch.delenv("PROXION_ALLOWED_ORIGINS", raising=False)
+    agent = AgentState.generate()
+    port = _free_port()
+    gw = ProxionGateway(
+        agent=agent, dm_clients=[], room_memberships=[],
+        config=GatewayConfig(port=port, http_port=8080), read_state=ReadState(),
+    )
+    async with websockets.serve(gw.handle_client, "127.0.0.1", port, origins=gw._allowed_ws_origins()):
+        ws = await websockets.connect(
+            f"ws://127.0.0.1:{port}",
+            additional_headers={"Origin": "tauri://localhost"},
+        )
+        try:
+            msg = await asyncio.wait_for(ws.recv(), timeout=2.0)
+            assert json.loads(msg).get("type") == "config"
+        finally:
+            await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_no_origin_accepted_with_default_allowlist(monkeypatch):
+    """Non-browser federation peers / CLI (no Origin header) still connect."""
+    monkeypatch.delenv("PROXION_ALLOWED_ORIGINS", raising=False)
+    agent = AgentState.generate()
+    port = _free_port()
+    gw = ProxionGateway(
+        agent=agent, dm_clients=[], room_memberships=[],
+        config=GatewayConfig(port=port, http_port=8080), read_state=ReadState(),
+    )
+    async with websockets.serve(gw.handle_client, "127.0.0.1", port, origins=gw._allowed_ws_origins()):
+        ws = await websockets.connect(f"ws://127.0.0.1:{port}")
+        try:
+            msg = await asyncio.wait_for(ws.recv(), timeout=2.0)
+            assert json.loads(msg).get("type") == "config"
+        finally:
+            await ws.close()
+
+
+# ---------------------------------------------------------------------------
 # IP connection count cleanup
 # ---------------------------------------------------------------------------
 
