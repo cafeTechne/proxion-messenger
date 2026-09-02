@@ -2244,8 +2244,10 @@ class MiscHandlerMixin:
         }))
 
     async def _handle_device_recovery_code_use(self, websocket, data: dict) -> None:
-        """Validate a recovery code. Marks it used if valid; rejects if used or wrong."""
+        """Validate a recovery code. Marks it used if valid; rejects if used,
+        expired, or wrong."""
         import hashlib
+        import time
         code_id = data.get("code_id", "")
         plaintext = data.get("code", "")
         if not code_id or not plaintext or not self._store:
@@ -2253,6 +2255,16 @@ class MiscHandlerMixin:
             return
         record = self._store.get_device_recovery_code(code_id)
         if not record:
+            await websocket.send(json.dumps({"type": "device_recovery_code_invalid", "reason": "not_found"}))
+            return
+        expires_at = record.get("expires_at")
+        if expires_at is not None and time.time() > expires_at:
+            # An expired code is treated exactly like an unknown one so the
+            # response does not reveal that a real code lapsed.
+            try:
+                self._store.prune_expired_device_recovery_codes()
+            except Exception:
+                pass
             await websocket.send(json.dumps({"type": "device_recovery_code_invalid", "reason": "not_found"}))
             return
         if record.get("used_at") is not None:

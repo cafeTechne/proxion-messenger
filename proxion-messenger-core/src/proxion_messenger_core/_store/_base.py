@@ -1182,6 +1182,9 @@ class _StoreBase(object):
                     PRIMARY KEY (room_id, name)
                 )""",
             ],
+            # 56: TTL on device recovery codes. Legacy rows keep a NULL
+            # expires_at and are treated as non-expiring for back-compat.
+            "ALTER TABLE device_recovery_codes ADD COLUMN expires_at REAL",
         ]
 
         for version, migration in enumerate(migrations, start=1):

@@ -16,6 +16,10 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# Device recovery codes are single-use 128-bit secrets. Cap their lifetime so a
+# leaked-but-unredeemed code stops being a standing credential.
+DEVICE_RECOVERY_CODE_TTL_SECONDS = 7 * 86400  # 7 days
+
 
 
 
@@ -122,25 +126,31 @@ class DeviceStoreMixin(object):
     def save_device_recovery_code(
         self, code_id: str, owner_webid: str, code_hash: str
     ) -> None:
+        now = time.time()
         with self._conn() as conn:
             try:
                 conn.execute(
                     """INSERT OR IGNORE INTO device_recovery_codes
-                       (code_id, owner_webid, code_hash, created_at)
-                       VALUES (?, ?, ?, ?)""",
-                    (code_id, owner_webid, code_hash, time.time()),
+                       (code_id, owner_webid, code_hash, created_at, expires_at)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (code_id, owner_webid, code_hash, now,
+                     now + DEVICE_RECOVERY_CODE_TTL_SECONDS),
                 )
             except Exception:
                 pass
     def use_device_recovery_code(self, code_id: str) -> bool:
-        """Mark recovery code as used. Returns False if not found or already used."""
+        """Mark recovery code as used. Returns False if not found, already used,
+        or past its expiry (a NULL expires_at is a legacy non-expiring code)."""
         with self._conn() as conn:
             try:
                 row = conn.execute(
-                    "SELECT used_at FROM device_recovery_codes WHERE code_id=?",
+                    "SELECT used_at, expires_at FROM device_recovery_codes WHERE code_id=?",
                     (code_id,),
                 ).fetchone()
                 if row is None or row["used_at"] is not None:
+                    return False
+                expires_at = row["expires_at"]
+                if expires_at is not None and time.time() > expires_at:
                     return False
                 conn.execute(
                     "UPDATE device_recovery_codes SET used_at=? WHERE code_id=?",
@@ -149,6 +159,19 @@ class DeviceStoreMixin(object):
                 return True
             except Exception:
                 return False
+    def prune_expired_device_recovery_codes(self) -> int:
+        """Delete unused recovery codes past their expiry. Returns rows removed."""
+        with self._conn() as conn:
+            try:
+                cur = conn.execute(
+                    """DELETE FROM device_recovery_codes
+                       WHERE used_at IS NULL AND expires_at IS NOT NULL
+                         AND expires_at <= ?""",
+                    (time.time(),),
+                )
+                return cur.rowcount
+            except Exception:
+                return 0
     def get_device_recovery_code(self, code_id: str) -> dict | None:
         with self._conn() as conn:
             try:
