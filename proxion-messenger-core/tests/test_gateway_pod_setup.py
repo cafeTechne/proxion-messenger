@@ -148,6 +148,50 @@ async def test_get_setup_pod_connected_after_post(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_get_setup_pod_untrusted_origin_omits_pod_url(tmp_path):
+    """Info-disclosure hardening: an untrusted-origin caller learns only whether a
+    pod is connected, never its pod_url/css_url."""
+    gw, http_port, ready = _start_gateway(tmp_path)
+    assert ready.wait(timeout=5), "gateway failed to start"
+    await asyncio.sleep(0.2)
+
+    gw._pod_available = True
+    gw._pod_url = "https://pod.solidcommunity.net/secret-user/"
+
+    resp = httpx.get(
+        f"http://127.0.0.1:{http_port}/setup/pod",
+        headers={"Origin": "http://evil.example"},
+        timeout=5,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["connected"] is True
+    assert "pod_url" not in data
+    assert "css_url" not in data
+
+
+@pytest.mark.asyncio
+async def test_get_setup_pod_trusted_origin_returns_full_body(tmp_path):
+    """The local web UI (trusted origin) still receives pod_url/css_url."""
+    gw, http_port, ready = _start_gateway(tmp_path)
+    assert ready.wait(timeout=5), "gateway failed to start"
+    await asyncio.sleep(0.2)
+
+    gw._pod_available = True
+    gw._pod_url = "https://pod.solidcommunity.net/testuser/"
+
+    resp = httpx.get(
+        f"http://127.0.0.1:{http_port}/setup/pod",
+        headers={"Origin": f"http://localhost:{http_port}"},
+        timeout=5,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["connected"] is True
+    assert data["pod_url"] == "https://pod.solidcommunity.net/testuser/"
+
+
+@pytest.mark.asyncio
 async def test_my_address_event_includes_gateway_http_url(tmp_path):
     """R16: get_my_address response includes gateway_http_url for wizard use."""
     from proxion_messenger_core.didkey import pub_key_to_did

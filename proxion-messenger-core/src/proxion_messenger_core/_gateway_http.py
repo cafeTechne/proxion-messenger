@@ -1726,11 +1726,18 @@ class HttpEndpointsMixin:
 
                 # ── GET /setup/pod — R16.2.3: current pod connection status ──
                 if method == "GET" and path == "/setup/pod":
-                    status_data = json.dumps({
-                        "connected": bool(self._pod_available and self._pod_url),
-                        "pod_url": self._pod_url or None,
-                        "css_url": getattr(self.config, "css_url", None),
-                    }).encode()
+                    _connected = bool(self._pod_available and self._pod_url)
+                    if self._is_trusted_origin(origin_header, http_port, peer_ip):
+                        _setup_status = {
+                            "connected": _connected,
+                            "pod_url": self._pod_url or None,
+                            "css_url": getattr(self.config, "css_url", None),
+                        }
+                    else:
+                        # Untrusted callers learn only whether a pod is connected,
+                        # not its URL (the POST is already trusted-origin gated).
+                        _setup_status = {"connected": _connected}
+                    status_data = json.dumps(_setup_status).encode()
                     writer.write(
                         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                         + _gated_acao()
