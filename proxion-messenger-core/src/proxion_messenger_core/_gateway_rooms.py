@@ -209,6 +209,9 @@ class RoomHandlerMixin:
     async def _expire_messages_loop(self):
         """Delete expired disappearing messages every 30 seconds (rooms + DM threads)."""
         from datetime import timedelta
+        # Bound the per-tick pod-delete work so a thread with many expired ids
+        # cannot wedge the loop; the remainder is handled on the next tick.
+        _POD_EXPIRE_BATCH = 200
         _consecutive_failures = 0
         while True:
             await asyncio.sleep(30)
@@ -231,7 +234,23 @@ class RoomHandlerMixin:
                     # in memory when history_mode=="all" — so for normal rooms
                     # `expired` was always empty and disappearing messages were
                     # NEVER deleted from persistence (they reappeared on reload).
-                    store_deleted = self._store.delete_messages_before(room_id, cutoff) if self._store else 0
+                    if self._store and self._pod_client():
+                        # Messages are written through to the pod (and re-imported
+                        # on restart), so the pod object must be deleted too or the
+                        # message reappears. Enumerate a bounded batch, purge each
+                        # pod object best-effort, then delete exactly those rows so
+                        # nothing is orphaned; the rest expires on later ticks.
+                        _expired_ids = self._store.select_message_ids_before(
+                            room_id, cutoff, limit=_POD_EXPIRE_BATCH)
+                        for _mid in _expired_ids:
+                            try:
+                                await self._delete_room_message_on_pod(room_id, _mid)
+                            except Exception:
+                                pass
+                            self._store.delete_message(_mid)
+                        store_deleted = len(_expired_ids)
+                    else:
+                        store_deleted = self._store.delete_messages_before(room_id, cutoff) if self._store else 0
                     for mid in expired:
                         for ws in list(room.get("members", set())):
                             try:
@@ -263,7 +282,20 @@ class RoomHandlerMixin:
                     if not self._store:
                         continue
                     cutoff = (datetime.now(timezone.utc) - timedelta(milliseconds=ms)).isoformat()
-                    deleted = self._store.delete_messages_before(cert_id, cutoff)
+                    if self._pod_client():
+                        # DM messages are written through to the pod (local_dms/…)
+                        # and re-imported on restart; delete the pod object too.
+                        _expired_ids = self._store.select_message_ids_before(
+                            cert_id, cutoff, limit=_POD_EXPIRE_BATCH)
+                        for _mid in _expired_ids:
+                            try:
+                                await self._delete_local_dm_on_pod(cert_id, _mid)
+                            except Exception:
+                                pass
+                            self._store.delete_message(_mid)
+                        deleted = len(_expired_ids)
+                    else:
+                        deleted = self._store.delete_messages_before(cert_id, cutoff)
                     if deleted:
                         await self._notify_dm_expired(cert_id, cutoff)
                 _consecutive_failures = 0  # reset on success
@@ -2061,15 +2093,20 @@ class RoomHandlerMixin:
 
     async def _handle_get_message_readers(self, websocket, data: dict) -> None:
         message_id = data.get("message_id", "")
-        room_id = data.get("room_id", "")
         if not message_id or not self._store:
             await websocket.send(json.dumps({"type": "message_readers", "message_id": message_id, "readers": []}))
             return
-        # Permission: caller must be a member
-        if room_id and room_id in self._local_rooms:
-            if websocket not in self._local_rooms[room_id].get("members", set()):
-                await websocket.send(json.dumps({"type": "message_readers", "message_id": message_id, "readers": []}))
-                return
+        # Authz: resolve the message's REAL thread from the store (never trust the
+        # client-supplied room_id) and gate on read access. The old check only ran
+        # when room_id was a known local room, so an empty/DM/federated room_id
+        # skipped it and leaked readers for ANY message_id. Mirrors
+        # _handle_get_pins / _handle_get_disappear_timer.
+        _binding = self._store.get_message_identity_binding(message_id)
+        _thread_id = _binding.get("thread_id", "") if _binding else ""
+        if self._auth_enforced() and not self._actor_can_read_thread(
+                websocket, self._client_webids.get(websocket), _thread_id):
+            await websocket.send(json.dumps({"type": "message_readers", "message_id": message_id, "readers": []}))
+            return
         readers = self._store.get_message_readers(message_id)
         for r in readers:
             r["display_name"] = self._store.get_display_name(r["receiver_webid"]) or r["receiver_webid"][:12]
@@ -2544,6 +2581,17 @@ class RoomHandlerMixin:
             if not peer_webid and str(cert_id).startswith("did:key:"):
                 peer_webid = cert_id
             if peer_webid:
+                # Authz: only deliver DM typing when the sender is a party to this
+                # DM thread (or holds a relationship with the peer). The cross-gateway
+                # relay path already enforces this via _authorized_relationship; the
+                # same-gateway path did not, so any authenticated user could push
+                # "X is typing" to an arbitrary did:key peer. Gated on _auth_enforced()
+                # to match the other DM handlers (auth-off registers a session DID
+                # that owns the thread rows).
+                if self._auth_enforced() and not (
+                        self._actor_participates_in_dm(sender, cert_id)
+                        or self._authorized_relationship(peer_webid)):
+                    return
                 peer_ws = self._any_socket(peer_webid)
                 if peer_ws and peer_ws != websocket:
                     await peer_ws.send(json.dumps(typing_event))
@@ -2580,6 +2628,10 @@ class RoomHandlerMixin:
             return
         if send_at > time.time() + 365 * 86400:
             await websocket.send(json.dumps({"type": "error", "message": "Cannot schedule more than 1 year ahead"}))
+            return
+        _MAX_PENDING_SCHEDULED = 100
+        if self._store and self._store.count_pending_scheduled(actor) >= _MAX_PENDING_SCHEDULED:
+            await websocket.send(json.dumps({"type": "error", "message": "Too many pending scheduled messages"}))
             return
         import uuid as _uuid_sched
         sched_id = str(_uuid_sched.uuid4())

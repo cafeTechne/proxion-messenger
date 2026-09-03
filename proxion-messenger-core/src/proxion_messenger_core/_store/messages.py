@@ -28,6 +28,24 @@ class MessageStoreMixin(object):
                 (thread_id, cutoff_iso)
             )
             return cur.rowcount
+    def select_message_ids_before(
+        self, thread_id: str, cutoff_iso: str, limit: int = 0
+    ) -> list[str]:
+        """Return message_ids in a thread older than cutoff_iso, oldest first.
+
+        Used to enumerate expiring disappearing messages so their pod objects can
+        be purged alongside the SQLite rows. A positive *limit* bounds the batch
+        so a thread with many expired ids does not wedge the expiry loop.
+        """
+        sql = ("SELECT message_id FROM messages WHERE thread_id = ? AND timestamp < ? "
+               "ORDER BY timestamp ASC")
+        params: list = [thread_id, cutoff_iso]
+        if limit and limit > 0:
+            sql += " LIMIT ?"
+            params.append(limit)
+        with self._conn() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [r[0] for r in rows]
     def save_message(
         self,
         message_id: str,
@@ -301,6 +319,14 @@ class MessageStoreMixin(object):
                 (sched["id"], sched["thread_id"], sched["from_webid"], sched["content"],
                  sched["send_at"], sched["created_at"])
             )
+    def count_pending_scheduled(self, from_webid: str) -> int:
+        """Count a user's pending (uncancelled) scheduled messages, for per-user cap."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM scheduled_messages WHERE from_webid=? AND cancelled=0",
+                (from_webid,),
+            ).fetchone()
+        return row[0] if row else 0
     def get_due_scheduled_messages(self, now: float) -> list:
         with self._conn() as conn:
             rows = conn.execute(

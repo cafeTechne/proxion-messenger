@@ -1207,6 +1207,27 @@ class PodSyncMixin:
             except Exception as exc:
                 logger.debug("_sync_local_dm_to_pod failed [%s]: %s", thread_id[:20], exc)
 
+    async def _delete_local_dm_on_pod(self, thread_id: str, message_id: str) -> None:
+        """Remove a gateway-relayed DM message from the pod after expiry/delete.
+
+        Mirrors _sync_local_dm_to_pod's path derivation so the object deleted is
+        the one that was written:
+        stash://pod/local_dms/{sha256(thread_id)[:16]}/{message_id}.json
+        """
+        client = self._pod_client()
+        if not client or not message_id:
+            return
+        import hashlib as _hl
+        thread_key = _hl.sha256(thread_id.encode()).hexdigest()[:16]
+        async with self._pod_sync_sem:
+            try:
+                loop = asyncio.get_event_loop()
+                uri = f"stash://pod/local_dms/{thread_key}/{message_id}.json"
+                await loop.run_in_executor(None, lambda: client.delete(uri))
+            except Exception as exc:
+                logger.debug("_delete_local_dm_on_pod failed [%s/%s]: %s",
+                             thread_id[:20], message_id, exc)
+
     async def _restore_local_dms_from_pod(self) -> None:
         """Pull gateway-relayed DM messages from pod into SQLite on cold start.
 
