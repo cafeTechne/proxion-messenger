@@ -1,6 +1,7 @@
 import solidAuthn from './solid-authn.bundle.js';
 import { detectMode } from './transport.js';
 import { isPrivatePodHost } from './ssrf.js';
+import { podQueueClear } from './podqueue.js';
 const { Session } = solidAuthn;
 
 export const solidSession = new Session({ restorePreviousSession: true });
@@ -48,6 +49,16 @@ export async function solidLogout() {
     // Clear the persisted root too, so the next account signed in on this browser
     // does not inherit the previous account's pod root.
     try { localStorage.removeItem(_ROOT_KEY); } catch { /* ignore */ }
+    // Purge the SW cache and the offline send queue so an account switch on a
+    // shared device leaks no pod-derived responses or queued message content.
+    // Best-effort: never let a failure here block the logout.
+    try {
+        if (typeof caches !== 'undefined' && caches.keys) {
+            const keys = await caches.keys();
+            await Promise.all(keys.filter((k) => /^proxion-shell-/.test(k)).map((k) => caches.delete(k)));
+        }
+    } catch { /* ignore */ }
+    try { await podQueueClear(); } catch { /* ignore */ }
 }
 
 // Is `root` safe to trust as THIS WebID's storage root? Require same origin as the

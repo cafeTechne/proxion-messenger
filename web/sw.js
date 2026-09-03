@@ -1,4 +1,4 @@
-const CACHE = "proxion-shell-v212";
+const CACHE = "proxion-shell-v213";
 const SHELL = [
   "./",
   "index.html",
@@ -102,6 +102,10 @@ const SHELL = [
 const IS_LOCAL = self.location.hostname === "localhost" ||
                  self.location.hostname === "127.0.0.1";
 
+// Runtime-cache only same-origin static assets. Never persist authenticated pod
+// GETs or dynamic gateway responses, and keep the cache from growing unbounded.
+const STATIC_ASSET = /\.(?:js|jsonld|css|svg|png|ico|woff2|json|webmanifest)$/;
+
 self.addEventListener("install", (e) => {
   if (IS_LOCAL) { self.skipWaiting(); return; }
   e.waitUntil(
@@ -124,6 +128,11 @@ self.addEventListener("fetch", (e) => {
   if (url.protocol === "ws:" || url.protocol === "wss:") return;
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/ws")) return;
 
+  // Never touch cross-origin requests (e.g. authenticated pod GETs via
+  // solidSession.fetch) or non-GET methods: caching them would serve stale
+  // realtime reads and leak authenticated pod responses into shared storage.
+  if (e.request.method !== "GET" || url.origin !== self.location.origin) return;
+
   // On localhost: always go to the network so code changes are immediate.
   if (IS_LOCAL) return;
 
@@ -133,7 +142,9 @@ self.addEventListener("fetch", (e) => {
       fetch(e.request)
         .then((r) => {
           const clone = r.clone();
-          caches.open(CACHE).then((c) => c.put(e.request, clone));
+          // Cache under the bare path, dropping the query so the OIDC callback
+          // (?code=…&state=…) is never persisted and navigations don't pile up.
+          caches.open(CACHE).then((c) => c.put(new Request(url.origin + url.pathname), clone));
           return r;
         })
         .catch(() => caches.match("index.html"))
@@ -147,7 +158,9 @@ self.addEventListener("fetch", (e) => {
       (cached) =>
         cached ||
         fetch(e.request).then((r) => {
-          if (r.ok) {
+          // Only ever persist same-origin static assets, not arbitrary r.ok
+          // responses (which would grow the cache without bound).
+          if (r.ok && STATIC_ASSET.test(url.pathname)) {
             const clone = r.clone();
             caches.open(CACHE).then((c) => c.put(e.request, clone));
           }
