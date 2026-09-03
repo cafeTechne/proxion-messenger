@@ -73,6 +73,18 @@ async def test_relay_read_receipt_e2e(tmp_path):
     did_a = pub_key_to_did(agent_a.identity_pub_bytes)
     did_b = pub_key_to_did(agent_b.identity_pub_bytes)
 
+    # The receipt handler delivers only for an authorized (known) contact, so give
+    # Alice's gateway a relationship with Bob (whose receipt it will receive).
+    gw_a._store.save_relationship(
+        {
+            "certificate_id": "cert-receipt-e2e",
+            "issuer": agent_a.identity_pub_bytes.hex(),
+            "subject": agent_b.identity_pub_bytes.hex(),
+            "signature": "dummy",
+        },
+        peer_did=did_b,
+    )
+
     async with (
         websockets.connect(f"ws://127.0.0.1:{ws_a}") as conn_a,
         websockets.connect(f"ws://127.0.0.1:{ws_b}") as conn_b,

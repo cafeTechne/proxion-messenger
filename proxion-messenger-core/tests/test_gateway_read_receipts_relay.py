@@ -185,6 +185,17 @@ async def test_relay_receipt_endpoint_delivers_read_receipt_event(tmp_path):
         sender_priv = Ed25519PrivateKey.generate()
         sender_pub = sender_priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
         sender_did = pub_key_to_did(sender_pub)
+        # The receipt handler now delivers only for an authorized (known) contact,
+        # so seed a relationship for the sender on the recipient's gateway.
+        gw._store.save_relationship(
+            {
+                "certificate_id": "cert-receipt-endpoint",
+                "issuer": agent.identity_pub_bytes.hex(),
+                "subject": sender_pub.hex(),
+                "signature": "dummy",
+            },
+            peer_did=sender_did,
+        )
         ts = datetime.now(timezone.utc).isoformat()
         sig = sign_relay_message(sender_priv, sender_did, recipient_did, "msg-receipt-test", "", ts)
 
@@ -220,3 +231,85 @@ async def test_relay_receipt_endpoint_delivers_read_receipt_event(tmp_path):
     assert receipt_event["message_id"] == "msg-receipt-test"
     assert receipt_event["from_did"] == sender_did
     assert receipt_event["to_did"] == recipient_did
+
+
+@pytest.mark.asyncio
+async def test_relay_receipt_from_stranger_or_blocked_not_delivered(tmp_path):
+    """R10.3: the receipt handler delivers only for an authorized (known),
+    non-blocked contact. A stranger's receipt, and a blocked contact's receipt,
+    are accepted (200, no reveal) but not delivered."""
+    import httpx
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+    from proxion_messenger_core.relay import sign_relay_message
+    from datetime import datetime, timezone
+
+    ws_port = _free_port()
+    http_port = _free_port()
+    agent = AgentState.generate()
+    gw, _, _, ready = _start_gateway(agent, ws_port, http_port, str(tmp_path / "gw.db"))
+    assert ready.wait(timeout=5), "Gateway failed to start"
+    await asyncio.sleep(0.2)
+
+    recipient_did = pub_key_to_did(agent.identity_pub_bytes)
+    sender_priv = Ed25519PrivateKey.generate()
+    sender_pub = sender_priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    sender_did = pub_key_to_did(sender_pub)
+
+    def _post(msg_id):
+        ts = datetime.now(timezone.utc).isoformat()
+        sig = sign_relay_message(sender_priv, sender_did, recipient_did, msg_id, "", ts)
+        return httpx.post(
+            f"http://127.0.0.1:{http_port}/relay/receipt",
+            json={
+                "from_did": sender_did, "to_did": recipient_did,
+                "message_id": msg_id, "thread_id": "cert-x",
+                "timestamp": ts, "signature": sig,
+            },
+            timeout=5,
+        )
+
+    async def _got_receipt(conn, msg_id, timeout=2.0):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                raw = await asyncio.wait_for(conn.recv(), timeout=0.3)
+                msg = json.loads(raw)
+                if msg.get("type") == "read_receipt" and msg.get("message_id") == msg_id:
+                    return True
+            except asyncio.TimeoutError:
+                continue
+        return False
+
+    async with websockets.connect(f"ws://127.0.0.1:{ws_port}") as conn:
+        await conn.send(json.dumps({"cmd": "register", "did": recipient_did}))
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            try:
+                await asyncio.wait_for(conn.recv(), timeout=0.3)
+            except asyncio.TimeoutError:
+                break
+
+        # 1) Stranger (no relationship) — accepted but not delivered.
+        assert _post("msg-stranger").status_code == 200
+        assert not await _got_receipt(conn, "msg-stranger"), \
+            "stranger's receipt must not be delivered"
+
+        # 2) Authorized contact — delivered.
+        gw._store.save_relationship(
+            {
+                "certificate_id": "cert-recv-gate",
+                "issuer": agent.identity_pub_bytes.hex(),
+                "subject": sender_pub.hex(),
+                "signature": "dummy",
+            },
+            peer_did=sender_did,
+        )
+        assert _post("msg-authorized").status_code == 200
+        assert await _got_receipt(conn, "msg-authorized"), \
+            "authorized contact's receipt must be delivered"
+
+        # 3) Same contact, now blocked by the recipient owner — not delivered.
+        gw._store.set_block(recipient_did, sender_did, True)
+        assert _post("msg-blocked").status_code == 200
+        assert not await _got_receipt(conn, "msg-blocked"), \
+            "blocked contact's receipt must not be delivered"

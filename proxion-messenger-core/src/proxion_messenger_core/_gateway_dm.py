@@ -600,6 +600,12 @@ class DmHandlerMixin:
         if target_gateway_url and target_webid:
             self._record_peer_gateway(target_webid, target_gateway_url)
 
+        # Blocked sender: the sender still gets their own echo above (block is silent
+        # from their side), but the target receives nothing — no live delivery, no
+        # offline push/relay below. Scoped to the recipient owner (R90 B).
+        if self._is_blocked_for(target_webid, sender_webid):
+            return
+
         target_sockets = self._sockets_for(target_webid)
         if target_sockets:
             payload = json.dumps(event)

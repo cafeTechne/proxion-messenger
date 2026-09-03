@@ -211,11 +211,18 @@ class HttpEndpointsMixin:
             except Exception:
                 from_did = None
         
+        # Drop an invite whose issuer is blocked by the owner (this gateway's user).
+        # Silent accept, no persist, no reveal — scoped to the owner (R90 B).
+        _owner_did = self._own_gateway_did()
+        if from_did and self._is_blocked_for(_owner_did, from_did):
+            return "200 OK", '{"status":"received"}'
+
         # Save pending invite if store is available
         if self._store:
             self._store.save_pending_invite(invite.to_dict(), from_did or "unknown")
-        
-        # Broadcast to all connected WebSocket clients
+
+        # Deliver the pending invite (issuer DID + display name) only to the owner,
+        # not every connected client. broadcast leaked it gateway-wide.
         event = {
             "type": "friend_request_received",
             "invitation_id": invite.invitation_id,
@@ -223,7 +230,7 @@ class HttpEndpointsMixin:
             "display_name": invite.issuer.get("display_name"),
             "endpoint_hints": invite.endpoint_hints,
         }
-        await self.broadcast(event)
+        await self._send_to_identity(_owner_did, json.dumps(event))
 
         return "200 OK", '{"status":"received"}'
 
@@ -798,6 +805,15 @@ class HttpEndpointsMixin:
         # R12.1.1 — reject relay from revoked senders
         if from_webid in self._revoked_dids:
             return "403 Forbidden", '{"error":"sender revoked"}'
+
+        # Blocked sender: silently accept but don't deliver (no block-reveal),
+        # matching the dm_fanout relay path. Scoped to the recipient owner (R90 B).
+        # Placed after signature verification so the sender is who they claim, and
+        # ahead of both the live-socket and offline-queue paths so neither delivers.
+        # A sealed_dm that unsealed to a plain DM falls through to here too, so this
+        # one check covers the sealed path as well.
+        if self._is_blocked_for(to_webid, from_webid):
+            return "200 OK", '{"status":"received"}'
 
         # Record the sender's gateway URL — validate first to prevent SSRF pinning
         if origin_gateway and from_webid:
@@ -1562,6 +1578,20 @@ class HttpEndpointsMixin:
                             err = b'{"error":"invalid signature"}'
                             writer.write(b"HTTP/1.1 400 Bad Request\r\nContent-Length: " +
                                          str(len(err)).encode() + b"\r\n\r\n" + err)
+                            await writer.drain()
+                            return
+                        # Only deliver receipts from a peer we hold a relationship with,
+                        # who isn't blocked by the recipient — a stranger or blocked sender
+                        # gets a 200 with no delivery (no reveal), mirroring the presence/
+                        # typing relay gates.
+                        if (not self._authorized_relationship(from_did)
+                                or self._is_blocked_for(to_did, from_did)):
+                            ok = b'{"status":"ok"}'
+                            writer.write(
+                                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                                b"Access-Control-Allow-Origin: *\r\n"
+                                b"Content-Length: " + str(len(ok)).encode() + b"\r\n\r\n" + ok
+                            )
                             await writer.drain()
                             return
                         receipt_event = json.dumps({
