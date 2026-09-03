@@ -451,7 +451,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         return _host not in ("127.0.0.1", "localhost", "::1")
 
     def _relay_sender_gateway_ok(self, from_webid: str, relay_sig_did: str,
-                                 require_established: bool = False) -> bool:
+                                 require_established: bool = False,
+                                 may_seed: bool = True) -> bool:
         """TOFU continuity binding for ephemeral room/voice/file relays.
 
         The envelope signature only proves *some* gateway (relay_sig_did) signed the
@@ -465,6 +466,14 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         later relay claiming the same ``from_webid`` but signed by a DIFFERENT
         gateway key is rejected. When ``from_webid`` IS the signer (DM-style actors
         whose from_webid is their own gateway did) there is nothing to bind.
+
+        ``may_seed`` gates the first-use seed: the caller must have already verified
+        the envelope signature AND confirmed ``from_webid`` is authorized for the
+        relay target (a room member / DM peer) before allowing a new binding. A
+        validly-signed but unauthorized POST must not create a ``relaygw:<victim>``
+        row, else it permanently drops the victim's real federated traffic. The
+        MATCH path (authorizing an already-established binding) never seeds and is
+        unaffected by ``may_seed``.
         """
         if not self._store or not from_webid or not relay_sig_did:
             return False
@@ -488,12 +497,56 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 # traffic) for privileged ops; keep TOFU for ordinary relays.
                 if require_established:
                     return False
+                # Only seed when the caller has authorized this from_webid for the
+                # relay target (verified signature + membership/relationship).
+                if not may_seed:
+                    return False
                 self._store.record_identity_key_seen(_key, gw_pub_hex, trusted=True)
                 return True
             if any(h.get("pubkey_hex") == gw_pub_hex for h in _hist):
                 return True
         except Exception:
             return False
+        return False
+
+    def _relay_from_is_room_member(self, room_id: str, from_webid: str) -> bool:
+        """Whether *from_webid* is a known member (local or federated) of the local
+        room *room_id*.
+
+        Mirrors the membership check the room relay handlers use to authorize
+        delivery; here it gates the first-use relaygw seed so a stranger cannot
+        poison a binding for a room they are not part of.
+        """
+        if not room_id or not self._store or room_id not in self._local_rooms:
+            return False
+        _known = set(self._store.get_room_members(room_id))
+        _known |= {m.get("member_did") for m in self._store.get_federated_room_members(room_id)}
+        _known.discard("")
+        return from_webid in _known
+
+    def _relay_seed_authorized(self, data: dict, content_type: str, from_webid: str) -> bool:
+        """Whether *from_webid* is authorized for the relay target it names, and may
+        therefore SEED a first-use relaygw binding.
+
+        Mirrors each relay handler's own membership/relationship authz so a
+        validly-signed but UNAUTHORIZED POST cannot poison a victim's binding.
+        ``from_webid`` must be a well-formed did:key. Room/voice relays require
+        membership of the named room; file relays require an existing relationship.
+        """
+        if not from_webid or not from_webid.startswith("did:key:") or not self._store:
+            return False
+        try:
+            from .didkey import did_to_pub_key
+            if len(did_to_pub_key(from_webid)) != 32:
+                return False
+        except Exception:
+            return False
+        if content_type.startswith("room_"):
+            return self._relay_from_is_room_member(data.get("room_id", ""), from_webid)
+        if content_type.startswith("voice_channel_"):
+            return self._relay_from_is_room_member(data.get("channel_id", ""), from_webid)
+        if content_type.startswith("file_"):
+            return self._store.get_relationship_by_did(from_webid) is not None
         return False
 
     def _voice_channel_gateway_ok(self, channel_id: str, signer_did: str) -> bool:
@@ -1651,10 +1704,16 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             self._store.save_e2e_key(alice_did, _alice_e2e)
         asyncio.create_task(self._sync_cert_to_pod(cert.to_dict()))
 
-        # Register Alice's endpoint so relay routing works immediately
+        # Register Alice's endpoint so relay routing works immediately — validate
+        # first (peer-supplied endpoint_hint) to prevent SSRF pinning to a
+        # private/loopback host, mirroring the accept-POST check below.
         requester_gw_ws = (invite.endpoint_hints or [None])[0]
         if requester_gw_ws and alice_did:
-            self._record_peer_gateway(alice_did, requester_gw_ws)
+            _req_http = requester_gw_ws.replace("wss://", "https://").replace("ws://", "http://")
+            if _is_safe_gateway_url(_req_http):
+                self._record_peer_gateway(alice_did, requester_gw_ws)
+            else:
+                logger.warning("Skipping peer gateway record — invite endpoint_hint is a private URL: %s", requester_gw_ws)
 
         # Populate dm_clients so pod-backed DMs can use the relationship
         pod_client = self._pod_client()

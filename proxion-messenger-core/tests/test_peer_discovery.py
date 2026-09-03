@@ -1,13 +1,14 @@
 """Tests: _discover_peer_gateway fetches .well-known/proxion."""
 from __future__ import annotations
-import asyncio
 import json
+from contextlib import ExitStack
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from proxion_messenger_core.gateway import ProxionGateway, GatewayConfig
 from proxion_messenger_core.persist import AgentState
 from proxion_messenger_core.readstate import ReadState
 from proxion_messenger_core.local_store import LocalStore
+from proxion_messenger_core.network import NetworkError
 
 @pytest.fixture
 def gateway(tmp_path):
@@ -32,16 +33,22 @@ def _valid_well_known(did="did:key:z6MkABCD"):
         "fingerprint": "AA:BB",
     }).encode()
 
+
+def _patch_fetch(well_known_bytes):
+    """Route _discover_peer_gateway's fetch through a mocked SSRF-safe GET and
+    treat the discovered gateway URL as safe (no real DNS in unit tests)."""
+    stack = ExitStack()
+    stack.enter_context(patch(
+        "proxion_messenger_core.network.async_safe_get",
+        new=AsyncMock(return_value=well_known_bytes)))
+    stack.enter_context(patch(
+        "proxion_messenger_core.relay._validate_relay_target", return_value=True))
+    return stack
+
 @pytest.mark.asyncio
 async def test_discover_peer_gateway_valid(gateway):
     """Valid .well-known response caches gateway URL and x25519 pub."""
-    mock_resp = MagicMock()
-    mock_resp.getcode.return_value = 200
-    mock_resp.read.return_value = _valid_well_known("did:key:z6MkABCD")
-    mock_resp.__enter__ = lambda s: s
-    mock_resp.__exit__ = MagicMock(return_value=False)
-
-    with patch("urllib.request.urlopen", return_value=mock_resp):
+    with _patch_fetch(_valid_well_known("did:key:z6MkABCD")):
         result = await gateway._discover_peer_gateway("did:key:z6MkABCD@https://bob.example.com")
 
     assert result is not None
@@ -51,13 +58,7 @@ async def test_discover_peer_gateway_valid(gateway):
 @pytest.mark.asyncio
 async def test_discover_peer_gateway_fingerprint_mismatch(gateway):
     """DID in address must match DID in response; mismatch returns None."""
-    mock_resp = MagicMock()
-    mock_resp.getcode.return_value = 200
-    mock_resp.read.return_value = _valid_well_known("did:key:z6MkOTHER")
-    mock_resp.__enter__ = lambda s: s
-    mock_resp.__exit__ = MagicMock(return_value=False)
-
-    with patch("urllib.request.urlopen", return_value=mock_resp):
+    with _patch_fetch(_valid_well_known("did:key:z6MkOTHER")):
         result = await gateway._discover_peer_gateway("did:key:z6MkABCD@https://bob.example.com")
 
     assert result is None
@@ -65,21 +66,15 @@ async def test_discover_peer_gateway_fingerprint_mismatch(gateway):
 @pytest.mark.asyncio
 async def test_discover_peer_gateway_timeout(gateway):
     """Network timeout returns None without raising."""
-    import urllib.error
-    with patch("urllib.request.urlopen", side_effect=TimeoutError("timeout")):
+    with patch("proxion_messenger_core.network.async_safe_get",
+               new=AsyncMock(side_effect=NetworkError("timeout"))):
         result = await gateway._discover_peer_gateway("did:key:z6MkABCD@https://bob.example.com")
     assert result is None
 
 @pytest.mark.asyncio
 async def test_discover_peer_gateway_caches_x25519(gateway):
     """x25519_pub from .well-known is stored in x25519_pubs table."""
-    mock_resp = MagicMock()
-    mock_resp.getcode.return_value = 200
-    mock_resp.read.return_value = _valid_well_known("did:key:z6MkABCD")
-    mock_resp.__enter__ = lambda s: s
-    mock_resp.__exit__ = MagicMock(return_value=False)
-
-    with patch("urllib.request.urlopen", return_value=mock_resp):
+    with _patch_fetch(_valid_well_known("did:key:z6MkABCD")):
         await gateway._discover_peer_gateway("did:key:z6MkABCD@https://bob.example.com")
 
     stored = gateway._store.get_x25519_pub("did:key:z6MkABCD")
@@ -95,13 +90,7 @@ async def test_discover_peer_command_sends_peer_discovered(gateway):
     gateway.clients.add(ws)
     gateway._client_webids[ws] = "https://alice.pod/profile/card#me"
 
-    mock_resp = MagicMock()
-    mock_resp.getcode.return_value = 200
-    mock_resp.read.return_value = _valid_well_known("did:key:z6MkABCD")
-    mock_resp.__enter__ = lambda s: s
-    mock_resp.__exit__ = MagicMock(return_value=False)
-
-    with patch("urllib.request.urlopen", return_value=mock_resp):
+    with _patch_fetch(_valid_well_known("did:key:z6MkABCD")):
         await gateway.process_command(ws, {"cmd": "discover_peer", "address": "did:key:z6MkABCD@https://bob.example.com"})
 
     ws.send.assert_called()

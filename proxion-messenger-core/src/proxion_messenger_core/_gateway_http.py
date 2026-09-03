@@ -574,6 +574,12 @@ class HttpEndpointsMixin:
             from .relay import verify_relay_envelope
             _from = data.get("from_webid", "")
             _signer = data.get("relay_sig_did", "")
+            # Verify the full-payload envelope signature BEFORE any binding logic so
+            # an unauthenticated POST can never reach the TOFU seed: a forged
+            # relaygw:<victim> binding permanently drops the victim's real federated
+            # traffic. Unknown/invalid/forged → 200 no-reveal (don't act, don't seed).
+            if not verify_relay_envelope(data):
+                return "200 OK", '{"status":"received"}'
             if _ct in _SELF_SIGNED_TYPES:
                 _bound = (_signer == _from)
             elif _ct in _MEMBER_SIGNED_TYPES:
@@ -582,10 +588,17 @@ class HttpEndpointsMixin:
                 # grab the owner's never-inbound-relayed identity. Require the
                 # signer binding to already be established by prior normal traffic.
                 _privileged = _ct in ("room_moderation", "room_emoji")
-                _bound = self._relay_sender_gateway_ok(_from, _signer, require_established=_privileged)
+                # Seed a NEW binding only when from_webid is authorized for the
+                # relay target it names (a member of the local room, or a DM peer
+                # for file transfers). A stranger's validly-signed POST must not
+                # create a relaygw:<stranger> row. First-contact federation from a
+                # registered (federated) member still seeds and delivers.
+                _may_seed = self._relay_seed_authorized(data, _ct, _from)
+                _bound = self._relay_sender_gateway_ok(
+                    _from, _signer, require_established=_privileged, may_seed=_may_seed)
             else:  # _CHANNEL_SIGNED_TYPES — bind the signer to a channel participant
                 _bound = self._voice_channel_gateway_ok(data.get("channel_id", ""), _signer)
-            if not _bound or not verify_relay_envelope(data):
+            if not _bound:
                 return "200 OK", '{"status":"received"}'
             # Replay guard: dedup on the signed nonce (partitioned by signer).
             _env_nonce = data.get("relay_nonce", "")

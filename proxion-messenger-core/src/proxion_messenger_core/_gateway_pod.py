@@ -241,7 +241,6 @@ class PodSyncMixin:
         Accepts 'did:key:z6Mk...@https://gateway.example.com' or a bare gateway URL.
         Returns the parsed .well-known JSON dict, or None on any error.
         """
-        import urllib.request as _urlreq
         from .relay import parse_proxion_address
 
         peer_did: Optional[str] = None
@@ -260,21 +259,19 @@ class PodSyncMixin:
         gateway_http = gateway_url.replace("wss://", "https://").replace("ws://", "http://")
         well_known_url = gateway_http.rstrip("/") + "/.well-known/proxion"
 
+        # SSRF-safe fetch: per-hop IP pinning + private-range block + redirect
+        # re-validation (gateway_url is user-supplied via discover_peer). Mirrors
+        # the other outbound federation calls.
+        from .network import async_safe_get, NetworkError
         try:
-            loop = asyncio.get_event_loop()
-
-            def _fetch() -> Optional[dict]:
-                req = _urlreq.Request(
-                    well_known_url, headers={"Accept": "application/json", "User-Agent": "Proxion/0.1"}
-                )
-                with _urlreq.urlopen(req, timeout=5) as resp:
-                    if resp.getcode() != 200:
-                        return None
-                    raw = resp.read(65536)
-                    return json.loads(raw)
-
-            result = await loop.run_in_executor(None, _fetch)
-        except Exception as exc:
+            raw = await async_safe_get(
+                well_known_url,
+                timeout=5,
+                max_bytes=65536,
+                headers={"Accept": "application/json", "User-Agent": "Proxion/0.1"},
+            )
+            result = json.loads(raw)
+        except (NetworkError, ValueError, json.JSONDecodeError) as exc:
             logger.debug("_discover_peer_gateway %s: %s", well_known_url, exc)
             return None
 
@@ -292,8 +289,13 @@ class PodSyncMixin:
             logger.warning("_discover_peer_gateway: DID mismatch expected=%s got=%s", peer_did, discovered_did)
             return None
 
-        # Cache the gateway URL
-        self._record_peer_gateway(discovered_did, discovered_http)
+        # Cache the gateway URL — validate first to prevent SSRF pinning to a
+        # private/loopback host supplied by the peer's .well-known response.
+        from .relay import _validate_relay_target as _is_safe_gateway_url
+        if _is_safe_gateway_url(discovered_http):
+            self._record_peer_gateway(discovered_did, discovered_http)
+        else:
+            logger.debug("_discover_peer_gateway: rejected unsafe gateway_http_url %s", discovered_http)
 
         # Cache x25519 pub for sealed relay
         if "x25519_pub" in result and self._store:
