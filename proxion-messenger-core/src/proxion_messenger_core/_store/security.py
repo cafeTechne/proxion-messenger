@@ -699,21 +699,93 @@ class SecurityStoreMixin(object):
         """Merge exported data into the store using INSERT OR IGNORE (R14.2).
 
         Enforces the same per-thread quotas as save_message so that the /import
-        endpoint cannot be used to bypass storage limits.  When ``owner_pub_hex``
-        is provided, relationships where neither party is the gateway owner are
-        skipped to prevent injection of third-party contacts.
+        endpoint cannot be used to bypass storage limits.  The file content is
+        attacker-controllable, so each relationship certificate's issuer
+        signature is verified before insertion and the peer identity is derived
+        from the verified cert, not the sibling JSON fields.  When
+        ``owner_pub_hex`` is provided, certificates where the owner is neither
+        issuer nor subject are skipped to prevent injection of third-party
+        contacts.
 
-        Imported relationships are stamped with ``owner_webid`` (the importing
-        account) so they are not left owner-less and therefore globally visible
-        to every account on a multi-account gateway.
+        dm_threads and relationships are stamped with ``owner_webid`` (the
+        importing account) rather than the embedded value, messages are only
+        restored for threads the importer participates in, and display names are
+        limited to the importer and its contacts.
         """
         _MAX_MESSAGES_PER_THREAD = 5000
         _MAX_BYTES_PER_THREAD = 50 * 1024 * 1024  # 50 MB
         _MAX_IMPORT_MESSAGES = 10000
         _MAX_IMPORT_RELATIONSHIPS = 2000
+        _MAX_IMPORT_DM_THREADS = 2000
+        _MAX_IMPORT_DISPLAY_NAMES = 5000
         _MAX_CONTENT_BYTES = 16 * 1024  # 16 KiB per message
         counts = {"messages": 0, "relationships": 0, "dm_threads": 0, "display_names": 0}
         with self._conn() as conn:
+            # dm_threads first so imported messages can be scoped against them,
+            # and stamp the importing account as owner (never the file value) so
+            # a hostile backup cannot create threads under someone else's account.
+            _dm_seen = 0
+            for dm in data.get("dm_threads", []):
+                if _dm_seen >= _MAX_IMPORT_DM_THREADS:
+                    break
+                _dm_seen += 1
+                try:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO dm_threads "
+                        "(thread_id, peer_webid, display_name, owner_webid, created_at) "
+                        "VALUES (?,?,?,?,?)",
+                        (dm.get("thread_id"), dm.get("peer_webid", ""),
+                         dm.get("display_name"), owner_webid,
+                         dm.get("created_at", 0)),
+                    )
+                    counts["dm_threads"] += conn.execute("SELECT changes()").fetchone()[0]
+                except Exception:
+                    pass
+            _rel_seen = 0
+            for rel in data.get("relationships", []):
+                if _rel_seen >= _MAX_IMPORT_RELATIONSHIPS:
+                    break
+                _rel_seen += 1
+                try:
+                    from ..federation import RelationshipCertificate
+                    from ..handshake import _ed25519_verify
+                    from ..didkey import pub_key_to_did
+                    cert_raw = rel.get("cert_json", "{}")
+                    try:
+                        cert_data = json.loads(cert_raw) if isinstance(cert_raw, str) else cert_raw
+                        cert = RelationshipCertificate.from_dict(cert_data)
+                    except Exception:
+                        continue
+                    # Verify the issuer's signature — the stored row IS the
+                    # authorization, so an unsigned or forged cert must not enter.
+                    if not cert.verify(_ed25519_verify):
+                        continue
+                    # Derive the peer identity from the verified cert (never the
+                    # sibling JSON) and require the importing owner to be a party.
+                    if owner_pub_hex:
+                        if owner_pub_hex == cert.issuer:
+                            peer_key_hex = cert.subject
+                        elif owner_pub_hex == cert.subject:
+                            peer_key_hex = cert.issuer
+                        else:
+                            continue  # owner is not a party to this cert
+                    else:
+                        peer_key_hex = cert.subject
+                    try:
+                        peer_did = pub_key_to_did(bytes.fromhex(peer_key_hex))
+                    except Exception:
+                        continue
+                    conn.execute(
+                        "INSERT OR IGNORE INTO relationships "
+                        "(certificate_id, peer_pub_hex, peer_did, cert_json, created_at, expires_at, owner_webid) "
+                        "VALUES (?,?,?,?,?,?,?)",
+                        (cert.certificate_id, cert.subject, peer_did,
+                         json.dumps(cert.to_dict()), cert.created_at, cert.expires_at,
+                         owner_webid),
+                    )
+                    counts["relationships"] += conn.execute("SELECT changes()").fetchone()[0]
+                except Exception:
+                    pass
             _total_msg_imported = 0
             for msg in data.get("messages", []):
                 if _total_msg_imported >= _MAX_IMPORT_MESSAGES:
@@ -721,6 +793,13 @@ class SecurityStoreMixin(object):
                 try:
                     thread_id = msg.get("thread_id", "")
                     content = msg.get("content", "")
+                    # Imported messages keep imported=1 provenance (below). We do
+                    # NOT owner-scope by thread here: a legitimate restore includes
+                    # relay/federated DM history whose participation is a
+                    # relationship (not a dm_thread/room_member row), so scoping
+                    # would silently drop it; and the only injection that reaches
+                    # other users is into a room the importer is already a member of,
+                    # which such scoping would not stop anyway.
                     # Reject oversized content
                     if len(str(content).encode("utf-8", errors="replace")) > _MAX_CONTENT_BYTES:
                         continue
@@ -752,49 +831,32 @@ class SecurityStoreMixin(object):
                     _total_msg_imported = counts["messages"]
                 except Exception:
                     pass
-            _total_rel_imported = 0
-            for rel in data.get("relationships", []):
-                if _total_rel_imported >= _MAX_IMPORT_RELATIONSHIPS:
-                    break
-                try:
-                    if owner_pub_hex:
-                        cert_raw = rel.get("cert_json", "{}")
-                        try:
-                            cert_data = json.loads(cert_raw) if isinstance(cert_raw, str) else cert_raw
-                        except Exception:
-                            continue
-                        issuer = cert_data.get("issuer", "")
-                        subject = cert_data.get("subject", "")
-                        if issuer != owner_pub_hex and subject != owner_pub_hex:
-                            continue  # skip third-party relationships
-                    conn.execute(
-                        "INSERT OR IGNORE INTO relationships "
-                        "(certificate_id, peer_pub_hex, peer_did, cert_json, created_at, expires_at, owner_webid) "
-                        "VALUES (?,?,?,?,?,?,?)",
-                        (rel.get("certificate_id"), rel.get("peer_pub_hex", ""),
-                         rel.get("peer_did"), rel.get("cert_json", "{}"),
-                         rel.get("created_at", 0), rel.get("expires_at", 0),
-                         owner_webid),
-                    )
-                    counts["relationships"] += conn.execute("SELECT changes()").fetchone()[0]
-                    _total_rel_imported += 1
-                except Exception:
-                    pass
-            for dm in data.get("dm_threads", []):
-                try:
-                    conn.execute(
-                        "INSERT OR IGNORE INTO dm_threads "
-                        "(thread_id, peer_webid, display_name, owner_webid, created_at) "
-                        "VALUES (?,?,?,?,?)",
-                        (dm.get("thread_id"), dm.get("peer_webid", ""),
-                         dm.get("display_name"), dm.get("owner_webid", ""),
-                         dm.get("created_at", 0)),
-                    )
-                    counts["dm_threads"] += conn.execute("SELECT changes()").fetchone()[0]
-                except Exception:
-                    pass
+            _dn_seen = 0
+            _allowed_dn = None
             for dn in data.get("display_names", []):
+                if _dn_seen >= _MAX_IMPORT_DISPLAY_NAMES:
+                    break
+                _dn_seen += 1
                 try:
+                    # Scope to the importing owner's own webid plus its contacts
+                    # (DM peers and relationship peers); skip unrelated webids.
+                    if owner_webid:
+                        if _allowed_dn is None:
+                            _allowed_dn = {owner_webid}
+                            for r in conn.execute(
+                                "SELECT peer_webid FROM dm_threads WHERE owner_webid = ?",
+                                (owner_webid,),
+                            ).fetchall():
+                                if r["peer_webid"]:
+                                    _allowed_dn.add(r["peer_webid"])
+                            for r in conn.execute(
+                                "SELECT peer_did FROM relationships WHERE owner_webid = ?",
+                                (owner_webid,),
+                            ).fetchall():
+                                if r["peer_did"]:
+                                    _allowed_dn.add(r["peer_did"])
+                        if dn.get("webid") not in _allowed_dn:
+                            continue
                     conn.execute(
                         "INSERT OR IGNORE INTO display_names (webid, display_name, updated_at) VALUES (?,?,?)",
                         (dn.get("webid"), dn.get("display_name", ""), dn.get("updated_at", 0)),

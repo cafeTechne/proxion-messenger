@@ -347,15 +347,26 @@ class TestListFriendRequestsScoped:
 # ---------------------------------------------------------------------------
 
 class TestImportDataOwnership:
-    def _make_rel_dict(self, issuer_hex, subject_hex, cert_id="cert-import-001"):
-        cert_data = {"issuer": issuer_hex, "subject": subject_hex, "version": 1}
+    def _make_rel_dict(self, issuer_priv, subject_hex, cert_id="cert-import-001"):
+        """Build an export row carrying a genuine issuer-signed certificate."""
+        from proxion_messenger_core.federation import RelationshipCertificate, Capability
+        issuer_hex = issuer_priv.public_key().public_bytes(
+            Encoding.Raw, PublicFormat.Raw
+        ).hex()
+        cert = RelationshipCertificate(
+            issuer=issuer_hex,
+            subject=subject_hex,
+            capabilities=[Capability(with_="stash://dm/", can="crud/write")],
+            certificate_id=cert_id,
+        )
+        cert.sign(issuer_priv)
         return {
             "certificate_id": cert_id,
             "peer_pub_hex": subject_hex,
             "peer_did": "did:key:zpeer",
-            "cert_json": json.dumps(cert_data),
-            "created_at": 0,
-            "expires_at": 0,
+            "cert_json": json.dumps(cert.to_dict()),
+            "created_at": cert.created_at,
+            "expires_at": cert.expires_at,
         }
 
     def test_import_data_rejects_third_party_rels(self, tmp_path):
@@ -363,38 +374,60 @@ class TestImportDataOwnership:
         from proxion_messenger_core.local_store import LocalStore
         store = LocalStore(str(tmp_path / "store.db"))
         alice = Ed25519PrivateKey.generate()
-        alice_hex = alice.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
         bob = Ed25519PrivateKey.generate()
         bob_hex = bob.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
         owner = Ed25519PrivateKey.generate()
         owner_hex = owner.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
-        third_party_rel = self._make_rel_dict(alice_hex, bob_hex, "cert-foreign")
+        # Signature-valid cert between alice (issuer) and bob (subject); the
+        # importing owner is neither party, so it must be skipped.
+        third_party_rel = self._make_rel_dict(alice, bob_hex, "cert-foreign")
         counts = store.import_data({"relationships": [third_party_rel]}, owner_pub_hex=owner_hex)
         assert counts["relationships"] == 0
         saved = store.list_relationships()
         assert not any(r.get("certificate_id") == "cert-foreign" for r in saved)
 
     def test_import_data_accepts_own_rels(self, tmp_path):
-        """Import accepts relationships where the owner is a party."""
+        """Import accepts a signature-valid cert where the owner is a party."""
         from proxion_messenger_core.local_store import LocalStore
         store = LocalStore(str(tmp_path / "store.db"))
         owner = Ed25519PrivateKey.generate()
         owner_hex = owner.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
         peer = Ed25519PrivateKey.generate()
         peer_hex = peer.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
-        own_rel = self._make_rel_dict(owner_hex, peer_hex, "cert-own-001")
+        own_rel = self._make_rel_dict(owner, peer_hex, "cert-own-001")
         counts = store.import_data({"relationships": [own_rel]}, owner_pub_hex=owner_hex)
         assert counts["relationships"] == 1
 
-    def test_import_data_no_owner_skips_validation(self, tmp_path):
-        """Without owner_pub_hex, all relationships are imported (backward compat)."""
+    def test_import_data_rejects_forged_signature(self, tmp_path):
+        """A relationship whose cert signature does not verify is skipped."""
+        from proxion_messenger_core.local_store import LocalStore
+        from proxion_messenger_core.didkey import pub_key_to_did
+        store = LocalStore(str(tmp_path / "store.db"))
+        owner = Ed25519PrivateKey.generate()
+        owner_hex = owner.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+        peer = Ed25519PrivateKey.generate()
+        peer_hex = peer.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+        rel = self._make_rel_dict(owner, peer_hex, "cert-forged")
+        # Tamper with the signature so verification fails.
+        cert = json.loads(rel["cert_json"])
+        sig = bytearray(bytes.fromhex(cert["signature"]))
+        sig[0] ^= 0xFF
+        cert["signature"] = bytes(sig).hex()
+        rel["cert_json"] = json.dumps(cert)
+        counts = store.import_data({"relationships": [rel]}, owner_pub_hex=owner_hex)
+        assert counts["relationships"] == 0
+        peer_did = pub_key_to_did(bytes.fromhex(peer_hex))
+        assert store.get_relationship_by_did(peer_did) is None
+
+    def test_import_data_no_owner_still_verifies_signature(self, tmp_path):
+        """Without owner_pub_hex the owner-party filter is skipped, but the
+        certificate signature is still verified before import."""
         from proxion_messenger_core.local_store import LocalStore
         store = LocalStore(str(tmp_path / "store.db"))
         alice = Ed25519PrivateKey.generate()
-        alice_hex = alice.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
         bob = Ed25519PrivateKey.generate()
         bob_hex = bob.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
-        rel = self._make_rel_dict(alice_hex, bob_hex, "cert-noowner")
+        rel = self._make_rel_dict(alice, bob_hex, "cert-noowner")
         counts = store.import_data({"relationships": [rel]})  # no owner_pub_hex
         assert counts["relationships"] == 1
 
