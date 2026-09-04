@@ -61,22 +61,49 @@ describe('_updateIdentityFingerprint', () => {
     expect(els['fingerprint-bar'].style.display).toBe('none');
     expect(e.state._fingerprintBarDid).toBeNull();
   });
-  it('renders safety words and records the shown DID', async () => {
-    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ safety_words: ['red','sun','tree','owl','blue','fish'] }) }));
+  const STRONG_SN = '0'.repeat(60);
+  const STRONG_GROUPS = Array.from({ length: 12 }, () => '00000');
+  it('renders the strong safety number and records it + the shown DID', async () => {
+    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({
+      safety_number: STRONG_SN, safety_number_groups: STRONG_GROUPS,
+      safety_words: ['red','sun','tree','owl','blue','fish'],
+    }) }));
     const e = createE2EStatus();
     await e._updateIdentityFingerprint('did:key:zCarol');
     expect(els['fingerprint-bar'].style.display).toBe('flex');
-    expect(els['fingerprint-words'].textContent).toContain('red sun tree');
+    expect(els['fingerprint-words'].textContent).toContain('00000 00000 00000');
+    // the strong number is shown, not the legacy words
+    expect(els['fingerprint-words'].textContent).not.toContain('red');
     expect(e.state._fingerprintBarDid).toBe('did:key:zCarol');
+    expect(e.state._fingerprintBarSafetyNumber).toBe(STRONG_SN);
     expect(els['fingerprint-verify-btn'].disabled).toBe(false);
   });
-  it('marks the verify button done when already verified', async () => {
-    store['proxion_verified_did:key:zCarol'] = '1';
-    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ safety_words: ['a','b','c'] }) }));
+  it('marks the verify button done when the stored value matches the strong number', async () => {
+    store['proxion_verified_did:key:zCarol'] = STRONG_SN;
+    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({
+      safety_number: STRONG_SN, safety_number_groups: STRONG_GROUPS,
+    }) }));
     const e = createE2EStatus();
     await e._updateIdentityFingerprint('did:key:zCarol');
     expect(els['fingerprint-verify-btn'].disabled).toBe(true);
     expect(els['fingerprint-verify-btn'].textContent).toContain('e2e.verified');
+  });
+  it('treats a legacy "1" flag as unverified against the strong number', async () => {
+    store['proxion_verified_did:key:zCarol'] = '1';
+    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({
+      safety_number: STRONG_SN, safety_number_groups: STRONG_GROUPS,
+    }) }));
+    const e = createE2EStatus();
+    await e._updateIdentityFingerprint('did:key:zCarol');
+    expect(els['fingerprint-verify-btn'].disabled).toBe(false);
+    expect(els['fingerprint-verify-btn'].textContent).toContain('e2e.markVerified');
+  });
+  it('falls back to legacy words when an older gateway omits the safety number', async () => {
+    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ safety_words: ['red','sun','tree','owl','blue','fish'] }) }));
+    const e = createE2EStatus();
+    await e._updateIdentityFingerprint('did:key:zCarol');
+    expect(els['fingerprint-words'].textContent).toContain('red sun tree');
+    expect(e.state._fingerprintBarSafetyNumber).toBeNull();
   });
 });
 

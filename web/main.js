@@ -1242,9 +1242,13 @@ import { createIdentityResolver } from './identity.js';
         // (createConnection). Reconnect timers + pending-command queue live there.
 
         // Pre-processes events asynchronously (E2E decrypt) then delegates to handleEvent.
-        async function _handleEventAsync(event) {
-            // Cache peer's X25519 pub key from any DM event
-            if (event.x25519_pub && event.from_webid) {
+        // fromPod marks an event that arrived over an untrusted pod drop box (call/DM/
+        // join/presence inbox) rather than the authenticated gateway socket. The send
+        // path (isE2EEnabled) trusts this key cache, so only the semi-trusted gateway
+        // may seed it; a pod-drop key is honoured only once its envelope is verified.
+        async function _handleEventAsync(event, fromPod = false) {
+            // Cache peer's X25519 pub key from a gateway-delivered DM event only.
+            if (!fromPod && event.x25519_pub && event.from_webid) {
                 cachePeerPub(event.from_webid, event.x25519_pub);
             }
             // Decrypt E2E messages before rendering
@@ -1283,7 +1287,9 @@ import { createIdentityResolver } from './identity.js';
                 const fromAcct = event.from_webid;
                 const senderDev = p.from_device_id || fromAcct;
                 const pid = fromAcct + '#' + senderDev;
-                if (p.x25519_pub) cachePeerPub(pid, p.x25519_pub);
+                // Gateway fanout is semi-trusted key distribution; a pod-drop fanout
+                // is only trusted once webdm has verified its envelope signature.
+                if (p.x25519_pub && (!fromPod || event.sender_verified)) cachePeerPub(pid, p.x25519_pub);
                 let text = p.content;
                 if (p.e2e && p.nonce) {
                     try {
@@ -5344,7 +5350,8 @@ import { createIdentityResolver } from './identity.js';
             document.getElementById('fingerprint-verify-btn')?.addEventListener('click', () => {
                 const did = e2eStatus.state._fingerprintBarDid;
                 if (did) {
-                    localStorage.setItem("proxion_verified_" + did, "1");
+                    const sn = e2eStatus.state._fingerprintBarSafetyNumber;
+                    localStorage.setItem("proxion_verified_" + did, sn || "1");
                     _updateIdentityFingerprint(did);
                 }
             });
@@ -5529,7 +5536,7 @@ import { createIdentityResolver } from './identity.js';
                         pod: { podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop },
                         e2e: { cachePeerPub, ratchetDecrypt },
                         notify: { watchResource },
-                        handleEvent: (ev) => _handleEventAsync(ev),
+                        handleEvent: (ev) => _handleEventAsync(ev, true),
                         getSelfWebId: () => selfWebId,
                         getDisplayName: () => localStorage.getItem('proxion_display_name') || '',
                         getMyDeviceId: () => clientDid,
@@ -5568,7 +5575,7 @@ import { createIdentityResolver } from './identity.js';
                     const webCalls = createWebCalls({
                         pod: { podEnsureCallInbox, podDropSignal, podReadSignals, podDeleteSignal },
                         notify: { watchResource },
-                        handleEvent: (ev) => _handleEventAsync(ev),
+                        handleEvent: (ev) => _handleEventAsync(ev, true),
                         getSelfWebId: () => selfWebId,
                         getDisplayName: () => localStorage.getItem('proxion_display_name') || '',
                         peerPodRoot: (webid) => peerPodRootFromWebId(webid),
@@ -5588,7 +5595,7 @@ import { createIdentityResolver } from './identity.js';
                     });
                     socket = createPodSocket({
                         getSelfWebId: () => selfWebId,
-                        handleEvent: (ev) => _handleEventAsync(ev),
+                        handleEvent: (ev) => _handleEventAsync(ev, true),
                         pod: { podListOwnedRoomDescriptors },
                         dm: webDm,
                         calls: webCalls,
@@ -5611,7 +5618,7 @@ import { createIdentityResolver } from './identity.js';
                     const webPresence = createWebPresence({
                         pod: { podWritePresence, podReadPresence, presenceUrlFor },
                         notify: { watchResource },
-                        handleEvent: (ev) => _handleEventAsync(ev),
+                        handleEvent: (ev) => _handleEventAsync(ev, true),
                         getContacts: () => Object.keys(localDmPeers || {}),
                         peerPodRoot: (webid) => peerPodRootFromWebId(webid),
                     });

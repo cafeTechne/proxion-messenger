@@ -14,6 +14,14 @@
 // The outbound commands voice.js emits that this engine carries.
 export const SIGNAL_CMDS = new Set(['voice_invite', 'voice_answer', 'ice_candidate', 'voice_hangup']);
 
+// The call inbox is public-Append: anyone who knows our WebID can POST arbitrary
+// JSON into it. It legitimately carries only the signal types we drop into a
+// peer's inbox (sendSignal maps cmd -> type), so the receive-side allowlist is
+// that same set. Dispatch only these voice types; anything else (a forged
+// contact_revoked, message, block, ...) would otherwise run through the full
+// client dispatch.
+const RECV_TYPES = SIGNAL_CMDS;
+
 export function createWebCalls({ pod, notify, handleEvent, getSelfWebId, getDisplayName, peerPodRoot }) {
     let _unsub = null;
     let _draining = false;
@@ -50,7 +58,7 @@ export function createWebCalls({ pod, notify, handleEvent, getSelfWebId, getDisp
                 const sigs = await pod.podReadSignals();
                 for (const { url, signal } of sigs) {
                     try {
-                        if (signal && signal.type) handleEvent(signal);
+                        if (signal && RECV_TYPES.has(signal.type)) handleEvent(signal);
                     } catch (err) {
                         console.warn('[webcalls] signal handling failed:', err);
                     }

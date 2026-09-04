@@ -70,6 +70,20 @@ describe('createWebCalls receive', () => {
         expect(deleted).toEqual(['bad']);
     });
 
+    it('drops a non-voice event injected into the call inbox but keeps the voice one', async () => {
+        // The call inbox is public-Append; a non-voice event forged in by anyone
+        // who knows the WebID must never reach the client dispatch, yet the drop
+        // is still cleaned up so it cannot be replayed.
+        const { calls, events, deleted } = harness({ signals: [
+            { url: 'evil1', signal: { type: 'contact_revoked', from_webid: 'https://mallory' } },
+            { url: 'evil2', signal: { type: 'message', from_webid: 'https://mallory', content: 'spoofed' } },
+            { url: 'ok', signal: { type: 'voice_invite', from_webid: 'https://bob', caller_webid: 'https://bob', sdp_offer: 'O' } },
+        ] });
+        await calls.drainOnce();
+        expect(events.map((e) => e.type)).toEqual(['voice_invite']);
+        expect(deleted).toEqual(['evil1', 'evil2', 'ok']);
+    });
+
     it('start() ensures the inbox, drains, and subscribes', async () => {
         const { calls, pod, notify } = harness();
         await calls.start();

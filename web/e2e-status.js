@@ -13,6 +13,7 @@ import { t } from './i18n.js';
 export function createE2EStatus() {
     const state = {
         _fingerprintBarDid: null, // R11.2.2: DID shown in fingerprint bar
+        _fingerprintBarSafetyNumber: null, // strong safety number currently shown
     };
 
     function _updateE2EStatus(peerId) {
@@ -53,9 +54,26 @@ export function createE2EStatus() {
             const resp = await fetch(`/fingerprint/${encodeURIComponent(peerDid)}`);
             if (!resp.ok) { bar.style.display = "none"; return; }
             const data = await resp.json();
-            const words = (data.safety_words || []);
-            wordsEl.textContent = words.slice(0,3).join(" ") + "  " + words.slice(3).join(" ");
-            const verified = localStorage.getItem("proxion_verified_" + peerDid) === "1";
+            // Prefer the strong safety number (SHA-512 fold binding both
+            // identities); fall back to the legacy 6-word fingerprint only when
+            // an older gateway omits it.
+            const safetyNum = data.safety_number || null;
+            state._fingerprintBarSafetyNumber = safetyNum;
+            if (safetyNum) {
+                const groups = data.safety_number_groups || [];
+                wordsEl.textContent = groups.length
+                    ? groups.slice(0, 6).join(" ") + "  " + groups.slice(6).join(" ")
+                    : safetyNum;
+            } else {
+                const words = (data.safety_words || []);
+                wordsEl.textContent = words.slice(0,3).join(" ") + "  " + words.slice(3).join(" ");
+            }
+            // The stored verification records the exact safety number that was
+            // confirmed out-of-band. A legacy "1" flag (or a rotated key) no
+            // longer matches the strong number, so the contact shows unverified
+            // and is re-verified against the stronger representation.
+            const stored = localStorage.getItem("proxion_verified_" + peerDid);
+            const verified = safetyNum ? (stored === safetyNum) : (stored === "1");
             if (verified) {
                 verifyBtn.textContent = '✓ ' + t('e2e.verified');
                 verifyBtn.style.background = "#134e26";
