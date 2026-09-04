@@ -10,6 +10,9 @@
 
 export const ROOM_DESC_VERSION = 1;
 const ROLES = new Set(['owner', 'admin', 'member']);
+// A descriptor rides in an attacker-writable room.json; cap membership so a huge
+// members array can't blow up here. Matches the gateway's _MAX_ROOM_MEMBERS_ACL.
+const MAX_MEMBERS = 500;
 
 /**
  * Normalise a members list into descriptor form: deduped by webid, a valid role
@@ -20,6 +23,7 @@ export function normalizeMembers(members, owner) {
     const out = [];
     const seen = new Set();
     for (const m of members || []) {
+        if (out.length >= MAX_MEMBERS) break;
         const webid = typeof m === 'string' ? m : (m && m.webid);
         if (!webid || seen.has(webid)) continue;
         seen.add(webid);

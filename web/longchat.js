@@ -444,9 +444,13 @@ export function reconcileRoomHistory(local = [], pod = []) {
     return out;
 }
 
+// Cap on @graph nodes walked from a (possibly foreign) day file: defence in depth
+// alongside the byte cap on the fetched body in pod.podReadChatDayAt.
+const MAX_LONGCHAT_NODES = 5000;
+
 export function parseLongChatJsonLd(json, threadId = '') {
     const out = [];
-    for (const node of nodesOf(json)) {
+    for (const node of nodesOf(json).slice(0, MAX_LONGCHAT_NODES)) {
         if (!node || typeof node !== 'object') continue;
         const content = firstLiteral(node, P.content);
         if (content == null) continue;          // not a message node

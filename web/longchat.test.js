@@ -303,6 +303,13 @@ describe('parseLongChatJsonLd', () => {
         expect(parseLongChatJsonLd([null, 'nonsense', {}])).toEqual([]);
     });
 
+    it('caps the number of @graph nodes it walks (foreign day file)', () => {
+        const nodes = Array.from({ length: 6000 }, (_, i) =>
+            msgNode(`https://p/c#m${i}`, `x${i}`, '2026-07-22T10:00:00Z'));
+        const out = parseLongChatJsonLd(nodes);
+        expect(out.length).toBeLessThanOrEqual(5000);
+    });
+
     it('defaults the extras that only Proxion writes', () => {
         const out = parseLongChatJsonLd([msgNode('https://p/c#m', 'x', '2026-07-22T10:00:00Z')]);
         expect(out[0].content_type).toBe('text');

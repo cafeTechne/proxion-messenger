@@ -2972,7 +2972,17 @@ import { createIdentityResolver } from './identity.js';
             if (!appr.owner_webid || peerPodRootFromWebId(appr.owner_webid) !== appr.owner_pod_root) return;
             const roomId = appr.room_id;
             const desc = await podReadRoomDescriptorAt(appr.owner_pod_root, roomId);
-            const container = (desc && desc.long_chat) || chatRootUrl(appr.owner_pod_root, roomId);
+            // long_chat rides in the approver's own room.json, so it is attacker-
+            // controlled: only honour it when it survives the same SSRF gate as the
+            // owner root AND is same-origin as the validated owner_pod_root; otherwise
+            // watch/fetch the safe URL derived from the (already vetted) owner root.
+            let container = chatRootUrl(appr.owner_pod_root, roomId);
+            const claimed = desc && desc.long_chat;
+            if (claimed && isPeerPodRootAllowed(claimed, podStorageRoot())) {
+                try {
+                    if (new URL(claimed).origin === new URL(appr.owner_pod_root).origin) container = claimed;
+                } catch (_) { /* malformed long_chat → keep the derived URL */ }
+            }
             const title = (desc && desc.title) || appr.title || roomId;
             if (_remoteRooms[roomId]) return;
             _remoteRooms[roomId] = { ownerPodRoot: appr.owner_pod_root, container, title };

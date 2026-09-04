@@ -18,6 +18,20 @@ import { accessControlUrl, detectAclModel, buildAcpAcr } from './acl.js';
 
 const SAFE_ID_RE = /^[\w-]{1,128}$/;
 
+// Foreign Long Chat reads are on attacker-supplied URLs and bodies. Bound both:
+// how many discovered containers we fan out to, and how large a day file we parse.
+const MAX_DISCOVERED_CHATS = 100;
+const MAX_CHAT_DAY_BYTES = 512 * 1024;
+
+// A chat container URL must be an absolute http(s) URL ending in '/', with no
+// fragment/query/whitespace or traversal. Mirrors solidchat.isValidChatContainer,
+// duplicated here to keep pod.js from depending on the higher-level chat module.
+function _isValidChatContainer(url) {
+    if (typeof url !== 'string' || !/^https?:\/\//.test(url) || !url.endsWith('/')) return false;
+    if (/[\s?#]/.test(url) || url.includes('..')) return false;
+    try { new URL(url); return true; } catch { return false; }
+}
+
 async function podFetch(path, options = {}) {
     const root = podStorageRoot();
     if (!root || !solidSession.info.isLoggedIn) return;
@@ -477,7 +491,19 @@ export async function podReadChatDayAt(containerUrl, date, threadId = '') {
             headers: { Accept: 'application/ld+json' },
         });
         if (!res || !res.ok) return [];
-        return parseLongChatJsonLd(await res.json(), threadId);
+        // Foreign day file: bound the body before parsing (Content-Length when the
+        // server sends one, then the actual text), mirroring the descriptor path.
+        const len = Number(res.headers?.get?.('content-length'));
+        if (Number.isFinite(len) && len > MAX_CHAT_DAY_BYTES) return [];
+        let json;
+        if (typeof res.text === 'function') {
+            const text = await res.text();
+            if (text.length > MAX_CHAT_DAY_BYTES) return [];
+            json = JSON.parse(text);
+        } else {
+            json = await res.json();
+        }
+        return parseLongChatJsonLd(json, threadId);
     } catch (err) {
         console.warn('[pod] podReadChatDayAt failed:', err);
         return [];
@@ -914,7 +940,10 @@ export async function podListChatsForWebId(webId) {
         return [];
     }
     const out = [];
-    for (const container of containers) {
+    // A foreign type index is attacker-writable: cap the fan-out, and skip any
+    // container that fails the shape or SSRF gate before authenticating to it.
+    for (const container of containers.slice(0, MAX_DISCOVERED_CHATS)) {
+        if (!_isValidChatContainer(container) || !_peerRootAllowed(container)) continue;
         out.push({ container, title: await _readChatTitle(container) });
     }
     return out;
@@ -924,7 +953,7 @@ export async function podListChatsForWebId(webId) {
 async function _readChatTitle(container) {
     const fallback = roomIdFromChatContainer(container) || container;
     try {
-        const res = await solidSession.fetch(indexUrlAt(container), { headers: { Accept: 'text/turtle' } });
+        const res = await solidSession.fetch(indexUrlAt(container), { headers: { Accept: 'text/turtle' }, redirect: 'error' });
         if (!res || !res.ok) return fallback;
         const ttl = await res.text();
         const m = ttl.match(/(?:dc:title|<http:\/\/purl\.org\/dc\/elements\/1\.1\/title>)\s+"([^"]*)"/);

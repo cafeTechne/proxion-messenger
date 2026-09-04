@@ -67,6 +67,13 @@ describe('normalizeMembers', () => {
         const m = normalizeMembers([BOB], OWNER);
         expect(m.find(x => x.webid === BOB)).toEqual({ webid: BOB, role: 'member', banned: false });
     });
+
+    it('caps a huge members array (attacker-writable descriptor) at 500', () => {
+        const huge = Array.from({ length: 5000 }, (_, i) => `https://p${i}.pod/#me`);
+        const m = normalizeMembers(huge, OWNER);
+        expect(m.length).toBeLessThanOrEqual(501);   // 500 from the list, owner prepended
+        expect(m.find(x => x.webid === OWNER).role).toBe('owner');
+    });
 });
 
 describe('buildRoomDescriptor', () => {
