@@ -181,12 +181,13 @@ class TestInviteAcceptValidation:
             [Capability(with_="stash://dm/", can="crud/write")],
             endpoint_hints=["http://localhost:8080"],
         )
-        if gw._store:
-            gw._store.save_pending_invite(invite.to_dict(), "did:key:zacceptor")
         priv = Ed25519PrivateKey.generate()
         pub_bytes = priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
         pub_hex = pub_bytes.hex()
         acceptor_did = pub_key_to_did(pub_bytes)
+        # The acceptance must come from the DID the invite was issued to.
+        if gw._store:
+            gw._store.save_pending_invite(invite.to_dict(), acceptor_did)
         body = self._make_payload(invite.invitation_id, pub_hex, from_did=acceptor_did)
         status, resp = await gw._handle_invite_accept_post(body)
         assert status.startswith("200"), f"Expected 200 got {status}: {resp}"

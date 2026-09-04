@@ -891,8 +891,25 @@ class PodSyncMixin:
                 })
 
             certs = handshake.receive_certificates(self.agent.store_key, store)
+            owner_pub_hex = self.agent.identity_pub_bytes.hex()
             for cert, valid in certs:
                 if not valid:
+                    continue
+                # `valid` only proves the issuer signed the cert; anyone who knows
+                # our store pubkey can seal a signed cert into our mailbox. The
+                # stored row IS the authorization, so require the cert to name THIS
+                # owner as subject (mirrors the /invite/accept subject check) before
+                # trusting it. RESIDUAL: a pending-invite/consent lookup is not wired
+                # on the pod handshake path (inbound pod invites are not persisted via
+                # save_pending_invite), so subject==owner is the enforced minimum —
+                # an unsolicited self-signed cert naming us as subject is still
+                # accepted here (deferred consent-check design item).
+                if cert.subject != owner_pub_hex:
+                    logger.warning(
+                        "_poll_handshake_completions: rejected inbound cert %s — "
+                        "subject is not this gateway owner",
+                        cert.certificate_id,
+                    )
                     continue
                 try:
                     peer_did = pub_key_to_did(bytes.fromhex(cert.issuer))
@@ -1063,8 +1080,26 @@ class PodSyncMixin:
                 if not cert_id or cert_id in known_ids:
                     continue
                 from .federation import RelationshipCertificate as _RC
+                from .handshake import _ed25519_verify
                 cert = _RC.from_dict(cert_dict)
-                peer_pub = cert_dict.get("subject") or cert_dict.get("issuer", "")
+                # The stored row IS the authorization, so verify the issuer's
+                # signature and require this owner to be a party before trusting
+                # pod contents (which any writer to the container could have added).
+                if not cert.verify(_ed25519_verify):
+                    logger.warning(
+                        "_restore_relationships_from_pod: rejected cert %s — invalid signature",
+                        cert_id,
+                    )
+                    continue
+                owner_pub_hex = self.agent.identity_pub_bytes.hex()
+                if cert.issuer != owner_pub_hex and cert.subject != owner_pub_hex:
+                    logger.warning(
+                        "_restore_relationships_from_pod: rejected cert %s — "
+                        "neither issuer nor subject matches gateway owner",
+                        cert_id,
+                    )
+                    continue
+                peer_pub = cert.subject if cert.issuer == owner_pub_hex else cert.issuer
                 peer_did = None
                 if peer_pub:
                     peer_did = pub_key_to_did(bytes.fromhex(peer_pub))

@@ -1761,10 +1761,22 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
     async def _handle_restore_contacts(self, websocket, data: dict) -> None:
         """Rehydrate dm_clients and SQLite from pod-persisted RelationshipCertificates."""
+        # Owner-gate: a stored relationship row IS the authorization (it grants the
+        # peer DM/reaction/file/voice), so only the gateway owner may rehydrate it.
+        # On an auth-enforced deployment every other registered session is a
+        # self-claimed-DID stranger who could otherwise inject a relationship
+        # binding the owner to an attacker-controlled peer.
+        caller_did = self._client_webids.get(websocket, "")
+        if caller_did != self._own_gateway_did():
+            await websocket.send(json.dumps({
+                "type": "error", "code": "E_FORBIDDEN", "message": "gateway_owner_only",
+            }))
+            return
         certs = data.get("certs", [])
         if not isinstance(certs, list):
             return
         from .didkey import pub_key_to_did
+        from .handshake import _ed25519_verify
         owner_pub_hex = self.agent.identity_pub_bytes.hex()
         restored = 0
         for cert_dict in certs:
@@ -1774,6 +1786,17 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             if not cert_id:
                 continue
             try:
+                # Verify the issuer's signature before trusting the cert — the stored
+                # row IS the authorization, so an unsigned or forged cert must not enter.
+                try:
+                    cert_obj = RelationshipCertificate.from_dict(cert_dict)
+                except Exception:
+                    continue
+                if not cert_obj.verify(_ed25519_verify):
+                    logger.warning(
+                        f"restore_contacts: rejected cert {cert_id} — invalid signature"
+                    )
+                    continue
                 # Reject certs that don't involve this gateway owner as issuer or subject.
                 # Prevents a compromised client from injecting third-party relationships.
                 issuer = cert_dict.get("issuer", "")
@@ -1793,7 +1816,6 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                     asyncio.create_task(self._sync_cert_to_pod(cert_dict))
                 pod_client = self._pod_client()
                 if pod_client and cert_id not in self.dm_clients:
-                    cert_obj = RelationshipCertificate.from_dict(cert_dict)
                     self.dm_clients[cert_id] = (cert_obj, pod_client)
                 if peer_did:
                     endpoint = cert_dict.get("endpoint_hints", [None])[0] if cert_dict.get("endpoint_hints") else None

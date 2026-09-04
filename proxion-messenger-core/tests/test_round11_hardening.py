@@ -175,6 +175,19 @@ async def test_fingerprint_endpoint(tmp_path):
     expected_fp = base64.urlsafe_b64encode(hashlib.sha256(pub_bytes).digest()).decode().rstrip("=")
     assert body["fingerprint"] == expected_fp, f"Fingerprint mismatch: {body}"
 
+    # Strong safety number: 60 digits, folds both identities, and matches
+    # compute_safety_numbers over (gateway did, peer did).
+    from proxion_messenger_core.safety_numbers import (
+        compute_safety_numbers,
+        format_safety_numbers,
+    )
+    my_pub = gw.agent.identity_pub_bytes
+    my_did = pub_key_to_did(my_pub)
+    expected_sn = compute_safety_numbers(my_did, my_pub, did, pub_bytes)
+    assert body["safety_number"] == expected_sn, f"Safety number mismatch: {body}"
+    assert len(body["safety_number"]) == 60 and body["safety_number"].isdigit()
+    assert body["safety_number_groups"] == format_safety_numbers(expected_sn)
+
     # Invalid DID → 404
     reader2, writer2 = await asyncio.open_connection("127.0.0.1", http_port)
     writer2.write(b"GET /fingerprint/did%3Akey%3AINVALID HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")

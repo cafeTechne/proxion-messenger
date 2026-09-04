@@ -292,24 +292,26 @@ class TestTypingIndicatorNoFallbackBroadcast:
 # ---------------------------------------------------------------------------
 
 class TestRestoreContactsOwnershipValidation:
-    def _make_cert_dict(self, issuer_hex: str, subject_hex: str, cert_id: str = "cert-001") -> dict:
-        return {
-            "certificate_id": cert_id,
-            "issuer": issuer_hex,
-            "subject": subject_hex,
-            "capabilities": [],
-            "version": 1,
-            "signature": None,
-        }
+    def _signed_cert_dict(self, issuer_priv, subject_hex: str, cert_id: str = "cert-001") -> dict:
+        """Build a cert dict signed by *issuer_priv* (a real Ed25519 key)."""
+        from proxion_messenger_core.federation import RelationshipCertificate, Capability
+        issuer_hex = issuer_priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+        cert = RelationshipCertificate(
+            issuer=issuer_hex,
+            subject=subject_hex,
+            capabilities=[Capability(with_="stash://dm/", can="crud/write")],
+            certificate_id=cert_id,
+        )
+        cert.sign(issuer_priv)
+        return cert.to_dict()
 
     @pytest.mark.asyncio
     async def test_cert_with_owner_as_issuer_is_accepted(self, tmp_path):
         gw = _make_gateway(tmp_path)
-        owner_hex = gw.agent.identity_pub_bytes.hex()
         peer_priv = Ed25519PrivateKey.generate()
         peer_hex = peer_priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
         ws = _owner_ws(gw)
-        cert = self._make_cert_dict(owner_hex, peer_hex)
+        cert = self._signed_cert_dict(gw.agent.identity_key, peer_hex)
         await gw._handle_restore_contacts(ws, {"certs": [cert]})
         if gw._store:
             saved = gw._store.list_relationships()
@@ -320,9 +322,8 @@ class TestRestoreContactsOwnershipValidation:
         gw = _make_gateway(tmp_path)
         owner_hex = gw.agent.identity_pub_bytes.hex()
         peer_priv = Ed25519PrivateKey.generate()
-        peer_hex = peer_priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
         ws = _owner_ws(gw)
-        cert = self._make_cert_dict(peer_hex, owner_hex, cert_id="cert-002")
+        cert = self._signed_cert_dict(peer_priv, owner_hex, cert_id="cert-002")
         await gw._handle_restore_contacts(ws, {"certs": [cert]})
         if gw._store:
             saved = gw._store.list_relationships()
@@ -332,16 +333,61 @@ class TestRestoreContactsOwnershipValidation:
     async def test_third_party_cert_is_rejected(self, tmp_path):
         gw = _make_gateway(tmp_path)
         alice_priv = Ed25519PrivateKey.generate()
-        alice_hex = alice_priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
         bob_priv = Ed25519PrivateKey.generate()
         bob_hex = bob_priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
         ws = _owner_ws(gw)
-        # Neither party is the gateway owner
-        cert = self._make_cert_dict(alice_hex, bob_hex, cert_id="cert-foreign")
+        # Validly signed by Alice, but neither party is the gateway owner.
+        cert = self._signed_cert_dict(alice_priv, bob_hex, cert_id="cert-foreign")
         await gw._handle_restore_contacts(ws, {"certs": [cert]})
         if gw._store:
             saved = gw._store.list_relationships()
             assert not any(r.get("certificate_id") == "cert-foreign" for r in saved)
+
+    @pytest.mark.asyncio
+    async def test_unsigned_owner_cert_is_rejected(self, tmp_path):
+        """A cert naming the owner but with no/forged signature must not enter —
+        the stored row is the authorization."""
+        gw = _make_gateway(tmp_path)
+        owner_hex = gw.agent.identity_pub_bytes.hex()
+        peer_priv = Ed25519PrivateKey.generate()
+        peer_hex = peer_priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+        ws = _owner_ws(gw)
+        unsigned = {
+            "certificate_id": "cert-unsigned",
+            "issuer": owner_hex,
+            "subject": peer_hex,
+            "capabilities": [],
+            "version": 1,
+            "signature": None,
+        }
+        await gw._handle_restore_contacts(ws, {"certs": [unsigned]})
+        if gw._store:
+            saved = gw._store.list_relationships()
+            assert not any(r.get("certificate_id") == "cert-unsigned" for r in saved)
+
+    @pytest.mark.asyncio
+    async def test_non_owner_session_is_rejected(self, tmp_path):
+        """Only the gateway owner may restore contacts; a registered stranger
+        (self-claimed DID) must be refused before any relationship is saved."""
+        gw = _make_gateway(tmp_path)
+        owner_hex = gw.agent.identity_pub_bytes.hex()
+        peer_priv = Ed25519PrivateKey.generate()
+        peer_hex = peer_priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+        # A different, non-owner registered session.
+        stranger_priv = Ed25519PrivateKey.generate()
+        from proxion_messenger_core.didkey import pub_key_to_did
+        stranger_did = pub_key_to_did(
+            stranger_priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        )
+        ws = _fake_ws(gw, stranger_did)
+        cert = self._signed_cert_dict(gw.agent.identity_key, peer_hex, cert_id="cert-stranger")
+        await gw._handle_restore_contacts(ws, {"certs": [cert]})
+        ws.send.assert_awaited()
+        sent = json.loads(ws.send.await_args_list[0].args[0])
+        assert sent.get("code") == "E_FORBIDDEN"
+        if gw._store:
+            saved = gw._store.list_relationships()
+            assert not any(r.get("certificate_id") == "cert-stranger" for r in saved)
 
     @pytest.mark.asyncio
     async def test_malformed_cert_skipped_without_crash(self, tmp_path):

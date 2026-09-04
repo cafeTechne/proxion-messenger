@@ -285,6 +285,29 @@ class HttpEndpointsMixin:
         if not self._store.get_pending_invite(invitation_id):
             return "400 Bad Request", '{"error":"no matching pending invite"}'
 
+        # Bind the acceptance to the DID the invite was actually issued to. Without
+        # this, the pending invite is confirmed for anyone who learns the
+        # invitation_id, letting a stranger accept an invite meant for someone else
+        # and inject a relationship (the stored row IS the authorization). The
+        # target DID was recorded by save_pending_invite; a blank/legacy target
+        # ("" or "unknown") is treated as unbound and skipped.
+        try:
+            with self._store._conn() as _conn:
+                _row = _conn.execute(
+                    "SELECT target_did FROM pending_invites WHERE invitation_id = ?",
+                    (invitation_id,),
+                ).fetchone()
+            _recorded_target = (_row["target_did"] if _row else "") or ""
+        except Exception:
+            _recorded_target = ""
+        if _recorded_target and _recorded_target not in ("unknown",):
+            if expected_did != _recorded_target:
+                self._store.save_security_event(
+                    "invite_accept_target_mismatch", "warning",
+                    details=f"expected={_recorded_target} got={expected_did}",
+                )
+                return "403 Forbidden", '{"error":"acceptor is not the invited target"}'
+
         my_pub_hex = self.agent.identity_pub_bytes.hex()
 
         if acceptor_cert:
@@ -1244,15 +1267,34 @@ class HttpEndpointsMixin:
                     try:
                         import urllib.parse as _up
                         did_param = _up.unquote(raw_did)
-                        from .didkey import did_to_pub_key as _d2pk, fingerprint_words as _fw
+                        from .didkey import (
+                            did_to_pub_key as _d2pk,
+                            fingerprint_words as _fw,
+                            pub_key_to_did as _p2d,
+                        )
                         from .pop import fingerprint as _fp
+                        from .safety_numbers import (
+                            compute_safety_numbers as _csn,
+                            format_safety_numbers as _fsn,
+                        )
                         pub = _d2pk(did_param)
                         fp = _fp(pub)
                         words = _fw(pub)
+                        # Strong safety number: SHA-512 fold over BOTH identities
+                        # (~199 bits, defeats the ~2^60 grind against the 6-word
+                        # fingerprint). did:key strings are the stable ids: they
+                        # are deterministic from each identity key and identical
+                        # on both gateways, so the two peers compute the same
+                        # value out-of-band.
+                        my_pub = self.agent.identity_pub_bytes
+                        my_did = _p2d(my_pub)
+                        safety_number = _csn(my_did, my_pub, did_param, pub)
                         fp_body = json.dumps({
                             "did": did_param,
                             "fingerprint": fp,
                             "safety_words": words,
+                            "safety_number": safety_number,
+                            "safety_number_groups": _fsn(safety_number),
                         }).encode()
                         writer.write(
                             b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
