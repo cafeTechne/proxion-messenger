@@ -259,10 +259,12 @@ class IdentityStoreMixin(object):
         return result
     def get_relationship_by_cert_id(self, certificate_id: str) -> Optional[dict]:
         """Return cert_json dict (with peer_did injected) for the given certificate_id."""
+        now = int(time.time())
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT cert_json, peer_did FROM relationships WHERE certificate_id = ? LIMIT 1",
-                (certificate_id,),
+                "SELECT cert_json, peer_did FROM relationships "
+                "WHERE certificate_id = ? AND revoked=0 AND expires_at > ? LIMIT 1",
+                (certificate_id, now),
             ).fetchone()
         if row is None:
             return None
@@ -275,7 +277,7 @@ class IdentityStoreMixin(object):
         with self._conn() as conn:
             row = conn.execute(
                 "SELECT cert_json FROM relationships "
-                "WHERE peer_did = ? AND expires_at > ? "
+                "WHERE peer_did = ? AND expires_at > ? AND revoked=0 "
                 "ORDER BY created_at DESC LIMIT 1",
                 (peer_did, now),
             ).fetchone()
@@ -457,13 +459,22 @@ class IdentityStoreMixin(object):
                    VALUES (?, ?, ?, ?)""",
                 (peer_webid, safety_numbers, time.time(), verified_by),
             )
-    def get_contact_verification(self, peer_webid: str) -> dict | None:
+    def get_contact_verification(
+        self, peer_webid: str, verified_by: str | None = None
+    ) -> dict | None:
         with self._conn() as conn:
             try:
-                row = conn.execute(
-                    "SELECT * FROM contact_verifications WHERE peer_webid=?",
-                    (peer_webid,),
-                ).fetchone()
+                if verified_by:
+                    row = conn.execute(
+                        "SELECT * FROM contact_verifications "
+                        "WHERE peer_webid=? AND verified_by=?",
+                        (peer_webid, verified_by),
+                    ).fetchone()
+                else:
+                    row = conn.execute(
+                        "SELECT * FROM contact_verifications WHERE peer_webid=?",
+                        (peer_webid,),
+                    ).fetchone()
                 return dict(row) if row else None
             except Exception:
                 return None
@@ -493,11 +504,13 @@ class IdentityStoreMixin(object):
         peer_webid = record.get("peer_webid", "")
         if not peer_webid:
             return
+        verified_by = record.get("verified_by", "")
         with self._conn() as conn:
             try:
                 existing = conn.execute(
-                    "SELECT verification_version FROM contact_verifications WHERE peer_webid=?",
-                    (peer_webid,),
+                    "SELECT verification_version FROM contact_verifications "
+                    "WHERE peer_webid=? AND verified_by=?",
+                    (peer_webid, verified_by),
                 ).fetchone()
                 incoming_version = int(record.get("verification_version", 1))
                 if existing is None or incoming_version > existing["verification_version"]:

@@ -47,4 +47,4 @@ def test_schema_version_intact():
     import sqlite3
     s = _store()
     v = sqlite3.connect(s.db_path).execute("SELECT version FROM schema_version").fetchone()[0]
-    assert v == 56   # bump whenever a migration is added (56 = device recovery code TTL)
+    assert v == 57   # bump whenever a migration is added (57 = contact_verifications composite key)

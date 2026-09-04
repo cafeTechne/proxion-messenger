@@ -1541,12 +1541,14 @@ class MiscHandlerMixin:
         if not self._store or not peer_webid:
             await websocket.send(json.dumps({"type": "contact_verification", "record": None}))
             return
-        record = self._store.get_contact_verification(peer_webid)
+        caller_webid = self._client_webids.get(websocket, "")
+        record = self._store.get_contact_verification(peer_webid, caller_webid)
         await websocket.send(json.dumps({"type": "contact_verification", "record": record}))
 
     async def _handle_list_verified_contacts(self, websocket, data: dict) -> None:
-        """Return all verified contact records."""
-        records = self._store.list_verified_contacts() if self._store else []
+        """Return the caller's own verified contact records."""
+        caller_webid = self._client_webids.get(websocket, "")
+        records = self._store.list_contact_verifications(caller_webid) if self._store else []
         await websocket.send(json.dumps({"type": "verified_contacts", "contacts": records}))
 
     # ------------------------------------------------------------------

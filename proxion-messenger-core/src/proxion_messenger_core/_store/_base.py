@@ -1185,6 +1185,29 @@ class _StoreBase(object):
             # 56: TTL on device recovery codes. Legacy rows keep a NULL
             # expires_at and are treated as non-expiring for back-compat.
             "ALTER TABLE device_recovery_codes ADD COLUMN expires_at REAL",
+            # 57: composite key (peer_webid, verified_by) for contact_verifications
+            # so multiple accounts on one gateway do not clobber or read each
+            # other's safety-number rows. SQLite can't alter a PK in place, so
+            # recreate the table and copy existing rows over.
+            [
+                """CREATE TABLE IF NOT EXISTS contact_verifications_v57 (
+                    peer_webid TEXT NOT NULL,
+                    safety_numbers TEXT NOT NULL,
+                    verified_at REAL NOT NULL,
+                    verified_by TEXT NOT NULL,
+                    verified_on_device_id TEXT NOT NULL DEFAULT '',
+                    verification_version INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY (peer_webid, verified_by)
+                )""",
+                """INSERT OR REPLACE INTO contact_verifications_v57
+                   (peer_webid, safety_numbers, verified_at, verified_by,
+                    verified_on_device_id, verification_version)
+                   SELECT peer_webid, safety_numbers, verified_at, verified_by,
+                          verified_on_device_id, verification_version
+                   FROM contact_verifications""",
+                "DROP TABLE contact_verifications",
+                "ALTER TABLE contact_verifications_v57 RENAME TO contact_verifications",
+            ],
         ]
 
         for version, migration in enumerate(migrations, start=1):
