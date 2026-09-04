@@ -14,7 +14,22 @@ function mkEl() {
         append(...cs) { cs.forEach(c => { if (c) c._parent = this; }); this._children.push(...cs); },
         addEventListener(ev, fn) { this._on = this._on || {}; this._on[ev] = fn; },
         remove() { const p = this._parent; if (p) p._children = p._children.filter(c => c !== this); },
-        querySelector() { return null; },
+        // Realistic enough to exercise the [data-mid="…"] dedup guard: find a
+        // descendant whose data-mid matches the value in the selector.
+        querySelector(sel) {
+            const m = /^\[data-mid="(.*)"\]$/.exec(sel || '');
+            if (!m) return null;
+            const want = m[1];
+            const find = (node) => {
+                for (const c of node._children || []) {
+                    if (c.dataset && c.dataset.mid === want) return c;
+                    const hit = find(c);
+                    if (hit) return hit;
+                }
+                return null;
+            };
+            return find(this);
+        },
     };
     return el;
 }
@@ -131,6 +146,30 @@ describe('openConversation', () => {
         subs[0].cb([{ message_id: 'm2', from_webid: 'https://a.pod/#me', content: 'new one' }]);
         expect(feed._children).toHaveLength(2);
         expect(feed._children[1].dataset.mid).toBe('m2');
+    });
+
+    it('does not double-render history when the subscription primes with the same messages', async () => {
+        // Regression (issues #2/#3): the subscription primes immediately, re-reading
+        // today's file and feeding the SAME messages back through the dedup guard.
+        // History rows must carry data-mid so the guard matches and skips them.
+        const history = [
+            { message_id: 'm1', from_webid: 'https://a.pod/#me', content: 'hi' },
+            { message_id: 'm2', from_webid: 'https://a.pod/#me', content: 'there' },
+        ];
+        const subs = [];
+        const model = fakeModel({
+            loadConversation: async () => history,
+            subscribeConversation: (id, cb) => { subs.push({ id, cb }); return () => {}; },
+        });
+        const ui = createSolidChatUI({ model, getMyWebId: () => 'https://me.pod/#me' });
+        const feed = mkEl();
+        await ui.openConversation('https://a.pod/x/', feed);
+        expect(feed._children).toHaveLength(2);             // history rendered once
+
+        // The prime delivers today's file again, verbatim.
+        subs[0].cb(history);
+        expect(feed._children).toHaveLength(2);             // no duplicates
+        expect(feed._children.map(r => r.dataset.mid)).toEqual(['m1', 'm2']);
     });
 });
 

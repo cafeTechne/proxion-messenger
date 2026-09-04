@@ -90,6 +90,7 @@ export function createSolidChatUI({ model, getMyWebId = () => '', showToast = ()
         for (const m of msgs || []) {
             const row = document.createElement('div');
             row.className = 'solidchat-msg' + (m.from_webid && m.from_webid === me ? ' mine' : '');
+            row.dataset.mid = m.message_id || '';
             const author = document.createElement('span');
             author.className = 'solidchat-author';
             author.textContent = m.from_display_name || shortWebId(m.from_webid);   // safe
