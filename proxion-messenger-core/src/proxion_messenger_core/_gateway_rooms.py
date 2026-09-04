@@ -28,6 +28,10 @@ from .room import RoomMembership
 
 logger = logging.getLogger("proxion_messenger_core.gateway")
 
+# Per-room member cap for local (pod-free) rooms. Joins over this are rejected;
+# existing members reconnecting are unaffected.
+_MAX_ROOM_MEMBERS = 500
+
 
 class RoomHandlerMixin:
 
@@ -420,10 +424,17 @@ class RoomHandlerMixin:
                 return room.get("creator_webid") == caller_webid
             if role == "admin":
                 # Owner OR an explicitly-granted admin. Previously ANY member
-                # passed here, so any member could ban/mute/unban anyone.
+                # passed here, so any member could ban/mute/unban anyone. A
+                # granted admin must ALSO be a current member — a role row alone
+                # survives removal, so without this a kicked/banned ex-admin who
+                # reconnected could still run admin ops.
                 if room.get("creator_webid") == caller_webid:
                     return True
-                return bool(self._store and self._store.get_room_role(room_id, caller_webid) == "admin")
+                return bool(
+                    self._store
+                    and self._store.get_room_role(room_id, caller_webid) == "admin"
+                    and caller_webid in self._store.get_room_members(room_id)
+                )
             return websocket in room.get("members", set())
 
         return False
@@ -958,6 +969,16 @@ class RoomHandlerMixin:
             await websocket.send(json.dumps({"type": "error", "message": "Message not found"}))
             return
 
+        # The actor must be able to READ the source message's thread, else they
+        # could exfiltrate a message from a thread they were never party to just
+        # by naming its message_id here. Gated on _auth_enforced() like the other
+        # read-authz handlers: only meaningful when strangers can register.
+        _source_thread = source_row.get("thread_id", "")
+        if (self._auth_enforced() and _source_thread
+                and not self._actor_can_read_thread(websocket, actor, _source_thread)):
+            await websocket.send(json.dumps({"type": "error", "message": "Cannot read source message"}))
+            return
+
         target_room = self._local_rooms.get(target_thread_id)
         if target_room and websocket not in target_room.get("members", set()):
             await websocket.send(json.dumps({"type": "error", "message": "Not a member of target thread"}))
@@ -1082,9 +1103,15 @@ class RoomHandlerMixin:
             caller_did = self._client_webids.get(websocket, "")
             is_creator = room.get("creator_webid") == caller_did and caller_did
 
+            # Evict ALL of the leaver's sockets, not just the one that sent the
+            # command, so a second device does not keep receiving room traffic.
+            if caller_did:
+                for _ws in self._sockets_for(caller_did):
+                    room["members"].discard(_ws)
             room["members"].discard(websocket)
             if caller_did and self._store:
                 self._store.remove_room_member(room_id, caller_did)
+                self._store.delete_room_role(room_id, caller_did)
 
             if is_creator:
                 other_members = list(room["members"])
@@ -1849,6 +1876,24 @@ class RoomHandlerMixin:
             if self._store and joiner_webid and self._store.is_room_banned(room_id, joiner_webid):
                 await websocket.send(json.dumps({"type": "error", "message": "banned_from_room"}))
                 return
+            # A4: reject joins over the per-room member cap (existing members
+            # reconnecting are exempt so they are never locked out).
+            _current_members = (self._store.get_room_members(room_id)
+                                if self._store else [])
+            _already_member = bool(joiner_webid and joiner_webid in _current_members)
+            _member_count = (len(_current_members) if self._store
+                             else len(self._local_rooms[room_id].get("members", set())))
+            if not _already_member and _member_count >= _MAX_ROOM_MEMBERS:
+                await websocket.send(json.dumps({"type": "error", "message": "room_full"}))
+                return
+            # A3: enforce invite expiry / max-uses. Only invite-table codes are
+            # gated; a legacy plaintext code (no invite row) falls through so
+            # pre-existing joins keep working.
+            if self._store and code_hash and self._store.room_invite_exists(code_hash):
+                if self._store.consume_room_invite(code_hash) is None:
+                    await websocket.send(json.dumps({
+                        "type": "error", "message": "invite_expired_or_exhausted"}))
+                    return
             room = self._local_rooms[room_id]
             room["members"].add(websocket)
             logger.info(f"Client joined local room {room_id} via code {code}")
@@ -1918,17 +1963,24 @@ class RoomHandlerMixin:
         if not self._check_room_permission(websocket, room_id, role="owner"):
             await websocket.send(json.dumps({"type": "error", "message": "Only the room owner can kick members"}))
             return
+        # The owner cannot be kicked (mirrors _handle_set_member_role).
+        _room_obj = self._local_rooms.get(room_id, {})
+        if target_webid and target_webid == _room_obj.get("creator_webid"):
+            await websocket.send(json.dumps({"type": "error", "message": "Cannot kick the room owner"}))
+            return
         if room_id and target_webid:
             if self._store:
                 self._store.remove_room_member(room_id, target_webid)
+                self._store.delete_room_role(room_id, target_webid)
+            # Evict ALL of the target's sockets and notify each — a single-socket
+            # discard left a second device connected and still receiving.
+            _target_sockets = self._sockets_for(target_webid)
             if room_id in self._local_rooms:
-                kicked_ws = self._any_socket(target_webid)
-                if kicked_ws:
-                    self._local_rooms[room_id]["members"].discard(kicked_ws)
-            target_ws = self._any_socket(target_webid)
-            if target_ws:
+                for _ws in _target_sockets:
+                    self._local_rooms[room_id]["members"].discard(_ws)
+            for _ws in _target_sockets:
                 try:
-                    await target_ws.send(json.dumps({
+                    await _ws.send(json.dumps({
                         "type": "kicked_from_room",
                         "room_id": room_id,
                     }))
@@ -1984,17 +2036,23 @@ class RoomHandlerMixin:
             return
         if not target_webid or not self._store:
             return
-        self._store.ban_room_member(room_id, target_webid, caller_webid, reason)
-        # Also kick if currently online
+        # The owner cannot be banned (mirrors _handle_set_member_role).
         room = self._local_rooms.get(room_id, {})
-        target_ws = self._any_socket(target_webid)
-        if target_ws and target_ws in room.get("members", set()):
-            room["members"].discard(target_ws)
-            if self._store:
-                self._store.remove_room_member(room_id, target_webid)
+        if target_webid == room.get("creator_webid"):
+            await websocket.send(json.dumps({"type": "error", "message": "Cannot ban the room owner"}))
+            return
+        self._store.ban_room_member(room_id, target_webid, caller_webid, reason)
+        self._store.remove_room_member(room_id, target_webid)
+        self._store.delete_room_role(room_id, target_webid)
+        # Evict ALL of the target's sockets (a single-socket discard left a second
+        # device connected and still able to decrypt future messages) and notify each.
+        _target_sockets = self._sockets_for(target_webid)
+        for _ws in _target_sockets:
+            room.get("members", set()).discard(_ws)
+        for _ws in _target_sockets:
             try:
-                await target_ws.send(json.dumps({"type": "kicked_from_room", "room_id": room_id,
-                                                  "message": "You were banned from this room"}))
+                await _ws.send(json.dumps({"type": "kicked_from_room", "room_id": room_id,
+                                           "message": "You were banned from this room"}))
             except Exception:
                 pass
         display_name = self._store.get_display_name(target_webid) or target_webid[:12]
@@ -2005,6 +2063,29 @@ class RoomHandlerMixin:
                 await ws.send(event)
             except Exception:
                 pass
+        # Rotate room + sender keys so a banned user's surviving session cannot
+        # decrypt future E2E group messages (parity with the kick path).
+        try:
+            from .room_rekey import rotate_room_key, build_room_key_update_event
+            remaining = list(self._store.get_room_members(room_id)) if self._store else []
+            rekey_result = rotate_room_key(room_id, remaining, store=self._store)
+            rekey_event = build_room_key_update_event(rekey_result)
+            if room_id in self._local_rooms:
+                for ws in list(self._local_rooms[room_id]["members"]):
+                    try:
+                        sealed = rekey_result["sealed_keys"].get(
+                            self._client_webids.get(ws, ""), None
+                        )
+                        payload = {**rekey_event, "sealed_key": sealed}
+                        await ws.send(json.dumps(payload))
+                    except Exception:
+                        pass
+        except Exception as _rk_exc:
+            logger.warning("room_rekey after ban failed: %s", _rk_exc)
+        try:
+            await self._trigger_sender_key_rotation(room_id, target_webid)
+        except Exception as _sk_exc:
+            logger.warning("sender_key_rotation after ban failed: %s", _sk_exc)
         self._relay_room_moderation(room_id, "ban", target_webid, caller_webid, reason=reason)
 
     async def _handle_unban_member(self, websocket, data: dict) -> None:
@@ -2030,6 +2111,10 @@ class RoomHandlerMixin:
         caller_webid = self._client_webids.get(websocket, "")
         if not self._check_room_permission(websocket, room_id, "admin"):
             await websocket.send(json.dumps({"type": "error", "message": "insufficient_permissions"}))
+            return
+        # The owner cannot be muted (mirrors _handle_set_member_role).
+        if target_webid == self._local_rooms.get(room_id, {}).get("creator_webid"):
+            await websocket.send(json.dumps({"type": "error", "message": "Cannot mute the room owner"}))
             return
         import time as _t
         expires_at = (_t.time() + float(duration_seconds)) if duration_seconds else None

@@ -99,6 +99,15 @@ class RoomStoreMixin(object):
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (invite_id, room_id, code_hash, uses_left, time.time(), expires_at),
             )
+    def room_invite_exists(self, code_hash: str) -> bool:
+        """True when an invite row exists for *code_hash*, regardless of remaining
+        uses or expiry. Lets the join path tell an invite-table code (which must be
+        consumed) apart from a legacy plaintext code (no invite row → not gated)."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM room_invites WHERE code_hash = ?", (code_hash,)
+            ).fetchone()
+        return bool(row)
     def consume_room_invite(self, code_hash: str) -> Optional[str]:
         """Atomically decrement uses_left for *code_hash*; return room_id or None."""
         with self._conn() as conn:
@@ -327,6 +336,12 @@ class RoomStoreMixin(object):
                 (room_id, webid)
             ).fetchone()
             return row["role"] if row else "member"
+    def delete_room_role(self, room_id: str, webid: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM room_roles WHERE room_id = ? AND webid = ?",
+                (room_id, webid),
+            )
     def get_all_room_roles(self, room_id: str) -> dict:
         with self._conn() as conn:
             rows = conn.execute(
