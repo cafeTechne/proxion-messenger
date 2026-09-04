@@ -113,6 +113,10 @@ async def test_voice_answer_routes_by_target_webid(gateway):
     gateway._webid_sockets[target_webid] = {target_ws}
     gateway.clients.add(sender_ws)
     gateway.clients.add(target_ws)
+    gateway._voice_channels["ch-2"] = {"members": {
+        sender_webid: {"ws": sender_ws, "gateway_url": None},
+        target_webid: {"ws": target_ws, "gateway_url": None},
+    }}
 
     await gateway._handle_voice_answer(sender_ws, {
         "target_webid": target_webid,

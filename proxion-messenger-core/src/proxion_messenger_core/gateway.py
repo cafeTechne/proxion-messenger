@@ -2454,6 +2454,16 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if self._store and (self._store.is_room_banned(room_id, from_webid)
                             or self._store.is_room_muted(room_id, from_webid)):
             return "403 Forbidden", '{"error":"sender_moderated"}'
+        # Membership re-check (mirrors _handle_room_relay): a removed (non-banned)
+        # federated member must not still land reactions in a room they left. Fail
+        # open only when we have NO membership records at all, so a legit member
+        # whose federation join wasn't tracked isn't dropped.
+        if self._store:
+            _known = set(self._store.get_room_members(room_id))
+            _known |= {m.get("member_did") for m in self._store.get_federated_room_members(room_id)}
+            _known.discard("")
+            if _known and from_webid not in _known:
+                return "403 Forbidden", '{"error":"sender_not_member"}'
         if self._store:
             if action == "add":
                 self._store.save_reaction(room_id, message_id, emoji, from_webid)

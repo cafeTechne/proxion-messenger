@@ -327,6 +327,17 @@ class VoiceHandlerMixin:
         target_webid = data.get("target_webid")
         if target_webid:
             sender_wid = self._client_webids.get(websocket, "")
+            # Gate on either a voice-channel co-membership (group calls) OR a stored
+            # relationship (1:1 across gateways route by webid too), mirroring the ICE
+            # handler. Without it any registered user could push an SDP answer at any
+            # webid. Return without delivering if it fails.
+            _shares_channel = any(
+                sender_wid in ch.get("members", {}) and target_webid in ch.get("members", {})
+                for ch in self._voice_channels.values()
+            )
+            _related = bool(self._store and self._store.get_relationship_by_did(target_webid))
+            if not (_shares_channel or _related):
+                return
             answer_event = {
                 "type": "voice_answer",
                 "from_webid": sender_wid,
@@ -578,6 +589,11 @@ class VoiceHandlerMixin:
                 return
 
         channel = self._voice_channels.setdefault(channel_id, {"members": {}})
+        # Seed this local channel's participant-gateway set with our OWN did so its
+        # slot is never empty. An empty set makes _voice_channel_gateway_ok TOFU-accept
+        # ANY signer, letting a relayed peer_present/peer_joined inject a ghost peer
+        # into a purely local channel (D1). Seeding here closes that bootstrap.
+        channel.setdefault("gateway_dids", set()).add(self._own_gateway_did())
         existing = dict(channel["members"])
 
         if len(existing) >= 6:
@@ -714,6 +730,13 @@ class VoiceHandlerMixin:
         channel_id   = data.get("channel_id", "")
         peer_webid   = data.get("peer_webid", "")
         peer_gw      = data.get("peer_gateway_url", "")
+        # Membership gate (D1): for a channel scoped to a LOCAL room, the injected
+        # peer must be a known room member. Otherwise a channel-bound signer could
+        # inject a ghost peer the victim then opens WebRTC to. The joiner side (a
+        # channel that is NOT a local room here) has no membership records; its
+        # signer is authorized as a channel gateway at the /relay dispatch.
+        if channel_id in self._local_rooms and not self._relay_from_is_room_member(channel_id, peer_webid):
+            return "200 OK", '{"status":"received"}'
         # Record the peer + its gateway in the local channel roster so voice_signal
         # to that peer can resolve a gateway (channel-scoped, not global routing)
         # even when the two users aren't direct friends.
@@ -747,6 +770,13 @@ class VoiceHandlerMixin:
         channel_id = data.get("channel_id", "")
         peer_webid = data.get("peer_webid", "")
         peer_gw    = data.get("peer_gateway_url", "")
+        # Membership gate (D1): for a channel scoped to a LOCAL room, the injected
+        # peer must be a known room member. Otherwise a channel-bound signer could
+        # inject a ghost peer the victim then opens WebRTC to. The joiner side (a
+        # channel that is NOT a local room here) has no membership records; its
+        # signer is authorized as a channel gateway at the /relay dispatch.
+        if channel_id in self._local_rooms and not self._relay_from_is_room_member(channel_id, peer_webid):
+            return "200 OK", '{"status":"received"}'
         event = json.dumps({
             "type": "voice_peer_present",
             "channel_id": channel_id,
