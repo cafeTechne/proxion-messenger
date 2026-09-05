@@ -173,6 +173,109 @@ def test_relationship_certificate_constructed_without_wireguard():
 
 
 # ---------------------------------------------------------------------------
+# R113 — subject counter-signature / mutual verification
+# ---------------------------------------------------------------------------
+
+def _new_priv_and_hex():
+    priv = Ed25519PrivateKey.generate()
+    return priv, priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+
+
+def test_verify_mutual_requires_subject_signature(priv, pub_hex):
+    """An issuer-only cert passes verify() but NOT verify_mutual()."""
+    _, subject_hex = _new_priv_and_hex()
+    cert = RelationshipCertificate(
+        issuer=pub_hex, subject=subject_hex,
+        capabilities=[Capability(with_="stash://dm/", can="crud/write")],
+    )
+    cert.sign(priv)
+    assert cert.verify(_ed25519_verify)
+    assert not cert.verify_mutual(_ed25519_verify)
+
+
+def test_verify_mutual_accepts_when_subject_consents(priv, pub_hex):
+    subject_priv, subject_hex = _new_priv_and_hex()
+    cert = RelationshipCertificate(
+        issuer=pub_hex, subject=subject_hex,
+        capabilities=[Capability(with_="stash://dm/", can="crud/write")],
+    )
+    cert.attach_subject_consent(subject_priv)
+    cert.sign(priv)
+    assert cert.verify_mutual(_ed25519_verify)
+
+
+def test_verify_mutual_rejects_wrong_subject_key(priv, pub_hex):
+    """Consent signed by a key other than the subject's is not accepted."""
+    _, subject_hex = _new_priv_and_hex()
+    wrong_priv, _ = _new_priv_and_hex()
+    cert = RelationshipCertificate(
+        issuer=pub_hex, subject=subject_hex,
+        capabilities=[Capability(with_="stash://dm/", can="crud/write")],
+    )
+    cert.attach_subject_consent(wrong_priv)   # not the subject's key
+    cert.sign(priv)
+    assert cert.verify(_ed25519_verify)
+    assert not cert.verify_mutual(_ed25519_verify)
+
+
+def test_subject_consent_is_issuer_bound(priv, pub_hex):
+    """A subject consent proof cannot be replayed under a different issuer: the
+    signed message names the issuer, so swapping the issuer breaks verify_mutual."""
+    subject_priv, subject_hex = _new_priv_and_hex()
+    cert = RelationshipCertificate(
+        issuer=pub_hex, subject=subject_hex,
+        capabilities=[Capability(with_="stash://dm/", can="crud/write")],
+    )
+    cert.attach_subject_consent(subject_priv)
+    # Attacker lifts the (subject_signature) into a cert with a different issuer.
+    attacker_priv, attacker_hex = _new_priv_and_hex()
+    forged = RelationshipCertificate(
+        issuer=attacker_hex, subject=subject_hex,
+        capabilities=[Capability(with_="stash://dm/", can="crud/write")],
+    )
+    forged.subject_signature = cert.subject_signature
+    forged.sign(attacker_priv)
+    assert forged.verify(_ed25519_verify)          # attacker signed the body
+    assert not forged.verify_mutual(_ed25519_verify)  # but consent names a different issuer
+
+
+def test_subject_signature_does_not_disturb_issuer_signature(priv, pub_hex):
+    """Attaching/removing the subject signature never invalidates the issuer
+    signature (back-compat: pre-R113 issuer-only certs still verify)."""
+    subject_priv, subject_hex = _new_priv_and_hex()
+    cert = RelationshipCertificate(
+        issuer=pub_hex, subject=subject_hex,
+        capabilities=[Capability(with_="stash://dm/", can="crud/write")],
+    )
+    cert.sign(priv)
+    sig_before = cert.signature
+    cert.attach_subject_consent(subject_priv)
+    assert cert.signature == sig_before      # issuer sig unchanged
+    assert cert.verify(_ed25519_verify)
+    # Round-trips through to_dict/from_dict preserving both signatures.
+    rt = RelationshipCertificate.from_dict(cert.to_dict())
+    assert rt.verify(_ed25519_verify)
+    assert rt.verify_mutual(_ed25519_verify)
+
+
+def test_legacy_cert_without_subject_field_still_verifies():
+    """A serialized cert with no subject_signature key (pre-R113) verifies."""
+    priv, pub_hex = _new_priv_and_hex()
+    _, subject_hex = _new_priv_and_hex()
+    cert = RelationshipCertificate(
+        issuer=pub_hex, subject=subject_hex,
+        capabilities=[Capability(with_="stash://dm/", can="crud/write")],
+    )
+    cert.sign(priv)
+    d = cert.to_dict()
+    d.pop("subject_signature", None)   # simulate an older serialization
+    rt = RelationshipCertificate.from_dict(d)
+    assert rt.verify(_ed25519_verify)
+    assert rt.subject_signature is None
+    assert not rt.verify_mutual(_ed25519_verify)
+
+
+# ---------------------------------------------------------------------------
 # R86 — call-binding capability advertisement
 # ---------------------------------------------------------------------------
 

@@ -747,7 +747,7 @@ class SecurityStoreMixin(object):
                     break
                 _rel_seen += 1
                 try:
-                    from ..federation import RelationshipCertificate
+                    from ..federation import RelationshipCertificate, cert_authorizes_owner
                     from ..handshake import _ed25519_verify
                     from ..didkey import pub_key_to_did
                     cert_raw = rel.get("cert_json", "{}")
@@ -756,19 +756,20 @@ class SecurityStoreMixin(object):
                         cert = RelationshipCertificate.from_dict(cert_data)
                     except Exception:
                         continue
-                    # Verify the issuer's signature — the stored row IS the
-                    # authorization, so an unsigned or forged cert must not enter.
-                    if not cert.verify(_ed25519_verify):
+                    # The stored row IS the authorization, so require owner consent
+                    # before insertion. Owner-as-issuer: the issuer signature
+                    # suffices. Owner-as-subject: require the durable subject
+                    # counter-signature by the owner's own key (R113) — an
+                    # issuer-only cert naming the owner as subject (which an
+                    # attacker-controlled backup can contain) is refused. With no
+                    # owner_pub_hex the owner filter is skipped but the issuer
+                    # signature is still verified.
+                    if not cert_authorizes_owner(cert, owner_pub_hex, _ed25519_verify):
                         continue
-                    # Derive the peer identity from the verified cert (never the
-                    # sibling JSON) and require the importing owner to be a party.
-                    if owner_pub_hex:
-                        if owner_pub_hex == cert.issuer:
-                            peer_key_hex = cert.subject
-                        elif owner_pub_hex == cert.subject:
-                            peer_key_hex = cert.issuer
-                        else:
-                            continue  # owner is not a party to this cert
+                    # Derive the peer identity from the verified cert, never the
+                    # sibling JSON.
+                    if owner_pub_hex and owner_pub_hex == cert.subject:
+                        peer_key_hex = cert.issuer
                     else:
                         peer_key_hex = cert.subject
                     try:

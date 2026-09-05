@@ -292,8 +292,13 @@ class TestTypingIndicatorNoFallbackBroadcast:
 # ---------------------------------------------------------------------------
 
 class TestRestoreContactsOwnershipValidation:
-    def _signed_cert_dict(self, issuer_priv, subject_hex: str, cert_id: str = "cert-001") -> dict:
-        """Build a cert dict signed by *issuer_priv* (a real Ed25519 key)."""
+    def _signed_cert_dict(self, issuer_priv, subject_hex: str, cert_id: str = "cert-001",
+                          subject_priv=None) -> dict:
+        """Build a cert dict signed by *issuer_priv* (a real Ed25519 key).
+
+        When *subject_priv* is given, also attach the subject's durable consent
+        counter-signature so the cert is mutually signed (R113).
+        """
         from proxion_messenger_core.federation import RelationshipCertificate, Capability
         issuer_hex = issuer_priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
         cert = RelationshipCertificate(
@@ -302,6 +307,8 @@ class TestRestoreContactsOwnershipValidation:
             capabilities=[Capability(with_="stash://dm/", can="crud/write")],
             certificate_id=cert_id,
         )
+        if subject_priv is not None:
+            cert.attach_subject_consent(subject_priv)
         cert.sign(issuer_priv)
         return cert.to_dict()
 
@@ -318,16 +325,51 @@ class TestRestoreContactsOwnershipValidation:
             assert any(r.get("certificate_id") == "cert-001" for r in saved)
 
     @pytest.mark.asyncio
-    async def test_cert_with_owner_as_subject_is_accepted(self, tmp_path):
+    async def test_cert_with_owner_as_subject_mutually_signed_is_accepted(self, tmp_path):
+        """Owner-as-subject is accepted only when the cert carries the owner's own
+        durable subject consent signature (R113)."""
         gw = _make_gateway(tmp_path)
         owner_hex = gw.agent.identity_pub_bytes.hex()
         peer_priv = Ed25519PrivateKey.generate()
         ws = _owner_ws(gw)
-        cert = self._signed_cert_dict(peer_priv, owner_hex, cert_id="cert-002")
+        cert = self._signed_cert_dict(
+            peer_priv, owner_hex, cert_id="cert-002", subject_priv=gw.agent.identity_key
+        )
         await gw._handle_restore_contacts(ws, {"certs": [cert]})
         if gw._store:
             saved = gw._store.list_relationships()
             assert any(r.get("certificate_id") == "cert-002" for r in saved)
+
+    @pytest.mark.asyncio
+    async def test_cert_with_owner_as_subject_without_consent_is_rejected(self, tmp_path):
+        """An attacker-issued cert naming the owner as subject with NO owner
+        consent signature must be refused (the R113 residual)."""
+        gw = _make_gateway(tmp_path)
+        owner_hex = gw.agent.identity_pub_bytes.hex()
+        peer_priv = Ed25519PrivateKey.generate()
+        ws = _owner_ws(gw)
+        cert = self._signed_cert_dict(peer_priv, owner_hex, cert_id="cert-no-consent")
+        await gw._handle_restore_contacts(ws, {"certs": [cert]})
+        if gw._store:
+            saved = gw._store.list_relationships()
+            assert not any(r.get("certificate_id") == "cert-no-consent" for r in saved)
+
+    @pytest.mark.asyncio
+    async def test_cert_with_owner_as_subject_forged_consent_is_rejected(self, tmp_path):
+        """A subject consent signature made by a key other than the owner's must
+        not authorize an owner-as-subject cert."""
+        gw = _make_gateway(tmp_path)
+        owner_hex = gw.agent.identity_pub_bytes.hex()
+        peer_priv = Ed25519PrivateKey.generate()
+        ws = _owner_ws(gw)
+        # The attacker signs the "subject consent" with its OWN key, not the owner's.
+        cert = self._signed_cert_dict(
+            peer_priv, owner_hex, cert_id="cert-forged-consent", subject_priv=peer_priv
+        )
+        await gw._handle_restore_contacts(ws, {"certs": [cert]})
+        if gw._store:
+            saved = gw._store.list_relationships()
+            assert not any(r.get("certificate_id") == "cert-forged-consent" for r in saved)
 
     @pytest.mark.asyncio
     async def test_third_party_cert_is_rejected(self, tmp_path):

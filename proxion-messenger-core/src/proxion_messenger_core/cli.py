@@ -2018,6 +2018,7 @@ def cert_verify(
     try:
         data = cert.to_dict()
         data.pop("signature", None)
+        data.pop("subject_signature", None)   # not covered by the issuer signature
         canonical = _json.dumps(data, sort_keys=True).encode()
         pub = Ed25519PublicKey.from_public_bytes(bytes.fromhex(cert.issuer))
         pub.verify(bytes.fromhex(cert.signature), canonical)

@@ -68,6 +68,35 @@ def test_full_handshake_cert_has_capabilities(store):
     assert len(cert.capabilities) == len(CAPS)
 
 
+def _verify(pubkey_hex, sig_bytes, message):
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    try:
+        Ed25519PublicKey.from_public_bytes(bytes.fromhex(pubkey_hex)).verify(sig_bytes, message)
+        return True
+    except (InvalidSignature, ValueError):
+        return False
+
+
+def test_full_handshake_cert_is_mutually_signed(store):
+    """R113: a genuine handshake yields a cert the SUBJECT also consented to, so
+    verify_mutual (issuer + subject signatures) accepts it."""
+    alice_id, alice_store = _new_agent()
+    bob_id, bob_store = _new_agent()
+    cert, valid = run_local_handshake(
+        alice_id, alice_store, bob_id, bob_store, CAPS, CAPS, store
+    )
+    assert valid
+    assert cert.subject_signature is not None
+    assert cert.verify_mutual(_verify)
+    # Tampering the subject to a party that never consented breaks verify_mutual.
+    other = Ed25519PrivateKey.generate().public_key().public_bytes(
+        Encoding.Raw, PublicFormat.Raw
+    ).hex()
+    cert.subject = other
+    assert not cert.verify_mutual(_verify)
+
+
 # ---------------------------------------------------------------------------
 # Type filtering — messages of other types left in mailbox
 # ---------------------------------------------------------------------------

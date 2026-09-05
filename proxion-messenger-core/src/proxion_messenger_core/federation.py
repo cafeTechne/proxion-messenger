@@ -18,6 +18,25 @@ from typing import List, Dict, Optional, Any
 CALL_BINDING_CAP = "proxion://cap/call-binding"
 CALL_BINDING_PEER_CAP = "proxion://cap/call-binding/peer"
 
+# Signature context for the handshake challenge_response (the acceptor signs the
+# invite's challenge_marker). Shared with handshake.py so both sides agree.
+HANDSHAKE_CHALLENGE_CTX = b"proxion-handshake-v1:"
+
+# Signature context for a RelationshipCertificate's SUBJECT consent. The subject
+# signs a binding over issuer||subject with its own identity key, making the
+# subject's consent to THIS pairing durable and non-transferable: because the
+# signed message names the issuer, the proof cannot be lifted out of one cert and
+# replayed under a different (attacker-chosen) issuer. This is the R113 fix — an
+# issuer-only cert is a single-party token the counterparty fully controls, so any
+# ingest that treats "our owner is the subject" as authorization must instead
+# require a subject signature only the real owner could have produced.
+SUBJECT_CONSENT_CTX = b"proxion-rel-subject-consent-v1:"
+
+
+def subject_consent_message(issuer_hex: str, subject_hex: str) -> bytes:
+    """The canonical bytes a cert subject signs to prove consent to the pairing."""
+    return SUBJECT_CONSENT_CTX + issuer_hex.encode() + b"|" + subject_hex.encode()
+
 
 def call_binding_capability(peer: bool = False) -> "Capability":
     """The marker capability advertising call-binding support (issuer, or subject if peer)."""
@@ -44,6 +63,33 @@ def cert_dict_peer_binds_calls(cert_dict: dict, peer_pub_hex: str) -> bool:
     if cert_dict.get("subject") == peer_pub_hex:
         return _caps_have(caps, CALL_BINDING_PEER_CAP)
     return False
+
+def cert_authorizes_owner(cert: "RelationshipCertificate", owner_pub_hex: str, verifier_func) -> bool:
+    """Whether *cert* may be saved as a relationship row for this owner (R113).
+
+    A stored relationship row IS the authorization (it grants the peer
+    DM/reaction/file/voice), so every ingest path must confirm the owner actually
+    consented before writing one:
+
+    * owner is the cert ISSUER  -> the owner issued it; the issuer signature
+      (``verify``) is sufficient.
+    * owner is the cert SUBJECT -> the issuer signature alone is a single-party
+      token the counterparty controls, so require the durable subject
+      counter-signature by the owner's own key (``verify_mutual``). Only the real
+      owner could have produced it, closing the hostile-import residual.
+    * owner is neither party    -> refuse.
+
+    When *owner_pub_hex* is empty the owner-party filter is not applied and only
+    the issuer signature is checked (legacy no-owner ingest).
+    """
+    if not owner_pub_hex:
+        return cert.verify(verifier_func)
+    if owner_pub_hex == cert.issuer:
+        return cert.verify(verifier_func)
+    if owner_pub_hex == cert.subject:
+        return cert.verify_mutual(verifier_func)
+    return False
+
 
 def _normalize_endpoint_hints(hints: list) -> list:
     """Normalize endpoint hints: trim, lowercase scheme+host, remove trailing slash, deduplicate."""
@@ -214,10 +260,15 @@ class InviteAcceptance:
     invitation_id: str
     responder: Dict[str, Any] # {public_key, endpoint_hints}
     challenge_response: str   # Signature of challenge_marker
-    
+
     timestamp: int = field(default_factory=lambda: int(time.time()))
     signature: Optional[str] = None
-    
+    # Durable proof that the responder (the future cert SUBJECT) consented to the
+    # pairing: an Ed25519 signature over subject_consent_message(issuer, subject).
+    # The issuer copies it into the RelationshipCertificate it builds, so the
+    # subject's consent survives past the ephemeral handshake. See R113.
+    subject_consent: Optional[str] = None
+
     def to_dict(self) -> dict:
         return {
             "@type": "InviteAcceptance",
@@ -225,7 +276,8 @@ class InviteAcceptance:
             "responder": self.responder,
             "challenge_response": self.challenge_response,
             "timestamp": self.timestamp,
-            "signature": self.signature
+            "signature": self.signature,
+            "subject_consent": self.subject_consent,
         }
 
     def sign(self, identity_key):
@@ -246,8 +298,7 @@ class InviteAcceptance:
 
     def verify_challenge(self, verifier_func, challenge_marker: str) -> bool:
         """Verify the signature on the challenge_marker."""
-        _CHALLENGE_CTX = b"proxion-handshake-v1:"
-        return verifier_func(self.responder['public_key'], bytes.fromhex(self.challenge_response), _CHALLENGE_CTX + challenge_marker.encode())
+        return verifier_func(self.responder['public_key'], bytes.fromhex(self.challenge_response), HANDSHAKE_CHALLENGE_CTX + challenge_marker.encode())
 
     @classmethod
     def from_dict(cls, d: dict, strict: bool = False) -> "InviteAcceptance":
@@ -255,7 +306,7 @@ class InviteAcceptance:
             # Check for unknown top-level fields
             allowed_fields = {
                 "invitation_id", "responder", "challenge_response",
-                "timestamp", "signature", "@type"
+                "timestamp", "signature", "subject_consent", "@type"
             }
             unknown = set(d.keys()) - allowed_fields
             if unknown:
@@ -280,6 +331,7 @@ class InviteAcceptance:
         )
         obj.timestamp = d.get("timestamp", 0)
         obj.signature = d.get("signature")
+        obj.subject_consent = d.get("subject_consent")
         return obj
 
 @dataclass
@@ -295,6 +347,11 @@ class RelationshipCertificate:
     expires_at: int = field(default_factory=lambda: int(time.time()) + (90 * 86400)) # 90 days
     wireguard: Dict[str, Any] = field(default_factory=dict)
     signature: Optional[str] = None
+    # Counter-signature by the SUBJECT's identity key over subject_consent_message
+    # (issuer||subject). Proves the subject consented to this pairing (R113). Kept
+    # out of the issuer's canonical signing bytes so it can be attached
+    # independently and never disturbs the issuer signature (back-compat).
+    subject_signature: Optional[str] = None
 
     def validate_policy(self) -> None:
         """Raise ValueError('invalid_certificate_policy') on policy violations."""
@@ -323,24 +380,68 @@ class RelationshipCertificate:
             "wireguard": self.wireguard,
             "created_at": self.created_at,
             "expires_at": self.expires_at,
-            "signature": self.signature
+            "signature": self.signature,
+            "subject_signature": self.subject_signature,
         }
 
-    def sign(self, identity_key):
+    def _issuer_canonical(self) -> bytes:
+        """Canonical bytes covered by the issuer signature.
+
+        The subject counter-signature is excluded so it can be attached before or
+        after the issuer signs without disturbing it, and so certs predating the
+        subject_signature field verify byte-for-byte as they did before (the field
+        is simply absent from the canonical on both old and new serializations).
+        """
         data = self.to_dict()
-        if 'signature' in data: del data['signature']
-        canonical = json.dumps(data, sort_keys=True)
+        data.pop('signature', None)
+        data.pop('subject_signature', None)
+        return json.dumps(data, sort_keys=True).encode()
+
+    def sign(self, identity_key):
         if hasattr(identity_key, 'sign'):
-             sig_bytes = identity_key.sign(canonical.encode())
+             sig_bytes = identity_key.sign(self._issuer_canonical())
              self.signature = sig_bytes.hex() if isinstance(sig_bytes, bytes) else str(sig_bytes)
 
     def verify(self, verifier_func) -> bool:
         """Verify the issuer's signature on the certificate."""
         if not self.signature: return False
-        data = self.to_dict()
-        del data['signature']
-        canonical = json.dumps(data, sort_keys=True)
-        return verifier_func(self.issuer, bytes.fromhex(self.signature), canonical.encode())
+        return verifier_func(self.issuer, bytes.fromhex(self.signature), self._issuer_canonical())
+
+    def attach_subject_consent(self, subject_identity_key) -> None:
+        """Counter-sign the pairing with the SUBJECT's identity key (R113).
+
+        Produces a durable, issuer-bound proof of the subject's consent. Only the
+        holder of the subject key can produce it, so an issuer (or anyone who
+        reads the stored cert) cannot fabricate consent for a party they do not
+        control, nor replay this proof under a different issuer.
+        """
+        sig_bytes = subject_identity_key.sign(
+            subject_consent_message(self.issuer, self.subject)
+        )
+        self.subject_signature = (
+            sig_bytes.hex() if isinstance(sig_bytes, bytes) else str(sig_bytes)
+        )
+
+    def verify_mutual(self, verifier_func) -> bool:
+        """Verify BOTH the issuer signature AND the subject's consent signature.
+
+        ``verify()`` alone only proves the issuer signed the cert — a single-party
+        token the issuer fully controls. ``verify_mutual`` additionally requires a
+        valid subject counter-signature (see :meth:`attach_subject_consent`),
+        proving the party named as ``subject`` genuinely consented to the pairing.
+        """
+        if not self.verify(verifier_func):
+            return False
+        if not self.subject_signature:
+            return False
+        try:
+            return verifier_func(
+                self.subject,
+                bytes.fromhex(self.subject_signature),
+                subject_consent_message(self.issuer, self.subject),
+            )
+        except (ValueError, TypeError):
+            return False
 
     @classmethod
     def from_dict(cls, d: dict) -> "RelationshipCertificate":
@@ -356,4 +457,5 @@ class RelationshipCertificate:
         obj.created_at = d["created_at"]
         obj.expires_at = d["expires_at"]
         obj.signature = d.get("signature")
+        obj.subject_signature = d.get("subject_signature")
         return obj

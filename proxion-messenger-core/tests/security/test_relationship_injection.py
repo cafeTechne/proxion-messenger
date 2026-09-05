@@ -25,7 +25,7 @@ def _make_gateway(tmp_path):
     return ProxionGateway(agent=agent, dm_clients={}, room_memberships={}, config=config)
 
 
-def _signed_cert(issuer_priv, subject_hex: str, cert_id: str = "cert-x"):
+def _signed_cert(issuer_priv, subject_hex: str, cert_id: str = "cert-x", subject_priv=None):
     from proxion_messenger_core.federation import RelationshipCertificate, Capability
     issuer_hex = issuer_priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
     cert = RelationshipCertificate(
@@ -34,6 +34,8 @@ def _signed_cert(issuer_priv, subject_hex: str, cert_id: str = "cert-x"):
         capabilities=[Capability(with_="stash://dm/", can="crud/write")],
         certificate_id=cert_id,
     )
+    if subject_priv is not None:
+        cert.attach_subject_consent(subject_priv)
     cert.sign(issuer_priv)
     return cert
 
@@ -44,12 +46,17 @@ def _signed_cert(issuer_priv, subject_hex: str, cert_id: str = "cert-x"):
 
 class TestPodCertReceiveSubjectCheck:
     @pytest.mark.asyncio
-    async def test_cert_naming_owner_as_subject_is_saved(self, tmp_path):
+    async def test_mutually_signed_cert_naming_owner_as_subject_is_saved(self, tmp_path):
+        """A cert naming the owner as subject is saved only when it carries the
+        owner's durable subject consent signature (R113)."""
         gw = _make_gateway(tmp_path)
         gw.broadcast = AsyncMock()
         owner_hex = gw.agent.identity_pub_bytes.hex()
         peer_priv = Ed25519PrivateKey.generate()
-        cert = _signed_cert(peer_priv, owner_hex, cert_id="cert-inbound-ok")
+        cert = _signed_cert(
+            peer_priv, owner_hex, cert_id="cert-inbound-ok",
+            subject_priv=gw.agent.identity_key,
+        )
         with patch("proxion_messenger_core.handshake.receive_acceptances", return_value=[]), \
              patch("proxion_messenger_core.handshake.receive_certificates",
                    return_value=[(cert, True)]), \
@@ -57,6 +64,23 @@ class TestPodCertReceiveSubjectCheck:
             await gw._poll_handshake_completions()
         saved = gw._store.list_relationships()
         assert any(r.get("certificate_id") == "cert-inbound-ok" for r in saved)
+
+    @pytest.mark.asyncio
+    async def test_issuer_only_cert_naming_owner_as_subject_is_rejected(self, tmp_path):
+        """An issuer-only cert naming the owner as subject (no owner consent) must
+        be refused — the R113 residual the mutual signature closes."""
+        gw = _make_gateway(tmp_path)
+        gw.broadcast = AsyncMock()
+        owner_hex = gw.agent.identity_pub_bytes.hex()
+        attacker_priv = Ed25519PrivateKey.generate()
+        cert = _signed_cert(attacker_priv, owner_hex, cert_id="cert-no-consent")
+        with patch("proxion_messenger_core.handshake.receive_acceptances", return_value=[]), \
+             patch("proxion_messenger_core.handshake.receive_certificates",
+                   return_value=[(cert, True)]), \
+             patch.object(gw, "_sync_cert_to_pod", new=AsyncMock()):
+            await gw._poll_handshake_completions()
+        saved = gw._store.list_relationships()
+        assert not any(r.get("certificate_id") == "cert-no-consent" for r in saved)
 
     @pytest.mark.asyncio
     async def test_cert_not_naming_owner_as_subject_is_rejected(self, tmp_path):

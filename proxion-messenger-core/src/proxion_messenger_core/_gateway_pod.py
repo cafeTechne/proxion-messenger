@@ -892,22 +892,21 @@ class PodSyncMixin:
 
             certs = handshake.receive_certificates(self.agent.store_key, store)
             owner_pub_hex = self.agent.identity_pub_bytes.hex()
+            from .federation import cert_authorizes_owner
+            from .handshake import _ed25519_verify
             for cert, valid in certs:
                 if not valid:
                     continue
-                # `valid` only proves the issuer signed the cert; anyone who knows
-                # our store pubkey can seal a signed cert into our mailbox. The
-                # stored row IS the authorization, so require the cert to name THIS
-                # owner as subject (mirrors the /invite/accept subject check) before
-                # trusting it. RESIDUAL: a pending-invite/consent lookup is not wired
-                # on the pod handshake path (inbound pod invites are not persisted via
-                # save_pending_invite), so subject==owner is the enforced minimum —
-                # an unsolicited self-signed cert naming us as subject is still
-                # accepted here (deferred consent-check design item).
-                if cert.subject != owner_pub_hex:
+                # `valid` only proves the ISSUER signed the cert; anyone who knows
+                # our store pubkey can seal a signed cert into our mailbox naming us
+                # as subject. The stored row IS the authorization, so require the
+                # durable SUBJECT counter-signature by this owner's key (R113): only
+                # the real owner, having accepted the invite, could have produced it.
+                # An unsolicited self-signed cert naming us as subject now fails here.
+                if not cert_authorizes_owner(cert, owner_pub_hex, _ed25519_verify):
                     logger.warning(
                         "_poll_handshake_completions: rejected inbound cert %s — "
-                        "subject is not this gateway owner",
+                        "owner is not a consenting party (missing subject consent)",
                         cert.certificate_id,
                     )
                     continue
@@ -1079,23 +1078,20 @@ class PodSyncMixin:
                 cert_id = cert_dict.get("certificate_id")
                 if not cert_id or cert_id in known_ids:
                     continue
-                from .federation import RelationshipCertificate as _RC
+                from .federation import RelationshipCertificate as _RC, cert_authorizes_owner
                 from .handshake import _ed25519_verify
                 cert = _RC.from_dict(cert_dict)
-                # The stored row IS the authorization, so verify the issuer's
-                # signature and require this owner to be a party before trusting
-                # pod contents (which any writer to the container could have added).
-                if not cert.verify(_ed25519_verify):
-                    logger.warning(
-                        "_restore_relationships_from_pod: rejected cert %s — invalid signature",
-                        cert_id,
-                    )
-                    continue
+                # The stored row IS the authorization, so require owner consent
+                # before trusting pod contents (which any writer to the container
+                # could have added). Owner-as-issuer: issuer signature suffices.
+                # Owner-as-subject: require the durable subject counter-signature
+                # by the owner's own key (R113) — an issuer-only cert naming us as
+                # subject is refused.
                 owner_pub_hex = self.agent.identity_pub_bytes.hex()
-                if cert.issuer != owner_pub_hex and cert.subject != owner_pub_hex:
+                if not cert_authorizes_owner(cert, owner_pub_hex, _ed25519_verify):
                     logger.warning(
                         "_restore_relationships_from_pod: rejected cert %s — "
-                        "neither issuer nor subject matches gateway owner",
+                        "owner is not a consenting party (missing/invalid signature)",
                         cert_id,
                     )
                     continue

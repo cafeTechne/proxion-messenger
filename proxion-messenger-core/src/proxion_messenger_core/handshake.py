@@ -73,7 +73,13 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import (
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from .errors import ProxionError
-from .federation import Capability, FederationInvite, InviteAcceptance, RelationshipCertificate
+from .federation import (
+    Capability,
+    FederationInvite,
+    InviteAcceptance,
+    RelationshipCertificate,
+    subject_consent_message,
+)
 from .sealed import mailbox_id_for, open_sealed_json, seal_json
 from .store import MemoryStore
 
@@ -298,6 +304,16 @@ def accept_invite(
     _CHALLENGE_CTX = b"proxion-handshake-v1:"
     challenge_sig = bob_identity_priv.sign(_CHALLENGE_CTX + invite.challenge_marker.encode())
 
+    # Durable, issuer-bound proof of our (the future cert subject's) consent to
+    # this pairing. The issuer copies it into the RelationshipCertificate so an
+    # ingest of an owner-as-subject cert can require the real owner's signature.
+    subject_consent = None
+    issuer_pub_hex = invite.issuer.get("public_key")
+    if issuer_pub_hex:
+        subject_consent = bob_identity_priv.sign(
+            subject_consent_message(issuer_pub_hex, bob_identity_pub_hex)
+        ).hex()
+
     acceptance = InviteAcceptance(
         invitation_id=invite.invitation_id,
         responder={
@@ -306,6 +322,7 @@ def accept_invite(
             "capabilities": [c.to_dict() for c in capabilities],
         },
         challenge_response=challenge_sig.hex(),
+        subject_consent=subject_consent,
     )
     acceptance.sign(bob_identity_priv)
 
@@ -430,6 +447,10 @@ def finalize_handshake(
         wireguard={},   # transport-layer config is EI-specific; left empty here
         **cert_kwargs,
     )
+    # Carry the subject's consent (produced in accept_invite) into the cert so the
+    # relationship is mutually signed and survives the ephemeral handshake (R113).
+    if acceptance.subject_consent:
+        cert.subject_signature = acceptance.subject_consent
     cert.sign(alice_identity_priv)
 
     # Optionally configure WireGuard peer if interface name is provided
@@ -491,6 +512,8 @@ def process_join_requests(
             wireguard={},
             certificate_id=acceptance.invitation_id,
         )
+        if acceptance.subject_consent:
+            cert.subject_signature = acceptance.subject_consent
         cert.sign(alice_identity_priv)
         if bob_store_hex:
             try:
@@ -688,12 +711,13 @@ def _dict_to_acceptance(d: dict) -> InviteAcceptance:
         challenge_response=d["challenge_response"],
         timestamp=d.get("timestamp", int(time.time())),
         signature=d.get("signature"),
+        subject_consent=d.get("subject_consent"),
     )
 
 
 def _dict_to_cert(d: dict) -> RelationshipCertificate:
     caps = [Capability(**_normalise_cap(c)) for c in d.get("capabilities", [])]
-    return RelationshipCertificate(
+    cert = RelationshipCertificate(
         issuer=d["issuer"],
         subject=d["subject"],
         capabilities=caps,
@@ -704,6 +728,8 @@ def _dict_to_cert(d: dict) -> RelationshipCertificate:
         expires_at=d.get("expires_at", int(time.time()) + 86400 * 90),
         signature=d.get("signature"),
     )
+    cert.subject_signature = d.get("subject_signature")
+    return cert
 
 
 def _normalise_cap(c: dict) -> dict:

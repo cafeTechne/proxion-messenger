@@ -348,8 +348,13 @@ class TestListFriendRequestsScoped:
 # ---------------------------------------------------------------------------
 
 class TestImportDataOwnership:
-    def _make_rel_dict(self, issuer_priv, subject_hex, cert_id="cert-import-001"):
-        """Build an export row carrying a genuine issuer-signed certificate."""
+    def _make_rel_dict(self, issuer_priv, subject_hex, cert_id="cert-import-001",
+                       subject_priv=None):
+        """Build an export row carrying a genuine issuer-signed certificate.
+
+        When *subject_priv* is given the cert is also subject-counter-signed
+        (mutually signed) so an owner-as-subject import is authorized (R113).
+        """
         from proxion_messenger_core.federation import RelationshipCertificate, Capability
         issuer_hex = issuer_priv.public_key().public_bytes(
             Encoding.Raw, PublicFormat.Raw
@@ -360,6 +365,8 @@ class TestImportDataOwnership:
             capabilities=[Capability(with_="stash://dm/", can="crud/write")],
             certificate_id=cert_id,
         )
+        if subject_priv is not None:
+            cert.attach_subject_consent(subject_priv)
         cert.sign(issuer_priv)
         return {
             "certificate_id": cert_id,
@@ -419,6 +426,42 @@ class TestImportDataOwnership:
         assert counts["relationships"] == 0
         peer_did = pub_key_to_did(bytes.fromhex(peer_hex))
         assert store.get_relationship_by_did(peer_did) is None
+
+    def test_import_data_owner_as_subject_requires_consent(self, tmp_path):
+        """R113: an issuer-only cert naming the importing owner as SUBJECT is
+        refused (the attack path), so no relationship row is created."""
+        from proxion_messenger_core.local_store import LocalStore
+        from proxion_messenger_core.didkey import pub_key_to_did
+        store = LocalStore(str(tmp_path / "store.db"))
+        attacker = Ed25519PrivateKey.generate()
+        attacker_hex = attacker.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+        owner = Ed25519PrivateKey.generate()
+        owner_hex = owner.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+        # Attacker issues, owner is subject, NO owner consent signature.
+        hostile = self._make_rel_dict(attacker, owner_hex, "cert-owner-subject-bad")
+        counts = store.import_data({"relationships": [hostile]}, owner_pub_hex=owner_hex)
+        assert counts["relationships"] == 0
+        attacker_did = pub_key_to_did(bytes.fromhex(attacker_hex))
+        assert store.get_relationship_by_did(attacker_did) is None
+
+    def test_import_data_owner_as_subject_with_consent_accepted(self, tmp_path):
+        """A mutually-signed cert naming the owner as subject imports (the genuine
+        pod-handshake outcome)."""
+        from proxion_messenger_core.local_store import LocalStore
+        from proxion_messenger_core.didkey import pub_key_to_did
+        store = LocalStore(str(tmp_path / "store.db"))
+        peer = Ed25519PrivateKey.generate()
+        peer_hex = peer.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+        owner = Ed25519PrivateKey.generate()
+        owner_hex = owner.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+        # Peer issues, owner is subject, and the owner counter-signed consent.
+        rel = self._make_rel_dict(
+            peer, owner_hex, "cert-owner-subject-ok", subject_priv=owner
+        )
+        counts = store.import_data({"relationships": [rel]}, owner_pub_hex=owner_hex)
+        assert counts["relationships"] == 1
+        peer_did = pub_key_to_did(bytes.fromhex(peer_hex))
+        assert store.get_relationship_by_did(peer_did) is not None
 
     def test_import_data_no_owner_still_verifies_signature(self, tmp_path):
         """Without owner_pub_hex the owner-party filter is skipped, but the

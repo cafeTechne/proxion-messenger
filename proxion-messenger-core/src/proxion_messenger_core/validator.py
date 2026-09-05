@@ -44,6 +44,7 @@ def _cert_sig_ok(cert: RelationshipCertificate) -> bool:
         import json as _json
         data = cert.to_dict()
         data.pop("signature", None)
+        data.pop("subject_signature", None)   # not covered by the issuer signature
         canonical = _json.dumps(data, sort_keys=True).encode()
         pub = Ed25519PublicKey.from_public_bytes(bytes.fromhex(cert.issuer))
         pub.verify(bytes.fromhex(cert.signature), canonical)

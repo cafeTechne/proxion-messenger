@@ -1777,6 +1777,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             return
         from .didkey import pub_key_to_did
         from .handshake import _ed25519_verify
+        from .federation import cert_authorizes_owner
         owner_pub_hex = self.agent.identity_pub_bytes.hex()
         restored = 0
         for cert_dict in certs:
@@ -1786,27 +1787,23 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             if not cert_id:
                 continue
             try:
-                # Verify the issuer's signature before trusting the cert — the stored
-                # row IS the authorization, so an unsigned or forged cert must not enter.
+                # The stored row IS the authorization, so require owner consent
+                # before it enters. Owner-as-issuer: the issuer signature suffices.
+                # Owner-as-subject: require the durable subject counter-signature by
+                # the owner's own key (R113) — an issuer-only cert naming us as
+                # subject (which a hostile backup could contain) is refused.
                 try:
                     cert_obj = RelationshipCertificate.from_dict(cert_dict)
                 except Exception:
                     continue
-                if not cert_obj.verify(_ed25519_verify):
-                    logger.warning(
-                        f"restore_contacts: rejected cert {cert_id} — invalid signature"
-                    )
-                    continue
-                # Reject certs that don't involve this gateway owner as issuer or subject.
-                # Prevents a compromised client from injecting third-party relationships.
-                issuer = cert_dict.get("issuer", "")
-                subject = cert_dict.get("subject", "")
-                if issuer != owner_pub_hex and subject != owner_pub_hex:
+                if not cert_authorizes_owner(cert_obj, owner_pub_hex, _ed25519_verify):
                     logger.warning(
                         f"restore_contacts: rejected cert {cert_id} — "
-                        "neither issuer nor subject matches gateway owner"
+                        "owner is not a consenting party (missing/invalid signature)"
                     )
                     continue
+                issuer = cert_dict.get("issuer", "")
+                subject = cert_dict.get("subject", "")
                 peer_pub_hex = subject if issuer == owner_pub_hex else issuer
                 peer_did = None
                 if peer_pub_hex:
