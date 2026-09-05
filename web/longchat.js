@@ -23,6 +23,8 @@
 // We WRITE Turtle (matching the ecosystem convention) and READ via JSON-LD
 // content negotiation, so no RDF parser has to ship to the browser.
 
+import { verifyLongChatProof } from './dmsig.js';
+
 export const NS = Object.freeze({
     meeting: 'http://www.w3.org/ns/pim/meeting#',
     wf: 'http://www.w3.org/2005/01/wf/flow#',
@@ -33,6 +35,8 @@ export const NS = Object.freeze({
     xsd: 'http://www.w3.org/2001/XMLSchema#',
     schema: 'http://schema.org/',
     px: 'https://proxion.dev/vocab/v1#',
+    // #4: the message signature literal required by the Solid chat SHACL shape.
+    sec: 'https://w3id.org/security#',
 });
 
 export const P = Object.freeze({
@@ -63,6 +67,10 @@ export const P = Object.freeze({
     // D4: a per-message monotonic order hint (px:, ours only) so a user's devices
     // agree on order despite client clock skew. Not part of the shared vocabulary.
     seq: NS.px + 'seq',
+    // #4: the Solid chat SHACL shape's cryptographic signature over a message's
+    // core fields (id, created, content, maker). One literal per message, so it
+    // packs the signer did:key alongside the base64 signature (see dmsig.js).
+    proofValue: NS.sec + 'proofValue',
 });
 
 // Characters that must never survive into a Turtle literal or IRI. Built from
@@ -182,7 +190,7 @@ export function buildIndexTurtle(title) {
  * SolidOS appends. Absolute IRIs throughout, so relative-reference resolution
  * inside a PATCH body cannot vary between servers.
  */
-export function appendOps({ channelIri, messageIri, content, createdIso, makerIri, seq, replyToIri }) {
+export function appendOps({ channelIri, messageIri, content, createdIso, makerIri, seq, replyToIri, proof }) {
     // Both link predicates: wf:message for the SolidOS databrowser, meeting:message
     // for the written spec and POD-CHAT. Absolute IRIs throughout.
     const inserts = [
@@ -193,6 +201,9 @@ export function appendOps({ channelIri, messageIri, content, createdIso, makerIr
     ];
     // foaf:maker is an IRI node; omit rather than emit an empty value.
     if (makerIri) inserts.push(`${iriRef(messageIri)} ${iriRef(P.maker)} ${iriRef(makerIri)} .`);
+    // #4: the shape's sec:proofValue signature; omitted when we cannot sign (no
+    // key), leaving a valid unsigned message exactly like other Solid chat apps.
+    if (proof) inserts.push(`${iriRef(messageIri)} ${iriRef(P.proofValue)} "${escapeTurtleLiteral(proof)}" .`);
     // D4: monotonic order hint (server-clock ms); omitted until known (set on echo).
     if (Number.isFinite(seq)) inserts.push(`${iriRef(messageIri)} ${iriRef(P.seq)} ${Math.trunc(seq)} .`);
     // R101.1: parent-to-reply sioc:has_reply (readers union the day files).
@@ -435,6 +446,10 @@ export function reconcileRoomHistory(local = [], pod = []) {
             from_display_name: p.from_display_name || l.from_display_name,
             // Pod's order hint wins when present (D4); keep the local one otherwise.
             ...(Number.isFinite(p.seq) ? { seq: p.seq } : {}),
+            // #4: the pod copy is the authoritative content, so its signature verdict
+            // wins too; carry it onto the merged message (own messages never show the
+            // badge, so this only surfaces on others').
+            ...(typeof p.sender_verified === 'boolean' ? { sender_verified: p.sender_verified } : {}),
         } : p);
     }
     for (const l of local || []) {
@@ -461,12 +476,24 @@ export function parseLongChatJsonLd(json, threadId = '') {
         const deletedAt = firstLiteral(node, P.dateDeleted);
         const seqRaw = firstLiteral(node, P.seq);
         const seq = seqRaw == null ? undefined : Number(seqRaw);
+        // #4: the shape's message signature, if present. Extracted here; verified
+        // (and authorized signer -> maker) asynchronously by verifyLongChatMessages
+        // on the read path, since that needs a pod fetch. Absent on SolidOS /
+        // POD-CHAT messages, which read as unverified but are never dropped.
+        const proof = firstLiteral(node, P.proofValue);
         out.push({
             message_id: id.includes('#') ? id.slice(id.lastIndexOf('#') + 1) : id,
+            // The full message IRI is the signed `id` field; keep it so the proof
+            // can be re-checked over the exact bytes that were signed.
+            iri: id,
             thread_id: threadId,
             content: deletedAt != null ? '' : content,
             deleted: deletedAt != null,
             deleted_at: deletedAt || null,
+            proof: proof || null,
+            // Default to unverified; verifyLongChatMessages upgrades a valid,
+            // authorized signature to true. Marked, never a reason to drop.
+            sender_verified: false,
             timestamp: firstLiteral(node, P.created) || null,
             from_webid: firstId(node, P.maker) || '',
             // D4 order hint (ours). Absent on SolidOS / POD-CHAT messages; those
@@ -480,4 +507,40 @@ export function parseLongChatJsonLd(json, threadId = '') {
     }
     out.sort(compareByOrder);
     return out;
+}
+
+/**
+ * Authenticate parsed Long Chat messages against their sec:proofValue (#4).
+ *
+ * For each message that carries a proof, the signature is checked over the
+ * message's core fields (id, created, content, maker), and the recovered signer
+ * did:key is authorized to speak for foaf:maker by fetching the maker's published
+ * signer identity from THEIR OWN pod (the trust anchor an attacker cannot write
+ * to, exactly as a DM is verified). A message with no proof, an invalid
+ * signature, or a signer the maker has not published stays sender_verified:false
+ * — it is marked, never dropped, so unsigned messages from other Solid chat apps
+ * still show. A message whose content was edited or tombstoned after signing no
+ * longer matches its proof and reads as unverified, which is honest.
+ *
+ * Async and dependency-injected (fetchPeerSigner, peerPodRoot) so it stays
+ * unit-testable without a live pod. Mutates each message in place and returns the
+ * same array. peerPodRoot(maker) -> pod root; fetchPeerSigner(root) -> { signer }.
+ */
+export async function verifyLongChatMessages(messages, { fetchPeerSigner, peerPodRoot } = {}) {
+    if (typeof fetchPeerSigner !== 'function' || typeof peerPodRoot !== 'function') return messages || [];
+    const signerCache = new Map();   // pod root -> published signer doc (dedupe fetches within a read)
+    for (const m of messages || []) {
+        if (!m || !m.proof || !m.iri || !m.from_webid) continue;   // unsigned/foreign: already false
+        const signer = await verifyLongChatProof(
+            { id: m.iri, created: m.timestamp || '', content: m.content || '', maker: m.from_webid },
+            m.proof,
+        );
+        if (!signer) continue;                       // bad signature: stays false
+        const root = peerPodRoot(m.from_webid);
+        if (!root) continue;
+        if (!signerCache.has(root)) signerCache.set(root, await fetchPeerSigner(root));
+        const iddoc = signerCache.get(root);
+        if (iddoc && signer === iddoc.signer) m.sender_verified = true;
+    }
+    return messages || [];
 }

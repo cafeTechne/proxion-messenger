@@ -27,7 +27,8 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podEnsureJoinInbox, podDropJoin, podReadJoins, podDeleteJoin,
          podReadRoomDescriptorAt, podReadChatRecentAt, podWriteChatMessageAt,
          podEditChatMessageAt, podSoftDeleteChatMessageAt, podSetChatSeqAt,
-         podGrantChatParticipants, podPublishSigner, podFetchPeerSigner } from './pod.js';
+         podGrantChatParticipants, podPublishSigner, podFetchPeerSigner,
+         podSetLongChatSigner } from './pod.js';
 import { signDm, verifyDmSig, signFanout, verifyFanoutSig } from './dmsig.js';
 import { verifyDeviceCert } from './device-cert.js';
 import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
@@ -5341,6 +5342,10 @@ import { createIdentityResolver } from './identity.js';
                 }
             }
             await generateOrLoadIdentity();
+            // #4: hand pod.js the identity signer so Long Chat room messages we
+            // write carry a sec:proofValue a reader can verify. Set in both modes;
+            // without a key (fallback DID path) messages simply write unsigned.
+            if (_identityPrivKey && clientDid) podSetLongChatSigner({ privKey: _identityPrivKey, signerDid: clientDid });
             // Keep a linked device's account identity; only fall back to the
             // device's own did when it is neither pod-backed nor account-linked.
             if (!podWebId) selfWebId = accountDid || clientDid;

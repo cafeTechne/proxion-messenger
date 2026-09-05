@@ -4,8 +4,10 @@ import {
     chatRootUrl, indexUrlAt, channelIriAt, dayFileAt, messageIriAt,
     buildIndexTurtle, appendOps, editOps, deleteOps, seqOps,
     buildChatAcl, roomIdFromChatContainer,
-    parseLongChatJsonLd, mergeLongChatMessages, reactionActionTriples,
+    parseLongChatJsonLd, verifyLongChatMessages, mergeLongChatMessages, reactionActionTriples,
 } from './longchat.js';
+import { signLongChat } from './dmsig.js';
+import { peerPodRootFromWebId } from './webdm.js';
 import {
     buildEmptyTypeIndex, buildRegisterPatch, buildDeregisterPatch,
     parsePublicTypeIndex, parseRegisteredContainers,
@@ -17,6 +19,15 @@ import {
 import { accessControlUrl, detectAclModel, buildAcpAcr } from './acl.js';
 
 const SAFE_ID_RE = /^[\w-]{1,128}$/;
+
+// #4: the local identity signer used to stamp a sec:proofValue on Long Chat
+// messages we write. Set by main.js once the Ed25519 identity key is loaded;
+// until then (or if it stays null) messages write unsigned — still valid Long
+// Chat, just unverifiable, matching a message from any other Solid chat app.
+let _longChatSigner = null;
+export function podSetLongChatSigner(signer) {
+    _longChatSigner = signer && signer.privKey && signer.signerDid ? signer : null;
+}
 
 // Foreign Long Chat reads are on attacker-supplied URLs and bodies. Bound both:
 // how many discovered containers we fan out to, and how large a day file we parse.
@@ -462,13 +473,26 @@ export async function podWriteChatMessageAt(containerUrl, messageId, msg) {
     if (msg.reply_to_id && msg.reply_to_timestamp) {
         replyToIri = messageIriAt(containerUrl, msg.reply_to_id, msg.reply_to_timestamp);
     }
+    const messageIri = messageIriAt(containerUrl, messageId, timestamp);
+    // #4: sign the message's core fields (id, created, content, maker) with this
+    // device's identity key so a reader can prove the author. Best-effort: with no
+    // signer the message writes unsigned, valid Long Chat that simply cannot be
+    // verified, the same as one written by another Solid chat app.
+    let proof = null;
+    if (_longChatSigner) {
+        proof = await signLongChat(
+            { id: messageIri, created: timestamp, content: msg.content || '', maker: msg.from_webid || '' },
+            _longChatSigner.privKey, _longChatSigner.signerDid,
+        );
+    }
     const ops = appendOps({
         channelIri: channelIriAt(containerUrl),
-        messageIri: messageIriAt(containerUrl, messageId, timestamp),
+        messageIri,
         content: msg.content || '',
         createdIso: timestamp,
         makerIri: msg.from_webid || '',
         replyToIri,
+        proof,
     });
     try {
         const res = await podRdfPatch(dayFileAt(containerUrl, timestamp), ops);
@@ -503,7 +527,14 @@ export async function podReadChatDayAt(containerUrl, date, threadId = '') {
         } else {
             json = await res.json();
         }
-        return parseLongChatJsonLd(json, threadId);
+        // #4: parse, then authenticate each message's sec:proofValue against the
+        // maker's published signer (podFetchPeerSigner is the same trust anchor a
+        // DM uses). Unsigned/foreign messages stay sender_verified:false; nothing
+        // is dropped.
+        return verifyLongChatMessages(parseLongChatJsonLd(json, threadId), {
+            fetchPeerSigner: podFetchPeerSigner,
+            peerPodRoot: peerPodRootFromWebId,
+        });
     } catch (err) {
         console.warn('[pod] podReadChatDayAt failed:', err);
         return [];

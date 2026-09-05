@@ -419,10 +419,11 @@ export function createRendering({
             const shieldHtml = (!isVerified && msg.from_webid && msg.from_webid.startsWith("did:key:"))
                 ? `<span title="${t('msg.identityUnverified')}" style="color:#8091a7;margin-left:4px;font-size:0.85em;">&#x1F6E1;</span>`
                 : "";
-            // R107: incoming gateway-free DM whose signature did not verify against
-            // the sender's published identity — surfaced, not blocked. The
-            // sender_verified===false flag is only set on the gateway-free DM paths
-            // (single + fanout), so it already scopes this to those messages.
+            // R107 / #4: an incoming DM or Long Chat room message whose signature
+            // did not verify against the author's published identity — surfaced, not
+            // blocked. The sender_verified===false flag is set only on the paths that
+            // carry a proof (gateway-free DM single + fanout, and pod-read room
+            // messages), so it already scopes this to those messages.
             const dmAuthHtml = (msg.sender_verified === false && msg.from_webid && msg.from_webid !== selfWebId)
                 ? `<span title="${t('msg.senderUnverified')}" style="color:#e0a458;margin-left:4px;font-size:0.85em;">&#x26A0;&#xFE0F;</span>`
                 : "";

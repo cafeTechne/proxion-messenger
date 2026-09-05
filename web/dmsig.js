@@ -130,3 +130,44 @@ export async function verifyFanoutSig(env) {
     if (await _verify(env, canonicalFanoutBytes(env))) return true;
     return _verify(env, _canonicalLegacy(SIGNED_FIELDS_FANOUT_LEGACY, _fanoutObj(env)));
 }
+
+// ── Long Chat room-message signing (#4) ──
+// A SolidOS Long Chat message carries exactly one signature literal
+// (sec:proofValue, per the Solid chat SHACL shape), so the proof has to be
+// self-describing: it packs the signer's did:key and the base64 signature as
+// "<did:key>|<b64sig>". The verifier splits on the FIRST '|' — a did:key holds
+// only base58 and base64 has no '|', so the delimiter is unambiguous — recovers
+// the public key from the did:key, and checks the signature. The signed material
+// is EXACTLY the shape's four core fields (the message IRI as id, dct:created,
+// sioc:content and foaf:maker) under the same 4-byte length-prefixed framing as a
+// DM, so a tampered id, time, text or author fails to verify.
+const SIGNED_FIELDS_LONGCHAT = ['id', 'created', 'content', 'maker'];
+
+export function canonicalLongChatBytes(msg) { return _canonical(SIGNED_FIELDS_LONGCHAT, msg); }
+
+// Sign a room message; returns the compact "<did:key>|<b64sig>" proof string, or
+// null if we have no key. `msg` carries { id, created, content, maker }.
+export async function signLongChat(msg, privKey, signerDid) {
+    if (!privKey || !signerDid) return null;
+    try {
+        const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', privKey, canonicalLongChatBytes(msg)));
+        return `${signerDid}|${_b64(sig)}`;
+    } catch { return null; }
+}
+
+// Verify a proof string against the message's core fields. Returns the signer
+// did:key on success (so the caller can authorize signer -> foaf:maker against the
+// maker's published identity), or null. Never throws. Does NOT decide
+// authorization — the caller does that against the maker's published signer.
+export async function verifyLongChatProof(msg, proof) {
+    try {
+        if (typeof proof !== 'string') return null;
+        const bar = proof.indexOf('|');
+        if (bar <= 0) return null;
+        const signer = proof.slice(0, bar);
+        const sig = proof.slice(bar + 1);
+        if (!sig) return null;
+        const pub = await crypto.subtle.importKey('raw', didToEd25519Pub(signer), { name: 'Ed25519' }, false, ['verify']);
+        return (await crypto.subtle.verify('Ed25519', pub, _b64dec(sig), canonicalLongChatBytes(msg))) ? signer : null;
+    } catch { return null; }
+}

@@ -133,6 +133,34 @@ models replies on the parent message while Proxion models them on the child, so
 that mapping is being prototyped against a real SolidOS thread rather than
 guessed. Those relations remain `px:`-only until verified.
 
+**Message signatures.** Each room message Proxion writes also carries a
+cryptographic signature, following the [Solid chat SHACL
+shape](https://github.com/solid/shapes/blob/main/shapes/chat.ttl):
+
+| Standard term | Namespace | Carries |
+|---|---|---|
+| `sec:proofValue` | `https://w3id.org/security#` | an Ed25519 signature over the message |
+
+The signature covers exactly the message's core fields: its IRI (`@id`), the
+`dct:created` time, the `sioc:content` text, and the `foaf:maker` author, framed
+as length-prefixed bytes so no field can be shifted into another. Because the
+shape allows one literal, the value packs the signer's `did:key` and the base64
+signature as `"<did:key>|<base64-signature>"`, so a reader has both the key and
+the signature from the single term.
+
+On read, Proxion verifies the signature and then confirms the signer is one the
+author published at their **own** pod (the same trust anchor a direct message
+uses; see `proxion/identity/signer.json`), which is what lets a reader trust that
+`foaf:maker` is really the author and not a value a third party wrote into a
+shared container. A message shows as **verified** only when both checks pass.
+
+A message with **no** signature, an invalid one, or a signer the author has not
+published shows as **unverified**, but is still read and displayed, never
+dropped. This is required for interoperability: SolidOS and POD-CHAT write
+unsigned messages, and an edit that rewrites `sioc:content` in place changes the
+bytes the original signature covered, so an edited message also reads as
+unverified.
+
 ### The Long Chat container layout
 
 Carrying the right terms is not enough for another app to *open* a Proxion room;
@@ -153,7 +181,8 @@ A day file links each message to the channel and then describes it:
 :m-abc123
     dct:created "2026-07-22T14:03:11.000Z"^^xsd:dateTime;
     sioc:content "Morning, everyone";
-    foaf:maker <https://alice.pod.example/profile/card#me>.
+    foaf:maker <https://alice.pod.example/profile/card#me>;
+    sec:proofValue "did:key:z6Mk...|Base64Signature==".
 ```
 
 Details worth stating because they are easy to get wrong:
