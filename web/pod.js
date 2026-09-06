@@ -4,7 +4,8 @@ import {
     chatRootUrl, indexUrlAt, channelIriAt, dayFileAt, messageIriAt,
     buildIndexTurtle, appendOps, editOps, deleteOps, seqOps,
     buildChatAcl, roomIdFromChatContainer,
-    parseLongChatJsonLd, verifyLongChatMessages, mergeLongChatMessages, reactionActionTriples,
+    parseLongChatJsonLd, verifyLongChatMessages, mergeLongChatMessages,
+    reactionActionTriples, reactionCancelTriples,
 } from './longchat.js';
 import { signLongChat } from './dmsig.js';
 import { peerPodRootFromWebId } from './webdm.js';
@@ -603,19 +604,21 @@ export async function podSetChatSeqAt(containerUrl, messageId, date, seq) {
 
 /**
  * Grant a set of participants the ability to POST to a chat we host, by writing
- * the container ACL (owner control + participants read/write/append). This is
- * what turns "a chat in my pod" into "a conversation others can take part in".
+ * the container ACL (owner control + participants read/append). Append-only (#4):
+ * a participant can add a message but not overwrite or delete an existing one.
+ * This is what turns "a chat in my pod" into "a conversation others can take part
+ * in".
  */
 export async function podGrantChatParticipants(containerUrl, ownerWebId, participantWebIds) {
     if (!containerUrl || !solidSession?.info?.isLoggedIn) return false;
     try {
         const { url: aclUrl, model } = await discoverAccessControl(containerUrl);
         // On an ACP server (ESS) the WAC turtle would not grant anything; author an
-        // ACR that gives participants Read+Write+Append instead. (ACP path is spec
+        // ACR that gives participants Read+Append instead. (ACP path is spec
         // -authored, not yet live-verified; it only activates when the server
         // advertises ACP, so WAC servers such as CSS are unaffected.)
         const body = model === 'acp'
-            ? buildAcpAcr(ownerWebId, participantWebIds, containerUrl, 'acl:Read, acl:Write, acl:Append')
+            ? buildAcpAcr(ownerWebId, participantWebIds, containerUrl, 'acl:Read, acl:Append')
             : buildChatAcl(ownerWebId, participantWebIds, containerUrl);
         const res = await solidSession.fetch(aclUrl, {
             method: 'PUT',
@@ -1680,9 +1683,12 @@ export async function podWriteReactions(roomId, messageId, reactions) {
 /**
  * R101: mirror one reaction into the Long Chat day file as a schema:LikeAction
  * targeting the message, so other Solid apps see reactions (not just our px:
- * ReactionSet). Add inserts the action, un-react deletes the same triples. Needs
- * the message's timestamp (threaded from the client) to build its date-partitioned
- * IRI; a no-op without it. Best-effort, additive.
+ * ReactionSet). #4: both add AND un-react are append-only INSERTs now — add writes
+ * the action, un-react appends a schema:dateDeleted tombstone on the SAME action
+ * (a reader treats a tombstoned action as cancelled, parseReactionActions), so a
+ * member with only acl:Append never needs Write. Needs the message's timestamp
+ * (threaded from the client) to build its date-partitioned IRI; a no-op without
+ * it. Best-effort, additive.
  */
 // Mirror a reaction as a schema:LikeAction into a specific chat container's day
 // file, so other Solid apps (and, for a joined room, the other participants
@@ -1693,9 +1699,11 @@ export async function podWriteReactionActionAt(container, messageId, messageTime
     const dayFile = dayFileAt(container, messageTimestamp);
     const actionIri = `${dayFile}#react-${encodeURIComponent(messageId)}`
         + `-${encodeURIComponent(reactorWebId || 'anon')}-${encodeURIComponent(emoji)}`;
-    const triples = reactionActionTriples({ actionIri, msgIri, agentIri: reactorWebId, emoji });
+    const ops = add
+        ? { inserts: reactionActionTriples({ actionIri, msgIri, agentIri: reactorWebId, emoji }) }
+        : { inserts: reactionCancelTriples({ actionIri, canceledIso: new Date().toISOString() }) };
     try {
-        const r = await podRdfPatch(dayFile, add ? { inserts: triples } : { deletes: triples });
+        const r = await podRdfPatch(dayFile, ops);
         return !!(r && r.ok);
     } catch (err) {
         console.warn('[pod] podWriteReactionAction failed:', err);

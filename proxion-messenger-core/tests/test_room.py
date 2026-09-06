@@ -127,7 +127,11 @@ def test_set_room_acl_generates_turtle(mock_pod_client, sample_room):
     assert owner_webid in acl_content
     assert all(wid in acl_content for wid in member_webids)
     assert "acl:Read" in acl_content
-    assert "acl:Write" in acl_content
+    assert "acl:Write" in acl_content   # owner stanza keeps Write/Control
+    # #4: members are append-only (Read+Append), so the body advertises Append.
+    assert "acl:Append" in acl_content
+    members_section = acl_content.split("<#members>")[-1]
+    assert "acl:Write" not in members_section
 
 
 def test_send_to_room_writes_message(mock_pod_client, sample_room, mock_cert):

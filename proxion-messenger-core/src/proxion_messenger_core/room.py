@@ -559,11 +559,13 @@ def set_room_acl(
     owner_webid: str,
     member_webids: list[str],
 ) -> str:
-    """Set WAC ACL for a room, granting members read+write access.
-    
+    """Set WAC ACL for a room, granting members read+append access.
+
     Generates a Turtle ACL document with:
     - Owner stanza: Read/Write/Control + acl:default for owner_webid
-    - Members stanza: Read/Write + acl:default for each member_webid
+    - Members stanza: Read/Append + acl:default for each member_webid
+      (append-only: a member can post but not overwrite or delete; a
+      read-only room drops Append and grants Read alone)
     
     Parameters
     ----------
@@ -591,7 +593,7 @@ def set_room_acl(
     # Detect ACL mode (ACP vs WAC)
     mode = detect_acl_mode(owner_client, room.stash_root)
 
-    member_modes = ["Read"] if room.read_only else ["Read", "Write"]
+    member_modes = ["Read"] if room.read_only else ["Read", "Append"]
 
     if mode == "acp":
         acr_url = None
@@ -600,7 +602,7 @@ def set_room_acl(
         return acr_url if acr_url else room.stash_root.rstrip("/") + ".acr"
 
     # WAC path
-    member_mode_str = "acl:Read, acl:Write" if not room.read_only else "acl:Read"
+    member_mode_str = "acl:Read, acl:Append" if not room.read_only else "acl:Read"
     container = room.stash_root if room.stash_root.endswith("/") else room.stash_root + "/"
     # WAC ACL bodies must reference the resource by its real HTTP URL. stash:// is
     # Proxion's internal scheme: the pod server can't match it, so acl:accessTo /

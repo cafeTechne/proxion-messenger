@@ -101,8 +101,9 @@ class PodRoomStore:
 
         When *owner_webid* is provided the room container ACL is written so
         that only the owner (Read/Write/Control) and the listed *member_webids*
-        (Read) can access it. This prevents public pod configurations from
-        leaking room messages.
+        (Read/Append, so a member can post but not overwrite or delete) can
+        access it. This prevents public pod configurations from leaking room
+        messages.
         """
         rooms_uri = self._rooms_container_uri()
         room_uri = f"stash://pod/rooms/{room_id}/"
@@ -119,7 +120,7 @@ class PodRoomStore:
                     room_uri,
                     owner_webid,
                     members,
-                    subject_modes=["Read"],
+                    subject_modes=["Read", "Append"],
                 )
             except Exception as exc:
                 logger.warning("Failed to set room ACL for %s: %s", room_id, exc)

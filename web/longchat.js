@@ -245,6 +245,17 @@ export function reactionActionTriples({ actionIri, msgIri, agentIri, emoji }) {
 }
 
 /**
+ * Triples cancelling a reaction, append-only (#4). Un-react used to DELETE the
+ * LikeAction, which needs acl:Write; a member now only has acl:Append, so instead
+ * we tombstone the action node with schema:dateDeleted, exactly like a withdrawn
+ * message. The reader (parseReactionActions) treats a tombstoned action as no
+ * longer active. Same deterministic actionIri as reactionActionTriples. Pure.
+ */
+export function reactionCancelTriples({ actionIri, canceledIso }) {
+    return [`${iriRef(actionIri)} ${iriRef(P.dateDeleted)} "${escapeTurtleLiteral(canceledIso)}"^^${iriRef(P.dateTime)} .`];
+}
+
+/**
  * A SPARQL-Update body that adds the D4 order hint (px:seq) to an existing
  * message. Used to stamp the server-assigned order onto a message that was
  * written optimistically before the echo arrived. Idempotent in effect: writing
@@ -313,19 +324,21 @@ export function buildDeletePatch(args) { return _sparqlFromOps(deleteOps(args));
 
 /**
  * WAC ACL for a shared chat container. Owner gets full control; each participant
- * gets Read + Write + Append so they can POST. Verified against CSS 7.1.9: a
- * second WebID with this grant can PATCH the day file in another user's pod.
+ * gets Read + Append only, so a participant can POST a new message but cannot
+ * overwrite or delete an existing statement. Verified against CSS 7.1.9: a second
+ * WebID with this grant can PATCH-append to the day file in another user's pod.
  *
  * acl:default propagates the grant to contained resources (the day files),
  * including ones a participant creates on a new UTC day. This is the difference
  * between "can read the chat" and "can take part in the conversation".
  *
- * KNOWN LIMITATION (integrity): acl:Write is required for a participant to edit or
- * delete their OWN messages (the DELETE/INSERT patches), but WAC cannot scope a
- * write to a foaf:maker, so it also lets a participant overwrite or delete other
- * participants' messages or the container index. This is inherent to a shared-
- * container Long Chat under pure WAC; closing it needs a server-side maker check
- * or a per-participant sub-container layout, neither of which is expressible here.
+ * Integrity (#4): Append (not Write) is all a participant needs, because every
+ * member operation is INSERT-only — a new message, its px:seq stamp, a reaction
+ * add, an append-only un-react tombstone, and a soft-delete tombstone. Without
+ * acl:Write a participant can no longer overwrite or delete another participant's
+ * message or the container index; only the owner keeps Write. In-place content
+ * edit (editOps) is a DELETE/INSERT that needs Write, so the ACL makes editing a
+ * message effectively owner-only, which is intentional under this model.
  */
 export function buildChatAcl(ownerWebId, participantWebIds, containerUrl) {
     const lines = [
@@ -345,7 +358,7 @@ export function buildChatAcl(ownerWebId, participantWebIds, containerUrl) {
             `    acl:agent ${iriRef(webid)};`,
             `    acl:accessTo ${iriRef(containerUrl)};`,
             `    acl:default ${iriRef(containerUrl)};`,
-            '    acl:mode acl:Read, acl:Write, acl:Append.',
+            '    acl:mode acl:Read, acl:Append.',
         );
     });
     lines.push('');
@@ -467,6 +480,13 @@ export function parseLongChatJsonLd(json, threadId = '') {
     const out = [];
     for (const node of nodesOf(json).slice(0, MAX_LONGCHAT_NODES)) {
         if (!node || typeof node !== 'object') continue;
+        // A reaction is a schema:LikeAction that ALSO carries sioc:content (the
+        // emoji), so skip it by type before the content check, or it would surface
+        // as a stray message (and a tombstoned un-react as a "deleted message").
+        // Reactions are read separately (parseReactionActions).
+        const types = node['@type'];
+        const typeList = Array.isArray(types) ? types : (types ? [types] : []);
+        if (typeList.includes(P.likeAction)) continue;
         const content = firstLiteral(node, P.content);
         if (content == null) continue;          // not a message node
         const id = String(node['@id'] || '');
@@ -543,4 +563,31 @@ export async function verifyLongChatMessages(messages, { fetchPeerSigner, peerPo
         if (iddoc && signer === iddoc.signer) m.sender_verified = true;
     }
     return messages || [];
+}
+
+/**
+ * Read the reactions in a Long Chat day document (#4). Each reaction is a
+ * schema:LikeAction targeting a message; an append-only un-react tombstones that
+ * action with schema:dateDeleted (see reactionCancelTriples). This returns only
+ * the ACTIVE reactions — a tombstoned action is cancelled and excluded — so a
+ * reader sees the current state without any resource ever being rewritten or
+ * deleted. Works on reactions written by other Solid apps too, since it keys off
+ * the shared schema.org terms. Pure.
+ */
+export function parseReactionActions(json) {
+    const out = [];
+    for (const node of nodesOf(json).slice(0, MAX_LONGCHAT_NODES)) {
+        if (!node || typeof node !== 'object') continue;
+        const types = node['@type'];
+        const typeList = Array.isArray(types) ? types : (types ? [types] : []);
+        if (!typeList.includes(P.likeAction)) continue;
+        if (firstLiteral(node, P.dateDeleted) != null) continue;   // cancelled un-react
+        out.push({
+            action_iri: String(node['@id'] || ''),
+            target_iri: firstId(node, P.target) || '',
+            emoji: firstLiteral(node, P.content) || '',
+            agent: firstId(node, P.agent) || '',
+        });
+    }
+    return out;
 }

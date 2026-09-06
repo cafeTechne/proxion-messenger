@@ -7,7 +7,7 @@ import {
     chatIndexUrl, chatChannelIri, chatDayUrl, messageIriFor,
     chatRootUrl, roomIdFromChatContainer,
     buildIndexTurtle, buildAppendPatch, parseLongChatJsonLd, mergeLongChatMessages,
-    reactionActionTriples,
+    reactionActionTriples, reactionCancelTriples, parseReactionActions,
 } from './longchat.js';
 
 describe('roomIdFromChatContainer (inverse of chatRootUrl)', () => {
@@ -214,25 +214,28 @@ describe('container addressing (shared chats in any pod)', () => {
     });
 });
 
-describe('buildChatAcl (participant write grant)', () => {
+describe('buildChatAcl (participant append grant, #4)', () => {
     const OWNER = 'https://alice.pod/profile/card#me';
     const BOB = 'https://bob.pod/profile/card#me';
     const CONTAINER = 'https://alice.pod/OurChat/';
 
-    it('gives the owner control and each participant read/write/append', async () => {
+    it('gives the owner control and each participant read/append (not write)', async () => {
         const { buildChatAcl } = await import('./longchat.js');
         const acl = buildChatAcl(OWNER, [BOB], CONTAINER);
         expect(acl).toContain(`acl:agent <${OWNER}>`);
-        expect(acl).toContain('acl:Read, acl:Write, acl:Control');   // owner
+        expect(acl).toContain('acl:Read, acl:Write, acl:Control');   // owner keeps full control
         expect(acl).toContain(`acl:agent <${BOB}>`);
-        expect(acl).toContain('acl:Read, acl:Write, acl:Append');    // participant can POST
+        expect(acl).toContain('acl:Read, acl:Append');               // participant can POST, not overwrite
+        // #4: a member never gets Write; only the owner stanza carries it.
+        const memberSection = acl.split('#participant0')[1] || '';
+        expect(memberSection).not.toContain('acl:Write');
         expect(acl).toContain(`acl:default <${CONTAINER}>`);         // propagates to day files
     });
     it('does not grant the owner a second (participant) stanza, or dedupe wrongly', async () => {
         const { buildChatAcl } = await import('./longchat.js');
         const acl = buildChatAcl(OWNER, [OWNER, BOB, BOB], CONTAINER);
         // owner filtered out of participants; bob appears once
-        expect((acl.match(/acl:Read, acl:Write, acl:Append/g) || []).length).toBe(1);
+        expect((acl.match(/acl:Read, acl:Append\./g) || []).length).toBe(1);
     });
     it('a hostile WebID cannot inject an extra authorization', async () => {
         const { buildChatAcl } = await import('./longchat.js');
@@ -314,6 +317,48 @@ describe('parseLongChatJsonLd', () => {
         const out = parseLongChatJsonLd([msgNode('https://p/c#m', 'x', '2026-07-22T10:00:00Z')]);
         expect(out[0].content_type).toBe('text');
         expect(out[0].from_display_name).toBe('');
+    });
+});
+
+describe('reactions read append-only (#4)', () => {
+    const MSG = 'https://p/c/chat.ttl#m1';
+    const ACTION = 'https://p/c/chat.ttl#react-m1-alice-👍';
+    const action = (extra = {}) => ({
+        '@id': ACTION,
+        '@type': [P.likeAction],
+        [P.target]: [{ '@id': MSG }],
+        [P.content]: [{ '@value': '👍' }],
+        [P.agent]: [{ '@id': ALICE }],
+        ...extra,
+    });
+
+    it('reactionCancelTriples tombstones the action instead of deleting it', () => {
+        const [triple] = reactionCancelTriples({ actionIri: ACTION, canceledIso: '2026-08-08T11:00:00Z' });
+        expect(triple).toContain(`<${ACTION}> <${P.dateDeleted}>`);
+        expect(triple).toContain(`"2026-08-08T11:00:00Z"^^<${P.dateTime}>`);
+        // Append-only: a cancel is a plain INSERT triple, never a DELETE.
+        expect(triple).not.toContain('DELETE');
+    });
+
+    it('parseReactionActions returns an active reaction', () => {
+        const out = parseReactionActions([action()]);
+        expect(out).toHaveLength(1);
+        expect(out[0]).toMatchObject({ target_iri: MSG, emoji: '👍', agent: ALICE });
+    });
+
+    it('a tombstoned (un-reacted) action reads as cancelled and is excluded', () => {
+        const out = parseReactionActions([
+            action({ [P.dateDeleted]: [{ '@value': '2026-08-08T11:00:00Z', '@type': P.dateTime }] }),
+        ]);
+        expect(out).toHaveLength(0);
+    });
+
+    it('a LikeAction never surfaces as a chat message (nor its tombstone)', () => {
+        // The same node stream fed to the message parser: it must skip reactions by
+        // type, so a reaction (or a cancelled one) is not mistaken for a message.
+        const cancelled = action({ [P.dateDeleted]: [{ '@value': '2026-08-08T11:00:00Z', '@type': P.dateTime }] });
+        const msgs = parseLongChatJsonLd([action(), cancelled], 'general');
+        expect(msgs).toHaveLength(0);
     });
 });
 

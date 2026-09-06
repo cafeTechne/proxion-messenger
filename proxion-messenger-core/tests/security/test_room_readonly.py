@@ -36,13 +36,17 @@ CAROL = "https://pod.example.com/carol/profile/card#me"
 # ---------------------------------------------------------------------------
 
 class TestSetRoomAclReadOnly:
-    def test_writable_room_grants_read_write(self):
+    def test_writable_room_grants_members_append_not_write(self):
+        # #4: a writable room grants members Read+Append (append-only), never Write.
+        # The owner stanza still carries Write, so scope the check to the members.
         room, client = _make_room_and_client(read_only=False)
         with patch("proxion_messenger_core.acp.detect_acl_mode", return_value="wac"):
             set_room_acl(room, client, owner_webid=OWNER, member_webids=[BOB])
         put_call = client._session.put.call_args
         acl_body = put_call[1]["content"].decode() if "content" in put_call[1] else put_call[0][1].decode()
-        assert "acl:Write" in acl_body
+        members_section = acl_body.split("<#members>")[-1]
+        assert "acl:Append" in members_section
+        assert "acl:Write" not in members_section
 
     def test_read_only_room_does_not_grant_write(self):
         room, client = _make_room_and_client(read_only=True)
@@ -100,7 +104,8 @@ class TestSetRoomAclReadOnlyACP:
         assert modes == ["Read"]
         assert "Write" not in modes
 
-    def test_acp_writable_passes_read_write_modes(self):
+    def test_acp_writable_passes_read_append_modes(self):
+        # #4: append-only members on the ACP path too — Read+Append, never Write.
         room, client = _make_room_and_client(read_only=False)
         with patch("proxion_messenger_core.acp.detect_acl_mode", return_value="acp"), \
              patch("proxion_messenger_core.acp.set_acp_policy", return_value="stash://rooms/room-test/.acr") as mock_acp:
@@ -108,7 +113,8 @@ class TestSetRoomAclReadOnlyACP:
         mock_acp.assert_called_once()
         _, _, _, _, modes = mock_acp.call_args[0]
         assert "Read" in modes
-        assert "Write" in modes
+        assert "Append" in modes
+        assert "Write" not in modes
 
 
 # ---------------------------------------------------------------------------

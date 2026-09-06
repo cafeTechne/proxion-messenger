@@ -82,9 +82,9 @@ describe('buildAcpAcr', () => {
         expect(() => buildAcpAcr('nope', [], RES)).toThrow();
     });
 
-    it('grants members the requested modes (chat participants get read/write/append)', () => {
-        const acr = buildAcpAcr(OWNER, [M1], RES, 'acl:Read, acl:Write, acl:Append');
-        expect(acr).toMatch(/<#members-policy> a acp:Policy; acp:allow acl:Read, acl:Write, acl:Append/);
+    it('grants members the requested modes (chat participants get read/append, #4)', () => {
+        const acr = buildAcpAcr(OWNER, [M1], RES, 'acl:Read, acl:Append');
+        expect(acr).toMatch(/<#members-policy> a acp:Policy; acp:allow acl:Read, acl:Append/);
         // owner still full control
         expect(acr).toMatch(/acp:allow acl:Read, acl:Write, acl:Control/);
     });
@@ -134,10 +134,12 @@ describe('podWriteReactionAction (R101 reaction interop)', () => {
         expect(p[0].body).toContain('http://schema.org/LikeAction');
     });
 
-    it('deletes the same triples on un-react', async () => {
+    it('un-react is append-only: tombstones the action with schema:dateDeleted, no DELETE (#4)', async () => {
         const p = patchSession();
         await podWriteReactionAction('r1', 'm1', '2026-08-08T10:00:00Z', '👍', null, false);
-        expect(p[0].body).toContain('DELETE DATA');
+        expect(p[0].body).toContain('INSERT DATA');
+        expect(p[0].body).toContain('http://schema.org/dateDeleted');
+        expect(p[0].body).not.toContain('DELETE');
     });
 
     it('is a no-op without the message timestamp', async () => {
