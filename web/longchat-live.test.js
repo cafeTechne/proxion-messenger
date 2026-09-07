@@ -34,8 +34,31 @@ import {
     podReadLongChatDay,
     podReadLongChatRecent,
     ensureProxionContainer,
+    podSetLongChatSigner, podPublishSigner,
 } from './pod.js';
 import { chatIndexUrl, chatDayUrl, chatChannelIri, P } from './longchat.js';
+
+// A signing identity so writes carry a sec:proofValue / px:deleteProof and the
+// read path can authenticate them (own-pod signer.json is the trust anchor).
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function b58encode(bytes) {
+    let zeros = 0; while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
+    const digits = [0];
+    for (let i = zeros; i < bytes.length; i++) {
+        let carry = bytes[i];
+        for (let j = 0; j < digits.length; j++) { carry += digits[j] << 8; digits[j] = carry % 58; carry = (carry / 58) | 0; }
+        while (carry > 0) { digits.push(carry % 58); carry = (carry / 58) | 0; }
+    }
+    let s = ''; for (let k = 0; k < zeros; k++) s += '1';
+    for (let q = digits.length - 1; q >= 0; q--) s += B58[digits[q]];
+    return s;
+}
+async function makeSigner() {
+    const kp = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+    const rawPub = new Uint8Array(await crypto.subtle.exportKey('raw', kp.publicKey));
+    const mc = new Uint8Array(2 + rawPub.length); mc[0] = 0xed; mc[1] = 0x01; mc.set(rawPub, 2);
+    return { privKey: kp.privateKey, signerDid: 'did:key:z' + b58encode(mc) };
+}
 
 // A fixed UTC instant so the day partition is deterministic: 2026/07/22.
 const TS = '2026-07-22T10:00:00.000Z';
@@ -70,6 +93,11 @@ beforeAll(async () => {
     });
     _storageRoot = process.env.TEST_STORAGE_ROOT;
     await ensureProxionContainer();
+    // Sign our writes and publish the signer so the read path can authenticate the
+    // message signatures and the authenticated soft-delete (#5 Part A).
+    const signer = await makeSigner();
+    podSetLongChatSigner(signer);
+    await podPublishSigner(signer.signerDid, null);
 }, 60000);
 
 afterAll(async () => {

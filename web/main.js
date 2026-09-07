@@ -2907,7 +2907,7 @@ import { createIdentityResolver } from './identity.js';
             const _remote = _remoteRooms[threadId];
             Promise.allSettled(
                 _remote
-                    ? [podReadChatRecentAt(_remote.container)]
+                    ? [podReadChatRecentAt(_remote.container, 7, threadId, _remote.owner)]
                     : [podReadMessages(threadId), podReadLongChatRecent(threadId)]
             )
                 .then((results) => {
@@ -2992,7 +2992,10 @@ import { createIdentityResolver } from './identity.js';
             }
             const title = (desc && desc.title) || appr.title || roomId;
             if (_remoteRooms[roomId]) return;
-            _remoteRooms[roomId] = { ownerPodRoot: appr.owner_pod_root, container, title };
+            // owner_webid was bound to owner_pod_root above, so it is the room's
+            // verified owner: pass it to the reader so an owner-moderation delete on
+            // the owner's pod authenticates (a member's own self-deletes always do).
+            _remoteRooms[roomId] = { ownerPodRoot: appr.owner_pod_root, container, title, owner: appr.owner_webid };
             addRoomToSidebar(roomId, title, '');
             try {
                 _remoteRooms[roomId].unwatch = watchResource(container, () => {

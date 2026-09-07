@@ -23,7 +23,10 @@
 // We WRITE Turtle (matching the ecosystem convention) and READ via JSON-LD
 // content negotiation, so no RDF parser has to ship to the browser.
 
-import { verifyLongChatProof } from './dmsig.js';
+import {
+    verifyLongChatProof, verifyLongChatDeleteProof,
+    verifyLongChatReactionProof, verifyLongChatCancelProof,
+} from './dmsig.js';
 
 export const NS = Object.freeze({
     meeting: 'http://www.w3.org/ns/pim/meeting#',
@@ -68,9 +71,25 @@ export const P = Object.freeze({
     // agree on order despite client clock skew. Not part of the shared vocabulary.
     seq: NS.px + 'seq',
     // #4: the Solid chat SHACL shape's cryptographic signature over a message's
-    // core fields (id, created, content, maker). One literal per message, so it
-    // packs the signer did:key alongside the base64 signature (see dmsig.js).
+    // core fields (id, created, content, maker, px:fromName). One literal per
+    // message, so it packs the signer did:key alongside the base64 signature (see
+    // dmsig.js).
     proofValue: NS.sec + 'proofValue',
+    // The author's DISPLAY name. Now emitted into the shared day file (not only the
+    // px: archive) AND covered by the message signature, so a validly-signed
+    // message cannot carry a name spoofing another author. Read back as
+    // from_display_name.
+    fromName: NS.px + 'fromName',
+    // #5 Part A: proof that a schema:dateDeleted tombstone was authorized. A
+    // "<did:key>|<b64sig>" over { message IRI, deletedIso }; the reader honours the
+    // tombstone only when this verifies for the maker (self-delete) or room owner.
+    deleteProof: NS.px + 'deleteProof',
+    // #5 Part C: proof a reaction was made by its claimed agent, and proof an
+    // un-react was made by that same agent. Both "<did:key>|<b64sig>" strings on
+    // the LikeAction node (over the reaction fields / over { action IRI,
+    // canceledIso } respectively).
+    reactProof: NS.px + 'reactProof',
+    cancelProof: NS.px + 'cancelProof',
 });
 
 // Characters that must never survive into a Turtle literal or IRI. Built from
@@ -190,7 +209,7 @@ export function buildIndexTurtle(title) {
  * SolidOS appends. Absolute IRIs throughout, so relative-reference resolution
  * inside a PATCH body cannot vary between servers.
  */
-export function appendOps({ channelIri, messageIri, content, createdIso, makerIri, seq, replyToIri, proof }) {
+export function appendOps({ channelIri, messageIri, content, createdIso, makerIri, fromName, seq, replyToIri, proof }) {
     // Both link predicates: wf:message for the SolidOS databrowser, meeting:message
     // for the written spec and POD-CHAT. Absolute IRIs throughout.
     const inserts = [
@@ -201,6 +220,9 @@ export function appendOps({ channelIri, messageIri, content, createdIso, makerIr
     ];
     // foaf:maker is an IRI node; omit rather than emit an empty value.
     if (makerIri) inserts.push(`${iriRef(messageIri)} ${iriRef(P.maker)} ${iriRef(makerIri)} .`);
+    // The author's display name, covered by the signature below. Omitted when
+    // empty (a signed empty name canonicalizes to '', matching a reader default).
+    if (fromName) inserts.push(`${iriRef(messageIri)} ${iriRef(P.fromName)} "${escapeTurtleLiteral(fromName)}" .`);
     // #4: the shape's sec:proofValue signature; omitted when we cannot sign (no
     // key), leaving a valid unsigned message exactly like other Solid chat apps.
     if (proof) inserts.push(`${iriRef(messageIri)} ${iriRef(P.proofValue)} "${escapeTurtleLiteral(proof)}" .`);
@@ -233,7 +255,7 @@ export function buildAppendPatch(args) { return _sparqlFromOps(appendOps(args));
  * on react and deleted on un-react. Returns an array of triple strings for the
  * generic patch builders. Pure.
  */
-export function reactionActionTriples({ actionIri, msgIri, agentIri, emoji }) {
+export function reactionActionTriples({ actionIri, msgIri, agentIri, emoji, proof }) {
     const a = iriRef(actionIri);
     const triples = [
         `${a} a ${iriRef(P.likeAction)} .`,
@@ -241,6 +263,9 @@ export function reactionActionTriples({ actionIri, msgIri, agentIri, emoji }) {
         `${a} ${iriRef(P.content)} "${escapeTurtleLiteral(emoji)}" .`,
     ];
     if (agentIri) triples.push(`${a} ${iriRef(P.agent)} ${iriRef(agentIri)} .`);
+    // #5 Part C: the reactor's signature over { action, target, agent, emoji }, so
+    // the reader can prove the agent field was not forged. Omitted when unsigned.
+    if (proof) triples.push(`${a} ${iriRef(P.reactProof)} "${escapeTurtleLiteral(proof)}" .`);
     return triples;
 }
 
@@ -251,8 +276,13 @@ export function reactionActionTriples({ actionIri, msgIri, agentIri, emoji }) {
  * message. The reader (parseReactionActions) treats a tombstoned action as no
  * longer active. Same deterministic actionIri as reactionActionTriples. Pure.
  */
-export function reactionCancelTriples({ actionIri, canceledIso }) {
-    return [`${iriRef(actionIri)} ${iriRef(P.dateDeleted)} "${escapeTurtleLiteral(canceledIso)}"^^${iriRef(P.dateTime)} .`];
+export function reactionCancelTriples({ actionIri, canceledIso, proof }) {
+    const triples = [`${iriRef(actionIri)} ${iriRef(P.dateDeleted)} "${escapeTurtleLiteral(canceledIso)}"^^${iriRef(P.dateTime)} .`];
+    // #5 Part C: only the reaction's own agent may cancel it. The proof over
+    // { action, canceledIso } lets the reader ignore a tombstone forged by anyone
+    // else. Omitted when unsigned (an unsigned cancel is not honoured).
+    if (proof) triples.push(`${iriRef(actionIri)} ${iriRef(P.cancelProof)} "${escapeTurtleLiteral(proof)}" .`);
+    return triples;
 }
 
 /**
@@ -313,12 +343,21 @@ export function buildEditPatch(args) { return _sparqlFromOps(editOps(args)); }
  *
  * Appends a schema:dateDeleted tombstone rather than removing the node, so the
  * append-only day file stays valid and other Solid apps can see the message was
- * withdrawn. Our reader blanks the content of a tombstoned message on read.
+ * withdrawn.
+ *
+ * #5 Part A: a tombstone is otherwise unauthenticated — any acl:Append member
+ * could write one against another member's message and censor it. So the deleter
+ * ALSO writes a px:deleteProof: a signature over { message IRI, deletedIso }. Our
+ * reader honours the tombstone only when this proof verifies for an authorized
+ * signer (the maker, or the room owner). A tombstone without a valid proof (an
+ * unsigned delete from another Solid app, or a forged one) is IGNORED, so the
+ * message stays visible — the safe posture. Omitted when we cannot sign, in which
+ * case the tombstone is interop-only (other apps hide it; Proxion does not).
  */
-export function deleteOps({ messageIri, deletedIso }) {
-    return {
-        inserts: [`${iriRef(messageIri)} ${iriRef(P.dateDeleted)} "${escapeTurtleLiteral(deletedIso)}"^^${iriRef(P.dateTime)} .`],
-    };
+export function deleteOps({ messageIri, deletedIso, proof }) {
+    const inserts = [`${iriRef(messageIri)} ${iriRef(P.dateDeleted)} "${escapeTurtleLiteral(deletedIso)}"^^${iriRef(P.dateTime)} .`];
+    if (proof) inserts.push(`${iriRef(messageIri)} ${iriRef(P.deleteProof)} "${escapeTurtleLiteral(proof)}" .`);
+    return { inserts };
 }
 export function buildDeletePatch(args) { return _sparqlFromOps(deleteOps(args)); }
 
@@ -490,10 +529,15 @@ export function parseLongChatJsonLd(json, threadId = '') {
         const content = firstLiteral(node, P.content);
         if (content == null) continue;          // not a message node
         const id = String(node['@id'] || '');
-        // Phase B: a schema:dateDeleted tombstone means the message was withdrawn
-        // (by us or another app). It reads as deleted with no content, never as
-        // stale text; callers can drop it or show a tombstone.
+        // #5 Part A: a schema:dateDeleted tombstone is EXTRACTED here but NOT
+        // honoured yet. Under acl:Append any member can write a tombstone against
+        // anyone's message, so trusting the raw tombstone would let a member censor
+        // a signed message. The message therefore stays VISIBLE at parse time;
+        // verifyLongChatMessages marks it deleted only when an accompanying
+        // px:deleteProof verifies for an authorized signer (the maker, or owner).
+        // An unsigned/forged tombstone (or one from another Solid app) is ignored.
         const deletedAt = firstLiteral(node, P.dateDeleted);
+        const deleteProof = firstLiteral(node, P.deleteProof);
         const seqRaw = firstLiteral(node, P.seq);
         const seq = seqRaw == null ? undefined : Number(seqRaw);
         // #4: the shape's message signature, if present. Extracted here; verified
@@ -507,9 +551,11 @@ export function parseLongChatJsonLd(json, threadId = '') {
             // can be re-checked over the exact bytes that were signed.
             iri: id,
             thread_id: threadId,
-            content: deletedAt != null ? '' : content,
-            deleted: deletedAt != null,
+            content,
+            // Not deleted until an authorized deletion is proven (see above).
+            deleted: false,
             deleted_at: deletedAt || null,
+            delete_proof: deleteProof || null,
             proof: proof || null,
             // Default to unverified; verifyLongChatMessages upgrades a valid,
             // authorized signature to true. Marked, never a reason to drop.
@@ -542,37 +588,67 @@ export function parseLongChatJsonLd(json, threadId = '') {
  * still show. A message whose content was edited or tombstoned after signing no
  * longer matches its proof and reads as unverified, which is honest.
  *
+ * #5 Part A: this is also where an authenticated soft-delete is honoured. A parsed
+ * message carrying a schema:dateDeleted tombstone stays visible until its
+ * px:deleteProof verifies over { iri, deletedIso } AND the signer is authorized:
+ * the message's own foaf:maker (self-delete, the MVP that closes cross-member
+ * censorship) or, when `ownerWebId` is supplied by the caller, the room owner
+ * (owner moderation). Only then is the message marked deleted and its content
+ * blanked; an unsigned, forged or foreign tombstone leaves the message visible.
+ *
  * Async and dependency-injected (fetchPeerSigner, peerPodRoot) so it stays
  * unit-testable without a live pod. Mutates each message in place and returns the
- * same array. peerPodRoot(maker) -> pod root; fetchPeerSigner(root) -> { signer }.
+ * same array. peerPodRoot(webid) -> pod root; fetchPeerSigner(root) -> { signer }.
  */
-export async function verifyLongChatMessages(messages, { fetchPeerSigner, peerPodRoot } = {}) {
+export async function verifyLongChatMessages(messages, { fetchPeerSigner, peerPodRoot, ownerWebId } = {}) {
     if (typeof fetchPeerSigner !== 'function' || typeof peerPodRoot !== 'function') return messages || [];
     const signerCache = new Map();   // pod root -> published signer doc (dedupe fetches within a read)
-    for (const m of messages || []) {
-        if (!m || !m.proof || !m.iri || !m.from_webid) continue;   // unsigned/foreign: already false
-        const signer = await verifyLongChatProof(
-            { id: m.iri, created: m.timestamp || '', content: m.content || '', maker: m.from_webid },
-            m.proof,
-        );
-        if (!signer) continue;                       // bad signature: stays false
-        const root = peerPodRoot(m.from_webid);
-        if (!root) continue;
+    // The published signer did:key for a WebID (or null), memoised per read.
+    const publishedSignerFor = async (webid) => {
+        const root = webid && peerPodRoot(webid);
+        if (!root) return null;
         if (!signerCache.has(root)) signerCache.set(root, await fetchPeerSigner(root));
         const iddoc = signerCache.get(root);
-        if (iddoc && signer === iddoc.signer) m.sender_verified = true;
+        return (iddoc && iddoc.signer) || null;
+    };
+    for (const m of messages || []) {
+        if (!m || !m.iri) continue;
+        // Message signature: authorizes signer -> foaf:maker (covers from_display_name).
+        if (m.proof && m.from_webid) {
+            const signer = await verifyLongChatProof(
+                { id: m.iri, created: m.timestamp || '', content: m.content || '', maker: m.from_webid, from_display_name: m.from_display_name || '' },
+                m.proof,
+            );
+            if (signer && signer === await publishedSignerFor(m.from_webid)) m.sender_verified = true;
+        }
+        // Soft-delete: honour the tombstone only when its proof verifies for an
+        // authorized signer (the maker, or the room owner when known).
+        if (m.deleted_at && m.delete_proof) {
+            const signer = await verifyLongChatDeleteProof({ iri: m.iri, deletedIso: m.deleted_at }, m.delete_proof);
+            if (signer) {
+                const makerSigner = await publishedSignerFor(m.from_webid);
+                const ownerSigner = ownerWebId ? await publishedSignerFor(ownerWebId) : null;
+                if ((makerSigner && signer === makerSigner) || (ownerSigner && signer === ownerSigner)) {
+                    m.deleted = true;
+                    m.content = '';
+                }
+            }
+        }
     }
     return messages || [];
 }
 
 /**
- * Read the reactions in a Long Chat day document (#4). Each reaction is a
- * schema:LikeAction targeting a message; an append-only un-react tombstones that
- * action with schema:dateDeleted (see reactionCancelTriples). This returns only
- * the ACTIVE reactions — a tombstoned action is cancelled and excluded — so a
- * reader sees the current state without any resource ever being rewritten or
- * deleted. Works on reactions written by other Solid apps too, since it keys off
- * the shared schema.org terms. Pure.
+ * Read the reactions in a Long Chat day document (#4, #5 Part C). Each reaction is
+ * a schema:LikeAction targeting a message; an append-only un-react tombstones that
+ * action with schema:dateDeleted (see reactionCancelTriples). Pure.
+ *
+ * This returns EVERY candidate like-action — including tombstoned ones — with its
+ * proof fields extracted but NOTHING trusted yet. The agent field is only a claim
+ * (any member can Append a LikeAction naming anyone as agent), and a tombstone is
+ * only a claim (any member can Append a schema:dateDeleted onto anyone's action).
+ * verifyReactionActions authenticates both and returns the trustworthy set; a
+ * caller that wants only authenticated, active reactions must run it.
  */
 export function parseReactionActions(json) {
     const out = [];
@@ -581,13 +657,63 @@ export function parseReactionActions(json) {
         const types = node['@type'];
         const typeList = Array.isArray(types) ? types : (types ? [types] : []);
         if (!typeList.includes(P.likeAction)) continue;
-        if (firstLiteral(node, P.dateDeleted) != null) continue;   // cancelled un-react
         out.push({
             action_iri: String(node['@id'] || ''),
             target_iri: firstId(node, P.target) || '',
             emoji: firstLiteral(node, P.content) || '',
             agent: firstId(node, P.agent) || '',
+            proof: firstLiteral(node, P.reactProof) || null,
+            canceled_at: firstLiteral(node, P.dateDeleted) || null,
+            cancel_proof: firstLiteral(node, P.cancelProof) || null,
+            // Default to unverified; verifyReactionActions upgrades a valid,
+            // agent-authorized reaction to true.
+            verified: false,
         });
+    }
+    return out;
+}
+
+/**
+ * Authenticate parsed reactions against their proofs (#5 Part C). For each
+ * candidate:
+ *   * the react proof must verify over { action, target, agent, emoji } AND the
+ *     signer must be the one the AGENT published at their own pod — otherwise the
+ *     reaction is forged (agent field spoofed) and dropped.
+ *   * a cancel is honoured only when its proof verifies over { action,
+ *     canceledIso } for the SAME agent's published signer — so only the reactor can
+ *     un-react. A forged cancel by anyone else is ignored and the reaction stays.
+ *
+ * Returns the trustworthy, ACTIVE reactions ({ action_iri, target_iri, emoji,
+ * agent, verified:true }). Async and dependency-injected like
+ * verifyLongChatMessages: peerPodRoot(agent) -> pod root; fetchPeerSigner(root) ->
+ * { signer }. Without the deps it returns [] (nothing can be authenticated).
+ */
+export async function verifyReactionActions(reactions, { fetchPeerSigner, peerPodRoot } = {}) {
+    if (typeof fetchPeerSigner !== 'function' || typeof peerPodRoot !== 'function') return [];
+    const signerCache = new Map();
+    const publishedSignerFor = async (webid) => {
+        const root = webid && peerPodRoot(webid);
+        if (!root) return null;
+        if (!signerCache.has(root)) signerCache.set(root, await fetchPeerSigner(root));
+        const iddoc = signerCache.get(root);
+        return (iddoc && iddoc.signer) || null;
+    };
+    const out = [];
+    for (const r of reactions || []) {
+        if (!r || !r.action_iri || !r.agent || !r.proof) continue;   // unsigned/foreign: not trusted
+        const agentSigner = await publishedSignerFor(r.agent);
+        if (!agentSigner) continue;
+        const signer = await verifyLongChatReactionProof(
+            { action: r.action_iri, target: r.target_iri, agent: r.agent, emoji: r.emoji }, r.proof,
+        );
+        if (!signer || signer !== agentSigner) continue;             // forged agent: dropped
+        // An authenticated cancel by the same agent withdraws the reaction.
+        if (r.canceled_at && r.cancel_proof) {
+            const csigner = await verifyLongChatCancelProof({ action: r.action_iri, canceledIso: r.canceled_at }, r.cancel_proof);
+            if (csigner && csigner === agentSigner) continue;        // genuinely cancelled
+        }
+        r.verified = true;
+        out.push(r);
     }
     return out;
 }

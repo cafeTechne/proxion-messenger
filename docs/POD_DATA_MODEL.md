@@ -125,8 +125,25 @@ the real SolidOS databrowser:
   replacement chain, whose rendering is reader-dependent; the `px:` layer keeps
   full edit history.
 - A **delete** appends a `schema:dateDeleted` tombstone (`http://schema.org/`).
-  The message node stays so the append-only day file remains valid; the
-  databrowser hides a tombstoned message, and Proxion's reader blanks its content.
+  The message node stays so the append-only day file remains valid, and other
+  Solid apps (the SolidOS databrowser) hide a tombstoned message.
+
+  Under `acl:Append`, though, any participant can append a tombstone onto anyone's
+  message, so a bare tombstone would let a member censor another member's message,
+  even a signed one (the signature does not cover `schema:dateDeleted`). Proxion
+  therefore requires an **authenticated** deletion: the deleter also writes a
+  `px:deleteProof` holding an Ed25519 signature over the message IRI and the
+  deletion time, packed as `"<did:key>|<base64-signature>"`. On read, Proxion
+  honours a tombstone (hides the message) only when this proof verifies **and** the
+  signer is authorized: the message's `foaf:maker` (a self-delete) or the room
+  owner (moderation). A tombstone with no valid proof, or one signed by anyone
+  else, is **ignored** and the message stays visible.
+
+  Interop consequence: a delete made by another Solid app carries no
+  `px:deleteProof`, so Proxion cannot tell it apart from a forged tombstone and
+  will **not** hide it. This is the safe posture (never hide content on an
+  unauthenticated tombstone). Other apps still honour the `schema:dateDeleted`
+  tombstone as before.
 
 Not yet mapped: replies and threads (`sioc:has_reply`, `sioc:Thread`). Long Chat
 models replies on the parent message while Proxion models them on the child, so
@@ -141,12 +158,17 @@ shape](https://github.com/solid/shapes/blob/main/shapes/chat.ttl):
 |---|---|---|
 | `sec:proofValue` | `https://w3id.org/security#` | an Ed25519 signature over the message |
 
-The signature covers exactly the message's core fields: its IRI (`@id`), the
-`dct:created` time, the `sioc:content` text, and the `foaf:maker` author, framed
-as length-prefixed bytes so no field can be shifted into another. Because the
-shape allows one literal, the value packs the signer's `did:key` and the base64
-signature as `"<did:key>|<base64-signature>"`, so a reader has both the key and
-the signature from the single term.
+The signature covers the message's core fields: its IRI (`@id`), the
+`dct:created` time, the `sioc:content` text, the `foaf:maker` author, and the
+author's display name (`px:fromName`), framed as length-prefixed bytes so no
+field can be shifted into another. The display name is included so a validly
+-signed message cannot carry a name that spoofs another author; a `px:fromName`
+changed or appended after signing fails verification. Because the shape allows one
+literal, the value packs the signer's `did:key` and the base64 signature as
+`"<did:key>|<base64-signature>"`, so a reader has both the key and the signature
+from the single term. A verifier accepts a legacy signature over just the four
+core fields (from before the name was signed) only when no name is present, so the
+legacy shim can never bless an appended name.
 
 On read, Proxion verifies the signature and then confirms the signer is one the
 author published at their **own** pod (the same trust anchor a direct message
@@ -182,6 +204,7 @@ A day file links each message to the channel and then describes it:
     dct:created "2026-07-22T14:03:11.000Z"^^xsd:dateTime;
     sioc:content "Morning, everyone";
     foaf:maker <https://alice.pod.example/profile/card#me>;
+    px:fromName "Alice";
     sec:proofValue "did:key:z6Mk...|Base64Signature==".
 ```
 
@@ -197,6 +220,18 @@ Details worth stating because they are easy to get wrong:
 - Day partitioning uses the message's **UTC** date, as the spec requires.
 - Messages are appended with a SPARQL-Update `PATCH`, not read-modify-write, so
   two devices writing the same day do not clobber each other.
+
+**Reactions** are mirrored into the day file as a `schema:LikeAction` targeting
+the message (`schema:agent` the reactor, `sioc:content` the emoji), and an
+append-only un-react tombstones that action with `schema:dateDeleted`. Both are
+authenticated the same way a delete is: the reactor writes a `px:reactProof` over
+the action IRI, target IRI, agent and emoji, and only that agent may cancel,
+writing a `px:cancelProof` over the action IRI and cancel time. Proxion trusts a
+reaction's agent only when its proof verifies for the agent's published signer,
+and honours a cancel only when it is signed by that same agent, so a reaction
+cannot be forged as another person and only its own author can withdraw it. A
+reaction written by another Solid app carries no proof and is not trusted by
+Proxion (but is still visible to that app).
 
 Reading goes the other way: Proxion requests these resources as JSON-LD via
 content negotiation, so it can display a chat written by SolidOS or POD-CHAT

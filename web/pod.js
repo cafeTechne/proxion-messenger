@@ -7,7 +7,7 @@ import {
     parseLongChatJsonLd, verifyLongChatMessages, mergeLongChatMessages,
     reactionActionTriples, reactionCancelTriples,
 } from './longchat.js';
-import { signLongChat } from './dmsig.js';
+import { signLongChat, signLongChatDelete, signLongChatReaction, signLongChatCancel } from './dmsig.js';
 import { peerPodRootFromWebId } from './webdm.js';
 import {
     buildEmptyTypeIndex, buildRegisterPatch, buildDeregisterPatch,
@@ -482,7 +482,7 @@ export async function podWriteChatMessageAt(containerUrl, messageId, msg) {
     let proof = null;
     if (_longChatSigner) {
         proof = await signLongChat(
-            { id: messageIri, created: timestamp, content: msg.content || '', maker: msg.from_webid || '' },
+            { id: messageIri, created: timestamp, content: msg.content || '', maker: msg.from_webid || '', from_display_name: msg.from_display_name || '' },
             _longChatSigner.privKey, _longChatSigner.signerDid,
         );
     }
@@ -492,6 +492,9 @@ export async function podWriteChatMessageAt(containerUrl, messageId, msg) {
         content: msg.content || '',
         createdIso: timestamp,
         makerIri: msg.from_webid || '',
+        // Part B: the display name is now emitted into the shared day file and
+        // covered by the signature above, so a signed message's name cannot be spoofed.
+        fromName: msg.from_display_name || '',
         replyToIri,
         proof,
     });
@@ -509,7 +512,7 @@ export async function podWriteChatMessageAt(containerUrl, messageId, msg) {
  * via content negotiation (every Solid server supports it), so no RDF parser has
  * to ship to the browser. Reads chats written by SolidOS and POD-CHAT too.
  */
-export async function podReadChatDayAt(containerUrl, date, threadId = '') {
+export async function podReadChatDayAt(containerUrl, date, threadId = '', ownerWebId = null) {
     if (!containerUrl || !_peerRootAllowed(containerUrl) || !solidSession?.info?.isLoggedIn) return [];
     try {
         const res = await solidSession.fetch(dayFileAt(containerUrl, date), {
@@ -528,13 +531,16 @@ export async function podReadChatDayAt(containerUrl, date, threadId = '') {
         } else {
             json = await res.json();
         }
-        // #4: parse, then authenticate each message's sec:proofValue against the
+        // #4/#5: parse, then authenticate each message's sec:proofValue against the
         // maker's published signer (podFetchPeerSigner is the same trust anchor a
-        // DM uses). Unsigned/foreign messages stay sender_verified:false; nothing
-        // is dropped.
+        // DM uses), and honour a soft-delete only when its px:deleteProof verifies
+        // for the maker or, when known, the room owner. Unsigned/foreign messages
+        // stay sender_verified:false; an unauthenticated tombstone leaves the
+        // message visible. Nothing is dropped.
         return verifyLongChatMessages(parseLongChatJsonLd(json, threadId), {
             fetchPeerSigner: podFetchPeerSigner,
             peerPodRoot: peerPodRootFromWebId,
+            ownerWebId,
         });
     } catch (err) {
         console.warn('[pod] podReadChatDayAt failed:', err);
@@ -569,10 +575,20 @@ export async function podEditChatMessageAt(containerUrl, messageId, date, newCon
  */
 export async function podSoftDeleteChatMessageAt(containerUrl, messageId, date, deletedIso) {
     if (!containerUrl || !solidSession?.info?.isLoggedIn) return false;
-    const ops = deleteOps({
-        messageIri: messageIriAt(containerUrl, messageId, date),
-        deletedIso: deletedIso || new Date().toISOString(),
-    });
+    const messageIri = messageIriAt(containerUrl, messageId, date);
+    const iso = deletedIso || new Date().toISOString();
+    // #5 Part A: sign { messageIri, deletedIso } so a reader can prove the deletion
+    // was authorized (the maker self-deleting, or the room owner moderating) and
+    // ignore a forged tombstone. Best-effort: without a signer the tombstone writes
+    // unsigned — interop-only, and NOT honoured by Proxion's own reader.
+    let proof = null;
+    if (_longChatSigner) {
+        proof = await signLongChatDelete(
+            { iri: messageIri, deletedIso: iso },
+            _longChatSigner.privKey, _longChatSigner.signerDid,
+        );
+    }
+    const ops = deleteOps({ messageIri, deletedIso: iso, proof });
     try {
         const res = await podRdfPatch(dayFileAt(containerUrl, date), ops);
         return !!(res && res.ok);
@@ -643,7 +659,8 @@ export function podWriteLongChatMessage(roomId, messageId, msg) {
 export function podReadLongChatDay(roomId, date) {
     const root = podStorageRoot();
     if (!root) return Promise.resolve([]);
-    return podReadChatDayAt(chatRootUrl(root, roomId), date, roomId);
+    // A room we host: we are the owner, so owner-moderation deletes authenticate too.
+    return podReadChatDayAt(chatRootUrl(root, roomId), date, roomId, solidSession?.info?.webId || null);
 }
 
 export function podEditLongChatMessage(roomId, messageId, date, newContent) {
@@ -671,14 +688,14 @@ export function podSetLongChatSeq(roomId, messageId, date, seq) {
  * container to find all history would be a request storm on a long-lived chat.
  * A caller wanting more history pages further back by raising `days`.
  */
-export async function podReadChatRecentAt(containerUrl, days = 7, threadId = '') {
+export async function podReadChatRecentAt(containerUrl, days = 7, threadId = '', ownerWebId = null) {
     if (!_peerRootAllowed(containerUrl)) return [];   // SSRF gate (defence in depth)
     const out = [];
     const seen = new Set();
     const today = Date.now();
     for (let i = Math.max(0, days - 1); i >= 0; i--) {
         const when = new Date(today - i * 86400000);
-        for (const m of await podReadChatDayAt(containerUrl, when, threadId)) {
+        for (const m of await podReadChatDayAt(containerUrl, when, threadId, ownerWebId)) {
             if (m.message_id && seen.has(m.message_id)) continue;
             if (m.message_id) seen.add(m.message_id);
             out.push(m);
@@ -690,7 +707,8 @@ export async function podReadChatRecentAt(containerUrl, days = 7, threadId = '')
 export function podReadLongChatRecent(roomId, days = 7) {
     const root = podStorageRoot();
     if (!root) return Promise.resolve([]);
-    return podReadChatRecentAt(chatRootUrl(root, roomId), days, roomId);
+    // A room we host: we are the owner (owner-moderation deletes authenticate too).
+    return podReadChatRecentAt(chatRootUrl(root, roomId), days, roomId, solidSession?.info?.webId || null);
 }
 
 // ── Pod-as-source-of-truth, first step (PLAN_ROUND_67 Phase D) ───────────────
@@ -1699,9 +1717,31 @@ export async function podWriteReactionActionAt(container, messageId, messageTime
     const dayFile = dayFileAt(container, messageTimestamp);
     const actionIri = `${dayFile}#react-${encodeURIComponent(messageId)}`
         + `-${encodeURIComponent(reactorWebId || 'anon')}-${encodeURIComponent(emoji)}`;
-    const ops = add
-        ? { inserts: reactionActionTriples({ actionIri, msgIri, agentIri: reactorWebId, emoji }) }
-        : { inserts: reactionCancelTriples({ actionIri, canceledIso: new Date().toISOString() }) };
+    // #5 Part C: sign the reaction (react proof over its fields) / un-react (cancel
+    // proof over { action, canceledIso }) so a reader can prove the agent, and so
+    // only the agent can cancel. Best-effort: unsigned without a signer, in which
+    // case an authenticating reader will not trust it.
+    let ops;
+    if (add) {
+        let proof = null;
+        if (_longChatSigner) {
+            proof = await signLongChatReaction(
+                { action: actionIri, target: msgIri, agent: reactorWebId || '', emoji },
+                _longChatSigner.privKey, _longChatSigner.signerDid,
+            );
+        }
+        ops = { inserts: reactionActionTriples({ actionIri, msgIri, agentIri: reactorWebId, emoji, proof }) };
+    } else {
+        const canceledIso = new Date().toISOString();
+        let proof = null;
+        if (_longChatSigner) {
+            proof = await signLongChatCancel(
+                { action: actionIri, canceledIso },
+                _longChatSigner.privKey, _longChatSigner.signerDid,
+            );
+        }
+        ops = { inserts: reactionCancelTriples({ actionIri, canceledIso, proof }) };
+    }
     try {
         const r = await podRdfPatch(dayFile, ops);
         return !!(r && r.ok);

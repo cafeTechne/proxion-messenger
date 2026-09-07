@@ -138,28 +138,22 @@ export async function verifyFanoutSig(env) {
 // "<did:key>|<b64sig>". The verifier splits on the FIRST '|' — a did:key holds
 // only base58 and base64 has no '|', so the delimiter is unambiguous — recovers
 // the public key from the did:key, and checks the signature. The signed material
-// is EXACTLY the shape's four core fields (the message IRI as id, dct:created,
-// sioc:content and foaf:maker) under the same 4-byte length-prefixed framing as a
-// DM, so a tampered id, time, text or author fails to verify.
-const SIGNED_FIELDS_LONGCHAT = ['id', 'created', 'content', 'maker'];
+// is framed with the same 4-byte length-prefixed scheme as a DM, so no field can
+// be shifted into another and a tampered field fails to verify.
 
-export function canonicalLongChatBytes(msg) { return _canonical(SIGNED_FIELDS_LONGCHAT, msg); }
-
-// Sign a room message; returns the compact "<did:key>|<b64sig>" proof string, or
-// null if we have no key. `msg` carries { id, created, content, maker }.
-export async function signLongChat(msg, privKey, signerDid) {
+// Sign arbitrary canonical bytes into the compact "<did:key>|<b64sig>" proof
+// string, or null if we have no key. Never throws.
+async function _signProof(bytes, privKey, signerDid) {
     if (!privKey || !signerDid) return null;
     try {
-        const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', privKey, canonicalLongChatBytes(msg)));
+        const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', privKey, bytes));
         return `${signerDid}|${_b64(sig)}`;
     } catch { return null; }
 }
-
-// Verify a proof string against the message's core fields. Returns the signer
-// did:key on success (so the caller can authorize signer -> foaf:maker against the
-// maker's published identity), or null. Never throws. Does NOT decide
-// authorization — the caller does that against the maker's published signer.
-export async function verifyLongChatProof(msg, proof) {
+// Verify a "<did:key>|<b64sig>" proof over `bytes`; returns the signer did:key on
+// success (so the caller can authorize it against the actor's published identity),
+// or null. Never throws. Does NOT decide authorization.
+async function _verifyProof(bytes, proof) {
     try {
         if (typeof proof !== 'string') return null;
         const bar = proof.indexOf('|');
@@ -168,6 +162,84 @@ export async function verifyLongChatProof(msg, proof) {
         const sig = proof.slice(bar + 1);
         if (!sig) return null;
         const pub = await crypto.subtle.importKey('raw', didToEd25519Pub(signer), { name: 'Ed25519' }, false, ['verify']);
-        return (await crypto.subtle.verify('Ed25519', pub, _b64dec(sig), canonicalLongChatBytes(msg))) ? signer : null;
+        return (await crypto.subtle.verify('Ed25519', pub, _b64dec(sig), bytes)) ? signer : null;
     } catch { return null; }
+}
+
+// The signed material now also covers foaf:maker's DISPLAY name (px:fromName, the
+// `from_display_name` field), so a validly-signed message under an attacker's own
+// maker cannot carry a spoofed name that reads as someone else. The LEGACY set is
+// the pre-name shape (id, created, content, maker), kept only for the shim below.
+const SIGNED_FIELDS_LONGCHAT = ['id', 'created', 'content', 'maker', 'from_display_name'];
+const SIGNED_FIELDS_LONGCHAT_LEGACY = ['id', 'created', 'content', 'maker'];
+
+export function canonicalLongChatBytes(msg) { return _canonical(SIGNED_FIELDS_LONGCHAT, msg); }
+
+// Sign a room message; returns the compact "<did:key>|<b64sig>" proof string, or
+// null if we have no key. `msg` carries { id, created, content, maker,
+// from_display_name }.
+export async function signLongChat(msg, privKey, signerDid) {
+    return _signProof(canonicalLongChatBytes(msg), privKey, signerDid);
+}
+
+// Verify a proof string against the message's core fields. Returns the signer
+// did:key on success (so the caller can authorize signer -> foaf:maker against the
+// maker's published identity), or null. Never throws. Does NOT decide
+// authorization — the caller does that against the maker's published signer.
+//
+// Tries the CURRENT field set (which covers from_display_name) first. Falls back
+// to the LEGACY set (the four core fields) ONLY when no display name is present,
+// so a message signed by the just-shipped code — which omitted from_display_name
+// and never wrote px:fromName — still verifies during rollout. The fallback is
+// deliberately skipped when a name IS present: a name has to be covered by the
+// current-scheme signature, so an attacker cannot Append a px:fromName onto a
+// legacy-signed message and have the legacy shim (which never signed a name) bless
+// it. A spoofed name therefore fails verification and shows as unverified.
+export async function verifyLongChatProof(msg, proof) {
+    const signer = await _verifyProof(canonicalLongChatBytes(msg), proof);
+    if (signer) return signer;
+    if (msg && msg.from_display_name != null && msg.from_display_name !== '') return null;
+    return _verifyProof(_canonical(SIGNED_FIELDS_LONGCHAT_LEGACY, msg), proof);
+}
+
+// ── Authenticated soft-delete (#5 Part A) ──
+// A tombstone (schema:dateDeleted) under acl:Append can be written by ANY member,
+// so on its own it lets a member censor anyone's message. The deleter therefore
+// signs a proof over the message IRI and the deletion time; the reader honours a
+// tombstone only when this proof verifies AND the signer is authorized (the
+// message's foaf:maker for a self-delete, or the room owner for moderation).
+const SIGNED_FIELDS_LONGCHAT_DELETE = ['iri', 'deletedIso'];
+export function canonicalLongChatDeleteBytes(t) { return _canonical(SIGNED_FIELDS_LONGCHAT_DELETE, t); }
+// `t` carries { iri, deletedIso }.
+export async function signLongChatDelete(t, privKey, signerDid) {
+    return _signProof(canonicalLongChatDeleteBytes(t), privKey, signerDid);
+}
+export async function verifyLongChatDeleteProof(t, proof) {
+    return _verifyProof(canonicalLongChatDeleteBytes(t), proof);
+}
+
+// ── Authenticated reactions and un-reactions (#5 Part C) ──
+// A schema:LikeAction and its append-only un-react tombstone are otherwise
+// unauthenticated, so a member could forge a reaction as anyone or cancel
+// anyone's. The reactor signs a proof over the action IRI, the target message IRI,
+// the agent WebID and the emoji; only that agent may cancel, signing over the
+// action IRI and the cancel time.
+const SIGNED_FIELDS_LONGCHAT_REACTION = ['action', 'target', 'agent', 'emoji'];
+export function canonicalLongChatReactionBytes(r) { return _canonical(SIGNED_FIELDS_LONGCHAT_REACTION, r); }
+// `r` carries { action, target, agent, emoji }.
+export async function signLongChatReaction(r, privKey, signerDid) {
+    return _signProof(canonicalLongChatReactionBytes(r), privKey, signerDid);
+}
+export async function verifyLongChatReactionProof(r, proof) {
+    return _verifyProof(canonicalLongChatReactionBytes(r), proof);
+}
+
+const SIGNED_FIELDS_LONGCHAT_CANCEL = ['action', 'canceledIso'];
+export function canonicalLongChatCancelBytes(c) { return _canonical(SIGNED_FIELDS_LONGCHAT_CANCEL, c); }
+// `c` carries { action, canceledIso }.
+export async function signLongChatCancel(c, privKey, signerDid) {
+    return _signProof(canonicalLongChatCancelBytes(c), privKey, signerDid);
+}
+export async function verifyLongChatCancelProof(c, proof) {
+    return _verifyProof(canonicalLongChatCancelBytes(c), proof);
 }

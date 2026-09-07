@@ -57,7 +57,7 @@ describe('buildDeletePatch (soft-delete tombstone)', () => {
     });
 });
 
-describe('parseLongChatJsonLd honours a tombstone on read', () => {
+describe('parseLongChatJsonLd extracts a tombstone but does NOT honour it (#5 Part A)', () => {
     const day = (extra) => [{
         '@id': MSG_IRI,
         [P.content]: [{ '@value': 'the original text' }],
@@ -72,14 +72,18 @@ describe('parseLongChatJsonLd honours a tombstone on read', () => {
         expect(m.content).toBe('the original text');
     });
 
-    it('a schema:dateDeleted message reads as deleted with no content', () => {
+    it('a schema:dateDeleted tombstone is extracted but the message stays VISIBLE', () => {
+        // A raw tombstone is unauthenticated (any acl:Append member can write one),
+        // so parse must not act on it: the message stays visible and content intact
+        // until verifyLongChatMessages authenticates an accompanying px:deleteProof.
         const [m] = parseLongChatJsonLd(
             day({ [P.dateDeleted]: [{ '@value': '2026-07-25T12:00:00.000Z', '@type': P.dateTime }] }),
             'general',
         );
-        expect(m.deleted).toBe(true);
-        expect(m.deleted_at).toBe('2026-07-25T12:00:00.000Z');
-        expect(m.content).toBe('');            // stale text never surfaces
+        expect(m.deleted).toBe(false);
+        expect(m.deleted_at).toBe('2026-07-25T12:00:00.000Z');  // extracted
+        expect(m.delete_proof).toBe(null);                      // none supplied
+        expect(m.content).toBe('the original text');            // NOT blanked on a raw tombstone
         expect(m.message_id).toBe('m-1');
     });
 

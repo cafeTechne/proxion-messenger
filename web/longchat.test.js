@@ -7,8 +7,9 @@ import {
     chatIndexUrl, chatChannelIri, chatDayUrl, messageIriFor,
     chatRootUrl, roomIdFromChatContainer,
     buildIndexTurtle, buildAppendPatch, parseLongChatJsonLd, mergeLongChatMessages,
-    reactionActionTriples, reactionCancelTriples, parseReactionActions,
+    reactionActionTriples, reactionCancelTriples, parseReactionActions, verifyReactionActions,
 } from './longchat.js';
+import { signLongChatReaction, signLongChatCancel } from './dmsig.js';
 
 describe('roomIdFromChatContainer (inverse of chatRootUrl)', () => {
     it('round-trips a room id, including one needing url-encoding', () => {
@@ -340,17 +341,28 @@ describe('reactions read append-only (#4)', () => {
         expect(triple).not.toContain('DELETE');
     });
 
-    it('parseReactionActions returns an active reaction', () => {
-        const out = parseReactionActions([action()]);
-        expect(out).toHaveLength(1);
-        expect(out[0]).toMatchObject({ target_iri: MSG, emoji: '👍', agent: ALICE });
+    it('reactionActionTriples / reactionCancelTriples carry the proofs when supplied', () => {
+        const add = reactionActionTriples({ actionIri: ACTION, msgIri: MSG, agentIri: ALICE, emoji: '👍', proof: 'did:key:zA|R' });
+        expect(add.some(t => t.includes(`<${P.reactProof}> "did:key:zA|R"`))).toBe(true);
+        const cancel = reactionCancelTriples({ actionIri: ACTION, canceledIso: '2026-08-08T11:00:00Z', proof: 'did:key:zA|C' });
+        expect(cancel.some(t => t.includes(`<${P.cancelProof}> "did:key:zA|C"`))).toBe(true);
     });
 
-    it('a tombstoned (un-reacted) action reads as cancelled and is excluded', () => {
+    it('parseReactionActions returns the candidate (unverified, agent not yet trusted)', () => {
+        const out = parseReactionActions([action()]);
+        expect(out).toHaveLength(1);
+        expect(out[0]).toMatchObject({ target_iri: MSG, emoji: '👍', agent: ALICE, verified: false });
+    });
+
+    it('parseReactionActions no longer excludes a tombstoned action on the raw tombstone', () => {
+        // A raw dateDeleted is unauthenticated, so a forged cancel must not silently
+        // hide a reaction: parse returns the candidate with canceled_at extracted,
+        // and verifyReactionActions decides whether the cancel is genuine.
         const out = parseReactionActions([
             action({ [P.dateDeleted]: [{ '@value': '2026-08-08T11:00:00Z', '@type': P.dateTime }] }),
         ]);
-        expect(out).toHaveLength(0);
+        expect(out).toHaveLength(1);
+        expect(out[0].canceled_at).toBe('2026-08-08T11:00:00Z');
     });
 
     it('a LikeAction never surfaces as a chat message (nor its tombstone)', () => {
@@ -359,6 +371,110 @@ describe('reactions read append-only (#4)', () => {
         const cancelled = action({ [P.dateDeleted]: [{ '@value': '2026-08-08T11:00:00Z', '@type': P.dateTime }] });
         const msgs = parseLongChatJsonLd([action(), cancelled], 'general');
         expect(msgs).toHaveLength(0);
+    });
+});
+
+// ── Part C: authenticated reactions and un-reactions ─────────────────────────
+describe('verifyReactionActions (#5 Part C)', () => {
+    const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    function b58encode(bytes) {
+        let zeros = 0; while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
+        const digits = [0];
+        for (let i = zeros; i < bytes.length; i++) {
+            let carry = bytes[i];
+            for (let j = 0; j < digits.length; j++) { carry += digits[j] << 8; digits[j] = carry % 58; carry = (carry / 58) | 0; }
+            while (carry > 0) { digits.push(carry % 58); carry = (carry / 58) | 0; }
+        }
+        let s = ''; for (let k = 0; k < zeros; k++) s += '1';
+        for (let q = digits.length - 1; q >= 0; q--) s += B58[digits[q]];
+        return s;
+    }
+    function didFromPub(pub) {
+        const mc = new Uint8Array(2 + pub.length); mc[0] = 0xed; mc[1] = 0x01; mc.set(pub, 2);
+        return 'did:key:z' + b58encode(mc);
+    }
+    async function makeIdentity() {
+        const kp = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+        const rawPub = new Uint8Array(await crypto.subtle.exportKey('raw', kp.publicKey));
+        return { priv: kp.privateKey, did: didFromPub(rawPub) };
+    }
+
+    const MSG = 'https://p/c/chat.ttl#m1';
+    const BOB = 'https://bob.pod/profile/card#me';
+    const CAROL = 'https://carol.pod/profile/card#me';
+    const ACTION = 'https://p/c/chat.ttl#react-m1-bob-👍';
+
+    const rootOf = (w) => `https://${new URL(w).host}/`;
+    function deps(published) {
+        const byRoot = {};
+        for (const [w, did] of Object.entries(published)) byRoot[rootOf(w)] = { signer: did };
+        return { peerPodRoot: rootOf, fetchPeerSigner: async (root) => byRoot[root] || null };
+    }
+    function actionNode(over = {}) {
+        return {
+            '@id': ACTION, '@type': [P.likeAction],
+            [P.target]: [{ '@id': MSG }],
+            [P.content]: [{ '@value': '👍' }],
+            [P.agent]: [{ '@id': BOB }],
+            ...over,
+        };
+    }
+
+    it('accepts a reaction whose proof verifies for the claimed agent', async () => {
+        const bob = await makeIdentity();
+        const proof = await signLongChatReaction({ action: ACTION, target: MSG, agent: BOB, emoji: '👍' }, bob.priv, bob.did);
+        const parsed = parseReactionActions([actionNode({ [P.reactProof]: [{ '@value': proof }] })]);
+        const out = await verifyReactionActions(parsed, deps({ [BOB]: bob.did }));
+        expect(out).toHaveLength(1);
+        expect(out[0]).toMatchObject({ agent: BOB, emoji: '👍', verified: true });
+    });
+
+    it('drops a FORGED reaction (agent=victim, signed by the attacker)', async () => {
+        const bob = await makeIdentity();       // the real Bob, published signer
+        const mallory = await makeIdentity();   // attacker
+        // Mallory forges a reaction claiming agent = Bob, signed with her own key.
+        const proof = await signLongChatReaction({ action: ACTION, target: MSG, agent: BOB, emoji: '👍' }, mallory.priv, mallory.did);
+        const parsed = parseReactionActions([actionNode({ [P.reactProof]: [{ '@value': proof }] })]);
+        const out = await verifyReactionActions(parsed, deps({ [BOB]: bob.did }));
+        expect(out).toHaveLength(0);            // agent field cannot be forged
+    });
+
+    it('an unsigned reaction is not trusted', async () => {
+        const bob = await makeIdentity();
+        const parsed = parseReactionActions([actionNode()]);   // no proof
+        const out = await verifyReactionActions(parsed, deps({ [BOB]: bob.did }));
+        expect(out).toHaveLength(0);
+    });
+
+    it('honours a cancel signed by the reaction agent', async () => {
+        const bob = await makeIdentity();
+        const rProof = await signLongChatReaction({ action: ACTION, target: MSG, agent: BOB, emoji: '👍' }, bob.priv, bob.did);
+        const cIso = '2026-08-08T11:00:00Z';
+        const cProof = await signLongChatCancel({ action: ACTION, canceledIso: cIso }, bob.priv, bob.did);
+        const parsed = parseReactionActions([actionNode({
+            [P.reactProof]: [{ '@value': rProof }],
+            [P.dateDeleted]: [{ '@value': cIso, '@type': P.dateTime }],
+            [P.cancelProof]: [{ '@value': cProof }],
+        })]);
+        const out = await verifyReactionActions(parsed, deps({ [BOB]: bob.did }));
+        expect(out).toHaveLength(0);            // genuinely cancelled by its agent
+    });
+
+    it('a FORGED cancel by a non-agent does not cancel the reaction', async () => {
+        const bob = await makeIdentity();
+        const carol = await makeIdentity();     // not the reaction's agent
+        const rProof = await signLongChatReaction({ action: ACTION, target: MSG, agent: BOB, emoji: '👍' }, bob.priv, bob.did);
+        const cIso = '2026-08-08T11:00:00Z';
+        // Carol signs a cancel over Bob's action; she is not the agent.
+        const cProof = await signLongChatCancel({ action: ACTION, canceledIso: cIso }, carol.priv, carol.did);
+        const parsed = parseReactionActions([actionNode({
+            [P.reactProof]: [{ '@value': rProof }],
+            [P.dateDeleted]: [{ '@value': cIso, '@type': P.dateTime }],
+            [P.cancelProof]: [{ '@value': cProof }],
+        })]);
+        const out = await verifyReactionActions(parsed, deps({ [BOB]: bob.did, [CAROL]: carol.did }));
+        expect(out).toHaveLength(1);            // forged cancel ignored, reaction stays
+        expect(out[0].agent).toBe(BOB);
     });
 });
 

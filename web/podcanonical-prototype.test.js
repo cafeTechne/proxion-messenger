@@ -31,8 +31,31 @@ vi.mock('./auth.js', () => ({
 import {
     podWriteLongChatMessage, podEditLongChatMessage, podSoftDeleteLongChatMessage,
     podHydrateRoom, ensureProxionContainer,
+    podSetLongChatSigner, podPublishSigner,
 } from './pod.js';
 import { chatRootUrl, dayPath } from './longchat.js';
+
+// A signing identity so the soft-delete carries a px:deleteProof the read path can
+// authenticate (#5 Part A); published to our own pod, the delete's trust anchor.
+const _B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function _b58encode(bytes) {
+    let zeros = 0; while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
+    const digits = [0];
+    for (let i = zeros; i < bytes.length; i++) {
+        let carry = bytes[i];
+        for (let j = 0; j < digits.length; j++) { carry += digits[j] << 8; digits[j] = carry % 58; carry = (carry / 58) | 0; }
+        while (carry > 0) { digits.push(carry % 58); carry = (carry / 58) | 0; }
+    }
+    let s = ''; for (let k = 0; k < zeros; k++) s += '1';
+    for (let q = digits.length - 1; q >= 0; q--) s += _B58[digits[q]];
+    return s;
+}
+async function _makeSigner() {
+    const kp = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+    const rawPub = new Uint8Array(await crypto.subtle.exportKey('raw', kp.publicKey));
+    const mc = new Uint8Array(2 + rawPub.length); mc[0] = 0xed; mc[1] = 0x01; mc.set(rawPub, 2);
+    return { privKey: kp.privateKey, signerDid: 'did:key:z' + _b58encode(mc) };
+}
 
 const LIVE = !!process.env.TEST_CSS_CLIENT_ID;
 // TODAY (UTC): podHydrateRoom reads a recent window ending now, so the messages
@@ -60,6 +83,9 @@ beforeAll(async () => {
     });
     _storageRoot = process.env.TEST_STORAGE_ROOT;
     await ensureProxionContainer();
+    const signer = await _makeSigner();
+    podSetLongChatSigner(signer);
+    await podPublishSigner(signer.signerDid, null);
 
     const me = webId();
     // Three messages, then edit the middle and delete the last: the room's final
