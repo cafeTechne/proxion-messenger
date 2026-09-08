@@ -624,25 +624,16 @@ class DmHandlerMixin:
                     _vpk = getattr(self, "_vapid_private_pem", None)
                     _vsub = getattr(self, "_vapid_subject", None)
                     if _vpk and _vsub:
-                        from .webpush import send_web_push
                         _sender_name = self._name_for(websocket, sender_webid)
-                        for _sub in _subs:
-                            send_web_push(
-                                subscription={
-                                    "endpoint": _sub["endpoint"],
-                                    "keys": {
-                                        "p256dh": _sub["p256dh_b64"],
-                                        "auth": _sub["auth_b64"],
-                                    },
-                                },
-                                payload={
-                                    "type": "message",
-                                    "thread_id": thread_id,
-                                    "display_name": _sender_name,
-                                },
-                                vapid_private_pem=_vpk,
-                                vapid_subject=_vsub,
-                            )
+                        await self._push_offline_fanout(
+                            _subs,
+                            {
+                                "type": "message",
+                                "thread_id": thread_id,
+                                "display_name": _sender_name,
+                            },
+                            _vpk, _vsub,
+                        )
             # Try cross-gateway relay
             peer_gw = self._resolve_peer_gateway(target_webid)
             if peer_gw:
@@ -869,20 +860,10 @@ class DmHandlerMixin:
                     _vapid_priv = getattr(self, "_vapid_private_pem", None)
                     _vapid_sub = getattr(self, "_vapid_subject", None)
                     if _vapid_priv and _vapid_sub:
-                        from .webpush import send_web_push
-                        for sub in subs:
-                            send_web_push(
-                                subscription={
-                                    "endpoint": sub["endpoint"],
-                                    "keys": {
-                                        "p256dh": sub["p256dh_b64"],
-                                        "auth": sub["auth_b64"],
-                                    },
-                                },
-                                payload={"type": "sealed_message"},
-                                vapid_private_pem=_vapid_priv,
-                                vapid_subject=_vapid_sub,
-                            )
+                        await self._push_offline_fanout(
+                            subs, {"type": "sealed_message"},
+                            _vapid_priv, _vapid_sub,
+                        )
 
     async def _handle_send_dm_fanout(self, websocket, data: dict) -> None:
         """Deliver per-device encrypted DM envelopes in one logical send.
@@ -953,8 +934,8 @@ class DmHandlerMixin:
                                                 to_device_id, entry.get("payload"))
                     if not account_sockets and to_webid not in _pushed_accounts:
                         _pushed_accounts.add(to_webid)
-                        self._push_offline_dm(to_webid, from_webid,
-                                              self._name_for(websocket, from_webid))
+                        await self._push_offline_dm(to_webid, from_webid,
+                                                    self._name_for(websocket, from_webid))
             delivered.append({"to_webid": to_webid, "to_device_id": to_device_id})
 
         await websocket.send(json.dumps({
@@ -991,7 +972,43 @@ class DmHandlerMixin:
             q.pop(0)  # drop-oldest
         q.append({"message_id": message_id, "from_webid": from_webid, "payload": payload})
 
-    def _push_offline_dm(self, to_webid: str, from_webid: str, display_name: str = "") -> None:
+    async def _push_offline_fanout(self, subs, payload: dict, vpk: str, vsub: str) -> None:
+        """Send a web-push fan-out to *subs* off the event loop.
+
+        ``send_web_push`` does blocking network I/O and SSRF-validates each
+        endpoint itself; running the whole loop in an executor (bounded by a
+        timeout) keeps a slow or hanging push service from stalling the loop.
+        Awaited, not fire-and-forget, so delivery ordering is preserved.
+        """
+        if not subs:
+            return
+        from .webpush import send_web_push
+
+        def _fanout():
+            for s in subs:
+                try:
+                    send_web_push(
+                        subscription={
+                            "endpoint": s["endpoint"],
+                            "keys": {"p256dh": s["p256dh_b64"], "auth": s["auth_b64"]},
+                        },
+                        payload=payload,
+                        vapid_private_pem=vpk,
+                        vapid_subject=vsub,
+                    )
+                except Exception:
+                    pass
+
+        try:
+            loop = asyncio.get_event_loop()
+            await asyncio.wait_for(
+                loop.run_in_executor(None, _fanout),
+                timeout=len(subs) * 12.0 + 5.0,
+            )
+        except Exception:
+            pass
+
+    async def _push_offline_dm(self, to_webid: str, from_webid: str, display_name: str = "") -> None:
         """Web-push an offline account about a DM, honoring server-side mutes.
         Mirrors the plain local_dm push block — the fanout path never pushed,
         so a phone with the app closed missed multi-device DMs entirely."""
@@ -1004,24 +1021,15 @@ class DmHandlerMixin:
         _vsub = getattr(self, "_vapid_subject", None)
         if not (_subs and _vpk and _vsub):
             return
-        from .webpush import send_web_push
-        for _sub in _subs:
-            try:
-                send_web_push(
-                    subscription={
-                        "endpoint": _sub["endpoint"],
-                        "keys": {"p256dh": _sub["p256dh_b64"], "auth": _sub["auth_b64"]},
-                    },
-                    payload={
-                        "type": "message",
-                        "thread_id": from_webid,
-                        "display_name": display_name or from_webid[:12],
-                    },
-                    vapid_private_pem=_vpk,
-                    vapid_subject=_vsub,
-                )
-            except Exception:
-                pass
+        await self._push_offline_fanout(
+            _subs,
+            {
+                "type": "message",
+                "thread_id": from_webid,
+                "display_name": display_name or from_webid[:12],
+            },
+            _vpk, _vsub,
+        )
 
     async def _relay_dm_fanout_entry(self, message_id: str, to_webid: str,
                                      to_device_id: str, payload) -> None:
@@ -1157,7 +1165,7 @@ class DmHandlerMixin:
             self._queue_fanout_envelope(message_id, from_webid, to_webid,
                                         to_device_id, payload)
             if not (self._sockets_for(to_webid) or []):
-                self._push_offline_dm(to_webid, from_webid)
+                await self._push_offline_dm(to_webid, from_webid)
         return "200 OK", '{"status":"received"}'
 
     async def _handle_dm_decrypt_failed(self, websocket, data: dict) -> None:

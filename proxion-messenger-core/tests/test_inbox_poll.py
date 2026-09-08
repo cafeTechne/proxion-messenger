@@ -125,14 +125,17 @@ def test_unreadable_inbox_is_skipped(gw):
 def test_send_inbox_push_rate_limited(gw):
     """A second push to the same WebID within the window is suppressed (dedups the
     webhook + poll paths)."""
-    gw._store.save_push_subscription("s1", WEBID, "https://push/ep", "p", "a")
+    gw._store.save_push_subscription("s1", WEBID, "https://push.example/ep", "p", "a")
     import proxion_messenger_core.webpush as wp
+    from unittest.mock import patch
     calls = []
     orig = wp.send_web_push
     wp.send_web_push = lambda **k: (calls.append(1) or True)
+    _public = [(None, None, None, None, ("93.184.216.34", 0))]
     try:
-        assert gw._send_inbox_push(WEBID) is True
-        assert gw._send_inbox_push(WEBID) is False   # within window
+        with patch("proxion_messenger_core.network.socket.getaddrinfo", return_value=_public):
+            assert gw._send_inbox_push(WEBID) is True
+            assert gw._send_inbox_push(WEBID) is False   # within window
     finally:
         wp.send_web_push = orig
     assert len(calls) == 1

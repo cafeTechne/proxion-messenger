@@ -1569,6 +1569,12 @@ class MiscHandlerMixin:
         if not endpoint or not p256dh_b64 or not auth_b64:
             await websocket.send(json.dumps({"type": "error", "message": "missing_subscription_fields"}))
             return
+        # SSRF guard: never store an endpoint we could later be coerced into POSTing
+        # to a private/loopback/metadata host. Same validator the relay path uses.
+        from .webpush import is_safe_push_endpoint
+        if not is_safe_push_endpoint(endpoint):
+            await websocket.send(json.dumps({"type": "error", "message": "invalid_push_endpoint"}))
+            return
         self._store.save_push_subscription(subscription_id, owner_webid, endpoint, p256dh_b64, auth_b64)
         asyncio.create_task(self._sync_push_subscription_to_pod(subscription_id, owner_webid, endpoint, p256dh_b64, auth_b64))
         await websocket.send(json.dumps({
@@ -1577,10 +1583,11 @@ class MiscHandlerMixin:
         }))
 
     async def _handle_unsubscribe_push(self, websocket, data: dict) -> None:
-        """Remove a push subscription."""
+        """Remove a push subscription. Scoped to the caller's own subscriptions."""
         subscription_id = data.get("subscription_id", "")
-        if self._store and subscription_id:
-            self._store.delete_push_subscription(subscription_id)
+        owner_webid = self._client_webids.get(websocket, "")
+        if self._store and subscription_id and owner_webid:
+            self._store.delete_push_subscription(subscription_id, owner_webid)
             asyncio.create_task(self._delete_push_subscription_from_pod(subscription_id))
         await websocket.send(json.dumps({"type": "push_unsubscribed", "subscription_id": subscription_id}))
 
@@ -1655,9 +1662,12 @@ class MiscHandlerMixin:
         if now - last < self._INBOX_PUSH_MIN_INTERVAL:
             return False
         self._last_inbox_push[webid] = now
-        from .webpush import send_web_push
+        from .webpush import send_web_push, is_safe_push_endpoint
         sent = False
         for sub in subs:
+            # Defense in depth: skip a stored endpoint that no longer validates.
+            if not is_safe_push_endpoint(sub.get("endpoint", "")):
+                continue
             try:
                 ok = send_web_push(
                     subscription={

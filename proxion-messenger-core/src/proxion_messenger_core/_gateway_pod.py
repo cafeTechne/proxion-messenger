@@ -2075,6 +2075,16 @@ class PodSyncMixin:
                 auth_b64 = rec.get("auth_b64", "")
                 if not subscription_id or not owner_webid or not endpoint:
                     continue
+                # A compromised pod is a second injection route for the push
+                # endpoint, so re-validate it through the same SSRF check before
+                # trusting a restored subscription.
+                from .webpush import is_safe_push_endpoint
+                if not is_safe_push_endpoint(endpoint):
+                    logger.warning(
+                        "_restore_push_subscriptions_from_pod: skipping unsafe endpoint for %s",
+                        subscription_id[:16],
+                    )
+                    continue
                 existing = self._store.get_push_subscriptions(owner_webid)
                 if any(s.get("subscription_id") == subscription_id for s in existing):
                     continue

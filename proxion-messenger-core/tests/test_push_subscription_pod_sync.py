@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import json
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+# Any push endpoint is now SSRF-validated (DNS-resolved) before it is stored or
+# restored; make the fake test hosts resolve to a public IP.
+_PUBLIC_IP = [(None, None, None, None, ("93.184.216.34", 0))]
 
 from proxion_messenger_core.gateway import ProxionGateway, GatewayConfig
 from proxion_messenger_core.persist import AgentState
@@ -76,7 +80,8 @@ async def test_restore_push_subscriptions_from_pod_populates_sqlite(gateway):
     gateway._pod_webid = "https://pod.example/profile/card#me"
     gateway.own_pod_clients[gateway._pod_webid] = (MagicMock(), mock_client)
 
-    await gateway._restore_push_subscriptions_from_pod()
+    with patch("proxion_messenger_core.network.socket.getaddrinfo", return_value=_PUBLIC_IP):
+        await gateway._restore_push_subscriptions_from_pod()
     subs = gateway._store.get_push_subscriptions("https://alice.pod/profile/card#me")
     assert any(s.get("subscription_id") == "sub-restore-1" for s in subs)
 

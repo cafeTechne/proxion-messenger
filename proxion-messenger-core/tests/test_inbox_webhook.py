@@ -74,7 +74,9 @@ def test_token_is_bound_to_webid(gw):
 
 def test_valid_token_pushes_content_free(gw):
     gw._store.save_push_subscription("s1", WEBID, "https://push.example/ep", "p256", "auth")
-    with patch("proxion_messenger_core.webpush.send_web_push") as sp:
+    _public = [(None, None, None, None, ("93.184.216.34", 0))]
+    with patch("proxion_messenger_core.webpush.send_web_push") as sp, \
+         patch("proxion_messenger_core.network.socket.getaddrinfo", return_value=_public):
         sp.return_value = True
         assert gw._deliver_inbox_webhook(gw._inbox_webhook_token(WEBID)) is True
     assert sp.call_count == 1

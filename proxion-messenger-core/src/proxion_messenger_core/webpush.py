@@ -21,8 +21,34 @@ from __future__ import annotations
 import base64
 import json
 import logging
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+# Bounded network timeout for a single push delivery, so a slow or hanging push
+# service can't wedge the caller (or the event loop, once offloaded).
+_PUSH_TIMEOUT = 10.0
+
+
+def is_safe_push_endpoint(endpoint: str) -> bool:
+    """Return True only if *endpoint* is an https URL that resolves to a public IP.
+
+    Reuses :func:`~proxion_messenger_core.network._resolve_safe_ip` — the SSRF
+    validator the rest of the codebase uses — so loopback/private/link-local/
+    reserved/metadata addresses are rejected across every resolved IP (guarding
+    against split-horizon DNS).  Push endpoints must additionally be https.
+
+    Set ``PROXION_ALLOW_PRIVATE_RELAY=1`` to permit private hosts in local tests.
+    """
+    if not endpoint or not isinstance(endpoint, str):
+        return False
+    try:
+        if urlparse(endpoint).scheme != "https":
+            return False
+    except Exception:
+        return False
+    from .network import _resolve_safe_ip
+    return _resolve_safe_ip(endpoint) is not None
 
 
 def generate_vapid_keypair() -> tuple[str, str]:
@@ -82,6 +108,12 @@ def send_web_push(
     -------
     True on successful delivery, False on any error.
     """
+    # Defense in depth: reject a subscription whose endpoint fails the SSRF check
+    # even if it was somehow stored without validation.
+    if not is_safe_push_endpoint((subscription or {}).get("endpoint", "")):
+        logger.warning("WebPush endpoint failed SSRF validation — skipped")
+        return False
+
     try:
         from pywebpush import webpush, WebPushException
     except ImportError:
@@ -97,6 +129,7 @@ def send_web_push(
             vapid_claims={"sub": vapid_subject},
             ttl=ttl,
             content_encoding="aes128gcm",
+            timeout=_PUSH_TIMEOUT,
         )
         if resp and resp.status_code < 300:
             return True

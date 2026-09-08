@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 # leaked-but-unredeemed code stops being a standing credential.
 DEVICE_RECOVERY_CODE_TTL_SECONDS = 7 * 86400  # 7 days
 
+# Cap push subscriptions per owner so an attacker cannot register many endpoints
+# for push amplification. Over the cap we evict the oldest rows.
+MAX_PUSH_SUBSCRIPTIONS_PER_OWNER = 20
+
 
 
 
@@ -196,6 +200,21 @@ class DeviceStoreMixin(object):
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (subscription_id, owner_webid, endpoint, p256dh_b64, auth_b64, time.time()),
             )
+            # Enforce the per-owner cap: evict the oldest rows over the limit so a
+            # single owner cannot register an unbounded number of push endpoints.
+            try:
+                conn.execute(
+                    """DELETE FROM push_subscriptions
+                       WHERE owner_webid=? AND subscription_id NOT IN (
+                           SELECT subscription_id FROM push_subscriptions
+                           WHERE owner_webid=?
+                           ORDER BY created_at DESC, subscription_id DESC
+                           LIMIT ?
+                       )""",
+                    (owner_webid, owner_webid, MAX_PUSH_SUBSCRIPTIONS_PER_OWNER),
+                )
+            except Exception:
+                pass
     def get_push_subscriptions(self, owner_webid: str) -> list[dict]:
         with self._conn() as conn:
             try:
@@ -216,13 +235,26 @@ class DeviceStoreMixin(object):
                 return [r[0] for r in rows if r and r[0]]
             except Exception:
                 return []
-    def delete_push_subscription(self, subscription_id: str) -> None:
+    def delete_push_subscription(
+        self, subscription_id: str, owner_webid: Optional[str] = None
+    ) -> None:
+        """Delete a push subscription by id.
+
+        When *owner_webid* is given the delete is scoped to that owner, so a
+        caller cannot remove another owner's subscription by guessing its id.
+        """
         with self._conn() as conn:
             try:
-                conn.execute(
-                    "DELETE FROM push_subscriptions WHERE subscription_id=?",
-                    (subscription_id,),
-                )
+                if owner_webid is not None:
+                    conn.execute(
+                        "DELETE FROM push_subscriptions WHERE subscription_id=? AND owner_webid=?",
+                        (subscription_id, owner_webid),
+                    )
+                else:
+                    conn.execute(
+                        "DELETE FROM push_subscriptions WHERE subscription_id=?",
+                        (subscription_id,),
+                    )
             except Exception:
                 pass
     def register_device(
