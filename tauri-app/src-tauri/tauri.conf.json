@@ -25,10 +25,7 @@
       },
       "shell": {
         "all": false,
-        "sidecar": true,
-        "scope": [
-          { "name": "sidecar/proxion-gateway", "sidecar": true }
-        ]
+        "sidecar": false
       }
     },
     "bundle": {
