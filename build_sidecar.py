@@ -18,6 +18,7 @@ Tauri picks this up automatically via externalBin in tauri.conf.json.
 import hashlib
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -157,6 +158,13 @@ def fetch_cloudflared(triple: str) -> Optional[Path]:
     asset = cloudflared_asset_name(triple)
     if not asset:
         print(f"[cloudflared] no known asset for {triple}; detect-only")
+        return None
+    # Defense in depth: the version is interpolated into the download URL, so a
+    # malformed value (e.g. "../../owner/evilrepo/...") could redirect the fetch.
+    # cloudflared versions are calendar-style (YYYY.M.P); refuse anything else.
+    if not re.fullmatch(r"[0-9]{4}\.[0-9]+\.[0-9]+", version):
+        print(f"[cloudflared] refusing to build: version {version!r} is not a "
+              "valid cloudflared version (expected YYYY.M.P); detect-only")
         return None
     url = (f"https://github.com/cloudflare/cloudflared/releases/download/"
            f"{version}/{asset}")

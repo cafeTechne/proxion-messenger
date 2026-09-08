@@ -84,7 +84,7 @@ jobs:
           node-version: "20"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable (2026-09-03)
 
       - name: Linux build deps
         if: runner.os == 'Linux'
@@ -97,7 +97,7 @@ jobs:
         run: npm ci
 
       - name: Build + sign Tauri app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5  # v0.6.2
         env:
           # Required for creating the release and uploading assets.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -147,7 +147,7 @@ jobs:
           sha256sum * | tee ../SHA256SUMS.txt
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018  # v1.4.4
         with:
           subject-path: assets/*
 
