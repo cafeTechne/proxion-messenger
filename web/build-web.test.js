@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { injectWebHead, WEB_CSP } from './scripts/build-web.mjs';
+import { createHash } from 'node:crypto';
+import { injectWebHead, WEB_CSP, FRAME_BUST } from './scripts/build-web.mjs';
 
 describe('injectWebHead', () => {
     it('adds the web-mode meta so detectMode picks web', () => {
@@ -33,5 +34,45 @@ describe('injectWebHead', () => {
         expect(WEB_CSP).toContain("default-src 'self'");
         expect(WEB_CSP).toContain('connect-src');
         expect(WEB_CSP).toContain('wss:');
+    });
+
+    it('injects the frame-bust guard and whitelists it by hash in the CSP', () => {
+        const hash = "'sha256-" + createHash('sha256').update(FRAME_BUST).digest('base64') + "'";
+        expect(WEB_CSP).toContain(`script-src 'self' ${hash}`);
+        const out = injectWebHead('<head></head>');
+        expect(out).toContain(`<script>${FRAME_BUST}</script>`);
+    });
+});
+
+describe('frame-bust guard', () => {
+    // Run the injected script body with a controlled `window` (it references only
+    // window.*, so a Function param shadows the global).
+    const run = (win) => new Function('window', FRAME_BUST)(win);
+
+    it('no-ops in a top-level context', () => {
+        const style = {};
+        const win = { location: { href: 'https://app/', replace() {} }, document: { documentElement: { style } } };
+        win.self = win; win.top = win;
+        run(win);
+        expect(style.display).toBeUndefined();
+    });
+
+    it('breaks out of a same-origin frame by navigating top', () => {
+        const style = {};
+        let navigated = '';
+        const win = { location: { href: 'https://app/x' }, document: { documentElement: { style } } };
+        win.self = win;
+        win.top = { location: { replace: (u) => { navigated = u; } } };
+        run(win);
+        expect(navigated).toBe('https://app/x');
+    });
+
+    it('hides the document when a cross-origin top blocks the break-out', () => {
+        const style = {};
+        const win = { location: { href: 'https://app/' }, document: { documentElement: { style } } };
+        win.self = win;
+        win.top = { get location() { throw new Error('cross-origin'); } };
+        run(win);
+        expect(style.display).toBe('none');
     });
 });

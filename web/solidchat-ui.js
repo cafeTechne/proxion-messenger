@@ -7,6 +7,8 @@
 // createElement, never innerHTML with interpolation, so a hostile message
 // cannot inject markup. This mirrors the b64attr/escaping discipline elsewhere.
 
+import { inviteActorVerified } from './ldn.js';
+
 // Well-known WebID container names that do not identify the user; skip them so
 // the label lands on the username (CSS puts it first: /{user}/profile/card#me)
 // or on the host for a root-hosted pod (/profile/card#me).
@@ -32,6 +34,7 @@ const _EN = {
     'solidchat.noChatsFound': 'No chats found for that WebID.',
     'solidchat.noInvites': 'No pending invitations.',
     'solidchat.inviteFrom': '{title} from {who}',
+    'voice.unverified': 'Unverified',
     'btn.accept': 'Accept',
     'btn.dismiss': 'Dismiss',
 };
@@ -220,7 +223,10 @@ export function createSolidChatUI({ model, getMyWebId = () => '', showToast = ()
     /**
      * Render pending inbox invitations into `listEl` (PLAN_ROUND_75). Each row shows
      * the sender and chat title (foreign data, textContent only) with Accept and
-     * Dismiss. Accept joins and calls onAccepted(conv); both clear the row.
+     * Dismiss. Accept joins and calls onAccepted(conv); both clear the row. The
+     * inbox is public-Append, so the `actor` cannot be trusted on its own: unless
+     * inviteActorVerified holds (actor and container share an origin) the sender is
+     * marked Unverified and the row carries solidchat-invite-unverified.
      */
     async function renderInvitations(listEl, onAccepted) {
         if (!listEl) return;
@@ -239,7 +245,12 @@ export function createSolidChatUI({ model, getMyWebId = () => '', showToast = ()
             li.className = 'solidchat-invite';
             const label = document.createElement('span');
             label.className = 'solidchat-invite-label';
-            const who = shortWebId(inv.from) || 'someone';
+            const verified = inviteActorVerified(inv.from, inv.container);
+            let who = shortWebId(inv.from) || 'someone';
+            if (!verified) {                                     // public-Append inbox: actor unproven
+                who = `${who} (${t('voice.unverified')})`;
+                li.classList.add('solidchat-invite-unverified');
+            }
             label.textContent = t('solidchat.inviteFrom', { title: inv.title || shortWebId(inv.container), who });   // textContent: safe
             const accept = document.createElement('button');
             accept.type = 'button';

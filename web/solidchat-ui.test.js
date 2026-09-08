@@ -8,6 +8,7 @@ import { createSolidChatUI, shortWebId } from './solidchat-ui.js';
 function mkEl() {
     const el = {
         className: '', type: '', _text: '', innerHTML: '', dataset: {}, _children: [],
+        classList: { _s: new Set(), add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); }, contains(c) { return this._s.has(c); } },
         set textContent(v) { this._text = String(v); },
         get textContent() { return this._text; },
         appendChild(c) { c._parent = this; this._children.push(c); return c; },
@@ -298,6 +299,35 @@ describe('renderInvitations (Track G2)', () => {
         const list = mkEl();
         await ui.renderInvitations(list, () => {});
         expect(harvest(list).text.join(' ')).toMatch(/no pending invitations/i);
+    });
+
+    it('marks a spoofed invite (actor origin != container origin) Unverified', async () => {
+        // Attacker drops an Invite naming a trusted contact as actor, but the
+        // container lives on the attacker's own pod: origins differ -> untrusted.
+        const ui = createSolidChatUI({
+            model: fakeModel({
+                listInvitations: async () => [{ id: 'n', from: 'https://alice.pod/alice/profile/card#me', container: 'https://mallory.pod/trap/', title: 'Team' }],
+            }),
+        });
+        const list = mkEl();
+        await ui.renderInvitations(list, () => {});
+        const h = harvest(list);
+        expect(h.text.join(' ')).toContain('Unverified');
+        expect(list._children[0].classList.contains('solidchat-invite-unverified')).toBe(true);
+    });
+
+    it('does not mark a same-origin invite Unverified', async () => {
+        const ui = createSolidChatUI({
+            model: fakeModel({
+                listInvitations: async () => [{ id: 'n', from: 'https://alice.pod/alice/profile/card#me', container: 'https://alice.pod/x/', title: 'Team' }],
+            }),
+        });
+        const list = mkEl();
+        await ui.renderInvitations(list, () => {});
+        const h = harvest(list);
+        expect(h.text.join(' ')).toContain('alice@alice.pod');
+        expect(h.text.join(' ')).not.toContain('Unverified');
+        expect(list._children[0].classList.contains('solidchat-invite-unverified')).toBe(false);
     });
 
     it('renders a hostile invite title as text, never markup', async () => {

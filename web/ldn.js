@@ -72,6 +72,20 @@ function resolve(base, ref) {
 }
 
 /**
+ * Whether the invite's `actor` can be trusted as the inviter. The ldp:inbox is
+ * public-Append, so anyone may drop an AS2 Invite naming any `actor`. A sender
+ * can only legitimately invite you to a container on their own pod, so we treat
+ * the invite as verified only when the actor WebID and the container share an
+ * origin. A missing actor or a cross-origin container is unverified (a spoof
+ * signal); the UI surfaces that rather than presenting the actor as trusted.
+ */
+export function inviteActorVerified(from, container) {
+    try {
+        return new URL(String(from)).origin === new URL(String(container)).origin;
+    } catch { return false; }
+}
+
+/**
  * Notification resource URLs listed in an inbox container document (JSON-LD),
  * from `ldp:contains`. Relative refs are resolved against the inbox URL.
  */
@@ -91,10 +105,12 @@ export function parseInboxListing(json, inboxUrl = '') {
 }
 
 /**
- * Parse a single notification into { from, container, title }, or null if it does
- * not reference a chat container. `object` may be an IRI or a nested Link with
- * href/name; we also fall back to top-level href/target and name/summary so an
- * invite framed by another app still resolves.
+ * Parse a single notification into { from, container, title, verified }, or null
+ * if it does not reference a chat container. `object` may be an IRI or a nested
+ * Link with href/name; we also fall back to top-level href/target and
+ * name/summary so an invite framed by another app still resolves. `verified` is
+ * a provenance signal (see inviteActorVerified): the inbox is public-Append, so
+ * a caller must not present `from` as a trusted identity when it is false.
  */
 export function parseInviteNotification(json) {
     for (const node of nodesOf(json)) {
@@ -118,7 +134,7 @@ export function parseInviteNotification(json) {
         }
         if (!title) title = firstStr(vals(node, ['name', AS + 'name', 'summary', AS + 'summary']));
 
-        if (container) return { from: from || '', container, title: title || '' };
+        if (container) return { from: from || '', container, title: title || '', verified: inviteActorVerified(from, container) };
     }
     return null;
 }

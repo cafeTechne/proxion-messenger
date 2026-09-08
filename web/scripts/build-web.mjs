@@ -13,28 +13,45 @@
 
 import { cp, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+
+// Frame-busting guard. The CSP below sets frame-ancestors 'none', but browsers
+// ignore that directive in a <meta> CSP (it is header-only) and GitHub Pages
+// cannot send headers, so the static /app/ origin would otherwise have no
+// clickjacking defense. This runs before the app paints: it no-ops in a normal
+// top-level context, and when framed it breaks out (or, if a cross-origin top
+// blocks the navigation, hides the document so it cannot be clickjacked).
+export const FRAME_BUST =
+    "if(window.top!==window.self){try{window.top.location.replace(window.location.href)}catch(e){}" +
+    "window.document.documentElement.style.display='none'}";
+
+// CSP source expression for the inline guard, so it is allowed under a strict
+// script-src without opening the origin to 'unsafe-inline'.
+const FRAME_BUST_HASH = "'sha256-" + createHash('sha256').update(FRAME_BUST).digest('base64') + "'";
 
 // The web CSP for the static build. 'self' for code, https/wss for the user's
 // pod and Solid Notifications, data:/https: images for pod avatars, inline
-// styles because index.html uses them throughout.
+// styles because index.html uses them throughout. script-src also allows the
+// hashed frame-bust guard injected below.
 export const WEB_CSP = [
     "default-src 'self'",
     "connect-src 'self' https: wss:",
     "img-src 'self' data: https:",
     "style-src 'self' 'unsafe-inline'",
-    "script-src 'self'",
+    `script-src 'self' ${FRAME_BUST_HASH}`,
     "font-src 'self' data:",
     "base-uri 'self'",
     "frame-ancestors 'none'",
 ].join('; ');
 
-// Pure: inject the web-mode meta and CSP right after <head>. Idempotent — if the
-// mode meta is already present the html is returned unchanged.
+// Pure: inject the web-mode meta, CSP, and frame-bust guard right after <head>.
+// Idempotent — if the mode meta is already present the html is returned unchanged.
 export function injectWebHead(html, { csp = WEB_CSP } = {}) {
     if (/name=["']proxion-mode["']/.test(html)) return html;
     const inject =
         `\n    <meta name="proxion-mode" content="web">` +
-        `\n    <meta http-equiv="Content-Security-Policy" content="${csp}">`;
+        `\n    <meta http-equiv="Content-Security-Policy" content="${csp}">` +
+        `\n    <script>${FRAME_BUST}</script>`;
     // Insert after the opening <head> (tolerate attributes/whitespace).
     return html.replace(/<head(\s[^>]*)?>/i, (m) => m + inject);
 }
