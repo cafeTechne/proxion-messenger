@@ -105,6 +105,20 @@ describe('peer fetches never follow a cross-origin redirect', () => {
         expect(await podDropDm('https://alice.pod.example/', { message_id: 'm' })).toBe(false);
         expect(_calls[0].opts.redirect).toBe('error');
     });
+    it('podReadChatDayAt passes redirect:error on the day-file GET', async () => {
+        _session = redirectingSession();
+        expect(await podReadChatDayAt('https://alice.pod.example/OurChat/', new Date())).toEqual([]);
+        expect(_calls[0].opts.redirect).toBe('error');
+    });
+    it('podWriteChatMessageAt sends redirect:error on every write (ensureChatIndexAt + PATCH)', async () => {
+        // One call exercises ensureChatIndexAt's HEAD+PUT and the day-file HEAD+PATCH;
+        // none of them may follow a redirect off the vetted host.
+        _session = redirectingSession();
+        expect(await podWriteChatMessageAt('https://alice.pod.example/OurChat/', 'm1', { content: 'x' })).toBe(false);
+        expect(_calls.length).toBeGreaterThan(0);
+        expect(_calls.every(c => c.opts.redirect === 'error')).toBe(true);
+        expect(_calls.some(c => c.opts.method === 'PATCH')).toBe(true);
+    });
 });
 
 describe('own-pod file helpers reject an unsafe roomId/messageId (no fetch)', () => {

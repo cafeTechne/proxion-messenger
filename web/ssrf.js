@@ -7,18 +7,33 @@
 // pod I/O layer can use it without an import cycle, and so it is not swept up in
 // the test suites that mock ./auth.js.
 
-// True if the URL's host is loopback / private / link-local — i.e. not a real
-// public pod. Covers IPv4 private ranges, IPv6 loopback/ULA/link-local, the
-// IPv4-mapped IPv6 prefix, and bracketed forms. Exotic numeric IPv4 encodings
-// (0x7f.., decimal) are left to the URL parser's own normalization.
+// True if the URL is not a public pod we may send the DPoP-bound token to: a
+// non-https scheme, or a loopback / private / link-local / reserved host. Covers
+// the IPv4 private ranges, every IPv6 form that begins with :: (loopback ::1,
+// unspecified ::, the IPv4-mapped ::ffff: prefix and the deprecated IPv4-compatible
+// ::a.b.c.d form), IPv6 link-local / ULA, bracketed forms, and the numeric IPv4
+// encodings — decimal (2130706433), octal (0177.0.0.1), hex (0x7f.1) — which the
+// WHATWG URL parser normalizes to dotted-quad for https before we classify them.
+//
+// This is a LEXICAL check: it cannot see where a DNS name actually resolves, so a
+// https://name.example/ whose A record is 127.0.0.1 or 169.254.169.254 still reads
+// as public here. Defeating that (DNS rebinding) is out of reach in the browser,
+// which does not expose name resolution before fetch; it is instead mitigated by
+// the cross-origin preflight and the DPoP sender-constraint on the token. The
+// server-side gate (network._resolve_safe_ip) is the real IP-level defense; this is
+// defense in depth for the gateway-less browser build.
 export function isPrivatePodHost(url) {
-    let host;
-    try { host = new URL(url).hostname.toLowerCase(); } catch { return true; }
+    let u;
+    try { u = new URL(url); } catch { return true; }
+    if (u.protocol !== 'https:') return true;   // never carry the token over a non-https scheme
+    let host = u.hostname.toLowerCase();
     if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
     if (host === 'localhost' || host.endsWith('.localhost')) return true;
-    if (host === '::1' || host === '::') return true;
+    // Any IPv6 that begins with :: is non-public: loopback (::1), unspecified (::),
+    // IPv4-mapped (::ffff:7f00:1) and the deprecated IPv4-compatible form (::7f00:1).
+    // Global unicast (2000::/3) never starts with ::.
+    if (host.startsWith('::')) return true;
     if (/^fe80:/.test(host) || /^f[cd][0-9a-f]{2}:/.test(host)) return true;   // fe80::/10, fc00::/7
-    if (/^::ffff:/.test(host)) return true;   // IPv4-mapped IPv6 (never a public pod)
     return (
         /^127\./.test(host) ||
         /^10\./.test(host) ||

@@ -429,7 +429,7 @@ export async function podWriteMessageJsonLd(threadId, messageId, msg, isRoom = t
 async function ensureChatIndexAt(containerUrl, title) {
     const url = indexUrlAt(containerUrl);
     try {
-        const head = await solidSession.fetch(url, { method: 'HEAD' });
+        const head = await solidSession.fetch(url, { method: 'HEAD', redirect: 'error' });
         if (head && head.ok) return true;
     } catch { /* treat as missing and try to create it */ }
     try {
@@ -437,6 +437,7 @@ async function ensureChatIndexAt(containerUrl, title) {
             method: 'PUT',
             headers: { 'Content-Type': 'text/turtle' },
             body: buildIndexTurtle(title || 'Proxion room'),
+            redirect: 'error',   // never follow a peer redirect off the vetted host
         });
         const ok = !!(res && res.ok);
         // Track D: the index was just created, so this is a NEW chat in our pod.
@@ -517,6 +518,7 @@ export async function podReadChatDayAt(containerUrl, date, threadId = '', ownerW
     try {
         const res = await solidSession.fetch(dayFileAt(containerUrl, date), {
             headers: { Accept: 'application/ld+json' },
+            redirect: 'error',   // never follow a peer redirect off the vetted host
         });
         if (!res || !res.ok) return [];
         // Foreign day file: bound the body before parsing (Content-Length when the
@@ -856,14 +858,16 @@ export function patchFormatFor(acceptPatch) {
 export async function podRdfPatch(resourceUrl, ops) {
     let acceptPatch = null;
     try {
-        const res = await solidSession.fetch(resourceUrl, { method: 'HEAD' });
+        const res = await solidSession.fetch(resourceUrl, { method: 'HEAD', redirect: 'error' });
         acceptPatch = res?.headers?.get?.('accept-patch') || null;
     } catch (_) { /* default to SPARQL below */ }
     const fmt = patchFormatFor(acceptPatch);
     const body = fmt === 'n3' ? buildN3Patch(ops) : buildSparqlUpdate(ops);
     const ct = fmt === 'n3' ? 'text/n3' : 'application/sparql-update';
+    // A PATCH is state-changing, so it must never be replayed against a host a peer
+    // pod redirects us to; refuse the redirect the way the peer read paths do.
     return solidSession.fetch(resourceUrl, {
-        method: 'PATCH', headers: { 'Content-Type': ct }, body,
+        method: 'PATCH', headers: { 'Content-Type': ct }, body, redirect: 'error',
     });
 }
 

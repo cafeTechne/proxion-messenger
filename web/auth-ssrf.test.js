@@ -36,10 +36,35 @@ describe('isPrivatePodHost', () => {
             'https://[::ffff:127.0.0.1]/',
         ]) expect(isPrivatePodHost(u), u).toBe(true);
     });
+    it('flags numeric / octal / hex IPv4 encodings of a private host', () => {
+        // The URL parser normalizes each of these to a dotted-quad loopback before
+        // we classify it, so a peer cannot smuggle 127.0.0.1 past the lexical check.
+        for (const u of [
+            'https://2130706433/',      // decimal 127.0.0.1
+            'https://0177.0.0.1/',      // octal first octet
+            'https://0x7f.1/',          // hex + short form
+            'https://0x7f000001/',      // single hex dword
+            'https://127.1/',           // short-form loopback
+        ]) expect(isPrivatePodHost(u), u).toBe(true);
+    });
+    it('flags IPv4-mapped / IPv4-compatible IPv6 and bracketed loopback forms', () => {
+        for (const u of [
+            'https://[::ffff:7f00:1]/',                 // ::ffff:127.0.0.1 (hex form)
+            'https://[::127.0.0.1]/',                   // deprecated IPv4-compatible ::a.b.c.d
+            'https://[0:0:0:0:0:ffff:a9fe:a9fe]/',      // ::ffff:169.254.169.254 (link-local)
+            'https://[::]/',                            // unspecified
+        ]) expect(isPrivatePodHost(u), u).toBe(true);
+    });
+    it('rejects non-https schemes outright', () => {
+        for (const u of [
+            'http://pod.example.com/', 'ftp://pod.example.com/', 'file:///etc/passwd',
+        ]) expect(isPrivatePodHost(u), u).toBe(true);
+    });
     it('allows public hosts', () => {
         for (const u of [
             'https://pod.example.com/', 'https://storage.inrupt.com/abc/',
             'https://8.8.8.8/', 'https://172.15.0.1/', 'https://172.32.0.1/',
+            'https://[2606:4700::1111]/',
         ]) expect(isPrivatePodHost(u), u).toBe(false);
     });
     it('treats an unparseable URL as unsafe', () => {
