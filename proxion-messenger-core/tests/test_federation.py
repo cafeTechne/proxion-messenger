@@ -276,6 +276,101 @@ def test_legacy_cert_without_subject_field_still_verifies():
 
 
 # ---------------------------------------------------------------------------
+# R115 — cert-bound subject consent (revoked-relationship resurrection replay)
+# ---------------------------------------------------------------------------
+
+def _caps():
+    return [Capability(with_="stash://dm/", can="crud/write")]
+
+
+def test_new_cert_stamps_consent_version_into_issuer_body(priv, pub_hex):
+    """A freshly built cert is v2 and its consent_version rides in the issuer
+    canonical, so stripping it to force legacy verification breaks the issuer sig."""
+    _, subject_hex = _new_priv_and_hex()
+    cert = RelationshipCertificate(issuer=pub_hex, subject=subject_hex, capabilities=_caps())
+    cert.sign(priv)
+    d = cert.to_dict()
+    assert d["consent_version"] == 2
+    # Drop the version from the signed body: the issuer signature must no longer verify.
+    d.pop("consent_version", None)
+    downgraded = RelationshipCertificate.from_dict(d)
+    assert downgraded.consent_version is None
+    assert not downgraded.verify(_ed25519_verify)
+
+
+def test_find3_replay_fresh_cert_with_reattached_old_consent_rejected(priv, pub_hex):
+    """FIND-3: a subject's consent from one cert cannot authorize a freshly minted
+    cert (new certificate_id) for the same pair — the v2 message names the id."""
+    subject_priv, subject_hex = _new_priv_and_hex()
+    orig = RelationshipCertificate(
+        issuer=pub_hex, subject=subject_hex, capabilities=_caps(),
+        certificate_id="cert-original",
+    )
+    orig.attach_subject_consent(subject_priv)
+    orig.sign(priv)
+    assert orig.verify_mutual(_ed25519_verify)
+
+    # Issuer re-mints a fresh cert (new id, reset expiry) and re-attaches the
+    # captured subject signature. verify_mutual must now reject it.
+    fresh = RelationshipCertificate(
+        issuer=pub_hex, subject=subject_hex, capabilities=_caps(),
+        certificate_id="cert-resurrected",
+        expires_at=int(__import__("time").time()) + 90 * 86400,
+    )
+    fresh.subject_signature = orig.subject_signature
+    fresh.sign(priv)
+    assert fresh.verify(_ed25519_verify)              # issuer self-signed the new body
+    assert not fresh.verify_mutual(_ed25519_verify)   # but consent names the old id
+
+
+def test_v2_consent_is_bound_to_capabilities(priv, pub_hex):
+    """Changing the capability set after the subject consents breaks verify_mutual."""
+    subject_priv, subject_hex = _new_priv_and_hex()
+    cert = RelationshipCertificate(
+        issuer=pub_hex, subject=subject_hex, capabilities=_caps(),
+        certificate_id="cert-caps",
+    )
+    cert.attach_subject_consent(subject_priv)
+    # Issuer swaps in broader capabilities and re-signs the body.
+    cert.capabilities = [Capability(with_="stash://dm/", can="crud/write"),
+                         Capability(with_="stash://files/", can="crud/write")]
+    cert.sign(priv)
+    assert cert.verify(_ed25519_verify)
+    assert not cert.verify_mutual(_ed25519_verify)
+
+
+def test_legacy_pair_consent_verifies_but_cannot_authorize_fresh_cert(pub_hex, priv):
+    """A genuine legacy cert (pair-only consent, no consent_version) still verifies
+    through the fallback, but that same pair signature cannot authorize a fresh
+    (v2) certificate."""
+    from proxion_messenger_core.federation import subject_consent_message
+    subject_priv, subject_hex = _new_priv_and_hex()
+
+    # Genuine legacy cert: subject signed the pair-only message, no consent_version.
+    legacy = RelationshipCertificate(
+        issuer=pub_hex, subject=subject_hex, capabilities=_caps(),
+        certificate_id="cert-legacy",
+    )
+    legacy.subject_signature = subject_priv.sign(
+        subject_consent_message(pub_hex, subject_hex)
+    ).hex()
+    legacy.consent_version = None            # predates R115
+    legacy.sign(priv)
+    assert legacy.verify_mutual(_ed25519_verify)   # fallback accepts it
+
+    # The very same pair signature on a fresh v2 cert must NOT verify: a v2 cert is
+    # checked only against the cert-bound message, so the pair signature fails.
+    fresh = RelationshipCertificate(
+        issuer=pub_hex, subject=subject_hex, capabilities=_caps(),
+        certificate_id="cert-fresh",
+    )
+    fresh.subject_signature = legacy.subject_signature   # v2 by default
+    fresh.sign(priv)
+    assert fresh.verify(_ed25519_verify)
+    assert not fresh.verify_mutual(_ed25519_verify)
+
+
+# ---------------------------------------------------------------------------
 # R86 — call-binding capability advertisement
 # ---------------------------------------------------------------------------
 

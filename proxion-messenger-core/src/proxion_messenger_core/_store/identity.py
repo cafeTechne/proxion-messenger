@@ -196,12 +196,14 @@ class IdentityStoreMixin(object):
                 ),
             )
     def get_relationship_by_peer(self, peer_pub_hex: str) -> Optional[dict]:
-        """Returns cert_json parsed as dict for the newest non-expired cert, or None."""
+        """Returns cert_json parsed as dict for the newest non-expired, non-revoked
+        cert, or None. The revoked=0 filter matches get_relationship_by_did so a
+        revoked relationship can never be returned as authorization (FIND-12)."""
         with self._conn() as conn:
             row = conn.execute(
                 """
                 SELECT cert_json FROM relationships
-                WHERE peer_pub_hex = ? AND expires_at > ?
+                WHERE peer_pub_hex = ? AND expires_at > ? AND revoked=0
                 ORDER BY created_at DESC LIMIT 1
                 """,
                 (peer_pub_hex, int(time.time())),
@@ -216,6 +218,21 @@ class IdentityStoreMixin(object):
                 "UPDATE relationships SET revoked=1 WHERE certificate_id=?",
                 (cert_id,),
             )
+    def relationship_is_revoked(self, cert_id: str) -> bool:
+        """True if a relationship row with this certificate_id exists and is revoked.
+
+        Ingest paths consult this before writing an inbound cert so a revoked
+        certificate_id cannot be resurrected by re-delivering a cert under the same
+        id (save_relationship is INSERT OR REPLACE, which would otherwise clear the
+        revoked flag). See _poll_handshake_completions (FIND-3)."""
+        if not cert_id:
+            return False
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT revoked FROM relationships WHERE certificate_id=? LIMIT 1",
+                (cert_id,),
+            ).fetchone()
+        return bool(row["revoked"]) if row is not None else False
     def list_relationships(
         self,
         owner_webid: Optional[str] = None,

@@ -158,3 +158,72 @@ class TestInviteAcceptTargetBind:
         with patch.object(gw, "_sync_cert_to_pod", new=AsyncMock()):
             status, _resp = await gw._handle_invite_accept_post(body)
         assert status.startswith("200")
+
+
+# ---------------------------------------------------------------------------
+# FIND-3: revoked-relationship resurrection via consent replay
+# ---------------------------------------------------------------------------
+
+class TestPodCertReceiveResurrection:
+    def _active_ids(self, gw):
+        return {r.get("certificate_id") for r in gw._store.list_relationships()}
+
+    async def _ingest(self, gw, cert):
+        with patch("proxion_messenger_core.handshake.receive_acceptances", return_value=[]), \
+             patch("proxion_messenger_core.handshake.receive_certificates",
+                   return_value=[(cert, True)]), \
+             patch.object(gw, "_sync_cert_to_pod", new=AsyncMock()):
+            await gw._poll_handshake_completions()
+
+    @pytest.mark.asyncio
+    async def test_revoked_cert_id_is_not_resurrected(self, tmp_path):
+        """A cert whose id was revoked cannot be re-saved as active, even mutually
+        signed: save_relationship is INSERT OR REPLACE, so the ingest must refuse
+        a revoked id rather than clear the revoked flag."""
+        gw = _make_gateway(tmp_path)
+        gw.broadcast = AsyncMock()
+        owner_hex = gw.agent.identity_pub_bytes.hex()
+        peer_priv = Ed25519PrivateKey.generate()
+        cert = _signed_cert(
+            peer_priv, owner_hex, cert_id="cert-revoked-res",
+            subject_priv=gw.agent.identity_key,
+        )
+        gw._store.save_relationship(cert.to_dict(), peer_did="did:key:peer")
+        gw._store.revoke_relationship("cert-revoked-res")
+        assert gw._store.relationship_is_revoked("cert-revoked-res")
+
+        await self._ingest(gw, cert)
+
+        assert "cert-revoked-res" not in self._active_ids(gw)
+        assert gw._store.relationship_is_revoked("cert-revoked-res")
+
+    @pytest.mark.asyncio
+    async def test_legacy_consent_cert_rejected_at_network_ingest(self, tmp_path):
+        """A legacy (pair-only) subject consent, though it satisfies verify_mutual's
+        fallback, is refused for a network-delivered owner-as-subject cert so a
+        retained pair signature cannot be replayed onto a fresh certificate."""
+        from proxion_messenger_core.federation import (
+            RelationshipCertificate, Capability, subject_consent_message,
+        )
+        from proxion_messenger_core.handshake import _ed25519_verify
+        gw = _make_gateway(tmp_path)
+        gw.broadcast = AsyncMock()
+        owner_hex = gw.agent.identity_pub_bytes.hex()
+        issuer_priv = Ed25519PrivateKey.generate()
+        issuer_hex = issuer_priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+        cert = RelationshipCertificate(
+            issuer=issuer_hex, subject=owner_hex,
+            capabilities=[Capability(with_="stash://dm/", can="crud/write")],
+            certificate_id="cert-legacy-inbound",
+        )
+        cert.subject_signature = gw.agent.identity_key.sign(
+            subject_consent_message(issuer_hex, owner_hex)
+        ).hex()
+        cert.consent_version = None      # predates R115
+        cert.sign(issuer_priv)
+        # verify_mutual's fallback accepts it, so the rejection is the ingest guard.
+        assert cert.verify_mutual(_ed25519_verify)
+
+        await self._ingest(gw, cert)
+
+        assert "cert-legacy-inbound" not in self._active_ids(gw)

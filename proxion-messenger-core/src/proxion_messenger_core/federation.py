@@ -1,6 +1,7 @@
 import json
 import uuid
 import time
+import hashlib
 import secrets
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Optional, Any
@@ -32,10 +33,75 @@ HANDSHAKE_CHALLENGE_CTX = b"proxion-handshake-v1:"
 # require a subject signature only the real owner could have produced.
 SUBJECT_CONSENT_CTX = b"proxion-rel-subject-consent-v1:"
 
+# Cert-bound subject consent (R115). The v1 message above names only the
+# (issuer, subject) pair, so a counter-signature authorizes ANY cert with that
+# pair: an issuer who keeps a subject's old signature can re-issue a fresh
+# certificate (new certificate_id, reset expiry, chosen capabilities) after the
+# subject revoked, re-attach the retained signature, and verify_mutual would
+# still pass (a revoked relationship resurrected). The v2 message additionally
+# names the specific certificate_id and a digest of the capability set, so one
+# counter-signature authorizes exactly one certificate and cannot be transplanted
+# onto a re-minted one. created_at/expires_at are deliberately NOT bound: the
+# subject counter-signs during the handshake (accept_invite), before the issuer
+# has built the certificate and chosen its validity window, so those values are
+# not known to the signer. Binding certificate_id already pins the cert identity;
+# re-minting under the same id is blocked separately at ingest (revoked ids stay
+# revoked).
+SUBJECT_CONSENT_CTX_V2 = b"proxion-rel-subject-consent-v2:"
+
+# The consent scheme a cert's subject_signature uses. New certs stamp this into
+# the issuer-signed body so it cannot be stripped to force the legacy pair-only
+# verification path (a downgrade): removing it changes the issuer canonical and
+# breaks the issuer signature. A cert with no consent_version predates R115 and
+# is verified against the legacy pair message.
+CONSENT_VERSION = 2
+
 
 def subject_consent_message(issuer_hex: str, subject_hex: str) -> bytes:
-    """The canonical bytes a cert subject signs to prove consent to the pairing."""
+    """The legacy (v1) bytes a cert subject signs to prove consent to the pairing."""
     return SUBJECT_CONSENT_CTX + issuer_hex.encode() + b"|" + subject_hex.encode()
+
+
+def capabilities_digest(capabilities) -> str:
+    """Stable hex digest of a capability set (Capability objects OR plain dicts).
+
+    Order is preserved: the handshake carries the subject's capability list into
+    the issued cert unchanged, so the subject and the verifier hash the same
+    sequence. Only the (with, can, caveats) triple of each entry is covered.
+    """
+    items = []
+    for c in capabilities or []:
+        if isinstance(c, dict):
+            with_ = c.get("with") or c.get("with_") or ""
+            can = c.get("can", "")
+            caveats = c.get("caveats", {})
+        else:
+            with_ = getattr(c, "with_", "") or ""
+            can = getattr(c, "can", "")
+            caveats = getattr(c, "caveats", {})
+        items.append({"with": with_, "can": can, "caveats": caveats})
+    canonical = json.dumps(items, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def subject_consent_message_v2(
+    issuer_hex: str, subject_hex: str, certificate_id, caps_digest: str
+) -> bytes:
+    """The cert-bound (v2) bytes a cert subject signs to prove consent (R115).
+
+    Binds the pairing to one specific certificate_id and capability set so the
+    counter-signature authorizes exactly that certificate.
+    """
+    return (
+        SUBJECT_CONSENT_CTX_V2
+        + issuer_hex.encode()
+        + b"|"
+        + subject_hex.encode()
+        + b"|"
+        + str(certificate_id or "").encode()
+        + b"|"
+        + caps_digest.encode()
+    )
 
 
 def call_binding_capability(peer: bool = False) -> "Capability":
@@ -347,11 +413,19 @@ class RelationshipCertificate:
     expires_at: int = field(default_factory=lambda: int(time.time()) + (90 * 86400)) # 90 days
     wireguard: Dict[str, Any] = field(default_factory=dict)
     signature: Optional[str] = None
-    # Counter-signature by the SUBJECT's identity key over subject_consent_message
-    # (issuer||subject). Proves the subject consented to this pairing (R113). Kept
-    # out of the issuer's canonical signing bytes so it can be attached
-    # independently and never disturbs the issuer signature (back-compat).
+    # Counter-signature by the SUBJECT's identity key. For a v2 cert this covers
+    # subject_consent_message_v2 (issuer||subject||certificate_id||caps_digest);
+    # for a legacy cert it covers the pair-only subject_consent_message. Proves the
+    # subject consented to this specific pairing (R113/R115). Kept out of the
+    # issuer's canonical signing bytes so it can be attached independently and never
+    # disturbs the issuer signature (back-compat).
     subject_signature: Optional[str] = None
+    # Consent scheme of subject_signature. Set on every freshly built cert so it
+    # rides in the issuer-signed body (a downgrade to legacy verification would
+    # change the canonical and break the issuer signature). None means the cert
+    # predates R115 and its subject_signature is verified against the legacy pair
+    # message. See CONSENT_VERSION.
+    consent_version: Optional[int] = CONSENT_VERSION
 
     def validate_policy(self) -> None:
         """Raise ValueError('invalid_certificate_policy') on policy violations."""
@@ -370,7 +444,7 @@ class RelationshipCertificate:
             raise ValueError("certificate_expired")
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "@type": "RelationshipCertificate",
             "version": self.version,
             "certificate_id": self.certificate_id,
@@ -383,6 +457,12 @@ class RelationshipCertificate:
             "signature": self.signature,
             "subject_signature": self.subject_signature,
         }
+        # Emit consent_version only when set so legacy certs (version absent)
+        # serialize byte-for-byte as they did pre-R115 and their issuer signature
+        # still verifies. A v2 cert always carries it, inside the issuer canonical.
+        if self.consent_version is not None:
+            d["consent_version"] = self.consent_version
+        return d
 
     def _issuer_canonical(self) -> bytes:
         """Canonical bytes covered by the issuer signature.
@@ -407,17 +487,36 @@ class RelationshipCertificate:
         if not self.signature: return False
         return verifier_func(self.issuer, bytes.fromhex(self.signature), self._issuer_canonical())
 
-    def attach_subject_consent(self, subject_identity_key) -> None:
-        """Counter-sign the pairing with the SUBJECT's identity key (R113).
+    def _subject_consent_bytes(self) -> bytes:
+        """The message the subject_signature is expected to cover for THIS cert.
 
-        Produces a durable, issuer-bound proof of the subject's consent. Only the
-        holder of the subject key can produce it, so an issuer (or anyone who
-        reads the stored cert) cannot fabricate consent for a party they do not
-        control, nor replay this proof under a different issuer.
+        A cert carrying a consent_version uses the cert-bound v2 message (pinned to
+        this certificate_id and capability set); a legacy cert (no version) uses
+        the pair-only v1 message. The two paths never mix, so an old pair-only
+        signature can never satisfy a v2 cert and a v2 cert cannot be downgraded to
+        the pair message.
         """
-        sig_bytes = subject_identity_key.sign(
-            subject_consent_message(self.issuer, self.subject)
-        )
+        if (self.consent_version or 1) >= 2:
+            return subject_consent_message_v2(
+                self.issuer,
+                self.subject,
+                self.certificate_id,
+                capabilities_digest(self.capabilities),
+            )
+        return subject_consent_message(self.issuer, self.subject)
+
+    def attach_subject_consent(self, subject_identity_key) -> None:
+        """Counter-sign THIS certificate with the SUBJECT's identity key (R113/R115).
+
+        Produces a durable, cert-bound proof of the subject's consent over
+        subject_consent_message_v2 (issuer, subject, certificate_id, capability
+        digest). Only the holder of the subject key can produce it, so an issuer
+        (or anyone who reads the stored cert) cannot fabricate consent for a party
+        they do not control, replay this proof under a different issuer, or
+        transplant it onto a re-minted certificate with a different id or caps.
+        """
+        self.consent_version = CONSENT_VERSION
+        sig_bytes = subject_identity_key.sign(self._subject_consent_bytes())
         self.subject_signature = (
             sig_bytes.hex() if isinstance(sig_bytes, bytes) else str(sig_bytes)
         )
@@ -425,10 +524,13 @@ class RelationshipCertificate:
     def verify_mutual(self, verifier_func) -> bool:
         """Verify BOTH the issuer signature AND the subject's consent signature.
 
-        ``verify()`` alone only proves the issuer signed the cert — a single-party
+        ``verify()`` alone only proves the issuer signed the cert, a single-party
         token the issuer fully controls. ``verify_mutual`` additionally requires a
         valid subject counter-signature (see :meth:`attach_subject_consent`),
-        proving the party named as ``subject`` genuinely consented to the pairing.
+        proving the party named as ``subject`` genuinely consented to THIS
+        certificate. A v2 cert is checked only against its cert-bound message and a
+        legacy cert only against the pair message, so a retained pair-only
+        signature cannot authorize a freshly minted (v2) certificate.
         """
         if not self.verify(verifier_func):
             return False
@@ -438,7 +540,7 @@ class RelationshipCertificate:
             return verifier_func(
                 self.subject,
                 bytes.fromhex(self.subject_signature),
-                subject_consent_message(self.issuer, self.subject),
+                self._subject_consent_bytes(),
             )
         except (ValueError, TypeError):
             return False
@@ -458,4 +560,6 @@ class RelationshipCertificate:
         obj.expires_at = d["expires_at"]
         obj.signature = d.get("signature")
         obj.subject_signature = d.get("subject_signature")
+        # Absent for pre-R115 certs (verified against the legacy pair message).
+        obj.consent_version = d.get("consent_version")
         return obj

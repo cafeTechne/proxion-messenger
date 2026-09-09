@@ -78,7 +78,8 @@ from .federation import (
     FederationInvite,
     InviteAcceptance,
     RelationshipCertificate,
-    subject_consent_message,
+    capabilities_digest,
+    subject_consent_message_v2,
 )
 from .sealed import mailbox_id_for, open_sealed_json, seal_json
 from .store import MemoryStore
@@ -163,6 +164,13 @@ def create_invite(
         capabilities=capabilities,
         certificate_id=certificate_id,
     )
+    # Pin the certificate_id at invite time so the acceptor can bind its subject
+    # consent to the exact certificate the issuer will mint (R115). Defaulting it
+    # to the invitation_id keeps it stable through the acceptance and the finalized
+    # cert: finalize_handshake resolves it from the invite and process_join_requests
+    # keys the cert off the same invitation_id.
+    if invite.certificate_id is None:
+        invite.certificate_id = invite.invitation_id
     invite.sign(alice_identity_priv)
     return invite
 
@@ -304,14 +312,21 @@ def accept_invite(
     _CHALLENGE_CTX = b"proxion-handshake-v1:"
     challenge_sig = bob_identity_priv.sign(_CHALLENGE_CTX + invite.challenge_marker.encode())
 
-    # Durable, issuer-bound proof of our (the future cert subject's) consent to
-    # this pairing. The issuer copies it into the RelationshipCertificate so an
-    # ingest of an owner-as-subject cert can require the real owner's signature.
+    # Durable, cert-bound proof of our (the future cert subject's) consent to this
+    # pairing (R115). We bind the invite's pinned certificate_id and the capability
+    # set we are agreeing to, so the issuer copies a signature that authorizes
+    # exactly the one certificate it is about to mint and cannot re-use it to
+    # resurrect a revoked relationship under a fresh certificate_id.
     subject_consent = None
     issuer_pub_hex = invite.issuer.get("public_key")
     if issuer_pub_hex:
         subject_consent = bob_identity_priv.sign(
-            subject_consent_message(issuer_pub_hex, bob_identity_pub_hex)
+            subject_consent_message_v2(
+                issuer_pub_hex,
+                bob_identity_pub_hex,
+                invite.certificate_id,
+                capabilities_digest(capabilities),
+            )
         ).hex()
 
     acceptance = InviteAcceptance(
@@ -729,6 +744,10 @@ def _dict_to_cert(d: dict) -> RelationshipCertificate:
         signature=d.get("signature"),
     )
     cert.subject_signature = d.get("subject_signature")
+    # Preserve the on-the-wire consent scheme: a legacy cert has no consent_version
+    # and MUST NOT inherit the v2 constructor default, or its subject_signature
+    # (over the pair message) would be checked against the v2 message and fail.
+    cert.consent_version = d.get("consent_version")
     return cert
 
 

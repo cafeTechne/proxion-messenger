@@ -910,6 +910,31 @@ class PodSyncMixin:
                         cert.certificate_id,
                     )
                     continue
+                # A revoked certificate_id must stay revoked. save_relationship is
+                # INSERT OR REPLACE, so re-delivering a cert under a revoked id would
+                # clear the revoked flag and resurrect the relationship (FIND-3).
+                if self._store and self._store.relationship_is_revoked(cert.certificate_id):
+                    logger.warning(
+                        "_poll_handshake_completions: rejected inbound cert %s — "
+                        "certificate_id is revoked (resurrection attempt)",
+                        cert.certificate_id,
+                    )
+                    continue
+                # When THIS owner is the subject, require the cert-bound (v2) subject
+                # consent for a freshly network-delivered cert. The legacy pair-only
+                # consent authorizes any cert with the same pair, so a retained old
+                # signature could otherwise be re-attached to a fresh cert and replayed
+                # here; a peer on the current protocol always issues v2. verify_mutual
+                # keeps the legacy fallback for stored/restore/import paths, so this does
+                # not break already-established relationships. (FIND-3)
+                if cert.subject == owner_pub_hex and (cert.consent_version or 1) < 2:
+                    logger.warning(
+                        "_poll_handshake_completions: rejected inbound cert %s — "
+                        "legacy subject consent not accepted for a network-delivered "
+                        "owner-as-subject cert",
+                        cert.certificate_id,
+                    )
+                    continue
                 try:
                     peer_did = pub_key_to_did(bytes.fromhex(cert.issuer))
                     self._store.save_relationship(cert.to_dict(), peer_did=peer_did)
