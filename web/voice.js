@@ -284,6 +284,9 @@ export function createVoice(deps) {
                 if (!fingerprint) return {};
                 const fp_sig = await signFingerprint({
                     fingerprint, sessionId: state.currentCallSessionId || '', role, privKey: priv,
+                    // Bind the offer/answer to the peer it is meant for so it cannot be
+                    // transplanted into a call to someone else (R110 FIND-10).
+                    recipientDid: state._callPeerWebid || '',
                 });
                 // On a linked device the signer is this device's key, not the account
                 // the peer knows us by; ship the device->account cert so they can bind it.
@@ -307,6 +310,9 @@ export function createVoice(deps) {
                 // Whether this contact is known to bind calls (R86): if so, a call with
                 // no binding proof is a downgrade, not a legacy client.
                 peerBindsCalls: getPeerBindsCalls?.(_exp) || false,
+                // We are the intended recipient; accept a signature bound to our WebID
+                // (verifyFingerprint falls back to the legacy unbound form) (R110 FIND-10).
+                recipientDid: getSelfWebId?.() || '',
             });
             if (verdict === 'mismatch' || verdict === 'downgrade') {
                 // Both refuse. 'mismatch' is a tampered media channel (a swapped DTLS
@@ -632,7 +638,7 @@ export function createVoice(deps) {
             if (isCaller) {
                 const offer = await peerPc.createOffer();
                 await peerPc.setLocalDescription(offer);
-                const fp = await _signPeerFingerprint(peerPc, sessionId || state._channelSessionIds[targetWebid] || '', 'offer');
+                const fp = await _signPeerFingerprint(peerPc, sessionId || state._channelSessionIds[targetWebid] || '', 'offer', targetWebid);
                 getSocket()?.send(JSON.stringify({
                     cmd: "voice_invite",
                     target_webid: targetWebid,
@@ -650,7 +656,7 @@ export function createVoice(deps) {
                 await peerPc.setRemoteDescription({ type: "offer", sdp: sdpOffer });
                 const answer = await peerPc.createAnswer();
                 await peerPc.setLocalDescription(answer);
-                const fp = await _signPeerFingerprint(peerPc, sessionId || '', 'answer');
+                const fp = await _signPeerFingerprint(peerPc, sessionId || '', 'answer', targetWebid);
                 getSocket()?.send(JSON.stringify({
                     cmd: "voice_answer",
                     target_webid: targetWebid,
@@ -663,14 +669,15 @@ export function createVoice(deps) {
         }
 
         // Sign a specific peer connection's local DTLS fingerprint (group path).
-        async function _signPeerFingerprint(peerPc, sessionId, role) {
+        async function _signPeerFingerprint(peerPc, sessionId, role, recipientDid) {
             try {
                 const priv = getIdentityPrivKey?.();
                 const did = getClientDid?.();
                 if (!priv || !did || !peerPc?.localDescription?.sdp) return {};
                 const fingerprint = extractFingerprint(peerPc.localDescription.sdp);
                 if (!fingerprint) return {};
-                const fp_sig = await signFingerprint({ fingerprint, sessionId: sessionId || '', role, privKey: priv });
+                // Bind to the co-member this SDP is meant for (R110 FIND-10).
+                const fp_sig = await signFingerprint({ fingerprint, sessionId: sessionId || '', role, privKey: priv, recipientDid: recipientDid || '' });
                 const fp_cert = getDeviceCert?.() || null;
                 return fp_cert ? { fp_sig, fp_signer: did, fp_cert } : { fp_sig, fp_signer: did };
             } catch { return {}; }
@@ -691,6 +698,9 @@ export function createVoice(deps) {
                 expectedDid,
                 deviceCert: event?.fp_cert || null,
                 peerBindsCalls: getPeerBindsCalls?.(expectedDid) || false,
+                // We are the intended recipient; a signature bound to our WebID verifies,
+                // with a legacy unbound fallback (R110 FIND-10).
+                recipientDid: getSelfWebId?.() || '',
             });
             const refuse = verdict === 'mismatch' || verdict === 'downgrade';
             // Per-peer, so one tile can read Verified while another reads Unverified.
@@ -1075,17 +1085,30 @@ export function createVoice(deps) {
         }
 
         function handleVoiceHangup(event) {
-            // Only the active call may be torn down. A stale duplicate carries an older
-            // session_id and must not drop a newer call; over the public-Append pod
-            // call-inbox anyone who knows our WebID could otherwise POST a hangup, but
-            // the session_id is a secret they cannot read from a write-only inbox.
-            if (event.session_id && event.session_id !== state.currentCallSessionId) return;
-            // Pod-mode hangups stamp the sender's own account WebID; require it to be
-            // the peer we are actually in a call with. Gateway-relayed hangups are
-            // authenticated server-side (_fromGateway) and carry the gateway did, so
-            // they are exempt from this account-WebID check.
-            if (event.from_webid && !event._fromGateway && state._callPeerWebid
-                && event.from_webid !== state._callPeerWebid) return;
+            // Only the active call may be torn down, and only by a hangup we can attribute
+            // to it. The pod call-inbox is public-Append, so anyone who knows our WebID can
+            // POST a forged hangup; the guards below MUST fail closed on a missing field so
+            // a bare {"type":"voice_hangup"} cannot drop a live call.
+            //
+            //  - Gateway-relayed (_fromGateway): authenticated server-side and carrying the
+            //    relaying gateway did (not the peer account webid), so it legitimately omits
+            //    from_webid. Still bind it to the active session so a stale relay cannot end
+            //    a newer call.
+            //  - Pod-delivered with from_webid: a legit pod hangup stamps BOTH the sender's
+            //    account webid (our peer) AND the session_id — require both.
+            //  - Otherwise (no from_webid, not gateway): the only legitimate shape is the
+            //    same-gateway hangup, which the authenticated gateway delivers carrying the
+            //    session_id (a secret an outsider cannot read from a write-only inbox) and no
+            //    webid. Require a matching session_id, so a hangup that proves nothing is
+            //    rejected.
+            if (event._fromGateway) {
+                if (event.session_id && event.session_id !== state.currentCallSessionId) return;
+            } else if (event.from_webid) {
+                if (event.session_id !== state.currentCallSessionId) return;
+                if (state._callPeerWebid && event.from_webid !== state._callPeerWebid) return;
+            } else {
+                if (event.session_id !== state.currentCallSessionId) return;
+            }
             if (state._callState !== CallState.IDLE) setCallState(CallState.ENDING);
             hangupCleanup();
         }
@@ -1159,12 +1182,22 @@ export function createVoice(deps) {
         }
 
         async function handleVoiceAnswer(event) {
-            // Bind to the call peer set at invite/offer time (not to CONNECTED state, so
-            // legitimate setup signals still pass). A pod-mode signal stamps the sender's
-            // account WebID; drop one that names anyone but our peer. Gateway-relayed
-            // signals (_fromGateway) carry the gateway did and are exempt.
-            if (event.from_webid && !event._fromGateway && state._callPeerWebid
-                && event.from_webid !== state._callPeerWebid) return;
+            // Bind an untrusted (non-gateway) answer to the peer set at invite/offer time.
+            // Once we know our peer, an answer over the public-Append pod call-inbox must
+            // identify itself: a legit pod answer stamps the sender's account WebID (our
+            // peer), while a same-gateway answer instead carries the session_id (a secret
+            // an outsider cannot read from a write-only inbox). Reject one that names the
+            // WRONG peer, or an unattributed one that proves neither — closing the fail-open
+            // where an omitted from_webid bypassed the binding. Gateway-relayed answers
+            // (_fromGateway) are authenticated server-side and exempt. This is an ADDITIONAL
+            // gate on top of the fingerprint verification below, not a replacement.
+            if (!event._fromGateway && state._callPeerWebid) {
+                if (event.from_webid) {
+                    if (event.from_webid !== state._callPeerWebid) return;
+                } else if (event.session_id !== state.currentCallSessionId) {
+                    return;
+                }
+            }
             if (state.pc) {
                 // Authenticate the answerer's media channel before accepting it.
                 if (!(await _verifyPeerSdp(event.sdp_answer, 'answer', event))) {
@@ -1180,12 +1213,21 @@ export function createVoice(deps) {
 
         async function handleIceCandidate(event) {
             if (!state.pc) return;
-            // Bind to the call peer set at invite/offer time. A pod-mode candidate stamps
-            // the sender's account WebID; drop one from anyone but our peer so an injected
-            // candidate cannot steer our connection. Gateway-relayed candidates
-            // (_fromGateway) carry the gateway did and are exempt.
-            if (event.from_webid && !event._fromGateway && state._callPeerWebid
-                && event.from_webid !== state._callPeerWebid) return;
+            // Bind an untrusted (non-gateway) candidate to the peer set at invite/offer
+            // time so an injected candidate cannot steer our connection. Once we know our
+            // peer, a legit pod candidate stamps the sender's account WebID (our peer),
+            // while a same-gateway candidate carries the session_id (a secret). Reject one
+            // that names the WRONG peer, or an unattributed one that proves neither —
+            // closing the fail-open where an omitted from_webid bypassed the binding.
+            // Gateway-relayed candidates (_fromGateway) are authenticated server-side and
+            // exempt.
+            if (!event._fromGateway && state._callPeerWebid) {
+                if (event.from_webid) {
+                    if (event.from_webid !== state._callPeerWebid) return;
+                } else if (event.session_id !== state.currentCallSessionId) {
+                    return;
+                }
+            }
             const cand = {
                 candidate: event.candidate,
                 sdpMid: event.sdp_mid,

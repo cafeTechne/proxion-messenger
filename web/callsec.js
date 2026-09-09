@@ -106,18 +106,36 @@ export function extractFingerprint(sdp) {
 // unnecessary anyway, because the fingerprint is unique per call (a fresh DTLS
 // certificate), and a replayed (fingerprint, signature) is useless to an attacker
 // without the matching DTLS private key.
-export async function signFingerprint({ fingerprint, role, privKey }) {
-    const canon = _canonical([DOMAIN, fingerprint || '', role || '']);
-    const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', privKey, canon));
+//
+// When the intended recipient is known we ALSO bind their WebID, so a signed
+// offer/answer cannot be transplanted to a third party (the same fingerprint replayed
+// into a different call to a different peer). A signer that does not know the recipient
+// (or predates this binding) signs the legacy unbound form; verifyFingerprint accepts
+// both, so binding is a strict addition that never rejects an older peer.
+export async function signFingerprint({ fingerprint, role, privKey, recipientDid }) {
+    const parts = recipientDid
+        ? [DOMAIN, fingerprint || '', role || '', recipientDid]
+        : [DOMAIN, fingerprint || '', role || ''];
+    const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', privKey, _canonical(parts)));
     return _b64std(sig);
 }
 
 /** Verify a fingerprint signature against a signer's did:key. Never throws. */
-export async function verifyFingerprint({ fingerprint, role, signatureB64, signerDid }) {
+export async function verifyFingerprint({ fingerprint, role, signatureB64, signerDid, recipientDid }) {
     try {
         if (!fingerprint || !signatureB64 || !signerDid) return false;
         const pub = await crypto.subtle.importKey('raw', _didToPubBytes(signerDid), { name: 'Ed25519' }, false, ['verify']);
-        return await crypto.subtle.verify('Ed25519', pub, _b64dec(signatureB64),
+        const sig = _b64dec(signatureB64);
+        // Prefer the recipient-bound form (defeats transplanting a signed offer/answer
+        // into a call to a different peer); fall back to the legacy unbound form so a
+        // signer that predates recipient binding still validates. A tampered fingerprint
+        // matches neither form, so this never softens a mismatch.
+        if (recipientDid) {
+            const bound = await crypto.subtle.verify('Ed25519', pub, sig,
+                _canonical([DOMAIN, fingerprint, role || '', recipientDid]));
+            if (bound) return true;
+        }
+        return await crypto.subtle.verify('Ed25519', pub, sig,
             _canonical([DOMAIN, fingerprint, role || '']));
     } catch {
         return false;
@@ -150,7 +168,7 @@ export async function verifyFingerprint({ fingerprint, role, signatureB64, signe
  * 'unverifiable' (allowed) so older clients are never refused. 'downgrade' is a refusal
  * like 'mismatch', reported distinctly so a real strip is diagnosable.
  */
-export async function classifyPeerSdp({ sdp, role, signatureB64, signerDid, expectedDid, deviceCert, peerBindsCalls = false }) {
+export async function classifyPeerSdp({ sdp, role, signatureB64, signerDid, expectedDid, deviceCert, peerBindsCalls = false, recipientDid }) {
     const fps = extractAllFingerprints(sdp);
     if (!fps.length) return 'unverifiable';
     // Divergent fingerprints across m-lines are anomalous: with one DTLS certificate
@@ -163,6 +181,9 @@ export async function classifyPeerSdp({ sdp, role, signatureB64, signerDid, expe
         // No signature/signer at all. For a peer we cannot confirm binds calls this is
         // an older/non-signing client: allow (Unverified), never refuse. For a peer we
         // KNOW binds calls, a call that arrived stripped of its proof is a downgrade.
+        // TOFU: the FIRST call from a contact reaches here as 'unverifiable' (allowed)
+        // until a verified bound call pins them as call-capable, so an initial call is
+        // trust-on-first-use and can be silently downgraded exactly once.
         if (!signatureB64 || !signerDid) return peerBindsCalls ? 'downgrade' : 'unverifiable';
         // Is the signer bound to the contact we expect? Either it IS their identity,
         // or a still-valid cert chains the signing key to it (a linked device, or a
@@ -182,18 +203,20 @@ export async function classifyPeerSdp({ sdp, role, signatureB64, signerDid, expe
             // bind calls that is a downgrade (refuse); otherwise it is an old/other-
             // identity client we allow as Unverified.
             if (certFailedToChain) return 'mismatch';
+            // TOFU: same first-use trust as above — a signer we cannot bind and that we
+            // do not yet know to be call-capable is allowed as Unverified this once.
             return peerBindsCalls ? 'downgrade' : 'unverifiable';
         }
         // The signer IS the contact: now the fingerprint must check out. A divergent
         // or unverifiable fingerprint from a bound signer means the media channel was
         // tampered (a relay swapped the DTLS fingerprint) — refuse.
         if (distinct.length !== 1) return 'mismatch';
-        const ok = await verifyFingerprint({ fingerprint, role, signatureB64, signerDid });
+        const ok = await verifyFingerprint({ fingerprint, role, signatureB64, signerDid, recipientDid });
         return ok ? 'verified' : 'mismatch';
     }
     // Unknown peer identity: verify if we can, but we cannot bind it to a contact.
     if (signatureB64 && signerDid && distinct.length === 1) {
-        const ok = await verifyFingerprint({ fingerprint, role, signatureB64, signerDid });
+        const ok = await verifyFingerprint({ fingerprint, role, signatureB64, signerDid, recipientDid });
         return ok ? 'verified' : 'mismatch';
     }
     return 'unverifiable';

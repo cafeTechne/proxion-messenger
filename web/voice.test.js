@@ -359,6 +359,24 @@ describe('inbound signal binding (pod call-inbox is untrusted)', () => {
     expect(voice.state._callState).toBe(CallState.IDLE);
   });
 
+  it('hangup: NEITHER session_id NOR from_webid is REJECTED (the drop-box exploit)', () => {
+    const { voice } = makeVoice();
+    inActiveCall(voice);
+    // A bare {"type":"voice_hangup"} POSTed to the public-Append call-inbox proves
+    // nothing about the call and must not tear it down (fail closed).
+    voice.handleVoiceHangup({});
+    expect(stillUp(voice)).toBe(true);
+  });
+
+  it('hangup: naming the peer but WITHOUT the session_id secret is REJECTED', () => {
+    const { voice } = makeVoice();
+    inActiveCall(voice);
+    // The peer WebID is public and self-attested over the pod; the session_id is the
+    // secret gate, so a hangup that omits it is rejected even if it names the peer.
+    voice.handleVoiceHangup({ from_webid: 'did:key:zPeer' });
+    expect(stillUp(voice)).toBe(true);
+  });
+
   it('ice: a candidate from a non-peer WebID is ignored', async () => {
     const { voice } = makeVoice();
     const added = [];
@@ -371,6 +389,52 @@ describe('inbound signal binding (pod call-inbox is untrusted)', () => {
 
     await voice.handleIceCandidate({ from_webid: 'did:key:zPeer', candidate: 'legit' });
     expect(added).toHaveLength(1);
+  });
+
+  it('ice: an omitted from_webid on the pod path is REJECTED (binding not bypassed)', async () => {
+    const { voice } = makeVoice();
+    const added = [];
+    voice.state.pc = { addIceCandidate: (c) => { added.push(c); return Promise.resolve(); } };
+    voice.state._remoteDescSet = true;
+    voice.state._callPeerWebid = 'did:key:zPeer';
+    voice.state.currentCallSessionId = 'sess1';
+
+    // No from_webid and no matching session_id: an injected pod candidate. Rejected.
+    await voice.handleIceCandidate({ candidate: 'evil' });
+    expect(added).toHaveLength(0);
+
+    // A gateway-relayed candidate (gateway did, _fromGateway) still applies.
+    await voice.handleIceCandidate({ _fromGateway: true, from_webid: 'did:key:zGateway', candidate: 'relayed' });
+    expect(added).toHaveLength(1);
+
+    // A same-gateway candidate (no from_webid, matching session_id) still applies.
+    await voice.handleIceCandidate({ session_id: 'sess1', candidate: 'samegw' });
+    expect(added).toHaveLength(2);
+  });
+
+  it('answer: an omitted from_webid on the pod path is REJECTED; legit paths still apply', async () => {
+    const { voice } = makeVoice();
+    const setRemote = [];
+    voice.state.pc = {
+      setRemoteDescription: (d) => { setRemote.push(d); return Promise.resolve(); },
+      getTransceivers: () => [],
+    };
+    voice.state._callPeerWebid = 'did:key:zPeer';
+    voice.state.currentCallSessionId = 'sess1';
+    const answerSdp = 'v=0\r\na=fingerprint:sha-256 AA:BB:CC:DD\r\n';
+
+    // No from_webid and no matching session_id: an injected pod answer. Rejected before
+    // setRemoteDescription.
+    await voice.handleVoiceAnswer({ sdp_answer: answerSdp });
+    expect(setRemote).toHaveLength(0);
+
+    // A legit same-peer pod answer proceeds.
+    await voice.handleVoiceAnswer({ from_webid: 'did:key:zPeer', sdp_answer: answerSdp });
+    expect(setRemote).toHaveLength(1);
+
+    // A gateway-relayed answer (gateway did, _fromGateway) proceeds too.
+    await voice.handleVoiceAnswer({ _fromGateway: true, from_webid: 'did:key:zGateway', sdp_answer: answerSdp });
+    expect(setRemote).toHaveLength(2);
   });
 });
 

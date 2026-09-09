@@ -227,3 +227,70 @@ describe('classifyPeerSdp peer-aware downgrade (R86)', () => {
         })).toBe('mismatch');
     });
 });
+
+// R110 FIND-10: bind the intended recipient's WebID into the signature so a signed
+// offer/answer cannot be transplanted into a call to a different peer. Verification
+// prefers the bound form and falls back to the legacy unbound form, so older signers
+// still validate.
+describe('recipient-bound fingerprint signatures (FIND-10)', () => {
+    it('a recipient-bound signature verifies for the intended recipient', async () => {
+        const me = await identity();
+        const bob = 'did:key:zBobRecipient';
+        const sig = await signFingerprint({ fingerprint: FP, role: 'offer', privKey: me.priv, recipientDid: bob });
+        expect(await verifyFingerprint({
+            fingerprint: FP, role: 'offer', signatureB64: sig, signerDid: me.did, recipientDid: bob,
+        })).toBe(true);
+    });
+
+    it('a recipient-bound signature does NOT verify for a different recipient (no transplant)', async () => {
+        const me = await identity();
+        const sig = await signFingerprint({ fingerprint: FP, role: 'offer', privKey: me.priv, recipientDid: 'did:key:zBob' });
+        // A third party the signer never addressed cannot accept it: neither the bound
+        // form (wrong recipient) nor the legacy form (the sig covers the bound bytes).
+        expect(await verifyFingerprint({
+            fingerprint: FP, role: 'offer', signatureB64: sig, signerDid: me.did, recipientDid: 'did:key:zCarol',
+        })).toBe(false);
+        expect(await verifyFingerprint({
+            fingerprint: FP, role: 'offer', signatureB64: sig, signerDid: me.did,
+        })).toBe(false);
+    });
+
+    it('a legacy (unbound) signature still verifies, with or without a recipient on verify', async () => {
+        const me = await identity();
+        const sig = await signFingerprint({ fingerprint: FP, role: 'offer', privKey: me.priv });   // no recipient
+        expect(await verifyFingerprint({
+            fingerprint: FP, role: 'offer', signatureB64: sig, signerDid: me.did,
+        })).toBe(true);
+        // A newer verifier that supplies its own WebID still accepts the legacy form.
+        expect(await verifyFingerprint({
+            fingerprint: FP, role: 'offer', signatureB64: sig, signerDid: me.did, recipientDid: 'did:key:zAnyone',
+        })).toBe(true);
+    });
+
+    it('a tampered fingerprint still fails even with recipient binding (verdict not softened)', async () => {
+        const me = await identity();
+        const bob = 'did:key:zBob';
+        const sig = await signFingerprint({ fingerprint: FP, role: 'offer', privKey: me.priv, recipientDid: bob });
+        expect(await verifyFingerprint({
+            fingerprint: 'sha-256 00:00', role: 'offer', signatureB64: sig, signerDid: me.did, recipientDid: bob,
+        })).toBe(false);
+    });
+
+    it('classifyPeerSdp verifies a recipient-bound offer from the expected contact', async () => {
+        const peer = await identity();
+        const me = 'did:key:zSelfRecipient';
+        const sig = await signFingerprint({ fingerprint: FP, role: 'offer', privKey: peer.priv, recipientDid: me });
+        expect(await classifyPeerSdp({
+            sdp: sdp(), role: 'offer', signatureB64: sig, signerDid: peer.did, expectedDid: peer.did, recipientDid: me,
+        })).toBe('verified');
+    });
+
+    it('classifyPeerSdp still verifies a legacy offer when a recipient is supplied (fallback)', async () => {
+        const peer = await identity();
+        const sig = await signFingerprint({ fingerprint: FP, role: 'offer', privKey: peer.priv });   // legacy
+        expect(await classifyPeerSdp({
+            sdp: sdp(), role: 'offer', signatureB64: sig, signerDid: peer.did, expectedDid: peer.did,
+            recipientDid: 'did:key:zSelfRecipient',
+        })).toBe('verified');
+    });
+});
