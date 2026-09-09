@@ -78,7 +78,18 @@ function _canonicalP(fields, obj, prefixLen) {
 }
 
 function _canonical(fields, obj) { return _canonicalP(fields, obj, 4); }
-function _canonicalLegacy(fields, obj) { return _canonicalP(fields, obj, 2); }
+// A 2-byte length header can only frame a field under 64KiB; a longer field would
+// wrap to its low 16 bits and make the legacy canonical bytes ambiguous (two
+// different envelopes canonicalizing the same). No genuinely-old signature ever
+// framed an oversized field, so refuse to build legacy bytes for one and let the
+// caller treat it as unverified rather than risk a colliding canonical. Returns
+// null when a field is too large; the 4-byte primary path has no such limit.
+function _canonicalLegacy(fields, obj) {
+    for (const k of fields) {
+        if (_ENC.encode(obj && obj[k] != null ? String(obj[k]) : '').length >= 65536) return null;
+    }
+    return _canonicalP(fields, obj, 2);
+}
 
 function _fanoutObj(env) {
     const p = (env && env.payload) || {};
@@ -124,11 +135,13 @@ export function signFanout(env, privKey, signerDid) { return _sign(canonicalFano
 // real Ed25519 signatures by the same signer; neither path is weakened.
 export async function verifyDmSig(env) {
     if (await _verify(env, canonicalDmBytes(env))) return true;
-    return _verify(env, _canonicalLegacy(SIGNED_FIELDS_LEGACY, env));
+    const legacy = _canonicalLegacy(SIGNED_FIELDS_LEGACY, env);
+    return legacy ? _verify(env, legacy) : false;
 }
 export async function verifyFanoutSig(env) {
     if (await _verify(env, canonicalFanoutBytes(env))) return true;
-    return _verify(env, _canonicalLegacy(SIGNED_FIELDS_FANOUT_LEGACY, _fanoutObj(env)));
+    const legacy = _canonicalLegacy(SIGNED_FIELDS_FANOUT_LEGACY, _fanoutObj(env));
+    return legacy ? _verify(env, legacy) : false;
 }
 
 // ── Long Chat room-message signing (#4) ──

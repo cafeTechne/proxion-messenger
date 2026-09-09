@@ -19,7 +19,14 @@ from cryptography.hazmat.backends import default_backend
 _CLOCK_SKEW_S = 30
 
 
-def validate_dpop_claims(payload: dict, now: Optional[int] = None, header: Optional[dict] = None) -> None:
+def validate_dpop_claims(
+    payload: dict,
+    now: Optional[int] = None,
+    header: Optional[dict] = None,
+    expected_htu: Optional[str] = None,
+    expected_htm: Optional[str] = None,
+    access_token: Optional[str] = None,
+) -> None:
     """Validate DPoP JWT payload claims. Raises ValueError describing the failure.
 
     Checks performed:
@@ -28,6 +35,15 @@ def validate_dpop_claims(payload: dict, now: Optional[int] = None, header: Optio
     - ``exp`` has not passed (with *_CLOCK_SKEW_S* tolerance)
     - ``jti`` is present (uniqueness tracking is left to callers via DpopReplayCache)
     - If ``header`` provided: validates alg=EdDSA and crv=Ed25519
+    - If ``expected_htm``/``expected_htu``/``access_token`` provided: requires the
+      proof's ``htm``/``htu``/``ath`` to match, rejecting a missing or mismatched
+      claim (fail-closed request binding, RFC 9449 §4.3)
+
+    The htu/htm/ath binding is OPTIONAL and off by default: the only callers today
+    are tests and the gateway is not a DPoP resource server, so nothing authorizes
+    requests on this proof. Anyone wiring this into real request authorization MUST
+    pass expected_htu and expected_htm (and access_token when the proof is token-
+    bound), or the proof is not bound to the request it accompanies.
 
     Parameters
     ----------
@@ -37,6 +53,15 @@ def validate_dpop_claims(payload: dict, now: Optional[int] = None, header: Optio
         Unix timestamp to use for validation (defaults to current time)
     header : dict, optional
         JWT header; when provided, validates algorithm and curve constraints
+    expected_htu : str, optional
+        Expected request URL; when provided, the proof's ``htu`` must match (the
+        fragment is stripped for comparison, as in proof generation)
+    expected_htm : str, optional
+        Expected HTTP method; when provided, the proof's ``htm`` must match
+        (case-insensitively)
+    access_token : str, optional
+        When provided, the proof's ``ath`` must equal the base64url SHA-256 of the
+        token, binding the proof to that bearer token
     """
     _now = now if now is not None else int(time.time())
     iat = payload.get("iat")
@@ -68,6 +93,19 @@ def validate_dpop_claims(payload: dict, now: Optional[int] = None, header: Optio
         jwk = header.get("jwk", {})
         if jwk.get("kty") != "OKP":
             raise ValueError("unsupported_dpop_algorithm")
+
+    # Request binding: only enforced when the caller supplies the expected values,
+    # so no-expectation calls keep today's behavior. When supplied, a missing claim
+    # fails closed (payload.get(...) is None, which never matches the expectation).
+    if expected_htm is not None and payload.get("htm") != expected_htm.upper():
+        raise ValueError("DPoP proof htm mismatch")
+    if expected_htu is not None and payload.get("htu") != expected_htu.split("#")[0]:
+        raise ValueError("DPoP proof htu mismatch")
+    if access_token is not None:
+        import hashlib as _hl
+        expected_ath = _b64url(_hl.sha256(access_token.encode("ascii")).digest())
+        if payload.get("ath") != expected_ath:
+            raise ValueError("DPoP proof ath mismatch")
 
 
 class DpopReplayCache:

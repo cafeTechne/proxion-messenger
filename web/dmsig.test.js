@@ -172,6 +172,18 @@ describe('dmsig legacy-signature shim', () => {
         const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', id.priv, bytes));
         expect(await verifyDmSig({ ...envFull, signer: other.did, sig: _b64(sig) })).toBe(false);
     });
+
+    // A field ≥ 64KiB wraps the legacy 2-byte length header and makes the legacy
+    // canonical bytes ambiguous, so the shim must refuse the legacy path for it —
+    // even a signature that the (equally-truncating) legacy scheme would produce
+    // must not verify. The 4-byte primary path already handles such fields (above).
+    it('rejects a legacy-signed oversized (≥64KiB) field', async () => {
+        const id = await makeIdentity();
+        const big = { ...envFull, content: 'x'.repeat(70000) };
+        const bytes = legacyCanonical(LEGACY_DM_FIELDS, big);
+        const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', id.priv, bytes));
+        expect(await verifyDmSig({ ...big, signer: id.did, sig: _b64(sig) })).toBe(false);
+    });
 });
 
 describe('dmsig fanout', () => {
