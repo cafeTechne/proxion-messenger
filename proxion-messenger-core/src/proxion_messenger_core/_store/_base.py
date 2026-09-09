@@ -79,7 +79,7 @@ class _StoreBase(object):
         """Flush the WAL to the main database file (call before shutdown)."""
         with self._conn() as conn:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    _SCHEMA_VERSION = 53
+    _SCHEMA_VERSION = 58
     _integrity_ok: bool = True
     def _init_db(self) -> None:
         with self._conn() as conn:
@@ -334,6 +334,33 @@ class _StoreBase(object):
                 END;
             """)
             self._run_migrations(conn)
+    def _run_rebuild_migration(self, conn: "sqlite3.Connection", migration: dict) -> None:
+        """Run a destructive table rebuild without swallowing failures.
+
+        The idempotent statement lists tolerate per-statement errors (an ALTER
+        that re-adds a column already present is expected on some paths). A
+        rebuild cannot: it copies live rows into a replacement table and drops
+        the original, so a swallowed copy failure would silently lose data. Here
+        the copy is verified row-for-row and the DROP runs only after that check
+        passes. Any failure raises, so the caller's transaction rolls back and
+        schema_version is left unchanged rather than advancing past a migration
+        that dropped rows.
+        """
+        src = migration["rebuild"]
+        tmp = migration["temp"]
+        for stmt in migration.get("pre", []):
+            conn.execute(stmt)
+        conn.execute(migration["copy"])
+        src_rows = conn.execute("SELECT COUNT(*) FROM " + src).fetchone()[0]
+        tmp_rows = conn.execute("SELECT COUNT(*) FROM " + tmp).fetchone()[0]
+        if tmp_rows != src_rows:
+            raise RuntimeError(
+                "rebuild of %s aborted: copied %d of %d rows" % (src, tmp_rows, src_rows)
+            )
+        conn.execute("DROP TABLE " + src)
+        conn.execute("ALTER TABLE " + tmp + " RENAME TO " + src)
+        for stmt in migration.get("post", []):
+            conn.execute(stmt)
     def _run_migrations(self, conn: "sqlite3.Connection") -> None:
         """Apply numbered migrations sequentially. Each runs in its own transaction."""
         row = conn.execute("SELECT version FROM schema_version").fetchone()
@@ -1208,6 +1235,41 @@ class _StoreBase(object):
                 "DROP TABLE contact_verifications",
                 "ALTER TABLE contact_verifications_v57 RENAME TO contact_verifications",
             ],
+            # 58: composite key (owner_webid, prekey_id) for dm_prekeys. prekey_id
+            # is minted client-side, so the old global INTEGER PRIMARY KEY let one
+            # owner's INSERT OR REPLACE evict another owner's row on an id collision
+            # (DoS of E2E session setup). Scope the identity per owner. This is a
+            # destructive rebuild, so it runs through _run_rebuild_migration: the
+            # copy is verified before the original is dropped.
+            {
+                "rebuild": "dm_prekeys",
+                "temp": "dm_prekeys_v58",
+                "pre": [
+                    "DROP TABLE IF EXISTS dm_prekeys_v58",
+                    """CREATE TABLE dm_prekeys_v58 (
+                        prekey_id        INTEGER NOT NULL,
+                        owner_webid      TEXT NOT NULL,
+                        pub_b64          TEXT NOT NULL,
+                        priv_wrapped_b64 TEXT NOT NULL,
+                        one_time         INTEGER NOT NULL DEFAULT 1,
+                        used             INTEGER NOT NULL DEFAULT 0,
+                        created_at       REAL NOT NULL,
+                        spk_created_at   REAL DEFAULT 0,
+                        expired          INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY (owner_webid, prekey_id)
+                    )""",
+                ],
+                "copy": """INSERT OR IGNORE INTO dm_prekeys_v58
+                           (prekey_id, owner_webid, pub_b64, priv_wrapped_b64,
+                            one_time, used, created_at, spk_created_at, expired)
+                           SELECT prekey_id, owner_webid, pub_b64, priv_wrapped_b64,
+                                  one_time, used, created_at, spk_created_at, expired
+                           FROM dm_prekeys""",
+                "post": [
+                    """CREATE INDEX IF NOT EXISTS idx_dm_prekeys_owner_used
+                       ON dm_prekeys(owner_webid, used)""",
+                ],
+            },
         ]
 
         for version, migration in enumerate(migrations, start=1):
@@ -1217,6 +1279,8 @@ class _StoreBase(object):
                 with conn:
                     if migration is None:
                         pass
+                    elif isinstance(migration, dict) and migration.get("rebuild"):
+                        self._run_rebuild_migration(conn, migration)
                     elif isinstance(migration, list):
                         for stmt in migration:
                             try:

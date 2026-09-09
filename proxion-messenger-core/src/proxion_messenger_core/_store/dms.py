@@ -318,20 +318,43 @@ class DmStoreMixin(object):
             except Exception:
                 return None
     def claim_one_time_prekey(self, owner_webid: str) -> dict | None:
-        """Return and mark-used one unused one-time prekey for owner_webid."""
+        """Return and mark-used one unused one-time prekey for owner_webid.
+
+        The select and the mark-used happen in one atomic step so two
+        concurrent claims can never hand out the same prekey: the UPDATE
+        matches the oldest unused row and re-checks ``used=0`` in its own
+        WHERE, so a racing claim that already marked it matches nothing. The
+        write stays scoped to owner_webid.
+        """
         with self._conn() as conn:
             try:
-                row = conn.execute(
-                    "SELECT * FROM dm_prekeys WHERE owner_webid=? AND one_time=1 AND used=0 ORDER BY created_at ASC LIMIT 1",
-                    (owner_webid,),
-                ).fetchone()
-                if row is None:
-                    return None
-                conn.execute(
-                    "UPDATE dm_prekeys SET used=1 WHERE prekey_id=?",
-                    (row["prekey_id"],),
-                )
-                d = dict(row)
+                if sqlite3.sqlite_version_info >= (3, 35, 0):
+                    row = conn.execute(
+                        """UPDATE dm_prekeys SET used=1
+                           WHERE prekey_id = (
+                               SELECT prekey_id FROM dm_prekeys
+                               WHERE owner_webid=? AND one_time=1 AND used=0
+                               ORDER BY created_at ASC LIMIT 1
+                           ) AND owner_webid=? AND one_time=1 AND used=0
+                           RETURNING *""",
+                        (owner_webid, owner_webid),
+                    ).fetchone()
+                    if row is None:
+                        return None
+                    d = dict(row)
+                else:
+                    conn.execute("BEGIN IMMEDIATE")
+                    row = conn.execute(
+                        "SELECT * FROM dm_prekeys WHERE owner_webid=? AND one_time=1 AND used=0 ORDER BY created_at ASC LIMIT 1",
+                        (owner_webid,),
+                    ).fetchone()
+                    if row is None:
+                        return None
+                    conn.execute(
+                        "UPDATE dm_prekeys SET used=1 WHERE prekey_id=? AND owner_webid=? AND used=0",
+                        (row["prekey_id"], owner_webid),
+                    )
+                    d = dict(row)
                 d["priv_wrapped_b64"] = self._unwrap_secret(d.get("priv_wrapped_b64"))
                 return d
             except Exception:
@@ -542,13 +565,16 @@ class DmStoreMixin(object):
                 return result
             except Exception:
                 return []
-    def mark_prekey_expired(self, prekey_id: int) -> None:
-        """Mark a signed prekey as expired (retained for 48h, then hard-deleted by purge loop)."""
+    def mark_prekey_expired(self, prekey_id: int, owner_webid: str) -> None:
+        """Mark a signed prekey as expired (retained for 48h, then hard-deleted by purge loop).
+
+        Scoped to owner_webid so a client-supplied prekey_id cannot expire
+        another owner's row that happens to share the id."""
         with self._conn() as conn:
             try:
                 conn.execute(
-                    "UPDATE dm_prekeys SET expired=1 WHERE prekey_id=?",
-                    (prekey_id,),
+                    "UPDATE dm_prekeys SET expired=1 WHERE prekey_id=? AND owner_webid=?",
+                    (prekey_id, owner_webid),
                 )
             except Exception:
                 pass

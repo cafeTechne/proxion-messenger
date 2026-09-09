@@ -1935,9 +1935,10 @@ class MiscHandlerMixin:
             spk_id, owner_webid, spk_pub, spk_priv, one_time=False,
             spk_created_at=spk_created_at or __import__("time").time(),
         )
-        # Mark the old SPK expired (retained 48h for in-flight sessions)
+        # Mark the old SPK expired (retained 48h for in-flight sessions).
+        # Scope to the caller so a supplied id can't expire a peer's SPK.
         if old_prekey_id and self._store:
-            self._store.mark_prekey_expired(int(old_prekey_id))
+            self._store.mark_prekey_expired(int(old_prekey_id), owner_webid)
         await websocket.send(json.dumps({
             "type": "spk_rotated",
             "signed_prekey_id": spk_id,

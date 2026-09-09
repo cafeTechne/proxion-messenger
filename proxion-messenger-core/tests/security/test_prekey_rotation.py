@@ -52,7 +52,7 @@ def test_mark_prekey_expired_retains_row(store):
     owner = "bob@example.org"
     _save_spk(store, 2001, owner, created_at_offset=-500)
 
-    store.mark_prekey_expired(2001)
+    store.mark_prekey_expired(2001, owner)
 
     import sqlite3
     conn = sqlite3.connect(store.db_path)
@@ -70,7 +70,7 @@ def test_expired_spk_hard_deleted_after_48h(store):
     """Rows with expired=1 and spk_created_at older than 48h must be deletable."""
     owner = "carol@example.org"
     _save_spk(store, 3001, owner, created_at_offset=-(48 * 3600 + 1))  # just past 48h
-    store.mark_prekey_expired(3001)
+    store.mark_prekey_expired(3001, owner)
 
     # Simulate the retention purge: delete expired rows older than 48h
     cutoff = time.time() - 48 * 3600
