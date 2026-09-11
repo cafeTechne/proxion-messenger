@@ -71,6 +71,11 @@ export function buildProfileLinkPatch({ webId, indexUrl }) {
 
 // ── Reading ──────────────────────────────────────────────────────────────────
 
+// Cap on nodes walked from a (possibly foreign, attacker-writable) type index or
+// profile document: defence in depth alongside the byte cap on the fetched body in
+// pod.js. Mirrors parseLongChatJsonLd's slice.
+const MAX_TYPEINDEX_NODES = 5000;
+
 function nodesOf(json) {
     if (!json) return [];
     if (Array.isArray(json)) return json;
@@ -88,14 +93,15 @@ function idsOf(node, predicate) {
 
 /** The `solid:publicTypeIndex` IRI from a profile document (JSON-LD). */
 export function parsePublicTypeIndex(json, webId = '') {
-    for (const node of nodesOf(json)) {
+    const nodes = nodesOf(json).slice(0, MAX_TYPEINDEX_NODES);
+    for (const node of nodes) {
         if (!node || typeof node !== 'object') continue;
         if (webId && String(node['@id'] || '') !== webId) continue;
         const [url] = idsOf(node, NS.solid + 'publicTypeIndex');
         if (url) return url;
     }
     // Fall back to any node carrying the predicate (some servers frame differently).
-    for (const node of nodesOf(json)) {
+    for (const node of nodes) {
         const [url] = idsOf(node || {}, NS.solid + 'publicTypeIndex');
         if (url) return url;
     }
@@ -109,7 +115,7 @@ export function parsePublicTypeIndex(json, webId = '') {
 export function parseRegisteredContainers(json, forClass = CHAT_CLASS) {
     const out = [];
     const seen = new Set();
-    for (const node of nodesOf(json)) {
+    for (const node of nodesOf(json).slice(0, MAX_TYPEINDEX_NODES)) {
         if (!node || typeof node !== 'object') continue;
         if (!idsOf(node, NS.solid + 'forClass').includes(forClass)) continue;
         for (const c of idsOf(node, NS.solid + 'instanceContainer')) {

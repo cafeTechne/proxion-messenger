@@ -35,6 +35,40 @@ export function podSetLongChatSigner(signer) {
 const MAX_DISCOVERED_CHATS = 100;
 const MAX_CHAT_DAY_BYTES = 512 * 1024;
 
+// A peer's type index, a foreign profile card, and every public-Append drop-box /
+// LDN inbox are attacker-controllable, so their bodies are bounded before parse the
+// way the self-pod readers already do (_fetchOnePodMessage). A single small doc (one
+// drop, one notification, a signer) gets the 64K cap; a container listing or a WebID
+// card, which can legitimately hold many entries, gets a larger one.
+const MAX_POD_JSON_BYTES = 65536;
+const MAX_POD_LISTING_BYTES = 512 * 1024;
+
+// Fetch and JSON-parse an attacker-controlled pod document with a byte cap, so a
+// giant body cannot be buffered into memory and hang the tab. Checks Content-Length
+// first, then the actual text length, before JSON.parse (mirrors _fetchOnePodMessage).
+// Returns the parsed value, or null when the response is not ok or exceeds maxBytes.
+// Network errors propagate so callers keep their own logging/fallback.
+async function _fetchJsonCapped(url, opts = {}, maxBytes = MAX_POD_JSON_BYTES) {
+    const res = await solidSession.fetch(url, opts);
+    if (!res || !res.ok) return null;
+    const len = Number(res.headers?.get?.('content-length'));
+    if (Number.isFinite(len) && len > maxBytes) return null;
+    if (typeof res.text === 'function') {
+        const text = await res.text();
+        if (text.length > maxBytes) return null;
+        return JSON.parse(text);
+    }
+    return await res.json();
+}
+
+// A URL discovered inside an attacker-authored profile (its publicTypeIndex, its
+// ldp:inbox) is only followed when it lives on the same origin as the profile it was
+// read from, so a hostile card cannot point our authenticated session at an
+// arbitrary host. Mirrors the long_chat same-origin rule in main.js.
+function _sameOrigin(a, b) {
+    try { return new URL(a).origin === new URL(b).origin; } catch { return false; }
+}
+
 // A chat container URL must be an absolute http(s) URL ending in '/', with no
 // fragment/query/whitespace or traversal. Mirrors solidchat.isValidChatContainer,
 // duplicated here to keep pod.js from depending on the higher-level chat module.
@@ -745,9 +779,14 @@ export async function podHydrateRoom(roomId, { days = 7, local = [] } = {}) {
 export async function podReadPublicTypeIndexUrlFor(webId) {
     if (!webId || !solidSession?.info?.isLoggedIn) return null;
     try {
-        const res = await solidSession.fetch(webId, { headers: { Accept: 'application/ld+json' } });
-        if (!res || !res.ok) return null;
-        return parsePublicTypeIndex(await res.json(), webId);
+        const json = await _fetchJsonCapped(webId, { headers: { Accept: 'application/ld+json' }, redirect: 'error' }, MAX_POD_LISTING_BYTES);
+        if (!json) return null;
+        const url = parsePublicTypeIndex(json, webId);
+        // The publicTypeIndex value is attacker-controlled even for a legit WebID, and
+        // it is fetched next with our authenticated session; only follow one that is on
+        // the profile's own origin and clears the SSRF gate.
+        if (!url || !_sameOrigin(url, webId) || !_peerRootAllowed(url)) return null;
+        return url;
     } catch (err) {
         console.warn('[pod] podReadPublicTypeIndexUrlFor failed:', err);
         return null;
@@ -966,9 +1005,9 @@ export async function podListRegisteredChats() {
     const indexUrl = await podReadPublicTypeIndexUrl();
     if (!indexUrl) return [];
     try {
-        const res = await solidSession.fetch(indexUrl, { headers: { Accept: 'application/ld+json' } });
-        if (!res || !res.ok) return [];
-        return parseRegisteredContainers(await res.json());
+        const json = await _fetchJsonCapped(indexUrl, { headers: { Accept: 'application/ld+json' }, redirect: 'error' }, MAX_POD_LISTING_BYTES);
+        if (!json) return [];
+        return parseRegisteredContainers(json);
     } catch (err) {
         console.warn('[pod] podListRegisteredChats failed:', err);
         return [];
@@ -988,9 +1027,12 @@ export async function podListChatsForWebId(webId) {
     if (!indexUrl) return [];
     let containers = [];
     try {
-        const res = await solidSession.fetch(indexUrl, { headers: { Accept: 'application/ld+json' } });
-        if (!res || !res.ok) return [];
-        containers = parseRegisteredContainers(await res.json());
+        // indexUrl was already bound to the profile's origin + SSRF gate by
+        // podReadPublicTypeIndexUrlFor; still refuse a redirect off that vetted host
+        // and cap the body of this attacker-writable document before parse.
+        const json = await _fetchJsonCapped(indexUrl, { headers: { Accept: 'application/ld+json' }, redirect: 'error' }, MAX_POD_LISTING_BYTES);
+        if (!json) return [];
+        containers = parseRegisteredContainers(json);
     } catch (err) {
         console.warn('[pod] podListChatsForWebId failed:', err);
         return [];
@@ -1042,12 +1084,14 @@ export function podDeregisterRoomChat(roomId) {
 export async function podDiscoverInbox(webId) {
     if (!webId || !solidSession?.info?.isLoggedIn) return null;
     try {
-        const res = await solidSession.fetch(webId, { headers: { Accept: 'application/ld+json' } });
-        if (!res || !res.ok) return null;
-        const json = await res.json();
+        const json = await _fetchJsonCapped(webId, { headers: { Accept: 'application/ld+json' }, redirect: 'error' }, MAX_POD_LISTING_BYTES);
+        if (!json) return null;
         for (const node of _jsonldNodes(json)) {
             const [inbox] = _idsOf(node, INBOX_PRED);
-            if (inbox) return inbox;
+            // The ldp:inbox is attacker-controlled in a foreign card and is fetched or
+            // POSTed to with our authenticated session; only surface one on the same
+            // origin as the profile that advertised it that also clears the SSRF gate.
+            if (inbox && _sameOrigin(inbox, webId) && _peerRootAllowed(inbox)) return inbox;
         }
         return null;
     } catch (err) {
@@ -1194,12 +1238,15 @@ export async function podSendChatInvite(recipientWebId, { container, title = '' 
     const inbox = await podDiscoverInbox(recipientWebId);
     if (!inbox) return false;
     try {
+        // podDiscoverInbox already bound the inbox to the recipient profile's origin
+        // + SSRF gate; still refuse to follow a redirect off that vetted host.
         const res = await solidSession.fetch(inbox, {
             method: 'POST',
             headers: { 'Content-Type': 'application/ld+json' },
             body: JSON.stringify(buildInviteNotification({
                 from: me, to: recipientWebId, container, title,
             })),
+            redirect: 'error',
         });
         return !!(res && res.ok);
     } catch (err) {
@@ -1225,9 +1272,9 @@ export async function podReadInboxNotifications() {
     if (!inbox) return [];
     let urls = [];
     try {
-        const res = await solidSession.fetch(inbox, { headers: { Accept: 'application/ld+json' } });
-        if (!res || !res.ok) return [];
-        urls = parseInboxListing(await res.json(), inbox);
+        const json = await _fetchJsonCapped(inbox, { headers: { Accept: 'application/ld+json' } }, MAX_POD_LISTING_BYTES);
+        if (!json) return [];
+        urls = parseInboxListing(json, inbox);
     } catch (err) {
         console.warn('[pod] podReadInboxNotifications listing failed:', err);
         return [];
@@ -1236,9 +1283,9 @@ export async function podReadInboxNotifications() {
     const out = [];
     for (const url of urls) {
         try {
-            const r = await solidSession.fetch(url, { headers: { Accept: 'application/ld+json' } });
-            if (!r || !r.ok) continue;
-            const inv = parseInviteNotification(await r.json());
+            const j = await _fetchJsonCapped(url, { headers: { Accept: 'application/ld+json' } });
+            if (!j) continue;
+            const inv = parseInviteNotification(j);
             if (inv && inv.container) out.push({ id: url, from: inv.from, container: inv.container, title: inv.title });
         } catch { /* skip a single unreadable notification */ }
     }
@@ -1329,9 +1376,9 @@ async function _readDropBox(path) {
     const inbox = root.replace(/\/?$/, '/') + path;
     let urls = [];
     try {
-        const res = await solidSession.fetch(inbox, { headers: { Accept: 'application/ld+json' } });
-        if (!res || !res.ok) return [];
-        urls = parseInboxListing(await res.json(), inbox);
+        const json = await _fetchJsonCapped(inbox, { headers: { Accept: 'application/ld+json' } }, MAX_POD_LISTING_BYTES);
+        if (!json) return [];
+        urls = parseInboxListing(json, inbox);
     } catch (err) {
         console.warn('[pod] drop-box listing failed:', err);
         return [];
@@ -1340,9 +1387,10 @@ async function _readDropBox(path) {
     const out = [];
     for (const url of urls) {
         try {
-            const r = await solidSession.fetch(url, { headers: { Accept: 'application/json' } });
-            if (!r || !r.ok) continue;
-            out.push({ url, item: await r.json() });
+            // Each dropped item is attacker-authored (the box is public-Append), so bound
+            // its body before parse the same way the listing above is bounded.
+            const item = await _fetchJsonCapped(url, { headers: { Accept: 'application/json' } });
+            if (item != null) out.push({ url, item });
         } catch { /* skip one unreadable drop */ }
     }
     return out;
@@ -1385,9 +1433,10 @@ export async function podPublishSigner(signerDid, accountDid) {
 export async function podFetchPeerSigner(peerPodRoot) {
     if (!peerPodRoot || !isPeerPodRootAllowed(peerPodRoot, podStorageRoot()) || !solidSession?.info?.isLoggedIn) return null;
     try {
-        const res = await solidSession.fetch(peerPodRoot.replace(/\/?$/, '/') + 'proxion/identity/signer.json', { headers: { Accept: 'application/json' }, redirect: 'error' });
-        if (!res || !res.ok) return null;
-        const d = await res.json();
+        const d = await _fetchJsonCapped(
+            peerPodRoot.replace(/\/?$/, '/') + 'proxion/identity/signer.json',
+            { headers: { Accept: 'application/json' }, redirect: 'error' },
+        );
         if (d && typeof d.signer === 'string') {
             return { signer: d.signer, account_did: typeof d.account_did === 'string' ? d.account_did : null };
         }
@@ -1558,9 +1607,8 @@ export async function podReadKnownWebIds(profileUrl) {
     const url = profileUrl || (solidSession?.info?.webId);
     if (!url || !solidSession?.info?.isLoggedIn) return [];
     try {
-        const res = await solidSession.fetch(url, { headers: { Accept: 'application/ld+json' } });
-        if (!res || !res.ok) return [];
-        const json = await res.json();
+        const json = await _fetchJsonCapped(url, { headers: { Accept: 'application/ld+json' } }, MAX_POD_LISTING_BYTES);
+        if (!json) return [];
         const out = new Set();
         for (const node of _jsonldNodes(json)) {
             for (const id of _idsOf(node, _FOAF_KNOWS)) out.add(id);
@@ -1576,9 +1624,8 @@ export async function podReadKnownWebIds(profileUrl) {
 export async function podResolveWebIdName(webid) {
     if (!webid || !solidSession?.info?.isLoggedIn) return '';
     try {
-        const res = await solidSession.fetch(webid, { headers: { Accept: 'application/ld+json' } });
-        if (!res || !res.ok) return '';
-        const json = await res.json();
+        const json = await _fetchJsonCapped(webid, { headers: { Accept: 'application/ld+json' } }, MAX_POD_LISTING_BYTES);
+        if (!json) return '';
         for (const node of _jsonldNodes(json)) {
             for (const p of [_FOAF_NAME, _VCARD_FN]) {
                 const raw = node[p];

@@ -25,6 +25,10 @@ import {
     podDeleteVoiceAudio,
     podUploadFile,
     podListChatsForWebId,
+    podReadPublicTypeIndexUrlFor,
+    podDiscoverInbox,
+    podSendChatInvite,
+    podReadDmDrops,
 } from './pod.js';
 import { isPeerPodRootAllowed } from './ssrf.js';
 
@@ -275,5 +279,50 @@ describe('podReadChatDayAt bounds an oversized day file (C3)', () => {
         const out = await podReadChatDayAt(CHAT, new Date('2026-07-22T10:00:00Z'), 'room1');
         expect(out).toHaveLength(1);
         expect(out[0]).toMatchObject({ message_id: 'm1', content: 'hi' });
+    });
+});
+
+// F8: a URL discovered inside an attacker-authored profile (its publicTypeIndex, its
+// ldp:inbox) is followed with our authenticated session, so it must be same-origin as
+// the profile and clear the SSRF gate. F7: the profile body is bounded before parse.
+describe('foreign-profile discovery URLs are origin-gated and body-capped (F7/F8)', () => {
+    const WEBID = 'https://alice.pod.example/profile/card#me';
+    const TI_PRED = 'http://www.w3.org/ns/solid/terms#publicTypeIndex';
+    const INBOX_PRED = 'http://www.w3.org/ns/ldp#inbox';
+    function profileSession(predObj) {
+        return makeSession(async (url) => {
+            if (url === WEBID) {
+                return { ok: true, status: 200, headers: { get: () => null },
+                    text: async () => JSON.stringify({ '@id': WEBID, ...predObj }) };
+            }
+            return { ok: true, status: 200, text: async () => '{}' };
+        });
+    }
+
+    it('accepts a same-origin publicTypeIndex', async () => {
+        _session = profileSession({ [TI_PRED]: [{ '@id': 'https://alice.pod.example/settings/idx.ttl' }] });
+        expect(await podReadPublicTypeIndexUrlFor(WEBID)).toBe('https://alice.pod.example/settings/idx.ttl');
+    });
+    it('rejects a cross-origin publicTypeIndex (SSRF)', async () => {
+        _session = profileSession({ [TI_PRED]: [{ '@id': 'https://evil.example/idx.ttl' }] });
+        expect(await podReadPublicTypeIndexUrlFor(WEBID)).toBe(null);
+    });
+    it('rejects a private-host publicTypeIndex', async () => {
+        _session = profileSession({ [TI_PRED]: [{ '@id': 'http://169.254.169.254/idx.ttl' }] });
+        expect(await podReadPublicTypeIndexUrlFor(WEBID)).toBe(null);
+    });
+    it('rejects an oversized profile body before parse (F7 byte cap)', async () => {
+        _session = makeSession(async () => ({
+            ok: true, status: 200,
+            headers: { get: () => String(600 * 1024) },
+            text: async () => { throw new Error('should not read an oversized body'); },
+        }));
+        expect(await podReadPublicTypeIndexUrlFor(WEBID)).toBe(null);
+    });
+    it('podDiscoverInbox accepts a same-origin inbox but rejects a cross-origin one', async () => {
+        _session = profileSession({ [INBOX_PRED]: [{ '@id': 'https://alice.pod.example/inbox/' }] });
+        expect(await podDiscoverInbox(WEBID)).toBe('https://alice.pod.example/inbox/');
+        _session = profileSession({ [INBOX_PRED]: [{ '@id': 'https://evil.example/inbox/' }] });
+        expect(await podDiscoverInbox(WEBID)).toBe(null);
     });
 });

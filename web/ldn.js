@@ -32,6 +32,11 @@ export function buildInviteNotification({ from, to, container, title = '', publi
 
 // ── Reading ──────────────────────────────────────────────────────────────────
 
+// Cap on nodes walked from a (public-Append, attacker-writable) inbox / drop-box
+// listing: defence in depth alongside the byte cap on the fetched body in pod.js.
+// Mirrors parseLongChatJsonLd's slice.
+const MAX_INBOX_NODES = 5000;
+
 function nodesOf(json) {
     if (!json) return [];
     if (Array.isArray(json)) return json;
@@ -92,7 +97,7 @@ export function inviteActorVerified(from, container) {
 export function parseInboxListing(json, inboxUrl = '') {
     const out = [];
     const seen = new Set();
-    for (const node of nodesOf(json)) {
+    for (const node of nodesOf(json).slice(0, MAX_INBOX_NODES)) {
         if (!node || typeof node !== 'object') continue;
         for (const v of vals(node, ['contains', CONTAINS_PRED])) {
             const id = asId(v);

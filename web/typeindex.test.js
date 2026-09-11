@@ -96,4 +96,15 @@ describe('parseRegisteredContainers', () => {
         const dup = index().concat(index());
         expect(parseRegisteredContainers({ '@graph': dup })).toEqual([CONTAINER]);
     });
+
+    it('walks at most the node cap, ignoring registrations past it (F7 DoS bound)', () => {
+        const filler = Array.from({ length: 5000 }, (_, i) => ({ '@id': `${INDEX}#pad${i}` }));
+        const late = {
+            '@id': `${INDEX}#late`,
+            [NS.solid + 'forClass']: [{ '@id': CHAT_CLASS }],
+            [NS.solid + 'instanceContainer']: [{ '@id': 'https://alice.pod/Late/' }],
+        };
+        // the real registration sits beyond the node cap, so the walk never reaches it
+        expect(parseRegisteredContainers({ '@graph': filler.concat(late) })).toEqual([]);
+    });
 });
