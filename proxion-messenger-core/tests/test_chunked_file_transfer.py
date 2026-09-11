@@ -80,6 +80,7 @@ async def test_file_offer_forwarded_to_local_recipient(gateway):
     gateway._client_webids[recipient] = "did:key:zBob"
     gateway._webid_sockets["did:key:zBob"] = {recipient}
     gateway.clients.add(sender); gateway.clients.add(recipient)
+    _seed_rel_file(gateway, "did:key:zAlice")  # F5: local delivery is relationship-gated
 
     await gateway._handle_file_offer(sender, {
         "to_webid": "did:key:zBob", "file_id": "f2",
@@ -102,6 +103,7 @@ async def test_file_chunk_forwarded_to_local_recipient(gateway):
     gateway._client_webids[recipient] = "did:key:zBob"
     gateway._webid_sockets["did:key:zBob"] = {recipient}
     gateway.clients.add(sender); gateway.clients.add(recipient)
+    _seed_rel_file(gateway, "did:key:zAlice")  # F5: local delivery is relationship-gated
 
     chunk_b64 = base64.b64encode(b"x" * CHUNK_SIZE).decode()
     await gateway._handle_file_chunk(sender, {
@@ -141,7 +143,8 @@ async def test_file_offer_relays_when_recipient_remote(gateway):
     with patch("asyncio.create_task", side_effect=lambda c: tasks.append(c) or MagicMock()):
         await gateway._handle_file_offer(sender, {
             "to_webid": "did:key:zBob", "file_id": "f5",
-            "filename": "doc.pdf", "size_bytes": 300000, "total_chunks": 5,
+            "filename": "doc.pdf", "mime_type": "application/pdf",
+            "size_bytes": 300000, "total_chunks": 5,
         })
     assert len(tasks) == 1  # relayed to Bob's gateway
 

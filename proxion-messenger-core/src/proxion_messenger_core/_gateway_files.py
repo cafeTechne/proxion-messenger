@@ -20,6 +20,8 @@ _relay_ephemeral(), clients.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import logging
 
@@ -38,6 +40,55 @@ _REJECT_FIELDS = ("file_id", "reason")
 
 class FileTransferMixin:
 
+    def _file_delivery_allowed(self, recipient_webid: str, sender_webid: str) -> bool:
+        """Whether a LOCAL file-transfer signal may be delivered to recipient_webid.
+
+        The chunked file path forwarded straight to the target's sockets with no
+        relationship or block check, so on a multi-account gateway a blocked or
+        unrelated user could push file_offer/file_chunk at any victim — the gate
+        the DM path (_handle_local_dm) and the cross-gateway file relay
+        (_handle_file_relay) already enforce. Same auth gating as those paths:
+        only meaningful when registration proved identity. Under loopback
+        single-user dev the browser registers under a session DID (not the
+        account DID), so the check is both unenforceable and wrong, hence skipped.
+        """
+        if not self._auth_enforced():
+            return True
+        if not self._store:
+            return True
+        if not (sender_webid and self._store.get_relationship_by_did(sender_webid)):
+            return False
+        if sender_webid in getattr(self, "_revoked_dids", set()):
+            return False
+        if self._is_blocked_for(recipient_webid, sender_webid):
+            return False
+        return True
+
+    def _offer_mime_allowed(self, mime_type: str) -> bool:
+        """Whether a chunked-transfer offer's declared MIME is in the allowlist the
+        inline 512 KB path (_handle_send_file) enforces. The chunked path streams,
+        so the content can't be magic-sniffed at offer time — the declared type is
+        all we have up front; the first chunk's magic bytes are checked separately."""
+        mime = str(mime_type or "").lower().split(";")[0].strip()
+        return mime in self._ALLOWED_FILE_MIMES
+
+    def _first_chunk_magic_blocked(self, data: dict) -> bool:
+        """True if this is the stream's first chunk (seq 0) and its leading bytes
+        match an executable/script signature the inline path always rejects
+        (_BLOCKED_MAGIC: MZ, ELF, Mach-O, shebang). The magic lives in the first
+        chunk, so the chunked forwarder sniffs seq 0 and refuses the transfer. An
+        undecodable first chunk is refused too — a valid chunk is always base64."""
+        if data.get("seq") != 0:
+            return False
+        chunk = data.get("data", "")
+        if not isinstance(chunk, str) or not chunk:
+            return False
+        try:
+            head = base64.b64decode(chunk[:64], validate=True)
+        except binascii.Error:
+            return True
+        return any(head[:len(m)] == m for m in self._BLOCKED_MAGIC)
+
     async def _forward_file_signal(self, websocket, data: dict, content_type: str, fields: tuple) -> None:
         """Forward a file-transfer control/data message to the target webid.
 
@@ -52,6 +103,12 @@ class FileTransferMixin:
 
         sockets = self._sockets_for(to_webid)
         if sockets:
+            # F5: gate local delivery on the same relationship + block check the
+            # DM path and the cross-gateway file relay enforce (auth-gated, so
+            # loopback single-user dev is unaffected). Reject silently — the DM
+            # path does the same, no block-reveal to the sender.
+            if not self._file_delivery_allowed(to_webid, sender_webid):
+                return
             event = {"type": content_type, "from_webid": sender_webid}
             for f in fields:
                 if f in data:
@@ -90,6 +147,18 @@ class FileTransferMixin:
                 "file_id": data.get("file_id", ""),
             }))
             return
+        # F6: the chunked path is otherwise a pure forwarder — enforce the same
+        # MIME allowlist the inline 512 KB path applies, at offer time (the
+        # stream's magic bytes are sniffed on the first chunk, in
+        # _handle_file_chunk, since the content isn't present yet here).
+        if not self._offer_mime_allowed(data.get("mime_type", "")):
+            _declared = str(data.get("mime_type", "")).lower().split(";")[0].strip()
+            await websocket.send(json.dumps({
+                "type": "error",
+                "message": f"file_type_not_allowed: {_declared}",
+                "file_id": data.get("file_id", ""),
+            }))
+            return
         await self._forward_file_signal(websocket, data, "file_offer", _OFFER_FIELDS)
 
     async def _handle_file_accept(self, websocket, data: dict) -> None:
@@ -102,6 +171,17 @@ class FileTransferMixin:
         chunk = data.get("data", "")
         if not isinstance(chunk, str) or len(chunk) > MAX_CHUNK_B64_LEN:
             await websocket.send(json.dumps({"type": "error", "message": "chunk_too_large"}))
+            return
+        # F6: reject executable/script payloads on the first chunk's magic bytes,
+        # mirroring the inline path's _BLOCKED_MAGIC check. Dropping seq 0 leaves
+        # the receiver's transfer incomplete (its idle timeout reclaims it), so
+        # the payload never reassembles.
+        if self._first_chunk_magic_blocked(data):
+            await websocket.send(json.dumps({
+                "type": "error",
+                "message": "file_type_not_allowed: executable/script",
+                "file_id": data.get("file_id", ""),
+            }))
             return
         await self._forward_file_signal(websocket, data, "file_chunk", _CHUNK_FIELDS)
 

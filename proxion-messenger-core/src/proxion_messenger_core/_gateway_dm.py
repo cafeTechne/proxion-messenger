@@ -350,6 +350,12 @@ class DmHandlerMixin:
             if peer_webid:
                 peer_sockets = self._sockets_for(peer_webid)
                 if peer_sockets:
+                    # F5: same relationship + block gate as _handle_local_dm and
+                    # the chunked file path — a blocked or unrelated user must not
+                    # receive a local file. Auth-gated (loopback dev is unaffected);
+                    # the sender still got their own echo above, no block-reveal.
+                    if not self._file_delivery_allowed(peer_webid, sender_webid):
+                        return
                     file_payload = json.dumps(event)
                     for ws in peer_sockets:
                         try:
