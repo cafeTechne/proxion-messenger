@@ -1447,7 +1447,7 @@ import { createIdentityResolver } from './identity.js';
                     break;
                 }
                 case "relay_pending": {
-                    const el = document.querySelector(`.message[data-message-id="${event.message_id}"]`);
+                    const el = document.querySelector(`.message[data-message-id="${CSS.escape(event.message_id)}"]`);
                     if (el && !el.querySelector(".relay-pending-badge")) {
                         const badge = document.createElement("span");
                         badge.className = "relay-pending-badge";
@@ -1459,7 +1459,7 @@ import { createIdentityResolver } from './identity.js';
                 }
                 case "relay_delivered": {
                     // R9.4.2: Update pending badge to delivered ✓
-                    const msgEl = document.querySelector(`[data-message-id="${event.message_id}"]`);
+                    const msgEl = document.querySelector(`[data-message-id="${CSS.escape(event.message_id)}"]`);
                     if (msgEl) {
                         const badge = msgEl.querySelector('.relay-pending-badge');
                         if (badge) { badge.textContent = '✓'; badge.classList.replace('relay-pending', 'relay-delivered'); }
@@ -1471,7 +1471,7 @@ import { createIdentityResolver } from './identity.js';
                     // state and, when we know how long the destination gateway has
                     // been unreachable, say so ("offline since ...") instead of a
                     // generic failure.
-                    const msgEl = document.querySelector(`[data-message-id="${event.message_id}"]`);
+                    const msgEl = document.querySelector(`[data-message-id="${CSS.escape(event.message_id)}"]`);
                     if (msgEl) {
                         const badge = msgEl.querySelector('.relay-pending-badge')
                             || (() => {
@@ -1662,7 +1662,7 @@ import { createIdentityResolver } from './identity.js';
                 case "read_receipt":
                     // R10.2.2: upgrade delivery badge to ✓✓
                     (function() {
-                        const msgEl = document.querySelector(`[data-message-id="${event.message_id}"]`);
+                        const msgEl = document.querySelector(`[data-message-id="${CSS.escape(event.message_id)}"]`);
                         if (msgEl) {
                             const badge = msgEl.querySelector('.relay-pending-badge, .relay-delivered');
                             if (badge) { badge.textContent = '✓✓'; badge.className = 'relay-read'; }

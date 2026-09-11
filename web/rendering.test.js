@@ -200,6 +200,52 @@ describe('data-name attribute hardening', () => {
   });
 });
 
+describe('message id XSS hardening', () => {
+  it('escapes a malicious message_id everywhere it lands in an innerHTML attribute', () => {
+    els['message-feed'] = mkEl({ scrollHeight: 500, clientHeight: 500 }); // at-bottom
+    const created = [];
+    const orig = global.document.createElement;
+    global.document.createElement = () => { const el = mkEl(); created.push(el); return el; };
+    try {
+      const r = make();
+      // Own message so the edit/delete/receipt attribute paths also render.
+      r.renderMessage({
+        message_id: '"><img src=x onerror=alert(1)>', thread_id: 'room-1',
+        from_webid: 'did:key:zSelf', local: true,
+        content: 'hi', timestamp: new Date().toISOString(),
+      });
+      const html = created.map(e => e.innerHTML).join('');
+      // No attacker markup is injected by the id, and the reactions container +
+      // action-button data-msg-id attributes carry only the escaped form.
+      expect(html).not.toContain('"><img src=x onerror=alert(1)>');
+      expect(html).toContain('data-msg-id="&quot;&gt;&lt;img');
+      expect(html).toContain('id="reactions-&quot;&gt;&lt;img');
+    } finally {
+      global.document.createElement = orig;
+    }
+  });
+  it('escapes a malicious reply_to_id in the reply-context attribute', () => {
+    const feed = mkEl();
+    const created = [];
+    const orig = global.document.createElement;
+    global.document.createElement = () => { const el = mkEl(); created.push(el); return el; };
+    try {
+      const r = make();
+      const mal = '"><img src=x onerror=alert(1)>';
+      host.messageMap[mal] = { from_display_name: 'Parent', content: 'parent body' };
+      r._renderMessageEl({
+        message_id: 'child', reply_to_id: mal, from_webid: 'did:key:zBob',
+        content: 'reply', timestamp: new Date().toISOString(),
+      }, feed, null);
+      const html = created.map(e => e.innerHTML).join('');
+      expect(html).not.toContain('"><img src=x onerror=alert(1)>');
+      expect(html).toContain('data-reply-id="&quot;&gt;&lt;img');
+    } finally {
+      global.document.createElement = orig;
+    }
+  });
+});
+
 describe('attachmentKind (R59A pure)', () => {
   it('classifies image, video, audio, and unknown mimes', async () => {
     const { attachmentKind } = await import('./rendering.js');

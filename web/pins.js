@@ -43,12 +43,15 @@ export function createPins({ getSocket, getActiveView }) {
             div.style.cssText = "border-bottom:1px solid #334155;padding:8px 0;color:#f1f5f9;";
             const pinner = escHtml((pin.pinned_by || "").slice(0, 20)) || "unknown";
             const preview = escHtml((pin.content || "").slice(0, 80));
+            // message_id is client-supplied and stored verbatim, so escape it before
+            // it lands in these innerHTML attributes (stored XSS otherwise).
+            const msgIdEsc = escHtml(pin.message_id);
             div.innerHTML = `<div style="font-size:0.85em;color:#94a3b8">${pinner}</div>
                 <div style="margin:2px 0;">${preview}</div>
                 <div style="display:flex;gap:8px;margin-top:4px;">
-                    <button data-pin-action="jump" data-msg-id="${pin.message_id}"
+                    <button data-pin-action="jump" data-msg-id="${msgIdEsc}"
                         style="background:transparent;border:none;color:#7dd3fc;cursor:pointer;padding:0;font-size:0.8em;">[Jump]</button>
-                    <button data-pin-action="unpin" data-msg-id="${pin.message_id}" data-thread-id="${threadId}"
+                    <button data-pin-action="unpin" data-msg-id="${msgIdEsc}" data-thread-id="${threadId}"
                         style="background:transparent;border:none;color:#94a3b8;cursor:pointer;padding:0;font-size:0.8em;">Unpin</button>
                 </div>`;
             list.appendChild(div);

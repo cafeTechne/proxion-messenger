@@ -95,4 +95,17 @@ describe('renderPins', () => {
     expect(html).not.toContain('<img src=x onerror=alert(1)>');
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
   });
+  it('escapes a malicious message_id so it cannot break out of the button attributes', () => {
+    const { pins } = make();
+    const appended = [];
+    document.getElementById('pin-list').appendChild = (el) => appended.push(el);
+    pins.renderPins([
+      { message_id: '"><img src=x onerror=alert(1)>', pinned_by: 'Bob', content: 'ok' },
+    ]);
+    const html = appended[0].innerHTML;
+    // message_id is client-supplied and stored verbatim; the attribute-breakout
+    // sequence must not survive into the data-msg-id attributes.
+    expect(html).not.toContain('"><img src=x onerror=alert(1)>');
+    expect(html).toContain('data-msg-id="&quot;&gt;&lt;img');
+  });
 });

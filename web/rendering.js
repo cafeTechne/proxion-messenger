@@ -223,6 +223,11 @@ export function createRendering({
         if (existing) return; // already in DOM
 
         const msgId = msg.message_id;
+        // message_id is client-supplied and relayed verbatim by the gateway, so
+        // it is attacker-controlled. The div.id / setAttribute / dataset writes
+        // below are safe, but every interpolation of it into an innerHTML string
+        // must be escaped or a crafted id breaks out of the attribute (stored XSS).
+        const msgIdEsc = escHtml(msgId);
         messageMap[msgId] = msg;
         const depth = msg._threadDepth || 0;
 
@@ -353,23 +358,23 @@ export function createRendering({
             (selfPubHex && msg.from_pub_hex === selfPubHex);
 
         const editBtn = isOwn
-            ? `<button data-msg-action="edit" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="Edit"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"/></svg></button>`
+            ? `<button data-msg-action="edit" data-msg-id="${msgIdEsc}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="Edit"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"/></svg></button>`
             : "";
         const deleteBtn = isOwn && (msg.local || activeView?.local)
-            ? `<button data-msg-action="delete" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg></button>`
+            ? `<button data-msg-action="delete" data-msg-id="${msgIdEsc}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg></button>`
             : "";
-        const forwardBtn = `<button data-msg-action="forward" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="${t('msg.forward')}">&#8599;</button>`;
+        const forwardBtn = `<button data-msg-action="forward" data-msg-id="${msgIdEsc}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="${t('msg.forward')}">&#8599;</button>`;
         // R59E: bookmark any message into the private Saved list
-        const bookmarkBtn = `<button data-msg-action="bookmark" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="${t('msg.bookmark')}">&#128278;</button>`;
+        const bookmarkBtn = `<button data-msg-action="bookmark" data-msg-id="${msgIdEsc}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="${t('msg.bookmark')}">&#128278;</button>`;
         // R58: star an image attachment into the local GIF tray
         const _mimeForGif = (msg.file?.mime_type || '').toLowerCase();
         const _isImageMsg = !!(msg.file?.data_b64 && ['image/jpeg','image/png','image/gif','image/webp','image/avif'].includes(_mimeForGif));
         const saveGifBtn = _isImageMsg
-            ? `<button data-msg-action="save-gif" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.85rem;" title="${t('gif.saveAction')}">&#9734;</button>`
+            ? `<button data-msg-action="save-gif" data-msg-id="${msgIdEsc}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.85rem;" title="${t('gif.saveAction')}">&#9734;</button>`
             : "";
         // R60B: caption an image into a meme
         const memeBtn = _isImageMsg
-            ? `<button data-msg-action="meme" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.72rem;font-weight:700;" title="${t('msg.makeMeme')}">M</button>`
+            ? `<button data-msg-action="meme" data-msg-id="${msgIdEsc}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.72rem;font-weight:700;" title="${t('msg.makeMeme')}">M</button>`
             : "";
 
         // --- Avatar column ---
@@ -389,7 +394,7 @@ export function createRendering({
             if (parent) {
                 const parentName = parent.from_display_name || (parent.from_webid || "").slice(0, 8);
                 const parentSnippet = (parent.content || "").slice(0, 50) + (parent.content && parent.content.length > 50 ? "…" : "");
-                body.innerHTML += `<div class="reply-context" data-msg-action="scroll-reply" data-reply-id="${msg.reply_to_id}" style="cursor:pointer;"><span class="reply-connector"></span><b style="color:${webidColor(parent.from_webid)};margin-right:2px;">${escHtml(parentName)}</b><span>${parentSnippet.replace(/</g,"&lt;")}</span></div>`;
+                body.innerHTML += `<div class="reply-context" data-msg-action="scroll-reply" data-reply-id="${escHtml(msg.reply_to_id)}" style="cursor:pointer;"><span class="reply-connector"></span><b style="color:${webidColor(parent.from_webid)};margin-right:2px;">${escHtml(parentName)}</b><span>${parentSnippet.replace(/</g,"&lt;")}</span></div>`;
             } else {
                 // Parent not in window — fetch it, render quote when it arrives
                 const placeholder = document.createElement("div");
@@ -438,12 +443,12 @@ export function createRendering({
 
         // Content
         const editedHtml = msg.edited_at
-            ? `<span class="edited-badge" role="button" tabindex="0" data-msg-id="${msgId}" title="${t('msg.editHistory')}">${t('msg.edited')}</span>`
+            ? `<span class="edited-badge" role="button" tabindex="0" data-msg-id="${msgIdEsc}" title="${t('msg.editHistory')}">${t('msg.edited')}</span>`
             : "";
         // Delivery tick rides inline at the end of the content's last line —
         // as a block-level sibling it used to cost every own message a whole
         // extra line just for a "✓".
-        const receiptHtml = isOwn ? `<span class="read-receipt" data-msg-id="${msgId}">&#10003;</span>` : "";
+        const receiptHtml = isOwn ? `<span class="read-receipt" data-msg-id="${msgIdEsc}">&#10003;</span>` : "";
         const _poll = parsePoll(rawText);
         if (msg.content_type === "audio" && msg.audio_b64) {
             const _durSecs = msg.duration_ms ? Math.round(msg.duration_ms / 1000) : 0;
@@ -464,14 +469,14 @@ export function createRendering({
         }
 
         if (fileHtml) body.innerHTML += fileHtml;
-        body.innerHTML += `<div id="reactions-${msgId}" class="reactions"></div>`;
+        body.innerHTML += `<div id="reactions-${msgIdEsc}" class="reactions"></div>`;
 
         // Hover action bar
         body.innerHTML += `<div class="msg-actions">
-            <button data-msg-action="react" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.8rem;" title="${t('msg.react')}">+</button>
-            <button data-msg-action="reply" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.85rem;" title="${t('msg.reply')}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3"/></svg></button>
+            <button data-msg-action="react" data-msg-id="${msgIdEsc}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.8rem;" title="${t('msg.react')}">+</button>
+            <button data-msg-action="reply" data-msg-id="${msgIdEsc}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.85rem;" title="${t('msg.reply')}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3"/></svg></button>
             ${editBtn}${deleteBtn}${forwardBtn}${saveGifBtn}${memeBtn}${bookmarkBtn}
-            <button data-msg-action="pin" data-msg-id="${msgId}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="${t('msg.pin')}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z"/></svg></button>
+            <button data-msg-action="pin" data-msg-id="${msgIdEsc}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="${t('msg.pin')}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z"/></svg></button>
         </div>`;
 
         div.appendChild(avatarCol);
