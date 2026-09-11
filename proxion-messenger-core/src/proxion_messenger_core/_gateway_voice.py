@@ -389,8 +389,11 @@ class VoiceHandlerMixin:
             # Caller is on a different gateway — try direct relay before pod
             _target = sess.get("caller_webid", "")
             if _target:
+                # Carry the fingerprint binding proof so the account-bound signature
+                # survives this hop too (mirrors the target_webid relay above) (CF1).
                 asyncio.create_task(self._relay_voice_signal(
-                    _target, "answer", {"session_id": session_id, "sdp_answer": sdp_answer}
+                    _target, "answer", {"session_id": session_id, "sdp_answer": sdp_answer,
+                     "fp_sig": fp_sig, "fp_signer": fp_signer, "fp_cert": fp_cert}
                 ))
             else:
                 try:

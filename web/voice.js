@@ -285,8 +285,12 @@ export function createVoice(deps) {
                 const fp_sig = await signFingerprint({
                     fingerprint, sessionId: state.currentCallSessionId || '', role, privKey: priv,
                     // Bind the offer/answer to the peer it is meant for so it cannot be
-                    // transplanted into a call to someone else (R110 FIND-10).
-                    recipientDid: state._callPeerWebid || '',
+                    // transplanted into a call to someone else (R110 FIND-10). Bind to the
+                    // peer's ACCOUNT WebID, not the routable _callPeerWebid: cross-gateway
+                    // the latter is the caller's GATEWAY did, which the far side never
+                    // verifies against, so the recipient-bound form has to use the identity
+                    // the far side knows itself by, i.e. its own WebID (CF1).
+                    recipientDid: state._callPeerIdentity || state._callPeerWebid || '',
                 });
                 // On a linked device the signer is this device's key, not the account
                 // the peer knows us by; ship the device->account cert so they can bind it.
@@ -656,7 +660,12 @@ export function createVoice(deps) {
                 await peerPc.setRemoteDescription({ type: "offer", sdp: sdpOffer });
                 const answer = await peerPc.createAnswer();
                 await peerPc.setLocalDescription(answer);
-                const fp = await _signPeerFingerprint(peerPc, sessionId || '', 'answer', targetWebid);
+                // Bind the answer to the offerer's ACCOUNT WebID, not the routable
+                // targetWebid: cross-gateway a channel offer arrives keyed by the relaying
+                // gateway did, but the offerer verifies our answer against its own WebID, so
+                // the recipient binding must be its account identity (offerMeta.caller_webid)
+                // to match on the far side (CF1).
+                const fp = await _signPeerFingerprint(peerPc, sessionId || '', 'answer', (offerMeta && offerMeta.caller_webid) || targetWebid);
                 getSocket()?.send(JSON.stringify({
                     cmd: "voice_answer",
                     target_webid: targetWebid,
@@ -877,6 +886,17 @@ export function createVoice(deps) {
             state._callPeerWebid = isCaller
                 ? (getActiveView() ? getActiveView().peerWebid : null)
                 : ((state.currentCall && (state.currentCall.caller_gateway || state.currentCall.caller_webid))
+                    || (getActiveView() ? getActiveView().peerWebid : null));
+            // The peer's ACCOUNT WebID, used ONLY to bind the DTLS-fingerprint signature
+            // to its recipient (identity, not routing). Unlike _callPeerWebid above, this
+            // never carries the caller_gateway did: cross-gateway the callee must bind its
+            // answer to the caller's ACCOUNT WebID (caller_webid), because the caller
+            // verifies the answer against its OWN WebID. Caller side: the DM peer's WebID,
+            // which is what the callee verifies against as its self WebID. Same-gateway
+            // both collapse to the account did, so 1:1 and pod paths are unchanged (CF1).
+            state._callPeerIdentity = isCaller
+                ? (getActiveView() ? getActiveView().peerWebid : null)
+                : ((state.currentCall && state.currentCall.caller_webid)
                     || (getActiveView() ? getActiveView().peerWebid : null));
 
             const stream = await getMedia();

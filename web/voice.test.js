@@ -1,5 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
+import { webcrypto } from 'node:crypto';
 import { createVoice, CallState, audioLevel } from './voice.js';
+import { extractFingerprint, verifyFingerprint, ed25519PubToDid } from './callsec.js';
 
 describe('audioLevel (speaking detection)', () => {
   it('is ~0 for silence (all samples at the 128 midpoint)', () => {
@@ -478,5 +480,29 @@ describe('_callerDisplayName resolves via injected lookups', () => {
   it('falls back to a room member name', () => {
     const { voice } = makeVoice({ members: [{ webid: 'did:key:zCarol', display_name: 'Carol' }] });
     expect(voice._callerDisplayName('did:key:zCarol')).toBe('Carol');
+  });
+});
+
+// CF1: the DTLS-fingerprint signature binds to the peer's ACCOUNT identity, not the
+// routable _callPeerWebid. Cross-gateway the latter is the caller's GATEWAY did (which
+// the far side never verifies against), so the recipient binding must use the account
+// WebID the far side knows itself by, or it would fall back to the unbound legacy form.
+describe('cross-gateway fingerprint binding uses the account identity (CF1)', () => {
+  it('callee binds to the caller ACCOUNT WebID while routing uses the gateway did', async () => {
+    const { voice } = makeVoice({ activeView: { peerWebid: 'did:key:zAlice' } });
+    voice.state.currentCall = { caller_gateway: 'did:key:zGATEWAY', caller_webid: 'did:key:zAlice' };
+    voice.state.localStream = { getTracks: () => [{ stop() {} }] };   // skip getUserMedia
+    try { await voice.initWebRTC('cert1', 'sess1', false); } catch { /* later RTC steps irrelevant */ }
+    expect(voice.state._callPeerWebid).toBe('did:key:zGATEWAY');   // routing
+    expect(voice.state._callPeerIdentity).toBe('did:key:zAlice');  // identity the fp binds to
+  });
+
+  it('same-gateway callee collapses routing and identity to the account did', async () => {
+    const { voice } = makeVoice({ activeView: { peerWebid: 'did:key:zAlice' } });
+    voice.state.currentCall = { caller_webid: 'did:key:zAlice' };   // no separate gateway hop
+    voice.state.localStream = { getTracks: () => [{ stop() {} }] };
+    try { await voice.initWebRTC('cert1', 'sess1', false); } catch { /* ignore */ }
+    expect(voice.state._callPeerWebid).toBe('did:key:zAlice');
+    expect(voice.state._callPeerIdentity).toBe('did:key:zAlice');
   });
 });
