@@ -20,6 +20,12 @@ from ._gateway_mailbox import relay_node_enabled, relay_fallback_url
 
 logger = logging.getLogger(__name__)
 
+# Clock for the per-IP HTTP rate limiter, indirected so a test can freeze the
+# fixed 60s window (a burst that outruns wall-clock under parallel load would
+# otherwise roll the window and never trip the limit). Kept off asyncio's own
+# monotonic clock so freezing it in a test cannot stall the event loop.
+_http_rate_now = time.monotonic
+
 
 async def _read_http_body(reader, n: int, timeout: float = 10.0) -> bytes:
     """Read exactly *n* bytes of request body (or until EOF/timeout).
@@ -1165,7 +1171,7 @@ class HttpEndpointsMixin:
                     if not ip:
                         return False
                     limit = _HTTP_RATE_LIMITS.get(group, 60)
-                    now_t = time.monotonic()
+                    now_t = _http_rate_now()
                     if len(_http_ip_rate) >= _HTTP_RATE_PRUNE_AT:
                         for _sk in [k for k, e in _http_ip_rate.items()
                                     if now_t - e[1] > 60]:

@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import time
 
 import pytest
 
@@ -39,6 +40,21 @@ def _start_gateway(tmp_path, host="127.0.0.1"):
     return gw, handle.http_port, handle.ws_port, handle.ready
 
 
+def _post_retry(url, *, body=None, headers=None, retries=4):
+    """POST with a short retry on transient transport errors. A freshly started
+    gateway under parallel-suite load can reset the first connection before it is
+    fully accepting (WinError 10054), which is a readiness race, not the behavior
+    under test. Returns the httpx.Response, or re-raises the last error."""
+    last = None
+    for attempt in range(retries):
+        try:
+            return httpx.post(url, json=body, headers=headers, timeout=_HTTP_TIMEOUT)
+        except (httpx.TransportError, OSError) as exc:
+            last = exc
+            time.sleep(0.25 * (attempt + 1))
+    raise last
+
+
 # ── 9.4.3: _is_trusted_origin unit tests ─────────────────────────────────────
 
 @pytest.mark.parametrize("origin,port,expected", [
@@ -69,11 +85,10 @@ async def test_setup_pod_untrusted_origin_returns_403(tmp_path):
     assert ready.wait(timeout=5), "gateway failed to start"
     await asyncio.sleep(0.2)
 
-    resp = httpx.post(
+    resp = _post_retry(
         f"http://127.0.0.1:{http_port}/setup/pod",
-        json={"css_url": "https://solidcommunity.net", "email": "x", "password": "y"},
+        body={"css_url": "https://solidcommunity.net", "email": "x", "password": "y"},
         headers={"Origin": "https://evil.example.com"},
-        timeout=_HTTP_TIMEOUT,
     )
     assert resp.status_code == 403
     assert "forbidden" in resp.json().get("error", "").lower()

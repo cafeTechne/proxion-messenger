@@ -217,7 +217,13 @@ def test_profile_rate_limited(tmp_path):
     assert saw_429
 
 
-def test_webhook_rate_limited(tmp_path):
+def test_webhook_rate_limited(tmp_path, monkeypatch):
+    # Freeze the rate-limiter clock so the fixed 60s window cannot roll mid-burst.
+    # Under parallel-suite load 65 fresh-connection POSTs can span >60s, rolling
+    # the window (count resets) so the limit never trips — a load flake, not a bug.
+    monkeypatch.setattr(
+        "proxion_messenger_core._gateway_http._http_rate_now", lambda: 1000.0
+    )
     ws_port, http_port = free_port(), free_port()
     gw = _make_gateway(tmp_path, ws_port, http_port)
     start_gateway(gw, ws_port, http_port)
