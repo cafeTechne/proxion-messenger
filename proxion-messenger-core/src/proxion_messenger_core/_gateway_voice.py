@@ -72,6 +72,54 @@ class VoiceHandlerMixin:
                 return gw
         return None
 
+    def _host_gateway_dids(self, gateway_url: str, channel_id: str = "") -> set:
+        """DIDs known — from OUR trusted routing state, never an inbound payload — to
+        reside at *gateway_url*.
+
+        Used on the joiner side to pin a cross-gateway voice channel's accepted
+        signer to the KNOWN host. voice_channel_peer_present/peer_joined carry no
+        from_webid, so without a pin _voice_channel_gateway_ok TOFU-accepts the FIRST
+        signer to POST — letting an attacker who wins the race become the trusted
+        channel gateway and inject ghost peers (F10). The signer is a gateway's own
+        identity did (== the peer's account did in the one-gateway-per-user model),
+        which _peer_gateway_urls and federated room membership already map to the
+        host URL from prior authenticated federation."""
+        dids: set = set()
+        if not gateway_url:
+            return dids
+        for _did, _gw in getattr(self, "_peer_gateway_urls", {}).items():
+            if _gw == gateway_url and _did:
+                dids.add(_did)
+        if channel_id and self._store:
+            try:
+                for _m in (self._store.get_federated_room_members(channel_id) or []):
+                    if _m.get("gateway_url") == gateway_url and _m.get("member_did"):
+                        dids.add(_m["member_did"])
+            except Exception:
+                pass
+        return dids
+
+    def _joiner_channel_signer_ok(self, channel_id: str, data: dict) -> bool:
+        """On the joiner side of a cross-gateway voice channel, confirm a
+        peer_present/peer_joined relay was signed by the pinned host gateway.
+
+        The channel records the host_gateway_url the joiner relayed its join to; the
+        relay signer (relay_sig_did) must be one of the pinned host dids OR resolve —
+        via OUR trusted routing state — to that same host URL. This blocks a non-host
+        signer that won the TOFU race from injecting ghost peers. Returns True when
+        there is no joiner pin to enforce (local-room / host side), leaving those
+        paths to their own membership gates."""
+        ch = getattr(self, "_voice_channels", {}).get(channel_id)
+        host = ch.get("host_gateway_url") if ch else None
+        if not host or channel_id in self._local_rooms:
+            return True
+        signer = data.get("relay_sig_did", "")
+        if not signer:
+            return False
+        if signer in ch.get("gateway_dids", set()):
+            return True
+        return self._resolve_peer_gateway(signer) == host
+
     async def _relay_voice_signal(
         self,
         target_webid: str,
@@ -579,6 +627,15 @@ class VoiceHandlerMixin:
                 channel = self._voice_channels.setdefault(channel_id, {"members": {}})
                 channel["members"][joiner_webid] = {"ws": websocket, "gateway_url": None}
                 channel["host_gateway_url"] = _host_gw
+                # Pin the channel's accepted signer(s) to the KNOWN host gateway so an
+                # attacker cannot win the peer_present/peer_joined TOFU race and inject
+                # ghost peers (F10). Resolve the host gateway did(s) from OUR trusted
+                # routing state (never from an inbound, forgeable payload); a non-empty
+                # gateway_dids set stops _voice_channel_gateway_ok's blind first-signer
+                # TOFU and admits only the pinned host. _host_gw was itself derived from
+                # that routing state above, so at least its did is recovered here.
+                channel.setdefault("gateway_dids", set()).update(
+                    self._host_gateway_dids(_host_gw, channel_id))
                 asyncio.create_task(self._relay_ephemeral(_host_gw, {
                     "content_type": "voice_channel_join",
                     "channel_id": channel_id,
@@ -733,6 +790,13 @@ class VoiceHandlerMixin:
         channel_id   = data.get("channel_id", "")
         peer_webid   = data.get("peer_webid", "")
         peer_gw      = data.get("peer_gateway_url", "")
+        # Joiner-side host pin (F10): a channel this gateway created as a JOINER
+        # records the known host_gateway_url. peer_present/peer_joined carry no
+        # from_webid, so _voice_channel_gateway_ok would otherwise TOFU-accept the
+        # first signer to POST. Require the signer to be the pinned host, blocking a
+        # racing non-host gateway from injecting ghost peers.
+        if not self._joiner_channel_signer_ok(channel_id, data):
+            return "200 OK", '{"status":"received"}'
         # Membership gate (D1): for a channel scoped to a LOCAL room, the injected
         # peer must be a known room member. Otherwise a channel-bound signer could
         # inject a ghost peer the victim then opens WebRTC to. The joiner side (a
@@ -773,6 +837,13 @@ class VoiceHandlerMixin:
         channel_id = data.get("channel_id", "")
         peer_webid = data.get("peer_webid", "")
         peer_gw    = data.get("peer_gateway_url", "")
+        # Joiner-side host pin (F10): a channel this gateway created as a JOINER
+        # records the known host_gateway_url. peer_present/peer_joined carry no
+        # from_webid, so _voice_channel_gateway_ok would otherwise TOFU-accept the
+        # first signer to POST. Require the signer to be the pinned host, blocking a
+        # racing non-host gateway from injecting ghost peers.
+        if not self._joiner_channel_signer_ok(channel_id, data):
+            return "200 OK", '{"status":"received"}'
         # Membership gate (D1): for a channel scoped to a LOCAL room, the injected
         # peer must be a known room member. Otherwise a channel-bound signer could
         # inject a ghost peer the victim then opens WebRTC to. The joiner side (a
