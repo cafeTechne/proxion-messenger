@@ -63,6 +63,23 @@ class HttpEndpointsMixin:
         for ip in [ip for ip, b in buckets.items()
                    if not b or (now - b[-1]) >= self._RELAY_RL_WINDOW]:
             buckets.pop(ip, None)
+
+    # /i/<token> keys the invite-enumeration limiter by source IP in the shared
+    # self._rate_counters map, one [count, monotonic] slot per IP that never got
+    # reclaimed — the same unbounded-growth-from-remote-input class as the relay
+    # limiter above. Prune idle invite_enum slots once the map gets large; other
+    # key shapes in _rate_counters (per-socket, per-room deques) are left alone.
+    _INVITE_ENUM_PRUNE_AT = 1024
+
+    def _prune_invite_enum_counters(self, now: float) -> None:
+        rc = getattr(self, "_rate_counters", None)
+        if not rc or len(rc) < self._INVITE_ENUM_PRUNE_AT:
+            return
+        stale = [k for k, e in rc.items()
+                 if isinstance(k, tuple) and len(k) == 2 and k[0] == "invite_enum"
+                 and isinstance(e, list) and len(e) >= 2 and (now - e[1]) >= 60.0]
+        for k in stale:
+            rc.pop(k, None)
     def _render_invite_landing(self, from_addr: str) -> bytes:
         """A4.1: the /i/<token> landing page — branch app-installed vs download,
         carrying the inviter (`from_addr`) through every path. Self-contained
@@ -596,7 +613,11 @@ class HttpEndpointsMixin:
             "room_message", "room_reaction", "room_edit", "room_delete", "room_moderation",
             "room_emoji",
             "file_offer", "file_accept", "file_reject", "file_chunk", "file_complete",
-            "voice_channel_join", "voice_channel_leave")
+            "voice_channel_join", "voice_channel_leave",
+            # presence/typing carry a CONTACT's from_webid (≠ the signing gateway),
+            # so bind from_webid→signer like the other member ephemerals; the seed is
+            # authorized by an existing relationship (see _relay_seed_authorized).
+            "presence", "typing")
         _CHANNEL_SIGNED_TYPES = (
             "voice_channel_peer_joined", "voice_channel_peer_present")
         _ct = data.get("content_type")
@@ -1035,7 +1056,15 @@ class HttpEndpointsMixin:
             "relay":   60,   # /relay: 60/min
             "invite":  20,   # /invite, /invite/accept: 20/min
             "backup":   5,   # /backup, /restore, /import: 5/min
+            "turn":    30,   # /turn-credentials: 30/min
+            "profile": 60,   # /profile/<did>: 60/min
+            "fingerprint": 60,  # /fingerprint/<did>: 60/min
+            "webhook": 60,   # /webhook/<token>: 60/min
         }
+        # (ip, group) buckets accumulate one slot per distinct source IP and were
+        # never reclaimed — unbounded memory driven by remote input. Prune idle
+        # buckets once the map gets large (mirrors _prune_relay_rate_limiter).
+        _HTTP_RATE_PRUNE_AT = 2048
 
         async def handle(reader, writer):
             try:
@@ -1092,6 +1121,10 @@ class HttpEndpointsMixin:
                         return False
                     limit = _HTTP_RATE_LIMITS.get(group, 60)
                     now_t = time.monotonic()
+                    if len(_http_ip_rate) >= _HTTP_RATE_PRUNE_AT:
+                        for _sk in [k for k, e in _http_ip_rate.items()
+                                    if now_t - e[1] > 60]:
+                            _http_ip_rate.pop(_sk, None)
                     key = (ip, group)
                     entry = _http_ip_rate.get(key)
                     if entry is None or now_t - entry[1] > 60:
@@ -1248,9 +1281,21 @@ class HttpEndpointsMixin:
 
                 # ── GET /turn-credentials — coturn HMAC credentials ──
                 if method == "GET" and path == "/turn-credentials":
-                    from .didkey import pub_key_to_did as _p2d_turn
-                    _turn_gw_did = _p2d_turn(self.agent.identity_pub_bytes)
-                    _turn_creds = self._make_turn_creds(_turn_gw_did)
+                    if _check_http_rate(peer_ip, "turn"):
+                        await _write_429(writer)
+                        await writer.drain()
+                        return
+                    # When auth is enforced (public/tunnel bind) an anonymous remote
+                    # caller must not be able to mint TURN relay credentials. Require a
+                    # trusted origin OR an authenticated WS actor from this address (the
+                    # browser placing the call has already registered over the socket).
+                    # Loopback single-user dev (auth off) keeps the open behavior.
+                    if self._auth_enforced() and not self._http_actor_ok(origin_header, http_port, peer_ip):
+                        _turn_creds = None
+                    else:
+                        from .didkey import pub_key_to_did as _p2d_turn
+                        _turn_gw_did = _p2d_turn(self.agent.identity_pub_bytes)
+                        _turn_creds = self._make_turn_creds(_turn_gw_did)
                     _turn_body = json.dumps(_turn_creds if _turn_creds else {"urls": []}).encode()
                     writer.write(
                         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
@@ -1263,6 +1308,10 @@ class HttpEndpointsMixin:
 
                 # ── GET /fingerprint/<did> — R11.2.1: safety number endpoint ──
                 if method == "GET" and path.startswith("/fingerprint/"):
+                    if _check_http_rate(peer_ip, "fingerprint"):
+                        await _write_429(writer)
+                        await writer.drain()
+                        return
                     raw_did = path[len("/fingerprint/"):]
                     try:
                         import urllib.parse as _up
@@ -1312,15 +1361,22 @@ class HttpEndpointsMixin:
 
                 # ── GET /health — R11.4.1: liveness check ──
                 if method == "GET" and path == "/health":
-                    health_body = json.dumps({
-                        "status": "ok",
-                        "connected_clients": len(self.clients),
-                        "pod_available": self._pod_available,
-                        "uptime_s": int(time.time() - self._start_time),
-                        "turn_configured": bool(self.config.turn_url and self.config.turn_secret),
-                        "relay_capable": bool(self.config.public_url),
-                        "public_url_set": bool(self.config.public_url),
-                    }).encode()
+                    # Anyone gets a minimal liveness signal; the operational detail
+                    # (client counts, pod/relay/tunnel state) is withheld from an
+                    # untrusted remote caller when auth is enforced, mirroring the
+                    # /setup/pod GET minimal shape. Loopback dev keeps full detail.
+                    if self._auth_enforced() and not self._http_actor_ok(origin_header, http_port, peer_ip):
+                        health_body = json.dumps({"status": "ok"}).encode()
+                    else:
+                        health_body = json.dumps({
+                            "status": "ok",
+                            "connected_clients": len(self.clients),
+                            "pod_available": self._pod_available,
+                            "uptime_s": int(time.time() - self._start_time),
+                            "turn_configured": bool(self.config.turn_url and self.config.turn_secret),
+                            "relay_capable": bool(self.config.public_url),
+                            "public_url_set": bool(self.config.public_url),
+                        }).encode()
                     writer.write(
                         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                         + _SEC_HDR + _NO_STORE_HDR
@@ -1332,17 +1388,24 @@ class HttpEndpointsMixin:
 
                 # ── GET /connectivity — NAT/reachability status for setup guide ──
                 if method == "GET" and path == "/connectivity":
-                    conn_body = json.dumps({
-                        "public_url_set": bool(self.config.public_url),
-                        "upnp_mapped":    self.config.upnp_mapped,
-                        "relay_capable":  bool(self.config.public_url),
-                        "local_ip":       getattr(self, "_local_ip", "127.0.0.1"),
-                        "local_port":     self.config.http_port or 8080,
-                        "turn_configured": bool(self.config.turn_url and self.config.turn_secret),
-                        "pod_available":  self._pod_available,
-                        "relay_fallback_active": bool(relay_fallback_url()),
-                        "relay_node": relay_node_enabled(),
-                    }).encode()
+                    # Reachability/NAT detail (local IP+port, tunnel/relay/pod state)
+                    # is setup-guide info for the local operator, not for an untrusted
+                    # remote caller. Withhold it when auth is enforced and the caller
+                    # is neither a trusted origin nor an authenticated WS actor.
+                    if self._auth_enforced() and not self._http_actor_ok(origin_header, http_port, peer_ip):
+                        conn_body = json.dumps({"relay_capable": bool(self.config.public_url)}).encode()
+                    else:
+                        conn_body = json.dumps({
+                            "public_url_set": bool(self.config.public_url),
+                            "upnp_mapped":    self.config.upnp_mapped,
+                            "relay_capable":  bool(self.config.public_url),
+                            "local_ip":       getattr(self, "_local_ip", "127.0.0.1"),
+                            "local_port":     self.config.http_port or 8080,
+                            "turn_configured": bool(self.config.turn_url and self.config.turn_secret),
+                            "pod_available":  self._pod_available,
+                            "relay_fallback_active": bool(relay_fallback_url()),
+                            "relay_node": relay_node_enabled(),
+                        }).encode()
                     writer.write(
                         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                         + _SEC_HDR + _NO_STORE_HDR
@@ -1428,6 +1491,10 @@ class HttpEndpointsMixin:
 
                 # ── GET /profile/{did} — contact profile lookup ──
                 if method == "GET" and path.startswith("/profile/"):
+                    if _check_http_rate(peer_ip, "profile"):
+                        await _write_429(writer)
+                        await writer.drain()
+                        return
                     _prof_did = path[len("/profile/"):]
                     if not _prof_did:
                         writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
@@ -1442,6 +1509,23 @@ class HttpEndpointsMixin:
                         await writer.drain()
                         return
                     _own_did = _p2d(self.agent.identity_pub_bytes)
+                    # The social-graph fields (display name, x25519 pubkey, gateway
+                    # URL, presence, fingerprint) are contact data, gated for /devices
+                    # behind a signed request + non-revoked relationship. A GET carries
+                    # no caller identity, so when auth is enforced an untrusted remote
+                    # caller (not a trusted origin, no authenticated WS actor) gets only
+                    # the bare shape. Loopback dev and the local/authenticated actor
+                    # keep the full profile.
+                    if self._auth_enforced() and not self._http_actor_ok(origin_header, http_port, peer_ip):
+                        _bare = json.dumps({"did": _prof_did, "status": "offline"}).encode()
+                        writer.write(
+                            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                            + _SEC_HDR + _NO_STORE_HDR
+                            + _gated_acao()
+                            + b"Content-Length: " + str(len(_bare)).encode() + b"\r\n\r\n" + _bare
+                        )
+                        await writer.drain()
+                        return
                     _profile: dict = {"did": _prof_did}
                     if self._store:
                         _dn = self._store.get_display_name(_prof_did)
@@ -1548,6 +1632,7 @@ class HttpEndpointsMixin:
                     _client_ip = writer.get_extra_info("peername", ("unknown", 0))[0]
                     _enum_key = ("invite_enum", _client_ip)
                     _now_enum = _time.monotonic()
+                    self._prune_invite_enum_counters(_now_enum)
                     _enum_entry = self._rate_counters.get(_enum_key)
                     if _enum_entry is None:
                         self._rate_counters[_enum_key] = [1, _now_enum]
@@ -2407,6 +2492,18 @@ class HttpEndpointsMixin:
 
                 # ── GET /metrics — OpenMetrics text format (R13.4, R17) ──
                 if method == "GET" and path == "/metrics":
+                    # Operational counters (connection/queue/tier gauges) are for the
+                    # local operator or a trusted scraper, not an anonymous remote
+                    # caller. Withhold the series when auth is enforced and the caller
+                    # is neither a trusted origin nor an authenticated WS actor.
+                    if self._auth_enforced() and not self._http_actor_ok(origin_header, http_port, peer_ip):
+                        writer.write(
+                            b"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain; charset=utf-8\r\n"
+                            + _NO_STORE_HDR
+                            + b"Content-Length: 0\r\n\r\n"
+                        )
+                        await writer.drain()
+                        return
                     _uptime = time.time() - self._start_time
                     from .security_policy import get_policy
                     _tier = get_policy().get_tier()
@@ -2609,6 +2706,10 @@ class HttpEndpointsMixin:
                     token = path[len("/webhook/"):]
                     if method != "POST":
                         writer.write(b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n")
+                        await writer.drain()
+                        return
+                    if _check_http_rate(peer_ip, "webhook"):
+                        await _write_429(writer)
                         await writer.drain()
                         return
                     wh = self._store.get_webhook_by_token_with_rotation(token) if self._store else None

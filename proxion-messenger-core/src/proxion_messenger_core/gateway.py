@@ -547,6 +547,12 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             return self._relay_from_is_room_member(data.get("channel_id", ""), from_webid)
         if content_type.startswith("file_"):
             return self._store.get_relationship_by_did(from_webid) is not None
+        # Presence/typing are contact-scoped ephemerals: from_webid must be a peer
+        # we hold a relationship with (mirrors the handlers' _authorized_relationship
+        # gate), so a first-use relaygw binding may seed off a contact's own signed
+        # presence even before any room/DM traffic has established one.
+        if content_type in ("presence", "typing"):
+            return self._store.get_relationship_by_did(from_webid) is not None
         return False
 
     def _voice_channel_gateway_ok(self, channel_id: str, signer_did: str) -> bool:
@@ -1980,6 +1986,33 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             "https://tauri.localhost",
         }
         return o in trusted
+
+    def _has_authenticated_client_ip(self, peer_ip: str) -> bool:
+        """Whether an authenticated WS client is connected from *peer_ip*.
+
+        Binds an otherwise-unauthenticated HTTP GET (TURN credentials, profile,
+        operational status) to a real actor when auth is enforced: the browser
+        that drives a call has already registered over the WebSocket from the
+        same address, while an anonymous remote caller has not. When auth is
+        enforced ``_client_webids`` holds only proven identities (see
+        _auth_enforced). Empty peer_ip (test/internal caller) is treated as
+        present so in-process callers keep working.
+        """
+        if not peer_ip:
+            return True
+        for ws in list(self._client_webids):
+            addr = getattr(ws, "remote_address", None)
+            if isinstance(addr, (tuple, list)) and addr and addr[0] == peer_ip:
+                return True
+        return False
+
+    def _http_actor_ok(self, origin_header: bytes, http_port: int, peer_ip: str = "") -> bool:
+        """Whether a sensitive, otherwise-unauthenticated HTTP GET may return its
+        full body: the caller is a trusted (local/desktop) origin, or an
+        authenticated WS actor is connected from the same address. Only consulted
+        when auth is enforced; loopback single-user dev skips the gate entirely."""
+        return (self._is_trusted_origin(origin_header, http_port, peer_ip)
+                or self._has_authenticated_client_ip(peer_ip))
 
     def _allowed_ws_origins(self) -> list:
         """Build the WebSocket handshake Origin allowlist.
