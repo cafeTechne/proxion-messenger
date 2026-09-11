@@ -990,8 +990,14 @@ class RoomHandlerMixin:
         # attributed as the author of the forwarded copy, so trusting their text
         # is no different from them sending a normal message.
         _client_content = data.get("content")
-        content = (_client_content if isinstance(_client_content, str) and _client_content
-                   else source_row.get("content", ""))
+        _content_is_client = isinstance(_client_content, str) and bool(_client_content)
+        content = _client_content if _content_is_client else source_row.get("content", "")
+        # The source author's display name may only ride along with the source
+        # row's own content. Pinning it to client-supplied text would let a
+        # forwarder post attacker-chosen content UNDER the original author's name.
+        # When the content is client-supplied we still mark it forwarded, but with
+        # no borrowed author identity.
+        _forwarded_from_name = "" if _content_is_client else source_row.get("from_display_name", "")
         if len(content.encode("utf-8")) > 16_384:
             await websocket.send(json.dumps({"type": "error", "code": "E_SCHEMA", "message": "content_too_large"}))
             return
@@ -1010,7 +1016,7 @@ class RoomHandlerMixin:
             "content": content,
             "content_type": "text",
             "forwarded": True,
-            "forwarded_from_name": source_row.get("from_display_name", ""),
+            "forwarded_from_name": _forwarded_from_name,
             "timestamp": ts,
             "local": True,
         }
@@ -2510,7 +2516,24 @@ class RoomHandlerMixin:
             "local": True,
         }
         if thread_id in self._local_rooms:
-            for ws in list(self._local_rooms[thread_id].get("members", set())):
+            # Room voice notes carry the same authorization as text room-sends
+            # (_handle_send_room): a non-member, banned, or muted account, or one
+            # writing to a read-only room, must not be able to push audio to every
+            # live member and into history just by knowing the room id.
+            if not self._check_room_permission(websocket, thread_id):
+                await websocket.send(json.dumps({"type": "error", "message": "Not a member of this room"}))
+                return
+            if self._store and self._store.is_room_banned(thread_id, sender):
+                await websocket.send(json.dumps({"type": "error", "message": "you_are_banned"}))
+                return
+            if self._store and self._store.is_room_muted(thread_id, sender):
+                await websocket.send(json.dumps({"type": "error", "message": "you_are_muted"}))
+                return
+            _vroom = self._local_rooms[thread_id]
+            if _vroom.get("read_only") and _vroom.get("creator_webid") != sender:
+                await websocket.send(json.dumps({"type": "error", "message": "Room is read-only"}))
+                return
+            for ws in list(_vroom.get("members", set())):
                 try:
                     await ws.send(json.dumps(event))
                 except Exception:
@@ -2522,16 +2545,37 @@ class RoomHandlerMixin:
             # reload. Deliver: echo to the sender's sessions/devices, then to
             # the peer (typing-pattern resolution: the sender's DM thread, or a
             # did:key thread id IS the peer).
-            _vpayload = json.dumps(event)
-            await self._send_to_identity(sender, _vpayload)
             peer_webid = ""
+            _from_owned_thread = False
             if self._store:
                 for t in self._store.get_dm_threads(owner_webid=sender):
                     if t.get("thread_id") == thread_id:
                         peer_webid = t.get("peer_webid", "")
+                        _from_owned_thread = True
                         break
             if not peer_webid and str(thread_id).startswith("did:key:"):
                 peer_webid = thread_id
+            # Authorization mirrors the DM send path (_handle_send_dm /
+            # _handle_local_dm): never deliver to a peer who blocked this sender,
+            # and, when auth is enforced, only to an established contact. Without
+            # this a blocked user could keep pushing voice notes and any account
+            # could push an unsolicited note to an arbitrary did:key. A DM thread
+            # the sender already owns is itself the established conversation, so it
+            # stands in for the relationship the way _handle_local_dm treats one.
+            if peer_webid and peer_webid != sender:
+                if self._is_blocked_for(peer_webid, sender):
+                    await websocket.send(json.dumps({"type": "error", "message": "Recipient is blocked"}))
+                    return
+                if (self._auth_enforced() and self._store and not _from_owned_thread
+                        and not self._store.get_relationship_by_did(peer_webid)):
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "code": "no_relationship",
+                        "message": "No relationship with this contact.",
+                    }))
+                    return
+            _vpayload = json.dumps(event)
+            await self._send_to_identity(sender, _vpayload)
             if peer_webid and peer_webid != sender:
                 if self._sockets_for(peer_webid):
                     await self._send_to_identity(peer_webid, _vpayload)

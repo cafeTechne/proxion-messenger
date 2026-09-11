@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import json
+import time
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
@@ -140,6 +141,10 @@ async def test_voice_message_persisted_to_store(gateway):
     room_id = "room-store"
     gateway._local_rooms[room_id] = {"members": {ws}, "messages": [], "history_mode": "none"}
     mock_store = MagicMock()
+    # The room-send authorization now consults the store; keep this member
+    # authorized so the test still exercises the persistence path.
+    mock_store.is_room_banned.return_value = False
+    mock_store.is_room_muted.return_value = False
     gateway._store = mock_store
     await gateway.process_command(ws, {
         "cmd": "send_voice_message",
