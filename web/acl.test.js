@@ -96,6 +96,38 @@ describe('buildAcpAcr', () => {
         expect(acr).toContain('<#public-ac>');           // wired into the controls
         expect(acr).not.toContain('members-ac');         // no members here
     });
+
+    // The public grant applies to the container only. Propagating public
+    // acl:Append to children (drop-box items) would let a third party tamper
+    // another sender's dropped envelope.
+    function acControls(acr, predicate) {
+        // Capture the object list up to the statement terminator (; or .).
+        const re = new RegExp(`acp:${predicate}\\s+([^;.]*)`);
+        const m = acr.match(re);
+        return m ? m[1] : '';
+    }
+
+    it('keeps the public grant out of memberAccessControl (drop-box tamper guard)', () => {
+        const acr = buildAcpAcr(OWNER, [M1], RES, 'acl:Read', 'acl:Append');
+        const access = acControls(acr, 'accessControl');
+        const member = acControls(acr, 'memberAccessControl');
+        // Public matcher is applied to the container itself...
+        expect(access).toContain('<#public-ac>');
+        // ...but never inherited by the container's members (children).
+        expect(member).not.toContain('<#public-ac>');
+        // Owner + members still apply on both levels as intended.
+        expect(access).toContain('<#owner-ac>');
+        expect(access).toContain('<#members-ac>');
+        expect(member).toContain('<#owner-ac>');
+        expect(member).toContain('<#members-ac>');
+    });
+
+    it('drop-box with no members: children get owner control, not public append', () => {
+        const acr = buildAcpAcr(OWNER, [], RES, 'acl:Read', 'acl:Append');
+        const member = acControls(acr, 'memberAccessControl');
+        expect(member).toContain('<#owner-ac>');
+        expect(member).not.toContain('<#public-ac>');
+    });
 });
 
 // ── discoverAccessControl + grant routing (network wrapper in pod.js) ────────

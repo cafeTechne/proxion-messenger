@@ -111,17 +111,25 @@ export function buildAcpAcr(ownerWebId, memberWebIds, resourceUrl, memberModes =
           `<#public-policy> a acp:Policy; acp:allow ${publicModes}; acp:anyOf <#public-matcher>.\n` +
           `<#public-matcher> a acp:Matcher; acp:agent acp:PublicAgent.\n`
         : '';
-    const controls = ['<#owner-ac>',
+    // acp:accessControl applies to the container itself; acp:memberAccessControl
+    // is inherited by its members (children). The public grant must stay on the
+    // container only: propagating public acl:Append to children would let a third
+    // party tamper another sender's dropped envelope in a drop-box inbox. The WAC
+    // equivalent withholds it too. Owner + members are intended on both levels.
+    const accessControls = ['<#owner-ac>',
         ...(members.length > 0 ? ['<#members-ac>'] : []),
         ...(publicModes ? ['<#public-ac>'] : []),
+    ].join(', ');
+    const memberControls = ['<#owner-ac>',
+        ...(members.length > 0 ? ['<#members-ac>'] : []),
     ].join(', ');
     return (
         `@prefix acp: <http://www.w3.org/ns/solid/acp#>.\n` +
         `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n\n` +
         `<> a acp:AccessControlResource;\n` +
         `   acp:resource <${resourceUrl}>;\n` +
-        `   acp:accessControl ${controls};\n` +
-        `   acp:memberAccessControl ${controls}.\n\n` +
+        `   acp:accessControl ${accessControls};\n` +
+        `   acp:memberAccessControl ${memberControls}.\n\n` +
         `<#owner-ac> a acp:AccessControl; acp:apply <#owner-policy>.\n` +
         `<#owner-policy> a acp:Policy;\n` +
         `   acp:allow acl:Read, acl:Write, acl:Control;\n` +

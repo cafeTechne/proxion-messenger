@@ -41,8 +41,8 @@ def test_set_acp_policy_puts_correct_jsonld():
     acr_uri = set_acp_policy(
         pod,
         "stash://messages/thread/c1/",
-        owner_webid="alice@pod.example",
-        subject_webid="bob@pod.example",
+        owner_webid="https://alice.example/profile#me",
+        subject_webid="https://bob.example/profile#me",
         subject_modes=["Read"],
     )
 
@@ -52,9 +52,78 @@ def test_set_acp_policy_puts_correct_jsonld():
     # Second positional arg is the body bytes
     body = call_args[0][1]
     doc = json.loads(body.decode("utf-8"))
-    assert doc["@context"] == "http://www.w3.org/ns/solid/acp#"
-    assert doc["policy"]["allOf"][0]["agent"] == "bob@pod.example"
-    assert "Read" in doc["policy"]["allow"]
+    assert doc["@type"] == "acp:AccessControlResource"
+    assert doc["resource"]["@id"] == "stash://messages/thread/c1/"
+    # Content type must be JSON-LD.
+    assert call_args[1]["content_type"] == "application/ld+json"
+
+
+def _acp_grant_for(doc, webid):
+    """Return the acp:Policy applied for *webid* by walking the conformant
+    ACR linkage acp:accessControl -> acp:AccessControl -> acp:apply ->
+    acp:Policy -> acp:anyOf -> acp:Matcher -> acp:agent."""
+    for control in doc["accessControl"]:
+        assert control["@type"] == "acp:AccessControl"
+        pol = control["apply"]
+        assert pol["@type"] == "acp:Policy"
+        matcher = pol["anyOf"]
+        assert matcher["@type"] == "acp:Matcher"
+        if matcher["agent"]["@id"] == webid:
+            return pol
+    return None
+
+
+def test_set_acp_policy_links_policies_via_access_control():
+    """The emitted ACR must reach its policies from the resource via
+    acp:accessControl -> acp:AccessControl -> acp:apply, not a bare
+    top-level policy that a real ACP engine ignores."""
+    pod = MagicMock()
+    set_acp_policy(
+        pod,
+        "stash://rooms/r1/",
+        owner_webid="https://alice.example/profile#me",
+        subject_webid="https://bob.example/profile#me",
+        subject_modes=["Read", "Append"],
+    )
+    doc = json.loads(pod.put.call_args[0][1].decode("utf-8"))
+
+    # Old broken shape is gone.
+    assert "policy" not in doc
+    assert "owner" not in doc
+
+    owner_pol = _acp_grant_for(doc, "https://alice.example/profile#me")
+    assert owner_pol is not None
+    assert owner_pol["allow"] == ["acl:Read", "acl:Write", "acl:Control"]
+
+    subject_pol = _acp_grant_for(doc, "https://bob.example/profile#me")
+    assert subject_pol is not None
+    assert subject_pol["allow"] == ["acl:Read", "acl:Append"]
+
+
+def test_set_acp_policy_read_only_room_drops_append():
+    pod = MagicMock()
+    set_acp_policy(
+        pod,
+        "stash://rooms/r1/",
+        owner_webid="https://alice.example/profile#me",
+        subject_webid="https://bob.example/profile#me",
+        subject_modes=["Read"],
+    )
+    doc = json.loads(pod.put.call_args[0][1].decode("utf-8"))
+    subject_pol = _acp_grant_for(doc, "https://bob.example/profile#me")
+    assert subject_pol["allow"] == ["acl:Read"]
+
+
+def test_set_acp_policy_rejects_malformed_webid():
+    pod = MagicMock()
+    with pytest.raises(ValueError):
+        set_acp_policy(
+            pod,
+            "stash://rooms/r1/",
+            owner_webid="https://alice.example/profile#me",
+            subject_webid='https://bob.example/#me"><injected',
+        )
+    pod.put.assert_not_called()
 
 
 def test_set_acl_auto_calls_set_acl_for_wac():

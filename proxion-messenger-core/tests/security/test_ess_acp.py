@@ -69,6 +69,28 @@ class TestSetAcpV3Policy:
         result = set_acp_v3_policy(client, "https://pod/res", "https://o/#me", "https://s/#me")
         assert result == "https://pod/res.acr"
 
+    def test_links_policies_via_access_control(self):
+        """ESS applies only policies reachable from the resource via
+        acp:accessControl -> acp:AccessControl -> acp:apply. The old shape
+        hung acp:policy straight off the ACR and omitted acp:resource."""
+        from proxion_messenger_core.acp import set_acp_v3_policy
+        client = self._mock_client()
+        set_acp_v3_policy(
+            client, "https://pod/res", "https://owner/#me", "https://member/#me",
+            ["Read", "Append"],
+        )
+        body = client.put.call_args[0][1].decode()
+        assert "acp:policy" not in body
+        assert "acp:resource <https://pod/res>" in body
+        assert "acp:accessControl <#owner-ac>, <#subject-ac>" in body
+        assert "<#owner-ac> a acp:AccessControl ;" in body
+        assert "acp:apply <#owner-policy>" in body
+        assert "<#subject-ac> a acp:AccessControl ;" in body
+        assert "acp:apply <#subject-policy>" in body
+        assert "acp:anyOf <#subject-matcher>" in body
+        # Multiple modes are comma-separated (valid Turtle object list).
+        assert "acp:allow acl:Read, acl:Append" in body
+
     def test_unsafe_owner_webid_raises(self):
         from proxion_messenger_core.acp import set_acp_v3_policy
         client = self._mock_client()

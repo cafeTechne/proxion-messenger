@@ -29,10 +29,11 @@ _KNOWN_ACP_PREDICATES = frozenset({
     # ACP core
     "allow", "deny", "allOf", "anyOf", "noneOf", "agent", "group",
     "accessControl", "memberAccessControl", "policy", "default",
+    "apply", "resource",
     # Proxion-internal document keys (JSON-LD subject stanzas)
     "owner", "subject",
     # ACP v3 classes
-    "AccessControlResource", "Policy", "Matcher",
+    "AccessControl", "AccessControlResource", "Policy", "Matcher",
     # ACL modes (via acl: prefix)
     "Read", "Write", "Control", "Append",
 })
@@ -126,19 +127,51 @@ def set_acp_policy(
     str
         The ACR URI that was written (``resource_url + ".acr"``).
     """
+    from .solid_client import _assert_safe_webid
+    _assert_safe_webid(owner_webid)
+    _assert_safe_webid(subject_webid)
+
     if subject_modes is None:
         subject_modes = ["Read"]
 
+    # Conformant ACR: policies are reachable from the resource via
+    # acp:accessControl -> acp:AccessControl -> acp:apply -> acp:Policy
+    # (acp:allow modes + acp:anyOf -> acp:Matcher -> acp:agent). A bare
+    # top-level policy/owner document applies nothing on a real ACP engine.
+    # @vocab resolves the bare acp terms; acl: prefixes the mode IRIs.
     policy = {
-        "@context": "http://www.w3.org/ns/solid/acp#",
-        "policy": {
-            "allow": subject_modes,
-            "allOf": [{"agent": subject_webid}],
+        "@context": {
+            "@vocab": "http://www.w3.org/ns/solid/acp#",
+            "acp": "http://www.w3.org/ns/solid/acp#",
+            "acl": "http://www.w3.org/ns/auth/acl#",
+            "allow": {"@id": "acp:allow", "@type": "@id"},
         },
-        "owner": {
-            "allow": ["Read", "Write", "Control"],
-            "allOf": [{"agent": owner_webid}],
-        },
+        "@type": "acp:AccessControlResource",
+        "resource": {"@id": resource_url},
+        "accessControl": [
+            {
+                "@type": "acp:AccessControl",
+                "apply": {
+                    "@type": "acp:Policy",
+                    "allow": ["acl:Read", "acl:Write", "acl:Control"],
+                    "anyOf": {
+                        "@type": "acp:Matcher",
+                        "agent": {"@id": owner_webid},
+                    },
+                },
+            },
+            {
+                "@type": "acp:AccessControl",
+                "apply": {
+                    "@type": "acp:Policy",
+                    "allow": [f"acl:{m}" for m in subject_modes],
+                    "anyOf": {
+                        "@type": "acp:Matcher",
+                        "agent": {"@id": subject_webid},
+                    },
+                },
+            },
+        ],
     }
 
     acr_url = resource_url + ".acr"
@@ -187,20 +220,30 @@ def set_acp_v3_policy(
     if subject_modes is None:
         subject_modes = ["Read"]
 
-    modes_str = " ".join(f"acl:{m}" for m in subject_modes)
+    modes_str = ", ".join(f"acl:{m}" for m in subject_modes)
+    # ESS applies only policies reachable from the resource via
+    # acp:accessControl -> acp:AccessControl -> acp:apply -> acp:Policy.
+    # Hanging acp:policy straight off the ACR (and omitting acp:resource)
+    # leaves the resource at its inherited default. Mirror the JS buildAcpAcr
+    # shape so a real ACP v3/v4 engine applies the owner + subject grants.
     turtle = (
         "@prefix acp: <http://www.w3.org/ns/solid/acp#> .\n"
         "@prefix acl: <http://www.w3.org/ns/auth/acl#> .\n\n"
         "<> a acp:AccessControlResource ;\n"
-        "    acp:policy <#owner-policy>, <#subject-policy> .\n\n"
+        f"    acp:resource <{resource_url}> ;\n"
+        "    acp:accessControl <#owner-ac>, <#subject-ac> .\n\n"
+        "<#owner-ac> a acp:AccessControl ;\n"
+        "    acp:apply <#owner-policy> .\n\n"
         "<#owner-policy> a acp:Policy ;\n"
         "    acp:allow acl:Read, acl:Write, acl:Control ;\n"
-        "    acp:allOf <#owner-matcher> .\n\n"
+        "    acp:anyOf <#owner-matcher> .\n\n"
         f"<#owner-matcher> a acp:Matcher ;\n"
         f"    acp:agent <{owner_webid}> .\n\n"
+        "<#subject-ac> a acp:AccessControl ;\n"
+        "    acp:apply <#subject-policy> .\n\n"
         "<#subject-policy> a acp:Policy ;\n"
         f"    acp:allow {modes_str} ;\n"
-        "    acp:allOf <#subject-matcher> .\n\n"
+        "    acp:anyOf <#subject-matcher> .\n\n"
         f"<#subject-matcher> a acp:Matcher ;\n"
         f"    acp:agent <{subject_webid}> .\n"
     )
