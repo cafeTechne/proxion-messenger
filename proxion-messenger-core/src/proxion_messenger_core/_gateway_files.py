@@ -198,17 +198,23 @@ class FileTransferMixin:
         # Anti-spoof: only accept a file transfer from a peer the recipient has a
         # relationship with — otherwise any gateway could spam file offers at any
         # webid and spoof the sender. Unknown senders are ignored (no reveal).
+        _target = to_webid
         if self._store and from_webid:
             if not self._store.get_relationship_by_did(from_webid):
                 return "202 Accepted", '{"status":"ignored"}'
             _owner = self._store.get_relationship_owner(from_webid) or ""
             if from_webid in getattr(self, "_revoked_dids", set()) or self._is_blocked_for(_owner, from_webid):
                 return "202 Accepted", '{"status":"ignored"}'
+            # Deliver to the relationship OWNER, never the wire's to_webid: on a
+            # multi-account gateway a contact of user X must not be able to push
+            # spoofed file offers/chunks at user Y by naming Y in to_webid.
+            if _owner:
+                _target = _owner
         if content_type == "file_chunk":
             _c = data.get("data", "")
             if not isinstance(_c, str) or len(_c) > MAX_CHUNK_B64_LEN:
                 return "400 Bad Request", '{"error":"chunk_too_large"}'
-        sockets = self._sockets_for(to_webid)
+        sockets = self._sockets_for(_target)
         if not sockets:
             return "202 Accepted", '{"status":"offline"}'
         event = {k: v for k, v in data.items() if k != "content_type"}

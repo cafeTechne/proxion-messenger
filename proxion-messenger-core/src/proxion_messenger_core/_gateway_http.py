@@ -56,6 +56,38 @@ class HttpEndpointsMixin:
     _RELAY_RL_WINDOW = 60.0
     _RELAY_RL_PRUNE_AT = 1024
 
+    def _recovery_token_ok(self, headers_raw: dict) -> bool:
+        """Whether a valid provisioned recovery token is presented on the request.
+
+        Mirrors the per-endpoint token ladder: PROXION_ADMIN_API_TOKEN (Bearer,
+        timing-safe) takes precedence, else the legacy PROXION_API_TOKEN (Bearer).
+        Returns False when no token is configured."""
+        _auth_header = headers_raw.get(b"authorization", b"").decode("utf-8", errors="replace")
+        _admin_token = os.environ.get("PROXION_ADMIN_API_TOKEN", "")
+        if _admin_token:
+            import hmac as _hmac_rec
+            _req = _auth_header.removeprefix("Bearer ").strip() if _auth_header else ""
+            return bool(_req) and _hmac_rec.compare_digest(_req, _admin_token)
+        _api_token = os.environ.get("PROXION_API_TOKEN", "")
+        if _api_token:
+            return _auth_header == f"Bearer {_api_token}"
+        return False
+
+    def _recovery_endpoint_allowed(self, headers_raw: dict) -> bool:
+        """Whether an identity recovery/backup endpoint (/backup, /restore, /export,
+        /import, /security-snapshot) may run for this request.
+
+        These endpoints export or replace the owner's Ed25519 identity and X25519
+        store keys. Their fallback gate is loopback/trusted-origin, which is
+        meaningless while the public tunnel is live: cloudflared proxies from
+        127.0.0.1, so a remote attacker presents peer_ip=127.0.0.1 and can forge the
+        Origin header. When the tunnel is live, refuse unless a provisioned token
+        (PROXION_ADMIN_API_TOKEN or PROXION_API_TOKEN) is presented. Genuine local
+        single-user desktop (no tunnel) is unaffected and keeps its loopback path."""
+        if not self._tunnel_active():
+            return True
+        return self._recovery_token_ok(headers_raw)
+
     def _prune_relay_rate_limiter(self, now: float) -> None:
         buckets = getattr(self, "_relay_rate_limiter", None)
         if not buckets or len(buckets) < self._RELAY_RL_PRUNE_AT:
@@ -639,6 +671,15 @@ class HttpEndpointsMixin:
                 # grab the owner's never-inbound-relayed identity. Require the
                 # signer binding to already be established by prior normal traffic.
                 _privileged = _ct in ("room_moderation", "room_emoji")
+                # room_edit/room_delete keep TOFU for the author branch (a member
+                # editing their OWN message on first contact), but their
+                # owner-authority branch (rewrite/delete ANY message as the room
+                # creator) must not be honored off a first-use seed. Capture whether
+                # the signer binding was ALREADY established, BEFORE the seed below
+                # can create it, and hand it to the handler.
+                if _ct in ("room_edit", "room_delete"):
+                    data["_relay_sender_established"] = self._relay_sender_gateway_ok(
+                        _from, _signer, require_established=True, may_seed=False)
                 # Seed a NEW binding only when from_webid is authorized for the
                 # relay target it names (a member of the local room, or a DM peer
                 # for file transfers). A stranger's validly-signed POST must not
@@ -651,18 +692,22 @@ class HttpEndpointsMixin:
                 _bound = self._voice_channel_gateway_ok(data.get("channel_id", ""), _signer)
             if not _bound:
                 return "200 OK", '{"status":"received"}'
-            # Replay guard: dedup on the signed nonce (partitioned by signer).
+            # Replay guard: the signed nonce is REQUIRED — it is bound into the
+            # envelope signature, so an omitted-nonce envelope carries no replay
+            # protection and must be rejected rather than delivered. Dedup on it
+            # (partitioned by signer).
             _env_nonce = data.get("relay_nonce", "")
-            if _env_nonce:
-                import hashlib as _h_env
-                _ek = _h_env.sha256(f"{_signer}:{_env_nonce}".encode()).hexdigest()
-                if self._store and self._store.seen_relay_nonce(_ek, ttl_seconds=600):
-                    return "200 OK", '{"status":"duplicate"}'
-                if _ek in self._seen_relay_nonces:
-                    return "200 OK", '{"status":"duplicate"}'
-                if self._store:
-                    self._store.record_relay_nonce(_ek)
-                self._seen_relay_nonces.append(_ek)
+            if not _env_nonce:
+                return "200 OK", '{"status":"received"}'
+            import hashlib as _h_env
+            _ek = _h_env.sha256(f"{_signer}:{_env_nonce}".encode()).hexdigest()
+            if self._store and self._store.seen_relay_nonce(_ek, ttl_seconds=600):
+                return "200 OK", '{"status":"duplicate"}'
+            if _ek in self._seen_relay_nonces:
+                return "200 OK", '{"status":"duplicate"}'
+            if self._store:
+                self._store.record_relay_nonce(_ek)
+            self._seen_relay_nonces.append(_ek)
 
         # ── Voice signal relay — ephemeral, delivered immediately, not queued ──
         if data.get("content_type") == "voice_signal":
@@ -1789,6 +1834,13 @@ class HttpEndpointsMixin:
                                      str(len(_err)).encode() + b"\r\n\r\n" + _err)
                         await writer.drain()
                         return
+                    # A live tunnel forwards from 127.0.0.1, so the loopback peer
+                    # check above no longer proves a local caller — require a token
+                    # for the full data export while the tunnel is up.
+                    if not self._recovery_endpoint_allowed(headers_raw):
+                        await _write_json(writer, 403, {"error": "recovery_forbidden_over_tunnel"})
+                        await writer.drain()
+                        return
                     if not self._store:
                         err = b'{"error":"no store"}'
                         writer.write(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: " +
@@ -1856,6 +1908,13 @@ class HttpEndpointsMixin:
                     _peer_ss = writer.get_extra_info("peername")
                     if _peer_ss and _peer_ss[0] not in ("127.0.0.1", "::1"):
                         await _write_json(writer, 403, {"error": "forbidden"})
+                        await writer.drain()
+                        return
+                    # A live tunnel forwards from 127.0.0.1, so the loopback peer
+                    # check above no longer proves a local caller — require a token
+                    # for the signed telemetry export while the tunnel is up.
+                    if not self._recovery_endpoint_allowed(headers_raw):
+                        await _write_json(writer, 403, {"error": "recovery_forbidden_over_tunnel"})
                         await writer.drain()
                         return
                     if not self._store:
@@ -2033,6 +2092,13 @@ class HttpEndpointsMixin:
                         await _write_429(writer)
                         await writer.drain()
                         return
+                    # A live tunnel makes loopback peer_ip and the Origin header
+                    # attacker-controlled, so refuse the identity export to an
+                    # anonymous remote caller unless a provisioned token is present.
+                    if not self._recovery_endpoint_allowed(headers_raw):
+                        await _write_json(writer, 403, {"error": "recovery_forbidden_over_tunnel"})
+                        await writer.drain()
+                        return
                     # Admin token check (Round 6)
                     _admin_token = os.environ.get("PROXION_ADMIN_API_TOKEN", "")
                     if _admin_token:
@@ -2155,6 +2221,13 @@ class HttpEndpointsMixin:
                     # R11: per-day operation budget (max 3 restore ops/day)
                     if self._store and not self._store.check_operation_budget("restore", 3):
                         await _write_json(writer, 429, {"error": "recovery_budget_exceeded"})
+                        await writer.drain()
+                        return
+                    # A live tunnel makes loopback peer_ip and the Origin header
+                    # attacker-controlled, so refuse the identity replace to an
+                    # anonymous remote caller unless a provisioned token is present.
+                    if not self._recovery_endpoint_allowed(headers_raw):
+                        await _write_json(writer, 403, {"error": "recovery_forbidden_over_tunnel"})
                         await writer.drain()
                         return
                     # Admin token check (Round 6)
@@ -2321,6 +2394,13 @@ class HttpEndpointsMixin:
                     # R11: per-day operation budget (max 10 import ops/day)
                     if self._store and not self._store.check_operation_budget("import", 10):
                         await _write_json(writer, 429, {"error": "recovery_budget_exceeded"})
+                        await writer.drain()
+                        return
+                    # A live tunnel makes loopback peer_ip and the Origin header
+                    # attacker-controlled, so refuse the data import to an anonymous
+                    # remote caller unless a provisioned token is present.
+                    if not self._recovery_endpoint_allowed(headers_raw):
+                        await _write_json(writer, 403, {"error": "recovery_forbidden_over_tunnel"})
                         await writer.drain()
                         return
                     # Admin token check (Round 6)

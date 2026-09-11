@@ -323,6 +323,33 @@ async def test_unsigned_voice_channel_join_dropped(tmp_path, noauth_env):
     assert "chan-1" not in gw._voice_channels   # never registered
 
 
+@pytest.mark.asyncio
+async def test_signed_envelope_without_relay_nonce_dropped(tmp_path, noauth_env):
+    """F13: a validly-signed ephemeral envelope that omits relay_nonce carries no
+    replay protection and must be dropped, not delivered — even though its
+    signature verifies and its signer binding is fine (self-signed voice_signal)."""
+    from unittest.mock import AsyncMock
+    gw = _gw(tmp_path, "nn")
+    caller_key = Ed25519PrivateKey.generate()
+    caller_did = pub_key_to_did(caller_key.public_key().public_bytes_raw())
+    target = pub_key_to_did(Ed25519PrivateKey.generate().public_key().public_bytes_raw())
+    _seed_rel(gw, "cert-NN", caller_did, owner="")
+    ws = AsyncMock(); ws.send = AsyncMock()
+    ws.__hash__ = lambda s: id(s); ws.__eq__ = lambda s, o: s is o
+    gw.clients.add(ws); gw._client_webids[ws] = target
+    gw._webid_sockets[target] = {ws}
+
+    payload = {"content_type": "voice_signal", "from_webid": caller_did, "to_webid": target,
+               "signal_type": "offer", "signal_data": {"sdp": "x"}, "session_id": "s1",
+               "message_id": "vs-nonn", "content": "offer",
+               "relay_sig_did": caller_did,
+               "relay_ts": datetime.now(timezone.utc).isoformat()}  # no relay_nonce
+    payload["signature"] = sign_relay_envelope(caller_key, payload)
+    status, _ = await gw._handle_relay_post(json.dumps(payload).encode())
+    assert status.startswith("200")            # no-reveal
+    assert ws.send.await_count == 0            # …but never delivered (replayable → rejected)
+
+
 def test_voice_channel_gateway_tofu_binding(tmp_path):
     """Per-channel participant-gateway continuity: first signer TOFU-trusted,
     a different gateway then rejected; unknown channel rejected."""

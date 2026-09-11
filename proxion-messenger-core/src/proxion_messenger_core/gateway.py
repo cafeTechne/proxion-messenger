@@ -1643,6 +1643,21 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         persist it, notify the requester's gateway, and emit the cert to the browser."""
         invitation_id = data.get("invitation_id")
 
+        # Only the gateway owner may accept an invite: acceptance issues the
+        # owner's RelationshipCertificate, so a non-owner session holding a known
+        # invitation_id must not be able to force the owner to friend a peer. When
+        # auth is enforced the registered DID is a proven identity, so we can bind
+        # this to the owner; the loopback single-user path (auth not enforced)
+        # registers under a session DID (not the owner DID) and is unenforceable
+        # anyway, so it keeps the existing single-user behaviour.
+        if self._auth_enforced():
+            from .didkey import pub_key_to_did as _p2d_accept
+            caller_did = self._client_webids.get(websocket, "")
+            owner_did = _p2d_accept(self.agent.identity_pub_bytes)
+            if caller_did != owner_did:
+                await websocket.send(json.dumps({"type": "error", "message": "not_owner"}))
+                return
+
         if not self._store:
             await websocket.send(json.dumps({"type": "error", "message": "no_store"}))
             return
@@ -2014,6 +2029,17 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         return (self._is_trusted_origin(origin_header, http_port, peer_ip)
                 or self._has_authenticated_client_ip(peer_ip))
 
+    def _tunnel_active(self) -> bool:
+        """Whether the app-managed public tunnel (cloudflared) is live.
+
+        start_tunnel sets ``self._tunnel``; stop_tunnel and a failed start clear it
+        back to None. cloudflared proxies from 127.0.0.1, so while the tunnel is up
+        a remote caller reaches the HTTP server with peer_ip=127.0.0.1 and (with no
+        Origin header) passes _is_trusted_origin — loopback trust is meaningless.
+        The identity recovery/backup endpoints consult this so they do not hand the
+        owner's keys to an anonymous remote caller over the tunnel."""
+        return getattr(self, "_tunnel", None) is not None
+
     def _allowed_ws_origins(self) -> list:
         """Build the WebSocket handshake Origin allowlist.
 
@@ -2084,6 +2110,14 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             )
             if not (_related or _co_channel):
                 return "202 Accepted", '{"status":"ignored"}'
+            # Relationship-gated signals deliver to the relationship OWNER, never
+            # the wire's to_webid: on a multi-account gateway a contact of user X
+            # must not push spoofed call signals at user Y by naming Y. The
+            # co-channel path is bounded by channel membership, so it keeps to_webid.
+            if _related and not _co_channel:
+                _owner = self._store.get_relationship_owner(from_webid) or ""
+                if _owner:
+                    to_webid = _owner
             if from_webid in getattr(self, "_revoked_dids", set()) or self._is_blocked_for(to_webid, from_webid):
                 return "202 Accepted", '{"status":"ignored"}'
 
@@ -2126,6 +2160,14 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
         if not room_id or not from_webid or not message_id:
             return "400 Bad Request", '{"error":"missing_room_relay_fields"}'
+
+        # Charset guard on the id before it is broadcast/persisted — belt-and-
+        # suspenders on the ingestion path so a hostile peer gateway cannot smuggle
+        # markup/control characters through message_id (client-side escaping is the
+        # primary XSS defense).
+        import re as _re_mid
+        if not _re_mid.match(r"^[A-Za-z0-9._:-]{1,128}$", message_id):
+            return "400 Bad Request", '{"error":"invalid_message_id"}'
 
         room = self._local_rooms.get(room_id)
         if not room:
@@ -2598,9 +2640,15 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # Authz: only the message's author (or the room owner) may edit it — the
         # relay path used to edit ANY message by id, letting a federated member's
         # gateway rewrite other members' messages. Mirrors the local edit check.
+        # The owner-authority branch (creator editing another member's message) is
+        # only honored when the signer binding was ALREADY established: a fresh
+        # first-use TOFU seed claiming to be the owner must not grant it (see the
+        # _relay_sender_established capture in the relay dispatch).
         if self._store:
             _sender = self._store.get_message_sender(message_id)
-            if _sender and _sender != from_webid and room.get("creator_webid") != from_webid:
+            _owner_authority = (room.get("creator_webid") == from_webid
+                                and bool(data.get("_relay_sender_established")))
+            if _sender and _sender != from_webid and not _owner_authority:
                 return "403 Forbidden", '{"error":"not_message_author"}'
             self._store.update_message(message_id, new_content, edited_at,
                                        editor_webid=from_webid)
@@ -2631,10 +2679,15 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             return "404 Not Found", '{"error":"room_not_found"}'
         # Authz: only the message's author (or the room owner) may delete it —
         # the relay path used to delete ANY message by id (no from_webid at all),
-        # letting a federated member's gateway delete others' messages.
+        # letting a federated member's gateway delete others' messages. The
+        # owner-authority branch is only honored when the signer binding was
+        # ALREADY established, mirroring the edit relay: a fresh first-use TOFU
+        # seed claiming to be the owner must not grant delete-any authority.
         if self._store and from_webid:
             _sender = self._store.get_message_sender(message_id)
-            if _sender and _sender != from_webid and room.get("creator_webid") != from_webid:
+            _owner_authority = (room.get("creator_webid") == from_webid
+                                and bool(data.get("_relay_sender_established")))
+            if _sender and _sender != from_webid and not _owner_authority:
                 return "403 Forbidden", '{"error":"not_message_author"}'
         if self._store:
             self._store.delete_message(message_id)
