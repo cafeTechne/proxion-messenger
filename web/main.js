@@ -3727,7 +3727,7 @@ import { createIdentityResolver } from './identity.js';
                         sendStatus.trackPodWrite(clientMsgId, async () => {
                             const ok = await podWriteMessageJsonLd(_roomId, clientMsgId, _podMsg, true);
                             if (ok) podQueueRemove(clientMsgId);
-                            else podQueueAdd({ message_id: clientMsgId, room_id: _roomId, msg: _podMsg });
+                            else podQueueAdd({ message_id: clientMsgId, room_id: _roomId, from_webid: selfWebId, msg: _podMsg });
                             return ok;
                         });
                         podWriteMessageWithIndex(_roomId, {
@@ -4266,9 +4266,12 @@ import { createIdentityResolver } from './identity.js';
         // back online). Each success clears that message's "not saved" note.
         function flushPodQueue() {
             if (!solidSession.info.isLoggedIn) return;
+            // Account-bind the replay: only this account's queued room writes are
+            // flushed to its pod; entries queued by another account are dropped.
             podQueueFlush(
                 (entry) => podWriteMessageJsonLd(entry.room_id, entry.message_id, entry.msg, true),
-                (id) => document.getElementById('msg-' + id)?.querySelector('.msg-pod-note')?.remove()
+                (id) => document.getElementById('msg-' + id)?.querySelector('.msg-pod-note')?.remove(),
+                selfWebId
             ).catch(() => {});
         }
         window.addEventListener('online', flushPodQueue);

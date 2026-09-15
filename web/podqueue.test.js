@@ -101,4 +101,50 @@ describe('podQueueFlush', () => {
         expect(res.flushed).toBe(0);
         expect(await podQueueCount()).toBe(1);
     });
+
+    it('drops entries queued by another account and flushes only the current one', async () => {
+        const A = 'https://a.example/profile/card#me';
+        const B = 'https://b.example/profile/card#me';
+        await podQueueAdd(entry('a', { from_webid: A, queued_at: 1 }));
+        await podQueueAdd(entry('b', { from_webid: B, queued_at: 2 }));
+        await podQueueAdd(entry('c', { from_webid: A, queued_at: 3 }));
+        const seen = [];
+        const res = await podQueueFlush(async (row) => { seen.push(row.message_id); return true; }, null, A);
+        expect(seen).toEqual(['a', 'c']);            // B's entry never written
+        expect(res.flushed).toBe(2);
+        expect(await podQueueCount()).toBe(0);       // A's flushed, B's dropped
+    });
+
+    it('reads from_webid off the queued msg when not set at top level', async () => {
+        const A = 'https://a.example/profile/card#me';
+        await podQueueAdd({ message_id: 'a', room_id: 'general', msg: { from_webid: A }, queued_at: 1 });
+        const seen = [];
+        await podQueueFlush(async (row) => { seen.push(row.message_id); return true; }, null, A);
+        expect(seen).toEqual(['a']);
+    });
+
+    it('flushes a legacy entry with no from_webid as the current account', async () => {
+        // entry() records no from_webid; a same-account backlog must still drain.
+        await podQueueAdd({ message_id: 'a', room_id: 'general', queued_at: 1 });
+        const seen = [];
+        await podQueueFlush(async (row) => { seen.push(row.message_id); return true; }, null, 'https://a.example/#me');
+        expect(seen).toEqual(['a']);
+        expect(await podQueueCount()).toBe(0);
+    });
+});
+
+describe('podQueueAdd size cap (drop-oldest)', () => {
+    it('never keeps more than the cap, evicting the oldest by queued_at', async () => {
+        // Cap is 200; enqueue 205 and assert the 5 oldest are gone.
+        for (let i = 0; i < 205; i++) {
+            // queued_at starts at 1: `0 || Date.now()` would make m000 the newest.
+            await podQueueAdd({ message_id: `m${String(i).padStart(3, '0')}`, room_id: 'r', queued_at: i + 1 });
+        }
+        expect(await podQueueCount()).toBe(200);
+        const ids = new Set((await podQueueList()).map((r) => r.message_id));
+        expect(ids.has('m000')).toBe(false);   // oldest evicted
+        expect(ids.has('m004')).toBe(false);
+        expect(ids.has('m005')).toBe(true);    // first kept
+        expect(ids.has('m204')).toBe(true);    // newest kept
+    });
 });

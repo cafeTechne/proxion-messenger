@@ -12,9 +12,16 @@
 // thread_id. Best-effort — if IndexedDB is unavailable, history just isn't cached
 // (same as today) and the app still works live.
 
+import { accountDbName } from './auth.js';
+
+// Base name; the live database is namespaced per authenticated account by
+// accountDbName (see auth.js) so one account can never read another's cached DM
+// plaintext on a shared device. Pre-namespacing databases (bare DB_NAME) are
+// simply never read once an account is signed in — they map to a different name.
 const DB_NAME = 'proxion-dm-history';
 const STORE = 'messages';
 let _dbPromise = null;
+let _openName = null;
 
 // Retention: keep at most this many messages per thread on this device. Oldest
 // beyond the cap are evicted on write so a long-lived device can't grow without
@@ -29,10 +36,14 @@ export function dmHistorySetEnabled(v) { _enabled = !!v; }
 export function dmHistoryEnabled() { return _enabled; }
 
 function _open() {
-    if (_dbPromise) return _dbPromise;
+    // Re-derive the account-bound name every open; if the account changed, drop
+    // the cached handle so we never serve one account's DB to another.
+    const name = accountDbName(DB_NAME);
+    if (_dbPromise && _openName === name) return _dbPromise;
+    _openName = name;
     _dbPromise = new Promise((resolve, reject) => {
         if (typeof indexedDB === 'undefined') { reject(new Error('no-indexeddb')); return; }
-        const req = indexedDB.open(DB_NAME, 1);
+        const req = indexedDB.open(name, 1);
         req.onupgradeneeded = (e) => {
             const db = e.target.result;
             if (!db.objectStoreNames.contains(STORE)) {

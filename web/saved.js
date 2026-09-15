@@ -11,17 +11,28 @@ import { t } from './i18n.js';
 import { inlineNotice } from './states.js';
 import { evictOverCap, sortByRecency } from './gifs.js';
 import { podSyncSavedMessage, podSyncRemoveSavedMessage, podReadSavedMessages } from './pod.js';
+import { accountDbName } from './auth.js';
 
+// Base name; the live database is namespaced per authenticated account by
+// accountDbName (see auth.js), because a snapshot stores up to 500 chars of a
+// message's decrypted content and must never be read by a different account on a
+// shared device. Pre-namespacing databases map to a different name and are never
+// read once an account is signed in.
 const DB_NAME = 'proxion-saved-messages';
 const STORE = 'saved';
 export const MAX_SAVED = 500;
 
 let _dbPromise = null;
+let _openName = null;
 function _open() {
-    if (_dbPromise) return _dbPromise;
+    // Re-derive the account-bound name every open; drop the cached handle if the
+    // account changed so one account never serves another its saved snapshots.
+    const name = accountDbName(DB_NAME);
+    if (_dbPromise && _openName === name) return _dbPromise;
+    _openName = name;
     _dbPromise = new Promise((resolve, reject) => {
         if (typeof indexedDB === 'undefined') { reject(new Error('no-indexeddb')); return; }
-        const req = indexedDB.open(DB_NAME, 1);
+        const req = indexedDB.open(name, 1);
         req.onupgradeneeded = () => {
             const db = req.result;
             if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' });

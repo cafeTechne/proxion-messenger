@@ -15,6 +15,10 @@ const DB_NAME = 'proxion-pod-queue';
 const STORE = 'writes';
 let _dbPromise = null;
 
+// Cap the backlog (drop-oldest) so a long outage can't grow the queue without
+// bound. Mirrors the in-session connect queue cap in connection.js.
+const MAX_QUEUE = 200;
+
 function _open() {
     if (_dbPromise) return _dbPromise;
     _dbPromise = new Promise((resolve, reject) => {
@@ -44,13 +48,45 @@ export async function podQueueAdd(entry) {
             tx.objectStore(STORE).put({
                 message_id: entry.message_id,
                 room_id: entry.room_id,
+                // Bind the entry to the account that queued it, so a replay never
+                // writes one account's queued room message to another's pod.
+                from_webid: entry.from_webid || (entry.msg && entry.msg.from_webid) || '',
                 msg: entry.msg || {},
                 queued_at: entry.queued_at || Date.now(),
             });
             tx.oncomplete = resolve;
             tx.onerror = () => reject(tx.error);
         });
+        await _enforceCap(db);
     } catch (_) { /* best-effort */ }
+}
+
+// Trim the backlog to MAX_QUEUE, dropping the oldest (by queued_at) past the cap.
+async function _enforceCap(db) {
+    const count = await new Promise((resolve) => {
+        const tx = db.transaction(STORE, 'readonly');
+        const req = tx.objectStore(STORE).count();
+        req.onsuccess = () => resolve(req.result || 0);
+        req.onerror = () => resolve(0);
+    });
+    if (count <= MAX_QUEUE) return;
+    const rows = await new Promise((resolve) => {
+        const out = [];
+        const tx = db.transaction(STORE, 'readonly');
+        const req = tx.objectStore(STORE).openCursor();
+        req.onsuccess = (e) => { const c = e.target.result; if (c) { out.push(c.value); c.continue(); } else resolve(out); };
+        req.onerror = () => resolve(out);
+    });
+    rows.sort((a, b) => (a.queued_at || 0) - (b.queued_at || 0));
+    const doomed = rows.slice(0, rows.length - MAX_QUEUE).map((r) => r.message_id);
+    if (!doomed.length) return;
+    await new Promise((resolve) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        const os = tx.objectStore(STORE);
+        doomed.forEach((id) => os.delete(id));
+        tx.oncomplete = resolve;
+        tx.onerror = resolve;
+    });
 }
 
 export async function podQueueRemove(messageId) {
@@ -111,9 +147,14 @@ export async function podQueueClear() {
 // the first failure so a still-offline device keeps the rest of its backlog in
 // order rather than hammering the pod. Serial, never overlapping. `onFlushed(id)`
 // (optional) fires per success so the UI can clear that message's "not saved"
-// note. Returns { flushed, remaining }.
+// note. `currentWebId` (optional) account-binds the replay: an entry queued by a
+// different account is DROPPED (not written) so a replay never sends one
+// account's message to whatever pod is currently signed in. Entries with no
+// recorded from_webid (legacy, pre-binding) are treated as the current account's
+// so a same-account backlog still flushes after an upgrade. Returns
+// { flushed, remaining }.
 let _flushing = false;
-export async function podQueueFlush(writeFn, onFlushed) {
+export async function podQueueFlush(writeFn, onFlushed, currentWebId) {
     if (typeof writeFn !== 'function') return { flushed: 0, remaining: 0 };
     if (_flushing) return { flushed: 0, remaining: await podQueueCount() };
     _flushing = true;
@@ -121,6 +162,10 @@ export async function podQueueFlush(writeFn, onFlushed) {
     try {
         const rows = await podQueueList();
         for (const row of rows) {
+            if (currentWebId && row.from_webid && row.from_webid !== currentWebId) {
+                await podQueueRemove(row.message_id);   // foreign account: drop, never replay
+                continue;
+            }
             let ok = false;
             try { ok = await writeFn(row); } catch (_) { ok = false; }
             if (!ok) break;    // still failing (offline / rejected): keep the ordered backlog

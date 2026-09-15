@@ -9,9 +9,54 @@ let _cachedStorageRoot = null;
 
 const _ROOT_KEY = 'proxion_storage_root_v2';
 
+// Local browser stores that cache decrypted content (DM plaintext, saved
+// messages). Their databases are namespaced per authenticated account so one
+// account signed in on a shared device can never read another's rows, and they
+// are cleared on logout (see accountDbName + solidLogout).
+const _DM_HISTORY_DB = 'proxion-dm-history';
+const _DM_HISTORY_STORE = 'messages';
+const _SAVED_DB = 'proxion-saved-messages';
+const _SAVED_STORE = 'saved';
+
 // Reject an untrustworthy pim:storage claim on a private/loopback host (the SSRF
 // host check lives in ssrf.js so it stays dependency-free and shared with pod.js).
 const _isPrivateIp = isPrivatePodHost;
+
+// Namespace a browser-store database name to the authenticated account, the same
+// binding the persisted storage root uses (the current WebID is the account
+// identity). This is the primary defense against cross-account bleed: it works
+// even without an explicit logout, since a second account signed in on a shared
+// origin opens a different-named database and cannot read the first's rows.
+// Falls back to the bare base name when no pod account is signed in (gateway-only
+// local rooms), preserving the pre-namespacing name for that case.
+export function accountDbName(base) {
+    const webId = solidSession.info.isLoggedIn && solidSession.info.webId;
+    return webId ? `${base}::${webId}` : base;
+}
+
+// Clear one object store via its own short-lived connection. IndexedDB allows
+// concurrent connections to a database, so this clears the rows even while a
+// store module holds its own open connection (unlike deleteDatabase, which the
+// open connection would block). Best-effort: resolves on any failure.
+function _clearStore(dbName, storeName) {
+    return new Promise((resolve) => {
+        if (typeof indexedDB === 'undefined') { resolve(); return; }
+        let req;
+        try { req = indexedDB.open(dbName); } catch { resolve(); return; }
+        req.onerror = () => resolve();
+        req.onblocked = () => resolve();
+        req.onsuccess = (e) => {
+            const db = e.target.result;
+            try {
+                if (!db.objectStoreNames.contains(storeName)) { db.close(); resolve(); return; }
+                const tx = db.transaction(storeName, 'readwrite');
+                tx.objectStore(storeName).clear();
+                tx.oncomplete = () => { db.close(); resolve(); };
+                tx.onerror = () => { db.close(); resolve(); };
+            } catch { try { db.close(); } catch { /* ignore */ } resolve(); }
+        };
+    });
+}
 
 export async function initSolidAuth() {
     await solidSession.handleIncomingRedirect({
@@ -40,6 +85,11 @@ export async function solidLogin(issuer) {
 }
 
 export async function solidLogout() {
+    // Resolve the account-bound store databases BEFORE the OIDC logout: once the
+    // session is torn down the WebID is gone and accountDbName collapses to the
+    // bare base name, so the purge below would miss the signed-in account's rows.
+    const dmDb = accountDbName(_DM_HISTORY_DB);
+    const savedDb = accountDbName(_SAVED_DB);
     try {
         await solidSession.logout({ logoutType: 'app' });
     } catch (e) {
@@ -59,6 +109,11 @@ export async function solidLogout() {
         }
     } catch { /* ignore */ }
     try { await podQueueClear(); } catch { /* ignore */ }
+    // Belt-and-suspenders over the per-account naming: clear this account's local
+    // plaintext stores (decrypted DM history + saved messages) so nothing they
+    // cached lingers after logout on a shared device.
+    try { await _clearStore(dmDb, _DM_HISTORY_STORE); } catch { /* ignore */ }
+    try { await _clearStore(savedDb, _SAVED_STORE); } catch { /* ignore */ }
 }
 
 // Is `root` safe to trust as THIS WebID's storage root? Require same origin as the

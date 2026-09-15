@@ -1,6 +1,15 @@
 // dmhistory.js — local DM plaintext cache: retention cap, enable switch, clear.
 import 'fake-indexeddb/auto';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+// Control the authenticated account the store namespaces its database by, without
+// pulling in the real solid-authn bundle. accountDbName mirrors auth.js: a base
+// name when signed out, `${base}::${webId}` when signed in.
+const _h = vi.hoisted(() => ({ acct: null }));
+vi.mock('./auth.js', () => ({
+  accountDbName: (base) => (_h.acct ? `${base}::${_h.acct}` : base),
+}));
+
 import {
   dmHistorySave, dmHistoryLoad, dmHistoryClearAll,
   dmHistorySetEnabled, dmHistoryEnabled, planEviction,
@@ -9,6 +18,7 @@ import {
 
 beforeEach(async () => {
   dmHistorySetEnabled(true);
+  _h.acct = null;
   await dmHistoryClearAll();
 });
 
@@ -131,5 +141,30 @@ describe('dmHistoryClearAll', () => {
     await dmHistoryClearAll();
     expect(await dmHistoryLoad('t1')).toHaveLength(0);
     expect(await dmHistoryLoad('t2')).toHaveLength(0);
+  });
+});
+
+describe('per-account namespacing (cross-account bleed)', () => {
+  const A = 'https://a.example/profile/card#me';
+  const B = 'https://b.example/profile/card#me';
+  it('account B never reads account A cached DM plaintext', async () => {
+    _h.acct = A; await dmHistoryClearAll();
+    _h.acct = B; await dmHistoryClearAll();
+    // Account A caches a decrypted DM with a peer.
+    _h.acct = A;
+    await dmHistorySave({ message_id: 'm1', thread_id: 'peer', content: 'A secret' });
+    expect((await dmHistoryLoad('peer')).map((r) => r.content)).toEqual(['A secret']);
+    // Account B opens the SAME peer thread: it must see none of A's rows.
+    _h.acct = B;
+    expect(await dmHistoryLoad('peer')).toHaveLength(0);
+    await dmHistorySave({ message_id: 'm2', thread_id: 'peer', content: 'B note' });
+    expect((await dmHistoryLoad('peer')).map((r) => r.content)).toEqual(['B note']);
+    // Switching back to A still shows only A's data (each account is isolated).
+    _h.acct = A;
+    expect((await dmHistoryLoad('peer')).map((r) => r.content)).toEqual(['A secret']);
+    // cleanup both account databases
+    await dmHistoryClearAll();
+    _h.acct = B; await dmHistoryClearAll();
+    _h.acct = null;
   });
 });
