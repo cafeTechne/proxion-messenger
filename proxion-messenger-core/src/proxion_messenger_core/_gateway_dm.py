@@ -15,6 +15,13 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger("proxion_messenger_core.gateway")
 
+# Ceiling on one-time prekeys per upload and on the total unused pool an owner
+# may hold. The client generates ~5 at a time and the replenish threshold is 5,
+# so a few hundred is generous headroom while capping unbounded dm_prekeys growth
+# from an oversized frame (upload_prekeys is not rate-limited as a heavy command).
+MAX_ONE_TIME_PREKEYS_PER_UPLOAD = 200
+MAX_UNUSED_ONE_TIME_PREKEYS = 200
+
 
 class DmHandlerMixin:
 
@@ -732,12 +739,26 @@ class DmHandlerMixin:
         spk_priv = bundle.get("signed_prekey_priv_b64", "")
         if spk_id and spk_pub:
             self._store.save_prekey(spk_id, owner_webid, spk_pub, spk_priv, one_time=False)
-        for opk in bundle.get("one_time_prekeys", []):
+        # Cap one-time prekeys: each entry is a dm_prekeys row, and a single 4MB
+        # frame can pack tens of thousands. Truncate the per-request batch, then
+        # stop once the owner's unused pool would exceed the ceiling, so repeated
+        # uploads can't grow the table without bound.
+        one_time = bundle.get("one_time_prekeys", [])
+        if not isinstance(one_time, list):
+            one_time = []
+        _remaining = MAX_UNUSED_ONE_TIME_PREKEYS - self._store.count_unused_one_time_prekeys(owner_webid)
+        _inserted = 0
+        for opk in one_time[:MAX_ONE_TIME_PREKEYS_PER_UPLOAD]:
+            if _inserted >= _remaining:
+                break
+            if not isinstance(opk, dict):
+                continue
             opk_id = opk.get("id")
             opk_pub = opk.get("pub_b64")
             opk_priv = opk.get("priv_b64", "")
             if opk_id and opk_pub:
                 self._store.save_prekey(opk_id, owner_webid, opk_pub, opk_priv, one_time=True)
+                _inserted += 1
         await websocket.send(json.dumps({"type": "prekeys_uploaded", "owner_webid": owner_webid}))
 
     async def _handle_get_prekey_bundle(self, websocket, data: dict) -> None:
@@ -904,6 +925,12 @@ class DmHandlerMixin:
             to_device_id = entry.get("to_device_id", "")
             if not to_webid or not to_device_id:
                 continue
+            # Blocked sender: drop every envelope for this recipient — no live
+            # delivery, no queue, no offline push. Mirrors the single-DM path
+            # (_gateway_dm.py local_dm) and the relay-receive twin below, scoped
+            # per recipient owner so other targets in the fanout are unaffected.
+            if self._is_blocked_for(to_webid, from_webid):
+                continue
             if self._store:
                 self._store.record_dm_delivery(message_id, to_webid, to_device_id)
             # Deliver to the addressed DEVICE's sockets (per-account delivery hid
@@ -1019,6 +1046,10 @@ class DmHandlerMixin:
         Mirrors the plain local_dm push block — the fanout path never pushed,
         so a phone with the app closed missed multi-device DMs entirely."""
         if not self._store or not to_webid:
+            return
+        # A blocked sender is never pushed, even if a caller reaches here without
+        # gating first. Same helper/scope as the relay-receive twin.
+        if from_webid and self._is_blocked_for(to_webid, from_webid):
             return
         if from_webid and self._store.is_thread_muted(to_webid, from_webid):
             return

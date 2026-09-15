@@ -139,3 +139,81 @@ async def test_fanout_entry_count_is_capped(gateway, noauth_env):
     await gateway.process_command(ws, {"cmd": "send_dm_fanout", "message_id": "m-big", "fanout": big})
     errs = _events(ws, "error")
     assert errs and "too large" in errs[-1]["message"]
+
+
+@pytest.mark.asyncio
+async def test_fanout_blocked_sender_reaches_no_device_socket(gateway, noauth_env):
+    """A blocked sender's fanout is dropped for every device of the recipient,
+    matching the single-DM path and the relay-receive twin (F2)."""
+    account = Ed25519PrivateKey.generate()
+    device = Ed25519PrivateKey.generate()
+    account_did, device_did = _did(account), _did(device)
+    cert = issue_device_cert(account, device_did)
+
+    ws_a1 = _mock_ws()
+    ws_a2 = _mock_ws()
+    ws_b = _mock_ws()
+    await _register(gateway, ws_a1, account_did)
+    await _register(gateway, ws_a2, device_did, cert=cert)
+    await _register(gateway, ws_b, _did(Ed25519PrivateKey.generate()))
+    sender_did = gateway._client_webids[ws_b]
+
+    gateway._store.set_block(account_did, sender_did, True)
+
+    ws_a1.send.reset_mock()
+    ws_a2.send.reset_mock()
+    await gateway.process_command(ws_b, {
+        "cmd": "send_dm_fanout", "message_id": "m-blocked",
+        "from_webid": sender_did,
+        "fanout": [
+            {"to_webid": account_did, "to_device_id": account_did, "payload": {"content": "for-a1"}},
+            {"to_webid": account_did, "to_device_id": device_did, "payload": {"content": "for-a2"}},
+        ],
+    })
+
+    assert _events(ws_a1, "dm_fanout") == [], "blocked sender must not reach the primary"
+    assert _events(ws_a2, "dm_fanout") == [], "blocked sender must not reach the delegated device"
+    # No delivery rows were recorded for the dropped entries.
+    assert gateway._store.get_dm_deliveries("m-blocked") == []
+    # Sender still gets an ack (block is silent from their side), but empty.
+    ack = _events(ws_b, "send_dm_fanout_ack")
+    assert ack and ack[-1]["delivered"] == []
+
+
+@pytest.mark.asyncio
+async def test_fanout_blocked_sender_is_not_pushed(gateway, noauth_env, monkeypatch):
+    """An offline blocked recipient is not web-pushed on the fanout path (F2)."""
+    from unittest.mock import AsyncMock
+
+    recipient_did = _did(Ed25519PrivateKey.generate())
+    gateway._store.save_push_subscription(
+        "sub-1", recipient_did, "https://push.example.org/x", "p256dh", "auth",
+    )
+    gateway._vapid_private_pem = "vapid-priv"
+    gateway._vapid_subject = "mailto:t@example.org"
+    pushed = AsyncMock()
+    monkeypatch.setattr(gateway, "_push_offline_fanout", pushed)
+
+    ws_b = _mock_ws()
+    await _register(gateway, ws_b, _did(Ed25519PrivateKey.generate()))
+    sender_did = gateway._client_webids[ws_b]
+
+    # Blocked: recipient offline, no push.
+    gateway._store.set_block(recipient_did, sender_did, True)
+    await gateway.process_command(ws_b, {
+        "cmd": "send_dm_fanout", "message_id": "m-blk-push",
+        "from_webid": sender_did,
+        "fanout": [{"to_webid": recipient_did, "to_device_id": recipient_did,
+                    "payload": {"content": "hi"}}],
+    })
+    assert pushed.await_count == 0, "blocked offline recipient must not be pushed"
+
+    # Unblock: same offline recipient IS pushed.
+    gateway._store.set_block(recipient_did, sender_did, False)
+    await gateway.process_command(ws_b, {
+        "cmd": "send_dm_fanout", "message_id": "m-ok-push",
+        "from_webid": sender_did,
+        "fanout": [{"to_webid": recipient_did, "to_device_id": recipient_did,
+                    "payload": {"content": "hi"}}],
+    })
+    assert pushed.await_count == 1, "non-blocked offline recipient must be pushed"
