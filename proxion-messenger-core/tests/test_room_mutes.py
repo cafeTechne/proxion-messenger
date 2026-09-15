@@ -72,3 +72,56 @@ async def test_send_room_rejects_muted_member(gateway):
     ws.send.assert_called_once()
     sent = json.loads(ws.send.call_args[0][0])
     assert sent.get("message") == "you_are_muted"
+
+
+def _muted_room(gateway, room_id, muted_webid):
+    ws = _ws()
+    gateway._client_webids[ws] = muted_webid
+    gateway._local_rooms[room_id] = {"name": "T", "code": "x",
+                                     "members": {ws}, "creator_webid": "did:key:zOwner"}
+    gateway.clients.add(ws)
+    gateway._store.add_room_member(room_id, muted_webid)
+    gateway._store.mute_room_member(room_id, muted_webid, "did:key:zOwner")
+    return ws
+
+
+@pytest.mark.asyncio
+async def test_add_reaction_rejects_muted_member(gateway):
+    ws = _muted_room(gateway, "room-mute-react", "did:key:zMuted")
+    await gateway._handle_add_reaction(
+        ws, {"room_id": "room-mute-react", "message_id": "m1", "emoji": "\U0001F44D"})
+    sent = json.loads(ws.send.call_args[0][0])
+    assert sent.get("message") == "you_are_muted"
+
+
+@pytest.mark.asyncio
+async def test_remove_reaction_rejects_muted_member(gateway):
+    ws = _muted_room(gateway, "room-mute-unreact", "did:key:zMuted")
+    await gateway._handle_remove_reaction(
+        ws, {"room_id": "room-mute-unreact", "message_id": "m1", "emoji": "\U0001F44D"})
+    sent = json.loads(ws.send.call_args[0][0])
+    assert sent.get("message") == "you_are_muted"
+
+
+@pytest.mark.asyncio
+async def test_edit_local_message_rejects_muted_member(gateway):
+    ws = _muted_room(gateway, "room-mute-edit", "did:key:zMuted")
+    await gateway._handle_edit_local_message(
+        ws, {"thread_id": "room-mute-edit", "message_id": "m1", "content": "rewritten"})
+    sent = json.loads(ws.send.call_args[0][0])
+    assert sent.get("message") == "you_are_muted"
+
+
+@pytest.mark.asyncio
+async def test_upload_sender_key_requires_room_membership(gateway):
+    # A caller who is not a member of the room cannot write sender-key rows for it.
+    gateway._force_auth = True
+    ws = _ws()
+    gateway._client_webids[ws] = "did:key:zStranger"
+    gateway._local_rooms["room-sk"] = {"name": "T", "code": "x",
+                                       "members": set(), "creator_webid": "did:key:zOwner"}
+    gateway.clients.add(ws)
+    await gateway._handle_upload_sender_key(
+        ws, {"room_id": "room-sk", "chain_key_b64": "AAAA", "iteration": 0})
+    sent = json.loads(ws.send.call_args[0][0])
+    assert sent.get("message") == "Not a member of this room"

@@ -850,6 +850,12 @@ class RoomHandlerMixin:
             return
         if thread_id in self._local_rooms and websocket not in self._local_rooms[thread_id]["members"]:
             return
+        # A muted member must not edit their own message to inject new content
+        # that broadcasts + federates. Same gate as _handle_send_room.
+        if (thread_id in self._local_rooms and self._store
+                and self._store.is_room_muted(thread_id, caller_webid_edit)):
+            await websocket.send(json.dumps({"type": "error", "message": "you_are_muted"}))
+            return
         if caller_webid_edit and self._store:
             sender = self._store.get_message_sender(message_id)
             if sender and sender != caller_webid_edit:
@@ -1034,6 +1040,11 @@ class RoomHandlerMixin:
             if not self._actor_participates_in_dm(actor, target_thread_id):
                 await websocket.send(json.dumps({
                     "type": "error", "message": "Not a participant in target thread"}))
+                return
+            # A block does not tear down a pre-existing DM thread, so a forward is
+            # a parallel delivery a normal DM would drop. Match _handle_local_dm:
+            # a blocked actor delivers nothing into the target's DM.
+            if self._is_blocked_for(target_thread_id, actor):
                 return
             for ws in (websocket, self._any_socket(target_thread_id)):
                 if ws:
@@ -1315,6 +1326,11 @@ class RoomHandlerMixin:
         if room_id and room_id in self._local_rooms:
             if websocket not in self._local_rooms[room_id]["members"]:
                 return
+            # A muted member's reaction must not broadcast + federate. Same gate
+            # as _handle_send_room (mute does not evict the socket).
+            if sender_webid and self._store and self._store.is_room_muted(room_id, sender_webid):
+                await websocket.send(json.dumps({"type": "error", "message": "you_are_muted"}))
+                return
             if self._store:
                 saved = self._store.save_reaction(room_id, message_id, emoji, sender_webid)
                 if not saved:
@@ -1435,6 +1451,11 @@ class RoomHandlerMixin:
 
         if room_id and room_id in self._local_rooms:
             if websocket not in self._local_rooms[room_id]["members"]:
+                return
+            # A muted member's reaction removal must not broadcast + federate.
+            # Same gate as _handle_send_room.
+            if sender_webid and self._store and self._store.is_room_muted(room_id, sender_webid):
+                await websocket.send(json.dumps({"type": "error", "message": "you_are_muted"}))
                 return
             if self._store and message_id and emoji:
                 self._store.remove_reaction(room_id, message_id, emoji, sender_webid)
@@ -2689,6 +2710,11 @@ class RoomHandlerMixin:
         if room_id and room_id in self._local_rooms:
             if websocket not in self._local_rooms[room_id]["members"]:
                 return
+            # A muted member must not push "X is typing" to the whole room. Same
+            # gate as _handle_send_room.
+            _typing_sender = self._client_webids.get(websocket, "")
+            if _typing_sender and self._store and self._store.is_room_muted(room_id, _typing_sender):
+                return
             for ws in list(self._local_rooms[room_id]["members"]):
                 if ws != websocket:
                     try:
@@ -2720,6 +2746,10 @@ class RoomHandlerMixin:
                 if self._auth_enforced() and not (
                         self._actor_participates_in_dm(sender, cert_id)
                         or self._authorized_relationship(peer_webid)):
+                    return
+                # A blocked sender must not push "X is typing" (nor have it relayed
+                # cross-gateway). Match _handle_local_dm block gating (recipient's POV).
+                if self._is_blocked_for(peer_webid, sender):
                     return
                 peer_ws = self._any_socket(peer_webid)
                 if peer_ws and peer_ws != websocket:
@@ -2988,6 +3018,11 @@ class RoomHandlerMixin:
         if not sender_webid or not room_id or not chain_key_b64 or not self._store:
             await websocket.send(json.dumps({"type": "error", "message": "missing_fields"}))
             return
+        # Require room membership so an attacker cannot write save_sender_key rows
+        # for arbitrary room ids they do not belong to (unbounded DB growth).
+        if self._auth_enforced() and not self._check_room_permission(websocket, room_id):
+            await websocket.send(json.dumps({"type": "error", "message": "Not a member of this room"}))
+            return
         self._store.save_sender_key(room_id, sender_webid, chain_key_b64, iteration)
         asyncio.create_task(self._sync_sender_key_to_pod(room_id, sender_webid, chain_key_b64, iteration))
         await websocket.send(json.dumps({
@@ -3019,8 +3054,21 @@ class RoomHandlerMixin:
         if not sender_webid or not room_id or not distribution:
             await websocket.send(json.dumps({"type": "error", "message": "missing_fields"}))
             return
+        # Require room membership so this cannot be used to push sender_key_received
+        # events at arbitrary accounts for a room the caller does not belong to.
+        if self._auth_enforced() and not self._check_room_permission(websocket, room_id):
+            await websocket.send(json.dumps({"type": "error", "message": "Not a member of this room"}))
+            return
+        # Only distribute to accounts that are actually members of the room, so a
+        # member cannot inject key events at arbitrary targets.
+        _room_members = (
+            set(self._store.get_room_members(room_id))
+            if (self._auth_enforced() and self._store) else None
+        )
         delivered: list[str] = []
         for target_webid, sealed_b64 in distribution.items():
+            if _room_members is not None and target_webid not in _room_members:
+                continue
             event = json.dumps({
                 "type": "sender_key_received",
                 "room_id": room_id,
