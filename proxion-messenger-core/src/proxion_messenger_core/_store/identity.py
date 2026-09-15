@@ -516,12 +516,20 @@ class IdentityStoreMixin(object):
                 return [dict(r) for r in rows]
             except Exception:
                 return []
-    def apply_contact_verification_sync(self, record: dict) -> None:
-        """Upsert a contact verification; higher verification_version wins."""
+    def apply_contact_verification_sync(
+        self, record: dict, owner_webid: Optional[str] = None
+    ) -> None:
+        """Upsert a contact verification; higher verification_version wins.
+
+        When *owner_webid* is given the row is forced into that owner's
+        namespace: ``verified_by`` is overridden so a caller can only ever write
+        verification rows for itself and cannot forge or clobber another
+        account's records by naming a different ``verified_by`` in *record*.
+        """
         peer_webid = record.get("peer_webid", "")
         if not peer_webid:
             return
-        verified_by = record.get("verified_by", "")
+        verified_by = owner_webid if owner_webid is not None else record.get("verified_by", "")
         with self._conn() as conn:
             try:
                 existing = conn.execute(
@@ -540,7 +548,7 @@ class IdentityStoreMixin(object):
                             peer_webid,
                             record.get("safety_numbers", ""),
                             record.get("verified_at", time.time()),
-                            record.get("verified_by", ""),
+                            verified_by,
                             record.get("verified_on_device_id", ""),
                             incoming_version,
                         ),

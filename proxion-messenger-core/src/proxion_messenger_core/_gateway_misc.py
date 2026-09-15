@@ -1460,6 +1460,26 @@ class MiscHandlerMixin:
     # R17: Delivery and read receipts
     # ------------------------------------------------------------------
 
+    def _receipt_authorized(self, actor: str, message_id: str, sender_webid: str) -> bool:
+        """True when *actor* may send a delivery/read receipt for *message_id* to
+        *sender_webid*.
+
+        The receipt is bound to the message's own thread: *actor* must be a party
+        to that thread and *sender_webid* must be the thread's genuine sender.
+        Without this an authenticated client could persist a receipt for any
+        message_id and emit msg_delivered/msg_read to an arbitrary account by
+        naming it as sender_webid. Reuses _actor_participates_in_dm, the same
+        thread-identity binding read_dm/get_message rely on."""
+        if not self._store or not actor or not message_id:
+            return False
+        msg = self._store.get_message(message_id)
+        if not msg:
+            return False
+        thread_id = msg.get("thread_id")
+        if not thread_id or not self._actor_participates_in_dm(actor, thread_id):
+            return False
+        return bool(sender_webid) and sender_webid == msg.get("from_webid")
+
     async def _handle_ack_delivered(self, websocket, data: dict) -> None:
         """Client signals that a message was delivered. Persists and notifies sender."""
         from datetime import datetime, timezone
@@ -1468,6 +1488,13 @@ class MiscHandlerMixin:
         receiver_webid = self._client_webids.get(websocket, "")
         if not message_id or not receiver_webid:
             await websocket.send(json.dumps({"type": "error", "message": "message_id required"}))
+            return
+        # Refuse a receipt the caller has no standing to send. Return the normal
+        # ack shape (no distinct error) so thread membership is not leaked.
+        if self._auth_enforced() and not self._receipt_authorized(
+            receiver_webid, message_id, sender_webid
+        ):
+            await websocket.send(json.dumps({"type": "ack_delivered_ok", "message_id": message_id}))
             return
         delivered_at = datetime.now(timezone.utc).isoformat()
         if self._store:
@@ -1494,6 +1521,13 @@ class MiscHandlerMixin:
         receiver_webid = self._client_webids.get(websocket, "")
         if not message_id or not receiver_webid:
             await websocket.send(json.dumps({"type": "error", "message": "message_id required"}))
+            return
+        # Refuse a receipt the caller has no standing to send. Return the normal
+        # ack shape (no distinct error) so thread membership is not leaked.
+        if self._auth_enforced() and not self._receipt_authorized(
+            receiver_webid, message_id, sender_webid
+        ):
+            await websocket.send(json.dumps({"type": "ack_read_ok", "message_id": message_id}))
             return
         read_at = datetime.now(timezone.utc).isoformat()
         if self._store:
@@ -1955,12 +1989,25 @@ class MiscHandlerMixin:
                 "type": "peer_devices", "peer_webid": peer_webid, "devices": []
             }))
             return
+        # Only a related account may enumerate a peer's device roster; without a
+        # relationship gate any caller could harvest per-device ids and keys for
+        # any account (the account did is public). The own account resolves
+        # locally and needs no relationship. Gated on _auth_enforced() so
+        # loopback single-user dev is unaffected; the refusal returns the empty
+        # shape so peer existence is not leaked. last_seen_at is dropped: fanout
+        # needs the keys, not per-device activity.
+        caller_webid = self._client_webids.get(websocket, "")
+        if (self._auth_enforced() and peer_webid != caller_webid
+                and not self._authorized_relationship(peer_webid)):
+            await websocket.send(json.dumps({
+                "type": "peer_devices", "peer_webid": peer_webid, "devices": []
+            }))
+            return
         devices = self._store.list_devices(peer_webid)
         result = [
             {
                 "device_id": d["device_id"],
                 "device_pub_b64": d["device_pub_b64"],
-                "last_seen_at": d.get("last_seen_at"),
             }
             for d in devices
         ]
@@ -1979,12 +2026,23 @@ class MiscHandlerMixin:
                 "type": "peer_device_keys", "peer_webid": peer_webid, "devices": [],
             }))
             return
+        # Same relationship gate as get_peer_devices: only a related account (or
+        # the caller's own account) may fetch a peer's per-device x25519 keys.
+        # Gated on _auth_enforced() so loopback dev is unaffected; refusal
+        # returns the empty shape and never leaks peer existence.
+        caller_webid = self._client_webids.get(websocket, "")
+        if (self._auth_enforced() and peer_webid != caller_webid
+                and not self._authorized_relationship(peer_webid)):
+            await websocket.send(json.dumps({
+                "type": "peer_device_keys", "peer_webid": peer_webid, "devices": [],
+            }))
+            return
         devices = self._store.list_device_e2e_keys(peer_webid)
         # Cross-gateway peer: their devices aren't in OUR store — fetch the
         # roster from their gateway (signed, relationship-gated /devices) so a
         # multi-device peer gets per-device fanout across gateways too. Own
         # account and local peers never hit this (they resolve locally above).
-        if not devices and peer_webid != self._client_webids.get(websocket, ""):
+        if not devices and peer_webid != caller_webid:
             devices = await self._fetch_remote_device_keys(peer_webid)
         await websocket.send(json.dumps({
             "type": "peer_device_keys", "peer_webid": peer_webid, "devices": devices,
@@ -2010,12 +2068,19 @@ class MiscHandlerMixin:
     async def _handle_apply_contact_verification_sync(self, websocket, data: dict) -> None:
         """Upsert a contact verification record from a peer device; higher version wins."""
         record = data.get("record", {})
-        if not record or not self._store:
+        owner_webid = self._client_webids.get(websocket, "")
+        if not record or not self._store or not owner_webid:
             await websocket.send(json.dumps({
                 "type": "contact_verification_sync_ack", "ok": False
             }))
             return
-        self._store.apply_contact_verification_sync(record)
+        # Force the row into the caller's own namespace. The read side
+        # (_handle_sync_contact_verifications) already scopes to the caller;
+        # binding verified_by here stops a stranger from forging or overwriting
+        # another account's safety-number records via a client-supplied
+        # verified_by. Legitimate self-sync is unchanged: the owner's own
+        # devices register under this same account identity.
+        self._store.apply_contact_verification_sync(record, owner_webid=owner_webid)
         await websocket.send(json.dumps({
             "type": "contact_verification_sync_ack", "ok": True
         }))
