@@ -11,9 +11,25 @@ import asyncio
 import base64
 import json
 import logging
+import re as _re
 from datetime import datetime, timezone
 
 logger = logging.getLogger("proxion_messenger_core.gateway")
+
+# Client-supplied ids that get embedded verbatim in a pod resource path must be a
+# single safe path segment. Proxion mints ids as uuids, ``local-``/``file-``
+# prefixes and ``msg-``/``m-`` style ids, all of which fit this charset; ``..``,
+# ``/`` and a leading dot are refused so a crafted id cannot traverse out of its
+# container and overwrite an arbitrary resource on the operator's pod.
+_SAFE_POD_ID_RE = _re.compile(r"^[\w.-]{1,128}$")
+
+
+def _is_safe_pod_id(value) -> bool:
+    return (
+        isinstance(value, str)
+        and bool(_SAFE_POD_ID_RE.match(value))
+        and not value.startswith(".")
+    )
 
 # Ceiling on one-time prekeys per upload and on the total unused pool an owner
 # may hold. The client generates ~5 at a time and the replenish threshold is 5,
@@ -503,7 +519,20 @@ class DmHandlerMixin:
                     return
         thread_id = data.get("thread_id") or target_webid
         import uuid as _uuid_local
-        message_id = data.get("message_id") or ("local-" + _uuid_local.uuid4().hex[:12])
+        # message_id is client-supplied and is embedded verbatim in the pod
+        # write-through path (local_dms/<thread_key>/<message_id>.json). Reject a
+        # traversal id rather than coercing it, so a crafted value can't escape
+        # the container and overwrite an arbitrary resource on the operator's pod.
+        _client_mid = data.get("message_id")
+        if _client_mid:
+            if not _is_safe_pod_id(_client_mid):
+                await websocket.send(json.dumps({
+                    "type": "error", "code": "E_SCHEMA", "message": "invalid_message_id",
+                }))
+                return
+            message_id = _client_mid
+        else:
+            message_id = "local-" + _uuid_local.uuid4().hex[:12]
         sender_name = self._name_for(websocket, sender_webid)
         ts = datetime.now(timezone.utc).isoformat()
 

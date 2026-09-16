@@ -24,6 +24,19 @@ _VALID_WEBID_PREFIXES = ("http://", "https://", "did:")
 _MAX_ROOM_MEMBERS_ACL = 500
 
 
+def _safe_segment(segment: str, kind: str) -> str:
+    """Return *segment* if it is a single safe pod path component.
+
+    Belt-and-suspenders behind the resolver guard: room and message ids arrive
+    from clients, and a ``..``, ``/`` or leading dot here would let a crafted id
+    address a resource outside the intended room container.
+    """
+    s = str(segment)
+    if not s or s.startswith(".") or "/" in s or "\\" in s:
+        raise ValueError(f"unsafe {kind} path segment: {segment!r}")
+    return s
+
+
 def _sanitize_member_webids(member_webids: Optional[list], owner_webid: str) -> list:
     """Return a deduplicated, validated list of member WebIDs safe for ACL writing.
 
@@ -73,12 +86,16 @@ class PodRoomStore:
     # ------------------------------------------------------------------
 
     def _room_meta_uri(self, room_id: str) -> str:
+        room_id = _safe_segment(room_id, "room_id")
         return f"stash://pod/rooms/{room_id}/room.json"
 
     def _messages_container_uri(self, room_id: str) -> str:
+        room_id = _safe_segment(room_id, "room_id")
         return f"stash://pod/rooms/{room_id}/messages/"
 
     def _message_uri(self, room_id: str, message_id: str) -> str:
+        room_id = _safe_segment(room_id, "room_id")
+        message_id = _safe_segment(message_id, "message_id")
         return f"stash://pod/rooms/{room_id}/messages/{message_id}.json"
 
     def _rooms_container_uri(self) -> str:
@@ -106,6 +123,7 @@ class PodRoomStore:
         messages.
         """
         rooms_uri = self._rooms_container_uri()
+        room_id = _safe_segment(room_id, "room_id")
         room_uri = f"stash://pod/rooms/{room_id}/"
         messages_uri = self._messages_container_uri(room_id)
         self._put_container_create_only(rooms_uri)

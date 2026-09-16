@@ -90,6 +90,17 @@ _SCHEMA: dict[str, dict[str, tuple]] = {
     },
 }
 
+# Optional per-command id fields that must be path-safe WHEN PRESENT, because a
+# handler embeds them in a pod resource path. This backstops the handler guard
+# without making the field required (a client may omit message_id and let the
+# gateway mint one) and without changing the "ignore undeclared" rule for any
+# other command.
+_PATH_SAFE_ID_RE = _re.compile(r"^[\w.-]{1,128}$")
+_OPTIONAL_PATH_IDS: dict[str, frozenset] = {
+    "local_dm": frozenset({"message_id"}),
+    "send_dm":  frozenset({"message_id"}),
+}
+
 # Commands that mutate state and should require auth / revocation check
 MUTATING_COMMANDS: frozenset[str] = frozenset({
     "send_dm", "send_room", "local_dm", "edit_message", "send_file",
@@ -165,3 +176,14 @@ def validate_command_payload(cmd: str, data: dict) -> None:
                 )
         if validator is not None and not validator(value):
             raise SchemaError(f"{cmd}.{field}: invalid value")
+
+    # Optional path-safe id fields: reject a traversal id before a handler can
+    # embed it in a pod resource path (see _OPTIONAL_PATH_IDS).
+    for _idf in _OPTIONAL_PATH_IDS.get(cmd, ()):  # noqa: B007
+        _idv = data.get(_idf)
+        if _idv in (None, ""):
+            continue
+        if (not isinstance(_idv, str)
+                or not _PATH_SAFE_ID_RE.match(_idv)
+                or _idv.startswith(".")):
+            raise SchemaError(f"{cmd}.{_idf}: unsafe id")

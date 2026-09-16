@@ -91,7 +91,17 @@ class SolidResolver:
             return self._base
 
         path = without_scheme[slash + 1:]  # everything after owner/
-        return urljoin(self._base, path) if path else self._base
+        if not path:
+            return self._base
+        # Path-traversal guard. urljoin normalizes ``../`` segments, so a crafted
+        # path such as ``../../rooms/victim/evil`` would otherwise resolve to a
+        # resource outside the intended container and let a client write anywhere
+        # on the pod with the operator's credentials. Reject any ``..`` segment
+        # and confirm the resolved URL stays under the pod base. Fails closed.
+        resolved = urljoin(self._base, path)
+        if ".." in path.split("/") or not resolved.startswith(self._base):
+            raise SolidResolverError(f"path escapes pod base: {stash_uri!r}")
+        return resolved
 
     def resolve_back(self, http_url: str, owner: str = "pod") -> str:
         """Invert resolve(): convert an absolute HTTP URL back to a stash:// URI.
