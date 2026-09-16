@@ -283,8 +283,31 @@ class DpopSolidClient(SolidClient):
         self._credentials = credentials
         self._dpop_nonce: Optional[str] = None
 
+    def _same_origin_as_pod(self, url: str) -> bool:
+        """Return True if *url* is on the same origin as the owner's own pod.
+
+        The DPoP token + proof authenticate the owner to their own pod only. A
+        malicious invite could route a read through the library at a foreign
+        host; attaching the token there would leak the owner's credentials
+        cross-origin. Only same-origin requests get the token.
+        """
+        from urllib.parse import urlparse
+        pod_base = getattr(self._resolver, "pod_base_url", None)
+        if not isinstance(pod_base, str) or not isinstance(url, str):
+            # Cannot establish the pod origin: fail closed (withhold the token).
+            return False
+        pod = urlparse(pod_base)
+        target = urlparse(url)
+        return bool(pod.netloc) and target.scheme == pod.scheme and target.netloc == pod.netloc
+
     def _dynamic_headers(self, method: str, url: str) -> dict:
-        """Return Authorization, DPoP, and User-Agent headers for this request."""
+        """Return Authorization, DPoP, and User-Agent headers for this request.
+
+        For a foreign-origin URL the owner's pod token and proof are withheld so
+        credentials never leak off the pod; the request is sent unauthenticated.
+        """
+        if not self._same_origin_as_pod(url):
+            return {"User-Agent": "Proxion/1.0"}
         token = self._credentials.get_token()
         proof = make_dpop_proof_es256(
             self._credentials._dpop_ec_key, method, url,

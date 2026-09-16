@@ -194,3 +194,43 @@ class TestDpopSolidClient:
             assert "Authorization" in request.headers
             assert request.headers["Authorization"].startswith("DPoP ")
             assert "DPoP" in request.headers
+
+    def test_dynamic_headers_attach_token_for_same_origin(self, resolver, creds):
+        """A same-origin pod URL gets the Authorization + DPoP proof."""
+        import time
+        creds._cached_tokens["pod_rw"] = "mytoken"
+        creds._token_expiries["pod_rw"] = time.time() + 3600
+        creds._token_issued_at["pod_rw"] = time.time()
+
+        client = DpopSolidClient(resolver, creds)
+        headers = client._dynamic_headers("GET", "http://localhost:3001/alice/foo")
+
+        assert headers["Authorization"] == "DPoP mytoken"
+        assert "DPoP" in headers
+
+    def test_dynamic_headers_withhold_token_for_foreign_origin(self, resolver, creds):
+        """A foreign-origin URL must NOT receive the owner's pod token or proof."""
+        import time
+        creds._cached_tokens["pod_rw"] = "mytoken"
+        creds._token_expiries["pod_rw"] = time.time() + 3600
+        creds._token_issued_at["pod_rw"] = time.time()
+
+        client = DpopSolidClient(resolver, creds)
+        headers = client._dynamic_headers("GET", "http://evil.example/alice/foo")
+
+        assert "Authorization" not in headers
+        assert "DPoP" not in headers
+        assert headers["User-Agent"] == "Proxion/1.0"
+
+    def test_dynamic_headers_withhold_token_for_same_host_different_scheme(self, resolver, creds):
+        """A scheme downgrade (https->http) is treated as a foreign origin."""
+        import time
+        creds._cached_tokens["pod_rw"] = "mytoken"
+        creds._token_expiries["pod_rw"] = time.time() + 3600
+        creds._token_issued_at["pod_rw"] = time.time()
+
+        client = DpopSolidClient(SolidResolver("https://localhost:3001/alice/"), creds)
+        headers = client._dynamic_headers("GET", "http://localhost:3001/alice/foo")
+
+        assert "Authorization" not in headers
+        assert "DPoP" not in headers

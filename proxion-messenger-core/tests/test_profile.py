@@ -1,5 +1,7 @@
 """Tests for WebID profile management."""
 
+import re
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
@@ -122,3 +124,84 @@ async def test_update_profile_partial_fields():
     assert "Bob" in call_args[1]["content"]
     # Other fields should not be in the document
     assert "foaf:img" not in call_args[1]["content"] or "foaf:img <" not in call_args[1]["content"]
+
+
+def test_escape_turtle_literal_neutralises_breakout():
+    """The literal-escape helper defeats an attempt to terminate the literal."""
+    from proxion_messenger_core.profile import _escape_turtle_literal
+
+    attack = '" . <https://evil.example/#e> <http://x/p> "pwned'
+    escaped = _escape_turtle_literal(attack)
+    # No unescaped quote survives, so the literal cannot be closed early.
+    assert re.search(r'(^|[^\\])"', escaped) is None
+    # Backslash, newline, carriage-return and tab become two-character escapes.
+    assert _escape_turtle_literal("a\\b") == "a\\\\b"
+    assert _escape_turtle_literal("a\nb") == "a\\nb"
+    assert _escape_turtle_literal("a\r\nb") == "a\\r\\nb"
+    assert _escape_turtle_literal("a\tb") == "a\\tb"
+    # Remaining control characters are stripped rather than emitted raw.
+    assert _escape_turtle_literal("a\x00b\x07c") == "abc"
+
+
+@pytest.mark.asyncio
+async def test_update_profile_escapes_literal_injection():
+    """A quote/newline in name or bio must not close the literal and inject triples."""
+    webid = "https://alice.example/profile#me"
+    mock_client = AsyncMock()
+    mock_response = AsyncMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_client.put.return_value = mock_response
+
+    attack = '" . <https://evil.example/#e> a foaf:Person ; foaf:name "pwned'
+    await update_profile(
+        mock_client,
+        webid,
+        name=attack,
+        bio="line1\nline2",
+    )
+
+    content = mock_client.put.call_args[1]["content"]
+    # The attack's leading quote is escaped, so the foaf:name literal is not
+    # terminated early and the injected statements never become real triples.
+    assert 'foaf:name "\\"' in content
+    # Newline in the bio is escaped, not emitted raw inside the literal.
+    assert "line1\\nline2" in content
+    assert '"line1\nline2"' not in content
+
+    # Parse the emitted document: the injected subject must not exist as a real
+    # node, and the whole attack payload must survive only as the name literal.
+    import rdflib
+    g = rdflib.Graph()
+    g.parse(data=content, format="turtle")
+    evil = rdflib.URIRef("https://evil.example/#e")
+    assert (evil, None, None) not in g
+    assert (None, None, evil) not in g
+    name_obj = g.value(rdflib.URIRef(webid), rdflib.URIRef("http://xmlns.com/foaf/0.1/name"))
+    assert str(name_obj) == attack
+
+
+@pytest.mark.asyncio
+async def test_update_profile_rejects_unsafe_webid():
+    """A webid with characters unsafe for a Turtle IRI is rejected, nothing written."""
+    mock_client = AsyncMock()
+    with pytest.raises(ValueError):
+        await update_profile(
+            mock_client,
+            'https://alice.example/#me> a foaf:Person . <https://evil.example/#e',
+            name="Alice",
+        )
+    mock_client.put.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_update_profile_rejects_unsafe_avatar_url():
+    """An avatar_url with characters unsafe for a Turtle IRI is rejected."""
+    webid = "https://alice.example/profile#me"
+    mock_client = AsyncMock()
+    with pytest.raises(ValueError):
+        await update_profile(
+            mock_client,
+            webid,
+            avatar_url="https://alice.example/a.jpg> . <https://evil.example/#e",
+        )
+    mock_client.put.assert_not_called()

@@ -12,6 +12,28 @@ from typing import Optional
 import re
 
 
+# Control characters that are illegal raw inside a Turtle literal (0x00-0x1f, 0x7f),
+# minus tab/newline/carriage-return which are turned into two-character escapes first.
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _escape_turtle_literal(value: str) -> str:
+    """Escape a string for safe inclusion inside a ``"..."`` Turtle literal.
+
+    Backslash, double-quote, newline, carriage-return and tab become their
+    two-character escapes; any remaining control character is stripped. This
+    prevents a name/bio from terminating the literal and injecting triples.
+    """
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
+    return _CONTROL_CHARS.sub("", escaped)
+
+
 @dataclass
 class WebIdProfile:
     """A WebID profile document with metadata."""
@@ -101,9 +123,19 @@ async def update_profile(
     
     Raises
     ------
+    ValueError
+        If ``webid`` or ``avatar_url`` contains characters unsafe for Turtle IRIs.
     httpx.HTTPStatusError
         If the PUT request returns a non-2xx status code.
     """
+    # Validate the IRIs and escape the string literals before interpolation so a
+    # hostile name/bio/webid/avatar_url cannot inject triples into the profile.
+    from .solid_client import _assert_safe_webid
+
+    _assert_safe_webid(webid)
+    if avatar_url:
+        _assert_safe_webid(avatar_url)
+
     # Build Turtle document from non-None fields
     turtle_lines = [
         "@prefix foaf: <http://xmlns.com/foaf/0.1/> .",
@@ -111,14 +143,14 @@ async def update_profile(
         "",
         f"<{webid}> a foaf:Person ;",
     ]
-    
+
     fields = []
     if name:
-        fields.append(f'  foaf:name "{name}" ;')
+        fields.append(f'  foaf:name "{_escape_turtle_literal(name)}" ;')
     if avatar_url:
         fields.append(f'  foaf:img <{avatar_url}> ;')
     if bio:
-        fields.append(f'  foaf:bio "{bio}" ;')
+        fields.append(f'  foaf:bio "{_escape_turtle_literal(bio)}" ;')
     
     if fields:
         turtle_lines.extend(fields[:-1])

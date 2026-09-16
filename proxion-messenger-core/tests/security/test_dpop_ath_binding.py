@@ -108,6 +108,9 @@ def test_dpop_solid_client_injects_ath():
     creds.get_token.return_value = fake_token
 
     resolver = MagicMock(spec=SolidResolver)
+    # The token+proof are attached only for same-origin pod requests, so the
+    # resolver must report the pod origin the request targets.
+    resolver.pod_base_url = "https://pod.example.com"
     client = DpopSolidClient(resolver, creds)
 
     headers = client._dynamic_headers("GET", "https://pod.example.com/resource")
