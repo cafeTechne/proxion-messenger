@@ -227,6 +227,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         self._tunnel = None
         self._tunnel_prev_public_url = None
         self._tunnel_prev_force_auth = False
+        # Serializes tunnel start/stop so the two transitions are mutually
+        # exclusive: concurrent starts cannot both spawn cloudflared, and a stop
+        # cannot interleave a start's auth-force / public_url mutations (F3).
+        self._tunnel_lock = asyncio.Lock()
 
         # Disappearing messages: room_id -> ms (0 = disabled) — must init before _hydrate_from_store
         self._room_disappear_timers: dict = {}
@@ -2028,6 +2032,44 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         when auth is enforced; loopback single-user dev skips the gate entirely."""
         return (self._is_trusted_origin(origin_header, http_port, peer_ip)
                 or self._has_authenticated_client_ip(peer_ip))
+
+    def _serialize_tunnel(self) -> "asyncio.Lock":
+        """Lock guarding tunnel start/stop transitions.
+
+        Lazily created so a bare ProxionGateway (tests built with __new__) still
+        works even though it skipped __init__."""
+        lock = getattr(self, "_tunnel_lock", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._tunnel_lock = lock
+        return lock
+
+    def _is_tunnel_owner(self, websocket) -> bool:
+        """Whether *websocket* may control or read the public tunnel.
+
+        Opening, closing, or reading the tunnel exposes or reveals the whole
+        gateway's public reach, so it is owner-only. The owner is proven one of
+        two ways:
+
+        * its registered identity is the gateway's own account DID (the
+          meaningful check whenever auth is enforced, which a live tunnel forces
+          on, so it holds even over the tunnel where cloudflared collapses
+          peer_ip to loopback), or
+        * it is a genuine loopback connection while auth is NOT enforced
+          (loopback single-user dev, where the browser registers under its own
+          session DID, not the account DID). A live tunnel forces auth on, so
+          this branch never trusts a remote caller arriving over the tunnel."""
+        try:
+            owner_did = self._own_gateway_did()
+        except Exception:
+            owner_did = ""
+        caller = self._client_webids.get(websocket, "")
+        if owner_did and caller == owner_did:
+            return True
+        if not self._auth_enforced():
+            ip = (self._session_meta.get(websocket) or {}).get("ip_addr", "")
+            return ip in ("", "127.0.0.1", "::1", "localhost", "unknown")
+        return False
 
     def _tunnel_active(self) -> bool:
         """Whether the app-managed public tunnel (cloudflared) is live.

@@ -204,32 +204,237 @@ def test_force_auth_makes_auth_enforced_true(monkeypatch):
 def test_tunnel_control_is_owner_only():
     """R98: opening/closing the public tunnel exposes/retracts the gateway, so a
     party reaching a live tunnel (who can register a self-claimed did:key) must
-    not be able to control it. tunnel_status stays open (benign)."""
+    not be able to control it. tunnel_status is owner-gated too (F7); the handler
+    enforces owner/loopback for all three."""
     from proxion_messenger_core.security_policy import _OWNER_ONLY_COMMANDS
     assert "start_tunnel" in _OWNER_ONLY_COMMANDS
     assert "stop_tunnel" in _OWNER_ONLY_COMMANDS
+
+
+# ── F7: handler-level owner gate for all three tunnel commands ──────────────
+def _owner_gw(*, force_auth: bool, owner_registered: bool, ip: str = "127.0.0.1"):
+    """A bare gateway wired just enough for _is_tunnel_owner and the handlers.
+
+    owner_registered=True registers the caller WS under the gateway's own account
+    DID (the owner); False registers a self-claimed non-owner DID (a peer)."""
+    import json as _json
+    from proxion_messenger_core.gateway import ProxionGateway
+    from proxion_messenger_core.persist import AgentState
+    from proxion_messenger_core.didkey import pub_key_to_did
+
+    gw = ProxionGateway.__new__(ProxionGateway)
+    gw.agent = AgentState.generate()
+    owner_did = pub_key_to_did(gw.agent.identity_pub_bytes)
+
+    class _Cfg:
+        host = "127.0.0.1"
+        public_url = None
+        http_port = 8080
+    gw.config = _Cfg()
+    gw._force_auth = force_auth
+    gw._tunnel = None
+    gw._tunnel_prev_public_url = None
+    gw._tunnel_prev_force_auth = False
+
+    class _WS:
+        def __init__(self):
+            self.sent = []
+        async def send(self, m):
+            self.sent.append(_json.loads(m))
+    ws = _WS()
+    caller_did = owner_did if owner_registered else (
+        "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRVjqxHt8vDgp")
+    gw._client_webids = {ws: caller_did}
+    gw._session_meta = {ws: {"ip_addr": ip}}
+    return gw, ws, owner_did
+
+
+@pytest.mark.asyncio
+async def test_tunnel_status_refused_for_non_owner_when_auth_enforced():
+    """A registered non-owner (e.g. a peer over the tunnel, where auth is forced
+    on) may not read the tunnel state/URL."""
+    gw, ws, _ = _owner_gw(force_auth=True, owner_registered=False)
+    await gw._handle_tunnel_status(ws, {})
+    assert ws.sent and ws.sent[-1]["type"] == "error"
+    assert ws.sent[-1]["message"] == "gateway_owner_only"
+
+
+@pytest.mark.asyncio
+async def test_stop_tunnel_refused_for_non_owner_when_auth_enforced():
+    gw, ws, _ = _owner_gw(force_auth=True, owner_registered=False)
+    gw._tunnel = _mgr([b"x"])  # pretend one is up; must NOT be torn down
+    await gw._handle_stop_tunnel(ws, {})
+    assert ws.sent and ws.sent[-1]["type"] == "error"
+    assert ws.sent[-1]["message"] == "gateway_owner_only"
+    assert gw._tunnel is not None  # non-owner did not tear it down
+
+
+@pytest.mark.asyncio
+async def test_start_tunnel_refused_for_non_owner_when_auth_enforced():
+    gw, ws, _ = _owner_gw(force_auth=True, owner_registered=False)
+    await gw._handle_start_tunnel(ws, {})
+    assert ws.sent and ws.sent[-1]["type"] == "error"
+    assert ws.sent[-1]["message"] == "gateway_owner_only"
+
+
+@pytest.mark.asyncio
+async def test_tunnel_status_allowed_for_owner():
+    gw, ws, _ = _owner_gw(force_auth=True, owner_registered=True)
+    await gw._handle_tunnel_status(ws, {})
+    assert ws.sent and ws.sent[-1]["type"] == "tunnel_status"
+
+
+@pytest.mark.asyncio
+async def test_tunnel_status_allowed_on_loopback_dev_non_owner_did(monkeypatch):
+    """Loopback single-user dev: auth not enforced, the browser registers its own
+    session DID (not the account DID), and it must still read tunnel state."""
+    monkeypatch.delenv("PROXION_REQUIRE_AUTH", raising=False)
+    gw, ws, _ = _owner_gw(force_auth=False, owner_registered=False, ip="127.0.0.1")
+    await gw._handle_tunnel_status(ws, {})
+    assert ws.sent and ws.sent[-1]["type"] == "tunnel_status"
 
 
 @pytest.mark.asyncio
 async def test_cold_stop_tunnel_does_not_wipe_configured_public_url():
     """R98: stop_tunnel with no active tunnel must not clobber a configured
     PROXION_PUBLIC_URL (or force_auth) with the init-default None/False."""
-    from proxion_messenger_core.gateway import ProxionGateway
-    gw = ProxionGateway.__new__(ProxionGateway)
-
-    class _Cfg:
-        public_url = "https://my.configured.example"
-    gw.config = _Cfg()
+    gw, ws, _ = _owner_gw(force_auth=True, owner_registered=True)
+    gw.config.public_url = "https://my.configured.example"
     gw._tunnel = None
     gw._tunnel_prev_public_url = None          # never started a tunnel
-    gw._force_auth = True                        # e.g. explicitly required
     gw._tunnel_prev_force_auth = False
 
-    sent = []
-    class _WS:
-        async def send(self, m): sent.append(m)
-
-    await gw._handle_stop_tunnel(_WS(), {})
+    await gw._handle_stop_tunnel(ws, {})
     assert gw.config.public_url == "https://my.configured.example"  # untouched
     assert gw._force_auth is True                                    # untouched
-    assert any("stopped" in m for m in sent)
+    assert any(m.get("state") == "stopped" for m in ws.sent)
+
+
+# ── F3: concurrent-start race + failed-start invariant ──────────────────────
+@pytest.mark.asyncio
+async def test_concurrent_start_rejects_second_no_second_cloudflared(monkeypatch):
+    """A second start_tunnel arriving while the first is still 'starting' must be
+    rejected: no second cloudflared, no state corruption. Simulated with a slow
+    TunnelManager.start held open on an event."""
+    import proxion_messenger_core.tunnel as tunnelmod
+    monkeypatch.delenv("PROXION_REQUIRE_AUTH", raising=False)
+    gw, ws1, owner_did = _owner_gw(force_auth=False, owner_registered=True)
+    ws2 = type(ws1)()
+    gw._client_webids[ws2] = owner_did
+    gw._session_meta[ws2] = {"ip_addr": "127.0.0.1"}
+
+    starts = {"count": 0}
+    release = asyncio.Event()
+
+    class _SlowMgr:
+        def __init__(self):
+            self._state = "stopped"; self._url = None; self._error = None
+        def status(self):
+            return {"state": self._state, "url": self._url, "error": self._error}
+        async def start(self, port, timeout=30.0):
+            starts["count"] += 1
+            self._state = "starting"
+            await release.wait()
+            self._state = "running"
+            self._url = "https://slow-1.trycloudflare.com"
+            return self.status()
+        async def stop(self):
+            self._state = "stopped"; self._url = None
+
+    monkeypatch.setattr(tunnelmod, "TunnelManager", _SlowMgr)
+    monkeypatch.setattr(tunnelmod, "find_cloudflared", lambda: "/usr/bin/cloudflared")
+    monkeypatch.setattr(gw, "_ws_public_url", lambda: "wss://slow-1.trycloudflare.com")
+    monkeypatch.setattr(gw, "_proxion_address", lambda: "addr")
+
+    task_a = asyncio.create_task(gw._handle_start_tunnel(ws1, {}))
+    # Let A reach the 'starting' state (owns _tunnel, suspended inside start()).
+    for _ in range(100):
+        await asyncio.sleep(0)
+        if gw._tunnel is not None and gw._tunnel.status()["state"] == "starting":
+            break
+    assert gw._tunnel is not None and gw._tunnel.status()["state"] == "starting"
+
+    # B starts concurrently — rejected by the 'starting' re-entrancy check.
+    await gw._handle_start_tunnel(ws2, {})
+    assert starts["count"] == 1                       # no second cloudflared
+    assert ws2.sent[-1]["type"] == "tunnel_status"
+    assert ws2.sent[-1]["state"] == "starting"
+
+    release.set()
+    await task_a
+    assert gw._tunnel.status()["state"] == "running"
+    assert gw._force_auth is True                     # auth stays forced on
+    assert starts["count"] == 1                       # still only one
+    assert ws1.sent[-1]["type"] == "tunnel_ready"
+
+
+@pytest.mark.asyncio
+async def test_failed_start_never_leaves_tunnel_active_with_auth_off(monkeypatch):
+    """A failed start rolls _force_auth back and clears _tunnel, so there is never
+    a live tunnel while auth is off (the F3 exposed-without-auth class)."""
+    import proxion_messenger_core.tunnel as tunnelmod
+    monkeypatch.delenv("PROXION_REQUIRE_AUTH", raising=False)
+    gw, ws, _ = _owner_gw(force_auth=False, owner_registered=True)
+
+    class _FailMgr:
+        def __init__(self):
+            self._state = "stopped"; self._url = None; self._error = None
+            self.stopped = False
+        def status(self):
+            return {"state": self._state, "url": self._url, "error": self._error}
+        async def start(self, port, timeout=30.0):
+            self._state = "failed"; self._error = "boom"
+            return self.status()
+        async def stop(self):
+            self.stopped = True; self._state = "stopped"
+
+    monkeypatch.setattr(tunnelmod, "TunnelManager", _FailMgr)
+    monkeypatch.setattr(tunnelmod, "find_cloudflared", lambda: "/usr/bin/cloudflared")
+
+    await gw._handle_start_tunnel(ws, {})
+    assert gw._tunnel is None                          # cleared
+    assert gw._force_auth is False                     # restored to prior
+    # The invariant: never a live tunnel while auth is off.
+    assert not (gw._tunnel is not None and gw._force_auth is False)
+    assert ws.sent[-1]["type"] == "tunnel_status"
+    assert ws.sent[-1]["state"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_solid_webhook_is_rate_limited(tmp_path):
+    """F13: /solid-webhook/{token} caps per-IP requests like /webhook/ does."""
+    import socket as _sock
+    from proxion_messenger_core.gateway import ProxionGateway, GatewayConfig
+    from proxion_messenger_core.persist import AgentState
+    from proxion_messenger_core.readstate import ReadState
+    from gwharness import start_gateway as _serve_gw
+
+    def _free():
+        with _sock.socket() as s:
+            s.bind(("127.0.0.1", 0)); return s.getsockname()[1]
+
+    ws_port, http_port = _free(), _free()
+    cfg = GatewayConfig(host="127.0.0.1", port=ws_port, http_port=http_port,
+                        public_url=f"ws://127.0.0.1:{ws_port}",
+                        db_path=str(tmp_path / "gw.db"))
+    gw = ProxionGateway(agent=AgentState.generate(), dm_clients={},
+                        room_memberships={}, config=cfg, read_state=ReadState())
+    handle = _serve_gw(gw, ws_port, http_port)
+    assert handle.ready.wait(timeout=5)
+
+    async def _post():
+        reader, writer = await asyncio.open_connection("127.0.0.1", handle.http_port)
+        writer.write(b"POST /solid-webhook/sometoken HTTP/1.0\r\nHost: 127.0.0.1\r\n"
+                     b"Content-Length: 0\r\n\r\n")
+        await writer.drain()
+        resp = await asyncio.wait_for(reader.read(4096), timeout=5.0)
+        writer.close()
+        return resp
+
+    saw_429 = False
+    for _ in range(70):                     # webhook limit is 60/min
+        resp = await _post()
+        if b"429" in resp:
+            saw_429 = True
+            break
+    assert saw_429, "solid-webhook was not rate limited after >60 requests"

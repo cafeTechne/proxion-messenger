@@ -120,6 +120,14 @@ def find_cloudflared() -> Optional[str]:
             )
 
     # 3. PATH: a cloudflared the user installed themselves.
+    #    Tradeoff (F15): when no pin is available for this host (a dev/non-frozen
+    #    checkout, or a macOS build whose .tgz asset hash is not the binary hash)
+    #    there is nothing to verify against, so a PATH binary runs unverified.
+    #    This only affects layouts that did not bundle cloudflared; shipped frozen
+    #    builds always prefer the immutable _MEIPASS copy in step 1 and never
+    #    reach here. Running the user's own installed cloudflared is the expected
+    #    behavior for those layouts, so it is used but logged as unverified rather
+    #    than silently trusted.
     which = shutil.which("cloudflared")
     if which:
         if expected and _sha256_file(which) == expected:

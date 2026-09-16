@@ -193,8 +193,16 @@ class MiscHandlerMixin:
         await websocket.send(json.dumps({"type": "blocks", "webids": webids}))
 
     async def _handle_tunnel_status(self, websocket, data: dict) -> None:
-        """Report the public-tunnel state so the client can offer / reflect it."""
+        """Report the public-tunnel state so the client can offer / reflect it.
+
+        Owner-only (F7): the state and URL reveal the gateway's public reach, so
+        a remote peer reaching a live tunnel (who can register a self-claimed
+        did:key) must not be able to read it."""
         from .tunnel import find_cloudflared
+        if not self._is_tunnel_owner(websocket):
+            await websocket.send(json.dumps({
+                "type": "error", "code": "E_FORBIDDEN", "message": "gateway_owner_only"}))
+            return
         if self._tunnel is not None:
             st = self._tunnel.status()
         else:
@@ -208,40 +216,78 @@ class MiscHandlerMixin:
         BEFORE the tunnel becomes reachable, because cloudflared forwards from
         localhost and the loopback default would otherwise skip auth."""
         from .tunnel import TunnelManager, find_cloudflared
+        # Owner-only (F7): a party reaching a live tunnel can register a
+        # self-claimed did:key but must not be able to spin a public ingress.
+        if not self._is_tunnel_owner(websocket):
+            await websocket.send(json.dumps({
+                "type": "error", "code": "E_FORBIDDEN", "message": "gateway_owner_only"}))
+            return
         caller = self._client_webids.get(websocket, "")
         if not caller:
             await websocket.send(json.dumps({"type": "error", "message": "not_registered"}))
             return
-        if self._tunnel is not None and self._tunnel.status().get("state") == "running":
-            st = self._tunnel.status()
-            await websocket.send(json.dumps({
-                "type": "tunnel_ready", "url": st["url"],
-                "ws_url": self._ws_public_url(), "address": self._proxion_address()}))
+        # A tunnel already running OR still starting is busy: a second concurrent
+        # start must not spawn another cloudflared (F3). Treating "starting" as
+        # busy rejects the fast-path racer; the lock below covers the narrow
+        # window before self._tunnel is set.
+        if self._tunnel is not None and self._tunnel.status().get("state") in ("running", "starting"):
+            await self._reply_tunnel_busy(websocket)
             return
         if not find_cloudflared():
             await websocket.send(json.dumps({
                 "type": "tunnel_status", "state": "absent", "url": None,
                 "install_hint": "Install cloudflared to connect a phone."}))
             return
-        # Force auth on and snapshot prior state BEFORE the tunnel goes live.
-        self._tunnel_prev_force_auth = self._force_auth
-        self._tunnel_prev_public_url = self.config.public_url
-        self._force_auth = True
-        self._tunnel = TunnelManager()
-        port = self.config.http_port or 8080
-        st = await self._tunnel.start(port)
+        # Serialize the whole start transition so two concurrent starts cannot
+        # interleave inside TunnelManager.start (F3). At no point may a tunnel be
+        # forwarding while _force_auth is False.
+        async with self._serialize_tunnel():
+            # Re-check under the lock: another start may have won the race between
+            # the pre-check above and acquiring the lock.
+            if self._tunnel is not None and self._tunnel.status().get("state") in ("running", "starting"):
+                await self._reply_tunnel_busy(websocket)
+                return
+            # Snapshot THIS call's own prior state in locals (not the shared
+            # _tunnel_prev_* attrs) so an overlapping cycle cannot corrupt the
+            # restore. Force auth on BEFORE the tunnel goes live.
+            prev_force_auth = self._force_auth
+            prev_public_url = self.config.public_url
+            self._force_auth = True
+            mgr = TunnelManager()
+            self._tunnel = mgr
+            # Record for stop_tunnel's restore now that this call owns the tunnel.
+            self._tunnel_prev_force_auth = prev_force_auth
+            self._tunnel_prev_public_url = prev_public_url
+            port = self.config.http_port or 8080
+            st = await mgr.start(port)
+            if st.get("state") == "running":
+                self.config.public_url = st["url"]
+                logger.info("Public tunnel up at %s (auth forced on)", st["url"])
+                await websocket.send(json.dumps({
+                    "type": "tunnel_ready", "url": st["url"],
+                    "ws_url": self._ws_public_url(), "address": self._proxion_address()}))
+            else:
+                # Failed start: roll back the forced auth + public_url so we never
+                # leave auth forced with nothing exposed, but only if THIS call
+                # still owns the tunnel (never null one a later start took over).
+                # Kill the cloudflared this call spawned so it is not orphaned.
+                if self._tunnel is mgr:
+                    self._force_auth = prev_force_auth
+                    self.config.public_url = prev_public_url
+                    self._tunnel = None
+                await mgr.stop()
+                await websocket.send(json.dumps({"type": "tunnel_status", **st}))
+
+    async def _reply_tunnel_busy(self, websocket) -> None:
+        """Answer a start_tunnel that arrived while a tunnel is already up or
+        coming up: hand back the ready URL when running, else the current
+        (starting) status. Never spawns a second cloudflared."""
+        st = self._tunnel.status()
         if st.get("state") == "running":
-            self.config.public_url = st["url"]
-            logger.info("Public tunnel up at %s (auth forced on)", st["url"])
             await websocket.send(json.dumps({
                 "type": "tunnel_ready", "url": st["url"],
                 "ws_url": self._ws_public_url(), "address": self._proxion_address()}))
         else:
-            # Tunnel never came up: roll back the forced auth + public_url so we
-            # do not leave auth forced with nothing exposed.
-            self._force_auth = self._tunnel_prev_force_auth
-            self.config.public_url = self._tunnel_prev_public_url
-            self._tunnel = None
             await websocket.send(json.dumps({"type": "tunnel_status", **st}))
 
     async def _handle_stop_tunnel(self, websocket, data: dict) -> None:
@@ -249,13 +295,24 @@ class MiscHandlerMixin:
 
         Only restores when a tunnel was actually active: otherwise a cold
         stop_tunnel would clobber a legitimately configured PROXION_PUBLIC_URL
-        (and force_auth) with the init-default None/False."""
-        if self._tunnel is not None:
-            await self._tunnel.stop()
-            self._tunnel = None
-            self.config.public_url = self._tunnel_prev_public_url
-            self._force_auth = self._tunnel_prev_force_auth
-            logger.info("Public tunnel stopped; auth/public_url restored")
+        (and force_auth) with the init-default None/False.
+
+        Owner-only (F7): a remote peer over the tunnel/federation must not be
+        able to tear it down (DoS)."""
+        if not self._is_tunnel_owner(websocket):
+            await websocket.send(json.dumps({
+                "type": "error", "code": "E_FORBIDDEN", "message": "gateway_owner_only"}))
+            return
+        # Serialize against start_tunnel so a stop cannot interleave a start's
+        # auth-force / public_url mutations (F3).
+        async with self._serialize_tunnel():
+            if self._tunnel is not None:
+                mgr = self._tunnel
+                self._tunnel = None
+                await mgr.stop()
+                self.config.public_url = self._tunnel_prev_public_url
+                self._force_auth = self._tunnel_prev_force_auth
+                logger.info("Public tunnel stopped; auth/public_url restored")
         await websocket.send(json.dumps({"type": "tunnel_status", "state": "stopped",
                                          "url": None, "error": None}))
 

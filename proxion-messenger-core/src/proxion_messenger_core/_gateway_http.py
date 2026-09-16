@@ -2650,6 +2650,13 @@ class HttpEndpointsMixin:
                 # treat the body as an opaque nudge, verify the token, and relay a
                 # content-free push. Always 204 so we never leak token validity.
                 if method == "POST" and path.startswith("/solid-webhook/"):
+                    # Per-IP rate limit (F13): the token is sound (HMAC +
+                    # compare_digest) but the endpoint is otherwise open, so cap
+                    # the fire-and-forget dispatch. Reuses the "webhook" group.
+                    if _check_http_rate(peer_ip, "webhook"):
+                        await _write_429(writer)
+                        await writer.drain()
+                        return
                     _wh_token = path[len("/solid-webhook/"):]
                     try:
                         if content_length > 0:
