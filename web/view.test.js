@@ -113,6 +113,18 @@ describe('renderContacts', () => {
     make().renderContacts([]);
     expect(els['contacts-section'].style.display).toBe('none');
   });
+  it('appends a stable short id beside a display name so same-named contacts are distinct', () => {
+    make().renderContacts([
+      { certificate_id: 'c1', peer_did: 'did:key:zRealAlice', display_name: 'Alice' },
+      { certificate_id: 'c2', peer_did: 'did:key:zFakeAlice', display_name: 'Alice' },
+    ]);
+    const [row1, row2] = els['contacts-list']._children;
+    // Both rows show "Alice" but the inline id keeps the rendered rows different.
+    expect(row1.innerHTML).toContain('Alice');
+    expect(row2.innerHTML).toContain('Alice');
+    expect(row1.innerHTML).not.toBe(row2.innerHTML);
+    expect(row1.innerHTML).toContain('RealAlice'.slice(0, 6));
+  });
 });
 
 describe('addRoomToSidebar + its click', () => {

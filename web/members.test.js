@@ -62,4 +62,15 @@ describe('renderMembersPanel', () => {
     ]);
     expect(els['members-list'].innerHTML).toContain('Federated member');
   });
+  it('appends a stable short id so members sharing a display name stay distinct', () => {
+    els['members-list'] = mkEl();
+    make().renderMembersPanel([
+      { webid: 'did:key:zRealAlice', display_name: 'Alice', status: 'online' },
+      { webid: 'did:key:zFakeAlice', display_name: 'Alice', status: 'online' },
+    ]);
+    const html = els['members-list'].innerHTML;
+    // Both are named "Alice", but each row carries its own webid-derived short id.
+    expect(html).toContain('RealAlice'.slice(0, 6));
+    expect(html).toContain('FakeAlice'.slice(0, 6));
+  });
 });

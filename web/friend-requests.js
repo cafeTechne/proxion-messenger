@@ -16,13 +16,22 @@ export function createFriendRequests({ getSocket }) {
     function renderPendingInvite(req) {
         const list = document.getElementById("friend-request-list");
         if (!list || document.getElementById("fri-" + req.invitation_id)) return;
-        const fromShort = req.display_name || ((req.from_did || "unknown").slice(8, 22) + "…");
+        // The display name is requester-chosen and self-signed, so it can copy a
+        // trusted contact's name. Accepting binds a certificate to the sender's
+        // key, so surface the stable identifier (from_did) inline and mark the
+        // name as an unverified claim.
+        const claimed = req.display_name || "";
+        const fromDid = req.from_did || "unknown";
         const li = document.createElement("li");
         li.id = "fri-" + req.invitation_id;
         li.dataset.peerDid = req.from_did || "";
         li.style.cssText = "padding:6px 8px;background:#1e293b;border-radius:6px;margin:3px 0";
+        const nameLine = claimed
+            ? `<div style="color:#e2e8f0;margin-bottom:2px">From <b>${escHtml(claimed)}</b> <span style="color:#f59e0b;font-size:0.72em">claimed name, unverified</span></div>`
+            : `<div style="color:#e2e8f0;margin-bottom:2px">Friend request</div>`;
         li.innerHTML =
-            `<div style="color:#e2e8f0;margin-bottom:4px">From <b>${escHtml(fromShort)}</b></div>` +
+            nameLine +
+            `<div style="color:#94a3b8;font-size:0.72em;margin-bottom:4px;word-break:break-all" title="${escHtml(fromDid)}">${escHtml(fromDid)}</div>` +
             `<div style="display:flex;gap:6px">` +
             `<button data-fr-action="accept" data-inv-id="${escHtml(req.invitation_id)}" ` +
             `style="background:#7c3aed;color:#fff;border:none;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:0.8em">Accept</button>` +

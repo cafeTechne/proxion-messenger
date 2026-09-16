@@ -32,12 +32,18 @@ export function createMembers({ getActiveView, requestRoomMembers }) {
         const fedBadge = m.federated
             ? `<span title="Federated member (${escHtml(m.gateway || 'remote gateway')})" style="font-size:0.65em;color:#8091a7;margin-left:4px;vertical-align:middle;">&#x1F517;</span>`
             : "";
+        // Member display names are peer-chosen and can collide. When a name is
+        // shown, append the stable short id inline so same-named members stay
+        // distinguishable without relying on hover (title=).
+        const idTag = m.display_name
+            ? ` <span class="member-id-suffix" style="color:#8091a7;font-size:0.72em">${escHtml((m.webid || "").slice(8, 22) + "…")}</span>`
+            : "";
         return `<div class="member-item" data-msg-action="profile" data-webid="${escHtml(m.webid)}" data-name="${escHtml(displayName)}">
                 <div style="position:relative;display:inline-block;margin-right:8px;">
                     <div class="avatar placeholder" style="background:${color};width:28px;height:28px;line-height:28px;font-size:12px;font-weight:bold;text-align:center;">${initial}</div>
                     <div class="avatar-presence ${presenceClass}" title="${escHtml(m.status || '')}"></div>
                 </div>
-                <span>${escHtml(m.display_name || m.webid.slice(0, 12))}${fedBadge}</span>
+                <span>${escHtml(m.display_name || m.webid.slice(0, 12))}${idTag}${fedBadge}</span>
                 <span class="sr-only">, ${escHtml(m.status || "offline")}${m.federated ? ", federated" : ""}</span>
             </div>`;
     }

@@ -936,13 +936,19 @@ import { createIdentityResolver } from './identity.js';
                 dmCount++;
                 const name = peer.display_name || (peer.peer_webid || id).slice(0, 12);
                 const last = dmLastMessages[id];
+                // The first inbound DM stores the sender's self-chosen display name
+                // as the sidebar identity. That name can copy a trusted contact's,
+                // so when one is shown, surface the stable short id inline too.
+                const idTag = peer.display_name
+                    ? `<span class="dm-item-id" style="color:#8091a7;font-size:0.72em;margin-inline-start:6px">${escHtml((peer.peer_webid || id || "").slice(8, 22) + "…")}</span>`
+                    : "";
                 const li = document.createElement("li");
                 li.id = `nav-${id}`;
                 li.className = "dm-item" + (activeView && activeView.id === id ? " active" : "");
                 const body = document.createElement("div");
                 body.className = "dm-item-body";
                 const ts = last ? timeAgo(last.timestamp) : "";
-                body.innerHTML = `<div class="dm-item-name" dir="auto">${escHtml(name)}${ts ? `<span style="color:#8091a7;font-size:0.75em;float:inline-end;margin-inline-start:4px">${ts}</span>` : ""}</div>
+                body.innerHTML = `<div class="dm-item-name" dir="auto">${escHtml(name)}${idTag}${ts ? `<span style="color:#8091a7;font-size:0.75em;float:inline-end;margin-inline-start:4px">${ts}</span>` : ""}</div>
                     ${last ? `<div class="dm-item-preview" dir="auto">${last.snippet.replace(/</g,"&lt;")}</div>` : ""}`;
                 const closeBtn = document.createElement("button");
                 closeBtn.className = "dm-close-btn";

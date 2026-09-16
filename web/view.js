@@ -48,11 +48,18 @@ export function createView({
             }
         });
         contacts.forEach(c => {
-            const label = c.display_name || (c.peer_did || "").slice(8, 22) + "…";
+            const shortId = (c.peer_did || "").slice(8, 22) + "…";
+            const label = c.display_name || shortId;
             const li = document.createElement("li");
             li.className = "dm-item";
             li.title = c.peer_did || "";
-            li.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25z"/></svg> ' + escHtml(label);
+            // Display names are peer-chosen, so two contacts can share one. When a
+            // name is shown, append the stable short id inline (not only in title=,
+            // which is hover-only and absent on touch) so the rows stay distinct.
+            const idTag = c.display_name
+                ? ` <span class="dm-id-suffix" style="color:#8091a7;font-size:0.72em">${escHtml(shortId)}</span>`
+                : "";
+            li.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25z"/></svg> ' + escHtml(label) + idTag;
             li.onclick = () => openContactThread(c);
             list.appendChild(li);
         });

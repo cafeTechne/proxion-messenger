@@ -47,6 +47,20 @@ function cssEscape(value) {
   return result;
 }
 
+describe('main.js DM sidebar surfaces a stable id, not just the peer-chosen name', () => {
+  it('renders an inline short id tag when a display name is present', () => {
+    // The first inbound DM persists the sender's self-chosen display name as the
+    // sidebar identity. That name can copy a trusted contact's, so the row must
+    // also show a stable id derived from the webid (not only in a hover title=).
+    expect(src).toContain('class="dm-item-id"');
+    // The tag is gated on a display name and built from the peer webid/thread id.
+    expect(src).toMatch(/idTag = peer\.display_name/);
+    expect(src).toMatch(/peer\.peer_webid \|\| id \|\| ""\)\.slice\(8, 22\)/);
+    // The dm-item-name line actually interpolates the tag next to the escaped name.
+    expect(src).toMatch(/dm-item-name[^`]*\$\{escHtml\(name\)\}\$\{idTag\}/);
+  });
+});
+
 describe('CSS.escape neutralizes a quote-bearing message id', () => {
   it('escapes the double quote so the built selector has no bare quote to break out on', () => {
     const escaped = cssEscape('"><img src=x onerror=alert(1)>');
