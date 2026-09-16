@@ -1039,6 +1039,34 @@ class PodSyncMixin:
 
     # ── Pod room helpers ─────────────────────────────────────────────────────
 
+    def _disappear_cutoff_iso(self, thread_id: str, is_dm: bool) -> Optional[str]:
+        """Return the ISO cutoff for a thread's disappearing-message timer, or None.
+
+        Re-import must never resurrect a message that has already expired: the
+        expiry sweep deletes the local row and best-effort deletes the pod object,
+        but a pod delete can fail (pod unreachable), leaving an orphan a later
+        backfill/restore would re-import with no cutoff. Skipping anything older
+        than this cutoff makes resurrection impossible even if the pod object
+        survives."""
+        if not self._store:
+            return None
+        ms = 0
+        try:
+            if is_dm:
+                ms = self._store.get_dm_disappear_timer(thread_id) or 0
+                if not ms:
+                    ms = getattr(self, "_dm_disappear_timers", {}).get(thread_id, 0) or 0
+            else:
+                ms = self._store.get_room_disappear_timer(thread_id) or 0
+                if not ms:
+                    ms = getattr(self, "_room_disappear_timers", {}).get(thread_id, 0) or 0
+        except Exception:
+            ms = 0
+        if not ms or ms <= 0:
+            return None
+        from datetime import timedelta
+        return (datetime.now(timezone.utc) - timedelta(milliseconds=ms)).isoformat()
+
     async def _backfill_rooms_from_pod(self, room_ids: list) -> None:
         """Pull pod room history into SQLite cache for a list of room_ids."""
         client = self._pod_client()
@@ -1048,6 +1076,7 @@ class PodSyncMixin:
         store = PodRoomStore(client)
         loop = asyncio.get_event_loop()
         for room_id in room_ids:
+            _cutoff = self._disappear_cutoff_iso(room_id, is_dm=False)
             # R13: retry logic with 3 attempts and 2s backoff
             for _attempt in range(3):
                 try:
@@ -1056,6 +1085,9 @@ class PodSyncMixin:
                         message_id = m["message_id"]
                         # R13: deduplication — skip if already exists
                         if self._store.get_message(message_id):
+                            continue
+                        # F5: do not resurrect an expired disappearing message.
+                        if _cutoff and (m.get("timestamp") or "") < _cutoff:
                             continue
                         try:
                             self._store.save_message(
@@ -1158,11 +1190,15 @@ class PodSyncMixin:
         restored = 0
         for cert in certs:
             try:
+                _cutoff = self._disappear_cutoff_iso(cert.certificate_id, is_dm=True)
                 messages = await loop.run_in_executor(None, _msg_receive, cert, client)
                 for msg in messages:
                     if self._store.get_message(msg.message_id):
                         continue
                     ts_iso = datetime.fromtimestamp(msg.timestamp, tz=timezone.utc).isoformat()
+                    # F5: do not resurrect an expired disappearing message.
+                    if _cutoff and ts_iso < _cutoff:
+                        continue
                     try:
                         self._store.save_message(
                             message_id=msg.message_id,
@@ -1272,17 +1308,28 @@ class PodSyncMixin:
         """
         client = self._pod_client()
         if not client or not message_id:
-            return
+            return False
         import hashlib as _hl
         thread_key = _hl.sha256(thread_id.encode()).hexdigest()[:16]
         async with self._pod_sync_sem:
             try:
                 loop = asyncio.get_event_loop()
                 uri = f"stash://pod/local_dms/{thread_key}/{message_id}.json"
-                await loop.run_in_executor(None, lambda: client.delete(uri))
+                from .solid_client import SolidError
+                def _del() -> bool:
+                    try:
+                        client.delete(uri)
+                    except SolidError as e:
+                        # Already gone counts as deleted; other errors do not.
+                        if e.status_code == 404:
+                            return True
+                        raise
+                    return True
+                return bool(await loop.run_in_executor(None, _del))
             except Exception as exc:
                 logger.debug("_delete_local_dm_on_pod failed [%s/%s]: %s",
                              thread_id[:20], message_id, exc)
+                return False
 
     async def _restore_local_dms_from_pod(self) -> None:
         """Pull gateway-relayed DM messages from pod into SQLite on cold start.

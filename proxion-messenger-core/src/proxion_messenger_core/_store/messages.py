@@ -140,8 +140,16 @@ class MessageStoreMixin(object):
             ).fetchone()
             return dict(row) if row else None
     def delete_message(self, message_id: str) -> None:
+        # Delete the message row (the FTS trigger drops its index entry) AND the
+        # dependent rows that carry copies of the content: a pin holds the pinned
+        # text, an edit holds prev+new content, and receipts hold reader state.
+        # Leaving those behind let a disappeared pinned/edited message be
+        # recovered, so purge them in the same transaction.
         with self._conn() as conn:
             conn.execute("DELETE FROM messages WHERE message_id = ?", (message_id,))
+            conn.execute("DELETE FROM pins WHERE message_id = ?", (message_id,))
+            conn.execute("DELETE FROM message_edits WHERE message_id = ?", (message_id,))
+            conn.execute("DELETE FROM message_receipts WHERE message_id = ?", (message_id,))
     def update_message(
         self, message_id: str, new_content: str, edited_at: Optional[str] = None,
         editor_webid: str = "",

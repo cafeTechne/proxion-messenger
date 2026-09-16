@@ -18,6 +18,7 @@ import asyncio
 import base64
 import json
 import logging
+import re
 import secrets
 import time
 from collections import deque
@@ -31,6 +32,23 @@ logger = logging.getLogger("proxion_messenger_core.gateway")
 # Per-room member cap for local (pod-free) rooms. Joins over this are rejected;
 # existing members reconnecting are unaffected.
 _MAX_ROOM_MEMBERS = 500
+
+# Real message ids are UUIDs, "local-<hex>", or urlsafe tokens, so they live
+# within [word chars, dot, hyphen]. A client-supplied id reaches a pod URI
+# (stash://pod/rooms/<rid>/messages/<message_id>.json), so an id containing a
+# slash or a bare dot segment could climb out of the messages container and
+# delete or rewrite room.json. Reject anything outside the strict charset before
+# any pod call.
+_MESSAGE_ID_RE = re.compile(r"^[\w.-]{1,128}$")
+
+
+def _is_safe_message_id(message_id) -> bool:
+    """True when *message_id* is a plain id with no path-traversal potential."""
+    if not message_id or not isinstance(message_id, str):
+        return False
+    if message_id in (".", ".."):
+        return False
+    return bool(_MESSAGE_ID_RE.match(message_id))
 
 
 class RoomHandlerMixin:
@@ -125,18 +143,25 @@ class RoomHandlerMixin:
         except Exception as exc:
             logger.debug(f"pod room edit failed [{room_id}/{message_id}]: {exc}")
 
-    async def _delete_room_message_on_pod(self, room_id: str, message_id: str) -> None:
-        """Remove a room message from the pod after a local delete."""
+    async def _delete_room_message_on_pod(self, room_id: str, message_id: str) -> bool:
+        """Remove a room message from the pod after a local delete.
+
+        Returns True when the pod object is gone (deleted or already absent) and
+        False when the pod is unreachable, so the expiry sweep can keep the local
+        row until the pod delete actually succeeds (avoids orphaning an object
+        that a later backfill would re-import)."""
         client = self._pod_client()
         if not client:
-            return
+            return False
         try:
             from .pod_room_store import PodRoomStore
             store = PodRoomStore(client)
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, store.delete_message, room_id, message_id)
+            return True
         except Exception as exc:
             logger.debug(f"pod room delete failed [{room_id}/{message_id}]: {exc}")
+            return False
 
     class _NullWs:
         """Stub websocket for offline scheduled message senders."""
@@ -246,13 +271,24 @@ class RoomHandlerMixin:
                         # nothing is orphaned; the rest expires on later ticks.
                         _expired_ids = self._store.select_message_ids_before(
                             room_id, cutoff, limit=_POD_EXPIRE_BATCH)
+                        store_deleted = 0
                         for _mid in _expired_ids:
+                            # Only drop the local row once the pod object is gone.
+                            # A failed pod delete (pod unreachable) leaves the row,
+                            # which the next tick re-selects and retries — so the
+                            # object is never orphaned for a backfill to resurrect.
+                            _pod_ok = False
                             try:
-                                await self._delete_room_message_on_pod(room_id, _mid)
+                                _pod_ok = await self._delete_room_message_on_pod(room_id, _mid)
                             except Exception:
-                                pass
-                            self._store.delete_message(_mid)
-                        store_deleted = len(_expired_ids)
+                                _pod_ok = False
+                            if _pod_ok:
+                                try:
+                                    await self._delete_pin_from_pod(room_id, _mid)
+                                except Exception:
+                                    pass
+                                self._store.delete_message(_mid)
+                                store_deleted += 1
                     else:
                         store_deleted = self._store.delete_messages_before(room_id, cutoff) if self._store else 0
                     for mid in expired:
@@ -291,13 +327,19 @@ class RoomHandlerMixin:
                         # and re-imported on restart; delete the pod object too.
                         _expired_ids = self._store.select_message_ids_before(
                             cert_id, cutoff, limit=_POD_EXPIRE_BATCH)
+                        deleted = 0
                         for _mid in _expired_ids:
+                            # Gate the local delete on pod success (see rooms
+                            # branch) so a failed pod delete cannot orphan the
+                            # object for a later restore to resurrect.
+                            _pod_ok = False
                             try:
-                                await self._delete_local_dm_on_pod(cert_id, _mid)
+                                _pod_ok = await self._delete_local_dm_on_pod(cert_id, _mid)
                             except Exception:
-                                pass
-                            self._store.delete_message(_mid)
-                        deleted = len(_expired_ids)
+                                _pod_ok = False
+                            if _pod_ok:
+                                self._store.delete_message(_mid)
+                                deleted += 1
                     else:
                         deleted = self._store.delete_messages_before(cert_id, cutoff)
                     if deleted:
@@ -777,17 +819,28 @@ class RoomHandlerMixin:
         if not caller_webid:
             await websocket.send(json.dumps({"type": "error", "message": "Not registered"}))
             return
+        # F2: a crafted message_id ("../room") reaches a pod URI, so validate the
+        # charset before anything else — a bad id is rejected outright.
+        if not _is_safe_message_id(message_id):
+            await websocket.send(json.dumps({"type": "error", "message": "Invalid message id"}))
+            return
         if thread_id in self._local_rooms and websocket not in self._local_rooms[thread_id]["members"]:
             return
-        if caller_webid and self._store:
-            sender = self._store.get_message_sender(message_id)
-            if sender and sender != caller_webid:
-                await websocket.send(json.dumps({"type": "error", "message": "Cannot delete another user's message"}))
-                return
+        sender = self._store.get_message_sender(message_id) if self._store else None
+        if sender is not None and sender != caller_webid:
+            await websocket.send(json.dumps({"type": "error", "message": "Cannot delete another user's message"}))
+            return
+        # F2: an id with no row (get_message_sender is None) must NOT reach a pod
+        # delete — that was the ownership bypass, since the guard only blocked a
+        # DIFFERENT existing sender. Only touch the pod for a row the caller owns.
+        _owned = sender is not None and sender == caller_webid
         if message_id and self._store:
             self._store.delete_message(message_id)
-        if message_id and thread_id in self._local_rooms:
+        if _owned and thread_id in self._local_rooms:
             asyncio.create_task(self._delete_room_message_on_pod(thread_id, message_id))
+            # F11: a pinned message keeps a pod-side pin object holding its
+            # content; drop it too so a delete cannot be undone by pin restore.
+            asyncio.create_task(self._delete_pin_from_pod(thread_id, message_id))
         event = {"type": "message_deleted", "message_id": message_id, "thread_id": thread_id}
         if thread_id in self._local_rooms:
             for ws in list(self._local_rooms[thread_id]["members"]):
@@ -848,6 +901,10 @@ class RoomHandlerMixin:
         if not caller_webid_edit:
             await websocket.send(json.dumps({"type": "error", "message": "Not registered"}))
             return
+        # F2: a crafted id reaches the pod read-modify-write, so validate first.
+        if not _is_safe_message_id(message_id):
+            await websocket.send(json.dumps({"type": "error", "message": "Invalid message id"}))
+            return
         if thread_id in self._local_rooms and websocket not in self._local_rooms[thread_id]["members"]:
             return
         # A muted member must not edit their own message to inject new content
@@ -856,17 +913,19 @@ class RoomHandlerMixin:
                 and self._store.is_room_muted(thread_id, caller_webid_edit)):
             await websocket.send(json.dumps({"type": "error", "message": "you_are_muted"}))
             return
-        if caller_webid_edit and self._store:
-            sender = self._store.get_message_sender(message_id)
-            if sender and sender != caller_webid_edit:
-                await websocket.send(json.dumps({"type": "error", "message": "Cannot edit another user's message"}))
-                return
+        sender = self._store.get_message_sender(message_id) if self._store else None
+        if sender is not None and sender != caller_webid_edit:
+            await websocket.send(json.dumps({"type": "error", "message": "Cannot edit another user's message"}))
+            return
+        # F2: only a row the caller owns may reach the pod read-modify-write; an
+        # unknown id must not be able to rewrite an arbitrary pod object.
+        _owned_edit = sender is not None and sender == caller_webid_edit
         if message_id and new_content:
             edited_at = datetime.now(timezone.utc).isoformat()
             if self._store:
                 self._store.update_message(message_id, new_content, edited_at,
                                            editor_webid=caller_webid_edit or "")
-            if thread_id in self._local_rooms:
+            if _owned_edit and thread_id in self._local_rooms:
                 asyncio.create_task(
                     self._edit_room_message_on_pod(thread_id, message_id, new_content, edited_at)
                 )
@@ -1536,6 +1595,16 @@ class RoomHandlerMixin:
         thread_id = data.get("thread_id")
         message_id_read = data.get("message_id", "")
         reader_webid = self._client_webids.get(websocket, "")
+
+        # F6: this handler writes a receipt (injecting the caller's WebID into the
+        # readers list), writes read rows, and broadcasts/relays a read receipt.
+        # Its read siblings gate on thread access; without the same guard a client
+        # could mark-read an arbitrary thread it is not a party to. Reject (no-op)
+        # when the actor cannot read the thread. Gated on _auth_enforced() like the
+        # other read-authz handlers.
+        if (self._auth_enforced() and thread_id
+                and not self._actor_can_read_thread(websocket, reader_webid, thread_id)):
+            return
 
         if self._store and reader_webid and thread_id:
             self._store.set_last_read(reader_webid, thread_id)
