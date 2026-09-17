@@ -76,7 +76,9 @@ class HttpEndpointsMixin:
             return bool(_req) and _hmac_rec.compare_digest(_req, _admin_token)
         _api_token = os.environ.get("PROXION_API_TOKEN", "")
         if _api_token:
-            return _auth_header == f"Bearer {_api_token}"
+            import hmac as _hmac_rec
+            _req = _auth_header.removeprefix("Bearer ").strip() if _auth_header else ""
+            return bool(_req) and _hmac_rec.compare_digest(_req, _api_token)
         return False
 
     def _recovery_endpoint_allowed(self, headers_raw: dict) -> bool:
@@ -1078,9 +1080,14 @@ class HttpEndpointsMixin:
         _meta_parts = [f'<meta name="x-gateway-url" content="{ws_url}">']
         if self.config.css_default_url:
             _meta_parts.append(f'<meta name="x-css-default-url" content="{self.config.css_default_url}">')
-        if _api_token:
-            _meta_parts.append(f'<meta name="x-api-token" content="{_api_token}">')
         inject = "".join(_meta_parts).encode()
+        # The x-api-token meta is the legacy PROXION_API_TOKEN, and that token is what
+        # the R118 recovery gate accepts to run /backup, /restore, /export, /import,
+        # and /security-snapshot. Embedding it in index.html for every GET / would hand
+        # it to any tunnel or LAN visitor. It is injected per-request instead, only for
+        # a genuine local client (see the index-serving branch below).
+        _token_meta = (f'<meta name="x-api-token" content="{_api_token}">'.encode()
+                       if _api_token else b"")
 
         ssl_ctx_http = None
         if self.config.ssl_certfile and self.config.ssl_keyfile:
@@ -2121,7 +2128,9 @@ class HttpEndpointsMixin:
                     _api_token_env = os.environ.get("PROXION_API_TOKEN", "")
                     _auth_header = headers_raw.get(b"authorization", b"").decode("utf-8", errors="replace")
                     if _api_token_env and not _admin_token:
-                        if _auth_header != f"Bearer {_api_token_env}":
+                        import hmac as _hmac_legacy
+                        _req_token = _auth_header.removeprefix("Bearer ").strip() if _auth_header else ""
+                        if not _req_token or not _hmac_legacy.compare_digest(_req_token, _api_token_env):
                             err = b'{"error":"unauthorized"}'
                             writer.write(b"HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\n"
                                          b"Content-Length: " + str(len(err)).encode() + b"\r\n\r\n" + err)
@@ -2252,7 +2261,9 @@ class HttpEndpointsMixin:
                     _api_token_env = os.environ.get("PROXION_API_TOKEN", "")
                     _auth_header = headers_raw.get(b"authorization", b"").decode("utf-8", errors="replace")
                     if _api_token_env and not _admin_token:
-                        if _auth_header != f"Bearer {_api_token_env}":
+                        import hmac as _hmac_legacy
+                        _req_token = _auth_header.removeprefix("Bearer ").strip() if _auth_header else ""
+                        if not _req_token or not _hmac_legacy.compare_digest(_req_token, _api_token_env):
                             err = b'{"error":"unauthorized"}'
                             writer.write(b"HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\n"
                                          b"Content-Length: " + str(len(err)).encode() + b"\r\n\r\n" + err)
@@ -2426,7 +2437,9 @@ class HttpEndpointsMixin:
                     _api_token_env = os.environ.get("PROXION_API_TOKEN", "")
                     _auth_header = headers_raw.get(b"authorization", b"").decode("utf-8", errors="replace")
                     if _api_token_env and not _admin_token:
-                        if _auth_header != f"Bearer {_api_token_env}":
+                        import hmac as _hmac_legacy
+                        _req_token = _auth_header.removeprefix("Bearer ").strip() if _auth_header else ""
+                        if not _req_token or not _hmac_legacy.compare_digest(_req_token, _api_token_env):
                             err = b'{"error":"unauthorized"}'
                             writer.write(b"HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\n"
                                          b"Access-Control-Allow-Origin: *\r\nContent-Length: "
@@ -2766,7 +2779,9 @@ class HttpEndpointsMixin:
                     _api_token_env_c = os.environ.get("PROXION_API_TOKEN", "")
                     _auth_header_c = headers_raw.get(b"authorization", b"").decode("utf-8", errors="replace")
                     if _api_token_env_c:
-                        if _auth_header_c != f"Bearer {_api_token_env_c}":
+                        import hmac as _hmac_legacy
+                        _req_token_c = _auth_header_c.removeprefix("Bearer ").strip() if _auth_header_c else ""
+                        if not _req_token_c or not _hmac_legacy.compare_digest(_req_token_c, _api_token_env_c):
                             writer.write(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n")
                             await writer.drain()
                             return
@@ -2931,7 +2946,18 @@ class HttpEndpointsMixin:
                 body = fpath.read_bytes()
                 is_index = (fname == "index.html")
                 if is_index:
-                    body = body.replace(b"</head>", inject + b"</head>", 1)
+                    _index_inject = inject
+                    # Only hand the x-api-token meta to a genuine local client. A live
+                    # tunnel collapses peer_ip to loopback (cloudflared proxies from
+                    # 127.0.0.1) and lets a remote caller forge the Origin header, so
+                    # while the tunnel is up the token is never injected. With no tunnel
+                    # it is injected only for a trusted (loopback/desktop) origin, which
+                    # keeps in-app recovery working locally while withholding the token
+                    # from any LAN visitor when bound to 0.0.0.0.
+                    if (_token_meta and not self._tunnel_active()
+                            and self._is_trusted_origin(origin_header, http_port, peer_ip)):
+                        _index_inject = inject + _token_meta
+                    body = body.replace(b"</head>", _index_inject + b"</head>", 1)
                 cc = b"no-cache" if fname == "sw.js" else b"no-store"
                 writer.write(
                     b"HTTP/1.1 200 OK\r\nContent-Type: " + ct + b"\r\n"
