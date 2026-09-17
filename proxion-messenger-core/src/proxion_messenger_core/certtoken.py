@@ -111,7 +111,58 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _covers(cap_action: str, cap_resource: str, action: str, resource: str) -> bool:
+def _is_number(value) -> bool:
+    """True for a plain int/float caveat value (booleans excluded)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _caveat_value_at_least_as_restrictive(parent_val, child_val) -> bool:
+    """True if *child_val* is no more permissive than *parent_val* for one caveat.
+
+    Semantics:
+
+    * Equal values are equally restrictive.
+    * Numeric caveats are treated as ceilings (e.g. ``quota_mb``): a smaller child
+      value is more restrictive, a larger one widens the grant.
+    * List/tuple/set caveats are treated as allowlists: the child must narrow to a
+      subset of the parent's allowed values.
+    * Any other differing value changes the caveat in a way we cannot prove is a
+      narrowing, so it is rejected.
+    """
+    if parent_val == child_val:
+        return True
+    if _is_number(parent_val) and _is_number(child_val):
+        return child_val <= parent_val
+    if isinstance(parent_val, (list, tuple, set)) and isinstance(child_val, (list, tuple, set)):
+        return set(child_val) <= set(parent_val)
+    return False
+
+
+def _caveats_cover(cap_caveats, child_caveats) -> bool:
+    """True if a child capability's caveats are at least as restrictive as the parent's.
+
+    A child may ADD caveats (that only narrows the grant) but may not DROP a caveat
+    the parent imposed nor WIDEN one it kept. Two empty caveat sets always cover, so
+    the common uncaveated case is unchanged.
+    """
+    parent = cap_caveats or {}
+    child = child_caveats or {}
+    for key, parent_val in parent.items():
+        if key not in child:
+            return False
+        if not _caveat_value_at_least_as_restrictive(parent_val, child[key]):
+            return False
+    return True
+
+
+def _covers(
+    cap_action: str,
+    cap_resource: str,
+    action: str,
+    resource: str,
+    cap_caveats=None,
+    req_caveats=None,
+) -> bool:
     """Return True if a certificate Capability covers a requested (action, resource).
 
     Coverage rules:
@@ -121,19 +172,24 @@ def _covers(cap_action: str, cap_resource: str, action: str, resource: str) -> b
       ``cap_resource`` ends with ``"/"`` and ``resource`` starts with it
       (hierarchical sub-path check), OR if ``cap_resource == "/"``
       (wildcard root).
+    * When caveats are supplied (a capability-to-capability comparison) the child
+      must not drop or widen a caveat the parent imposes — see
+      :func:`_caveats_cover`. The bare ``(action, resource)`` callers pass no
+      caveats, so their behaviour is unchanged.
 
     These rules mirror those in :func:`~proxion_messenger_core.validator.validate_request`
     for consistency.
     """
     if cap_action != action:
         return False
-    if cap_resource == resource:
-        return True
-    if cap_resource == "/":
-        return True
-    if cap_resource.endswith("/") and resource.startswith(cap_resource):
-        return True
-    return False
+    resource_ok = (
+        cap_resource == resource
+        or cap_resource == "/"
+        or (cap_resource.endswith("/") and resource.startswith(cap_resource))
+    )
+    if not resource_ok:
+        return False
+    return _caveats_cover(cap_caveats, req_caveats)
 
 
 def _permission_covered(
@@ -146,6 +202,54 @@ def _permission_covered(
         if _covers(cap.can, cap.with_, action, resource):
             return True
     return False
+
+
+def _covering_capability(action: str, resource: str, cert: RelationshipCertificate):
+    """Return the first Capability in *cert* whose action+resource covers the request.
+
+    Caveats are not considered here — this only locates the capability so its caveats
+    can be checked separately against the request. Returns ``None`` when nothing in
+    the certificate covers ``(action, resource)``.
+    """
+    for cap in cert.capabilities:
+        if _covers(cap.can, cap.with_, action, resource):
+            return cap
+    return None
+
+
+def _capability_caveats_satisfied(caveats, ctx) -> bool:
+    """Return True if request *ctx* satisfies every caveat a capability imposes.
+
+    Capability caveats are a plain dict (e.g. ``{"ip": [...], "not_after": ts}``).
+    An empty dict imposes nothing and always passes. A caveat this function cannot
+    evaluate against a request is treated as unsatisfiable, so the request is denied
+    rather than silently allowed.
+
+    Recognised keys:
+
+    * ``ip`` — an allowlist; ``ctx.ip`` must be one of the listed values.
+    * ``method`` / ``methods`` — an allowlist; ``ctx.method`` must be listed.
+    * ``not_before`` — a unix timestamp; ``ctx.now`` must be at or after it.
+    * ``not_after`` — a unix timestamp; ``ctx.now`` must be at or before it.
+    """
+    for key, val in (caveats or {}).items():
+        if key == "ip":
+            allowed = val if isinstance(val, (list, tuple, set)) else [val]
+            if ctx.ip not in allowed:
+                return False
+        elif key in ("method", "methods"):
+            allowed = val if isinstance(val, (list, tuple, set)) else [val]
+            if ctx.method not in allowed:
+                return False
+        elif key == "not_before":
+            if ctx.now.timestamp() < float(val):
+                return False
+        elif key == "not_after":
+            if ctx.now.timestamp() > float(val):
+                return False
+        else:
+            return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -370,7 +474,10 @@ def delegate_cert(
 
     delegated_caps = list(capabilities) if capabilities is not None else list(cert.capabilities)
     for dcap in delegated_caps:
-        if not any(_covers(p.can, p.with_, dcap.can, dcap.with_) for p in cert.capabilities):
+        if not any(
+            _covers(p.can, p.with_, dcap.can, dcap.with_, p.caveats, dcap.caveats)
+            for p in cert.capabilities
+        ):
             raise CertTokenError(
                 f"delegated capability {(dcap.can, dcap.with_)!r} exceeds parent certificate scope"
             )

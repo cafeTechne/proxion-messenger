@@ -81,6 +81,7 @@ from .federation import (
     capabilities_digest,
     subject_consent_message_v2,
 )
+from .certtoken import _covers
 from .sealed import mailbox_id_for, open_sealed_json, seal_json
 from .store import MemoryStore
 
@@ -99,6 +100,29 @@ class HandshakeError(ProxionError):
 
 def _pub_raw(key: X25519PublicKey | Ed25519PublicKey) -> bytes:
     return key.public_bytes(Encoding.Raw, PublicFormat.Raw)
+
+
+def _intersect_capabilities(
+    offered: List[Capability], echoed: List[Capability]
+) -> List[Capability]:
+    """Keep only echoed capabilities that an offered capability covers (F5).
+
+    The acceptor echoes the capabilities it agrees to, but the issuer must never
+    sign a capability it did not offer. An echoed capability survives only when some
+    offered capability covers it in action, resource, and caveats (so the acceptor
+    can neither add an unoffered grant nor drop/widen a caveat the issuer imposed).
+    The echoed object is retained rather than the offered one, so the subject-consent
+    digest (computed over the echoed set) still matches when the acceptor echoed the
+    offer unchanged.
+    """
+    result: List[Capability] = []
+    for cap in echoed:
+        if any(
+            _covers(off.can, off.with_, cap.can, cap.with_, off.caveats, cap.caveats)
+            for off in offered
+        ):
+            result.append(cap)
+    return result
 
 
 def _ed25519_verify(pubkey_hex: str, sig_bytes: bytes, message: bytes) -> bool:
@@ -442,11 +466,19 @@ def finalize_handshake(
     alice_identity_pub_hex = _pub_raw(alice_identity_priv.public_key()).hex()
     bob_identity_pub_hex = acceptance.responder["public_key"]
 
-    # Merge capabilities: everything Alice offered that Bob echoed back.
-    capabilities = [
+    # Merge capabilities: everything Alice offered that Bob echoed back. Intersect
+    # the acceptor's echoed set against the invite's offered set so the issuer only
+    # signs capabilities it actually offered (F5) — an echoed capability the offer
+    # does not cover is dropped. The v2 subject-consent digest below is computed over
+    # this intersected list, so consent still matches when the acceptor echoed the
+    # offer unchanged.
+    echoed_capabilities = [
         Capability(**_normalise_cap(c))
         for c in acceptance.responder.get("capabilities", [])
     ]
+    capabilities = _intersect_capabilities(
+        original_invite.capabilities, echoed_capabilities
+    )
 
     resolved_certificate_id = (
         certificate_id or original_invite.certificate_id
@@ -500,12 +532,19 @@ def process_join_requests(
     alice_identity_priv: Ed25519PrivateKey,
     alice_store_priv: X25519PrivateKey,
     store: "MemoryStore",
+    offered_capabilities: Optional[List[Capability]] = None,
 ) -> List[Tuple["RelationshipCertificate", bool]]:
     """Drain Alice's mailbox, issue certs for all pending join requests, deliver to members.
 
     Higher-level wrapper over receive_acceptances + cert creation + send_certificate.
     Skips challenge verification (suitable for room joins where the original invite
     is not retained in memory). Returns a list of (cert, valid) pairs.
+
+    When *offered_capabilities* is given (the set the issuer is willing to grant a
+    joiner) each acceptance's echoed capabilities are intersected against it, so the
+    issuer never signs a capability it did not offer (F5). When omitted the acceptor's
+    echoed set is used as-is, preserving the prior behaviour for callers that do not
+    yet supply an offer.
     """
     acceptances = receive_acceptances(alice_store_priv, store)
     results: List[Tuple["RelationshipCertificate", bool]] = []
@@ -516,10 +555,16 @@ def process_join_requests(
             continue
         bob_pub_hex = acceptance.responder.get("public_key", "")
         bob_store_hex = acceptance.responder.get("store_key", "")
-        capabilities = [
+        echoed_capabilities = [
             Capability(**_normalise_cap(c))
             for c in acceptance.responder.get("capabilities", [])
         ]
+        if offered_capabilities is not None:
+            capabilities = _intersect_capabilities(
+                offered_capabilities, echoed_capabilities
+            )
+        else:
+            capabilities = echoed_capabilities
         cert = RelationshipCertificate(
             issuer=alice_pub_hex,
             subject=bob_pub_hex,

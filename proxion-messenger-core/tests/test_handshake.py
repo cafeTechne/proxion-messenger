@@ -207,3 +207,103 @@ def test_missing_store_key_in_invite_raises(store):
 
     with pytest.raises(HandshakeError, match="store_key"):
         accept_invite(invite, bob_id, _pub(bob_store), CAPS, store)
+
+
+# ---------------------------------------------------------------------------
+# F5 — capability intersection: the issuer only signs what it offered
+# ---------------------------------------------------------------------------
+
+def test_finalize_drops_capability_not_offered(store):
+    """An acceptor that echoes a capability the issuer never offered gets a cert
+    without it — the cert is the intersection of the offer and the echo."""
+    alice_id, alice_store = _new_agent()
+    bob_id, bob_store = _new_agent()
+    offered = [Capability(with_="stash://alice/shared/", can="read")]
+    echoed = offered + [Capability(with_="/", can="admin")]
+    cert, valid = run_local_handshake(
+        alice_id, alice_store, bob_id, bob_store, offered, echoed, store
+    )
+    assert valid
+    grants = {(c.can, c.with_) for c in cert.capabilities}
+    assert ("read", "stash://alice/shared/") in grants
+    assert ("admin", "/") not in grants
+
+
+def test_finalize_preserves_exact_echo_and_consent(store):
+    """Echoing exactly the offer preserves the capability and keeps the v2
+    subject-consent valid (the consent digest is over the intersected list)."""
+    alice_id, alice_store = _new_agent()
+    bob_id, bob_store = _new_agent()
+    offered = [Capability(with_="stash://alice/shared/", can="read")]
+    cert, valid = run_local_handshake(
+        alice_id, alice_store, bob_id, bob_store, offered, offered, store
+    )
+    assert valid
+    grants = {(c.can, c.with_) for c in cert.capabilities}
+    assert grants == {("read", "stash://alice/shared/")}
+    assert cert.verify_mutual(_verify)
+
+
+def test_finalize_drops_echoed_caveat_widening(store):
+    """An acceptor may not widen a caveat the issuer offered: an echo that loosens
+    the offered caveat is not covered and is dropped from the cert."""
+    alice_id, alice_store = _new_agent()
+    bob_id, bob_store = _new_agent()
+    offered = [Capability(with_="stash://alice/shared/", can="read", caveats={"quota_mb": 100})]
+    echoed = [Capability(with_="stash://alice/shared/", can="read", caveats={"quota_mb": 500})]
+    cert, valid = run_local_handshake(
+        alice_id, alice_store, bob_id, bob_store, offered, echoed, store
+    )
+    assert valid
+    assert cert.capabilities == []
+
+
+def test_process_join_requests_intersects_offer(store):
+    """process_join_requests intersects each echo against the supplied offer."""
+    from proxion_messenger_core.handshake import process_join_requests
+
+    alice_id, alice_store = _new_agent()
+    bob_id, bob_store = _new_agent()
+    alice_store_pub = _pub(alice_store)
+    bob_store_pub = _pub(bob_store)
+
+    offered = [Capability(with_="stash://room/", can="read")]
+    invite = create_invite(alice_id, alice_store_pub, offered)
+    send_invite(invite, bob_store_pub, store)
+    bob_invite, _ = receive_invites(bob_store, store)[0]
+    echoed = offered + [Capability(with_="/", can="admin")]
+    accept_invite(bob_invite, bob_id, bob_store_pub, echoed, store)
+
+    results = process_join_requests(
+        alice_id, alice_store, store, offered_capabilities=offered
+    )
+    assert len(results) == 1
+    cert, ok = results[0]
+    assert ok
+    grants = {(c.can, c.with_) for c in cert.capabilities}
+    assert grants == {("read", "stash://room/")}
+
+
+def test_process_join_requests_without_offer_keeps_echo(store):
+    """Without an offer, process_join_requests keeps the acceptor's echoed set
+    unchanged (prior behaviour for callers that do not yet supply an offer)."""
+    from proxion_messenger_core.handshake import process_join_requests
+
+    alice_id, alice_store = _new_agent()
+    bob_id, bob_store = _new_agent()
+    alice_store_pub = _pub(alice_store)
+    bob_store_pub = _pub(bob_store)
+
+    offered = [Capability(with_="stash://room/", can="read")]
+    invite = create_invite(alice_id, alice_store_pub, offered)
+    send_invite(invite, bob_store_pub, store)
+    bob_invite, _ = receive_invites(bob_store, store)[0]
+    echoed = offered + [Capability(with_="/", can="admin")]
+    accept_invite(bob_invite, bob_id, bob_store_pub, echoed, store)
+
+    results = process_join_requests(alice_id, alice_store, store)
+    assert len(results) == 1
+    cert, ok = results[0]
+    assert ok
+    grants = {(c.can, c.with_) for c in cert.capabilities}
+    assert ("admin", "/") in grants

@@ -392,6 +392,73 @@ def test_delegate_cert_rejects_non_issuer_key(cert):
         )
 
 
+# ---------------------------------------------------------------------------
+# F7 — caveat-aware coverage (_covers)
+# ---------------------------------------------------------------------------
+
+def test_covers_uncaveated_unchanged():
+    from proxion_messenger_core.certtoken import _covers
+    assert _covers("read", "/data/", "read", "/data/")
+    assert _covers("read", "/data/", "read", "/data/photos/img")
+    assert _covers("read", "/", "read", "/anything")
+    assert not _covers("write", "/data/", "read", "/data/")
+    assert not _covers("read", "/data/", "read", "/other/file")
+
+
+def test_covers_child_dropping_parent_caveat_not_covered():
+    from proxion_messenger_core.certtoken import _covers
+    # Parent imposes an IP allowlist; child drops it entirely -> not covered.
+    assert not _covers("read", "/data/", "read", "/data/", {"ip": ["1.2.3.4"]}, {})
+    # Carrying the same caveat is fine.
+    assert _covers("read", "/data/", "read", "/data/", {"ip": ["1.2.3.4"]}, {"ip": ["1.2.3.4"]})
+
+
+def test_covers_child_widening_numeric_caveat_not_covered():
+    from proxion_messenger_core.certtoken import _covers
+    # A numeric caveat is a ceiling: a larger child value widens the grant.
+    assert not _covers("read", "/data/", "read", "/data/", {"quota_mb": 100}, {"quota_mb": 200})
+    assert _covers("read", "/data/", "read", "/data/", {"quota_mb": 100}, {"quota_mb": 100})
+    assert _covers("read", "/data/", "read", "/data/", {"quota_mb": 100}, {"quota_mb": 50})
+
+
+def test_covers_child_widening_allowlist_not_covered():
+    from proxion_messenger_core.certtoken import _covers
+    parent = {"ip": ["1.1.1.1", "2.2.2.2"]}
+    # Subset narrows -> covered; a value outside the parent's set widens -> not covered.
+    assert _covers("read", "/data/", "read", "/data/", parent, {"ip": ["1.1.1.1"]})
+    assert not _covers("read", "/data/", "read", "/data/", parent, {"ip": ["3.3.3.3"]})
+
+
+def test_covers_child_may_add_new_caveat():
+    from proxion_messenger_core.certtoken import _covers
+    # Adding a caveat the parent did not impose only narrows the grant.
+    assert _covers("read", "/data/", "read", "/data/", {}, {"ip": ["1.1.1.1"]})
+
+
+def test_delegate_cert_rejects_caveat_widening(cert):
+    from proxion_messenger_core.federation import RelationshipCertificate, Capability
+    certificate, alice_id, _ = cert
+    caveated = RelationshipCertificate(
+        issuer=certificate.issuer,
+        subject=certificate.subject,
+        capabilities=[
+            Capability(with_="stash://alice/shared/bob/", can="read", caveats={"quota_mb": 100})
+        ],
+        wireguard={},
+    )
+    caveated.sign(alice_id)
+    new_holder = Ed25519PrivateKey.generate()
+    with pytest.raises(CertTokenError, match="exceeds parent certificate scope"):
+        delegate_cert(
+            cert=caveated,
+            new_holder_pub_key=new_holder.public_key(),
+            issuer_identity_priv=alice_id,
+            capabilities=[
+                Capability(with_="stash://alice/shared/bob/", can="read", caveats={"quota_mb": 500})
+            ],
+        )
+
+
 def test_delegate_cert_rejects_capability_widening(cert):
     certificate, alice_id, _ = cert
     new_holder = Ed25519PrivateKey.generate()

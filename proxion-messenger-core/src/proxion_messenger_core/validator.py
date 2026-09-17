@@ -103,6 +103,16 @@ def validate_request(
             # 2. Verify the delegation cert's Ed25519 signature
             if not _cert_sig_ok(delegation_cert):
                 return _decide(_deny("delegation_cert_invalid_signature"))
+            # 2a. Bind the delegation cert to the trusted issuer. _cert_sig_ok only
+            # proves the cert is self-consistent, so a presenter could sign their own
+            # cert granting themselves anything. Require the delegation issuer to
+            # match the trusted root — the root cert's issuer when one is supplied,
+            # otherwise the identity the token is bound to (its audience). This
+            # mirrors check_token_within_cert's issuer check and rejects a
+            # self-issued delegation cert.
+            trusted_issuer = cert.issuer if cert is not None else token.aud
+            if delegation_cert.issuer != trusted_issuer:
+                return _decide(_deny("delegation_cert_issuer_mismatch"))
             # 3. Confirm the presenter's public key matches the delegation cert subject
             if isinstance(proof, PopProof):
                 presenter_pub_hex = proof.public_key_bytes.hex()
@@ -144,6 +154,20 @@ def validate_request(
 
         if not allowed_by_permission:
             return _decide(_deny("permission_missing"))
+        # Capability caveats — a matched cert/delegation-cert capability may impose
+        # constraints (IP allowlist, time window) the bare (action, resource)
+        # permission does not carry. The request must satisfy the caveats of every
+        # covering capability in each supplied certificate. Uncaveated capabilities
+        # impose nothing, so this is a no-op for the common case.
+        from .certtoken import _capability_caveats_satisfied, _covering_capability
+        for scoping_cert in (delegation_cert, cert):
+            if scoping_cert is None:
+                continue
+            covering = _covering_capability(ctx.action, ctx.resource, scoping_cert)
+            if covering is not None and not _capability_caveats_satisfied(
+                covering.caveats, ctx
+            ):
+                return _decide(_deny("caveat_failed"))
         for caveat in token.caveats:
             try:
                 if not caveat.evaluate(ctx):
