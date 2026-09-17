@@ -2719,6 +2719,17 @@ class MiscHandlerMixin:
             await websocket.send(json.dumps({"type": "error", "message": "banned_from_room"}))
             return
 
+        # F4: bind the federated member's gateway to the caller's OWN known
+        # gateway rather than trusting the attacker-controlled announced field.
+        # The caller's real gateway is recorded at register time / via the
+        # peer-gateway pin, so a distinct row cannot be pointed at an arbitrary
+        # host the relay fanout would then POST to. When the caller's gateway is
+        # not independently known (pod-free register with no gateway_url) we fall
+        # back to the announced value, still SSRF-screened below (the residual).
+        known_gw = self._resolve_peer_gateway(caller_webid) if caller_webid else None
+        if known_gw:
+            home_gateway = known_gw
+
         own_http = self._gateway_http_url()
         if home_gateway == own_http or home_gateway == self._ws_public_url():
             # Same gateway — no federation needed
@@ -2732,8 +2743,28 @@ class MiscHandlerMixin:
             await websocket.send(json.dumps({"type": "error", "message": "invalid_home_gateway"}))
             return
 
+        # F4: cap federated members per room. The local join path enforces
+        # _MAX_ROOM_MEMBERS; this path had no cap, so anyone with the code could
+        # register N distinct dids and grow room_federated_members without bound
+        # (unbounded state + relay fanout amplifier). Count local + federated
+        # members and reject a NEW member at/over the cap; existing members
+        # (re-announcing) are exempt so they are never locked out.
         if self._store:
-            self._store.add_federated_room_member(room_id, caller_webid, home_gateway)
+            from ._gateway_rooms import _MAX_ROOM_MEMBERS
+            _fed_members = self._store.get_federated_room_members(room_id) or []
+            _is_fed_member = any(_fm["member_did"] == caller_webid for _fm in _fed_members)
+            if not already_member and not _is_fed_member:
+                _local_members = self._store.get_room_members(room_id) or []
+                if len(_local_members) + len(_fed_members) >= _MAX_ROOM_MEMBERS:
+                    await websocket.send(json.dumps({"type": "error", "message": "room_full"}))
+                    return
+
+        if self._store:
+            if not self._store.add_federated_room_member(
+                room_id, caller_webid, home_gateway, max_members=_MAX_ROOM_MEMBERS
+            ):
+                await websocket.send(json.dumps({"type": "error", "message": "room_full"}))
+                return
             # R59G: replay the room's custom-emoji set to the new member's
             # gateway (per-emoji deltas — the /relay body cap forbids one blob).
             try:

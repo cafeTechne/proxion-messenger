@@ -57,12 +57,43 @@ class RoomStoreMixin(object):
                 "SELECT webid FROM room_members WHERE room_id = ?", (room_id,)
             ).fetchall()
             return [r["webid"] for r in rows]
-    def add_federated_room_member(self, room_id: str, member_did: str, gateway_url: str) -> None:
+    def add_federated_room_member(
+        self,
+        room_id: str,
+        member_did: str,
+        gateway_url: str,
+        max_members: Optional[int] = None,
+    ) -> bool:
+        """Record a federated (cross-gateway) room member.
+
+        When *max_members* is given, count existing local + federated members and
+        refuse (return False) a NEW member that would push the room over the cap.
+        Re-recording an existing member (same room_id + member_did) is always
+        allowed so a gateway-URL refresh never trips the cap. Defense in depth for
+        the handler-side cap; see _handle_announce_room_join.
+        """
         with self._conn() as conn:
+            if max_members is not None:
+                already = conn.execute(
+                    "SELECT 1 FROM room_federated_members WHERE room_id=? AND member_did=?",
+                    (room_id, member_did),
+                ).fetchone()
+                if not already:
+                    fed_n = conn.execute(
+                        "SELECT COUNT(*) FROM room_federated_members WHERE room_id=?",
+                        (room_id,),
+                    ).fetchone()[0]
+                    local_n = conn.execute(
+                        "SELECT COUNT(*) FROM room_members WHERE room_id=?",
+                        (room_id,),
+                    ).fetchone()[0]
+                    if fed_n + local_n >= max_members:
+                        return False
             conn.execute(
                 "INSERT OR REPLACE INTO room_federated_members (room_id, member_did, gateway_url) VALUES (?,?,?)",
                 (room_id, member_did, gateway_url),
             )
+        return True
     def remove_federated_room_member(self, room_id: str, member_did: str) -> None:
         with self._conn() as conn:
             conn.execute(
