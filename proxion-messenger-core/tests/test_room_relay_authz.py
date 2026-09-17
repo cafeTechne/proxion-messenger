@@ -174,6 +174,24 @@ async def test_room_relay_rejects_message_id_with_markup(gateway):
 
 
 @pytest.mark.asyncio
+async def test_room_message_relay_refuses_memberless_room(gateway):
+    """F3b: a known room with NO resolvable members refuses a relayed message
+    instead of failing open. This protects a pod-restored room whose member set
+    is empty from an injected relay; the sender cannot be verified, so the message
+    is neither persisted nor broadcast."""
+    room_id = "r-empty"
+    gateway._local_rooms[room_id] = {"members": set(), "creator_webid": "did:key:zOwner"}
+    # No stored or federated members recorded for this room.
+    status, resp = await gateway._handle_room_relay({
+        "room_id": room_id, "from_webid": "did:key:zSomeone",
+        "message_id": "m-empty", "content": "injected", "timestamp": "2026-01-01T00:00:00Z",
+    })
+    assert status.startswith("403")
+    assert "sender_not_member" in resp
+    assert gateway._store.get_message("m-empty") is None, "must not be persisted"
+
+
+@pytest.mark.asyncio
 async def test_room_relay_accepts_uuid_message_id(gateway):
     """A normal UUID-style message_id (letters, digits, hyphens) still passes."""
     room_id = "r-mid-ok"

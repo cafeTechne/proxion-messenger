@@ -1712,6 +1712,11 @@ class PodSyncMixin:
             history_mode = meta.get("history_mode", "none")
             invite_url = meta.get("invite_url", "")
             self._store.save_room(room_id, name, code, invite_url, history_mode, creator_webid)
+            # Record the creator as a member, mirroring _hydrate_from_store. A
+            # pod-restored room otherwise has an empty member set, which the relay
+            # authz path treats as "no records" and would fail open on.
+            if creator_webid and creator_webid not in self._store.get_room_members(room_id):
+                self._store.add_room_member(room_id, creator_webid)
             self._local_rooms[room_id] = {
                 "name": name,
                 "code": code,

@@ -1891,8 +1891,31 @@ class RoomHandlerMixin:
             await websocket.send(json.dumps({"type": "error", "code": "E_REHOST", "message": "signer is not the requester"}))
             return
 
-        # Already hosted: just make sure the requester is a live member; never clobber.
+        # Already hosted: adding the caller to the live member set is what grants
+        # send/history/members/reactions/pins, so it must be gated. A valid
+        # SELF-signed descriptor proves only "I am who I say"; it does NOT prove
+        # room membership. Rooms are hydrated into _local_rooms at startup, so
+        # without this any authenticated caller who learned the room id (a former
+        # member, a BANNED member, or anyone who saw it) could self-sign a
+        # descriptor and be added to the live members. Require a genuine
+        # membership tie: the room creator, or a current stored member, and never
+        # banned. Mirrors _handle_join_room's ban gate. Never clobber the room.
         if room_id in self._local_rooms:
+            _ids = {requester, signing_did, signer}
+            _ids.discard("")
+            _creator = self._local_rooms[room_id].get("creator_webid", "")
+            _is_creator = bool(_creator) and _creator in _ids
+            _members = set(self._store.get_room_members(room_id)) if self._store else set()
+            _is_member = bool(_ids & _members)
+            _is_banned = bool(self._store) and any(
+                self._store.is_room_banned(room_id, _i) for _i in _ids
+            )
+            if not (_is_creator or _is_member) or _is_banned:
+                await websocket.send(json.dumps({
+                    "type": "error", "code": "E_REHOST",
+                    "message": "not a room member",
+                }))
+                return
             self._local_rooms[room_id]["members"].add(websocket)
             await websocket.send(json.dumps({
                 "type": "room_rehosted", "room_id": room_id,

@@ -81,6 +81,8 @@ async def test_room_relay_skips_push_without_vapid(gateway):
     member_did = "did:key:zMember"
     gateway._local_rooms[room_id] = {"name": "T", "members": set()}
     gateway._store.add_room_member(room_id, member_did)
+    # The relay requires a known sender (no fail-open on empty membership).
+    gateway._store.add_federated_room_member(room_id, "did:key:zSender", "https://gw.example.com")
 
     with patch("proxion_messenger_core.webpush.send_web_push") as mock_push:
         await gateway._handle_room_relay({

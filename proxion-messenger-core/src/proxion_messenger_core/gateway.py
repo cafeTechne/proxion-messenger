@@ -2226,12 +2226,14 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             # Sender verification: from_webid must be a known member (local or
             # federated) of the room. Without this a peer gateway could inject a
             # message appearing "from" an arbitrary non-banned webid into a room
-            # you host. Fail-open only when we have NO membership records at all
-            # (avoid breaking a legit member whose federation join wasn't tracked).
+            # you host. This does NOT fail open on an empty member set: a
+            # pod-restored room now records its creator (see _restore_rooms_from_pod),
+            # and a known room with no resolvable members refuses the relay rather
+            # than accepting an unverifiable sender.
             _known = set(self._store.get_room_members(room_id))
             _known |= {m.get("member_did") for m in self._store.get_federated_room_members(room_id)}
             _known.discard("")
-            if _known and from_webid not in _known:
+            if from_webid not in _known:
                 return "403 Forbidden", '{"error":"sender_not_member"}'
 
         event = {
@@ -2638,7 +2640,12 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # local mod path checks admin before relaying; the receiver must re-verify.
         _room = self._local_rooms.get(room_id)
         _owner = _room.get("creator_webid") if _room else None
-        _is_admin = bool(caller) and self._store.get_room_role(room_id, caller) == "admin"
+        # A granted admin must ALSO be a current member — a role row alone
+        # survives removal, so an ex-admin whose role row persists must not keep
+        # moderation authority. Mirrors the local _check_room_permission("admin").
+        _is_admin = (bool(caller)
+                     and self._store.get_room_role(room_id, caller) == "admin"
+                     and caller in self._store.get_room_members(room_id))
         if not caller or (caller != _owner and not _is_admin):
             return "403 Forbidden", '{"error":"not_authorized_to_moderate"}'
         if action == "ban":

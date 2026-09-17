@@ -71,7 +71,9 @@ async def test_room_relay_allows_unbanned_sender(gateway):
     ws = _ws()
     room_id = "room-3"
     gateway._local_rooms[room_id] = {"name": "T", "members": {ws}}
-    # Not banned
+    # Not banned, and a known member (the relay no longer fails open on a room
+    # with no membership records).
+    gateway._store.add_room_member(room_id, "did:key:zOk")
     status, _ = await gateway._handle_room_relay({
         "room_id": room_id, "from_webid": "did:key:zOk",
         "message_id": "m3", "content": "hello", "timestamp": "2026-06-12T00:00:00Z",
@@ -161,3 +163,40 @@ async def test_moderation_relay_rejects_non_owner(gateway):
     })
     assert status.startswith("403")
     assert gateway._store.is_room_banned(room_id, "did:key:zBanned"), "ban must stand"
+
+
+@pytest.mark.asyncio
+async def test_moderation_relay_rejects_non_member_admin(gateway):
+    """F10: an 'admin' role row alone is not enough — the caller must ALSO be a
+    current member. An ex-admin whose role row persists after removal is rejected,
+    mirroring the local _check_room_permission admin co-check."""
+    room_id = "room-mod-exadmin"
+    gateway._local_rooms[room_id] = {"name": "T", "members": set(), "creator_webid": "did:key:zOwner"}
+    ex_admin = "did:key:zExAdmin"
+    gateway._store.set_room_role(room_id, ex_admin, "admin")  # role row persists
+    # ex_admin is NOT in get_room_members(room_id).
+    gateway._store.ban_room_member(room_id, "did:key:zVictim", "did:key:zOwner", "")
+    status, _ = await gateway._handle_room_moderation_relay({
+        "room_id": room_id, "action": "unban", "webid": "did:key:zVictim",
+        "from_webid": ex_admin,
+    })
+    assert status.startswith("403")
+    assert gateway._store.is_room_banned(room_id, "did:key:zVictim"), "ban must stand"
+
+
+@pytest.mark.asyncio
+async def test_moderation_relay_allows_member_admin(gateway):
+    """A granted admin who IS a current member can still moderate over the relay
+    (the co-check does not break a legitimate admin)."""
+    ws = _ws()
+    room_id = "room-mod-admin-ok"
+    gateway._local_rooms[room_id] = {"name": "T", "members": {ws}, "creator_webid": "did:key:zOwner"}
+    admin = "did:key:zAdmin"
+    gateway._store.set_room_role(room_id, admin, "admin")
+    gateway._store.add_room_member(room_id, admin)
+    status, _ = await gateway._handle_room_moderation_relay({
+        "room_id": room_id, "action": "ban", "webid": "did:key:zTarget",
+        "from_webid": admin, "reason": "spam",
+    })
+    assert status.startswith("200")
+    assert gateway._store.is_room_banned(room_id, "did:key:zTarget")
