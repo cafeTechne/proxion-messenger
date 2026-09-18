@@ -133,7 +133,7 @@ class PodRoomStore:
         if owner_webid:
             members = _sanitize_member_webids(member_webids, owner_webid)
             try:
-                set_acl_multi_auto(
+                acl_uri = set_acl_multi_auto(
                     self._client,
                     room_uri,
                     owner_webid,
@@ -142,6 +142,16 @@ class PodRoomStore:
                 )
             except Exception as exc:
                 logger.warning("Failed to set room ACL for %s: %s", room_id, exc)
+                return
+            # Read the ACL back so a write the pod accepted but did not apply (a
+            # 2xx that stored nothing, or an ACP pod ignoring a WAC document)
+            # surfaces here instead of silently leaving the room readable. A pod
+            # that forbids GET on the ACL resource is logged, not raised, so
+            # provisioning still completes on CSS/NSS.
+            try:
+                self._client.get(acl_uri)
+            except Exception as exc:
+                logger.warning("Room ACL for %s not confirmed after write: %s", room_id, exc)
 
     def _put_container_create_only(self, stash_uri: str) -> None:
         """Create a BasicContainer with If-None-Match: *.

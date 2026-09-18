@@ -116,7 +116,31 @@ class MessageStoreMixin(object):
         duration_ms: int,
         timestamp: str,
     ) -> None:
+        if from_display_name:
+            from_display_name = from_display_name[:64]
+        _MAX_MESSAGES_PER_THREAD = 5000
+        _MAX_BYTES_PER_THREAD = 50 * 1024 * 1024  # 50MB
         with self._conn() as conn:
+            # A voice message INSERTs into the same messages table, so it must
+            # honour the same per-thread quota save_message enforces. The audio
+            # payload lives in audio_b64 (content is empty), so it counts toward
+            # the byte total here.
+            res = conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(LENGTH(content) + LENGTH(COALESCE(audio_b64, ''))), 0) "
+                "FROM messages WHERE thread_id = ?",
+                (thread_id,),
+            ).fetchone()
+            count = res[0] or 0
+            total_bytes = res[1] or 0
+
+            if count >= _MAX_MESSAGES_PER_THREAD:
+                logger.warning("Quota exceeded for thread %s: message count %d", thread_id, count)
+                return
+
+            if total_bytes + len(audio_b64 or "") > _MAX_BYTES_PER_THREAD:
+                logger.warning("Quota exceeded for thread %s: byte size %d", thread_id, total_bytes)
+                return
+
             conn.execute(
                 """
                 INSERT OR IGNORE INTO messages
@@ -293,8 +317,17 @@ class MessageStoreMixin(object):
             ).fetchall()
             return [dict(r) for r in rows]
     def save_pin(self, thread_id: str, message_id: str, pinned_by: str, content: str = "") -> str:
-        pin_id = f"pin-{int(time.time()*1000)}"
         with self._conn() as conn:
+            # The pins table has no UNIQUE(thread_id, message_id) and the pin_id is
+            # time-based, so re-pinning the same message would mint a new row each
+            # time. Re-use the existing pin instead of growing the table.
+            existing = conn.execute(
+                "SELECT pin_id FROM pins WHERE thread_id = ? AND message_id = ?",
+                (thread_id, message_id),
+            ).fetchone()
+            if existing:
+                return existing[0]
+            pin_id = f"pin-{int(time.time()*1000)}"
             conn.execute(
                 "INSERT OR IGNORE INTO pins (pin_id, thread_id, message_id, pinned_by, pinned_at, content)"
                 " VALUES (?, ?, ?, ?, ?, ?)",

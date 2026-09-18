@@ -33,6 +33,10 @@ logger = logging.getLogger("proxion_messenger_core.gateway")
 # existing members reconnecting are unaffected.
 _MAX_ROOM_MEMBERS = 500
 
+# Per-message edit-history cap. Each edit appends a message_edits row holding the
+# previous and new content, so an unbounded edit loop is a disk-growth vector.
+_MAX_EDITS_PER_MESSAGE = 100
+
 # Real message ids are UUIDs, "local-<hex>", or urlsafe tokens, so they live
 # within [word chars, dot, hyphen]. A client-supplied id reaches a pod URI
 # (stash://pod/rooms/<rid>/messages/<message_id>.json), so an id containing a
@@ -920,6 +924,13 @@ class RoomHandlerMixin:
         # F2: only a row the caller owns may reach the pod read-modify-write; an
         # unknown id must not be able to rewrite an arbitrary pod object.
         _owned_edit = sender is not None and sender == caller_webid_edit
+        # Every edit appends a message_edits row (prev+new content), so an
+        # unbounded edit loop would grow that table without limit. Refuse once a
+        # message has reached the per-message edit ceiling. get_edits is a read.
+        if self._store and message_id and new_content:
+            if len(self._store.get_edits(message_id)) >= _MAX_EDITS_PER_MESSAGE:
+                await websocket.send(json.dumps({"type": "error", "message": "edit_history_full"}))
+                return
         if message_id and new_content:
             edited_at = datetime.now(timezone.utc).isoformat()
             if self._store:
@@ -1948,10 +1959,18 @@ class RoomHandlerMixin:
         if self._store:
             self._store.save_room(room_id, name, code_hash, invite_url, history_mode, signer)
             self._store.add_room_member(room_id, signer)
+            # The descriptor's members list is client-supplied, so cap it at
+            # _MAX_ROOM_MEMBERS (the signer already counts) the way _handle_join_room
+            # caps live joins. Without this a crafted descriptor could seed an
+            # arbitrarily large membership.
+            _rehost_added = 1
             for m in (desc.get("members") or []):
+                if _rehost_added >= _MAX_ROOM_MEMBERS:
+                    break
                 wid = m.get("webid") if isinstance(m, dict) else m
                 if isinstance(wid, str) and wid and wid != signer:
                     self._store.add_room_member(room_id, wid)
+                    _rehost_added += 1
         logger.info("Room rehosted from pod descriptor: %r (%s) by %s", name, room_id, signer)
         await websocket.send(json.dumps({
             "type": "room_rehosted", "room_id": room_id, "name": name,

@@ -50,6 +50,7 @@ _SCHEMA: dict[str, dict[str, tuple]] = {
     "send_room":        {"room_id": (str, _MAX_ID), "content": (str, _MAX_CONTENT)},
     "local_dm":         {"target_webid": (str, _MAX_ID), "content": (str, _MAX_CONTENT)},
     "edit_message":     {"message_id": (str, _MAX_ID), "content": (str, _MAX_CONTENT)},
+    "edit_local_message": {"message_id": (str, _MAX_ID), "content": (str, _MAX_CONTENT)},
     # register accepts either "did" OR "webid" — handler validates internally
     "auth_response":    {"signature": (str, _MAX_SIG)},
     "join_room":        {"code": (str, _MAX_ID)},
