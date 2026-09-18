@@ -16,9 +16,20 @@ globalThis.localStorage = {
 };
 
 // ── Mock auth.js (no pod in unit tests) ──────────────────────────────────────
+// Mutable so a test can flip to a logged-in pod session; defaults to logged-out so
+// the many initE2E() calls below leave the pod publish path a no-op.
+let _e2eSession = { info: { isLoggedIn: false } };
+let _e2eRoot = null;
 vi.mock('./auth.js', () => ({
-    solidSession: { info: { isLoggedIn: false } },
-    podStorageRoot: () => null,
+    get solidSession() { return _e2eSession; },
+    podStorageRoot: () => _e2eRoot,
+}));
+
+// e2e.js publishes the x25519 public key + its public-read ACL through pod.js; spy
+// on the ACL helper so a test can assert the trust anchor is made peer-readable.
+const _publishIdentityAcl = vi.fn(async () => true);
+vi.mock('./pod.js', () => ({
+    podPublishIdentityAcl: (...a) => _publishIdentityAcl(...a),
 }));
 
 // ── Import e2e module ────────────────────────────────────────────────────────
@@ -576,5 +587,45 @@ describe('cachePeerPub verified-flag pinning', () => {
         cachePeerPub('alice', 'KEY_B');   // key changed → verification cleared
         expect(localStorage.getItem('proxion_e2e_verified_alice')).toBe(null);
         expect(localStorage.getItem('proxion_e2e_peer_pub_alice')).toBe('KEY_B');
+    });
+});
+
+describe('publishing the x25519 public key makes it peer-readable (D2)', () => {
+    // Let init's fire-and-forget _publishPubToPod() settle.
+    const flush = () => new Promise((r) => setTimeout(r, 0));
+
+    it('writes x25519-pub.json then a public-read ACL on that file', async () => {
+        const calls = [];
+        _e2eRoot = 'https://me.pod.example/';
+        _e2eSession = {
+            info: { isLoggedIn: true, webId: 'https://me.pod.example/profile/card#me' },
+            fetch: vi.fn(async (url, opts = {}) => { calls.push({ url, opts }); return { ok: true, status: 200 }; }),
+        };
+        _publishIdentityAcl.mockClear();
+        try {
+            localStorage.clear();
+            _resetForTesting();
+            await initE2E();
+            await flush();
+            const pubUrl = 'https://me.pod.example/proxion/identity/x25519-pub.json';
+            const put = calls.find((c) => c.url === pubUrl && c.opts.method === 'PUT');
+            expect(put).toBeTruthy();
+            expect(JSON.parse(put.opts.body)).toMatchObject({ version: 1 });
+            // The public-read ACL is applied to exactly that file (not the container).
+            expect(_publishIdentityAcl).toHaveBeenCalledWith(pubUrl);
+        } finally {
+            _e2eSession = { info: { isLoggedIn: false } };
+            _e2eRoot = null;
+            _resetForTesting();
+        }
+    });
+
+    it('does not touch the pod (or its ACL) when logged out', async () => {
+        _publishIdentityAcl.mockClear();
+        localStorage.clear();
+        _resetForTesting();
+        await initE2E();
+        await flush();
+        expect(_publishIdentityAcl).not.toHaveBeenCalled();
     });
 });

@@ -9,6 +9,7 @@
  */
 import { solidSession, podStorageRoot } from './auth.js';
 import { isPeerPodRootAllowed } from './ssrf.js';
+import { podPublishIdentityAcl } from './pod.js';
 
 export class E2EDecryptError extends Error {
     constructor(msg) { super(msg); this.name = 'E2EDecryptError'; }
@@ -250,11 +251,17 @@ async function _doInit() {
 async function _publishPubToPod() {
     const root = typeof podStorageRoot === 'function' ? podStorageRoot() : null;
     if (!root || !solidSession?.info?.isLoggedIn) return;
-    await solidSession.fetch(root + 'proxion/identity/x25519-pub.json', {
+    const url = root + 'proxion/identity/x25519-pub.json';
+    const res = await solidSession.fetch(url, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ version: 1, pub: _myPubB64u }),
     });
+    if (!res || !res.ok) return;
+    // A peer must READ this public X25519 key from our pod to discover it without a
+    // gateway; give it a public-read ACL so it does not inherit proxion/'s owner-only
+    // default and 403 the peer. Public data only (the X25519 public key).
+    await podPublishIdentityAcl(url);
 }
 
 // ── Peer key management ───────────────────────────────────────────────────────

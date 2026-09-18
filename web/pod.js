@@ -1416,15 +1416,61 @@ async function _deleteDrop(url) {
 export async function podPublishSigner(signerDid, accountDid) {
     const root = podStorageRoot();
     if (!root || !signerDid || !solidSession?.info?.isLoggedIn) return false;
+    const url = root.replace(/\/?$/, '/') + 'proxion/identity/signer.json';
     try {
-        const res = await solidSession.fetch(root.replace(/\/?$/, '/') + 'proxion/identity/signer.json', {
+        const res = await solidSession.fetch(url, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ version: 1, signer: signerDid, account_did: accountDid || null }),
         });
-        return !!(res && res.ok);
+        if (!res || !res.ok) return false;
+        // The signer is a trust anchor a PEER must read from OUR pod, so give it a
+        // public-read ACL; without it the file inherits proxion/'s owner-only default
+        // and a peer 403s, so R107 sender verification never reaches sender_verified
+        // across pods. Best-effort (the file is already saved), logged on failure.
+        await podPublishIdentityAcl(url);
+        return true;
     } catch (err) {
         console.warn('[pod] podPublishSigner failed:', err);
+        return false;
+    }
+}
+
+/**
+ * Give an identity trust anchor (signer.json / x25519-pub.json) a public-read ACL.
+ * These files carry only public data (a did:key + account did; an X25519 public
+ * key), and a peer authenticating as itself must be able to READ them: R107 DM
+ * sender verification and gateway-free peer-key discovery both fetch them from the
+ * OTHER user's pod. Without it they inherit proxion/'s owner-only default, so a
+ * peer 403s and the feature silently degrades to a cross-pod no-op.
+ *
+ * Public READ only, scoped to the single file via acl:accessTo (never write/append/
+ * control, and no acl:default on proxion/ that would expose other private children
+ * such as read state, scheduled messages or room data). Mirrors the presence
+ * heartbeat / public type index ACL. D4: reads the ACL back to confirm the grant
+ * took effect rather than trusting the PUT status alone; returns whether public
+ * read is in place.
+ */
+export async function podPublishIdentityAcl(resourceUrl) {
+    const webId = solidSession?.info?.webId;
+    if (!resourceUrl || !webId || !solidSession?.info?.isLoggedIn) return false;
+    try {
+        const { url: aclUrl, model } = await discoverAccessControl(resourceUrl);
+        const put = await solidSession.fetch(aclUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'text/turtle' },
+            body: _publicReadAclBody(model, resourceUrl, webId),
+        });
+        if (!put || !put.ok) {
+            console.warn('[pod] identity ACL write returned', put && put.status);
+            return false;
+        }
+        const check = await solidSession.fetch(aclUrl, { headers: { Accept: 'text/turtle' } });
+        if (!check || !check.ok) return false;
+        const ttl = typeof check.text === 'function' ? await check.text() : '';
+        return /acl:Read/.test(ttl);
+    } catch (err) {
+        console.warn('[pod] podPublishIdentityAcl failed:', err);
         return false;
     }
 }

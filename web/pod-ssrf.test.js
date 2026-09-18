@@ -20,6 +20,8 @@ import {
     podWriteChatMessageAt,
     podReadPresence,
     podFetchPeerSigner,
+    podPublishSigner,
+    podPublishIdentityAcl,
     podDropDm,
     podUploadVoiceAudio,
     podDeleteVoiceAudio,
@@ -324,5 +326,82 @@ describe('foreign-profile discovery URLs are origin-gated and body-capped (F7/F8
         expect(await podDiscoverInbox(WEBID)).toBe('https://alice.pod.example/inbox/');
         _session = profileSession({ [INBOX_PRED]: [{ '@id': 'https://evil.example/inbox/' }] });
         expect(await podDiscoverInbox(WEBID)).toBe(null);
+    });
+});
+
+describe('identity trust anchors get a public-read ACL (D2 / D4)', () => {
+    const SIGNER_URL = 'https://me.pod.example/proxion/identity/signer.json';
+
+    // A tiny in-memory pod: PUT stores a body at its URL; GET returns it (so the
+    // ACL read-back sees what we wrote); HEAD carries no Link, so discovery falls
+    // back to the `.acl` convention + WAC (the CSS/NSS path).
+    function podSession() {
+        const store = {};
+        return {
+            info: { isLoggedIn: true, webId: 'https://me.pod.example/profile/card#me' },
+            fetch: vi.fn(async (url, opts = {}) => {
+                _calls.push({ url, opts });
+                const method = opts.method || 'GET';
+                if (method === 'PUT') { store[url] = opts.body; return { ok: true, status: 201 }; }
+                if (method === 'HEAD') { return { ok: true, status: 200 }; }
+                const body = store[url];
+                return body != null
+                    ? { ok: true, status: 200, text: async () => body, json: async () => JSON.parse(body) }
+                    : { ok: false, status: 404, text: async () => '', json: async () => ({}) };
+            }),
+        };
+    }
+
+    it('podPublishSigner writes signer.json then a foaf:Agent acl:Read ACL on that file', async () => {
+        _session = podSession();
+        expect(await podPublishSigner('did:key:zSigner', 'did:key:zAccount')).toBe(true);
+
+        const put = _calls.find((c) => c.url === SIGNER_URL && c.opts.method === 'PUT');
+        expect(put).toBeTruthy();
+        expect(JSON.parse(put.opts.body)).toMatchObject({ version: 1, signer: 'did:key:zSigner' });
+
+        const aclPut = _calls.find((c) => c.url === SIGNER_URL + '.acl' && c.opts.method === 'PUT');
+        expect(aclPut).toBeTruthy();
+        const acl = aclPut.opts.body;
+        // Public gets READ, granted to everyone (foaf:Agent), scoped to this file.
+        expect(acl).toContain('acl:agentClass foaf:Agent');
+        expect(acl).toContain(`acl:accessTo <${SIGNER_URL}>`);
+        const publicBlock = acl.split('#public')[1] || '';
+        expect(publicBlock).toContain('acl:mode acl:Read');
+        // ...never write/append/control to the public.
+        expect(publicBlock).not.toContain('acl:Write');
+        expect(publicBlock).not.toContain('acl:Append');
+        expect(publicBlock).not.toContain('acl:Control');
+        // Scoped to the file only: no broad acl:default that would expose other
+        // private proxion/ children.
+        expect(acl).not.toContain('acl:default');
+        expect(acl).not.toContain('/proxion/>');
+    });
+
+    it('reads the ACL back and reports the grant is in place (D4)', async () => {
+        _session = podSession();
+        expect(await podPublishIdentityAcl(SIGNER_URL)).toBe(true);
+        const aclGet = _calls.find((c) => c.url === SIGNER_URL + '.acl' && (c.opts.method || 'GET') === 'GET');
+        expect(aclGet).toBeTruthy();   // read-back happened
+    });
+
+    it('surfaces a failure (returns false) when the ACL PUT is refused', async () => {
+        _session = makeSession(async (url, opts = {}) => {
+            if (opts.method === 'PUT' && url.endsWith('.acl')) return { ok: false, status: 403 };
+            return { ok: true, status: 200, text: async () => '', json: async () => ({}) };
+        });
+        expect(await podPublishIdentityAcl(SIGNER_URL)).toBe(false);
+    });
+
+    it('a peer-read of signer.json is not owner-gated (public GET succeeds)', async () => {
+        // The peer authenticates as ITSELF, not the owner; with the public-read ACL
+        // in place the server serves the file, so podFetchPeerSigner returns it.
+        _session = makeSession(async () => ({
+            ok: true, status: 200,
+            json: async () => ({ version: 1, signer: 'did:key:zPeer', account_did: null }),
+            text: async () => JSON.stringify({ version: 1, signer: 'did:key:zPeer' }),
+        }));
+        const got = await podFetchPeerSigner('https://alice.pod.example/');
+        expect(got).toEqual({ signer: 'did:key:zPeer', account_did: null });
     });
 });
