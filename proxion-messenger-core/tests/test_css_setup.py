@@ -316,6 +316,58 @@ def test_connect_agent_accepts_subdomain_pod(key):
     assert webid == "http://alice.localhost/alice/profile/card#me"
 
 
+def test_login_debug_log_redacts_cookie_value_and_body(mgr, caplog):
+    """Debug logs from the login path must not leak the session cookie value or the raw body.
+
+    The css-account session cookie is bearer-equivalent (creates pods, issues
+    client credentials, changes the password), so a debug log may name which
+    cookies were set but never their values, and must not echo the login body.
+    """
+    LOGIN_URL = f"{BASE}/.account/login/password/"
+    secret_cookie = "SUPER-SECRET-SESSION-VALUE"
+    secret_body_token = "SECRET-AUTHZ-TOKEN"
+
+    import logging
+    with respx.mock:
+        respx.get(f"{BASE}/.account/").mock(return_value=httpx.Response(200, json=AUTH_CONTROLS))
+        respx.post(LOGIN_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={"authorization": secret_body_token},
+                headers={"Set-Cookie": f"css-account={secret_cookie}; Path=/"},
+            )
+        )
+        with caplog.at_level(logging.DEBUG, logger="proxion_messenger_core.css_setup"):
+            result = mgr.login("alice@test.com", "pass123")
+
+    assert result == secret_cookie
+    emitted = "\n".join(r.getMessage() for r in caplog.records)
+    # The value must never appear; the cookie name may.
+    assert secret_cookie not in emitted
+    assert secret_body_token not in emitted
+    assert "css-account" in emitted
+
+
+def test_pod_list_debug_log_omits_body(mgr, caplog):
+    """The pod-list debug log records only the status code, never the response body."""
+    secret_pod_body = "SECRET-POD-LISTING"
+    import logging
+    with respx.mock:
+        respx.get(POD_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={"pods": {f"{BASE}/alice/": POD_URL + "pod-id/"}, "note": secret_pod_body},
+            )
+        )
+        client = httpx.Client()
+        with caplog.at_level(logging.DEBUG, logger="proxion_messenger_core.css_setup"):
+            mgr._get_pod_url_and_webid(client, AUTH_CONTROLS["controls"])
+        client.close()
+
+    emitted = "\n".join(r.getMessage() for r in caplog.records)
+    assert secret_pod_body not in emitted
+
+
 def test_parse_jwt_exp_returns_zero_on_garbage():
     from proxion_messenger_core.css_setup import _parse_jwt_exp
     assert _parse_jwt_exp("not.a.jwt") == 0.0

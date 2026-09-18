@@ -97,8 +97,8 @@ class CssAccountManager:
         )
         logger.debug("css_setup: POST login → %s", login_url)
         resp = client.post(login_url, json={"email": email, "password": password})
-        logger.debug("css_setup: login status=%d cookies=%s body=%s",
-                     resp.status_code, dict(client.cookies), resp.text[:400])
+        logger.debug("css_setup: login status=%d cookie_names=%s",
+                     resp.status_code, sorted(client.cookies.keys()))
         resp.raise_for_status()
         controls = self._authenticated_controls(client)
         logger.debug("css_setup: authenticated controls keys=%s", list(controls.keys()))
@@ -181,7 +181,7 @@ class CssAccountManager:
         url = controls["account"]["pod"]
         logger.debug("css_setup: GET pod list → %s", url)
         resp = client.get(url)
-        logger.debug("css_setup: pod list status=%d body=%s", resp.status_code, resp.text[:400])
+        logger.debug("css_setup: pod list status=%d", resp.status_code)
         resp.raise_for_status()
         body = resp.json()
         pods: dict = body.get("pods", {})
