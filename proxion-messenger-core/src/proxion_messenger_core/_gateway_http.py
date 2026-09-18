@@ -2088,6 +2088,17 @@ class HttpEndpointsMixin:
                     if peer_did not in self._revoked_dids:
                         self._store.mark_revoked(cert_id or "", peer_did)
                         self._revoked_dids.add(peer_did)
+                        # Set the relationships.revoked column too (mark_revoked
+                        # only writes the revocations table), so the cert-lookup
+                        # helpers stop returning a UI-revoked cert as valid.
+                        if cert_id:
+                            self._store.revoke_relationship(cert_id)
+                        if peer_did:
+                            self._store.revoke_relationships_for_peer(peer_did)
+                        # Durable pod tombstone: survives cold start / DID rotation.
+                        asyncio.create_task(
+                            self._sync_revocation_to_pod(cert_id or "", peer_did)
+                        )
                         await self._broadcast_to_owner({
                             "type": "contact_revoked",
                             "cert_id": cert_id,

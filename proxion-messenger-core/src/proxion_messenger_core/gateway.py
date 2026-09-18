@@ -1897,6 +1897,15 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         peer_did = cert_dict.get("peer_did", "")
         self._store.mark_revoked(cert_id, peer_did)
         self._revoked_dids.add(peer_did)
+        # Also set the relationships.revoked column so the cert-lookup helpers
+        # (which filter revoked=0) stop returning it and relationship_is_revoked
+        # reports it revoked. mark_revoked + _revoked_dids alone left the column
+        # unset, so a UI-revoked cert still read back as valid.
+        self._store.revoke_relationship(cert_id)
+        self._store.revoke_relationships_for_peer(peer_did)
+        # Write a durable pod tombstone so the revocation survives a SQLite cold
+        # start / DID rotation and is the authority on restore (harasser stays out).
+        asyncio.create_task(self._sync_revocation_to_pod(cert_id, peer_did))
         # Scope to the revoker's OWN identity (all their devices, so each purges
         # the contact + cached DM plaintext) rather than telling every session on
         # the gateway that this user revoked this peer (a relationship-metadata

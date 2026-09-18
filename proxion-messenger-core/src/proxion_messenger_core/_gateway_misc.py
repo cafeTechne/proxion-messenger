@@ -1972,8 +1972,15 @@ class MiscHandlerMixin:
         if not verify_device_attestation(device_pub_b64, owner_webid, device_id, timestamp, attestation_b64):
             await websocket.send(json.dumps({"type": "error", "message": "invalid_attestation"}))
             return
-        self._store.register_device(device_id, owner_webid, device_pub_b64, attestation_b64)
-        asyncio.create_task(self._sync_device_to_pod(device_id, owner_webid, device_pub_b64, attestation_b64))
+        if not self._store.register_device(device_id, owner_webid, device_pub_b64, attestation_b64):
+            await websocket.send(json.dumps({"type": "error", "message": "device_limit_reached"}))
+            return
+        # Carry the attestation's signed timestamp to the pod so the record can be
+        # re-verified on restore (a plain registered_at cannot).
+        asyncio.create_task(self._sync_device_to_pod(
+            device_id, owner_webid, device_pub_b64, attestation_b64,
+            attest_timestamp=timestamp,
+        ))
         await websocket.send(json.dumps({
             "type": "device_registered",
             "device_id": device_id,

@@ -125,6 +125,95 @@ class SecurityStoreMixin(object):
         with self._conn() as conn:
             rows = conn.execute("SELECT peer_did FROM revocations").fetchall()
             return {r["peer_did"] for r in rows}
+    def is_cert_revoked(self, cert_id: str) -> bool:
+        """True if a revocation row exists for this certificate_id.
+
+        Restore paths consult this (alongside relationship_is_revoked and
+        is_revoked) before re-importing a cert from the pod, so a revoked
+        contact whose cert still lives on the pod is not resurrected."""
+        if not cert_id:
+            return False
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM revocations WHERE cert_id = ?", (cert_id,)
+            ).fetchone()
+            return row is not None
+    def _ensure_pod_pending_ops_table(self, conn: "sqlite3.Connection") -> None:
+        """Create the durable pod-op retry queue on first use.
+
+        Kept as a lazy CREATE-IF-NOT-EXISTS rather than a numbered migration so
+        the queue lives in the same SQLite file without a schema-version bump."""
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS pod_pending_ops (
+                uri             TEXT PRIMARY KEY,
+                op              TEXT NOT NULL,
+                body            TEXT,
+                content_type    TEXT NOT NULL DEFAULT 'application/json',
+                created_at      REAL NOT NULL,
+                attempts        INTEGER NOT NULL DEFAULT 0,
+                last_attempt_at REAL
+            )"""
+        )
+    def record_pending_pod_op(
+        self, uri: str, op: str, body: Optional[str] = None,
+        content_type: str = "application/json",
+    ) -> None:
+        """Queue a pod write/delete that failed (or could not be attempted) so it
+        is retried on the next reconnect rather than silently lost — a dropped
+        device delete or revocation tombstone would otherwise resurrect on the
+        next pod restore. The attempt counter survives re-queueing."""
+        if not uri or not op:
+            return
+        now = time.time()
+        with self._conn() as conn:
+            try:
+                self._ensure_pod_pending_ops_table(conn)
+                conn.execute(
+                    """INSERT OR REPLACE INTO pod_pending_ops
+                       (uri, op, body, content_type, created_at, attempts, last_attempt_at)
+                       VALUES (?, ?, ?, ?, ?,
+                           COALESCE((SELECT attempts FROM pod_pending_ops WHERE uri=?), 0),
+                           ?)""",
+                    (uri, op, body, content_type, now, uri, now),
+                )
+            except Exception:
+                pass
+    def clear_pending_pod_op(self, uri: str) -> None:
+        """Drop a queued pod op once it has landed (or is no longer needed)."""
+        if not uri:
+            return
+        with self._conn() as conn:
+            try:
+                self._ensure_pod_pending_ops_table(conn)
+                conn.execute("DELETE FROM pod_pending_ops WHERE uri=?", (uri,))
+            except Exception:
+                pass
+    def list_pending_pod_ops(self, limit: int = 500) -> list[dict]:
+        """Return queued pod ops oldest first (for retry on reconnect)."""
+        with self._conn() as conn:
+            try:
+                self._ensure_pod_pending_ops_table(conn)
+                rows = conn.execute(
+                    "SELECT * FROM pod_pending_ops ORDER BY created_at ASC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+    def bump_pending_pod_op_attempt(self, uri: str) -> None:
+        """Record another failed retry for a queued pod op."""
+        if not uri:
+            return
+        with self._conn() as conn:
+            try:
+                self._ensure_pod_pending_ops_table(conn)
+                conn.execute(
+                    "UPDATE pod_pending_ops SET attempts = attempts + 1, last_attempt_at=? "
+                    "WHERE uri=?",
+                    (time.time(), uri),
+                )
+            except Exception:
+                pass
     def save_audit_log(
         self,
         event_type: str,

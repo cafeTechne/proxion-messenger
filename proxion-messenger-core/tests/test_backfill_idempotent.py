@@ -61,11 +61,24 @@ async def test_backfill_idempotent_via_version_marker(gateway):
 @pytest.mark.asyncio
 async def test_restore_devices_idempotent(gateway):
     """Calling _restore_devices_from_pod twice does not duplicate SQLite rows."""
+    import base64 as _b64, time as _time
+    from proxion_messenger_core.device_registry import (
+        generate_device_key, sign_device_attestation,
+    )
+    owner = "https://alice.pod/profile/card#me"
+    device_id = "dev-idem-1"
+    dk = generate_device_key()
+    ts = _time.time()
+    # A verifiable attestation so restore actually stores the device (D1); the
+    # test asserts idempotency of a restored row, not attestation handling.
     rec = {
-        "device_id": "dev-idem-1",
-        "owner_webid": "https://alice.pod/profile/card#me",
-        "device_pub_b64": "pub==",
-        "attestation_b64": "att==",
+        "device_id": device_id,
+        "owner_webid": owner,
+        "device_pub_b64": dk["pub_b64"],
+        "attestation_b64": sign_device_attestation(
+            _b64.b64decode(dk["priv_b64"]), owner, device_id, ts
+        ),
+        "attest_timestamp": ts,
     }
     mock_client = MagicMock()
     mock_client.list = MagicMock(return_value=["stash://pod/devices/dev-idem-1.json"])

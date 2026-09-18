@@ -24,6 +24,11 @@ DEVICE_RECOVERY_CODE_TTL_SECONDS = 7 * 86400  # 7 days
 # for push amplification. Over the cap we evict the oldest rows.
 MAX_PUSH_SUBSCRIPTIONS_PER_OWNER = 20
 
+# Cap device registrations per owner. A device row is self-attested (the account
+# signs its own device keys), so without a cap a single account can mint an
+# unbounded roster. A new registration past the cap is rejected.
+MAX_DEVICES_PER_OWNER = 8
+
 
 
 
@@ -263,14 +268,33 @@ class DeviceStoreMixin(object):
         owner_webid: str,
         device_pub_b64: str,
         attestation_b64: str,
-    ) -> None:
+    ) -> bool:
+        """Register (or refresh) a device key. Returns False without inserting
+        when the owner is already at MAX_DEVICES_PER_OWNER distinct devices and
+        device_id is new, so a self-attesting account cannot mint an unbounded
+        roster. Refreshing an already-registered device_id is always allowed."""
         with self._conn() as conn:
-            conn.execute(
-                """INSERT OR REPLACE INTO device_registrations
-                   (device_id, owner_webid, device_pub_b64, attestation_b64, created_at, last_seen_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (device_id, owner_webid, device_pub_b64, attestation_b64, time.time(), time.time()),
-            )
+            try:
+                existing = conn.execute(
+                    "SELECT 1 FROM device_registrations WHERE device_id=?",
+                    (device_id,),
+                ).fetchone()
+                if existing is None:
+                    count = conn.execute(
+                        "SELECT COUNT(*) FROM device_registrations WHERE owner_webid=?",
+                        (owner_webid,),
+                    ).fetchone()[0]
+                    if count >= MAX_DEVICES_PER_OWNER:
+                        return False
+                conn.execute(
+                    """INSERT OR REPLACE INTO device_registrations
+                       (device_id, owner_webid, device_pub_b64, attestation_b64, created_at, last_seen_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (device_id, owner_webid, device_pub_b64, attestation_b64, time.time(), time.time()),
+                )
+                return True
+            except Exception:
+                return False
     def get_device(self, device_id: str) -> dict | None:
         with self._conn() as conn:
             try:

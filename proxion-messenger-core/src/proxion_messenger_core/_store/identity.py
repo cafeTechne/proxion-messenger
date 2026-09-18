@@ -218,6 +218,28 @@ class IdentityStoreMixin(object):
                 "UPDATE relationships SET revoked=1 WHERE certificate_id=?",
                 (cert_id,),
             )
+    def revoke_relationships_for_peer(self, peer_did: str) -> list:
+        """Mark every relationship row for peer_did as revoked. Returns the
+        certificate_ids that were affected.
+
+        The two live revoke paths write the revocations table + the in-memory
+        set, but a UI-revoked cert must also have the relationships.revoked
+        column set or get_relationship_by_did/_by_cert_id/_by_peer (which filter
+        revoked=0) still return it as valid. A peer can hold more than one cert,
+        so revoke them all rather than only the one named in the request."""
+        if not peer_did:
+            return []
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT certificate_id FROM relationships WHERE peer_did = ?",
+                (peer_did,),
+            ).fetchall()
+            cert_ids = [r["certificate_id"] for r in rows]
+            conn.execute(
+                "UPDATE relationships SET revoked=1 WHERE peer_did = ?",
+                (peer_did,),
+            )
+        return cert_ids
     def relationship_is_revoked(self, cert_id: str) -> bool:
         """True if a relationship row with this certificate_id exists and is revoked.
 

@@ -414,6 +414,7 @@ class PodSyncMixin:
                 None, self._reconnect_stored_pod_sync
             )
             if result:
+                await self._restore_revocations_from_pod()
                 await self._restore_relationships_from_pod()
                 await self._restore_dms_from_pod()
                 await self._restore_local_dms_from_pod()
@@ -426,6 +427,7 @@ class PodSyncMixin:
                 await self._restore_sender_keys_from_pod()
                 await self._restore_devices_from_pod()
                 await self._restore_push_subscriptions_from_pod()
+                await self._flush_pending_pod_ops()
                 asyncio.create_task(self._run_pod_backfill())
                 return
         except Exception as exc:
@@ -447,6 +449,7 @@ class PodSyncMixin:
                 self.config.css_password,
             )
             logger.info("Solid Pod connection established.")
+            await self._restore_revocations_from_pod()
             await self._restore_relationships_from_pod()
             await self._restore_dms_from_pod()
             await self._restore_local_dms_from_pod()
@@ -459,6 +462,7 @@ class PodSyncMixin:
             await self._restore_sender_keys_from_pod()
             await self._restore_devices_from_pod()
             await self._restore_push_subscriptions_from_pod()
+            await self._flush_pending_pod_ops()
             asyncio.create_task(self._run_pod_backfill())
         except Exception as exc:
             logger.warning(f"Could not connect to Solid Pod at startup: {exc}")
@@ -1135,6 +1139,22 @@ class PodSyncMixin:
                 cert_id = cert_dict.get("certificate_id")
                 if not cert_id or cert_id in known_ids:
                     continue
+                # Do not resurrect a revoked contact. A revoked cert still lives on
+                # the pod (still owner-signed) and is absent from list_relationships
+                # (revoked=0 filter), so save_relationship (INSERT OR REPLACE) would
+                # otherwise clear its revoked flag. The durable revocation authority
+                # — the revocations table + relationships.revoked column, hydrated
+                # from the pod tombstones by _restore_revocations_from_pod, which
+                # runs first — wins over the pod cert copy.
+                _cert_peer = cert_dict.get("peer_did") or ""
+                if (self._store.is_cert_revoked(cert_id)
+                        or self._store.relationship_is_revoked(cert_id)
+                        or (_cert_peer and self._store.is_revoked(_cert_peer))
+                        or (_cert_peer and _cert_peer in self._revoked_dids)):
+                    logger.info(
+                        "_restore_relationships_from_pod: skipped revoked cert %s", cert_id
+                    )
+                    continue
                 from .federation import RelationshipCertificate as _RC, cert_authorizes_owner
                 from .handshake import _ed25519_verify
                 cert = _RC.from_dict(cert_dict)
@@ -1156,6 +1176,16 @@ class PodSyncMixin:
                 peer_did = None
                 if peer_pub:
                     peer_did = pub_key_to_did(bytes.fromhex(peer_pub))
+                # peer_did is only known after parsing the cert, so re-check the
+                # revocation authority against it (a peer_did tombstone / DID
+                # rotation) before re-importing.
+                if peer_did and (self._store.is_revoked(peer_did)
+                                 or peer_did in self._revoked_dids):
+                    logger.info(
+                        "_restore_relationships_from_pod: skipped cert %s for revoked peer",
+                        cert_id,
+                    )
+                    continue
                 self._store.save_relationship(cert_dict, peer_did=peer_did)
                 if cert_id not in self.dm_clients:
                     self.dm_clients[cert_id] = (cert, client)
@@ -1243,6 +1273,128 @@ class PodSyncMixin:
                 )
             except Exception as exc:
                 logger.debug("_sync_cert_to_pod failed for %s: %s", cert_id[:8], exc)
+
+    async def _sync_revocation_to_pod(self, cert_id: str, peer_did: str) -> None:
+        """Write a revocation tombstone to the pod so a revoked contact stays
+        revoked across a SQLite cold start or DID rotation.
+
+        Pod path: stash://pod/revocations/{cert_id}.json
+        This tombstone is the durable authority consulted first on restore
+        (_restore_revocations_from_pod, before relationships). A tombstone only
+        ever removes access, so a lost write fails safe; it is still recorded as
+        a pending pod op and retried so the harasser-resurrection case is closed.
+        """
+        if not cert_id:
+            return
+        uri = f"stash://pod/revocations/{cert_id}.json"
+        record = {
+            "cert_id": cert_id,
+            "peer_did": peer_did or "",
+            "revoked_at": time.time(),
+        }
+        body = json.dumps(record)
+        client = self._pod_client()
+        if not client:
+            if self._store:
+                self._store.record_pending_pod_op(uri, "put", body)
+            return
+        async with self._pod_sync_sem:
+            try:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None,
+                    lambda: client.put(uri, body.encode("utf-8"),
+                                       content_type="application/json"),
+                )
+                if self._store:
+                    self._store.clear_pending_pod_op(uri)
+            except Exception as exc:
+                logger.debug("_sync_revocation_to_pod failed for %s: %s", cert_id[:8], exc)
+                if self._store:
+                    self._store.record_pending_pod_op(uri, "put", body)
+
+    async def _restore_revocations_from_pod(self) -> None:
+        """Pull revocation tombstones from the pod into the local revocations
+        table + relationships.revoked column + in-memory set BEFORE relationships
+        are restored, so a revoked contact is never re-imported on a SQLite cold
+        start or DID rotation. The pod tombstone is the durable authority.
+
+        Pod path: stash://pod/revocations/{cert_id}.json
+        """
+        client = self._pod_client()
+        if not client or not self._store:
+            return
+        loop = asyncio.get_event_loop()
+        try:
+            member_uris = await loop.run_in_executor(
+                None, client.list, "stash://pod/revocations/"
+            )
+        except Exception as exc:
+            logger.debug("_restore_revocations_from_pod: list failed: %s", exc)
+            return
+        restored = 0
+        for uri in member_uris:
+            if not uri.endswith(".json"):
+                continue
+            try:
+                raw = await loop.run_in_executor(None, client.get, uri)
+                rec = json.loads(raw.decode("utf-8"))
+                cert_id = rec.get("cert_id", "")
+                peer_did = rec.get("peer_did", "")
+                if not cert_id and not peer_did:
+                    continue
+                self._store.mark_revoked(cert_id or "", peer_did or "")
+                if cert_id:
+                    self._store.revoke_relationship(cert_id)
+                if peer_did:
+                    self._store.revoke_relationships_for_peer(peer_did)
+                    self._revoked_dids.add(peer_did)
+                restored += 1
+            except Exception as exc:
+                logger.debug("_restore_revocations_from_pod: failed for %s: %s", uri, exc)
+        if restored:
+            logger.info(
+                "_restore_revocations_from_pod: restored %d revocation(s) from pod", restored
+            )
+
+    async def _flush_pending_pod_ops(self) -> None:
+        """Reattempt pod writes/deletes queued while the pod was unreachable or
+        errored, so a failed device delete or revocation tombstone is not lost to
+        resurrection on the next reconnect."""
+        client = self._pod_client()
+        if not client or not self._store:
+            return
+        from .solid_client import SolidError
+        loop = asyncio.get_event_loop()
+        for op in self._store.list_pending_pod_ops():
+            uri = op.get("uri", "")
+            kind = op.get("op", "")
+            if not uri or not kind:
+                continue
+            async with self._pod_sync_sem:
+                try:
+                    if kind == "delete":
+                        def _del(u=uri):
+                            try:
+                                client.delete(u)
+                            except SolidError as e:
+                                if e.status_code != 404:
+                                    raise
+                        await loop.run_in_executor(None, _del)
+                    elif kind == "put":
+                        body = (op.get("body") or "").encode("utf-8")
+                        ctype = op.get("content_type") or "application/json"
+                        await loop.run_in_executor(
+                            None,
+                            lambda u=uri, b=body, c=ctype: client.put(u, b, content_type=c),
+                        )
+                    else:
+                        self._store.clear_pending_pod_op(uri)
+                        continue
+                    self._store.clear_pending_pod_op(uri)
+                except Exception as exc:
+                    logger.debug("_flush_pending_pod_ops: retry failed for %s: %s", uri, exc)
+                    self._store.bump_pending_pod_op_attempt(uri)
 
     async def _sync_profile_to_pod(
         self, identity: str, display_name: str = "", x25519_pub: str = ""
@@ -1717,6 +1869,25 @@ class PodSyncMixin:
             # authz path treats as "no records" and would fail open on.
             if creator_webid and creator_webid not in self._store.get_room_members(room_id):
                 self._store.add_room_member(room_id, creator_webid)
+            # A client may have created or joined this room during the awaits
+            # above. Overwriting the live entry with an empty member set + reset
+            # creator drops connected members from broadcasts (D3), so merge into
+            # the existing live entry rather than clobbering it: keep its members
+            # set and a freshly-transferred creator, only filling gaps from meta.
+            existing_live = self._local_rooms.get(room_id)
+            if existing_live is not None:
+                existing_live.setdefault("members", set())
+                existing_live["name"] = existing_live.get("name") or name
+                existing_live["code"] = existing_live.get("code") or code
+                existing_live["invite_url"] = existing_live.get("invite_url") or invite_url
+                existing_live["history_mode"] = existing_live.get("history_mode") or history_mode
+                if not existing_live.get("creator_webid"):
+                    existing_live["creator_webid"] = creator_webid
+                if code:
+                    self._room_codes.setdefault(code, room_id)
+                asyncio.create_task(self._restore_room_pins_from_pod(room_id))
+                restored += 1
+                continue
             self._local_rooms[room_id] = {
                 "name": name,
                 "code": code,
@@ -1986,11 +2157,16 @@ class PodSyncMixin:
 
     async def _sync_device_to_pod(
         self, device_id: str, owner_webid: str, device_pub_b64: str,
-        attestation_b64: str, is_primary: bool = False
+        attestation_b64: str, is_primary: bool = False,
+        attest_timestamp: float = 0.0,
     ) -> None:
         """Write a device registration to the pod.
 
         Pod path: stash://pod/devices/{device_id}.json
+
+        The attestation's signed timestamp is stored (registered_at is a plain
+        wall-clock stamp that cannot re-verify the signature), so a cold-start
+        restore can re-run verify_device_attestation before trusting the record.
         """
         client = self._pod_client()
         if not client or not device_id or not owner_webid:
@@ -2004,6 +2180,7 @@ class PodSyncMixin:
                     "device_pub_b64": device_pub_b64,
                     "attestation_b64": attestation_b64,
                     "is_primary": is_primary,
+                    "attest_timestamp": attest_timestamp,
                     "registered_at": time.time(),
                 }
                 data = json.dumps(record).encode("utf-8")
@@ -2015,14 +2192,24 @@ class PodSyncMixin:
                 logger.debug("_sync_device_to_pod failed [%s]: %s", device_id[:16], exc)
 
     async def _delete_device_from_pod(self, device_id: str) -> None:
-        """Remove a device registration from the pod."""
+        """Remove a device registration from the pod.
+
+        A delete that cannot be attempted or that fails is queued as a durable
+        pending pod op and retried on the next reconnect rather than swallowed:
+        a device left on the pod would otherwise be resurrected by
+        _restore_devices_from_pod (which also skips ids with a queued delete).
+        """
+        if not device_id:
+            return
+        uri = f"stash://pod/devices/{device_id}.json"
         client = self._pod_client()
-        if not client or not device_id:
+        if not client:
+            if self._store:
+                self._store.record_pending_pod_op(uri, "delete")
             return
         async with self._pod_sync_sem:
             try:
                 loop = asyncio.get_event_loop()
-                uri = f"stash://pod/devices/{device_id}.json"
                 from .solid_client import SolidError
                 def _del():
                     try:
@@ -2031,8 +2218,12 @@ class PodSyncMixin:
                         if e.status_code != 404:
                             raise
                 await loop.run_in_executor(None, _del)
+                if self._store:
+                    self._store.clear_pending_pod_op(uri)
             except Exception as exc:
                 logger.debug("_delete_device_from_pod failed [%s]: %s", device_id[:16], exc)
+                if self._store:
+                    self._store.record_pending_pod_op(uri, "delete")
 
     async def _restore_devices_from_pod(self) -> None:
         """Pull device registrations from pod into SQLite on cold start.
@@ -2042,6 +2233,7 @@ class PodSyncMixin:
         client = self._pod_client()
         if not client or not self._store:
             return
+        from .device_registry import verify_device_attestation
         loop = asyncio.get_event_loop()
         try:
             member_uris = await loop.run_in_executor(None, client.list, "stash://pod/devices/")
@@ -2049,9 +2241,18 @@ class PodSyncMixin:
             logger.debug("_restore_devices_from_pod: list failed: %s", exc)
             return
 
+        # A device with a queued pod delete was unregistered locally but the
+        # delete has not yet landed on the pod; do not re-register it (A3).
+        pending_delete_uris = {
+            op.get("uri", "") for op in self._store.list_pending_pod_ops()
+            if op.get("op") == "delete"
+        }
+
         restored = 0
         for uri in member_uris:
             if not uri.endswith(".json"):
+                continue
+            if uri in pending_delete_uris:
                 continue
             try:
                 raw = await loop.run_in_executor(None, client.get, uri)
@@ -2064,6 +2265,21 @@ class PodSyncMixin:
                     continue
                 existing = self._store.get_device(device_id)
                 if existing:
+                    continue
+                # D1: only restore a roster entry whose attestation still verifies
+                # against its signed timestamp, so a tampered or unverifiable pod
+                # record cannot mint a device row on cold start. Records written
+                # before attest_timestamp was stored are not restorable and are
+                # skipped rather than trusted blindly.
+                attest_ts = rec.get("attest_timestamp", 0)
+                if not attest_ts or not verify_device_attestation(
+                    device_pub_b64, owner_webid, device_id,
+                    float(attest_ts), attestation_b64,
+                ):
+                    logger.warning(
+                        "_restore_devices_from_pod: skipped %s — attestation not verifiable",
+                        device_id[:16],
+                    )
                     continue
                 self._store.register_device(device_id, owner_webid, device_pub_b64, attestation_b64)
                 restored += 1
