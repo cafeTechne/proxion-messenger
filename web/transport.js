@@ -25,6 +25,14 @@ export const FEATURES = ['rooms', 'history', 'invites', 'dm', 'presence', 'calls
 // Web build capabilities: pod-backed rooms/history/invites (R102), DMs through
 // the pod drop box (R103), heartbeat presence (R104), and 1:1 call signaling
 // over the pod (R105). The full gateway-free feature set.
+//
+// Message controls that still speak gateway-only WebSocket commands are NOT in
+// this set, so supports() reports them false in the web build: message edit,
+// reactions, pinning, delete-for-everyone, and the Settings data/federation
+// panels that hit gateway-only HTTP endpoints. The pod transport silently drops
+// those commands, so offering the controls would fake success or lose data.
+// Wiring these to the pod (podEditChatMessageAt / podSoftDeleteChatMessageAt /
+// reaction writes exist for room messages) is a separate future task.
 const _WEB_ONLY_SUPPORTED = new Set(['rooms', 'history', 'invites', 'dm', 'presence', 'calls']);
 
 export class NotSupported extends Error {
@@ -127,10 +135,30 @@ export function createPodTransport() {
 // UI gating (R102.4): the controls that must be hidden when the current
 // transport does not support their feature. Rooms/history/invites work in both
 // modes, so their controls are never gated; DM and call entry points are hidden
-// in the Phase 1 web build (they light up in R103/R105).
+// in the Phase 1 web build (they light up in R103/R105). The web build also
+// hides the message controls that speak gateway-only commands the pod transport
+// drops (pin panel entry, delete-for-everyone) and the Settings panels that hit
+// gateway-only HTTP endpoints (data export/import, federation health).
 const _FEATURE_CONTROLS = {
     dm: ['add-peer-btn'],
     calls: ['start-call-btn', 'start-video-call-btn'],
+    pins: ['pin-panel-btn'],
+    delete: ['delete-for-everyone-btn'],
+    'settings-data': ['export-data-btn', 'import-data-label'],
+    federation: ['settings-federation-section'],
+};
+
+// Message-action buttons are rendered per message (rendering.js) with no stable
+// id, and the context-menu entries (ctx-edit/react/pin/delete) have their inline
+// display reset each time openCtxMenu runs, so neither can be hidden reliably by
+// id. Instead we mark the document root with a class per unsupported feature and
+// let style.css hide the matching controls (the CSS rule uses !important to beat
+// the inline reset). This keeps the gating centralized here.
+const _FEATURE_ROOT_CLASSES = {
+    edit: 'gate-no-edit',
+    reactions: 'gate-no-reactions',
+    pins: 'gate-no-pins',
+    delete: 'gate-no-delete',
 };
 
 // Pure: the element ids to hide for this transport, given what it supports.
@@ -142,9 +170,21 @@ export function gatedControlIds(transport) {
     return ids;
 }
 
+// Pure: the document-root classes that hide the dynamic message controls this
+// transport cannot back.
+export function gatedRootClasses(transport) {
+    const classes = [];
+    for (const [feature, cls] of Object.entries(_FEATURE_ROOT_CLASSES)) {
+        if (!transport.supports(feature)) classes.push(cls);
+    }
+    return classes;
+}
+
 // Hide the gated controls in the given document (defaults to the live document).
-// Returns the ids actually hidden. Safe to call in any mode: in gateway mode
-// nothing is gated, so it is a no-op.
+// Returns the ids actually hidden. Also marks the document root with the class
+// per unsupported dynamic feature (edit/reactions/pins message buttons), which
+// style.css hides. Safe to call in any mode: in gateway mode nothing is gated,
+// so it is a no-op.
 export function applyTransportGating(transport, doc) {
     const d = doc || (typeof document !== 'undefined' ? document : undefined);
     if (!d || !d.getElementById) return [];
@@ -156,6 +196,10 @@ export function applyTransportGating(transport, doc) {
             if (el.setAttribute) el.setAttribute('aria-hidden', 'true');
             hidden.push(id);
         }
+    }
+    const root = d.documentElement;
+    if (root && root.classList) {
+        for (const cls of gatedRootClasses(transport)) root.classList.add(cls);
     }
     return hidden;
 }

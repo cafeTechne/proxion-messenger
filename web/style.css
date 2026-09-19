@@ -300,6 +300,21 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
 }
 .message:hover .msg-actions { display: flex; }
 
+/* Gateway-free (web) build: hide the per-message and context-menu controls that
+   speak gateway-only commands the pod transport drops, so nothing fakes success
+   or silently fails. Toggled by applyTransportGating (transport.js) via a class
+   on the document root; gateway mode never sets these, so it is unaffected.
+   !important is required because openCtxMenu resets the ctx-* inline display.
+   ctx-delete and delete-for-everyone are hidden; the hover delete button and its
+   "delete for me" option stay, since that removal is genuinely local. */
+.gate-no-edit [data-msg-action="edit"],
+.gate-no-edit #ctx-edit,
+.gate-no-reactions [data-msg-action="react"],
+.gate-no-reactions #ctx-react,
+.gate-no-pins [data-msg-action="pin"],
+.gate-no-pins #ctx-pin,
+.gate-no-delete #ctx-delete { display: none !important; }
+
 /* Icon buttons inside the action bar — override the global red accent */
 .icon-btn {
     background: transparent !important;

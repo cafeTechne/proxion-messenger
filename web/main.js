@@ -1053,7 +1053,11 @@ import { createIdentityResolver } from './identity.js';
             document.getElementById("settings-advanced").style.display = "none";
             document.getElementById("settings-advanced-toggle").setAttribute("aria-expanded", "false");
             document.getElementById("settings-advanced-caret").textContent = "▾";
-            // R33: Fetch connectivity + health for settings federation panel
+            // R33: Fetch connectivity + health for settings federation panel.
+            // Gateway-only HTTP endpoints: skip in the web build (the panel is
+            // hidden there by applyTransportGating) so we do not fire requests
+            // that cannot resolve.
+            if (window.proxionTransport?.supports('federation'))
             Promise.all([fetch('/connectivity').then(r=>r.json()), fetch('/health').then(r=>r.json())])
               .then(([c, h]) => {
                 const el = document.getElementById('settings-federation-status');

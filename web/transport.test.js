@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
     detectMode, createTransport, createGatewayTransport, createPodTransport,
-    NotSupported, FEATURES, gatedControlIds, applyTransportGating,
+    NotSupported, FEATURES, gatedControlIds, gatedRootClasses, applyTransportGating,
 } from './transport.js';
 
 // The module reads window/document/localStorage defensively. Provide/withdraw
@@ -116,26 +116,79 @@ describe('UI gating', () => {
     it('gates nothing in gateway mode', () => {
         const connection = { socketSendOrQueue: () => {} };
         expect(gatedControlIds(createGatewayTransport({ connection }))).toEqual([]);
+        expect(gatedRootClasses(createGatewayTransport({ connection }))).toEqual([]);
     });
 
-    it('gates nothing in the web build now that all features are supported (R105)', () => {
-        expect(gatedControlIds(createPodTransport())).toEqual([]);
+    it('gateway mode supports the gateway-only message controls', () => {
+        const connection = { socketSendOrQueue: () => {} };
+        const t = createGatewayTransport({ connection });
+        for (const f of ['edit', 'reactions', 'pins', 'delete', 'settings-data', 'federation']) {
+            expect(t.supports(f)).toBe(true);
+        }
     });
 
-    it('applyTransportGating hides nothing when everything is supported', () => {
+    it('web mode does not support the gateway-only message controls', () => {
+        const t = createPodTransport();
+        for (const f of ['edit', 'reactions', 'pins', 'delete', 'settings-data', 'federation']) {
+            expect(t.supports(f)).toBe(false);
+        }
+    });
+
+    it('hides the gateway-only static controls in the web build', () => {
+        // The pod transport drops edit/reaction/pin/delete commands and the
+        // Settings data/federation panels hit gateway-only HTTP endpoints, so
+        // their static controls are gated in the browser build.
+        expect(gatedControlIds(createPodTransport())).toEqual([
+            'pin-panel-btn',
+            'delete-for-everyone-btn',
+            'export-data-btn',
+            'import-data-label',
+            'settings-federation-section',
+        ]);
+    });
+
+    it('marks the document root to hide the dynamic message controls in the web build', () => {
+        expect(gatedRootClasses(createPodTransport())).toEqual([
+            'gate-no-edit', 'gate-no-reactions', 'gate-no-pins', 'gate-no-delete',
+        ]);
+    });
+
+    it('applyTransportGating hides the web-gated controls and marks the root', () => {
+        const mk = () => ({ style: {}, setAttribute(k, v) { this[k] = v; } });
         const els = {
-            'add-peer-btn': { style: {}, setAttribute(k, v) { this[k] = v; } },
-            'start-call-btn': { style: {}, setAttribute(k, v) { this[k] = v; } },
+            'add-peer-btn': mk(), 'start-call-btn': mk(),
+            'pin-panel-btn': mk(), 'delete-for-everyone-btn': mk(),
+            'export-data-btn': mk(), 'import-data-label': mk(),
+            'settings-federation-section': mk(),
         };
-        const doc = { getElementById: (id) => els[id] || null };
-        expect(applyTransportGating(createPodTransport(), doc)).toEqual([]);
-        expect(els['start-call-btn'].style.display).toBeUndefined();
+        const classes = new Set();
+        const doc = {
+            getElementById: (id) => els[id] || null,
+            documentElement: { classList: { add: (c) => classes.add(c) } },
+        };
+        const hidden = applyTransportGating(createPodTransport(), doc);
+        // DM/calls stay (pod-backed); the gateway-only controls are hidden.
+        expect(hidden).toEqual([
+            'pin-panel-btn', 'delete-for-everyone-btn',
+            'export-data-btn', 'import-data-label', 'settings-federation-section',
+        ]);
+        expect(els['add-peer-btn'].style.display).toBeUndefined();
+        expect(els['pin-panel-btn'].style.display).toBe('none');
+        expect(els['pin-panel-btn']['aria-hidden']).toBe('true');
+        expect([...classes]).toEqual([
+            'gate-no-edit', 'gate-no-reactions', 'gate-no-pins', 'gate-no-delete',
+        ]);
     });
 
     it('applyTransportGating is a no-op in gateway mode', () => {
         const connection = { socketSendOrQueue: () => {} };
-        const doc = { getElementById: () => ({ style: {} }) };
+        const classes = new Set();
+        const doc = {
+            getElementById: () => ({ style: {}, setAttribute() {} }),
+            documentElement: { classList: { add: (c) => classes.add(c) } },
+        };
         expect(applyTransportGating(createGatewayTransport({ connection }), doc)).toEqual([]);
+        expect([...classes]).toEqual([]);
     });
 });
 
