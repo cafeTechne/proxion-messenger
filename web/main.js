@@ -524,7 +524,7 @@ import { createIdentityResolver } from './identity.js';
         });
         // Pod / connectivity status banners (no deps). Instantiated before
         // onboarding because setPodBanner is injected into createOnboarding below.
-        const { _updateSettingsPodDot, setPodSyncIndicator, setPodBanner, _showNatWarning } =
+        const { _updateSettingsPodDot, setPodSyncIndicator, setPodBanner, setWebPodConnected, _showNatWarning } =
             createStatusBanners();
         // Onboarding wizard: destructured into same-named bindings so the
         // setupEventListeners wiring + handleEvent calls keep working unchanged.
@@ -4318,6 +4318,10 @@ import { createIdentityResolver } from './identity.js';
             localStorage.setItem('proxion_pod_webid', webId);
             selfWebId = webId;
             setPodBanner(false);
+            // Web build: no gateway pod_status event will arrive, so reflect the
+            // pod as connected straight from the signed-in Solid session (dot,
+            // panel, stored flag) and clear the gateway "Connecting…" state.
+            if (transport.mode === 'web') setWebPodConnected(true, webId);
             await discoverStorageRoot();
             ensureProxionContainer().catch(() => {});
             // R62: hydrate opt-in synced settings + bookmarks from the pod
@@ -5644,6 +5648,9 @@ import { createIdentityResolver } from './identity.js';
                 } else {
                     // Signed out in the browser build: show the pod sign-in, not the
                     // desktop onboarding wizard (its pod step needs the gateway).
+                    // Reflect the disconnected session in the dot/panel and clear the
+                    // gateway "Connecting…" placeholder while the sign-in prompt shows.
+                    setWebPodConnected(false);
                     const _wsm = document.getElementById('web-signin-modal');
                     if (_wsm) {
                         _wsm.style.display = 'flex';

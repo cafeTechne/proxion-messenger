@@ -1,6 +1,7 @@
 // Pod / connectivity status banners — leaf DOM toggles plus the NAT-reachability
-// warning. No host state or socket coupling; each just flips an element or
-// fetches /connectivity to build a one-off guidance banner.
+// warning. No socket coupling; each flips an element, fetches /connectivity to
+// build a one-off guidance banner, or (setWebPodConnected) mirrors the Solid
+// session into the pod dot/panel for the gateway-free web build.
 //
 // createStatusBanners() — no deps.
 
@@ -32,6 +33,41 @@ export function createStatusBanners() {
     function setPodBanner(show) {
         const el = document.getElementById("pod-connect-banner");
         if (el) el.style.display = show ? "flex" : "none";
+    }
+
+    // Web build (gateway-free): there is no gateway pod_status event, so the
+    // pod-connected state is derived straight from the Solid session. This drives
+    // the same settings dot, panel, and WebID label the gateway pod_status path
+    // uses, persists the flag the settings modal reads on open, and clears the
+    // gateway "Connecting…" placeholder the web build must never present. Pass the
+    // session WebID when connected.
+    function setWebPodConnected(connected, webId) {
+        _updateSettingsPodDot(connected ? 'connected' : 'none');
+        // The pod-connect banner points at the gateway onboarding, which the web
+        // build has no use for, so it stays hidden in both states.
+        setPodBanner(false);
+        const connDiv = document.getElementById('settings-pod-connected');
+        const discDiv = document.getElementById('settings-pod-disconnected');
+        if (connDiv) connDiv.style.display = connected ? 'block' : 'none';
+        if (discDiv) discDiv.style.display = connected ? 'none' : 'block';
+        try {
+            if (connected) {
+                localStorage.setItem('proxion_pod_connected', '1');
+                if (webId) localStorage.setItem('proxion_pod_webid', webId);
+            } else {
+                localStorage.removeItem('proxion_pod_connected');
+            }
+        } catch { /* private mode */ }
+        const nameEl = document.getElementById('username');
+        if (connected) {
+            const webidEl = document.getElementById('settings-pod-webid');
+            if (webidEl && webId) webidEl.textContent = webId;
+            let dn = null;
+            try { dn = localStorage.getItem('proxion_display_name'); } catch { /* private mode */ }
+            if (nameEl) nameEl.textContent = dn || (webId ? webId.replace(/^https?:\/\//, '').split('/')[0] : '');
+        } else if (nameEl) {
+            nameEl.textContent = t('conn.offline');
+        }
     }
 
     function _showNatWarning() {
@@ -94,5 +130,5 @@ export function createStatusBanners() {
         });
     }
 
-    return { _updateSettingsPodDot, setPodSyncIndicator, setPodBanner, _showNatWarning };
+    return { _updateSettingsPodDot, setPodSyncIndicator, setPodBanner, setWebPodConnected, _showNatWarning };
 }

@@ -61,6 +61,31 @@ describe('main.js DM sidebar surfaces a stable id, not just the peer-chosen name
   });
 });
 
+describe('main.js gateway-free pod-connected state (issue #7)', () => {
+  it('derives the connected pod state from the Solid session in onPodLoggedIn, web mode only', () => {
+    // On login (restore or interactive-return, both funnel through onPodLoggedIn)
+    // the web build has no gateway pod_status to wait on, so it mirrors the
+    // session into the dot/panel itself — gated on web mode so the gateway path
+    // is untouched.
+    expect(src).toMatch(/if \(transport\.mode === 'web'\) setWebPodConnected\(true, webId\);/);
+  });
+  it('marks the pod disconnected in the web signed-out branch', () => {
+    expect(src).toContain('setWebPodConnected(false);');
+  });
+  it('pulls setWebPodConnected from the status-banners factory', () => {
+    expect(src).toMatch(/setWebPodConnected[^=]*=\s*[\s\S]*createStatusBanners\(\)/);
+  });
+  it('leaves the gateway pod_status handler unchanged (own flag + dot path)', () => {
+    // The gateway build still learns the pod state from the pod_status event and
+    // must not route through the web helper.
+    const podStatus = src.slice(src.indexOf('case "pod_status": {'));
+    const body = podStatus.slice(0, podStatus.indexOf('case "error"'));
+    expect(body).toContain('localStorage.setItem("proxion_pod_connected", "1");');
+    expect(body).toContain("_updateSettingsPodDot('connected')");
+    expect(body).not.toContain('setWebPodConnected');
+  });
+});
+
 describe('CSS.escape neutralizes a quote-bearing message id', () => {
   it('escapes the double quote so the built selector has no bare quote to break out on', () => {
     const escaped = cssEscape('"><img src=x onerror=alert(1)>');
