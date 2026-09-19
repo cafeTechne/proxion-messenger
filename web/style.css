@@ -387,6 +387,13 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
     #message-form { padding: 12px 20px; gap: 8px; }
 }
 
+/* The compose "+" disclosure and its wrapper are a mobile-only affordance. On
+   desktop the wrapper is transparent (contents flow inline as before) and the
+   toggle is not rendered. The active behaviour lives in the max-width:768px block. */
+.compose-actions { display: contents; }
+.compose-more-toggle,
+.compose-more-btn { display: none; }
+
 #message-input {
     flex: 1;
     background: var(--bg-secondary);
@@ -460,6 +467,42 @@ button:hover { background: var(--accent-hover); }
        (still available on desktop) and tightening the Send button. */
     #schedule-btn { display: none; }
     #message-form > button[type="submit"] { padding-inline-start: 14px; padding-inline-end: 14px; }
+    /* Collapse the secondary actions (attach, emoji, poll, GIF) behind one "+"
+       so the textarea keeps the whole row. The toggle is a CSS-only disclosure:
+       a focusable checkbox, operable with Space, whose menu shows on :checked.
+       Anchor the menu to the form. */
+    #message-form { position: relative; }
+    .compose-more-toggle {
+        display: block; position: absolute; width: 1px; height: 1px;
+        margin: -1px; padding: 0; border: 0; overflow: hidden;
+        clip: rect(0,0,0,0); white-space: nowrap;
+    }
+    .compose-more-btn {
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0; width: 36px; height: 36px; border-radius: 4px;
+        cursor: pointer; color: var(--text-secondary); line-height: 0;
+        transition: transform var(--transition-fast), color var(--transition-fast);
+    }
+    .compose-more-toggle:focus-visible ~ .compose-more-btn {
+        outline: 2px solid var(--accent, #e94560); outline-offset: 2px;
+    }
+    /* Rotate the "+" into an "×" while the menu is open. */
+    .compose-more-toggle:checked ~ .compose-more-btn {
+        transform: rotate(45deg); color: var(--text-primary);
+    }
+    .compose-actions { display: none; }
+    .compose-more-toggle:checked ~ .compose-actions {
+        display: flex; align-items: center; gap: 6px;
+        position: absolute; bottom: calc(100% + 6px); inset-inline-start: 8px;
+        padding: 8px; background: var(--slate-800);
+        border: 1px solid var(--slate-600); border-radius: 8px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.5); z-index: 1000;
+    }
+    /* One context button: the mic shows while the input is empty, Send once the
+       user has typed. Both are siblings after the textarea, so :placeholder-shown
+       drives the swap without script. */
+    #message-input:placeholder-shown ~ button[type="submit"] { display: none; }
+    #message-input:not(:placeholder-shown) ~ #voice-record-btn { display: none; }
     /* Phone chat header: the room title wrapped onto two lines and the Leave/
        Delete/Call text buttons overflowed the row. Icons only on mobile (each
        keeps its title tooltip + aria-label); the title truncates with an
