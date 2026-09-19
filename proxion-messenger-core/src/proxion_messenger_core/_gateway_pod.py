@@ -1068,8 +1068,10 @@ class PodSyncMixin:
             ms = 0
         if not ms or ms <= 0:
             return None
-        from datetime import timedelta
-        return (datetime.now(timezone.utc) - timedelta(milliseconds=ms)).isoformat()
+        # Clamp + overflow-guard via the shared helper so a poisoned timer row
+        # cannot raise OverflowError here (which would abort a backfill/restore).
+        from ._gateway_rooms import _disappear_cutoff
+        return _disappear_cutoff(ms)
 
     async def _backfill_rooms_from_pod(self, room_ids: list) -> None:
         """Pull pod room history into SQLite cache for a list of room_ids."""

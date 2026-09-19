@@ -23,7 +23,7 @@ from ._gateway_voice import VoiceHandlerMixin
 from ._gateway_files import FileTransferMixin
 from ._gateway_mailbox import MailboxMixin, relay_node_enabled, relay_fallback_url
 from ._gateway_pod import PodSyncMixin, extract_mentions
-from ._gateway_rooms import RoomHandlerMixin
+from ._gateway_rooms import RoomHandlerMixin, _MAX_DISAPPEAR_MS
 from ._gateway_http import HttpEndpointsMixin
 from ._gateway_dm import DmHandlerMixin
 from ._gateway_auth import AuthHandlerMixin
@@ -376,14 +376,16 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         for room in self._store.get_all_rooms():
             ms = room.get("disappear_after_ms", 0)
             if ms:
-                self._room_disappear_timers[room["room_id"]] = ms
+                # Heal a pre-existing poisoned row so an over-large persisted ms
+                # cannot overflow the expiry sweep after a restart.
+                self._room_disappear_timers[room["room_id"]] = min(int(ms), _MAX_DISAPPEAR_MS)
         # Restore per-DM disappear timers (dedicated dm_disappear_timers table)
         # so DM disappearing messages survive a gateway restart. The prior
         # UPDATE-rooms persistence was a no-op for DM ids, so this never worked.
         try:
             for _tid, _dms in self._store.get_all_dm_disappear_timers().items():
                 if _dms:
-                    self._dm_disappear_timers[_tid] = _dms
+                    self._dm_disappear_timers[_tid] = min(int(_dms), _MAX_DISAPPEAR_MS)
         except Exception:
             logger.debug("DM disappear-timer restore skipped", exc_info=True)
         # R12: load revoked DIDs into fast in-memory set
@@ -2415,6 +2417,9 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             ms = max(0, int(data.get("ms", 0)))
         except (TypeError, ValueError):
             return "400 Bad Request", '{"error":"invalid_ms"}'
+        # Clamp a peer-relayed timer to the same ceiling as the local setter so a
+        # hostile peer gateway cannot poison our expiry sweep with an over-large ms.
+        ms = min(ms, _MAX_DISAPPEAR_MS)
         if not from_webid or not to_webid:
             return "400 Bad Request", '{"error":"missing_fields"}'
         rel = self._authorized_relationship(from_webid)

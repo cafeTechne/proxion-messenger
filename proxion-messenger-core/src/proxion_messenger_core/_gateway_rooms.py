@@ -37,6 +37,29 @@ _MAX_ROOM_MEMBERS = 500
 # previous and new content, so an unbounded edit loop is a disk-growth vector.
 _MAX_EDITS_PER_MESSAGE = 100
 
+# Upper bound on a disappearing-message timer, in milliseconds (365 days). The
+# 30s expiry sweep builds datetime.now() - timedelta(milliseconds=ms); an
+# unbounded ms raises OverflowError and would abort the whole tick, so both set
+# entry points clamp to this ceiling, which stays well within a representable
+# timedelta while covering every legitimate seconds-to-days timer.
+_MAX_DISAPPEAR_MS = 365 * 24 * 60 * 60 * 1000
+
+
+def _disappear_cutoff(ms) -> Optional[str]:
+    """Return the ISO cutoff for a disappearing timer, or None to skip.
+
+    Clamps ms to _MAX_DISAPPEAR_MS and swallows an overflow so a single poisoned
+    (already-persisted) timer row can never raise inside the expiry sweep and
+    abort the whole tick — that one thread is skipped, the rest still expire."""
+    from datetime import timedelta
+    try:
+        ms = min(int(ms), _MAX_DISAPPEAR_MS)
+        if ms <= 0:
+            return None
+        return (datetime.now(timezone.utc) - timedelta(milliseconds=ms)).isoformat()
+    except (OverflowError, TypeError, ValueError, OSError):
+        return None
+
 # Real message ids are UUIDs, "local-<hex>", or urlsafe tokens, so they live
 # within [word chars, dot, hyphen]. A client-supplied id reaches a pod URI
 # (stash://pod/rooms/<rid>/messages/<message_id>.json), so an id containing a
@@ -241,7 +264,6 @@ class RoomHandlerMixin:
 
     async def _expire_messages_loop(self):
         """Delete expired disappearing messages every 30 seconds (rooms + DM threads)."""
-        from datetime import timedelta
         # Bound the per-tick pod-delete work so a thread with many expired ids
         # cannot wedge the loop; the remainder is handled on the next tick.
         _POD_EXPIRE_BATCH = 200
@@ -256,7 +278,9 @@ class RoomHandlerMixin:
                     room = self._local_rooms.get(room_id)
                     if not room:
                         continue
-                    cutoff = (datetime.now(timezone.utc) - timedelta(milliseconds=ms)).isoformat()
+                    cutoff = _disappear_cutoff(ms)
+                    if cutoff is None:
+                        continue
                     expired = []
                     for msg in list(room.get("messages", [])):
                         if msg.get("timestamp", "") < cutoff:
@@ -325,7 +349,9 @@ class RoomHandlerMixin:
                         continue
                     if not self._store:
                         continue
-                    cutoff = (datetime.now(timezone.utc) - timedelta(milliseconds=ms)).isoformat()
+                    cutoff = _disappear_cutoff(ms)
+                    if cutoff is None:
+                        continue
                     if self._pod_client():
                         # DM messages are written through to the pod (local_dms/…)
                         # and re-imported on restart; delete the pod object too.
@@ -2512,6 +2538,9 @@ class RoomHandlerMixin:
         except (TypeError, ValueError):
             await websocket.send(json.dumps({"type": "error", "message": "Invalid timer value"}))
             return
+        # Clamp to a representable ceiling so the expiry sweep's timedelta cannot
+        # overflow and abort the whole tick (a gateway-wide DoS).
+        ms = min(ms, _MAX_DISAPPEAR_MS)
 
         if thread_id in self._local_rooms:
             # Room: only the owner may change it.
@@ -3149,6 +3178,19 @@ class RoomHandlerMixin:
         if not self._store or not room_id or not sender_webid:
             await websocket.send(json.dumps({"type": "sender_key", "key": None}))
             return
+        # This returns the raw group chain key, so gate it like the write siblings
+        # (_handle_upload_sender_key / _handle_distribute_sender_key): the caller
+        # must be a current room member AND may fetch only its OWN sender key. A
+        # kicked-but-still-authenticated account could otherwise pull the fresh
+        # key, negating rotation-on-kick.
+        caller_webid = self._client_webids.get(websocket, "")
+        if self._auth_enforced():
+            if not self._check_room_permission(websocket, room_id):
+                await websocket.send(json.dumps({"type": "error", "message": "Not a member of this room"}))
+                return
+            if sender_webid != caller_webid:
+                await websocket.send(json.dumps({"type": "error", "message": "Cannot fetch another member's sender key"}))
+                return
         key = self._store.get_sender_key(room_id, sender_webid)
         await websocket.send(json.dumps({"type": "sender_key", "room_id": room_id, "key": key}))
 

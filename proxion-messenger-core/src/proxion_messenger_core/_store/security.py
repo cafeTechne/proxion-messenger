@@ -16,6 +16,12 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# Per-message edit-history cap. Mirrors _MAX_EDITS_PER_MESSAGE in _gateway_rooms.py:
+# every edit path (the room handler and the DM update_message) converges on
+# save_edit with a fresh edit_id, so INSERT OR IGNORE never dedupes. The store is
+# the authoritative cap; save_edit keeps at most this many rows per message.
+_MAX_EDITS_PER_MESSAGE = 100
+
 
 
 
@@ -86,6 +92,21 @@ class SecurityStoreMixin(object):
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (edit_id, message_id, prev_content, new_content, edited_by, edited_at),
             )
+            # Bound the per-message edit history. The DM edit path reaches here via
+            # update_message with a fresh uuid per edit, so INSERT OR IGNORE never
+            # dedupes and the table would grow without limit. Keep only the most
+            # recent _MAX_EDITS_PER_MESSAGE rows (a bounded ring) so history stays
+            # useful; the message content update itself already applied.
+            count = conn.execute(
+                "SELECT COUNT(*) FROM message_edits WHERE message_id = ?", (message_id,)
+            ).fetchone()[0]
+            if count > _MAX_EDITS_PER_MESSAGE:
+                conn.execute(
+                    "DELETE FROM message_edits WHERE message_id = ? AND edit_id IN "
+                    "(SELECT edit_id FROM message_edits WHERE message_id = ? "
+                    "ORDER BY edited_at ASC, rowid ASC LIMIT ?)",
+                    (message_id, message_id, count - _MAX_EDITS_PER_MESSAGE),
+                )
     def get_edits(self, message_id: str) -> list:
         with self._conn() as conn:
             try:
