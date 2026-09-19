@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { injectWebHead, WEB_CSP, FRAME_BUST } from './scripts/build-web.mjs';
 
 describe('injectWebHead', () => {
@@ -41,6 +46,32 @@ describe('injectWebHead', () => {
         expect(WEB_CSP).toContain(`script-src 'self' ${hash}`);
         const out = injectWebHead('<head></head>');
         expect(out).toContain(`<script>${FRAME_BUST}</script>`);
+    });
+});
+
+describe('static build output', () => {
+    // The deployed app fetches locales relative to its own base, so the build
+    // must ship locales/*.json alongside the JS (they are not in DENY and are not
+    // dev-only). Run the real build and confirm the files land, while dev-only
+    // files are filtered out.
+    it('copies locales/*.json into the build and drops dev-only files', () => {
+        const scriptPath = fileURLToPath(new URL('./scripts/build-web.mjs', import.meta.url));
+        const root = mkdtempSync(join(tmpdir(), 'proxion-build-'));
+        const src = join(root, 'src');
+        const out = join(root, 'out');
+        try {
+            mkdirSync(join(src, 'locales'), { recursive: true });
+            writeFileSync(join(src, 'index.html'), '<head></head><body></body>');
+            writeFileSync(join(src, 'locales', 'en.json'), '{"app.title":"Proxion"}');
+            writeFileSync(join(src, 'x.test.js'), '// dev only');
+            execFileSync(process.execPath, [scriptPath, src, out], { stdio: 'pipe' });
+            expect(existsSync(join(out, 'locales', 'en.json'))).toBe(true);
+            const data = JSON.parse(readFileSync(join(out, 'locales', 'en.json'), 'utf8'));
+            expect(data['app.title']).toBe('Proxion');
+            expect(existsSync(join(out, 'x.test.js'))).toBe(false);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
     });
 });
 

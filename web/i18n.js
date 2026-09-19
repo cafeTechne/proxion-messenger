@@ -1,8 +1,9 @@
 // i18n.js — internationalization core (PLAN_ROUND_56 F1).
 //
 // Vanilla, dependency-free, factory-free (like a11y.js). Loads a flat dot-key
-// locale JSON from /locales/<code>.json (same-origin static file the gateway
-// already serves), with per-key fallback to English.
+// locale JSON from locales/<code>.json resolved RELATIVE to this module, so it
+// works both at / (gateway) and under a sub-path (GitHub Pages /app/), with
+// per-key fallback to English.
 //
 // Exports:
 //   initI18n()               resolve+load the active locale; call once at boot
@@ -83,7 +84,12 @@ function _resolveLocale() {
 async function _fetchLocale(code) {
     if (typeof fetch !== 'function') return {};
     try {
-        const res = await fetch(`/locales/${encodeURIComponent(code)}.json`, { cache: 'no-store' });
+        // Resolve relative to this module's URL, not root-absolute: import.meta.url
+        // is <app-base>/i18n.js, so the locale sits next to the app files whether
+        // served at / or at /proxion-messenger/app/. A bare /locales/<code>.json
+        // resolves to the domain root and 404s under a sub-path deploy.
+        const url = new URL(`locales/${encodeURIComponent(code)}.json`, import.meta.url);
+        const res = await fetch(url, { cache: 'no-store' });
         if (!res.ok) return {};
         const data = await res.json();
         if (data && typeof data === 'object') { delete data._meta; return data; }
