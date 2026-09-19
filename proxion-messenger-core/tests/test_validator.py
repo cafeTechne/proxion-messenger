@@ -437,3 +437,64 @@ def test_uncaveated_capability_still_allows():
     d = validate_request(token, ctx, proof, sk, delegation_cert=dcert)
     assert d.allowed, d.reason
 
+
+# ---------------------------------------------------------------------------
+# F4 secondary — a second covering capability must not be short-circuited into a
+# false deny by the first match's failing caveat
+# ---------------------------------------------------------------------------
+
+def test_second_covering_capability_prevents_false_deny():
+    """Two delegation-cert capabilities cover the request: the first carries an IP
+    caveat the request fails, the second is uncaveated. The request must be ALLOWED
+    rather than denied on the first match."""
+    from proxion_messenger_core.pop import sign_challenge
+    from proxion_messenger_core.certtoken import issue_from_certificate
+    from proxion_messenger_core.federation import Capability, RelationshipCertificate
+    from proxion_messenger_core import run_local_handshake, MemoryStore
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+
+    alice_id = Ed25519PrivateKey.generate()
+    alice_store = X25519PrivateKey.generate()
+    bob_id = Ed25519PrivateKey.generate()
+    bob_store = X25519PrivateKey.generate()
+    store = MemoryStore()
+    caps = [Capability(with_="stash://alice/shared/bob/", can="read")]
+    root_cert, valid = run_local_handshake(
+        alice_id, alice_store, bob_id, bob_store, caps, caps, store
+    )
+    assert valid
+
+    device = Ed25519PrivateKey.generate()
+    dcert = RelationshipCertificate(
+        issuer=root_cert.issuer,
+        subject=device.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex(),
+        capabilities=[
+            Capability(with_="stash://alice/shared/bob/", can="read", caveats={"ip": ["1.2.3.4"]}),
+            Capability(with_="stash://alice/shared/bob/", can="read"),
+        ],
+        wireguard={},
+        expires_at=root_cert.expires_at,
+    )
+    dcert.sign(alice_id)
+
+    sk = os.urandom(32)
+    now = datetime.now(timezone.utc)
+    token = issue_from_certificate(
+        cert=root_cert,
+        requested_permissions=[("read", "stash://alice/shared/bob/")],
+        holder_pub_key=device.public_key(),
+        signing_key=sk,
+        now=now,
+    )
+    ctx = RequestContext(
+        action="read",
+        resource="stash://alice/shared/bob/file.txt",
+        aud=root_cert.issuer,
+        now=now,
+        ip="9.9.9.9",            # fails the FIRST capability's caveat
+        device_nonce="req-2cap",
+    )
+    proof = sign_challenge(device, token.token_id, "req-2cap")
+    d = validate_request(token, ctx, proof, sk, delegation_cert=dcert)
+    assert d.allowed, d.reason
+

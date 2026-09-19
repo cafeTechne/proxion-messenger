@@ -435,6 +435,159 @@ def test_covers_child_may_add_new_caveat():
     assert _covers("read", "/data/", "read", "/data/", {}, {"ip": ["1.1.1.1"]})
 
 
+# ---------------------------------------------------------------------------
+# F4 — floor-vs-ceiling caveat monotonicity
+# ---------------------------------------------------------------------------
+
+def test_covers_child_earlier_not_before_not_covered():
+    from proxion_messenger_core.certtoken import _covers
+    # not_before is a FLOOR: a larger value is more restrictive (window starts
+    # later). An earlier (smaller) child not_before widens the window start and
+    # must NOT be accepted as a narrowing.
+    assert not _covers(
+        "read", "/data/", "read", "/data/", {"not_before": 1000}, {"not_before": 500}
+    )
+
+
+def test_covers_child_later_not_before_covered():
+    from proxion_messenger_core.certtoken import _covers
+    # A later (larger) child not_before narrows the window -> covered. Equal too.
+    assert _covers(
+        "read", "/data/", "read", "/data/", {"not_before": 1000}, {"not_before": 2000}
+    )
+    assert _covers(
+        "read", "/data/", "read", "/data/", {"not_before": 1000}, {"not_before": 1000}
+    )
+
+
+def test_covers_not_after_child_narrows_only():
+    from proxion_messenger_core.certtoken import _covers
+    # not_after stays a CEILING: a smaller child value narrows (expires sooner),
+    # a larger one widens the window end and is not covered.
+    assert _covers(
+        "read", "/data/", "read", "/data/", {"not_after": 2000}, {"not_after": 1000}
+    )
+    assert not _covers(
+        "read", "/data/", "read", "/data/", {"not_after": 2000}, {"not_after": 3000}
+    )
+
+
+def test_delegate_cert_rejects_earlier_not_before(cert):
+    from proxion_messenger_core.federation import RelationshipCertificate, Capability
+    certificate, alice_id, _ = cert
+    caveated = RelationshipCertificate(
+        issuer=certificate.issuer,
+        subject=certificate.subject,
+        capabilities=[
+            Capability(with_="stash://alice/shared/bob/", can="read", caveats={"not_before": 2000})
+        ],
+        wireguard={},
+    )
+    caveated.sign(alice_id)
+    new_holder = Ed25519PrivateKey.generate()
+    # A child cert that starts EARLIER widens the validity window -> rejected.
+    with pytest.raises(CertTokenError, match="exceeds parent certificate scope"):
+        delegate_cert(
+            cert=caveated,
+            new_holder_pub_key=new_holder.public_key(),
+            issuer_identity_priv=alice_id,
+            capabilities=[
+                Capability(with_="stash://alice/shared/bob/", can="read", caveats={"not_before": 1000})
+            ],
+        )
+
+
+def test_delegate_cert_allows_later_not_before(cert):
+    from proxion_messenger_core.federation import RelationshipCertificate, Capability
+    certificate, alice_id, _ = cert
+    caveated = RelationshipCertificate(
+        issuer=certificate.issuer,
+        subject=certificate.subject,
+        capabilities=[
+            Capability(with_="stash://alice/shared/bob/", can="read", caveats={"not_before": 1000})
+        ],
+        wireguard={},
+    )
+    caveated.sign(alice_id)
+    new_holder = Ed25519PrivateKey.generate()
+    # A child cert that starts LATER narrows the window -> accepted.
+    delegated = delegate_cert(
+        cert=caveated,
+        new_holder_pub_key=new_holder.public_key(),
+        issuer_identity_priv=alice_id,
+        capabilities=[
+            Capability(with_="stash://alice/shared/bob/", can="read", caveats={"not_before": 2000})
+        ],
+    )
+    assert delegated.capabilities[0].caveats == {"not_before": 2000}
+
+
+# ---------------------------------------------------------------------------
+# F4 secondary — _covering_capability considers ALL matching capabilities
+# ---------------------------------------------------------------------------
+
+def _two_cap_cert(cap_list):
+    from proxion_messenger_core.federation import RelationshipCertificate
+    return RelationshipCertificate(
+        issuer="aa", subject="bb", capabilities=cap_list, wireguard={}
+    )
+
+
+def test_covering_capability_prefers_satisfiable_match_with_ctx():
+    from proxion_messenger_core.certtoken import (
+        _covering_capability,
+        _capability_caveats_satisfied,
+    )
+    from proxion_messenger_core.federation import Capability
+    c = _two_cap_cert([
+        Capability(with_="/data/", can="read", caveats={"ip": ["9.9.9.9"]}),
+        Capability(with_="/data/", can="read", caveats={"ip": ["1.2.3.4"]}),
+    ])
+    now = datetime.now(timezone.utc)
+    ctx = RequestContext(action="read", resource="/data/x", aud="aa", now=now, ip="1.2.3.4")
+    covering = _covering_capability("read", "/data/x", c, ctx)
+    # The SECOND matching capability satisfies the request; it must be chosen so a
+    # caller does not falsely deny on the first match's failing caveat.
+    assert covering is not None
+    assert _capability_caveats_satisfied(covering.caveats, ctx)
+    assert covering.caveats == {"ip": ["1.2.3.4"]}
+
+
+def test_covering_capability_none_satisfiable_returns_first():
+    from proxion_messenger_core.certtoken import _covering_capability
+    from proxion_messenger_core.federation import Capability
+    c = _two_cap_cert([
+        Capability(with_="/data/", can="read", caveats={"ip": ["9.9.9.9"]}),
+        Capability(with_="/data/", can="read", caveats={"ip": ["8.8.8.8"]}),
+    ])
+    now = datetime.now(timezone.utc)
+    ctx = RequestContext(action="read", resource="/data/x", aud="aa", now=now, ip="1.2.3.4")
+    covering = _covering_capability("read", "/data/x", c, ctx)
+    # No matching capability admits the request, so the first match is returned and
+    # the caller's caveat check still denies.
+    assert covering.caveats == {"ip": ["9.9.9.9"]}
+
+
+def test_covering_capability_prefers_uncaveated_without_ctx():
+    from proxion_messenger_core.certtoken import _covering_capability
+    from proxion_messenger_core.federation import Capability
+    c = _two_cap_cert([
+        Capability(with_="/data/", can="read", caveats={"ip": ["9.9.9.9"]}),
+        Capability(with_="/data/", can="read"),
+    ])
+    covering = _covering_capability("read", "/data/x", c)
+    # An uncaveated covering capability authorises the request unconditionally and
+    # is preferred over an earlier caveated one.
+    assert covering is not None and not covering.caveats
+
+
+def test_covering_capability_none_when_no_match():
+    from proxion_messenger_core.certtoken import _covering_capability
+    from proxion_messenger_core.federation import Capability
+    c = _two_cap_cert([Capability(with_="/other/", can="read")])
+    assert _covering_capability("read", "/data/x", c) is None
+
+
 def test_delegate_cert_rejects_caveat_widening(cert):
     from proxion_messenger_core.federation import RelationshipCertificate, Capability
     certificate, alice_id, _ = cert

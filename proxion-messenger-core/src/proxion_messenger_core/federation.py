@@ -56,6 +56,23 @@ SUBJECT_CONSENT_CTX_V2 = b"proxion-rel-subject-consent-v2:"
 # is verified against the legacy pair message.
 CONSENT_VERSION = 2
 
+# Maximum lifetime a RelationshipCertificate may claim. An issuer cannot mint a
+# cert whose (expires_at - created_at) exceeds this: validate_policy rejects one
+# that does, and the relationship store clamps the stored expiry to it at ingest
+# so a cert with an over-long or unbounded expires_at cannot be honored past the
+# policy (F7).
+MAX_CERT_VALIDITY_SECONDS = 365 * 86400
+
+
+def clamp_cert_expiry(created_at: int, expires_at: int) -> int:
+    """Clamp a certificate expiry to the max-validity policy.
+
+    Returns the earlier of *expires_at* and ``created_at + MAX_CERT_VALIDITY_SECONDS``
+    so a cert minted with an over-long or unbounded expiry cannot outlive the policy
+    once stored. An expiry already within the limit is returned unchanged.
+    """
+    return min(expires_at, created_at + MAX_CERT_VALIDITY_SECONDS)
+
 
 def subject_consent_message(issuer_hex: str, subject_hex: str) -> bytes:
     """The legacy (v1) bytes a cert subject signs to prove consent to the pairing."""
@@ -431,8 +448,7 @@ class RelationshipCertificate:
         """Raise ValueError('invalid_certificate_policy') on policy violations."""
         if self.created_at > self.expires_at:
             raise ValueError("invalid_certificate_policy: created_at > expires_at")
-        max_validity = 365 * 86400
-        if self.expires_at - self.created_at > max_validity:
+        if self.expires_at - self.created_at > MAX_CERT_VALIDITY_SECONDS:
             raise ValueError("certificate_too_long_lived")
         if not self.capabilities or len(self.capabilities) > 32:
             raise ValueError("invalid_certificate_policy: capabilities length must be 1..32")

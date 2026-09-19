@@ -176,6 +176,23 @@ class IdentityStoreMixin(object):
             peer_pub_hex = cert_dict.get("subject")
             created_at = cert_dict.get("created_at", int(time.time()))
             expires_at = cert_dict.get("expires_at", created_at + 86400)
+            # F7: clamp the stored expiry to the max-validity policy so a cert
+            # minted with an over-long or unbounded expires_at cannot outlive the
+            # policy. Only the stored column is clamped; cert_json (the signed
+            # artifact) is left untouched so the issuer signature still verifies,
+            # and the expires_at > now at-use filters read this clamped column.
+            if isinstance(created_at, (int, float)) and isinstance(expires_at, (int, float)):
+                from ..federation import clamp_cert_expiry, MAX_CERT_VALIDITY_SECONDS
+                _now_i = int(time.time())
+                _orig_exp = int(expires_at)
+                _clamped = clamp_cert_expiry(int(created_at), _orig_exp)
+                # A bogus or very old created_at (e.g. 0) would clamp a still-valid
+                # cert into the past and retro-expire it. When that happens, honor
+                # the cert for at most the max validity from now rather than
+                # expiring it immediately; a genuinely-expired cert stays expired.
+                if _clamped <= _now_i < _orig_exp:
+                    _clamped = min(_orig_exp, _now_i + MAX_CERT_VALIDITY_SECONDS)
+                expires_at = _clamped
 
             conn.execute(
                 """

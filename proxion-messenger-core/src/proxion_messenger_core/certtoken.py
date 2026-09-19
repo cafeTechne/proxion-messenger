@@ -116,14 +116,26 @@ def _is_number(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def _caveat_value_at_least_as_restrictive(parent_val, child_val) -> bool:
+# Caveat keys whose numeric value is a FLOOR (a minimum the request must clear),
+# so a LARGER value is MORE restrictive. ``not_before`` is the canonical example:
+# _capability_caveats_satisfied admits a request only when ``ctx.now >= not_before``,
+# so raising not_before narrows the grant and lowering it widens the validity-window
+# start. Every numeric caveat not listed here is treated as a CEILING (a maximum,
+# e.g. ``not_after``/``quota_mb``/``max_*``) where a smaller value is more restrictive.
+_FLOOR_CAVEAT_KEYS = frozenset({"not_before"})
+
+
+def _caveat_value_at_least_as_restrictive(key, parent_val, child_val) -> bool:
     """True if *child_val* is no more permissive than *parent_val* for one caveat.
 
     Semantics:
 
     * Equal values are equally restrictive.
-    * Numeric caveats are treated as ceilings (e.g. ``quota_mb``): a smaller child
-      value is more restrictive, a larger one widens the grant.
+    * A numeric floor-type caveat (``key`` in :data:`_FLOOR_CAVEAT_KEYS`, e.g.
+      ``not_before``) is a minimum: a larger child value is more restrictive, a
+      smaller one widens the grant.
+    * Any other numeric caveat is a ceiling (e.g. ``not_after``, ``quota_mb``): a
+      smaller child value is more restrictive, a larger one widens the grant.
     * List/tuple/set caveats are treated as allowlists: the child must narrow to a
       subset of the parent's allowed values.
     * Any other differing value changes the caveat in a way we cannot prove is a
@@ -132,6 +144,8 @@ def _caveat_value_at_least_as_restrictive(parent_val, child_val) -> bool:
     if parent_val == child_val:
         return True
     if _is_number(parent_val) and _is_number(child_val):
+        if key in _FLOOR_CAVEAT_KEYS:
+            return child_val >= parent_val
         return child_val <= parent_val
     if isinstance(parent_val, (list, tuple, set)) and isinstance(child_val, (list, tuple, set)):
         return set(child_val) <= set(parent_val)
@@ -150,7 +164,7 @@ def _caveats_cover(cap_caveats, child_caveats) -> bool:
     for key, parent_val in parent.items():
         if key not in child:
             return False
-        if not _caveat_value_at_least_as_restrictive(parent_val, child[key]):
+        if not _caveat_value_at_least_as_restrictive(key, parent_val, child[key]):
             return False
     return True
 
@@ -204,17 +218,35 @@ def _permission_covered(
     return False
 
 
-def _covering_capability(action: str, resource: str, cert: RelationshipCertificate):
-    """Return the first Capability in *cert* whose action+resource covers the request.
+def _covering_capability(action: str, resource: str, cert: RelationshipCertificate, ctx=None):
+    """Return a Capability in *cert* whose action+resource covers the request.
 
-    Caveats are not considered here — this only locates the capability so its caveats
-    can be checked separately against the request. Returns ``None`` when nothing in
-    the certificate covers ``(action, resource)``.
+    A request may be covered by more than one capability, so all matches are
+    considered rather than short-circuiting on the first: denying on the first
+    match's caveats when a later match would admit the request is a false deny.
+
+    * With *ctx* the first matching capability whose caveats the request satisfies
+      is returned; if none are satisfied the first match is returned so a caller
+      that re-checks caveats still denies.
+    * Without *ctx* (caveats are checked separately by the caller) an uncaveated
+      matching capability is preferred over a caveated one, since an uncaveated
+      capability authorises the request unconditionally; otherwise the first match
+      is returned.
+
+    Returns ``None`` when nothing in the certificate covers ``(action, resource)``.
     """
+    first_match = None
     for cap in cert.capabilities:
-        if _covers(cap.can, cap.with_, action, resource):
+        if not _covers(cap.can, cap.with_, action, resource):
+            continue
+        if first_match is None:
+            first_match = cap
+        if ctx is not None:
+            if _capability_caveats_satisfied(cap.caveats, ctx):
+                return cap
+        elif not cap.caveats:
             return cap
-    return None
+    return first_match
 
 
 def _capability_caveats_satisfied(caveats, ctx) -> bool:
