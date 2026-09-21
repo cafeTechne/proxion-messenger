@@ -18,7 +18,14 @@
        WCAG 4.5:1; the button accent (#d61f52) is tuned for white text ON it and
        is too dark to BE text. (scripts/contrast_audit.mjs) */
     --accent-text: #f06a8a;
-    --border: #0f3460;
+    /* Borders were previously identical to --bg-accent (#0f3460), so any bordered
+       element sitting on an accent surface had an invisible edge. Lifted to a
+       distinct, slightly brighter navy that reads as a hairline on every surface
+       (primary #1a1a2e, secondary #16213e, accent #0f3460) without looking boxy. */
+    --border: #2a3c60;
+    /* Keep the old flat value available for the rare case a fill-matching edge is
+       wanted deliberately. */
+    --border-flush: #0f3460;
 
     /* Status */
     --color-success: #22c55e;
@@ -31,6 +38,34 @@
     /* Motion (R51/F4) — consistent transition timings; honour reduced-motion. */
     --transition-fast: 0.15s ease;
     --transition-base: 0.2s ease;
+
+    /* Elevation surfaces (R125) — one named scale for panel backgrounds so new
+       work stops drifting between the --bg-* and --slate-* ramps. Aliased to the
+       existing values, so adopting these is a no-op visual change; migrate sites
+       onto them incrementally. 0 = app ground, rising to 3 = popovers/menus. */
+    --surface-0: #1a1a2e;   /* app background            (= --bg-primary)   */
+    --surface-1: #16213e;   /* sidebars, cards           (= --bg-secondary) */
+    --surface-2: #1e293b;   /* raised panels, inputs     (= --slate-800)    */
+    --surface-3: #0f3460;   /* accent fills / active rows (= --bg-accent)   */
+
+    /* Radius (R125) — codifies the 3/4/6/8px + pill values already in use. */
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --radius-pill: 999px;
+
+    /* Shadow (R125) — the three ad-hoc elevations already scattered in the file. */
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 15px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.5);
+
+    /* Spacing (R125) — a 4px rhythm; adopt incrementally, do not churn literals. */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 32px;
 
     /* Neutral slate scale — the palette the legacy inline styles draw from */
     --slate-50: #f1f5f9;
@@ -81,7 +116,7 @@ body {
    don't trigger :focus-visible, so pointer UX is unchanged). */
 :focus-visible {
     outline: 2px solid var(--accent);
-    outline-offset: 1px;
+    outline-offset: 2px;
 }
 
 #app {
@@ -283,6 +318,9 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
     line-height: 1.5;
     word-break: break-word;
     overflow-wrap: break-word;
+    /* Cap the reading measure so body text doesn't run to 100+ chars/line on wide
+       (>1400px) windows; the row itself still spans the feed, text stays left. */
+    max-width: 75ch;
 }
 
 /* Hover action bar (react / reply / edit / delete / pin) */
@@ -477,6 +515,12 @@ button:hover { background: var(--accent-hover); }
     :root[dir="rtl"] #members-panel { transform: translateX(-100%); }
     #members-panel.mobile-open,
     :root[dir="rtl"] #members-panel.mobile-open { transform: translateX(0); }
+    /* The other fixed right drawers (pin / saved / contact) keep an inline 300px
+       width that would leave ~20px of app on a 320px phone. Cap them so a visible
+       strip of the app remains and there is an obvious off-panel tap target. */
+    #contact-profile-panel,
+    #saved-panel,
+    #pin-panel { width: min(300px, 92vw) !important; }
     /* Phone composer: the message input was squeezed to ~37% width by four buttons.
        Reclaim room for the primary input by dropping the secondary schedule action
        (still available on desktop) and tightening the Send button. */
@@ -648,7 +692,7 @@ button:hover { background: var(--accent-hover); }
     border-radius: 0 0 4px 0;
 }
 .skip-nav:focus { top: 0; }
-*:focus-visible { outline: 2px solid var(--accent, #e94560); outline-offset: 2px; }
+/* (single :focus-visible ring is defined once near the top of the file) */
 
 /* 13.6: Backup nudge banner */
 #backup-nudge {
@@ -660,7 +704,7 @@ button:hover { background: var(--accent-hover); }
 
 /* 13.7: Inline image preview */
 .msg-image-preview {
-    display: block; max-width: 320px; max-height: 240px;
+    display: block; max-width: min(320px, 100%); max-height: 240px;
     border-radius: 6px; margin-top: 6px; cursor: pointer;
     border: 1px solid var(--border, #334155);
     object-fit: cover;
@@ -1387,11 +1431,20 @@ button:hover { background: var(--accent-hover); }
    in index.html. Declarations match the former inline values exactly, so this
    is pixel-preserving; it just gives each repeated pattern one home. Size
    modifiers come after the base so they win on equal specificity. ── */
-.btn { border: none; border-radius: 4px; cursor: pointer; padding: 7px 16px; }
+.btn {
+    border: none; border-radius: var(--radius-sm); cursor: pointer; padding: 7px 16px;
+    transition: filter var(--transition-fast), opacity var(--transition-fast);
+}
 .btn--accent { background: var(--accent); color: #fff; }
 .btn--slate  { background: var(--slate-700); color: var(--slate-50); }
 .btn--lg { padding: 8px 16px; }
 .btn--sm { padding: 4px 10px; font-size: 0.8em; flex-shrink: 0; }
+/* Hover feedback via brightness so it works even where a button carries an
+   inline background:, which would otherwise beat a background-based :hover. */
+.btn:hover:not(:disabled):not([disabled]) { filter: brightness(1.12); }
+.btn:disabled, .btn[disabled] { opacity: 0.5; cursor: not-allowed; filter: none; }
+/* App-wide disabled affordance for the many plain <button>s that aren't .btn. */
+button:disabled { cursor: not-allowed; opacity: 0.55; }
 .btn-row { display: flex; gap: 8px; justify-content: flex-end; }
 .field-divider { border-color: var(--slate-700); margin: 16px 0 12px; }
 .section-label { margin: 0 0 8px; font-size: 0.8em; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }

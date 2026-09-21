@@ -11,7 +11,7 @@ beforeEach(() => {
   };
   global.document = {
     getElementById: (id) => (id === 'toast-container' ? container : null),
-    createElement: () => ({ style: {}, textContent: '', remove() {} }),
+    createElement: () => ({ style: {}, textContent: '', title: '', remove() {}, addEventListener() {} }),
     hasFocus: () => false,
   };
   global.window = {};

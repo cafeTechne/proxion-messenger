@@ -316,7 +316,7 @@ export function createRendering({
             // out of the attribute. The truthiness guards below keep the raw field.
             const _b64 = b64attr(msg.file.data_b64 || '');
             const _dlLink = `<a href="data:application/octet-stream;base64,${_b64}" download="${safeFilename}"
-                       style="color:#e94560;font-size:0.8em;display:block;margin-top:3px;">Download ${safeFilename}</a>`;
+                       style="color:var(--accent-text);font-size:0.8em;display:block;margin-top:3px;">Download ${safeFilename}</a>`;
             if (_kind === 'image' && msg.file.data_b64) {
                 // R13.7: inline image preview (+R60C: sender-marked spoiler
                 // renders blurred under a reveal cover — one-way, like text
@@ -346,7 +346,7 @@ export function createRendering({
                 // Force octet-stream to prevent data URI MIME injection
                 fileHtml = `<div class="attachment"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13"/></svg> ${safeFilename} (${Math.round(msg.file.size/1024)} KB)
                     <a href="data:application/octet-stream;base64,${_b64}" download="${safeFilename}"
-                       style="color:#e94560;margin-left:10px;">Download</a></div>`;
+                       style="color:var(--accent-text);margin-left:10px;">Download</a></div>`;
             }
         }
 

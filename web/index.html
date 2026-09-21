@@ -440,11 +440,11 @@
                 <button id="start-video-call-btn" style="display:none;" aria-label="Start video call" title="Video call" data-i18n-attr="title:ui.videoCall;aria-label:ui.videoCall"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h8.25a2.25 2.25 0 0 0 2.25-2.25V7.5a2.25 2.25 0 0 0-2.25-2.25H4.5A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z"/></svg> <span class="btn-label" data-i18n="ui.video">Video</span></button></div>
             </header>
             <!-- R34: Voice channel participant panel; R80: group video grid + controls -->
-            <div id="voice-channel-panel" style="display:none;position:fixed;bottom:0;left:0;right:0;background:var(--slate-900);border-top:1px solid var(--slate-800);padding:8px 16px;z-index:800;flex-direction:column;gap:8px;">
+            <div id="voice-channel-panel" style="display:none;position:fixed;bottom:0;left:0;right:0;background:var(--slate-900);border-top:1px solid var(--slate-800);padding:8px 16px;padding-bottom:calc(8px + env(safe-area-inset-bottom, 0px));z-index:800;flex-direction:column;gap:8px;">
               <div id="voice-channel-videos" style="display:none;gap:8px;flex-wrap:wrap;align-items:center;">
                 <video id="vc-local-video" autoplay playsinline muted style="display:none;width:160px;max-height:120px;background:#000;border:1px solid var(--slate-600,#475569);border-radius:6px;object-fit:cover;transform:scaleX(-1);"></video>
               </div>
-              <div style="display:flex;align-items:center;gap:12px;">
+              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;row-gap:8px;">
                 <span style="font-size:0.8em;color:var(--color-success-soft);font-weight:600;flex-shrink:0;">&#x1F50A; Voice channel</span>
                 <div id="voice-channel-participants" style="display:flex;gap:8px;flex:1;flex-wrap:wrap;"></div>
                 <button id="voice-channel-camera-btn" aria-label="Turn camera on or off" title="Camera on / off" aria-pressed="false" class="btn btn--slate btn--sm" data-i18n-attr="title:ui.cameraToggle;aria-label:ui.cameraToggle" data-i18n="ui.video">Video</button>
@@ -1203,7 +1203,7 @@
 
     <!-- Pin panel -->
     <!-- Contact profile panel (R29) -->
-    <div id="contact-profile-panel" style="display:none; position:fixed; right:0; top:0; bottom:0; width:300px; background:var(--bg-secondary,var(--slate-800)); box-shadow:-2px 0 10px rgba(0,0,0,.5); z-index:900; overflow-y:auto; padding:16px;">
+    <div id="contact-profile-panel" style="display:none; position:fixed; right:0; top:0; bottom:0; width:300px; background:var(--bg-secondary,var(--slate-800)); box-shadow:-2px 0 10px rgba(0,0,0,.5); z-index:900; overflow-y:auto; padding:16px; padding-top:calc(16px + env(safe-area-inset-top, 0px));">
       <button id="contact-profile-close" style="position:absolute;top:12px;right:12px;background:transparent;border:none;color:var(--text-secondary);font-size:1.2em;cursor:pointer;">&#x2715;</button>
       <div id="contact-profile-avatar" style="width:56px;height:56px;border-radius:50%;background:var(--slate-700);display:flex;align-items:center;justify-content:center;font-size:1.5em;color:var(--slate-50);margin:0 auto 12px;"></div>
       <p id="contact-profile-name" style="text-align:center;font-weight:600;color:var(--slate-50);margin:0 0 4px;"></p>
@@ -1222,13 +1222,13 @@
     </div>
 
     <!-- R59E: saved-messages panel (mirror of the pin panel) -->
-    <div id="saved-panel" style="display:none; position:fixed; right:0; top:0; bottom:0; width:300px; background:var(--bg-secondary,var(--slate-800)); box-shadow:-2px 0 10px rgba(0,0,0,.5); z-index:900; overflow-y:auto; padding:16px;">
+    <div id="saved-panel" style="display:none; position:fixed; right:0; top:0; bottom:0; width:300px; background:var(--bg-secondary,var(--slate-800)); box-shadow:-2px 0 10px rgba(0,0,0,.5); z-index:900; overflow-y:auto; padding:16px; padding-top:calc(16px + env(safe-area-inset-top, 0px));">
       <h3 style="color:var(--text-primary,var(--slate-50)); margin:0 0 12px;" data-i18n="heading.savedMessages">Saved Messages</h3>
       <button id="saved-panel-close" aria-label="Close saved messages"
               style="position:absolute;top:12px;right:12px;background:transparent;border:none;color:var(--text-secondary);font-size:1.2em;cursor:pointer;" data-i18n-attr="aria-label:ui.closeSavedMessages"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
       <div id="saved-list"></div>
     </div>
-    <div id="pin-panel" style="display:none; position:fixed; right:0; top:0; bottom:0; width:300px; background:var(--bg-secondary,var(--slate-800)); box-shadow:-2px 0 10px rgba(0,0,0,.5); z-index:900; overflow-y:auto; padding:16px;">
+    <div id="pin-panel" style="display:none; position:fixed; right:0; top:0; bottom:0; width:300px; background:var(--bg-secondary,var(--slate-800)); box-shadow:-2px 0 10px rgba(0,0,0,.5); z-index:900; overflow-y:auto; padding:16px; padding-top:calc(16px + env(safe-area-inset-top, 0px));">
       <h3 style="color:var(--text-primary,var(--slate-50)); margin:0 0 12px;" data-i18n="heading.pinnedMessages">Pinned Messages</h3>
       <button id="pin-panel-close" aria-label="Close pinned messages"
               style="position:absolute;top:12px;right:12px;background:transparent;border:none;color:var(--text-secondary);font-size:1.2em;cursor:pointer;" data-i18n-attr="aria-label:ui.closePinnedMessages"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>

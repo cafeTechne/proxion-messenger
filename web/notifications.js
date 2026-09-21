@@ -21,16 +21,31 @@ export function createNotifications({ getSoundEnabled, getDesktopNotifEnabled, n
         const bg = type === "error" ? "#dc2626" : type === "success" ? "#16a34a" : type === "warning" ? "#b45309" : "#1e293b";
         el.style.cssText = `background:${bg};color:#f8fafc;padding:10px 16px;border-radius:8px;` +
             `font-size:0.875rem;max-width:320px;box-shadow:0 4px 12px rgba(0,0,0,0.4);` +
-            `pointer-events:auto;opacity:1;transition:opacity 0.3s`;
+            `pointer-events:auto;opacity:1;transition:opacity 0.3s;cursor:pointer`;
         el.textContent = message;
+        el.title = "Dismiss";
         container.appendChild(el);
         // Screen readers: the toast is a visual popup, so mirror it to a live
         // region (assertive for errors so they interrupt, polite otherwise).
         announce(message, type === "error");
-        setTimeout(() => {
+
+        let hideTimer = null, removed = false;
+        const remove = () => {
+            if (removed) return;
+            removed = true;
             el.style.opacity = "0";
             setTimeout(() => el.remove(), 300);
-        }, 3500);
+        };
+        // Errors linger longer (they may need reading or acting on); others use
+        // the short default. Hovering pauses the countdown so a toast never
+        // vanishes mid-read, and a click dismisses it immediately.
+        const dwell = type === "error" ? 8000 : 3500;
+        const arm = () => { hideTimer = setTimeout(remove, dwell); };
+        const disarm = () => { if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; } };
+        el.addEventListener("mouseenter", disarm);
+        el.addEventListener("mouseleave", arm);
+        el.addEventListener("click", remove);
+        arm();
     }
 
     function playNotificationSound() {

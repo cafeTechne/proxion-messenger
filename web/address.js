@@ -16,7 +16,7 @@ export function createAddress({ showToast, showCopyModal }) {
             const btn = document.getElementById("copy-addr-btn");
             if (btn) {
                 const orig = btn.textContent;
-                btn.textContent = "✓ Copied";
+                btn.textContent = "✓ " + t('common.copied');
                 setTimeout(() => { btn.textContent = orig; }, 2000);
             }
         }).catch(() => { showCopyModal(addr); });
