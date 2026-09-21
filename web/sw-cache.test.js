@@ -60,9 +60,9 @@ describe('service worker fetch handler', () => {
     let sw;
     beforeEach(() => { sw = loadSW(); });
 
-    it('bumps the cache name to v213 (evicts poisoned caches on upgrade)', () => {
-        expect(SRC).toContain('proxion-shell-v213');
-        expect(SRC).not.toContain('proxion-shell-v212');
+    it('bumps the cache name to v214 (evicts stale caches on upgrade)', () => {
+        expect(SRC).toContain('proxion-shell-v214');
+        expect(SRC).not.toContain('proxion-shell-v213');
     });
 
     it('bypasses a cross-origin GET (pod fetch): not intercepted, not cached', async () => {
