@@ -488,6 +488,12 @@ button:hover { background: var(--accent-hover); }
        Anchor the menu to the form. */
     #message-form { position: relative; }
     .compose-more-toggle {
+        /* appearance:none + opacity:0 kill the native checkbox chrome; some
+           mobile browsers render the native tick box at its intrinsic size and
+           ignore the width/height/clip sr-only pattern alone. The label drives
+           the toggle; the checkbox stays in flow (position:absolute) and
+           focusable for keyboard use. */
+        appearance: none; -webkit-appearance: none; opacity: 0;
         display: block; position: absolute; width: 1px; height: 1px;
         margin: -1px; padding: 0; border: 0; overflow: hidden;
         clip: rect(0,0,0,0); white-space: nowrap;
