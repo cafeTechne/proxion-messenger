@@ -30,7 +30,12 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
     const _outgoingFiles = {};   // file_id -> {resolve, reject}
     const _incomingFiles = {};   // file_id -> {meta, chunks[], received, total, fromWebid}
 
+    // `verb` is a discriminator ('sending' | 'receiving'), not display text, so the
+    // visible label, aria-label, and spoken announcement all come from locale keys.
     function _showTransferProgress(fileId, name, pct, verb) {
+        const isSend = verb === 'sending';
+        const labelText = t(isSend ? 'file.labelSending' : 'file.labelReceiving', { name });
+        const progressText = t(isSend ? 'file.progressSending' : 'file.progressReceiving', { name, pct });
         let el = document.getElementById("xfer-" + fileId);
         if (!el) {
             el = document.createElement("div");
@@ -40,7 +45,7 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
             // speaks the state only at quarter marks.
             if (el.setAttribute) {   // real DOM only (vitest stubs createElement)
                 el.setAttribute("role", "progressbar");
-                el.setAttribute("aria-label", `${verb} ${name}`);
+                el.setAttribute("aria-label", labelText);
                 el.setAttribute("aria-valuemin", "0");
                 el.setAttribute("aria-valuemax", "100");
             }
@@ -48,9 +53,9 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
             document.body.appendChild(el);
         }
         if (el.setAttribute) el.setAttribute("aria-valuenow", String(pct));
-        el.textContent = `${verb} ${name} — ${pct}%`;   // visible: smooth updates
+        el.textContent = progressText;   // visible: smooth updates
         const _step = Math.floor(pct / 25);
-        if (el._lastStep !== _step) { el._lastStep = _step; announce(`${verb} ${name}, ${pct} percent`); }
+        if (el._lastStep !== _step) { el._lastStep = _step; announce(progressText); }
     }
     function _clearTransferProgress(fileId) {
         const el = document.getElementById("xfer-" + fileId);
@@ -93,18 +98,18 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
             mime_type: file.type || "application/octet-stream",
             size_bytes: buf.length, total_chunks: total,
         });
-        showToast(`Offering ${file.name}…`);
+        showToast(t('file.offering', { filename: file.name }));
         try { await acceptP; } catch (e) { delete _outgoingFiles[fileId]; _clearTransferProgress(fileId); showToast(t('file.notAccepted')); return; }
         for (let seq = 0; seq < total; seq++) {
             const slice = buf.subarray(seq * CHUNK_BYTES, (seq + 1) * CHUNK_BYTES);
             sendCmd("file_chunk", { to_webid: toWebid, file_id: fileId, seq, data: u8ToB64(slice) });
-            _showTransferProgress(fileId, file.name, Math.round(((seq + 1) / total) * 100), "Sending");
+            _showTransferProgress(fileId, file.name, Math.round(((seq + 1) / total) * 100), "sending");
             if (seq % 8 === 7) await new Promise(r => setTimeout(r, 0)); // yield to UI
         }
         sendCmd("file_complete", { to_webid: toWebid, file_id: fileId });
         _clearTransferProgress(fileId);
         delete _outgoingFiles[fileId];
-        showToast(`Sent ${file.name}`);
+        showToast(t('file.sent', { filename: file.name }));
     }
 
     function handleFileOffer(event) {
@@ -134,7 +139,7 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         };
         _armIdleTimeout(event.file_id);
         sendCmd("file_accept", { to_webid: event.from_webid, file_id: event.file_id });
-        showToast(`Receiving ${event.filename}…`);
+        showToast(t('file.receiving', { filename: event.filename }));
     }
     function handleFileChunk(event) {
         const rec = _incomingFiles[event.file_id];
@@ -152,7 +157,7 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
             rec.chunks[seq] = event.data;
             rec.received++;
             _armIdleTimeout(event.file_id);   // fresh chunk = still active
-            _showTransferProgress(event.file_id, rec.meta.filename, Math.round((rec.received / rec.total) * 100), "Receiving");
+            _showTransferProgress(event.file_id, rec.meta.filename, Math.round((rec.received / rec.total) * 100), "receiving");
         }
     }
     function handleFileComplete(event) {

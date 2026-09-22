@@ -964,7 +964,7 @@ import { createIdentityResolver } from './identity.js';
                 // Mute icon
                 const muteIcon = document.createElement("span");
                 muteIcon.className = "mute-icon";
-                muteIcon.title = "Muted";
+                muteIcon.title = t('ui.muted');
                 muteIcon.style.cssText = `display:${mutedThreads.has(id) ? "" : "none"};font-size:0.75em;color:#8091a7;margin-left:4px;flex-shrink:0;`;
                 muteIcon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M9.143 17.082a24.248 24.248 0 0 0 3.844.148m-3.844-.148a23.856 23.856 0 0 1-5.455-1.31 8.964 8.964 0 0 0 2.3-5.542m3.155 6.852a3 3 0 0 0 5.667 1.97m1.965-2.277L21 21m-4.225-4.225a23.81 23.81 0 0 0 3.536-1.003 8.967 8.967 0 0 1-2.312-6.022V9A6 6 0 0 0 9.239 3.477L3 3m6.239.477A5.965 5.965 0 0 0 6 9v.75a8.966 8.966 0 0 1-2.312 6.022"/></svg>';
                 li.appendChild(muteIcon);
@@ -3212,7 +3212,7 @@ import { createIdentityResolver } from './identity.js';
             const label = document.getElementById('disappear-label');
             if (!banner || !label) return;
             if (!ms) { banner.classList.remove('active'); return; }
-            const labels = {30000:'30 seconds',300000:'5 minutes',3600000:'1 hour',86400000:'1 day',604800000:'1 week'};
+            const labels = {30000:t('disappear.30s'),300000:t('disappear.5m'),3600000:t('disappear.1h'),86400000:t('disappear.1d'),604800000:t('disappear.1w')};
             label.textContent = labels[ms] || (ms/1000 + 's');
             banner.classList.add('active');
         }
@@ -4740,7 +4740,7 @@ import { createIdentityResolver } from './identity.js';
                 }
                 const btn = document.getElementById("voice-channel-mute-btn");
                 if (btn) {
-                    btn.textContent = voice.state.isMuted ? "Unmute" : "Mute";
+                    btn.textContent = voice.state.isMuted ? t('btn.unmute') : t('btn.mute2');
                     btn.style.background = voice.state.isMuted ? "#7f1d1d" : "#334155";
                 }
             });
@@ -5248,11 +5248,11 @@ import { createIdentityResolver } from './identity.js';
                     // Second-stage menu: swap in duration choices instead of the old
                     // native prompt() that made the user TYPE "5m"/"1h"/"24h".
                     menu.innerHTML =
-                        '<button data-role-action="mute-300">Mute for 5 minutes</button>' +
-                        '<button data-role-action="mute-3600">Mute for 1 hour</button>' +
-                        '<button data-role-action="mute-86400">Mute for 24 hours</button>' +
-                        '<button data-role-action="mute-0">Mute until unmuted</button>' +
-                        '<hr><button data-role-action="mute-cancel">Cancel</button>';
+                        `<button data-role-action="mute-300">${t('mute.for5m')}</button>` +
+                        `<button data-role-action="mute-3600">${t('mute.for1h')}</button>` +
+                        `<button data-role-action="mute-86400">${t('mute.for24h')}</button>` +
+                        `<button data-role-action="mute-0">${t('mute.untilUnmuted')}</button>` +
+                        `<hr><button data-role-action="mute-cancel">${t('btn.cancel')}</button>`;
                     return; // keep the menu open on the duration choices
                 } else if (action.startsWith('mute-')) {
                     const secs = parseInt(action.slice(5), 10);

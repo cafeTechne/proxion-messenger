@@ -228,8 +228,9 @@ export function createVoice(deps) {
             const banner = document.getElementById("voice-banner");
             const _cw = invite.caller_webid;
             const _known = _isKnownCaller(_cw);
-            document.getElementById("voice-msg").innerText =
-                `Incoming call from ${_callerDisplayName(_cw)}` + (_known ? "" : " (unverified)");
+            document.getElementById("voice-msg").innerText = _known
+                ? t('voice.incomingFrom', { name: _callerDisplayName(_cw) })
+                : t('voice.incomingFromUnverified', { name: _callerDisplayName(_cw) });
             banner.style.display = "flex";
             // Move focus to Answer so a keyboard / screen-reader user lands on the
             // primary action; the banner's role="alert" announces the caller.
@@ -472,7 +473,7 @@ export function createVoice(deps) {
             _updateVerifyBadge();
             const statusEl = document.getElementById("vw-status");
             if (statusEl && !connected) {
-                statusEl.textContent = state._callState === CallState.CALLING ? "Calling..." : "Incoming...";
+                statusEl.textContent = state._callState === CallState.CALLING ? t('voice.calling') : t('voice.incoming');
             }
         }
 
