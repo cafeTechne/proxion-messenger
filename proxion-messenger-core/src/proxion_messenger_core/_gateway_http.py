@@ -1998,6 +1998,15 @@ class HttpEndpointsMixin:
                                      + str(len(fb)).encode() + b"\r\n\r\n" + fb)
                         await writer.drain()
                         return
+                    # Repointing the pod backend rewrites where the owner's identity
+                    # and data live, so it belongs with the recovery endpoints: a live
+                    # tunnel makes loopback/Origin trust meaningless (cloudflared
+                    # collapses peer_ip to loopback), so require the provisioned token
+                    # then. Genuine local desktop (no tunnel) is unaffected.
+                    if not self._recovery_endpoint_allowed(headers_raw):
+                        await _write_json(writer, 403, {"error": "recovery_forbidden_over_tunnel"})
+                        await writer.drain()
+                        return
                     body = b""
                     if content_length > 0:
                         body = await _read_http_body(reader, min(content_length, 8192), 10.0)
@@ -2065,6 +2074,13 @@ class HttpEndpointsMixin:
                         _err = b'{"error":"forbidden"}'
                         writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: " +
                                      str(len(_err)).encode() + b"\r\n\r\n" + _err)
+                        await writer.drain()
+                        return
+                    # Loopback alone is meaningless behind cloudflared (peer_ip is
+                    # always 127.0.0.1 over the tunnel), and this writes a DURABLE pod
+                    # revocation tombstone. Require the token when the tunnel is live.
+                    if not self._recovery_endpoint_allowed(headers_raw):
+                        await _write_json(writer, 403, {"error": "recovery_forbidden_over_tunnel"})
                         await writer.drain()
                         return
                     body = b""
@@ -2704,6 +2720,14 @@ class HttpEndpointsMixin:
                         writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
                         await writer.drain()
                         return
+                    # Deleting pod credentials is an owner op; loopback/Origin is not an
+                    # authenticator over the tunnel. The authenticated owner uses the WS
+                    # disconnect_pod path; this HTTP fallback stays local-only when a
+                    # tunnel is live.
+                    if not self._recovery_endpoint_allowed(headers_raw):
+                        await _write_json(writer, 403, {"error": "recovery_forbidden_over_tunnel"})
+                        await writer.drain()
+                        return
                     self._pod_url = None
                     self._pod_webid = None
                     self.dm_clients.clear()
@@ -2721,6 +2745,10 @@ class HttpEndpointsMixin:
 
                 # ── GET /message-edits — edit history (R13.11) ──
                 if method == "GET" and path == "/message-edits":
+                    if _check_http_rate(peer_ip, "message_edits"):
+                        await _write_429(writer)
+                        await writer.drain()
+                        return
                     if not self._is_trusted_origin(origin_header, http_port, peer_ip):
                         writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
                         await writer.drain()
@@ -2745,7 +2773,18 @@ class HttpEndpointsMixin:
 
                 # ── GET /contacts — contact list (R13.14) ──
                 if method == "GET" and (path == "/contacts" or path.startswith("/contacts?")):
+                    if _check_http_rate(peer_ip, "contacts"):
+                        await _write_429(writer)
+                        await writer.drain()
+                        return
                     if not self._is_trusted_origin(origin_header, http_port, peer_ip):
+                        writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+                        await writer.drain()
+                        return
+                    # The full contact roster (WebIDs, display names, avatars) is
+                    # sensitive; loopback/Origin is meaningless over the tunnel, so also
+                    # require the provisioned token then (like the recovery endpoints).
+                    if not self._recovery_endpoint_allowed(headers_raw):
                         writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
                         await writer.drain()
                         return
@@ -2763,7 +2802,16 @@ class HttpEndpointsMixin:
 
                 # ── GET /contacts/search — contact typeahead (R13.14) ──
                 if method == "GET" and path.startswith("/contacts/search"):
+                    if _check_http_rate(peer_ip, "contacts"):
+                        await _write_429(writer)
+                        await writer.drain()
+                        return
                     if not self._is_trusted_origin(origin_header, http_port, peer_ip):
+                        writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+                        await writer.drain()
+                        return
+                    # See GET /contacts: also require the token over the tunnel.
+                    if not self._recovery_endpoint_allowed(headers_raw):
                         writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
                         await writer.drain()
                         return
