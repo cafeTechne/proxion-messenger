@@ -123,7 +123,15 @@ fn consume_pending_deep_link(state: State<PendingDeepLink>) -> Option<String> {
 }
 
 fn extract_proxion_url() -> Option<String> {
-    std::env::args().skip(1).find(|a| a.starts_with("proxion://"))
+    // Only accept a well-formed single proxion:// deep link. A "%1"-quoting break in
+    // the OS URL-scheme registration can smuggle extra argv tokens, so require the
+    // whole argument to be one proxion:// URL of sane length with no embedded
+    // whitespace or quote characters.
+    std::env::args().skip(1).find(|a| {
+        a.starts_with("proxion://")
+            && a.len() <= 2048
+            && !a.chars().any(|c| c.is_whitespace() || c == '"' || c == '\'')
+    })
 }
 
 // ── Autostart launch detection ────────────────────────────────────────────────
