@@ -367,6 +367,21 @@ class HttpEndpointsMixin:
 
         my_pub_hex = self.agent.identity_pub_bytes.hex()
 
+        # The acceptance MUST carry a certificate the acceptor signed with the
+        # private key behind acceptor_pub_hex; verifying it (below) is the proof the
+        # accepter actually holds that key. Without it, anyone who learns the
+        # invitation_id plus the invited party's PUBLIC key/DID (the address the
+        # inviter typed) could accept the invite and inject their own browser E2E key
+        # and delivery gateway — an E2E MITM. The legitimate acceptance always
+        # includes it (gateway.py builds it), so requiring it breaks nothing.
+        if not acceptor_cert:
+            if self._store:
+                self._store.save_security_event(
+                    "invite_accept_missing_certificate", "warning",
+                    details=f"acceptor_did={acceptor_did}",
+                )
+            return "400 Bad Request", '{"error":"missing certificate"}'
+
         if acceptor_cert:
             from .handshake import _ed25519_verify
             try:
@@ -408,7 +423,10 @@ class HttpEndpointsMixin:
 
         # Register acceptor's gateway URL so relay routing works immediately
         acceptor_gw_http = data.get("from_gateway_http_url", "")
-        if acceptor_gw_http and acceptor_did:
+        # SSRF-validate before pinning (this is first-seen-wins), matching the other
+        # peer-gateway record sites (/relay, discover). A hostile URL here would
+        # redirect the victim's later DMs to an attacker-chosen endpoint.
+        if acceptor_gw_http and acceptor_did and _is_safe_gateway_url(acceptor_gw_http):
             self._record_peer_gateway(acceptor_did, acceptor_gw_http)
 
         pod_client = self._pod_client()

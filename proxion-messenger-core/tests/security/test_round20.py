@@ -129,13 +129,16 @@ class TestRelayReceiptSignature:
 # ---------------------------------------------------------------------------
 
 class TestInviteAcceptValidation:
-    def _make_payload(self, invitation_id, from_pub_hex, from_did=""):
-        return json.dumps({
+    def _make_payload(self, invitation_id, from_pub_hex, from_did="", certificate=None):
+        payload = {
             "@type": "InviteAcceptance",
             "invitation_id": invitation_id,
             "from_pub_hex": from_pub_hex,
             "from_did": from_did,
-        }).encode()
+        }
+        if certificate is not None:
+            payload["certificate"] = certificate
+        return json.dumps(payload).encode()
 
     @pytest.mark.asyncio
     async def test_invite_accept_requires_pending_invite(self, tmp_path):
@@ -188,7 +191,20 @@ class TestInviteAcceptValidation:
         # The acceptance must come from the DID the invite was issued to.
         if gw._store:
             gw._store.save_pending_invite(invite.to_dict(), acceptor_did)
-        body = self._make_payload(invite.invitation_id, pub_hex, from_did=acceptor_did)
+        # The acceptance must carry a certificate the acceptor signed with pub_hex's
+        # private key (issuer=acceptor, subject=inviter) — the proof of key
+        # possession the handler now requires.
+        from proxion_messenger_core.federation import RelationshipCertificate
+        my_pub_hex = gw.agent.identity_pub_bytes.hex()
+        acc_cert = RelationshipCertificate(
+            issuer=pub_hex, subject=my_pub_hex,
+            capabilities=[Capability(with_="stash://dm/", can="crud/write")],
+        )
+        acc_cert.sign(priv)
+        body = self._make_payload(
+            invite.invitation_id, pub_hex, from_did=acceptor_did,
+            certificate=acc_cert.to_dict(),
+        )
         status, resp = await gw._handle_invite_accept_post(body)
         assert status.startswith("200"), f"Expected 200 got {status}: {resp}"
 

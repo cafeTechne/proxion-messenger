@@ -235,8 +235,15 @@ class TestInviteAcceptCertVerification:
         assert status.startswith("400"), f"Expected 400, got {status}"
         assert "issuer" in body
 
-    def test_accept_without_cert_still_works(self, tmp_path):
-        """Accepting without an acceptor cert (legacy flow) is still accepted."""
+    def test_accept_without_cert_is_rejected(self, tmp_path):
+        """An acceptance with no signed acceptor cert is REJECTED.
+
+        The certificate is the proof the acceptor holds the private key behind
+        from_pub_hex; without it anyone who learns the invitation_id (plus the
+        invited party's public key/DID, which is the address the inviter typed)
+        could accept and inject their own browser E2E key and delivery gateway,
+        an E2E MITM. The legitimate acceptance always carries the cert.
+        """
         gw = _make_gateway(tmp_path)
         acceptor_priv = Ed25519PrivateKey.generate()
         acceptor_pub = acceptor_priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
@@ -252,4 +259,4 @@ class TestInviteAcceptCertVerification:
             "from_did": acceptor_did,
             # no "certificate" key
         })
-        assert status.startswith("200"), f"Expected 200, got {status}"
+        assert status.startswith("400"), f"Expected 400, got {status}"
