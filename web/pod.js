@@ -1527,6 +1527,48 @@ export async function podReadJoins() {
 }
 export function podDeleteJoin(url) { return _deleteDrop(url); }
 
+// --- Pending join requests (W1) ---
+// The join inbox is public-Append, so anyone who knows a WebID can drop a
+// `join_approved`. To stop a forged approval from forcing a room in, the joiner
+// records a marker in their OWN pod (trustworthy, and cross-device) whenever they
+// actually request to join; an approval is only honored when a matching marker
+// exists. Keyed by a hash of (roomId, ownerWebId) so the path is a safe hex id no
+// matter what those strings contain.
+async function _pendingJoinPath(roomId, ownerWebId) {
+    const id = await _sha256Hex(String(roomId) + '\n' + String(ownerWebId));
+    return `proxion/join-requests/${id}.jsonld`;
+}
+
+export async function podWritePendingJoin(roomId, ownerWebId) {
+    if (!roomId || !ownerWebId) return;
+    await _writePxDoc(await _pendingJoinPath(roomId, ownerWebId), 'px:PendingJoin', {
+        'px:roomId': String(roomId),
+        'px:ownerWebId': String(ownerWebId),
+    });
+}
+
+export async function podHasPendingJoin(roomId, ownerWebId) {
+    const root = podStorageRoot();
+    if (!root || !solidSession.info.isLoggedIn || !roomId || !ownerWebId) return false;
+    try {
+        const res = await solidSession.fetch(root + await _pendingJoinPath(roomId, ownerWebId),
+            { headers: { Accept: 'application/ld+json' } });
+        if (!res.ok) return false;
+        const doc = await res.json();
+        // Match the fields too, so an astronomically unlikely hash collision can't
+        // vouch for a different room/owner than the one requested.
+        return doc?.['px:roomId'] === String(roomId) && doc?.['px:ownerWebId'] === String(ownerWebId);
+    } catch { return false; }
+}
+
+export async function podDeletePendingJoin(roomId, ownerWebId) {
+    const root = podStorageRoot();
+    if (!root || !solidSession.info.isLoggedIn || !roomId || !ownerWebId) return;
+    try {
+        await solidSession.fetch(root + await _pendingJoinPath(roomId, ownerWebId), { method: 'DELETE' });
+    } catch { /* best-effort cleanup */ }
+}
+
 /** Read a room descriptor from a specific owner's pod (not our own). */
 export async function podReadRoomDescriptorAt(ownerPodRoot, roomId) {
     if (!roomId || !SAFE_ID_RE.test(roomId) || !ownerPodRoot || !solidSession?.info?.isLoggedIn) return null;

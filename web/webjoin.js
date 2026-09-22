@@ -50,12 +50,21 @@ export function createWebJoin({
     async function requestJoin(roomId, ownerWebId) {
         const root = peerPodRoot(ownerWebId);
         if (!root) return false;
-        return pod.podDropJoin(root, {
+        const ok = await pod.podDropJoin(root, {
             kind: 'join_request',
             room_id: roomId,
             from_webid: getSelfWebId(),
             from_display_name: getDisplayName ? getDisplayName() : '',
         });
+        // Record a pending marker in our OWN pod so a later `join_approved` can be
+        // checked against a request we actually made. Without this, anyone who
+        // knows our WebID could drop a forged approval into the public-Append join
+        // inbox and force a room in. Best-effort: a failed marker just means the
+        // approval will be treated as unsolicited (safe default).
+        if (ok !== false && pod.podWritePendingJoin) {
+            try { await pod.podWritePendingJoin(roomId, ownerWebId); } catch { /* best-effort */ }
+        }
+        return ok;
     }
 
     // Owner: tell a joiner they are in (after granting them ACL). Carries where

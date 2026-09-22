@@ -25,6 +25,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podWritePresence, podReadPresence, presenceUrlFor,
          podEnsureCallInbox, podDropSignal, podReadSignals, podDeleteSignal,
          podEnsureJoinInbox, podDropJoin, podReadJoins, podDeleteJoin,
+         podWritePendingJoin, podHasPendingJoin, podDeletePendingJoin,
          podReadRoomDescriptorAt, podReadChatRecentAt, podWriteChatMessageAt,
          podEditChatMessageAt, podSoftDeleteChatMessageAt, podSetChatSeqAt,
          podGrantChatParticipants, podPublishSigner, podFetchPeerSigner,
@@ -2987,6 +2988,12 @@ import { createIdentityResolver } from './identity.js';
             // WebID (the approver's WebID is carried as owner_webid).
             if (!isPeerPodRootAllowed(appr.owner_pod_root, podStorageRoot())) return;
             if (!appr.owner_webid || peerPodRootFromWebId(appr.owner_webid) !== appr.owner_pod_root) return;
+            // Only honor an approval that matches a join request we actually made
+            // (recorded in our own pod at request time). The join inbox is
+            // public-Append, so without this an attacker could drop a forged
+            // approval and force a room in + make us fetch their pod. Checked BEFORE
+            // any fetch of the owner's pod below.
+            if (!(await podHasPendingJoin(appr.room_id, appr.owner_webid))) return;
             const roomId = appr.room_id;
             const desc = await podReadRoomDescriptorAt(appr.owner_pod_root, roomId);
             // long_chat rides in the approver's own room.json, so it is attacker-
@@ -3012,6 +3019,9 @@ import { createIdentityResolver } from './identity.js';
                     if (activeView && activeView.id === roomId) loadRoomHistory(roomId);
                 });
             } catch (_) { /* watchResource falls back to polling */ }
+            // The request is fulfilled: drop the pending marker so it can't be
+            // replayed and doesn't linger in our pod.
+            podDeletePendingJoin(roomId, appr.owner_webid).catch(() => {});
             showToast(t('join.joined', { room: title }));
         }
 
@@ -5609,7 +5619,7 @@ import { createIdentityResolver } from './identity.js';
                     // (granting the joiner ACL on the room container); the joiner
                     // registers the room, which lives on the owner's pod.
                     const webJoin = createWebJoin({
-                        pod: { podEnsureJoinInbox, podDropJoin, podReadJoins, podDeleteJoin },
+                        pod: { podEnsureJoinInbox, podDropJoin, podReadJoins, podDeleteJoin, podWritePendingJoin },
                         notify: { watchResource },
                         getSelfWebId: () => selfWebId,
                         getDisplayName: () => localStorage.getItem('proxion_display_name') || '',
