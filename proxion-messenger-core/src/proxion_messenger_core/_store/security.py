@@ -81,6 +81,25 @@ class SecurityStoreMixin(object):
                 return row[0] if row else 0
             except Exception:
                 return 0
+    def prune_room_join_attempts(self, cutoff_ts: float) -> int:
+        """Delete join-attempt rows older than *cutoff_ts*. Returns number deleted.
+
+        Both room_join_attempts tables are append-per-attempt on an unauthenticated,
+        IP-driven path, so without a prune they grow without bound (disk-exhaustion
+        DoS, and the COUNT() rate-limit queries degrade). Only rows inside the
+        rate-limit window matter; anything older is dead weight. The table names are
+        hardcoded literals (no user input), so the f-string is injection-safe.
+        """
+        deleted = 0
+        with self._conn() as conn:
+            for _tbl in ("room_join_attempts", "room_join_attempts_v2"):
+                try:
+                    conn.execute(f"DELETE FROM {_tbl} WHERE attempted_at < ?", (cutoff_ts,))
+                    deleted += conn.execute("SELECT changes()").fetchone()[0]
+                except Exception:
+                    pass
+        return deleted
+
     def save_edit(
         self, edit_id: str, message_id: str, prev_content: str,
         new_content: str, edited_by: str, edited_at: str,

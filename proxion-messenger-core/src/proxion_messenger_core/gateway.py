@@ -2862,6 +2862,18 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 )
                 idempotency_hours = int(_os_rp.environ.get("PROXION_IDEMPOTENCY_RETENTION_HOURS", "72"))
                 idempotency_pruned = self._store.prune_expired_idempotency_ops(retention_hours=idempotency_hours)
+                # Rate-limit feeder tables append on unauthenticated, IP-driven paths
+                # and their windows are seconds; a 1-day cutoff keeps everything the
+                # COUNT() checks need while stopping unbounded growth (disk DoS).
+                _rl_cutoff = time.time() - 86400
+                try:
+                    join_pruned = self._store.prune_room_join_attempts(_rl_cutoff)
+                    rl_pruned = self._store.prune_rate_limit_buckets(_rl_cutoff)
+                    if join_pruned or rl_pruned:
+                        logger.info("Retention purge: %d join attempts, %d rate-limit buckets removed",
+                                    join_pruned, rl_pruned)
+                except Exception as _rl_exc:
+                    logger.warning("Rate-limit table prune failed: %s", _rl_exc)
                 if audit_purged or sec_purged:
                     logger.info("Retention purge: %d audit logs, %d security events removed",
                                 audit_purged, sec_purged)
