@@ -2412,8 +2412,9 @@ class MiscHandlerMixin:
         if record.get("used_at") is not None:
             await websocket.send(json.dumps({"type": "device_recovery_code_invalid", "reason": "already_used"}))
             return
+        import hmac as _hmac
         expected_hash = hashlib.sha256(plaintext.encode()).hexdigest()
-        if expected_hash != record["code_hash"]:
+        if not _hmac.compare_digest(expected_hash, str(record["code_hash"])):
             await websocket.send(json.dumps({"type": "device_recovery_code_invalid", "reason": "wrong_code"}))
             return
         self._store.use_device_recovery_code(code_id)
