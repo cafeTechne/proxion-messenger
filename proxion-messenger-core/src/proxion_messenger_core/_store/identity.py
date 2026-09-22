@@ -194,11 +194,28 @@ class IdentityStoreMixin(object):
                     _clamped = min(_orig_exp, _now_i + MAX_CERT_VALIDITY_SECONDS)
                 expires_at = _clamped
 
+            # INSERT OR REPLACE resets columns not listed to their default
+            # (revoked defaults to 0), so re-importing an already-revoked cert would
+            # silently un-revoke it. Preserve the revoked flag for the SAME
+            # certificate_id (a fresh cert with a new id starts unrevoked, so
+            # re-establishing a relationship after revocation still works; the
+            # revocations tombstone table remains the cross-cert enforcement).
+            _revoked = 0
+            try:
+                _rr = conn.execute(
+                    "SELECT revoked FROM relationships WHERE certificate_id=?",
+                    (certificate_id,),
+                ).fetchone()
+                if _rr and _rr[0]:
+                    _revoked = 1
+            except Exception:
+                _revoked = 0
+
             conn.execute(
                 """
                 INSERT OR REPLACE INTO relationships
-                    (certificate_id, peer_pub_hex, peer_did, cert_json, created_at, expires_at, owner_webid, cert_policy_version, cert_validated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (certificate_id, peer_pub_hex, peer_did, cert_json, created_at, expires_at, owner_webid, cert_policy_version, cert_validated_at, revoked)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     certificate_id,
@@ -210,6 +227,7 @@ class IdentityStoreMixin(object):
                     owner_webid,
                     1,
                     time.time(),
+                    _revoked,
                 ),
             )
     def get_relationship_by_peer(self, peer_pub_hex: str) -> Optional[dict]:
