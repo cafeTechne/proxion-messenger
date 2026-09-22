@@ -890,6 +890,15 @@ class DmHandlerMixin:
             await websocket.send(json.dumps({"type": "error", "message": "contact_revoked"}))
             return
 
+        # A blocked sender must not be able to push sealed envelopes to a victim who
+        # blocked them: every other DM path (send_dm, local_dm, fanout, relay-receive)
+        # enforces the block on delivery, but sealed_dm did not, leaving an
+        # unsolicited-message channel the block system is meant to close. Silently
+        # ack-and-drop (don't reveal the block), scoped to the recipient's own list.
+        if self._is_blocked_for(target_webid, sender_webid):
+            await websocket.send(json.dumps({"type": "sealed_dm_sent", "target_webid": target_webid}))
+            return
+
         event = {
             "type": "sealed_message",
             "e2e_v": 3,
@@ -1253,7 +1262,33 @@ class DmHandlerMixin:
             await websocket.send(json.dumps({"type": "error", "message": "thread_id required"}))
             return
 
-        # Record the attempt in the store (metrics + observability)
+        # Resolve the peer this reporter was talking to AND require the reporter to be
+        # a party to it. Without this, anyone could set thread_id=<victim webid> to
+        # pollute recovery state/metrics and spoof a session_recovery_required event
+        # (naming themselves as reporter) delivered to the victim's sockets.
+        sender_webid = ""
+        if self._store and session_id:
+            sess = self._store.get_dm_session_by_id(session_id)
+            if sess:
+                owner = sess.get("owner_webid", "")
+                peer = sess.get("peer_webid", "")
+                if reporter_webid in (owner, peer):
+                    sender_webid = peer if owner == reporter_webid else owner
+        if not sender_webid and thread_id and self._store:
+            # No verified session: trust thread_id as the peer only when the reporter
+            # actually has a relationship with them.
+            if self._store.get_relationship_by_did(thread_id):
+                sender_webid = thread_id
+        if not sender_webid:
+            await websocket.send(json.dumps({
+                "type": "session_recovery_deferred",
+                "thread_id": thread_id,
+                "session_id": session_id,
+                "message": "No authorized session to recover.",
+            }))
+            return
+
+        # Record the (now-authorized) attempt for metrics + observability.
         attempt_no = 1
         if self._store:
             existing = self._store.get_recovery_attempts(thread_id, reporter_webid)
@@ -1263,17 +1298,6 @@ class DmHandlerMixin:
             self._metrics["session_recovery_attempts_total"] = (
                 self._metrics.get("session_recovery_attempts_total", 0) + 1
             )
-
-        # Determine the original sender (the peer this reporter was talking to)
-        sender_webid = ""
-        if self._store and session_id:
-            sess = self._store.get_dm_session_by_id(session_id)
-            if sess:
-                owner = sess.get("owner_webid", "")
-                peer = sess.get("peer_webid", "")
-                sender_webid = peer if owner == reporter_webid else owner
-        if not sender_webid and thread_id:
-            sender_webid = thread_id  # thread_id is often the peer's webid
 
         recovery_event = json.dumps({
             "type": "session_recovery_required",

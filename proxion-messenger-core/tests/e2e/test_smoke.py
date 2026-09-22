@@ -156,13 +156,16 @@ async def test_presence_exchange(alice_session, bob_session):
         status="away",
     )
 
-    # Alice should get a presence_update event
+    # Alice should get a presence_update event (her own)
     alice_presence = await alice_session.recv_type("presence_update", timeout=5.0)
     assert alice_presence.get("status") == "away"
 
-    # Bob should get Alice's presence update
-    bob_presence = await bob_session.recv_type("presence_update", timeout=5.0)
-    assert bob_presence.get("status") == "away"
+    # Bob is NOT a contact of Alice, so her presence must NOT be pushed to him —
+    # the push is now scoped to the sender's contacts, matching the get_all_presence
+    # pull contract (see test_get_all_presence). Previously it broadcast to every
+    # socket, leaking presence + status text to non-contacts on a shared gateway.
+    with pytest.raises(TimeoutError):
+        await bob_session.recv_type("presence_update", timeout=1.5)
 
 
 @pytest.mark.asyncio

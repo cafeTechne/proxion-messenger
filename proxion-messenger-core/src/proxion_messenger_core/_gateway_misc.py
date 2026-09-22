@@ -40,14 +40,38 @@ class MiscHandlerMixin:
                 "updated_at": now,
                 "last_active_at": last_active
             }
-            await self.broadcast({
+            _presence_event = {
                 "type": "presence_update",
                 "webid": webid,
                 "status": status,
                 "status_message": status_message,
                 "updated_at": now,
                 "last_active_at": last_active
-            })
+            }
+            # Scope the push to the user's own contacts (+ their own other sessions),
+            # not every connected socket. A raw broadcast leaked presence state and
+            # the free-text status_message to non-contacts on a multi-account gateway,
+            # contradicting get_all_presence which already filters to relationships.
+            _recipients = {webid}
+            if self._store:
+                try:
+                    for _rel in (self._store.list_relationships(webid) or []):
+                        _peer = _rel.get("peer_did") or ""
+                        if _peer:
+                            _recipients.add(_peer)
+                except Exception:
+                    pass
+            _presence_payload = json.dumps(_presence_event, default=str)
+            _presence_seen = set()
+            for _wid in _recipients:
+                for _ws in self._sockets_for(_wid):
+                    if id(_ws) in _presence_seen:
+                        continue
+                    _presence_seen.add(id(_ws))
+                    try:
+                        await _ws.send(_presence_payload)
+                    except Exception:
+                        pass
 
         from .presence import set_presence
         _pc_entry = self._any_pod_client_entry()
@@ -636,6 +660,11 @@ class MiscHandlerMixin:
         sess = self._voice_sessions.get(session_id)
         if not sess:
             return
+        # Only a party to the call may toggle its screenshare indicator; a
+        # non-participant who guessed the session id could otherwise spoof it
+        # (the other voice signaling handlers all enforce this).
+        if websocket not in (sess.get("caller_ws"), sess.get("callee_ws")):
+            return
         other = sess.get("callee_ws") if sess.get("caller_ws") is websocket else sess.get("caller_ws")
         if other:
             try:
@@ -651,6 +680,11 @@ class MiscHandlerMixin:
         session_id = data.get("session_id", "")
         sess = self._voice_sessions.get(session_id)
         if not sess:
+            return
+        # Only a party to the call may toggle its screenshare indicator; a
+        # non-participant who guessed the session id could otherwise spoof it
+        # (the other voice signaling handlers all enforce this).
+        if websocket not in (sess.get("caller_ws"), sess.get("callee_ws")):
             return
         other = sess.get("callee_ws") if sess.get("caller_ws") is websocket else sess.get("caller_ws")
         if other:

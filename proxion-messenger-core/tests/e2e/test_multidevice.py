@@ -50,7 +50,12 @@ async def test_same_did_two_connections(live_gateway):
 
 @pytest.mark.asyncio
 async def test_presence_broadcast_multidevice(live_gateway):
-    """Setting presence on one connection broadcasts to all connected clients."""
+    """Setting presence pushes to the sender's own sessions but NOT to non-contacts.
+
+    The push is scoped to the sender's contacts (+ their own devices), matching the
+    get_all_presence pull contract. Alice and Bob are separate, unrelated accounts
+    here, so Alice's presence must reach Alice's own session and not leak to Bob.
+    """
     alice_agent = AgentState.generate()
     bob_agent = AgentState.generate()
 
@@ -65,10 +70,11 @@ async def test_presence_broadcast_multidevice(live_gateway):
 
     alice_pres = await alice.recv_type("presence_update", timeout=5.0)
     assert alice_pres.get("status") == "busy"
+    assert alice_pres.get("webid") == alice.did
 
-    bob_pres = await bob.recv_type("presence_update", timeout=5.0)
-    assert bob_pres.get("status") == "busy"
-    assert bob_pres.get("webid") == alice.did
+    # Bob is a different, non-contact account: Alice's presence must not leak to him.
+    with pytest.raises(TimeoutError):
+        await bob.recv_type("presence_update", timeout=1.5)
 
     await alice.ws.close()
     await bob.ws.close()
