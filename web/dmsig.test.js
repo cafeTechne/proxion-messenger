@@ -145,9 +145,23 @@ function _b64(bytes) { let s = ''; for (const b of bytes) s += String.fromCharCo
 describe('dmsig legacy-signature shim', () => {
     it('accepts a signature produced under the legacy 2-byte scheme', async () => {
         const id = await makeIdentity();
-        const bytes = legacyCanonical(LEGACY_DM_FIELDS, envFull);
+        // A genuine pre-R110 envelope carries none of the current-only fields.
+        const bytes = legacyCanonical(LEGACY_DM_FIELDS, env);
         const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', id.priv, bytes));
-        expect(await verifyDmSig({ ...envFull, signer: id.did, sig: _b64(sig) })).toBe(true);
+        expect(await verifyDmSig({ ...env, signer: id.did, sig: _b64(sig) })).toBe(true);
+    });
+
+    it('rejects a legacy signature when a current-only field is present (no downgrade)', async () => {
+        // Sign only the legacy fields, then add a current-only field to the
+        // envelope. A real legacy signer never populated these, so the legacy
+        // fallback must be refused rather than letting an attacker add a spoofed
+        // display name / reply target / e2e flag that still verifies.
+        const id = await makeIdentity();
+        const bytes = legacyCanonical(LEGACY_DM_FIELDS, env);
+        const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', id.priv, bytes));
+        expect(await verifyDmSig({ ...env, from_display_name: 'Mallory', signer: id.did, sig: _b64(sig) })).toBe(false);
+        expect(await verifyDmSig({ ...env, reply_to_id: 'r-evil', signer: id.did, sig: _b64(sig) })).toBe(false);
+        expect(await verifyDmSig({ ...env, e2e: true, signer: id.did, sig: _b64(sig) })).toBe(false);
     });
 
     it('accepts a legacy-signed fanout copy', async () => {

@@ -133,13 +133,33 @@ export function signFanout(env, privKey, signerDid) { return _sign(canonicalFano
 // LEGACY (2-byte-prefix, fewer fields) scheme so a message from an older client
 // still verifies during rollout instead of flashing an "unverified" badge. Both are
 // real Ed25519 signatures by the same signer; neither path is weakened.
+// A genuine pre-R110 signer never populated e2e / reply_to_id / from_display_name
+// (DM) or the nested payload's e2e (fanout) — those fields did not exist in the
+// legacy canonical. So if any is present, the only valid signature is the
+// current-scheme one already tried above; refusing the legacy fallback here stops
+// an attacker ADDING or altering those fields on a legacy-signed envelope (name
+// spoof shown as verified, reply mis-threading, e2e flip) and still passing,
+// since the legacy canonical omits them. Mirrors the Long Chat guard.
+function _hasCurrentOnlyDm(env) {
+    if (!env) return false;
+    return env.e2e != null
+        || (env.reply_to_id != null && env.reply_to_id !== '')
+        || (env.from_display_name != null && env.from_display_name !== '');
+}
+function _hasCurrentOnlyFanout(env) {
+    const p = (env && env.payload) || {};
+    return p.e2e != null;
+}
+
 export async function verifyDmSig(env) {
     if (await _verify(env, canonicalDmBytes(env))) return true;
+    if (_hasCurrentOnlyDm(env)) return false;
     const legacy = _canonicalLegacy(SIGNED_FIELDS_LEGACY, env);
     return legacy ? _verify(env, legacy) : false;
 }
 export async function verifyFanoutSig(env) {
     if (await _verify(env, canonicalFanoutBytes(env))) return true;
+    if (_hasCurrentOnlyFanout(env)) return false;
     const legacy = _canonicalLegacy(SIGNED_FIELDS_FANOUT_LEGACY, _fanoutObj(env));
     return legacy ? _verify(env, legacy) : false;
 }
