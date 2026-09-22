@@ -208,6 +208,17 @@ export function createVoice(deps) {
             return webid.slice(0, 28);
         }
 
+        // In gateway-free web mode the call inbox is public-Append, so caller_webid
+        // and display_name in a voice_invite are attacker-settable. Treat a caller as
+        // known only when they are an existing DM peer or a member of the current
+        // room; anything else rings as unverified so a spoofed name is not trusted.
+        function _isKnownCaller(webid) {
+            if (!webid) return false;
+            if (Object.values(getLocalDmPeers()).some(p => p.peer_webid === webid)) return true;
+            if (getCurrentRoomMembers().some(m => m.webid === webid)) return true;
+            return false;
+        }
+
         function showVoiceBanner(invite) {
             state.currentCall = invite;
             // Set the call peer now (refined in initWebRTC on answer) so a decline or
@@ -215,8 +226,10 @@ export function createVoice(deps) {
             state._callPeerWebid = invite.caller_webid || invite.from_webid || state._callPeerWebid;
             setCallState(CallState.RINGING);
             const banner = document.getElementById("voice-banner");
+            const _cw = invite.caller_webid;
+            const _known = _isKnownCaller(_cw);
             document.getElementById("voice-msg").innerText =
-                `Incoming call from ${_callerDisplayName(invite.caller_webid)}`;
+                `Incoming call from ${_callerDisplayName(_cw)}` + (_known ? "" : " (unverified)");
             banner.style.display = "flex";
             playRingTone();
             const _ringCaller = invite.caller_webid;
