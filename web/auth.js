@@ -17,6 +17,8 @@ const _DM_HISTORY_DB = 'proxion-dm-history';
 const _DM_HISTORY_STORE = 'messages';
 const _SAVED_DB = 'proxion-saved-messages';
 const _SAVED_STORE = 'saved';
+const _GIF_DB = 'proxion-gif-tray';
+const _GIF_STORE = 'favorites';
 
 // Reject an untrustworthy pim:storage claim on a private/loopback host (the SSRF
 // host check lives in ssrf.js so it stays dependency-free and shared with pod.js).
@@ -90,6 +92,7 @@ export async function solidLogout() {
     // bare base name, so the purge below would miss the signed-in account's rows.
     const dmDb = accountDbName(_DM_HISTORY_DB);
     const savedDb = accountDbName(_SAVED_DB);
+    const gifDb = accountDbName(_GIF_DB);
     try {
         await solidSession.logout({ logoutType: 'app' });
     } catch (e) {
@@ -114,6 +117,9 @@ export async function solidLogout() {
     // cached lingers after logout on a shared device.
     try { await _clearStore(dmDb, _DM_HISTORY_STORE); } catch { /* ignore */ }
     try { await _clearStore(savedDb, _SAVED_STORE); } catch { /* ignore */ }
+    // Starred GIFs/memes hold full base64 image payloads from attachments — clear
+    // this account's tray too so it can't be read after logout on a shared device.
+    try { await _clearStore(gifDb, _GIF_STORE); } catch { /* ignore */ }
 }
 
 // Is `root` safe to trust as THIS WebID's storage root? Require same origin as the

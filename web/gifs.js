@@ -10,17 +10,27 @@
 
 import { t } from './i18n.js';
 import { podSyncGifFavorite, podSyncRemoveGifFavorite, podReadGifFavorites } from './pod.js';
+import { accountDbName } from './auth.js';
 
+// Base name; the live database is namespaced per authenticated account by
+// accountDbName (like saved.js), because a favorite stores a full base64 image
+// payload starred from an attachment and must never be read by a different
+// account on a shared device.
 const DB_NAME = 'proxion-gif-tray';
 const STORE = 'favorites';
 export const MAX_FAVORITES = 200;
 
 let _dbPromise = null;
+let _openName = null;
 function _open() {
-    if (_dbPromise) return _dbPromise;
+    // Re-derive the account-bound name every open; drop the cached handle if the
+    // account changed so one account never serves another its starred images.
+    const name = accountDbName(DB_NAME);
+    if (_dbPromise && _openName === name) return _dbPromise;
+    _openName = name;
     _dbPromise = new Promise((resolve, reject) => {
         if (typeof indexedDB === 'undefined') { reject(new Error('no-indexeddb')); return; }
-        const req = indexedDB.open(DB_NAME, 1);
+        const req = indexedDB.open(name, 1);
         req.onupgradeneeded = () => {
             const db = req.result;
             if (!db.objectStoreNames.contains(STORE)) {
