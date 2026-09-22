@@ -578,6 +578,11 @@ button:hover { background: var(--accent-hover); }
            showing — reclaim it for the action row. */
         padding-inline-start: 12px;
         padding-inline-end: 12px;
+        /* Trim the vertical padding so the 44px touch targets below define the
+           row height instead of stacking on top of the desktop 15px padding.
+           Keeps the header a single, compact row (keep the notch inset on top). */
+        padding-top: calc(6px + env(safe-area-inset-top, 0px));
+        padding-bottom: 6px;
     }
     #chat-header .btn-label { display: none; }
     /* If a view still shows more action icons than fit (owner room + voice),
@@ -589,6 +594,23 @@ button:hover { background: var(--accent-hover); }
         scrollbar-width: none;
         flex-shrink: 1 !important;
         min-width: 0;
+        /* Overflow affordance: the strip scrolls silently, so actions past the
+           edge were undiscoverable. Paint a subtle edge shadow that appears ONLY
+           while the strip actually overflows, using the background-attachment
+           trick: the two "cover" layers scroll WITH the content (local) and sit
+           over the shadow layers whenever that edge is fully in view; the two
+           shadow layers stay pinned to the viewport (scroll). Both edges are
+           handled, so it is correct in LTR and RTL without a mirror. Covers use
+           the header's own --bg-primary so a non-overflowing strip looks
+           unchanged. */
+        background:
+            linear-gradient(to right, var(--bg-primary), transparent) left center,
+            linear-gradient(to left,  var(--bg-primary), transparent) right center,
+            linear-gradient(to right, rgba(0, 0, 0, 0.45), transparent) left center,
+            linear-gradient(to left,  rgba(0, 0, 0, 0.45), transparent) right center;
+        background-repeat: no-repeat;
+        background-size: 22px 100%, 22px 100%, 16px 100%, 16px 100%;
+        background-attachment: local, local, scroll, scroll;
     }
     #chat-header-actions::-webkit-scrollbar { display: none; }
     #chat-header-name {
@@ -618,7 +640,44 @@ button:hover { background: var(--accent-hover); }
     }
     .message:not(.msg-grouped) { padding-top: 12px; }
     #menu-toggle {
-        display: block !important;
+        /* inline-flex (not block) so the glyph centers inside the enlarged hit
+           area below; !important still beats the base display:none. */
+        display: inline-flex !important;
+        align-items: center;
+        justify-content: center;
+    }
+    /* Touch targets (WCAG 2.5.5/2.5.8): the sidebar-header, chat-header and
+       compose icon buttons were ~26-36px on phones. Expand the HIT AREA to ~44px
+       via min-width/min-height with a centered icon; the glyphs themselves are
+       untouched. #chat-header stays a single nowrap row (its vertical padding was
+       trimmed above), and the action strip scrolls internally rather than pushing
+       the body, so no horizontal body scroll is introduced. */
+    #sidebar > header button,
+    #chat-header > #menu-toggle,
+    #chat-header-actions > button,
+    #message-form > button[type="submit"],
+    #message-form .paperclip,
+    #message-form .voice-record-btn,
+    .compose-more-btn,
+    .compose-actions > button {
+        min-width: 44px;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    /* An inline <svg> can collapse to 0 width as a flex item under this cascade
+       (flex-basis:auto resolves its presentation width to 0), which would blank
+       the icon inside the enlarged hit area. Pin the glyph so only the tap area
+       grew, not the icon. */
+    #sidebar > header button svg,
+    #chat-header > #menu-toggle svg,
+    #chat-header-actions > button svg,
+    #message-form .paperclip svg,
+    #message-form .voice-record-btn svg,
+    .compose-more-btn svg,
+    .compose-actions > button svg {
+        flex: 0 0 auto;
     }
     /* Modal boxes carry inline min-width (e.g. onboarding's 380px) that overflows
        a 375px phone. Cap every dialog's inner box to the viewport with a small
@@ -1156,8 +1215,16 @@ button:hover { background: var(--accent-hover); }
 
         /* â"€â"€ Round 31: Messaging Fundamentals â"€â"€ */
 
-        /* Message grouping */
-        .message.msg-grouped { margin-top: 0; padding-top: 2px; }
+        /* Message grouping. #message-feed is a flex column with a 12px gap, which
+           floored how tight a grouped follow-up could sit under the same sender.
+           Cancel that gap for grouped rows with a matching negative margin
+           (--space-3 == the feed gap) so consecutive lines hug Discord-style,
+           while ungrouped rows keep their gap + padding-top rhythm (~28px desktop,
+           ~24px phone). Net grouped spacing lands ~4px. */
+        .message.msg-grouped {
+            margin-top: calc(-1 * var(--space-3));
+            padding-top: var(--space-1);
+        }
 
         /* Date divider */
         .date-divider {
