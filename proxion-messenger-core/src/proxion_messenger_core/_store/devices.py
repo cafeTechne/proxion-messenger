@@ -48,7 +48,7 @@ class DeviceStoreMixin(object):
                    VALUES (?, ?, ?, ?, COALESCE(
                        (SELECT created_at FROM sender_keys WHERE room_id=? AND sender_webid=?), ?
                    ), ?)""",
-                (room_id, sender_webid, chain_key_b64, iteration, room_id, sender_webid, now, now),
+                (room_id, sender_webid, self._wrap_secret(chain_key_b64), iteration, room_id, sender_webid, now, now),
             )
     def get_sender_key(self, room_id: str, sender_webid: str) -> dict | None:
         with self._conn() as conn:
@@ -57,7 +57,14 @@ class DeviceStoreMixin(object):
                     "SELECT * FROM sender_keys WHERE room_id=? AND sender_webid=?",
                     (room_id, sender_webid),
                 ).fetchone()
-                return dict(row) if row else None
+                if not row:
+                    return None
+                d = dict(row)
+                # chain_key_b64 is a forward-secure symmetric secret; wrapped at rest
+                # like the DM session/prekey columns. Legacy raw rows unwrap to
+                # themselves.
+                d["chain_key_b64"] = self._unwrap_secret(d.get("chain_key_b64"))
+                return d
             except Exception:
                 return None
     def bump_sender_key_epoch(self, room_id: str, sender_webid: str) -> int:
