@@ -242,7 +242,26 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
 .message:hover { background: rgba(255,255,255,0.025); }
 /* Optimistic send: dim until the server echo confirms, then fade to full opacity. */
 .message { transition: opacity var(--transition-base); }
-.message.msg-pending { opacity: 0.5; }
+.message.msg-pending { opacity: 0.6; }
+/* While awaiting the echo, trail a small spinner after the content so the dimmed
+   message reads as "sending" rather than merely faded. Pure CSS via a pseudo-
+   element, so it never enters textContent (smoke:journey counts copies by text)
+   and disappears the instant confirm()/fail() drops .msg-pending. The global
+   prefers-reduced-motion guard below freezes the spin to a static ring. */
+.message.msg-pending .msg-content::after,
+.message.msg-pending .audio-message::after {
+    content: "";
+    display: inline-block;
+    width: 0.72em;
+    height: 0.72em;
+    margin-inline-start: 6px;
+    vertical-align: -1px;
+    border: 2px solid var(--slate-600);
+    border-top-color: var(--accent);
+    border-radius: var(--radius-pill);
+    animation: msg-sending-spin 0.7s linear infinite;
+}
+@keyframes msg-sending-spin { to { transform: rotate(360deg); } }
 /* R66: send-failure state — a message that never confirmed */
 .message.msg-failed { opacity: 1; }
 .msg-fail-note {
@@ -1552,6 +1571,19 @@ button:hover { background: var(--accent-hover); }
 .btn:disabled, .btn[disabled] { opacity: 0.5; cursor: not-allowed; filter: none; }
 /* App-wide disabled affordance for the many plain <button>s that aren't .btn. */
 button:disabled { cursor: not-allowed; opacity: 0.55; }
+/* Hover feedback for the many modal / settings buttons that carry an inline
+   background: and are NOT .btn. Brightness works over an inline background where
+   a background-based :hover would be overridden. focus-visible (the accent ring)
+   and the disabled affordance are already covered app-wide by the :focus-visible
+   and button:disabled rules, so only :hover was missing here. */
+[role="dialog"] button:not(.btn),
+#qr-share-panel button:not(.btn) {
+    transition: filter var(--transition-fast);
+}
+[role="dialog"] button:not(.btn):not(:disabled):hover,
+#qr-share-panel button:not(.btn):not(:disabled):hover {
+    filter: brightness(1.15);
+}
 .btn-row { display: flex; gap: 8px; justify-content: flex-end; }
 .field-divider { border-color: var(--slate-700); margin: 16px 0 12px; }
 .section-label { margin: 0 0 8px; font-size: 0.8em; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
