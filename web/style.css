@@ -286,6 +286,20 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
 .msg-pod-note .msg-retry-btn { border-color: #f59e0b; color: #f59e0b; }
 .msg-pod-note .msg-retry-btn:hover,
 .msg-pod-note .msg-retry-btn:focus-visible { background: rgba(245, 158, 11, 0.12); }
+/* Shared treatment for destructive actions (reset data, clear history, sign out,
+   logout other devices). A faint danger tint plus border reads as risky, instead
+   of red label text alone. Token-based so it tracks the danger palette. */
+.btn-danger {
+    background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-danger) 45%, transparent);
+    color: var(--color-danger-soft);
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.btn-danger:hover,
+.btn-danger:focus-visible {
+    background: color-mix(in srgb, var(--color-danger) 20%, transparent);
+    border-color: var(--color-danger);
+}
 /* Voice speaking indicator (Phase J): green ring on the active speaker's pill. */
 #voice-channel-participants span { transition: box-shadow var(--transition-fast); }
 #voice-channel-participants span.vc-speaking { box-shadow: 0 0 0 2px var(--color-success-soft); }

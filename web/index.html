@@ -586,7 +586,7 @@
       <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:8px; padding:24px; min-width:360px; max-width:480px; color:var(--text-primary,var(--slate-50));">
         <div style="display:flex;align-items:center;justify-content:space-between;margin:0 0 16px;">
           <h3 style="margin:0;" data-i18n="heading.settings">Settings</h3>
-          <span id="settings-pod-status-dot" style="font-size:0.78em;color:var(--slate-500);white-space:nowrap;">● No pod</span>
+          <span id="settings-pod-status-dot" style="font-size:0.78em;color:var(--slate-500);white-space:nowrap;" data-i18n="settings.podStatus.none">● No pod</span>
         </div>
         <label style="display:block; margin-bottom:4px; font-size:0.9em;" data-i18n="label.displayName">Display name</label>
         <input id="settings-display-name" type="text" placeholder="Your name"
@@ -600,7 +600,7 @@
         <label style="display:block; margin-bottom:4px; font-size:0.9em;" data-i18n="label.didShareThisPeers">Your DID (share this with peers)</label>
         <div id="settings-did" style="font-size:0.75em; color:var(--text-secondary); word-break:break-all; margin-bottom:14px; padding:6px; background:var(--slate-900); border-radius:4px; min-height:1.5em; cursor:text; user-select:all;"></div>
         <label style="display:block; margin-bottom:4px; font-size:0.9em;">
-          Your Proxion Address <span style="color:var(--slate-500);">(share this with cross-gateway peers)</span>
+          <span data-i18n="label.proxionAddress">Your Proxion Address</span> <span style="color:var(--slate-500);" data-i18n="label.proxionAddressHint">(share this with cross-gateway peers)</span>
         </label>
         <div id="settings-proxion-address"
              style="font-size:0.72em; color:var(--text-secondary); word-break:break-all; margin-bottom:14px;
@@ -613,7 +613,7 @@
                 style="width:100%;background:transparent;border:none;border-top:1px solid var(--slate-700);
                        color:var(--text-secondary);padding:12px 0 4px;margin-top:4px;cursor:pointer;
                        font-size:0.85em;text-align:left;display:flex;align-items:center;justify-content:space-between;">
-          <span style="text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Advanced settings</span>
+          <span style="text-transform:uppercase;letter-spacing:0.05em;font-weight:600;" data-i18n="section.advancedSettings">Advanced settings</span>
           <span id="settings-advanced-caret" aria-hidden="true">▾</span>
         </button>
         <div id="settings-advanced" style="display:none;">
@@ -623,28 +623,27 @@
         <!-- Pod section -->
         <hr class="field-divider">
         <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);
-                   text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">
+                   text-transform:uppercase;letter-spacing:0.05em;font-weight:600;" data-i18n="section.solidPod">
           Solid Pod
         </p>
         <!-- Connected state (hidden until pod auth) -->
         <div id="settings-pod-connected" style="display:none;">
-          <p style="margin:0 0 4px;font-size:0.85em;color:var(--color-success-soft);">● Connected</p>
+          <p style="margin:0 0 4px;font-size:0.85em;color:var(--color-success-soft);" data-i18n="settings.podStatus.connected">● Connected</p>
           <div id="settings-pod-webid" title="Click to copy"
                data-i18n-attr="title:ui.clickCopy"
                style="font-size:0.72em;color:var(--text-secondary);word-break:break-all;
                       margin-bottom:4px;padding:4px 6px;background:var(--slate-900);
                       border-radius:3px;user-select:all;cursor:pointer;"></div>
           <p style="margin:0 0 10px;font-size:0.72em;color:var(--slate-500);" data-i18n="settings.webidShareHint">Share this WebID so people can message you.</p>
-          <button id="settings-pod-logout-btn"
-                  style="background:var(--slate-700);border:none;color:var(--color-danger-soft);
-                         padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:12px;" data-i18n="btn.signOutPod">
+          <button id="settings-pod-logout-btn" class="btn-danger"
+                  style="padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:12px;" data-i18n="btn.signOutPod">
             Sign out of Pod
           </button>
           <p id="settings-push-status" style="margin:0 0 8px;font-size:0.72em;color:var(--text-secondary);"></p>
         </div>
         <!-- Disconnected state (default) -->
         <div id="settings-pod-disconnected" style="margin-bottom:12px;">
-          <p style="margin:0 0 8px;font-size:0.85em;color:var(--slate-500);">Not connected</p>
+          <p style="margin:0 0 8px;font-size:0.85em;color:var(--slate-500);" data-i18n="settings.podStatus.notConnected">Not connected</p>
           <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
             <button id="settings-solid-solidcommunity"
                     style="background:#1a56db;border:none;color:#fff;padding:8px 14px;
@@ -673,67 +672,65 @@
         <!-- R14.3: Data section -->
         <hr class="field-divider">
         <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);
-                  text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Data</p>
+                  text-transform:uppercase;letter-spacing:0.05em;font-weight:600;" data-i18n="section.data">Data</p>
         <button id="export-data-btn" style="width:100%;background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:6px;text-align:left;" data-i18n="btn.exportData">Export Data</button>
-        <button id="import-data-btn" style="width:100%;background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:12px;text-align:left;">Import Data</button>
+        <button id="import-data-btn" style="width:100%;background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:12px;text-align:left;" data-i18n="btn.importData">Import Data</button>
         <input type="file" id="import-file-input" accept=".json" style="display:none;">
         <!-- R10.3: Privacy toggles -->
         <hr class="field-divider">
         <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);
-                  text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Privacy</p>
+                  text-transform:uppercase;letter-spacing:0.05em;font-weight:600;" data-i18n="section.privacy">Privacy</p>
         <label style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;font-size:0.9em;cursor:pointer;">
-          <span style="color:var(--slate-300);">Send read receipts</span>
+          <span style="color:var(--slate-300);" data-i18n="settings.privacy.readReceipts">Send read receipts</span>
           <input type="checkbox" id="settings-receipts-toggle" checked style="width:18px;height:18px;cursor:pointer;">
         </label>
         <label style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;font-size:0.9em;cursor:pointer;">
-          <span style="color:var(--slate-300);">Generate link previews<br><span style="font-size:0.78em;color:var(--slate-500);">Sends URLs to gateway for fetching</span></span>
+          <span style="color:var(--slate-300);"><span data-i18n="settings.privacy.linkPreviews">Generate link previews</span><br><span style="font-size:0.78em;color:var(--slate-500);" data-i18n="settings.privacy.linkPreviewsHint">Sends URLs to gateway for fetching</span></span>
           <input type="checkbox" id="settings-link-previews-toggle" style="width:18px;height:18px;cursor:pointer;">
         </label>
         <label style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:0.9em;cursor:pointer;">
-          <span style="color:var(--slate-300);">Save DM history on this device<br><span style="font-size:0.78em;color:var(--slate-500);">Encrypted DMs can't be re-read from the server; kept locally so they reload</span></span>
+          <span style="color:var(--slate-300);"><span data-i18n="settings.privacy.dmHistory">Save DM history on this device</span><br><span style="font-size:0.78em;color:var(--slate-500);" data-i18n="settings.privacy.dmHistoryHint">Encrypted DMs can't be re-read from the server; kept locally so they reload</span></span>
           <input type="checkbox" id="settings-dm-history-toggle" checked style="width:18px;height:18px;cursor:pointer;">
         </label>
-        <!-- R61: opt-in DM archive to the pod (off by default). Plain-English
-             label like its siblings above: the inline <br>/<span> markup can't
-             live in an i18n textContent value. -->
+        <!-- R61: opt-in DM archive to the pod (off by default). Label and hint
+             are separate i18n spans: data-i18n sets textContent, so the inline
+             hint markup cannot share a value with the label. -->
         <label style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:0.9em;cursor:pointer;">
-          <span style="color:var(--slate-300);">Archive DM history to my pod<br><span style="font-size:0.78em;color:var(--slate-500);">Off by default. Stores your decrypted DM history on your own pod (private, only you can read it) so it syncs across your devices.</span></span>
+          <span style="color:var(--slate-300);"><span data-i18n="settings.privacy.dmArchive">Archive DM history to my pod</span><br><span style="font-size:0.78em;color:var(--slate-500);" data-i18n="settings.privacy.dmArchiveHint">Off by default. Stores your decrypted DM history on your own pod (private, only you can read it) so it syncs across your devices.</span></span>
           <input type="checkbox" id="settings-dm-pod-archive-toggle" style="width:18px;height:18px;cursor:pointer;">
         </label>
         <!-- R62: opt-in bookmarks + settings sync to the pod (off by default) -->
         <label style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:0.9em;cursor:pointer;">
-          <span style="color:var(--slate-300);">Sync bookmarks, settings &amp; saved GIFs to my pod<br><span style="font-size:0.78em;color:var(--slate-500);">Off by default. Mirrors your saved messages, app preferences, and GIF tray to your own pod (private) so they follow you across devices.</span></span>
+          <span style="color:var(--slate-300);"><span data-i18n="settings.privacy.podSync">Sync bookmarks, settings &amp; saved GIFs to my pod</span><br><span style="font-size:0.78em;color:var(--slate-500);" data-i18n="settings.privacy.podSyncHint">Off by default. Mirrors your saved messages, app preferences, and GIF tray to your own pod (private) so they follow you across devices.</span></span>
           <input type="checkbox" id="settings-pod-sync-toggle" style="width:18px;height:18px;cursor:pointer;">
         </label>
-        <button id="settings-clear-dm-history-btn"
-                style="background:var(--slate-800);border:1px solid var(--slate-600);color:var(--color-danger-soft);
-                       padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.82em;
+        <button id="settings-clear-dm-history-btn" class="btn-danger"
+                style="padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.82em;
                        margin-bottom:4px;width:100%;text-align:left;" data-i18n="btn.clearDmHistoryThis">
           Clear DM history on this device
         </button>
         <!-- Account reset -->
         <hr class="field-divider">
         <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);
-                  text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Account</p>
-        <button id="settings-reset-identity-btn"
-                style="background:var(--slate-800);border:1px solid var(--slate-600);color:var(--color-danger-soft);
-                       padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;
+                  text-transform:uppercase;letter-spacing:0.05em;font-weight:600;" data-i18n="section.account">Account</p>
+        <button id="settings-reset-identity-btn" class="btn-danger"
+                style="padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;
                        margin-bottom:12px;width:100%;text-align:left;" data-i18n="btn.resetAllLocalData">
           Reset all local data (switch account)
         </button>
         <!-- R28: Federation health status -->
         <div id="settings-federation-section">
           <hr class="field-divider">
-          <p class="section-label">Federation</p>
+          <p class="section-label" data-i18n="section.federation">Federation</p>
           <div id="settings-federation-status" style="font-size:0.85em;color:var(--text-secondary);line-height:1.8;">
-            <span style="color:var(--slate-600);">Loading…</span>
+            <span style="color:var(--slate-600);" data-i18n="common.loadingEllipsis">Loading…</span>
           </div>
         </div>
 
         <!-- R91: Calls / connectivity -->
         <div id="settings-calls-section">
           <hr class="field-divider">
-          <p class="section-label">Calls</p>
+          <p class="section-label" data-i18n="section.calls">Calls</p>
           <button id="calls-test-btn" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 14px;border-radius:6px;cursor:pointer;font-size:0.88em;" data-i18n="conn.test.button">Test call connectivity</button>
           <p id="calls-test-result" role="status" aria-live="polite" style="display:none;margin:8px 0 0;font-size:0.85em;line-height:1.5;"></p>
           <label style="display:flex;align-items:center;gap:8px;margin:12px 0 4px;font-size:0.85em;cursor:pointer;">
@@ -756,15 +753,15 @@
         <!-- R18.1.3 + R18.3.3: App section (shown only in Tauri desktop app) -->
         <div id="settings-tauri-section" style="display:none;">
           <hr class="field-divider">
-          <p class="section-label">App</p>
+          <p class="section-label" data-i18n="section.app">App</p>
           <label style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;font-size:0.9em;cursor:pointer;">
-            Start Proxion when I log in
+            <span data-i18n="settings.autostart">Start Proxion when I log in</span>
             <input type="checkbox" id="settings-autostart-toggle" style="width:16px;height:16px;cursor:pointer;">
           </label>
           <hr class="field-divider">
-          <p style="margin:0 0 4px;font-size:0.8em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">About</p>
+          <p style="margin:0 0 4px;font-size:0.8em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;font-weight:600;" data-i18n="section.about">About</p>
           <p style="margin:0 0 2px;font-size:0.9em;color:var(--slate-50);">Proxion <span id="settings-app-version" style="color:var(--slate-500);font-size:0.9em;"></span></p>
-          <p style="margin:0 0 8px;font-size:0.82em;color:var(--slate-500);">Sovereign messaging on your Solid Pod</p>
+          <p style="margin:0 0 8px;font-size:0.82em;color:var(--slate-500);" data-i18n="settings.about.tagline">Sovereign messaging on your Solid Pod</p>
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
             <button id="settings-about-website-btn"
                     style="background:var(--slate-700);border:none;color:var(--slate-50);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;" data-i18n="btn.viewProjectWebsite">
@@ -780,7 +777,7 @@
 
         <!-- Round 66: Active Sessions -->
         <hr class="field-divider">
-        <p class="section-label">Identity Backup</p>
+        <p class="section-label" data-i18n="section.identityBackup">Identity Backup</p>
         <button id="settings-backup-btn"
                 style="background:var(--slate-800);border:1px solid var(--slate-600);color:var(--text-secondary);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:6px;width:100%;text-align:left;" data-i18n="btn.downloadIdentityBackup">
           Download identity backup
@@ -796,14 +793,14 @@
         <input type="file" id="settings-restore-input" accept=".json" style="display:none">
         <input type="file" id="settings-verify-input" accept=".json" style="display:none">
         <hr class="field-divider">
-        <p class="section-label">Active Sessions</p>
-        <div id="sessions-list" style="margin-bottom:8px;color:var(--text-secondary);font-size:0.85em;">Loading…</div>
-        <button id="settings-logout-all-btn"
-                style="background:var(--slate-800);border:1px solid var(--slate-600);color:var(--color-danger-soft);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.82em;margin-bottom:12px;" data-i18n="btn.logoutAllOtherDevices">
+        <p class="section-label" data-i18n="section.activeSessions">Active Sessions</p>
+        <div id="sessions-list" style="margin-bottom:8px;color:var(--text-secondary);font-size:0.85em;" data-i18n="common.loadingEllipsis">Loading…</div>
+        <button id="settings-logout-all-btn" class="btn-danger"
+                style="padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.82em;margin-bottom:12px;" data-i18n="btn.logoutAllOtherDevices">
           Logout all other devices
         </button>
         <hr class="field-divider">
-        <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;font-weight:600;">Linked Devices</p>
+        <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;font-weight:600;" data-i18n="section.linkedDevices">Linked Devices</p>
         <div id="settings-devices-list" style="font-size:0.85em;color:var(--text-secondary);min-height:24px;"></div>
         <button id="link-device-btn"
                 style="background:var(--slate-800);border:1px solid var(--slate-600);color:var(--slate-50);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.82em;margin-top:8px;" data-i18n="btn.linkDevice">
