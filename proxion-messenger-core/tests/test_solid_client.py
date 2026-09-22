@@ -36,21 +36,21 @@ def test_solid_client_get_success(resolver, mock_session):
     """get() resolves URI and returns response body on success."""
     mock_response = MagicMock()
     mock_response.status_code = 200
-    mock_response.content = b"hello world"
-    mock_session.get.return_value = mock_response
+    mock_response.iter_bytes.return_value = iter([b"hello world"])
+    mock_session.stream.return_value = _stream_ctx(mock_response)
 
     client = SolidClient(resolver, session=mock_session)
     data = client.get("stash://alice/data/file.txt")
 
     assert data == b"hello world"
-    mock_session.get.assert_called_once()
+    mock_session.stream.assert_called_once()
 
 
 def test_solid_client_get_not_found(resolver, mock_session):
     """get() raises SolidError on 404."""
     mock_response = MagicMock()
     mock_response.status_code = 404
-    mock_session.get.return_value = mock_response
+    mock_session.stream.return_value = _stream_ctx(mock_response)
 
     client = SolidClient(resolver, session=mock_session)
     with pytest.raises(SolidError) as exc_info:
@@ -248,9 +248,11 @@ def test_auth_headers_sent_on_get(mock_session, resolver):
         session=mock_session,
         auth_headers={"Authorization": "Bearer tok123"},
     )
-    mock_session.get.return_value = MagicMock(status_code=200, content=b"ok")
+    _resp = MagicMock(status_code=200)
+    _resp.iter_bytes.return_value = iter([b"ok"])
+    mock_session.stream.return_value = _stream_ctx(_resp)
     client.get("stash://pod/file.txt")
-    call_headers = mock_session.get.call_args[1]["headers"]
+    call_headers = mock_session.stream.call_args[1]["headers"]
     assert call_headers.get("Authorization") == "Bearer tok123"
 
 
@@ -269,7 +271,9 @@ def test_auth_headers_sent_on_put(mock_session, resolver):
 
 def test_no_auth_headers_by_default(mock_session, resolver):
     client = SolidClient(resolver, session=mock_session)
-    mock_session.get.return_value = MagicMock(status_code=200, content=b"ok")
+    _resp = MagicMock(status_code=200)
+    _resp.iter_bytes.return_value = iter([b"ok"])
+    mock_session.stream.return_value = _stream_ctx(_resp)
     client.get("stash://pod/file.txt")
-    call_headers = mock_session.get.call_args[1].get("headers", {})
+    call_headers = mock_session.stream.call_args[1].get("headers", {})
     assert "Authorization" not in call_headers

@@ -12,8 +12,12 @@ def _make_client(mock_response_content=b"data"):
     mock_session = MagicMock()
     resp = MagicMock()
     resp.status_code = 200
-    resp.content = mock_response_content
-    mock_session.get.return_value = resp
+    # get() now streams; hand back a fresh iterator per call so a reused client works.
+    resp.iter_bytes.side_effect = lambda *a, **k: iter([mock_response_content])
+    ctx = MagicMock()
+    ctx.__enter__ = MagicMock(return_value=resp)
+    ctx.__exit__ = MagicMock(return_value=False)
+    mock_session.stream.return_value = ctx
     return SolidClient(resolver, session=mock_session), mock_session
 
 

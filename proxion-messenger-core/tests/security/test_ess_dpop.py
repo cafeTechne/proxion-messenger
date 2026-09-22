@@ -91,6 +91,14 @@ def _make_dpop_client(session):
     return client
 
 
+def _stream_ctx(mock_response):
+    """Wrap a mock response in a context manager as httpx.stream() returns."""
+    ctx = MagicMock()
+    ctx.__enter__ = MagicMock(return_value=mock_response)
+    ctx.__exit__ = MagicMock(return_value=False)
+    return ctx
+
+
 class TestDpopSolidClientNonce:
     def test_nonce_stored_after_401_response(self):
         mock_session = MagicMock()
@@ -99,8 +107,8 @@ class TestDpopSolidClientNonce:
         r401.headers = {"WWW-Authenticate": 'DPoP nonce="fresh-nonce"'}
         r200 = MagicMock()
         r200.status_code = 200
-        r200.content = b"data"
-        mock_session.get.side_effect = [r401, r200]
+        r200.iter_bytes.return_value = iter([b"data"])
+        mock_session.stream.side_effect = [_stream_ctx(r401), _stream_ctx(r200)]
 
         client = _make_dpop_client(mock_session)
         result = client.get("stash://pod/resource")
@@ -115,14 +123,14 @@ class TestDpopSolidClientNonce:
         r401.headers = {"WWW-Authenticate": 'DPoP nonce="retry-nonce"'}
         r200 = MagicMock()
         r200.status_code = 200
-        r200.content = b"ok"
-        mock_session.get.side_effect = [r401, r200]
+        r200.iter_bytes.return_value = iter([b"ok"])
+        mock_session.stream.side_effect = [_stream_ctx(r401), _stream_ctx(r200)]
 
         client = _make_dpop_client(mock_session)
         client.get("stash://pod/resource")
 
         # Second call's DPoP header must contain the nonce
-        second_call_headers = mock_session.get.call_args_list[1][1].get("headers", {})
+        second_call_headers = mock_session.stream.call_args_list[1][1].get("headers", {})
         dpop_token = second_call_headers.get("DPoP", "")
         payload = _decode_payload(dpop_token)
         assert payload.get("nonce") == "retry-nonce"
@@ -136,26 +144,26 @@ class TestDpopSolidClientNonce:
         r401b = MagicMock()
         r401b.status_code = 401
         r401b.headers = {}
-        mock_session.get.side_effect = [r401a, r401b]
+        mock_session.stream.side_effect = [_stream_ctx(r401a), _stream_ctx(r401b)]
 
         client = _make_dpop_client(mock_session)
         from proxion_messenger_core.solid_client import SolidError
         with pytest.raises(SolidError):
             client.get("stash://pod/resource")
         # Both attempts were made
-        assert mock_session.get.call_count == 2
+        assert mock_session.stream.call_count == 2
 
     def test_user_agent_sent_in_request(self):
         mock_session = MagicMock()
         r200 = MagicMock()
         r200.status_code = 200
-        r200.content = b"ok"
-        mock_session.get.return_value = r200
+        r200.iter_bytes.return_value = iter([b"ok"])
+        mock_session.stream.return_value = _stream_ctx(r200)
 
         client = _make_dpop_client(mock_session)
         client.get("stash://pod/resource")
 
-        call_headers = mock_session.get.call_args[1].get("headers", {})
+        call_headers = mock_session.stream.call_args[1].get("headers", {})
         assert call_headers.get("User-Agent") == "Proxion/1.0"
 
 

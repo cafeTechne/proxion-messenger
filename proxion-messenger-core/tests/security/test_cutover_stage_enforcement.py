@@ -13,8 +13,12 @@ def client():
     session = MagicMock()
     resp = MagicMock()
     resp.status_code = 200
-    resp.content = b"ok"
-    session.get.return_value = resp
+    # get() streams; fresh iterator per call so the reused fixture serves repeats.
+    resp.iter_bytes.side_effect = lambda *a, **k: iter([b"ok"])
+    ctx = MagicMock()
+    ctx.__enter__ = MagicMock(return_value=resp)
+    ctx.__exit__ = MagicMock(return_value=False)
+    session.stream.return_value = ctx
     return SolidClient(resolver, session=session)
 
 

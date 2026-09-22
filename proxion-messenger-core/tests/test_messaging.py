@@ -515,9 +515,13 @@ def test_j008_authenticated_client_aud_mismatch(alice, bob, cert):
 
     resolver = SolidResolver("http://pod/")
     real_client = SolidClient(resolver, session=MagicMock())
-    real_client._session.get.return_value = MagicMock(
-        status_code=200, content=b"data"
-    )
+    _resp = MagicMock(status_code=200)
+    # get() streams; fresh iterator per call so repeated get()s both return the body.
+    _resp.iter_bytes.side_effect = lambda *a, **k: iter([b"data"])
+    _ctx = MagicMock()
+    _ctx.__enter__ = MagicMock(return_value=_resp)
+    _ctx.__exit__ = MagicMock(return_value=False)
+    real_client._session.stream.return_value = _ctx
 
     signing_key = alice.signing_key_bytes
     # Use real wall-clock now so the token isn't stale when _check_allowed runs

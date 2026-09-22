@@ -155,17 +155,40 @@ class SolidClient:
                 status_code=None,
             )
 
+    # A single pod resource (one message .json, a room descriptor, a cert) is
+    # small; inline media is capped so the largest legitimate body is ~1 MB. Stream
+    # with a generous ceiling so a malicious room member / DM peer / pod cannot drop
+    # a multi-GB file and OOM the gateway on the next poll. list() has the same
+    # guard (at 512 KB, which is too tight for message bodies with inline media).
+    _GET_MAX_BODY = 16 * 1024 * 1024  # 16 MB
+
     def _get_legacy(self, url: str, stash_uri: str) -> bytes:
         """Internal GET using the legacy HTTP path (no adapter)."""
         try:
             for _attempt in range(2):
-                response = self._session.get(url, headers={**self._auth_headers, **self._dynamic_headers("GET", url)})
-                if response.status_code == 401 and _attempt == 0:
-                    self._refresh_auth(response)
-                    continue
-                if response.status_code < 200 or response.status_code >= 300:
-                    raise SolidError(f"GET {stash_uri}: HTTP {response.status_code}", status_code=response.status_code)
-                return response.content
+                # Stream so a hostile Pod cannot buffer an unbounded body into RAM
+                # before we can enforce the size cap (httpx buffers nothing until
+                # iter_bytes()).
+                with self._session.stream(
+                    "GET", url,
+                    headers={**self._auth_headers, **self._dynamic_headers("GET", url)},
+                ) as response:
+                    if response.status_code == 401 and _attempt == 0:
+                        response.read()  # drain before the connection is reused
+                        self._refresh_auth(response)
+                        continue
+                    if response.status_code < 200 or response.status_code >= 300:
+                        raise SolidError(f"GET {stash_uri}: HTTP {response.status_code}", status_code=response.status_code)
+                    chunks: list[bytes] = []
+                    received = 0
+                    for chunk in response.iter_bytes(chunk_size=65_536):
+                        received += len(chunk)
+                        if received > self._GET_MAX_BODY:
+                            raise SolidError(
+                                f"GET {stash_uri}: response too large (>{self._GET_MAX_BODY // (1024 * 1024)} MB)"
+                            )
+                        chunks.append(chunk)
+                    return b"".join(chunks)
         except SolidError:
             raise
         except Exception as exc:
