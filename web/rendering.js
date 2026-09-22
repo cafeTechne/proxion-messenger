@@ -322,7 +322,7 @@ export function createRendering({
                 // renders blurred under a reveal cover — one-way, like text
                 // spoilers; the reveal handler lives in the feed delegation)
                 const _imgSrc = `data:${_mime};base64,${_b64}`;
-                const _img = `<img class="msg-image-preview" src="${_imgSrc}" alt="${safeFilename}" loading="lazy">`;
+                const _img = `<img class="msg-image-preview" src="${_imgSrc}" alt="${safeFilename}" loading="lazy" tabindex="0" role="button">`;
                 fileHtml = msg.file.spoiler === true
                     ? `<div class="attachment">
                         <div class="media-spoiler" role="button" tabindex="0" aria-label="${t('spoiler.reveal')}">

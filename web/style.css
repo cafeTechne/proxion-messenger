@@ -1256,7 +1256,7 @@ button:hover { background: var(--accent-hover); }
             font-size: 0.9em;
         }
         .reply-preview { color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .cancel-reply { cursor: pointer; color: var(--accent); font-weight: bold; }
+        .cancel-reply { cursor: pointer; color: var(--accent); font-weight: bold; background: none; border: none; padding: 0; }
         
         .quoted-context {
             font-size: 0.85em;

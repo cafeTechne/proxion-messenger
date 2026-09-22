@@ -231,6 +231,9 @@ export function createVoice(deps) {
             document.getElementById("voice-msg").innerText =
                 `Incoming call from ${_callerDisplayName(_cw)}` + (_known ? "" : " (unverified)");
             banner.style.display = "flex";
+            // Move focus to Answer so a keyboard / screen-reader user lands on the
+            // primary action; the banner's role="alert" announces the caller.
+            try { document.getElementById("voice-answer")?.focus(); } catch (_) { /* ignore */ }
             playRingTone();
             const _ringCaller = invite.caller_webid;
             setTimeout(() => {

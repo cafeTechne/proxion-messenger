@@ -3469,7 +3469,10 @@ import { createIdentityResolver } from './identity.js';
             if (!voice.state.localStream) return;
             voice.state.isMuted = !voice.state.isMuted;
             voice.state.localStream.getAudioTracks().forEach(track => { track.enabled = !voice.state.isMuted; });
-            document.getElementById("mute-btn").classList.toggle("vw-muted", voice.state.isMuted);
+            const _mb = document.getElementById("mute-btn");
+            _mb.classList.toggle("vw-muted", voice.state.isMuted);
+            // Expose mute state to assistive tech + colour-blind users (was colour-only).
+            _mb.setAttribute("aria-pressed", voice.state.isMuted ? "true" : "false");
         };
 
         // --------------- Edit message ---------------
@@ -5539,13 +5542,21 @@ import { createIdentityResolver } from './identity.js';
             document.addEventListener("keydown", (e) => {
                 if (e.key === "Escape") document.getElementById("lightbox")?.classList.remove("visible");
             });
+            const _openLightbox = (img) => {
+                const lb = document.getElementById("lightbox");
+                const lbImg = document.getElementById("lightbox-img");
+                if (lb && lbImg) { lbImg.src = img.src; lb.classList.add("visible"); }
+            };
             document.addEventListener("click", (e) => {
                 const img = e.target.closest(".msg-image-preview");
-                if (img) {
-                    const lb = document.getElementById("lightbox");
-                    const lbImg = document.getElementById("lightbox-img");
-                    if (lb && lbImg) { lbImg.src = img.src; lb.classList.add("visible"); }
-                }
+                if (img) _openLightbox(img);
+            });
+            // The image preview is a role=button/tabindex=0 control; open the lightbox
+            // on Enter/Space so it is operable without a mouse.
+            document.addEventListener("keydown", (e) => {
+                if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+                const img = e.target.closest && e.target.closest(".msg-image-preview");
+                if (img) { e.preventDefault(); _openLightbox(img); }
             });
 
             // R13.11: Edit history popover (click on .edited-badge)
