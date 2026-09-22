@@ -662,7 +662,7 @@
                    placeholder="https://your-pod-server.example"
                    autocomplete="off" spellcheck="false"
                    style="flex:1;padding:6px 8px;background:var(--slate-900);border:1px solid var(--slate-700);
-                          color:var(--slate-50);border-radius:4px;font-size:0.85em;" / data-i18n-attr="placeholder:ui.httpsPodServerExample">
+                          color:var(--slate-50);border-radius:4px;font-size:0.85em;" data-i18n-attr="placeholder:ui.httpsPodServerExample">
             <button id="settings-solid-custom-btn"
                     style="background:var(--slate-700);border:none;color:var(--slate-50);padding:6px 12px;
                            border-radius:4px;cursor:pointer;font-size:0.85em;white-space:nowrap;" data-i18n="btn.sign">
@@ -675,10 +675,8 @@
         <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);
                   text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Data</p>
         <button id="export-data-btn" style="width:100%;background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:6px;text-align:left;" data-i18n="btn.exportData">Export Data</button>
-        <label id="import-data-label" style="display:block;width:100%;margin-bottom:12px;">
-          <span style="display:block;background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;text-align:center;margin-bottom:6px;">Import Data</span>
-          <input type="file" id="import-file-input" accept=".json" style="display:none;">
-        </label>
+        <button id="import-data-btn" style="width:100%;background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:12px;text-align:left;">Import Data</button>
+        <input type="file" id="import-file-input" accept=".json" style="display:none;">
         <!-- R10.3: Privacy toggles -->
         <hr class="field-divider">
         <p style="margin:0 0 8px;font-size:0.8em;color:var(--text-secondary);
@@ -1106,7 +1104,7 @@
                 Show
               </button>
             </div>
-            <div id="ob-pod-status" style="min-height:20px;font-size:0.82em;margin-bottom:10px;"></div>
+            <div id="ob-pod-status" role="status" aria-live="polite" style="min-height:20px;font-size:0.82em;margin-bottom:10px;"></div>
             <div style="display:flex;gap:8px;">
               <button id="ob-pod-test-btn"
                       style="flex:1;padding:9px;background:#3b82f6;border:none;color:#fff;

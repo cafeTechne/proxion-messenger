@@ -14,6 +14,37 @@ import { podWriteReadState } from './pod.js';
 
 import { t } from './i18n.js';
 
+// Make a sidebar conversation row operable by keyboard and announced to assistive
+// tech (it is otherwise a click-only <li>: no tab stop, no role, no Enter/Space).
+// `activate` opens the thread; `focusEl` is the element that takes the button role
+// and focus — the <li> itself, or an inner element when the row also holds a real
+// <button> (so the two don't nest, which axe flags as nested-interactive).
+function _makeRowOperable(li, activate, focusEl) {
+    const target = focusEl || li;
+    target.setAttribute("role", "button");
+    target.tabIndex = 0;
+    li.onclick = activate;
+    target.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+            e.preventDefault();
+            activate();
+        }
+    });
+}
+
+// Mark one nav row as the current conversation for sighted users (.active) and
+// assistive tech (aria-current), clearing it from the rest.
+function _setActiveNavRow(li) {
+    document.querySelectorAll("nav li").forEach((el) => {
+        el.classList.remove("active");
+        el.removeAttribute("aria-current");
+    });
+    if (li) {
+        li.classList.add("active");
+        li.setAttribute("aria-current", "true");
+    }
+}
+
 export function createView({
     getSocket,
     setActiveView, setMessageMap, setAllMessages, setCurrentRoomMembers, getAllMessages,
@@ -60,7 +91,7 @@ export function createView({
                 ? ` <span class="dm-id-suffix" style="color:#8091a7;font-size:0.72em">${escHtml(shortId)}</span>`
                 : "";
             li.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25z"/></svg> ' + escHtml(label) + idTag;
-            li.onclick = () => openContactThread(c);
+            _makeRowOperable(li, () => openContactThread(c));
             list.appendChild(li);
         });
     }
@@ -95,9 +126,7 @@ export function createView({
         setMessageMap({});
         setAllMessages([]);
         // Highlight sidebar item if present
-        document.querySelectorAll("nav li").forEach(el => el.classList.remove("active"));
-        const navEl = document.getElementById("nav-" + contact.certificate_id);
-        if (navEl) navEl.classList.add("active");
+        _setActiveNavRow(document.getElementById("nav-" + contact.certificate_id));
         // Fetch history from gateway
         if (socket && socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({cmd: "read_dm", cert_id: contact.certificate_id}));
@@ -180,7 +209,7 @@ export function createView({
             </div>
             <button data-sidebar-action="members" data-room-id="${escHtml(roomId)}" title="Members"
                     style="background:transparent;border:none;color:#8091a7;cursor:pointer;padding:2px 4px;font-size:0.85em;flex-shrink:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></svg></button>`;
-        li.onclick = () => {
+        const _openRoom = () => {
             const socket = getSocket();
             const unreadCounts = getUnreadCounts();
             const roomCreatorOf = getRoomCreatorOf();
@@ -201,8 +230,7 @@ export function createView({
             document.getElementById("members-toggle").style.display = "inline-block";
             document.getElementById("leave-room-btn").style.display = "inline-block";
             document.getElementById("delete-room-btn").style.display = roomCreatorOf.has(roomId) ? "inline-block" : "none";
-            document.querySelectorAll("nav li").forEach(el => el.classList.remove("active"));
-            li.classList.add("active");
+            _setActiveNavRow(li);
             unreadCounts[roomId] = 0;
             updateSidebarBadge(roomId);
             if (socket && socket.readyState === WebSocket.OPEN) {
@@ -219,6 +247,10 @@ export function createView({
                 renderMembersPanel([]);  // clear while loading
             }
         };
+        // The row is a click-only <li>; make it keyboard-operable. The focus/role
+        // goes on .room-item-body, not the <li>, so it doesn't nest with the
+        // members <button> the row also contains (axe nested-interactive).
+        _makeRowOperable(li, _openRoom, li.querySelector(".room-item-body"));
         // R59G fix: this incremental path never wired the sidebar context menu,
         // so right-click (mute / mark-read / custom emoji) was dead on locally
         // created rooms — populateSidebar rows had it, these didn't.
@@ -245,7 +277,7 @@ export function createView({
             nameSpan.style.flex = "1";
             nameSpan.textContent = name;
             li.appendChild(nameSpan);
-            li.onclick = () => {
+            const _openThread = () => {
                 const socket = getSocket();
                 const roomInviteUrls = getRoomInviteUrls();
                 const unreadCounts = getUnreadCounts();
@@ -286,6 +318,7 @@ export function createView({
                     updateVoiceChannels(id);
                 }
             };
+            _makeRowOperable(li, _openThread);
             li.addEventListener("contextmenu", e => openSidebarCtx(e, id));
             // Mute icon
             const muteIcon = document.createElement("span");

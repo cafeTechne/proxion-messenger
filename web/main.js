@@ -4981,6 +4981,10 @@ import { createIdentityResolver } from './identity.js';
                 a.click();
             };
             const importInput = document.getElementById('import-file-input');
+            // Import Data is now a real button (was a <label>, which isn't
+            // keyboard-focusable) that opens the hidden file input, like Restore.
+            const importBtn = document.getElementById('import-data-btn');
+            if (importBtn && importInput) importBtn.onclick = () => importInput.click();
             if (importInput) importInput.onchange = async (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
