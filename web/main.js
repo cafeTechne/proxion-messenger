@@ -2493,7 +2493,7 @@ import { createIdentityResolver } from './identity.js';
                     if (!m) break;
                     messageMap[m.message_id] = m;
                     // Fill in any placeholders waiting for this message
-                    document.querySelectorAll(`.reply-context-loading[data-reply-target="${m.message_id}"]`)
+                    document.querySelectorAll(`.reply-context-loading[data-reply-target="${CSS.escape(m.message_id)}"]`)
                         .forEach(el => {
                             const parentName = m.from_display_name || (m.from_webid || "").slice(0, 12);
                             const snippet = (m.content || "").slice(0, 80);
