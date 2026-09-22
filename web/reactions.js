@@ -66,10 +66,18 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         Object.keys(reacts).forEach(emoji => {
             const count = reacts[emoji].length;
             if (count === 0) return;
-            const alreadyReacted = selfWebId && reacts[emoji].includes(selfWebId);
+            const alreadyReacted = !!(selfWebId && reacts[emoji].includes(selfWebId));
             const span = document.createElement("span");
             span.className = "reaction" + (alreadyReacted ? " active" : "") +
                 (emoji === animateEmoji ? " reaction-anim" : "");
+            // A11y: expose each pill as a toggle button whose aria-pressed reflects
+            // whether the CURRENT user has reacted with this emoji, and make it
+            // keyboard-focusable. (Guarded for the DOM stubs used in unit tests.)
+            if (typeof span.setAttribute === "function") {
+                span.setAttribute("role", "button");
+                span.setAttribute("aria-pressed", alreadyReacted ? "true" : "false");
+            }
+            span.tabIndex = 0;
             // R60A: ":name:" keys render the room's custom emoji image (safe:
             // createElement + server-validated map, no innerHTML). Members
             // whose map lacks the name see the literal key — still readable.
@@ -84,7 +92,17 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
             } else {
                 span.innerText = `${emoji} ${count}`;
             }
-            span.onclick = () => alreadyReacted ? removeReaction(emoji, mid) : addEmoji(emoji, mid);
+            const toggle = () => alreadyReacted ? removeReaction(emoji, mid) : addEmoji(emoji, mid);
+            span.onclick = toggle;
+            // Keyboard: Enter / Space activate the pill like a button.
+            if (typeof span.addEventListener === "function") {
+                span.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+                        e.preventDefault();
+                        toggle();
+                    }
+                });
+            }
             container.appendChild(span);
         });
     }

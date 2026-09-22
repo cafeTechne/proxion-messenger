@@ -371,6 +371,35 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
     color: var(--text-primary, #e1e1e1);
 }
 
+/* Sidebar-header and chat-header icon buttons carry inline transparent styles and
+   had no hover feedback. Give the icon-only controls the same raised hover as the
+   compose/action icon buttons. The inline background/color are overridden with
+   !important (the icon-btn rule above does the same for the same reason). */
+#sound-toggle,
+#desktop-notif-toggle,
+#settings-btn,
+#menu-toggle,
+#invite-btn,
+#pin-panel-btn,
+#saved-panel-btn,
+#members-toggle,
+#integrations-btn {
+    border-radius: var(--radius-sm);
+    transition: background var(--transition-fast), color var(--transition-fast);
+}
+#sound-toggle:hover,
+#desktop-notif-toggle:hover,
+#settings-btn:hover,
+#menu-toggle:hover,
+#invite-btn:hover,
+#pin-panel-btn:hover,
+#saved-panel-btn:hover,
+#members-toggle:hover,
+#integrations-btn:hover {
+    background: var(--surface-2) !important;
+    color: var(--text-primary) !important;
+}
+
 .time {
     font-size: 0.75em;
     color: var(--text-secondary);
@@ -1045,10 +1074,21 @@ button:hover { background: var(--accent-hover); }
             font-size: 0.8em;
             cursor: pointer;
             border: 1px solid transparent;
+            transition: background var(--transition-fast), border-color var(--transition-fast);
+        }
+        .reaction:hover,
+        .reaction:focus-visible {
+            background: rgba(255,255,255,0.18);
+            border-color: var(--border);
         }
         .reaction.active {
             border-color: var(--accent);
             background: rgba(233, 69, 96, 0.2);
+        }
+        .reaction.active:hover,
+        .reaction.active:focus-visible {
+            border-color: var(--accent-hover);
+            background: rgba(233, 69, 96, 0.32);
         }
         /* D3: pop a reaction pill when it is added */
         @keyframes reaction-pop {
