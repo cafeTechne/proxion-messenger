@@ -403,6 +403,7 @@ import { createIdentityResolver } from './identity.js';
         let activeView = null;
         const _roomCodes = {};            // room_id -> invite code (for REST history catch-up)
         let unreadCounts = {}; // id -> count
+        const unreadMentions = new Set(); // ids with an unread @mention (distinct sidebar badge)
         let messageReactions = {}; // messageId -> { emoji: [webid] } (host-owned; reactions.js mutates by reference)
         let replyingTo = null; // { id, name, content }
         let messageMap = {}; // id -> msg object
@@ -1422,6 +1423,10 @@ import { createIdentityResolver } from './identity.js';
                             (selfName && (msg.content || "").toLowerCase().includes("@" + selfName.toLowerCase()));
                         if (mentionsMe && !mutedThreads.has(id)) {
                             playNotificationSound();
+                            // Flag the thread so its sidebar badge renders as a mention
+                            // (accent pill) rather than an ordinary unread count.
+                            unreadMentions.add(id);
+                            updateSidebarBadge(id);
                         }
                         const sender = msg.from_display_name || (msg.from_webid || "").slice(0, 12);
                         if (!mutedThreads.has(id)) {
@@ -3122,6 +3127,7 @@ import { createIdentityResolver } from './identity.js';
             const li = document.getElementById(`nav-${id}`);
             if (li) {
                 const count = unreadCounts[id] || 0;
+                const mentioned = count > 0 && unreadMentions.has(id);
                 let badge = li.querySelector(".unread-badge");
                 if (count > 0) {
                     if (!badge) {
@@ -3129,10 +3135,22 @@ import { createIdentityResolver } from './identity.js';
                         badge.className = "unread-badge";
                         li.appendChild(badge);
                     }
-                    badge.textContent = count > 99 ? "99+" : String(count);
+                    badge.classList.toggle("mention", mentioned);
+                    const countText = count > 99 ? "99+" : String(count);
+                    // Rebuild the badge contents. A mention carries an sr-only cue
+                    // first so a screen reader distinguishes it from a plain unread.
+                    badge.textContent = "";
+                    if (mentioned) {
+                        const sr = document.createElement("span");
+                        sr.className = "sr-only";
+                        sr.textContent = "mentions you, ";
+                        badge.appendChild(sr);
+                    }
+                    badge.appendChild(document.createTextNode(countText));
                     li.style.fontWeight = "600";
                 } else {
                     if (badge) badge.remove();
+                    unreadMentions.delete(id); // thread read → clear its mention flag
                     li.style.fontWeight = "normal";
                 }
             }

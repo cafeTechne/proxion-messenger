@@ -1199,7 +1199,7 @@
     <!-- Pin panel -->
     <!-- Contact profile panel (R29) -->
     <div id="contact-profile-panel" style="display:none; position:fixed; right:0; top:0; bottom:0; width:300px; background:var(--bg-secondary,var(--slate-800)); box-shadow:-2px 0 10px rgba(0,0,0,.5); z-index:900; overflow-y:auto; padding:16px; padding-top:calc(16px + env(safe-area-inset-top, 0px));">
-      <button id="contact-profile-close" style="position:absolute;top:12px;right:12px;background:transparent;border:none;color:var(--text-secondary);font-size:1.2em;cursor:pointer;">&#x2715;</button>
+      <button id="contact-profile-close" aria-label="Close" data-i18n-attr="aria-label:btn.close" style="position:absolute;top:12px;right:12px;background:transparent;border:none;color:var(--text-secondary);font-size:1.2em;cursor:pointer;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
       <div id="contact-profile-avatar" style="width:56px;height:56px;border-radius:50%;background:var(--slate-700);display:flex;align-items:center;justify-content:center;font-size:1.5em;color:var(--slate-50);margin:0 auto 12px;"></div>
       <p id="contact-profile-name" style="text-align:center;font-weight:600;color:var(--slate-50);margin:0 0 4px;"></p>
       <p id="contact-profile-status" style="text-align:center;font-size:0.82em;color:var(--text-secondary);margin:0 0 12px;"></p>

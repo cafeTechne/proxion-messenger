@@ -917,6 +917,19 @@ button:hover { background: var(--accent-hover); }
     margin-inline-start: auto; flex-shrink: 0;
 }
 
+/* 13.12b: Sidebar per-thread unread badge. Plain unreads use a neutral slate
+   pill; a thread with an unread @mention uses the accent fill (.mention) so the
+   two are distinguishable at a glance, not only by count. */
+.unread-badge {
+    margin-inline-start: auto; flex-shrink: 0;
+    min-width: 18px; padding: 1px 6px; text-align: center;
+    border-radius: var(--radius-pill); font-size: 0.72em; font-weight: 700;
+    background: var(--slate-700); color: var(--slate-50);
+}
+.unread-badge.mention {
+    background: var(--accent); color: #fff;
+}
+
 /* 13.14: Contact search dropdown */
 .contact-search-dropdown {
     position: absolute; z-index: 600; width: 100%;
