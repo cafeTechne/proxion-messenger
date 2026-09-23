@@ -1235,12 +1235,22 @@ import { createIdentityResolver } from './identity.js';
         // Auto-join from URL ?join=CODE
         (function checkAutoJoin() {
             const params = new URLSearchParams(window.location.search);
-            const code = params.get("join");
+            let code = params.get("join");
+            // In the browser build, signing in is an OIDC redirect that strips the
+            // ?join= param, so an invitee's join would be lost. Stash the code on the
+            // first load and pick it back up after the round-trip.
+            const STASH = "proxion_pending_join";
+            if (code) {
+                try { localStorage.setItem(STASH, code); } catch (_) { /* ignore */ }
+            } else {
+                try { code = localStorage.getItem(STASH) || ""; } catch (_) { /* ignore */ }
+            }
             if (code) {
                 // Wait for socket to be open, then join
                 const tryJoin = () => {
                     if (socket && socket.readyState === WebSocket.OPEN) {
                         socket.send(JSON.stringify({cmd: "join_room", code: code}));
+                        try { localStorage.removeItem(STASH); } catch (_) { /* ignore */ }
                         // Clean URL without reload
                         history.replaceState(null, "", window.location.pathname);
                     } else {
