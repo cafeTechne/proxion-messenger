@@ -32,6 +32,12 @@ def _load_or_create_raw_key(key_path: Path, key_cls, generate_fn):
     key = generate_fn()
     key_path.parent.mkdir(parents=True, exist_ok=True)
     key_path.write_bytes(key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption()))
+    # This is a long-term private key; keep it owner-only so it is not world-readable
+    # on a shared host. No-op on Windows (POSIX perms), harmless there.
+    try:
+        os.chmod(key_path, 0o600)
+    except OSError:
+        pass
     return key
 
 

@@ -137,8 +137,10 @@ jobs:
       - name: Download release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
-          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --dir assets
+          gh release download "$TAG" --repo "$REPO" --dir assets
           ls -l assets
 
       - name: Generate SHA256SUMS.txt
@@ -154,5 +156,7 @@ jobs:
       - name: Upload SHA256SUMS.txt to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
-          gh release upload "${{ github.ref_name }}" SHA256SUMS.txt --repo "${{ github.repository }}" --clobber
+          gh release upload "$TAG" SHA256SUMS.txt --repo "$REPO" --clobber
