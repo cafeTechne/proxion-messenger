@@ -120,6 +120,19 @@ export async function solidLogout() {
     // Starred GIFs/memes hold full base64 image payloads from attachments — clear
     // this account's tray too so it can't be read after logout on a shared device.
     try { await _clearStore(gifDb, _GIF_STORE); } catch { /* ignore */ }
+    // Clear the per-peer E2E session caches (ratchet state, cached peer keys) and
+    // the "verified" badges so a logged-out shared device does not retain the
+    // previous user's cached sessions or trust markers. The non-extractable
+    // identity key is intentionally NOT cleared here: it must survive the same
+    // user's re-login. (Per-account isolation of the identity key across a switch
+    // WITHOUT a logout is a separate change that needs a live multi-account test.)
+    try {
+        const _e2ePrefixes = ['proxion_e2e_state_', 'proxion_e2e_peer_pub_', 'proxion_e2e_verified_', 'proxion_verified_'];
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+            const k = localStorage.key(i);
+            if (k && _e2ePrefixes.some((p) => k.startsWith(p))) localStorage.removeItem(k);
+        }
+    } catch { /* ignore */ }
 }
 
 // Is `root` safe to trust as THIS WebID's storage root? Require same origin as the
