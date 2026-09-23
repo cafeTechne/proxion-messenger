@@ -4625,6 +4625,18 @@ import { createIdentityResolver } from './identity.js';
             attachListener('#voice-record-btn', 'mouseup', () => stopVoiceRecording(true));
             attachListener('#voice-record-btn', 'touchstart', e => { e.preventDefault(); startVoiceRecording(); }, {passive:false});
             attachListener('#voice-record-btn', 'touchend', () => stopVoiceRecording(true));
+            // Keyboard: mirror the "hold to record" gesture on Space/Enter (keydown
+            // starts, keyup stops), so the mic is operable without a pointer.
+            attachListener('#voice-record-btn', 'keydown', (e) => {
+                if ((e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') && !e.repeat) {
+                    e.preventDefault(); startVoiceRecording();
+                }
+            });
+            attachListener('#voice-record-btn', 'keyup', (e) => {
+                if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+                    e.preventDefault(); stopVoiceRecording(true);
+                }
+            });
             attachListener('#voice-record-cancel', 'click', () => stopVoiceRecording(false));
 
             // Round 65: Disappear timer select

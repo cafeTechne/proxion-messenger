@@ -866,11 +866,19 @@ export function createVoice(deps) {
             const stateColor = { connected: "#4ade80", connecting: "#fbbf24",
                                   checking: "#fbbf24", completed: "#4ade80",
                                   disconnected: "#f87171", failed: "#f87171", closed: "#64748b" };
+            // The status dot is colour-only; pair it with a word (title tooltip + an
+            // sr-only span) so the connection state is not lost to colour-blind or
+            // screen-reader users.
+            const stateWord = { connected: "connected", completed: "connected",
+                                connecting: "connecting", checking: "connecting",
+                                disconnected: "disconnected", failed: "connection failed",
+                                closed: "left" };
             container.innerHTML = Object.entries(state._channelParticipants).map(([webid, info]) => {
                 const color = stateColor[info.state] || "#94a3b8";
-                return `<span data-vc-webid="${escHtml(webid)}" style="background:#1e293b;padding:3px 8px;border-radius:12px;font-size:0.78em;color:#f1f5f9;display:flex;align-items:center;gap:4px;">
-                    <span style="width:6px;height:6px;border-radius:50%;background:${color};display:inline-block;"></span>
-                    ${escHtml(info.name)}
+                const word = stateWord[info.state] || "unknown";
+                return `<span data-vc-webid="${escHtml(webid)}" title="${escHtml(info.name)}: ${escHtml(word)}" style="background:#1e293b;padding:3px 8px;border-radius:12px;font-size:0.78em;color:#f1f5f9;display:flex;align-items:center;gap:4px;">
+                    <span style="width:6px;height:6px;border-radius:50%;background:${color};display:inline-block;" aria-hidden="true"></span>
+                    ${escHtml(info.name)}<span class="sr-only"> (${escHtml(word)})</span>
                 </span>`;
             }).join("");
         }
