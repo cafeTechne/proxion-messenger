@@ -17,7 +17,7 @@ function loadSW() {
     const listeners = {};
     const puts = [];       // { name, key }
     const deleted = [];
-    let cacheKeys = ['proxion-shell-v1', 'proxion-shell-v226', 'other-cache'];
+    let cacheKeys = ['proxion-shell-v1', 'proxion-shell-v227', 'other-cache'];
     const caches = {
         open: async (name) => ({ put: async (req) => { puts.push({ name, key: req.url }); } }),
         match: async () => undefined,
@@ -60,9 +60,9 @@ describe('service worker fetch handler', () => {
     let sw;
     beforeEach(() => { sw = loadSW(); });
 
-    it('bumps the cache name to v227 (evicts stale caches on upgrade)', () => {
-        expect(SRC).toContain('proxion-shell-v227');
-        expect(SRC).not.toContain('proxion-shell-v226');
+    it('bumps the cache name to v228 (evicts stale caches on upgrade)', () => {
+        expect(SRC).toContain('proxion-shell-v228');
+        expect(SRC).not.toContain('proxion-shell-v227');
     });
 
     it('bypasses a cross-origin GET (pod fetch): not intercepted, not cached', async () => {

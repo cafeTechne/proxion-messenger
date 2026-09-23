@@ -203,6 +203,10 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
     function obPodSignIn() {
         const cssUrl = _obCssUrl();
         if (!cssUrl) return;
+        // Reassure before the OIDC redirect leaves the app; we resume at the room
+        // step when the browser returns signed in.
+        const _st = document.getElementById("ob-pod-status");
+        if (_st) { _st.style.color = ""; _st.textContent = t('onboarding.redirecting'); }
         localStorage.setItem("proxion_ob_resume", "5");
         Promise.resolve(solidLogin(cssUrl)).catch(() => {
             localStorage.removeItem("proxion_ob_resume");

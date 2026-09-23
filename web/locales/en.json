@@ -390,6 +390,8 @@
   "onboarding.yourAddressHint": "Anyone can add you with this address to start a private conversation.",
   "empty.noContacts": "No one here yet. Add someone with their invite link, or share your own so they can add you.",
   "empty.orStartNew": "Or start something new:",
+  "onboarding.podTwoStep": "Test the connection, then sign in through your pod provider. That browser sign-in is what unlocks cross-app chat, and you will come right back here.",
+  "onboarding.redirecting": "Taking you to your pod provider to sign in, then back to Proxion…",
   "empty.selectConversation": "Select a conversation to start chatting.",
   "e2e.loading": "loading…",
   "e2e.verified": "Verified",
