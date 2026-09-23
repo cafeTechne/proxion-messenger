@@ -91,9 +91,10 @@ async def test_devices_endpoint_returns_roster_for_related_requester(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_devices_endpoint_owner_fallback_to_union(tmp_path):
-    """Relationships saved without an owner (older accept path) still resolve
-    via the one-gateway-per-user union."""
+async def test_devices_endpoint_owner_unresolved_returns_empty(tmp_path):
+    """A relationship saved without an owner no longer falls back to the union of
+    every account's device keys (that leaked other accounts on a multi-account
+    gateway); the roster is empty when the owning account cannot be resolved."""
     gw = _gw(tmp_path, "a")
     own_did = pub_key_to_did(gw.agent.identity_pub_bytes)
     req_key = Ed25519PrivateKey.generate()
@@ -105,7 +106,7 @@ async def test_devices_endpoint_owner_fallback_to_union(tmp_path):
     body = json.dumps(_sign_devices_request(req_key, req_did, own_did)).encode()
     status, resp = await gw._handle_devices_post(body)
     assert status.startswith("200")
-    assert len(json.loads(resp)["devices"]) == 2
+    assert json.loads(resp)["devices"] == []
 
 
 @pytest.mark.asyncio

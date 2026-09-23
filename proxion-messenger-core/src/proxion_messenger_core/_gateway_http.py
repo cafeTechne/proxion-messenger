@@ -524,14 +524,13 @@ class HttpEndpointsMixin:
             return "403 Forbidden", '{"error":"not_related"}'
         if not self._store.get_relationship_by_did(requester):
             return "403 Forbidden", '{"error":"not_related"}'
-        # Roster: prefer the account that owns the relationship with the
-        # requester; fall back to the one-gateway-per-user union (older rows
-        # were saved without an owner) — mirrors the _sockets_for fallback.
+        # Roster: only the account that owns the relationship with the requester may
+        # expose its device keys. When the owner cannot be resolved (legacy rows saved
+        # without an owner) return an empty roster rather than the union of every
+        # account's device keys, which would let one contact enumerate other accounts
+        # on a multi-account gateway.
         owner = self._store.get_relationship_owner(requester)
         devices = self._store.list_device_e2e_keys(owner) if owner else []
-        if not devices:
-            devices = [{"device_id": d["device_id"], "pub_b64u": d["pub_b64u"]}
-                       for d in self._store.list_all_device_e2e_keys()]
         return "200 OK", json.dumps({"devices": devices[:16]})
 
     async def _handle_relay_post(self, body: bytes, client_ip: str = "unknown") -> tuple[str, str]:
