@@ -470,7 +470,14 @@
                 <span><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg> Messages disappear after <strong id="disappear-label"></strong></span>
             </div>
             <div id="message-feed" role="log" aria-label="Messages" aria-live="polite" aria-relevant="additions" data-i18n-attr="aria-label:ui.messages">
-                <div class="system-msg" data-i18n="empty.selectConversation">Select a conversation to start chatting.</div>
+                <div class="feed-welcome">
+                    <p class="system-msg" data-i18n="empty.selectConversation">Select a conversation to start chatting.</p>
+                    <p class="feed-welcome-hint" data-i18n="empty.orStartNew">Or start something new:</p>
+                    <div class="feed-welcome-actions">
+                        <button type="button" id="feed-welcome-create-btn" class="btn btn--accent" data-i18n="control.createRoom">Create room</button>
+                        <button type="button" id="feed-welcome-add-btn" class="btn btn--slate" data-i18n="btn.addContact2">Add Contact</button>
+                    </div>
+                </div>
             </div>
             <button id="scroll-bottom-btn" aria-label="Scroll to latest messages" data-i18n-attr="aria-label:ui.scrollLatestMessages"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg> <span id="scroll-bottom-count"></span></button>
             <div id="typing-indicator" aria-live="polite" style="padding: 5px 20px; font-size: 0.8em; color: var(--text-secondary); height: 1.5em;"></div>

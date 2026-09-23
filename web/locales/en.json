@@ -389,6 +389,7 @@
   "onboarding.yourAddress": "Your Proxion address. Share it so people can add you:",
   "onboarding.yourAddressHint": "Anyone can add you with this address to start a private conversation.",
   "empty.noContacts": "No one here yet. Add someone with their invite link, or share your own so they can add you.",
+  "empty.orStartNew": "Or start something new:",
   "empty.selectConversation": "Select a conversation to start chatting.",
   "e2e.loading": "loading…",
   "e2e.verified": "Verified",

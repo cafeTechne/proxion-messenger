@@ -5084,6 +5084,10 @@ import { createIdentityResolver } from './identity.js';
             // Empty state quick-action buttons
             attachListener('#empty-create-room-btn', 'click', () => document.getElementById('create-room-btn').click());
             attachListener('#empty-add-contact-btn', 'click', () => document.getElementById('add-peer-btn').click());
+            // The message feed's pre-selection state offers a first action so a brand
+            // new user with no rooms or contacts is not left on a blank pane.
+            attachListener('#feed-welcome-create-btn', 'click', () => document.getElementById('create-room-btn').click());
+            attachListener('#feed-welcome-add-btn', 'click', () => document.getElementById('add-peer-btn').click());
 
             // R59D/R60C: spoiler reveal — text spans and media covers share the
             // one-way contract (click / Enter / Space; button semantics dropped
