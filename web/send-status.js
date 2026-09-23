@@ -12,6 +12,7 @@
 // is a safe gap-fill for a never-delivered message.
 
 import { t } from './i18n.js';
+import { announce } from './a11y.js';
 
 const CONFIRM_TIMEOUT_MS = 18000;
 
@@ -62,6 +63,10 @@ export function createSendStatus() {
         note.appendChild(label);
         note.appendChild(retry);
         (el.querySelector('.msg-content') || el).appendChild(note);
+        // A delivery failure is important enough to interrupt: mirror it to the
+        // assertive live region (the note is appended into an already-rendered
+        // message, which screen readers announce inconsistently on their own).
+        announce(t('send.notDelivered'), true);
     }
 
     function _retry(msgId) {

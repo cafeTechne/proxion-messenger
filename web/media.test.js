@@ -3,7 +3,7 @@ import { createMedia } from './media.js';
 
 beforeEach(() => {
   global.document = {
-    getElementById: () => ({ classList: { add() {}, remove() {} }, textContent: '' }),
+    getElementById: () => ({ classList: { add() {}, remove() {} }, textContent: '', setAttribute() {} }),
   };
   global.Blob = class { constructor(parts, opts) { this.parts = parts; this.opts = opts; } };
   // crypto is a read-only global in node; redefine it for a deterministic id.

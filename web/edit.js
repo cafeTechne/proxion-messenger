@@ -21,10 +21,12 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
         const inp = document.createElement("input");
         inp.type = "text";
         inp.value = original;
+        inp.setAttribute("aria-label", "Edit message");
         inp.style.cssText = "width:60%;padding:4px;border-radius:4px;border:1px solid #555;background:#0f172a;color:#f1f5f9;font-size:0.95em;";
         const confirmBtn = document.createElement("button");
         confirmBtn.innerText = "✓";
         confirmBtn.className = "edit-confirm-btn";
+        confirmBtn.setAttribute("aria-label", "Save edit");
         confirmBtn.style.cssText = "background:transparent;border:none;cursor:pointer;font-size:1em;margin-left:4px;";
         confirmBtn.onclick = () => commitEdit(msgId, inp.value);
         inp.onkeydown = (e) => {

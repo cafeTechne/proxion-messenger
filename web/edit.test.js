@@ -7,7 +7,7 @@ function mkEl(over = {}) {
     style: {}, value: '', innerText: '', innerHTML: '', className: '', type: '',
     onclick: null, onkeydown: null,
     querySelector: () => null, closest: () => null,
-    replaceWith() {}, appendChild() {}, remove() {}, after() {}, focus() {},
+    replaceWith() {}, appendChild() {}, remove() {}, after() {}, focus() {}, setAttribute() {},
     ...over,
   };
 }

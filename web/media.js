@@ -96,8 +96,13 @@ export function createMedia({ getSocket, getActiveView, showToast, getVoiceState
         for (const s of senders) { try { s.replaceTrack(screenTrack); } catch (_) {} }
         try { getVoice()?.recapSenders?.(); } catch (_) {}   // apply the screen-share profile
         screenTrack.onended = () => stopScreenShare();
-        const sBtn = document.getElementById('screenshare-btn');
-        if (sBtn) sBtn.classList.add('vw-sharing');
+        // Reflect the sharing state on both the 1:1 and the channel screenshare
+        // buttons (aria-pressed + class), so "am I sharing?" is visible and exposed
+        // to assistive tech in group calls too (was 1:1-class-only).
+        for (const _id of ['screenshare-btn', 'voice-channel-screenshare-btn']) {
+            const b = document.getElementById(_id);
+            if (b) { b.classList.add('vw-sharing'); b.setAttribute('aria-pressed', 'true'); }
+        }
         const socket = getSocket();
         if (socket && voiceState.currentCall) socket.send(JSON.stringify({ cmd: 'screenshare_started', session_id: voiceState.currentCall.session_id || '' }));
     }
@@ -112,8 +117,10 @@ export function createMedia({ getSocket, getActiveView, showToast, getVoiceState
         const restore = voiceState.videoEnabled ? (voiceState._cameraTrack || null) : null;
         for (const s of _videoSenders(voiceState)) { try { s.replaceTrack(restore); } catch (_) {} }
         try { getVoice()?.recapSenders?.(); } catch (_) {}   // back to the camera profile
-        const sBtn = document.getElementById('screenshare-btn');
-        if (sBtn) sBtn.classList.remove('vw-sharing');
+        for (const _id of ['screenshare-btn', 'voice-channel-screenshare-btn']) {
+            const b = document.getElementById(_id);
+            if (b) { b.classList.remove('vw-sharing'); b.setAttribute('aria-pressed', 'false'); }
+        }
         const socket = getSocket();
         if (socket && voiceState.currentCall) socket.send(JSON.stringify({ cmd: 'screenshare_stopped', session_id: voiceState.currentCall.session_id || '' }));
     }
