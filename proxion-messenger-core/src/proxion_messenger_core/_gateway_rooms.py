@@ -1788,9 +1788,19 @@ class RoomHandlerMixin:
 
     async def _handle_read_room(self, websocket, data: dict) -> None:
         room_id = data.get("room_id", "")
-        if room_id in self._local_rooms and websocket not in self._local_rooms[room_id]["members"]:
-            await websocket.send(json.dumps({"type": "error", "message": "Not a member of this room"}))
-            return
+        if room_id in self._local_rooms:
+            if websocket not in self._local_rooms[room_id]["members"]:
+                await websocket.send(json.dumps({"type": "error", "message": "Not a member of this room"}))
+                return
+        elif self._auth_enforced():
+            # Room not tracked locally (pod/federated): membership was only enforced
+            # for the local case, so a non-member local account could read the room's
+            # cached history by naming its id. Gate on the same read-authz helper the
+            # DM/history paths use.
+            _actor = self._client_webids.get(websocket, "")
+            if not self._actor_can_read_thread(websocket, _actor, room_id):
+                await websocket.send(json.dumps({"type": "history", "thread_id": room_id, "messages": []}))
+                return
         messages = [
             {
                 "type": "message",
