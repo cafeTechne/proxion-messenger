@@ -2277,7 +2277,9 @@ class MiscHandlerMixin:
         """Short human-verifiable code so the user can confirm the right device."""
         import hashlib
         h = hashlib.sha256(device_did.encode()).hexdigest()
-        return f"{int(h[:8], 16) % 1000000:06d}"
+        # 8 digits (not 6) so a relay cannot feasibly grind a device key whose code
+        # collides with the substituted one. Must stay identical to web/pairing.js.
+        return f"{int(h[:8], 16) % 100000000:08d}"
 
     async def _handle_pair_start(self, websocket, data: dict) -> None:
         """Authenticated primary opens a pairing session; returns a pairing_code."""

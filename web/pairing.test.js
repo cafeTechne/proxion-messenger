@@ -14,17 +14,17 @@ function make(over = {}) {
 
 describe('_safetyCode', () => {
     // Cross-checked against the gateway's _pairing_safety_code:
-    //   int(sha256(did).hexdigest()[:8], 16) % 1000000, zero-padded to 6.
+    //   int(sha256(did).hexdigest()[:8], 16) % 100000000, zero-padded to 8.
     it('matches the Python formula for known DIDs', async () => {
         const p = make();
-        expect(await p._safetyCode('did:key:zAlice')).toBe('475465');
-        expect(await p._safetyCode('did:key:zBob')).toBe('953079');
+        expect(await p._safetyCode('did:key:zAlice')).toBe('92475465');
+        expect(await p._safetyCode('did:key:zBob')).toBe('24953079');
     });
 
-    it('always returns a 6-digit string', async () => {
+    it('always returns an 8-digit string', async () => {
         const p = make();
         for (const did of ['did:key:zA', 'did:key:zB', 'x', '', 'did:key:zLong0000']) {
-            expect(await p._safetyCode(did)).toMatch(/^[0-9]{6}$/);
+            expect(await p._safetyCode(did)).toMatch(/^[0-9]{8}$/);
         }
     });
 

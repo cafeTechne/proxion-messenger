@@ -38,7 +38,8 @@ export function createPairing({
     async function _safetyCode(did) {
         const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(did || ''));
         const hex = [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
-        return String(parseInt(hex.slice(0, 8), 16) % 1000000).padStart(6, '0');
+        // 8 digits (must stay identical to the Python _pairing_safety_code).
+        return String(parseInt(hex.slice(0, 8), 16) % 100000000).padStart(8, '0');
     }
 
     // ---- Primary side --------------------------------------------------------
