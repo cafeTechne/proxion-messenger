@@ -1285,13 +1285,21 @@ class _StoreBase(object):
                         for stmt in migration:
                             try:
                                 conn.execute(stmt)
-                            except Exception:
-                                pass
+                            except Exception as _mig_exc:
+                                # Swallow only the expected "already applied" case
+                                # (column/table already exists on a re-run); a genuine
+                                # error must propagate so schema_version is NOT advanced
+                                # past a migration that did not actually apply.
+                                _m = str(_mig_exc).lower()
+                                if "already exists" not in _m and "duplicate column" not in _m:
+                                    raise
                     else:
                         try:
                             conn.execute(migration)
-                        except Exception:
-                            pass
+                        except Exception as _mig_exc:
+                            _m = str(_mig_exc).lower()
+                            if "already exists" not in _m and "duplicate column" not in _m:
+                                raise
                     conn.execute("UPDATE schema_version SET version = ?", (version,))
                 current = version
             except Exception as exc:
