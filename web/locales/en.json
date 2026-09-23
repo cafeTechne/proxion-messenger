@@ -622,6 +622,7 @@
   "solidchat.inviteFrom": "{title} from {who}",
   "voice.videoFull": "Video is full: too many people are already sharing video",
   "web.signin.title": "Welcome to Proxion Web",
+  "web.signin.invited": "You have been invited to a room. Sign in with your Solid pod, or get a free one below, to join.",
   "web.signin.what": "Proxion is an end-to-end encrypted messenger. Your messages live in your own Solid pod, a personal data store that only you control.",
   "web.signin.body": "Have a Solid pod? Enter your provider to sign in.",
   "web.signin.provider": "Pod provider",

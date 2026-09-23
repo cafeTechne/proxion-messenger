@@ -5705,6 +5705,12 @@ import { createIdentityResolver } from './identity.js';
                     const _wsm = document.getElementById('web-signin-modal');
                     if (_wsm) {
                         _wsm.style.display = 'flex';
+                        // If the user arrived via an invite link, frame the sign-in so
+                        // they know why they are being asked to sign in / get a pod.
+                        try {
+                            const _inv = document.getElementById('web-signin-invite');
+                            if (_inv) _inv.hidden = !parseInvite(window.location.href);
+                        } catch (_) { /* ignore */ }
                         const _err = document.getElementById('web-signin-error');
                         const _go = () => {
                             const url = (document.getElementById('web-signin-url').value || '').trim();
