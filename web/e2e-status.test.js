@@ -6,6 +6,7 @@ vi.mock('./e2e.js', () => ({
   isE2EEnabled: (id) => e2eEnabled.has(id),
   myX25519PubB64u: () => 'MYPUBKEYbase64url0000',
   safetyNumber: async () => '12345 67890 11111',
+  e2eScopedKey: (k) => k,
 }));
 
 import { createE2EStatus } from './e2e-status.js';

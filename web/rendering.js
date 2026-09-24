@@ -43,6 +43,10 @@ export function createRendering({
     getCurrentDisappearMs, getMessageMap, getAllMessages, getUserPresence,
     renderReactions, openCtxMenu, sendUpdateLastRead,
     getRoomCode, renderWindow, scrollBatch,
+    // Account-scopes the verification-badge localStorage key so a second account
+    // on a shared browser can't read the first's trust marks (see e2e.js). Falls
+    // back to identity for callers/tests that don't supply it.
+    e2eScopedKey = (k) => k,
 }) {
     const RENDER_WINDOW = renderWindow;
     const SCROLL_BATCH = scrollBatch;
@@ -420,7 +424,7 @@ export function createRendering({
             const importedBadge = msg.imported ? `<span style="font-size:0.7em;color:#94a3b8;background:#1e293b;border:1px solid #334155;border-radius:3px;padding:1px 5px;margin-left:6px;vertical-align:middle;">Imported</span>` : "";
             // R11.2.3: unverified shield for DID contacts not yet verified
             const isVerified = !msg.from_webid || msg.from_webid === selfWebId ||
-                localStorage.getItem("proxion_verified_" + msg.from_webid) === "1";
+                localStorage.getItem(e2eScopedKey("proxion_verified_" + msg.from_webid)) === "1";
             const shieldHtml = (!isVerified && msg.from_webid && msg.from_webid.startsWith("did:key:"))
                 ? `<span title="${t('msg.identityUnverified')}" style="color:#8091a7;margin-left:4px;font-size:0.85em;">&#x1F6E1;</span>`
                 : "";

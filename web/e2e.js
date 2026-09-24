@@ -63,22 +63,119 @@ function _openKeyDb() {
     }).catch((err) => { _keyDbPromise = null; throw err; });
     return _keyDbPromise;
 }
-async function _idbGetKeys() {
+async function _idbGetKeys(recKey) {
     const db = await _openKeyDb();
     return new Promise((resolve, reject) => {
-        const r = db.transaction(_KEY_STORE, 'readonly').objectStore(_KEY_STORE).get('self');
+        const r = db.transaction(_KEY_STORE, 'readonly').objectStore(_KEY_STORE).get(recKey);
         r.onsuccess = () => resolve(r.result || null);
         r.onerror = () => reject(r.error);
     });
 }
-async function _idbPutKeys(rec) {
+async function _idbPutKeys(rec, recKey) {
     const db = await _openKeyDb();
     return new Promise((resolve, reject) => {
         const tx = db.transaction(_KEY_STORE, 'readwrite');
-        tx.objectStore(_KEY_STORE).put(rec, 'self');
+        tx.objectStore(_KEY_STORE).put(rec, recKey);
         tx.oncomplete = () => resolve(true);
         tx.onerror = () => reject(tx.error);
     });
+}
+
+// ── Per-account namespacing (R134) ────────────────────────────────────────────
+// The identity key, cached peer keys, ratchet state and verification badges were
+// stored under a single global key ('self' / bare localStorage names). Two Solid
+// accounts signed in on the same browser therefore shared ONE E2E identity: the
+// second account adopted the first's private key and trust marks. Bind all of it
+// to the signed-in WebID instead, mirroring accountDbName() in auth.js. When no
+// pod account is signed in (gateway/local-only mode) the bare names are kept, so
+// that single-identity case is unchanged.
+//
+// Migration is deliberately non-destructive: the FIRST account to sign in claims
+// the pre-existing legacy identity (copying it into its namespace and recording a
+// one-account marker), and the legacy record is NEVER deleted. A regenerated
+// identity key is irreversible — it changes the user's public key and voids every
+// peer's verification — so the legacy key can only ever be claimed, not replaced.
+const _LEGACY_ID = 'self';
+const _LEGACY_CLAIM_KEY = 'proxion_e2e_legacy_claimed';   // WebID that claimed legacy 'self'
+// Peer-scoped localStorage families that must not bleed across accounts.
+const _LS_PEER_PREFIXES = [
+    'proxion_e2e_state_', 'proxion_e2e_peer_pub_', 'proxion_e2e_verified_', 'proxion_verified_',
+];
+
+function _currentWebId() {
+    return (solidSession?.info?.isLoggedIn && solidSession.info.webId) || null;
+}
+
+// IndexedDB record key for the identity: account-scoped when signed in, else 'self'.
+function _selfKeyId() {
+    const webId = _currentWebId();
+    return webId ? _LEGACY_ID + '::' + webId : _LEGACY_ID;
+}
+
+// Account-scope a localStorage key to the signed-in WebID (mirrors accountDbName).
+// Exported so the UI modules that read/write these keys stay consistent.
+export function e2eScopedKey(key) {
+    const webId = _currentWebId();
+    return webId ? key + '::' + webId : key;
+}
+
+function _legacyClaimant() {
+    try { return localStorage.getItem(_LEGACY_CLAIM_KEY); } catch { return null; }
+}
+function _setLegacyClaimant(webId) {
+    try { localStorage.setItem(_LEGACY_CLAIM_KEY, webId); } catch { /* ignore */ }
+}
+
+// Move any un-namespaced legacy peer-cache entries into this account's namespace
+// and drop the legacy originals, so a second account signed in later cannot read
+// the first account's cached peer keys or verification marks. Only pure-legacy
+// keys (no '::' account suffix) are touched; runs once, under the legacy claim.
+function _migrateLegacyLsCaches(webId) {
+    try {
+        const move = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (!k || k.includes('::')) continue;
+            if (_LS_PEER_PREFIXES.some((p) => k.startsWith(p))) move.push(k);
+        }
+        for (const k of move) {
+            const v = localStorage.getItem(k);
+            if (v !== null) localStorage.setItem(k + '::' + webId, v);
+            localStorage.removeItem(k);
+        }
+    } catch { /* ignore */ }
+}
+
+// Generate a fresh non-extractable identity + state key record.
+async function _genIdentity() {
+    const kp = await crypto.subtle.generateKey({ name: 'X25519' }, false, ['deriveBits']);
+    const pubJwk = await crypto.subtle.exportKey('jwk', kp.publicKey);   // public export is allowed
+    const stateKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    return { x25519Priv: kp.privateKey, x25519Pub: pubJwk.x, stateKey };
+}
+
+// Load the ancient pre-IndexedDB localStorage JWK identity (R110 and earlier), if
+// present, deriving the state key at its EXISTING value so stored state decrypts.
+// Returns a record or null.
+async function _identityFromLsJwk() {
+    const savedJwk = localStorage.getItem('proxion_e2e_x25519_priv_jwk');
+    const savedPub = localStorage.getItem('proxion_e2e_x25519_pub_b64u');
+    if (!savedJwk || !savedPub) return null;
+    try {
+        const jwk = JSON.parse(savedJwk);
+        const priv = await crypto.subtle.importKey('jwk', jwk, { name: 'X25519' }, false, ['deriveBits']);
+        const raw = await hkdf(b64uDec(jwk.d), 'proxion-e2e-state-v1', '', 256);
+        const stateKey = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+        return { x25519Priv: priv, x25519Pub: savedPub, stateKey };
+    } catch { return null; }
+}
+
+// The pre-existing legacy identity (IndexedDB 'self' first, then the ancient
+// localStorage JWK), for the first account to claim. Never mutates the source.
+async function _loadLegacyIdentity() {
+    const rec = await _idbGetKeys(_LEGACY_ID);
+    if (rec && rec.x25519Priv && rec.stateKey && rec.x25519Pub) return rec;
+    return _identityFromLsJwk();
 }
 
 // ── Encoding helpers (exported for tests) ─────────────────────────────────────
@@ -181,44 +278,55 @@ async function _doInit() {
     }
 
     // Preferred path: keep the identity key and state key as non-extractable
-    // CryptoKeys in IndexedDB. Migrate an existing localStorage keypair once
-    // (deriving the state key at its EXISTING value so stored state still
-    // decrypts), then drop the scalar. Fall back to the legacy localStorage
-    // keypair only when IndexedDB is unavailable.
+    // CryptoKeys in IndexedDB, under a per-account record key (see _selfKeyId).
+    // A returning account loads its own record; the FIRST account to sign in on
+    // this browser claims the pre-existing legacy identity (non-destructively);
+    // any later account gets a fresh key of its own. Fall back to the legacy
+    // localStorage keypair only when IndexedDB is unavailable.
     let usedIdb = false;
     try {
-        const rec = await _idbGetKeys();
+        const webId = _currentWebId();
+        const keyId = _selfKeyId();
+        const rec = await _idbGetKeys(keyId);
         if (rec && rec.x25519Priv && rec.stateKey && rec.x25519Pub) {
             _myPrivKey = rec.x25519Priv;
             _myPubB64u = rec.x25519Pub;
             _stateEncKey = rec.stateKey;
             usedIdb = true;
         } else {
-            const savedJwk = localStorage.getItem('proxion_e2e_x25519_priv_jwk');
-            const savedPub = localStorage.getItem('proxion_e2e_x25519_pub_b64u');
-            let priv = null, pub = null, stateKey = null;
-            if (savedJwk && savedPub) {
-                try {
-                    const jwk = JSON.parse(savedJwk);
-                    priv = await crypto.subtle.importKey('jwk', jwk, { name: 'X25519' }, false, ['deriveBits']);
-                    pub = savedPub;
-                    // Preserve the exact state key value so existing state decrypts.
-                    const raw = await hkdf(b64uDec(jwk.d), 'proxion-e2e-state-v1', '', 256);
-                    stateKey = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
-                } catch { priv = null; }
+            // No record for this account yet. When signed in, try to claim the
+            // legacy identity — but only if unclaimed or already ours, so a second
+            // account never adopts the first's key. Legacy is copied, never moved.
+            let id = null;
+            if (webId) {
+                const claimant = _legacyClaimant();
+                if (!claimant || claimant === webId) {
+                    const legacy = await _loadLegacyIdentity();
+                    if (legacy) {
+                        id = { x25519Priv: legacy.x25519Priv, x25519Pub: legacy.x25519Pub, stateKey: legacy.stateKey };
+                        await _idbPutKeys(id, keyId);
+                        _setLegacyClaimant(webId);
+                        _migrateLegacyLsCaches(webId);
+                    }
+                }
             }
-            if (!priv) {
-                const kp = await crypto.subtle.generateKey({ name: 'X25519' }, false, ['deriveBits']);
-                const pubJwk = await crypto.subtle.exportKey('jwk', kp.publicKey);   // public export is allowed
-                priv = kp.privateKey; pub = pubJwk.x;
-                stateKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+            if (!id) {
+                // Not-signed-in path also runs the ancient localStorage-JWK
+                // migration (single local identity, unchanged from R110); a fresh
+                // account with no legacy simply generates a new key.
+                if (keyId === _LEGACY_ID) id = await _identityFromLsJwk();
+                if (!id) id = await _genIdentity();
+                await _idbPutKeys(id, keyId);
+                // Only the single-identity ('self') path removes the extractable
+                // scalar from localStorage; the account paths leave the legacy
+                // record intact (never destructive to a claimable identity).
+                if (keyId === _LEGACY_ID) {
+                    try { localStorage.removeItem('proxion_e2e_x25519_priv_jwk'); } catch { /* ignore */ }
+                    try { localStorage.setItem('proxion_e2e_x25519_pub_b64u', id.x25519Pub); } catch { /* ignore */ }
+                }
             }
-            await _idbPutKeys({ x25519Priv: priv, x25519Pub: pub, stateKey });
-            _myPrivKey = priv; _myPubB64u = pub; _stateEncKey = stateKey;
+            _myPrivKey = id.x25519Priv; _myPubB64u = id.x25519Pub; _stateEncKey = id.stateKey;
             usedIdb = true;
-            // The scalar is safely in IndexedDB now; remove it from localStorage.
-            try { localStorage.removeItem('proxion_e2e_x25519_priv_jwk'); } catch { /* ignore */ }
-            try { localStorage.setItem('proxion_e2e_x25519_pub_b64u', pub); } catch { /* ignore */ }
         }
     } catch { usedIdb = false; }
 
@@ -270,19 +378,19 @@ export function myX25519PubB64u() { return _myPubB64u; }
 
 export function cachePeerPub(peerId, pubB64u) {
     if (!peerId || !pubB64u || typeof pubB64u !== 'string') return;
-    const prev = localStorage.getItem('proxion_e2e_peer_pub_' + peerId);
+    const prev = localStorage.getItem(e2eScopedKey('proxion_e2e_peer_pub_' + peerId));
     if (prev && prev !== pubB64u) {
         // The peer's key changed. Any prior "verified" mark applied to the OLD key
         // (its safety number), so it must not carry over to the new one, or the
         // verified badge would lie. Clear it; the user re-verifies the new key.
-        try { localStorage.removeItem('proxion_e2e_verified_' + peerId); } catch { /* ignore */ }
+        try { localStorage.removeItem(e2eScopedKey('proxion_e2e_verified_' + peerId)); } catch { /* ignore */ }
         console.warn('[e2e] peer key changed for', peerId, '- verification cleared');
     }
-    localStorage.setItem('proxion_e2e_peer_pub_' + peerId, pubB64u);
+    localStorage.setItem(e2eScopedKey('proxion_e2e_peer_pub_' + peerId), pubB64u);
 }
 
 function _peerPub(peerId) {
-    return localStorage.getItem('proxion_e2e_peer_pub_' + peerId) || null;
+    return localStorage.getItem(e2eScopedKey('proxion_e2e_peer_pub_' + peerId)) || null;
 }
 
 export function isE2EEnabled(peerId) {
@@ -360,7 +468,7 @@ export async function loadRatchetState(peerId) {
         } catch {}
     }
 
-    const ls = localStorage.getItem('proxion_e2e_state_' + peerId);
+    const ls = localStorage.getItem(e2eScopedKey('proxion_e2e_state_' + peerId));
     if (ls) {
         try {
             const state = await _decState(ls);
@@ -377,7 +485,7 @@ export async function saveRatchetState(peerId, state) {
     _stateCache[peerId] = state;
     if (!_stateEncKey) return;
     const enc = await _encState(state);
-    localStorage.setItem('proxion_e2e_state_' + peerId, enc);
+    localStorage.setItem(e2eScopedKey('proxion_e2e_state_' + peerId), enc);
 
     const root = typeof podStorageRoot === 'function' ? podStorageRoot() : null;
     if (root && solidSession?.info?.isLoggedIn) {

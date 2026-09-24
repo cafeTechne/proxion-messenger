@@ -2,6 +2,7 @@ import { solidSession, initSolidAuth, solidLogin, solidLogout, podStorageRoot, d
 import {
     initE2E, e2eSupported, isE2EEnabled, myX25519PubB64u, cachePeerPub,
     ratchetEncrypt, ratchetDecrypt, fetchAndCachePeerPub, E2EDecryptError, safetyNumber,
+    e2eScopedKey,
 } from './e2e.js';
 import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetContainerAcl,
          ensureProxionContainer, podWriteProfile, podReadProfile,
@@ -464,6 +465,7 @@ import { createIdentityResolver } from './identity.js';
             renderReactions: (id) => renderReactions(id),
             openCtxMenu, sendUpdateLastRead: _sendUpdateLastRead,
             getRoomCode: (id) => _roomCodes[id] || "",
+            e2eScopedKey,
             renderWindow: RENDER_WINDOW, scrollBatch: SCROLL_BATCH,
         });
         const { renderMessages, renderMessage, _renderThreaded, scrollToBottom } = rendering;
@@ -5437,7 +5439,7 @@ import { createIdentityResolver } from './identity.js';
                 const did = e2eStatus.state._fingerprintBarDid;
                 if (did) {
                     const sn = e2eStatus.state._fingerprintBarSafetyNumber;
-                    localStorage.setItem("proxion_verified_" + did, sn || "1");
+                    localStorage.setItem(e2eScopedKey("proxion_verified_" + did), sn || "1");
                     _updateIdentityFingerprint(did);
                 }
             });
@@ -5464,7 +5466,7 @@ import { createIdentityResolver } from './identity.js';
             document.getElementById('e2e-modal-verify')?.addEventListener('click', () => {
                 const peerId = document.getElementById('e2e-modal-current-peer')?.value;
                 if (peerId) {
-                    localStorage.setItem('proxion_e2e_verified_' + peerId, '1');
+                    localStorage.setItem(e2eScopedKey('proxion_e2e_verified_' + peerId), '1');
                     _updateE2EStatus(peerId);
                 }
                 document.getElementById('e2e-verify-modal').style.display = 'none';

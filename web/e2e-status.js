@@ -7,7 +7,7 @@
 // is cluster-owned state (state._fingerprintBarDid); the "Mark as verified"
 // button handler in main.js reads it back via e2eStatus.state.
 
-import { e2eSupported, isE2EEnabled, myX25519PubB64u, safetyNumber } from './e2e.js';
+import { e2eSupported, isE2EEnabled, myX25519PubB64u, safetyNumber, e2eScopedKey } from './e2e.js';
 import { t } from './i18n.js';
 
 export function createE2EStatus() {
@@ -21,7 +21,7 @@ export function createE2EStatus() {
         if (!el) return;
         const btn = document.getElementById('dm-e2e-verify-btn');
         if (peerId && isE2EEnabled(peerId)) {
-            const verified = localStorage.getItem('proxion_e2e_verified_' + peerId) === '1';
+            const verified = localStorage.getItem(e2eScopedKey('proxion_e2e_verified_' + peerId)) === '1';
             el.innerHTML = verified ? '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25z"/></svg> E2E' : '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 10.5V6.75a4.5 4.5 0 1 1 9 0v3.75M3.75 21.75h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H3.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25z"/></svg> E2E';
             el.title = verified ? 'End-to-end encrypted (verified)' : 'End-to-end encrypted (tap Verify to confirm identity)';
             el.style.display = 'inline';
@@ -72,7 +72,7 @@ export function createE2EStatus() {
             // confirmed out-of-band. A legacy "1" flag (or a rotated key) no
             // longer matches the strong number, so the contact shows unverified
             // and is re-verified against the stronger representation.
-            const stored = localStorage.getItem("proxion_verified_" + peerDid);
+            const stored = localStorage.getItem(e2eScopedKey("proxion_verified_" + peerDid));
             const verified = safetyNum ? (stored === safetyNum) : (stored === "1");
             if (verified) {
                 verifyBtn.textContent = '✓ ' + t('e2e.verified');
@@ -92,7 +92,7 @@ export function createE2EStatus() {
 
     async function _openVerifyModal(peerId) {
         const myPub   = myX25519PubB64u();
-        const theirPub = localStorage.getItem('proxion_e2e_peer_pub_' + peerId);
+        const theirPub = localStorage.getItem(e2eScopedKey('proxion_e2e_peer_pub_' + peerId));
         if (!myPub || !theirPub) return;
 
         const sn = await safetyNumber(myPub, theirPub);
