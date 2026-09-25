@@ -255,6 +255,15 @@
       <button id="backup-nudge-dismiss" aria-label="Dismiss backup reminder" style="background:transparent;border:none;color:var(--color-warning-text);cursor:pointer;margin-left:auto;font-size:1.1em;" data-i18n-attr="aria-label:ui.dismissBackupReminder">×</button>
     </div>
 
+    <!-- Persistent indicator: a ?join= room request is awaiting the owner's
+         approval (R106 gateway-free join handshake). Unlike the one-shot
+         "request sent" toast, this stays visible until the room appears, the
+         request fails, or the user dismisses it. -->
+    <div id="join-pending-banner" role="status" aria-live="polite">
+      <span id="join-pending-text" data-i18n="join.pendingApproval">Waiting for the room owner to approve your join request.</span>
+      <button id="join-pending-dismiss" aria-label="Dismiss" data-i18n-attr="aria-label:ui.dismiss">×</button>
+    </div>
+
     <!-- R13.7: image lightbox -->
     <div id="lightbox" role="dialog" aria-modal="true" aria-label="Image preview" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:2000;align-items:center;justify-content:center;" data-i18n-attr="aria-label:ui.imagePreview">
       <img id="lightbox-img" alt="Full-size image" style="max-width:90vw;max-height:90vh;border-radius:6px;box-shadow:0 4px 32px rgba(0,0,0,.8);">

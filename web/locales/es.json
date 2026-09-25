@@ -603,5 +603,6 @@
   "join.approved": "Aprobado: {who}",
   "join.joined": "Te uniste a {room}",
   "join.requestSent": "Solicitud enviada. Esperando la aprobación del propietario.",
-  "join.invalidInvite": "Eso no parece una invitación de sala válida."
+  "join.invalidInvite": "Eso no parece una invitación de sala válida.",
+  "join.pendingApproval": "Esperando a que el propietario de la sala apruebe tu solicitud de unión."
 }

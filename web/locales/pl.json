@@ -607,5 +607,6 @@
   "join.approved": "Zatwierdzono {who}",
   "join.joined": "Dołączono do {room}",
   "join.requestSent": "Prośba o dołączenie wysłana. Oczekiwanie na zgodę właściciela.",
-  "join.invalidInvite": "To nie wygląda na prawidłowe zaproszenie do pokoju."
+  "join.invalidInvite": "To nie wygląda na prawidłowe zaproszenie do pokoju.",
+  "join.pendingApproval": "Oczekiwanie na zatwierdzenie prośby o dołączenie przez właściciela pokoju."
 }

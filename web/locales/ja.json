@@ -603,5 +603,6 @@
   "join.approved": "{who} を承認しました",
   "join.joined": "{room} に参加しました",
   "join.requestSent": "参加リクエストを送信しました。オーナーの承認を待っています。",
-  "join.invalidInvite": "有効なルーム招待ではないようです。"
+  "join.invalidInvite": "有効なルーム招待ではないようです。",
+  "join.pendingApproval": "ルームのオーナーが参加リクエストを承認するのを待っています。"
 }

@@ -603,5 +603,6 @@
   "join.approved": "Đã chấp nhận {who}",
   "join.joined": "Đã tham gia {room}",
   "join.requestSent": "Đã gửi yêu cầu tham gia. Đang chờ chủ phòng phê duyệt.",
-  "join.invalidInvite": "Đây không giống một lời mời phòng hợp lệ."
+  "join.invalidInvite": "Đây không giống một lời mời phòng hợp lệ.",
+  "join.pendingApproval": "Đang chờ chủ phòng phê duyệt yêu cầu tham gia của bạn."
 }

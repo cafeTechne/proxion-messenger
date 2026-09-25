@@ -852,6 +852,7 @@ import { createIdentityResolver } from './identity.js';
         // { ownerPodRoot, container (Long Chat URL), title, unwatch }. History and
         // sends for these route to the owner's container via the *At pod helpers.
         const _remoteRooms = {};
+        let _joinPending = false;      // a ?join= request is awaiting owner approval (pending banner)
         const _podReadLastFetch = {};
         const POD_READ_DEBOUNCE_MS = 30000;
 
@@ -1233,6 +1234,30 @@ import { createIdentityResolver } from './identity.js';
         }
 
         // addRoomToSidebar: moved to view.js (createView).
+
+        // Persistent "pending owner approval" indicator for a ?join= room
+        // request. The one-shot join.requestSent toast disappears in a few
+        // seconds, but the gateway-free join handshake (webjoin.js, R106) can
+        // leave the joiner waiting on the owner for a while, so this stays
+        // visible until the request is approved (the room appears), fails, or
+        // the user dismisses it. role=status + aria-live=polite means the text
+        // is announced the moment the banner becomes visible.
+        function _showJoinPendingBanner() {
+            _joinPending = true;
+            document.getElementById("join-pending-banner")?.classList.add("visible");
+        }
+        function _clearJoinPendingBanner() {
+            if (!_joinPending) return;
+            _joinPending = false;
+            document.getElementById("join-pending-banner")?.classList.remove("visible");
+        }
+        // Backend errors _handle_join_room (gateway.py) can send back for a join
+        // attempt; any of these means the request failed, so the pending
+        // indicator should clear rather than linger forever.
+        const _JOIN_FAILURE_ERRORS = new Set([
+            "banned_from_room", "room_full", "invite_expired_or_exhausted",
+            "join_rate_limited", "room_not_found", "invalid_code",
+        ]);
 
         // Auto-join from URL ?join=CODE
         (function checkAutoJoin() {
@@ -1778,12 +1803,15 @@ import { createIdentityResolver } from './identity.js';
                     break;
                 case "join_request_sent":
                     showToast(t('join.requestSent'));
+                    _showJoinPendingBanner();
                     { const _jm = document.getElementById("join-room-modal"); if (_jm) _jm.style.display = "none"; }
                     break;
                 case "join_invalid_invite":
                     showToast(t('join.invalidInvite'), 'error');
+                    _clearJoinPendingBanner();
                     break;
                 case "room_joined":
+                    _clearJoinPendingBanner();
                     document.getElementById("room-create-modal").style.display = "none";
                     addRoomToSidebar(event.room_id, event.name, event.invite_url);
                     _podUpdateRoomIndex(event.room_id, true).catch(() => {});
@@ -2504,6 +2532,12 @@ import { createIdentityResolver } from './identity.js';
                     const _key = _errNice[_raw]
                         || (_raw.startsWith("file_type_not_allowed") ? "error.file_type_not_allowed" : null);
                     showToast(_key ? t(_key) : t('error.gatewayGeneric', { raw: _raw }), "error");
+                    // A join request that was pending owner approval failed
+                    // (banned, room full, expired invite, rate limit, not
+                    // found), so stop showing it as still awaiting approval.
+                    if (_joinPending && (_JOIN_FAILURE_ERRORS.has(_raw) || _raw.startsWith("No room found with invite code"))) {
+                        _clearJoinPendingBanner();
+                    }
                     break;
                 }
                 case "message_fetched": {
@@ -3040,6 +3074,7 @@ import { createIdentityResolver } from './identity.js';
             // replayed and doesn't linger in our pod.
             podDeletePendingJoin(roomId, appr.owner_webid).catch(() => {});
             showToast(t('join.joined', { room: title }));
+            _clearJoinPendingBanner();
         }
 
         // Merge locally-cached plaintext DM history over whatever the server/pod
@@ -4895,6 +4930,12 @@ import { createIdentityResolver } from './identity.js';
                 e.stopPropagation();
                 setPodBanner(false);
                 localStorage.setItem("proxion_pod_banner_dismissed", "1");
+            });
+
+            // Join-pending banner: let the user dismiss it manually (the owner
+            // may never respond, and there is no formal deny message).
+            attachListener('#join-pending-dismiss', 'click', () => {
+                _clearJoinPendingBanner();
             });
 
             // Room invite URL click to copy

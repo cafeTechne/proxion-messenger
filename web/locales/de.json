@@ -603,5 +603,6 @@
   "join.approved": "{who} zugelassen",
   "join.joined": "{room} beigetreten",
   "join.requestSent": "Beitrittsanfrage gesendet. Warte auf die Freigabe des Eigentümers.",
-  "join.invalidInvite": "Das sieht nicht nach einer gültigen Raum-Einladung aus."
+  "join.invalidInvite": "Das sieht nicht nach einer gültigen Raum-Einladung aus.",
+  "join.pendingApproval": "Warten auf die Genehmigung deiner Beitrittsanfrage durch den Raum-Eigentümer."
 }

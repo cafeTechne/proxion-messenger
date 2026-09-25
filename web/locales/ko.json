@@ -603,5 +603,6 @@
   "join.approved": "{who} 님을 승인했습니다",
   "join.joined": "{room}에 참여했습니다",
   "join.requestSent": "참여 요청을 보냈습니다. 소유자의 승인을 기다리는 중입니다.",
-  "join.invalidInvite": "유효한 방 초대가 아닌 것 같습니다."
+  "join.invalidInvite": "유효한 방 초대가 아닌 것 같습니다.",
+  "join.pendingApproval": "방 소유자가 참여 요청을 승인하기를 기다리는 중입니다."
 }

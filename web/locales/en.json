@@ -637,6 +637,7 @@
   "join.joined": "Joined {room}",
   "join.requestSent": "Join request sent. Waiting for the owner to approve.",
   "join.invalidInvite": "That does not look like a valid room invite.",
+  "join.pendingApproval": "Waiting for the room owner to approve your join request.",
   "section.solidPod": "Solid Pod",
   "section.data": "Data",
   "section.privacy": "Privacy",

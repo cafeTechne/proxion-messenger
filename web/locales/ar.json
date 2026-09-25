@@ -616,5 +616,6 @@
   "join.approved": "تمت الموافقة على {who}",
   "join.joined": "انضممت إلى {room}",
   "join.requestSent": "تم إرسال طلب الانضمام. في انتظار موافقة المالك.",
-  "join.invalidInvite": "لا يبدو أن هذه دعوة غرفة صالحة."
+  "join.invalidInvite": "لا يبدو أن هذه دعوة غرفة صالحة.",
+  "join.pendingApproval": "في انتظار موافقة مالك الغرفة على طلب انضمامك."
 }

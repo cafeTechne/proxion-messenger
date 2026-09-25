@@ -603,5 +603,6 @@
   "join.approved": "{who} onaylandı",
   "join.joined": "{room} odasına katıldın",
   "join.requestSent": "Katılma isteği gönderildi. Sahibinin onayı bekleniyor.",
-  "join.invalidInvite": "Bu geçerli bir oda daveti gibi görünmüyor."
+  "join.invalidInvite": "Bu geçerli bir oda daveti gibi görünmüyor.",
+  "join.pendingApproval": "Katılma isteğinizin oda sahibi tarafından onaylanması bekleniyor."
 }

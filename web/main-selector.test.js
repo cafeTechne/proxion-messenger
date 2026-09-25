@@ -86,6 +86,35 @@ describe('main.js gateway-free pod-connected state (issue #7)', () => {
   });
 });
 
+describe('main.js persistent join-pending banner', () => {
+  it('shows the banner (not just the toast) when a join request is sent', () => {
+    const body = src.slice(src.indexOf('case "join_request_sent":'), src.indexOf('case "join_invalid_invite":'));
+    expect(body).toContain("showToast(t('join.requestSent'));");
+    expect(body).toContain('_showJoinPendingBanner();');
+  });
+  it('clears the banner on an invalid invite and on room_joined', () => {
+    const invalid = src.slice(src.indexOf('case "join_invalid_invite":'), src.indexOf('case "room_joined":'));
+    expect(invalid).toContain('_clearJoinPendingBanner();');
+    const joined = src.slice(src.indexOf('case "room_joined":'), src.indexOf('case "federated_room_joined":'));
+    expect(joined).toContain('_clearJoinPendingBanner();');
+  });
+  it('clears the banner on a join-relevant backend error, not on unrelated ones', () => {
+    const errBody = src.slice(src.indexOf('case "error": {'), src.indexOf('case "message_fetched":'));
+    expect(errBody).toContain('_JOIN_FAILURE_ERRORS.has(_raw)');
+    expect(errBody).toContain('_clearJoinPendingBanner();');
+  });
+  it('clears the banner once a gateway-free (pod) join is approved', () => {
+    const fn = src.slice(src.indexOf('async function _onWebJoinApproved'), src.indexOf('async function mergeDmLocalHistory'));
+    expect(fn).toContain("showToast(t('join.joined'");
+    expect(fn).toContain('_clearJoinPendingBanner();');
+  });
+  it('toggles the banner element via the .visible class, driven by the join-pending-dismiss button', () => {
+    expect(src).toMatch(/document\.getElementById\("join-pending-banner"\)\?\.classList\.add\("visible"\)/);
+    expect(src).toMatch(/document\.getElementById\("join-pending-banner"\)\?\.classList\.remove\("visible"\)/);
+    expect(src).toContain("attachListener('#join-pending-dismiss', 'click', () => {");
+  });
+});
+
 describe('CSS.escape neutralizes a quote-bearing message id', () => {
   it('escapes the double quote so the built selector has no bare quote to break out on', () => {
     const escaped = cssEscape('"><img src=x onerror=alert(1)>');

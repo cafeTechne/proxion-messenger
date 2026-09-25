@@ -603,5 +603,6 @@
   "join.approved": "{who} disetujui",
   "join.joined": "Bergabung ke {room}",
   "join.requestSent": "Permintaan bergabung terkirim. Menunggu persetujuan pemilik.",
-  "join.invalidInvite": "Itu sepertinya bukan undangan ruang yang valid."
+  "join.invalidInvite": "Itu sepertinya bukan undangan ruang yang valid.",
+  "join.pendingApproval": "Menunggu pemilik ruang menyetujui permintaan bergabung Anda."
 }

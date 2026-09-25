@@ -603,5 +603,6 @@
   "join.approved": "{who} autorisé",
   "join.joined": "Vous avez rejoint {room}",
   "join.requestSent": "Demande envoyée. En attente de l'approbation du propriétaire.",
-  "join.invalidInvite": "Cela ne ressemble pas à une invitation de salon valide."
+  "join.invalidInvite": "Cela ne ressemble pas à une invitation de salon valide.",
+  "join.pendingApproval": "En attente de l'approbation de votre demande par le propriétaire du salon."
 }
