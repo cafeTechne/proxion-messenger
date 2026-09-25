@@ -21,10 +21,13 @@ cli    = ["fastapi>=0.111", "uvicorn[standard]>=0.29", "httpx>=0.27", "typer>=0.
 # pytest-asyncio pinned <1.4: 1.4.0 removed the implicit event loop that the
 # sync-test `asyncio.get_event_loop().run_until_complete(...)` pattern relies on.
 gateway = ["websockets>=12.0,<16", "pytest-asyncio>=1.3,<1.4"]
+# MCP server: exposes messaging to AI agents over the gateway WebSocket protocol.
+mcp = ["mcp>=1.0", "websockets>=12.0,<16"]
 test = ["pytest", "pytest-asyncio>=1.3,<1.4", "respx", "httpx", "ruff>=0.6", "rdflib"]
 
 [project.scripts]
 proxion = "proxion_messenger_core.cli:main"
+proxion-mcp = "proxion_messenger_core.mcp_server:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
