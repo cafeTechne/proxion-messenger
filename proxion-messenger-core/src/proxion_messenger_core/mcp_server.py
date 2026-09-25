@@ -119,6 +119,26 @@ def build_server():
         """Search the agent's accessible messages for a text query."""
         return await (await client()).search(query)
 
+    @mcp.tool()
+    async def edit_message(thread_id: str, message_id: str, text: str) -> dict:
+        """Edit a message the agent previously sent, in a room or DM thread."""
+        return await (await client()).edit_message(thread_id, message_id, text)
+
+    @mcp.tool()
+    async def delete_message(thread_id: str, message_id: str) -> dict:
+        """Delete a message the agent previously sent, in a room or DM thread."""
+        return await (await client()).delete_message(thread_id, message_id)
+
+    @mcp.tool()
+    async def react_to_message(thread_id: str, message_id: str, emoji: str) -> dict:
+        """React to a message with an emoji, in a room or DM thread."""
+        return await (await client()).react(thread_id, message_id, emoji)
+
+    @mcp.tool()
+    async def get_room_members(room_id: str) -> list:
+        """List the members of a room the agent belongs to."""
+        return await (await client()).get_room_members(room_id)
+
     return mcp
 
 

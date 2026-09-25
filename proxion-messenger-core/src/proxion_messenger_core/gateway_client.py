@@ -170,3 +170,35 @@ class GatewayClient:
     async def search(self, query: str) -> list:
         resp = await self._request("search", "search_results", query=query)
         return resp.get("results", [])
+
+    async def edit_message(self, thread_id: str, message_id: str, text: str) -> dict:
+        """Edit a previously sent message in a room or DM thread. Only the
+        original sender may edit their own message; the gateway rejects
+        anyone else's attempt."""
+        resp = await self._request("edit_local_message", "message_edited",
+                                   thread_id=thread_id, message_id=message_id, content=text)
+        return {"message_id": resp.get("message_id"), "content": resp.get("new_content", text)}
+
+    async def delete_message(self, thread_id: str, message_id: str) -> dict:
+        """Delete a previously sent message in a room or DM thread. Only the
+        original sender may delete their own message."""
+        resp = await self._request("delete_local_message", "message_deleted",
+                                   thread_id=thread_id, message_id=message_id)
+        return {"message_id": resp.get("message_id"), "thread_id": resp.get("thread_id")}
+
+    async def react(self, thread_id: str, message_id: str, emoji: str) -> dict:
+        """React to a message with an emoji, in a room or a DM thread.
+
+        The gateway keys a reaction target by room_id for a room or cert_id
+        for a DM thread, so thread_id is sent as both: whichever one matches
+        the caller's actual thread is the one the gateway uses, the same
+        thread_id addressing read_history and edit_message already rely on.
+        """
+        resp = await self._request("add_reaction", "reaction_added",
+                                   room_id=thread_id, cert_id=thread_id,
+                                   message_id=message_id, emoji=emoji)
+        return {"message_id": resp.get("message_id"), "emoji": resp.get("emoji")}
+
+    async def get_room_members(self, room_id: str) -> list:
+        resp = await self._request("get_room_members", "room_members", room_id=room_id)
+        return resp.get("members", [])

@@ -61,3 +61,48 @@ async def test_client_direct_message_and_history(live_gateway, alice_agent, bob_
     finally:
         await alice.close()
         await bob.close()
+
+
+@pytest.mark.asyncio
+async def test_client_edits_and_deletes_a_dm(live_gateway, alice_agent, bob_agent):
+    alice = GatewayClient(live_gateway["url"], alice_agent, "Agent A")
+    bob = GatewayClient(live_gateway["url"], bob_agent, "Agent B")
+    await alice.connect()
+    await bob.connect()
+    try:
+        sent = await alice.send_dm(bob.did, "original text")
+        message_id = sent["message_id"]
+
+        edited = await alice.edit_message(bob.did, message_id, "corrected text")
+        assert edited["message_id"] == message_id
+        assert edited["content"] == "corrected text"
+
+        deleted = await alice.delete_message(bob.did, message_id)
+        assert deleted["message_id"] == message_id
+    finally:
+        await alice.close()
+        await bob.close()
+
+
+@pytest.mark.asyncio
+async def test_client_reacts_to_a_room_message(live_gateway, alice_agent, bob_agent):
+    alice = GatewayClient(live_gateway["url"], alice_agent, "Agent A")
+    bob = GatewayClient(live_gateway["url"], bob_agent, "Agent B")
+    await alice.connect()
+    await bob.connect()
+    try:
+        room = await alice.create_room("Agent Reaction Room")
+        room_id = room["room_id"]
+        sent = await alice.send_room(room_id, "react to this")
+        message_id = sent["message_id"]
+
+        reacted = await alice.react(room_id, message_id, "\U0001F44D")
+        assert reacted["message_id"] == message_id
+        assert reacted["emoji"] == "\U0001F44D"
+
+        members = await alice.get_room_members(room_id)
+        webids = [m.get("webid") for m in members]
+        assert alice.did in webids
+    finally:
+        await alice.close()
+        await bob.close()
