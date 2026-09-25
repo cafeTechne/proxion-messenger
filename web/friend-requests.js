@@ -31,12 +31,12 @@ export function createFriendRequests({ getSocket }) {
             : `<div style="color:#e2e8f0;margin-bottom:2px">Friend request</div>`;
         li.innerHTML =
             nameLine +
-            `<div style="color:#94a3b8;font-size:0.72em;margin-bottom:4px;word-break:break-all" title="${escHtml(fromDid)}">${escHtml(fromDid)}</div>` +
+            `<div style="color:var(--text-secondary);font-size:0.72em;margin-bottom:4px;word-break:break-all" title="${escHtml(fromDid)}">${escHtml(fromDid)}</div>` +
             `<div style="display:flex;gap:6px">` +
             `<button data-fr-action="accept" data-inv-id="${escHtml(req.invitation_id)}" ` +
             `style="background:#7c3aed;color:#fff;border:none;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:0.8em">Accept</button>` +
             `<button data-fr-action="dismiss" data-inv-id="${escHtml(req.invitation_id)}" ` +
-            `style="background:#334155;color:#94a3b8;border:none;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:0.8em">Ignore</button>` +
+            `style="background:#334155;color:var(--text-secondary);border:none;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:0.8em">Ignore</button>` +
             `</div>`;
         list.appendChild(li);
         refreshFriendRequestsBadge();

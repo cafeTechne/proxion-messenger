@@ -36,7 +36,7 @@ export function createMembers({ getActiveView, requestRoomMembers }) {
         // shown, append the stable short id inline so same-named members stay
         // distinguishable without relying on hover (title=).
         const idTag = m.display_name
-            ? ` <span class="member-id-suffix" style="color:#8091a7;font-size:0.72em">${escHtml((m.webid || "").slice(8, 22) + "…")}</span>`
+            ? ` <span class="member-id-suffix" style="color:var(--slate-600);font-size:0.72em">${escHtml((m.webid || "").slice(8, 22) + "…")}</span>`
             : "";
         return `<div class="member-item" data-msg-action="profile" data-webid="${escHtml(m.webid)}" data-name="${escHtml(displayName)}">
                 <div style="position:relative;display:inline-block;margin-right:8px;">

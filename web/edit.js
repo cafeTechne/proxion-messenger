@@ -97,7 +97,7 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
         if (!tag) {
             tag = document.createElement("span");
             tag.className = "edited-tag";
-            tag.style.cssText = "font-size:0.75em;color:#94a3b8;margin-left:4px;";
+            tag.style.cssText = "font-size:0.75em;color:var(--text-secondary);margin-left:4px;";
             textEl.after(tag);
         }
         const editedTime = event.edited_at ? new Date(event.edited_at).toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit" }) : "";

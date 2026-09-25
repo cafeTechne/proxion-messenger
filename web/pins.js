@@ -46,13 +46,13 @@ export function createPins({ getSocket, getActiveView }) {
             // message_id is client-supplied and stored verbatim, so escape it before
             // it lands in these innerHTML attributes (stored XSS otherwise).
             const msgIdEsc = escHtml(pin.message_id);
-            div.innerHTML = `<div style="font-size:0.85em;color:#94a3b8">${pinner}</div>
+            div.innerHTML = `<div style="font-size:0.85em;color:var(--text-secondary)">${pinner}</div>
                 <div style="margin:2px 0;">${preview}</div>
                 <div style="display:flex;gap:8px;margin-top:4px;">
                     <button data-pin-action="jump" data-msg-id="${msgIdEsc}"
                         style="background:transparent;border:none;color:#7dd3fc;cursor:pointer;padding:0;font-size:0.8em;">[Jump]</button>
                     <button data-pin-action="unpin" data-msg-id="${msgIdEsc}" data-thread-id="${threadId}"
-                        style="background:transparent;border:none;color:#94a3b8;cursor:pointer;padding:0;font-size:0.8em;">Unpin</button>
+                        style="background:transparent;border:none;color:var(--text-secondary);cursor:pointer;padding:0;font-size:0.8em;">Unpin</button>
                 </div>`;
             list.appendChild(div);
         });

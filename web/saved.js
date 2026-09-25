@@ -174,7 +174,7 @@ export function createSaved({ showToast, jumpToMsg }) {
             const div = document.createElement('div');
             div.style.cssText = 'border-bottom:1px solid #334155;padding:8px 0;color:#f1f5f9;';
             const meta = document.createElement('div');
-            meta.style.cssText = 'font-size:0.85em;color:#94a3b8;';
+            meta.style.cssText = 'font-size:0.85em;color:var(--text-secondary);';
             meta.textContent = `${row.from_name} · ${row.thread_label}`;
             const body = document.createElement('div');
             body.style.cssText = 'margin:2px 0;';
@@ -187,7 +187,7 @@ export function createSaved({ showToast, jumpToMsg }) {
             jump.addEventListener('click', () => jumpToMsg?.(row.id));
             const rm = document.createElement('button');
             rm.textContent = t('saved.remove');
-            rm.style.cssText = 'background:transparent;border:none;color:#94a3b8;cursor:pointer;padding:0;font-size:0.8em;';
+            rm.style.cssText = 'background:transparent;border:none;color:var(--text-secondary);cursor:pointer;padding:0;font-size:0.8em;';
             rm.addEventListener('click', async () => {
                 await removeSaved(row.id).catch(() => {});
                 podSyncRemoveSavedMessage(row.id).catch(() => {});   // R62
