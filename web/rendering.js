@@ -404,7 +404,7 @@ export function createRendering({
                 const placeholder = document.createElement("div");
                 placeholder.className = "reply-context reply-context-loading";
                 placeholder.dataset.replyTarget = msg.reply_to_id;
-                placeholder.innerHTML = `<span class="reply-connector"></span><em style="color:#8091a7">${t('msg.loadingReply')}</em>`;
+                placeholder.innerHTML = `<span class="reply-connector"></span><em style="color:var(--slate-600)">${t('msg.loadingReply')}</em>`;
                 body.appendChild(placeholder);
                 if (socket && socket.readyState === WebSocket.OPEN) {
                     socket.send(JSON.stringify({ cmd: "get_message", message_id: msg.reply_to_id }));

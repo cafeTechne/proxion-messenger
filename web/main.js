@@ -2531,7 +2531,7 @@ import { createIdentityResolver } from './identity.js';
                                 ${s.is_current ? '<span class="session-current">● this device</span>' : ''}
                             </div>
                             ${!s.is_current ? `<button class="session-revoke-btn" data-session-id="${s.session_id}">Revoke</button>` : ''}
-                        </div>`).join('') || '<div style="color:#94a3b8">No sessions found.</div>';
+                        </div>`).join('') || inlineNotice('No sessions found.', 'empty');
                     sl.querySelectorAll('.session-revoke-btn').forEach(btn => {
                         btn.addEventListener('click', () => {
                             if (socket) socket.send(JSON.stringify({cmd:'revoke_session',session_id:btn.dataset.sessionId}));
@@ -2616,7 +2616,7 @@ import { createIdentityResolver } from './identity.js';
                 case "webhook_list": {
                     const wl = document.getElementById("webhook-list-area");
                     if (!wl) break;
-                    if (!event.webhooks || !event.webhooks.length) { wl.innerHTML = '<em style="color:#94a3b8">No webhooks.</em>'; break; }
+                    if (!event.webhooks || !event.webhooks.length) { wl.innerHTML = inlineNotice('No webhooks.', 'empty'); break; }
                     wl.innerHTML = event.webhooks.map(h => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:0.85em;">
                         <span style="flex:1">${escHtml(h.bot_name)} (${escHtml(h.direction)})</span>
                         <button data-del-wh="${escHtml(h.id)}" style="background:#7f1d1d;border:none;color:#fca5a5;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:0.8em;">Delete</button>
@@ -2656,7 +2656,7 @@ import { createIdentityResolver } from './identity.js';
                 case "scheduled_list": {
                     const sp = document.getElementById("scheduled-msgs-list");
                     if (!sp) break;
-                    if (!event.scheduled || !event.scheduled.length) { sp.innerHTML = '<em style="color:#94a3b8">None scheduled.</em>'; break; }
+                    if (!event.scheduled || !event.scheduled.length) { sp.innerHTML = inlineNotice('None scheduled.', 'empty'); break; }
                     sp.innerHTML = event.scheduled.map(s => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:0.85em;">
                         <span style="flex:1">${escHtml((s.content||'').slice(0,40))} <em style="color:#94a3b8">(${new Date(s.send_at*1000).toLocaleString(getLocale())})</em></span>
                         <button data-cancel-sched="${s.id}" style="background:#334155;border:none;color:#f1f5f9;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:0.8em;">Cancel</button>
@@ -2682,7 +2682,7 @@ import { createIdentityResolver } from './identity.js';
                     if (!container) break;
                     const devs = event.devices || [];
                     if (devs.length === 0) {
-                        container.innerHTML = '<span style="color:#8091a7;">No linked devices.</span>';
+                        container.innerHTML = inlineNotice('No linked devices.', 'empty');
                         break;
                     }
                     container.innerHTML = devs.map(d => {
