@@ -5046,7 +5046,7 @@ import { createIdentityResolver } from './identity.js';
             });
             // R18.3.3: about website
             attachListener('#settings-about-website-btn', 'click', () => {
-                const url = 'https://github.com/proxion-messenger';
+                const url = 'https://github.com/cafeTechne/proxion-messenger';
                 if (window.__TAURI__?.shell?.open) {
                     window.__TAURI__.shell.open(url);
                 } else {
