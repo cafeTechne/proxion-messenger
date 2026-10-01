@@ -25,7 +25,8 @@
       },
       "shell": {
         "all": false,
-        "sidecar": false
+        "sidecar": false,
+        "open": "^https://github\\.com/cafeTechne/proxion-messenger"
       }
     },
     "bundle": {

@@ -22,12 +22,6 @@ struct UnreadContact {
     thread_id: String,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-struct PodCredentials {
-    css_url: String,
-    email: String,
-}
-
 // ── Keychain helpers ──────────────────────────────────────────────────────────
 
 fn kentry(key: &str) -> Result<keyring::Entry, String> {
@@ -40,17 +34,6 @@ fn store_pod_credentials(css_url: String, email: String, password: String) -> Re
     kentry("pod_email")?.set_password(&email).map_err(|e| e.to_string())?;
     kentry("pod_password")?.set_password(&password).map_err(|e| e.to_string())?;
     Ok(())
-}
-
-#[tauri::command]
-fn load_pod_credentials() -> Result<Option<PodCredentials>, String> {
-    let css_url = match kentry("pod_css_url")?.get_password() {
-        Ok(v) => v,
-        Err(keyring::Error::NoEntry) => return Ok(None),
-        Err(e) => return Err(e.to_string()),
-    };
-    let email = kentry("pod_email")?.get_password().unwrap_or_default();
-    Ok(Some(PodCredentials { css_url, email }))
 }
 
 #[tauri::command]
@@ -122,16 +105,44 @@ fn consume_pending_deep_link(state: State<PendingDeepLink>) -> Option<String> {
     state.0.lock().unwrap().take()
 }
 
-fn extract_proxion_url() -> Option<String> {
-    // Only accept a well-formed single proxion:// deep link. A "%1"-quoting break in
-    // the OS URL-scheme registration can smuggle extra argv tokens, so require the
-    // whole argument to be one proxion:// URL of sane length with no embedded
-    // whitespace or quote characters.
-    std::env::args().skip(1).find(|a| {
+const AUTOSTART_FLAG: &str = "--autostart";
+
+/// Pick the deep link out of the launch arguments (argv[0] already removed).
+///
+/// A "%1"-quoting break in the OS URL-scheme registration can smuggle extra argv
+/// tokens, so apart from the known autostart flag the arguments must be exactly
+/// one proxion:// URL of sane length with no whitespace, quotes or control chars.
+fn parse_deep_link<I, S>(args: I) -> Option<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut found: Option<String> = None;
+    for arg in args {
+        let a = arg.as_ref();
+        if a == AUTOSTART_FLAG {
+            continue;
+        }
+        if found.is_some() {
+            return None;
+        }
+        found = Some(a.to_string());
+    }
+    found.filter(|a| {
         a.starts_with("proxion://")
             && a.len() <= 2048
-            && !a.chars().any(|c| c.is_whitespace() || c == '"' || c == '\'')
+            && !a
+                .chars()
+                .any(|c| c.is_whitespace() || c.is_control() || c == '"' || c == '\'')
     })
+}
+
+fn focus_main_window(app: &AppHandle) {
+    if let Some(win) = app.get_window("main") {
+        win.show().ok();
+        win.unminimize().ok();
+        win.set_focus().ok();
+    }
 }
 
 // ── Autostart launch detection ────────────────────────────────────────────────
@@ -147,7 +158,7 @@ fn is_autostart_launch(state: State<IsAutostartLaunch>) -> bool {
 
 #[tauri::command]
 fn quit_app(app: AppHandle, gateway: State<GatewayChild>) {
-    if let Some(mut child) = gateway.0.lock().unwrap().take() {
+    if let Some(child) = gateway.0.lock().unwrap().take() {
         child.kill().ok();
     }
     app.exit(0);
@@ -156,13 +167,23 @@ fn quit_app(app: AppHandle, gateway: State<GatewayChild>) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 fn main() {
-    let pending_link = extract_proxion_url();
-    let is_autostart = std::env::args().any(|a| a == "--autostart");
+    let pending_link = parse_deep_link(std::env::args().skip(1));
+    let is_autostart = std::env::args().any(|a| a == AUTOSTART_FLAG);
 
     tauri::Builder::default()
+        // Registered first: a second launch forwards its argv here and exits during
+        // plugin setup, before our setup could spawn another gateway sidecar.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            focus_main_window(app);
+            if let Some(url) = parse_deep_link(argv.into_iter().skip(1)) {
+                if let Some(win) = app.get_window("main") {
+                    win.emit("deep-link-invoke", &url).ok();
+                }
+            }
+        }))
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
-            Some(vec!["--autostart"]),
+            Some(vec![AUTOSTART_FLAG]),
         ))
         .manage(GatewayChild(Mutex::new(None)))
         .manage(PendingDeepLink(Mutex::new(pending_link)))
@@ -178,7 +199,7 @@ fn main() {
                     }
                 }
                 "quit" => {
-                    if let Some(mut child) =
+                    if let Some(child) =
                         app.state::<GatewayChild>().0.lock().unwrap().take()
                     {
                         child.kill().ok();
@@ -206,7 +227,6 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             show_notification,
             store_pod_credentials,
-            load_pod_credentials,
             clear_pod_credentials,
             update_tray_unread,
             consume_pending_deep_link,
@@ -297,4 +317,70 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::parse_deep_link;
+
+    #[test]
+    fn accepts_single_valid_link() {
+        assert_eq!(
+            parse_deep_link(["proxion://join/abc123"]),
+            Some("proxion://join/abc123".to_string())
+        );
+    }
+
+    #[test]
+    fn accepts_link_alongside_autostart_flag() {
+        assert_eq!(
+            parse_deep_link(["--autostart", "proxion://join/abc"]),
+            Some("proxion://join/abc".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_smuggled_extra_token() {
+        assert_eq!(parse_deep_link(["proxion://join/abc", "--evil"]), None);
+        assert_eq!(parse_deep_link(["--evil", "proxion://join/abc"]), None);
+    }
+
+    #[test]
+    fn rejects_two_links() {
+        assert_eq!(parse_deep_link(["proxion://join/a", "proxion://join/b"]), None);
+    }
+
+    #[test]
+    fn rejects_quote_space_and_control_chars() {
+        assert_eq!(parse_deep_link(["proxion://join/a\"b"]), None);
+        assert_eq!(parse_deep_link(["proxion://join/a'b"]), None);
+        assert_eq!(parse_deep_link(["proxion://join/a b"]), None);
+        assert_eq!(parse_deep_link(["proxion://join/a\tb"]), None);
+        assert_eq!(parse_deep_link(["proxion://join/a\u{0}b"]), None);
+        assert_eq!(parse_deep_link(["proxion://join/a\u{1b}b"]), None);
+        assert_eq!(parse_deep_link(["proxion://join/a\u{7f}b"]), None);
+    }
+
+    #[test]
+    fn rejects_overlong() {
+        let max = format!("proxion://{}", "a".repeat(2048 - 10));
+        assert_eq!(parse_deep_link([max.as_str()]), Some(max.clone()));
+        let over = format!("proxion://{}", "a".repeat(2048 - 9));
+        assert_eq!(parse_deep_link([over.as_str()]), None);
+    }
+
+    #[test]
+    fn rejects_non_proxion_scheme() {
+        assert_eq!(parse_deep_link(["https://example.com"]), None);
+        assert_eq!(parse_deep_link(["file:///etc/passwd"]), None);
+        assert_eq!(parse_deep_link(["PROXION://join/a"]), None);
+    }
+
+    #[test]
+    fn autostart_alone_or_no_args_is_none() {
+        assert_eq!(parse_deep_link(["--autostart"]), None);
+        assert_eq!(parse_deep_link(Vec::<String>::new()), None);
+    }
 }
