@@ -120,7 +120,7 @@ body {
     margin: 0;
     padding: 0;
     font-family: system-ui, -apple-system, sans-serif;
-    background: var(--bg-primary);
+    background: var(--surface-0);
     color: var(--text-primary);
     height: 100vh;
     display: flex;
@@ -157,7 +157,7 @@ body {
 
 #sidebar {
     width: 260px;
-    background: var(--bg-secondary);
+    background: var(--surface-1);
     border-inline-end: 1px solid var(--border);
     display: flex;
     flex-direction: column;
@@ -227,7 +227,10 @@ nav li {
 }
 
 nav li:hover { background: var(--tint-hover); }
-nav li.active { background: var(--bg-accent); color: var(--text-primary); }
+/* Raised fill plus an accent edge, so the open conversation reads against both
+   the sidebar and the chat canvas. */
+nav li.active { background: var(--surface-3); color: var(--text-primary); box-shadow: inset 3px 0 var(--accent); }
+:root[dir="rtl"] nav li.active { box-shadow: inset -3px 0 var(--accent); }
 /* Empty-state rows are not clickable conversations. */
 nav li.sidebar-empty, nav li.solidchat-empty { cursor: default; }
 nav li.sidebar-empty:hover, nav li.solidchat-empty:hover { background: none; }
@@ -282,19 +285,15 @@ nav li.dm-item > svg { flex: 0 0 16px; }
     margin-top: 2px;
 }
 
-#chat-area {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    background: var(--bg-accent);
-}
+/* The chat column is the page's only <main>; its flex layout is inline. */
+main { background: var(--surface-0); }
 
 #chat-header {
     padding: 15px var(--space-4);
     /* Clear the notch/status bar in standalone PWA mode (0 on non-notch/desktop). */
     padding-top: calc(15px + env(safe-area-inset-top, 0px));
-    background: var(--bg-primary);
-    border-bottom: 1px solid var(--bg-secondary);
+    background: var(--surface-0);
+    border-bottom: 1px solid var(--border);
 }
 #chat-header-name {
     margin: 0;
@@ -504,8 +503,9 @@ nav li.dm-item > svg { flex: 0 0 16px; }
     position: absolute;
     inset-inline-end: 12px;
     top: -14px;
-    background: var(--bg-secondary);
+    background: var(--surface-2);
     border: 1px solid var(--border);
+    box-shadow: var(--shadow-md);
     border-radius: 6px;
     padding: 2px;
     z-index: 10;
@@ -620,7 +620,7 @@ nav li.dm-item > svg { flex: 0 0 16px; }
     display: flex;
     gap: 4px;
     align-items: center;
-    background: var(--bg-primary);
+    background: var(--surface-0);
 }
 
 .paperclip {
@@ -696,7 +696,7 @@ nav li.dm-item > svg { flex: 0 0 16px; }
 
 #message-input {
     flex: 1;
-    background: var(--bg-secondary);
+    background: var(--surface-2);
     border: 1px solid var(--border);
     /* 6px block padding: 1.4 line-height + border lands on the 36px control height. */
     padding: calc(var(--space-2) - 2px) var(--space-3);
@@ -817,8 +817,8 @@ button:hover { background: var(--accent-hover); }
     .compose-more-toggle:checked ~ .compose-actions {
         display: flex; align-items: center; gap: 6px;
         position: absolute; bottom: calc(100% + 6px); inset-inline-start: 8px;
-        padding: 8px; background: var(--slate-800);
-        border: 1px solid var(--slate-600); border-radius: 8px;
+        padding: 8px; background: var(--surface-2);
+        border: 1px solid var(--border); border-radius: 8px;
         box-shadow: var(--shadow-md); z-index: 1000;
     }
     /* One context button: the mic shows while the input is empty, Send once the
@@ -1117,7 +1117,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
 }
 .edited-badge:hover { color: var(--slate-300); }
 .edit-history-popover {
-    position: absolute; z-index: 500; background: var(--bg-secondary);
+    position: absolute; z-index: 500; background: var(--surface-2);
     border: 1px solid var(--border); border-radius: 6px;
     padding: 10px 14px; font-size: 0.82em; color: var(--text-primary);
     max-width: 340px; max-height: 200px; overflow-y: auto;
@@ -1150,7 +1150,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
 /* 13.14: Contact search dropdown */
 .contact-search-dropdown {
     position: absolute; z-index: 600; width: 100%;
-    background: var(--bg-secondary);
+    background: var(--surface-2);
     border: 1px solid var(--border); border-radius: 6px;
     max-height: 200px; overflow-y: auto;
     box-shadow: var(--shadow-md);
@@ -1491,7 +1491,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         #gif-tray {
             position: absolute; bottom: 62px; left: 8px; right: 8px;
             max-width: 420px; max-height: 300px; overflow-y: auto;
-            background: var(--slate-800); border: 1px solid var(--slate-600);
+            background: var(--surface-2); border: 1px solid var(--border);
             border-radius: 8px; padding: 10px; z-index: 1000;
             box-shadow: var(--shadow-md);
         }
@@ -1521,7 +1521,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         .composer-emoji-panel {
             position: absolute; bottom: 62px; left: 8px; right: 8px;
             max-width: 420px; max-height: 260px; overflow-y: auto;
-            background: var(--slate-800); border: 1px solid var(--slate-600);
+            background: var(--surface-2); border: 1px solid var(--border);
             border-radius: 8px; padding: 8px; z-index: 1000;
             grid-template-columns: repeat(auto-fill, minmax(36px, 1fr)); gap: 2px;
             box-shadow: var(--shadow-md);
@@ -1590,7 +1590,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         /* Link Previews */
         .link-preview {
             margin-top: 10px;
-            background: var(--surface-0);
+            background: var(--surface-2);
             color: var(--text-primary);
             border: 1px solid var(--border);
             border-radius: 8px;
@@ -1722,13 +1722,13 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         .profile-popover {
             display: none;
             position: fixed;
-            background: var(--bg-secondary);
+            background: var(--surface-2);
             border: 1px solid var(--border);
             border-radius: 12px;
             padding: 16px;
             min-width: 280px;
             z-index: 1001;
-            box-shadow: var(--shadow-lg);
+            box-shadow: var(--shadow-md);
             animation: popoverFadeIn 0.15s ease-out;
         }
         @keyframes popoverFadeIn {
@@ -1853,7 +1853,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
            names stay as aliases so existing markup and JS keep working. */
         .menu, .ctx-menu, .delete-submenu, .member-context-menu {
             position: fixed; z-index: var(--z-menu);
-            background: var(--surface-2); border: 1px solid var(--slate-700);
+            background: var(--surface-2); border: 1px solid var(--border);
             border-radius: var(--radius-md); box-shadow: var(--shadow-md);
             min-width: 180px; padding: var(--space-1) 0; overflow: hidden;
         }
@@ -1897,7 +1897,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         .forwarded-banner { font-size: 0.8em; color: var(--text-secondary); margin-bottom: 3px; font-style: italic; }
 
         /* Round 69: Schedule picker */
-        .schedule-picker { position: absolute; bottom: 64px; right: 12px; background: var(--slate-800); border: 1px solid var(--slate-700); border-radius: 8px; padding: 14px; z-index: 200; display: flex; flex-direction: column; gap: 10px; min-width: 240px; box-shadow: var(--shadow-md); }
+        .schedule-picker { position: absolute; bottom: 64px; right: 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 14px; z-index: 200; display: flex; flex-direction: column; gap: 10px; min-width: 240px; box-shadow: var(--shadow-md); }
         .schedule-picker input[type="datetime-local"] { background: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-50); padding: 6px 8px; border-radius: 4px; font-size: 0.9em; width: 100%; box-sizing: border-box; }
         .schedule-picker label { font-size: 0.85em; color: var(--text-secondary); }
 
