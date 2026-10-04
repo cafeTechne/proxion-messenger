@@ -44,30 +44,67 @@ export function webidColor(webid) {
     return `hsl(${hue}, 55%, 68%)`;
 }
 
-// Lightweight Markdown renderer (no external deps). Escapes HTML first.
+function _escText(str) {
+    return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+// Escaped URL for use as both href and link text. "@" and ":" become numeric
+// references (the browser decodes them back, so the URL is unchanged) so the
+// later @mention and :emoji: passes cannot rewrite text inside the attribute.
+function _escUrl(url) {
+    return escHtml(url).replace(/@/g, "&#64;").replace(/:/g, "&#58;");
+}
+
+// Trim trailing sentence punctuation off an autolinked URL. A closing paren is
+// kept only when it balances an opening one inside the URL.
+function _trimUrl(url) {
+    let u = url;
+    for (;;) {
+        const c = u[u.length - 1];
+        if (".,;:!?".includes(c)) { u = u.slice(0, -1); continue; }
+        if (c === ")" && u.split("(").length < u.split(")").length) { u = u.slice(0, -1); continue; }
+        return u;
+    }
+}
+
+// Lightweight Markdown renderer (no external deps). Message text is untrusted:
+// code spans and URLs are pulled out of the raw text into placeholders first
+// (each escaped on its own), the rest is escaped, formatting then runs on the
+// escaped text only, and the placeholders are restored last.
 export function renderMarkdown(text) {
     if (!text) return "";
-    let s = text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    const tokens = [];
+    const hold = (html) => `${tokens.push(html) - 1}`;
+    let s = String(text).replace(/[]/g, "");
     // Code blocks
     s = s.replace(/```([\s\S]*?)```/g, (_, code) =>
-        `<pre class="code-block"><code>${code.trim()}</code></pre>`);
+        hold(`<pre class="code-block"><code>${_escText(code.trim())}</code></pre>`));
     // Inline code
-    s = s.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
+    s = s.replace(/`([^`\n]+)`/g, (_, code) => hold(`<code class="inline-code">${_escText(code)}</code>`));
+    // Autolink http(s) URLs. The pattern only admits these two schemes and
+    // stops at whitespace, quotes, angle brackets and backticks.
+    s = s.replace(/(?<![\w@.\/])https?:\/\/[^\s<>"'`]+/gi, (m) => {
+        const url = _trimUrl(m);
+        if (!/^https?:\/\/[^/?#]/i.test(url)) return m;
+        const e = _escUrl(url);
+        return hold(`<a href="${e}" rel="noopener noreferrer" target="_blank">${e}</a>`) + m.slice(url.length);
+    });
+    s = _escText(s);
     // Bold
     s = s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
-    s = s.replace(/__(.+?)__/g, '<b>$1</b>');
-    // Italic
+    s = s.replace(/(?<!\w)__(?=\S)(.+?)(?<=\S)__(?!\w)/g, '<b>$1</b>');
+    // Italic (underscores only at word boundaries, so snake_case is left alone)
     s = s.replace(/\*([^*\n]+)\*/g, '<i>$1</i>');
-    s = s.replace(/_([^_\n]+)_/g, '<i>$1</i>');
+    s = s.replace(/(?<!\w)_(?=\S)([^_\n]+?)(?<=\S)_(?!\w)/g, '<i>$1</i>');
     // Strikethrough
     s = s.replace(/~~(.+?)~~/g, '<s>$1</s>');
     // R59D: spoilers — ||text|| hidden until activated (click/Enter/Space via
     // the feed's delegated handler). No nesting; content is already escaped.
     s = s.replace(/\|\|([^|\n]+)\|\|/g, (_, inner) =>
         `<span class="spoiler" role="button" tabindex="0" aria-label="${t('msg.spoilerReveal')}">${inner}</span>`);
-    // Newlines (not inside pre blocks)
+    // Newlines (code blocks are still placeholders here, so they keep theirs)
     s = s.replace(/\n/g, '<br>');
-    return s;
+    return s.replace(/(\d+)/g, (_, i) => tokens[Number(i)]);
 }
 
 export function expireLabel(msRemaining) {

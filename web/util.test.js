@@ -148,3 +148,60 @@ describe('renderMarkdown spoilers (R59D)', () => {
     expect(html.match(/class="spoiler"/g)).toHaveLength(2);
   });
 });
+
+describe('renderMarkdown code spans, autolinks and underscores', () => {
+  const A = (href) => `<a href="${href}" rel="noopener noreferrer" target="_blank">${href}</a>`;
+  it('leaves formatting markers inside inline code alone', () => {
+    expect(renderMarkdown('`my_var_name` and `**x**`'))
+      .toBe('<code class="inline-code">my_var_name</code> and <code class="inline-code">**x**</code>');
+  });
+  it('keeps newlines inside fenced code blocks', () => {
+    expect(renderMarkdown('```\na_b_c\nx\n```')).toBe('<pre class="code-block"><code>a_b_c\nx</code></pre>');
+  });
+  it('does not italicise snake_case text', () => {
+    expect(renderMarkdown('call my_var_name now')).toBe('call my_var_name now');
+    expect(renderMarkdown('a __init__ method')).toBe('a <b>init</b> method');
+    expect(renderMarkdown('foo__bar__baz')).toBe('foo__bar__baz');
+    expect(renderMarkdown('_hi_ there')).toBe('<i>hi</i> there');
+  });
+  it('autolinks http and https URLs', () => {
+    expect(renderMarkdown('see https://example.com/a')).toBe('see ' + A('https&#58;//example.com/a'));
+    expect(renderMarkdown('http://x.org')).toBe(A('http&#58;//x.org'));
+  });
+  it('does not swallow trailing punctuation', () => {
+    expect(renderMarkdown('go to https://x.com/a.')).toBe('go to ' + A('https&#58;//x.com/a') + '.');
+    expect(renderMarkdown('(https://x.com/a), ok;')).toBe('(' + A('https&#58;//x.com/a') + '), ok;');
+    expect(renderMarkdown('https://en.wikipedia.org/wiki/Foo_(bar)'))
+      .toBe(A('https&#58;//en.wikipedia.org/wiki/Foo_(bar)'));
+  });
+  it('keeps underscores in URLs intact', () => {
+    expect(renderMarkdown('https://x.com/some_long_path_name'))
+      .toBe(A('https&#58;//x.com/some_long_path_name'));
+  });
+  it('does not link a URL inside code', () => {
+    expect(renderMarkdown('`https://x.com`')).toBe('<code class="inline-code">https://x.com</code>');
+  });
+  it('never links a javascript: or other non-http scheme', () => {
+    for (const bad of ['javascript:alert(1)', 'JaVaScRiPt:alert(1)', 'data:text/html,<b>x</b>', 'vbscript:x']) {
+      expect(renderMarkdown(bad)).not.toContain('<a ');
+    }
+    expect(renderMarkdown('javascript:https://x.com')).not.toMatch(/href="javascript/i);
+  });
+  it('cannot break out of the href attribute', () => {
+    expect(renderMarkdown('https://x.com/"onmouseover=alert(1)'))
+      .toBe(A('https&#58;//x.com/') + '"onmouseover=alert(1)');
+    const html2 = renderMarkdown("https://x.com/'onmouseover=alert(1) https://x.com/<img/src=x>");
+    expect(html2).not.toMatch(/<a [^>]*onmouseover/);
+    expect(html2).not.toContain('<img');
+    expect(renderMarkdown('https://x.com/&quot;onmouseover=alert(1)'))
+      .toContain('href="https&#58;//x.com/&amp;quot;onmouseover=alert(1)"');
+  });
+  it('hides @ and : in links from the mention and emoji passes', () => {
+    const html = renderMarkdown('https://x.com/@bob/:smile:');
+    expect(html).not.toMatch(/@\w/);
+    expect(html).not.toMatch(/:[a-z0-9_]{2,32}:/);
+  });
+  it('strips placeholder sentinels from input', () => {
+    expect(renderMarkdown('0 `x`')).toBe('0 <code class="inline-code">x</code>');
+  });
+});
