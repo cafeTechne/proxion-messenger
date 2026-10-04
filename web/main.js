@@ -1040,6 +1040,19 @@ import { createIdentityResolver } from './identity.js';
         // ── Leave / delete room ──
         // leaveRoom / deleteRoom / transferOwnership: moved to rooms.js (createRooms).
 
+        // Name + DID readout at the top of settings. Re-rendered after the
+        // display-name autosave so it never shows a stale name.
+        function _renderSettingsDid() {
+            const el = document.getElementById("settings-did");
+            if (!el) return;
+            const _myDid = clientDid || localStorage.getItem("proxion_identity_did") || "";
+            const _myName = localStorage.getItem("proxion_display_name") || "";
+            const _mySuffix = didSuffix(_myDid);
+            el.innerHTML = _myDid
+                ? `<span style="color:#f1f5f9">${escHtml(_myName || t('settings.noNameSet'))}</span><span style="color:#8091a7;margin-left:4px;">·${escHtml(_mySuffix)}</span><br><span style="font-size:0.85em;color:#8091a7;">${escHtml(_myDid)}</span>`
+                : escHtml(t('settings.didGenerating'));
+        }
+
         // Settings modal
         document.getElementById("settings-btn").onclick = () => {
             document.getElementById("settings-gw-url").value =
@@ -1048,12 +1061,7 @@ import { createIdentityResolver } from './identity.js';
                 localStorage.getItem("proxion_display_name") || "";
             document.getElementById("settings-status-message").value =
                 localStorage.getItem("proxion_status_message") || "";
-            const _myDid = clientDid || localStorage.getItem("proxion_identity_did") || "";
-            const _myName = localStorage.getItem("proxion_display_name") || "";
-            const _mySuffix = didSuffix(_myDid);
-            document.getElementById("settings-did").innerHTML = _myDid
-                ? `<span style="color:#f1f5f9">${escHtml(_myName || "(no name set)")}</span><span style="color:#8091a7;margin-left:4px;">·${_mySuffix}</span><br><span style="font-size:0.85em;color:#8091a7;">${escHtml(_myDid)}</span>`
-                : "(generating…)";
+            _renderSettingsDid();
             document.getElementById("settings-proxion-address").textContent =
                 localStorage.getItem("proxion_my_address") || "(not connected)";
             // Fetch live status from gateway (will update the pre-populated state)
@@ -1171,6 +1179,7 @@ import { createIdentityResolver } from './identity.js';
             // R100/A1: also publish the name into the standard WebID card so
             // other Solid apps show a name, not an opaque id.
             podEnsureProfileName(displayName).catch(() => {});
+            _renderSettingsDid();
             _flashProfileSaved();
         }
         function _saveStatusMessage() {

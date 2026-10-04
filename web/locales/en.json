@@ -828,5 +828,7 @@
   "room.createdShareHint": "Share this link with a friend. When they open it, Proxion adds you automatically. If they don't have Proxion yet, they are asked to install it first.",
   "ui.members": "Members",
   "pin.jump": "Jump",
-  "pin.unpin": "Unpin"
+  "pin.unpin": "Unpin",
+  "settings.noNameSet": "(no name set)",
+  "settings.didGenerating": "(generating…)"
 }

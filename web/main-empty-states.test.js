@@ -7,6 +7,14 @@ import { fileURLToPath } from 'node:url';
 const src = readFileSync(fileURLToPath(new URL('./main.js', import.meta.url)), 'utf8');
 const html = readFileSync(fileURLToPath(new URL('./index.html', import.meta.url)), 'utf8');
 
+describe('settings name readout', () => {
+  it('re-renders after the display-name autosave', () => {
+    const fn = src.slice(src.indexOf('function _saveDisplayName('));
+    const body = fn.slice(0, fn.indexOf('function _saveStatusMessage('));
+    expect(body).toContain('_renderSettingsDid();');
+  });
+});
+
 describe('feed empty states in main.js', () => {
   it('a conversation that goes away renders the shared empty-state helper with actions', () => {
     const fn = src.slice(src.indexOf('function _showThreadClosed('));
