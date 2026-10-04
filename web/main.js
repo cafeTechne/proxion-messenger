@@ -54,7 +54,7 @@ import { createMute } from './mute.js';
 import { createMentions } from './mentions.js';
 import { createRooms } from './rooms.js';
 import { createAddress } from './address.js';
-import { createTyping } from './typing.js';
+import { createTyping, shortWebId } from './typing.js';
 import { createMembers } from './members.js';
 import { createFriendRequests } from './friend-requests.js';
 import { createE2EStatus } from './e2e-status.js';
@@ -738,7 +738,7 @@ import { createIdentityResolver } from './identity.js';
             createAddress({ showToast, showCopyModal });
         // Typing indicators: owns typingUsers + outgoing throttle; call
         // typing.attach(inputEl) once the message input exists.
-        const typing = createTyping({ getSocket: () => socket, getActiveView: () => activeView });
+        const typing = createTyping({ getSocket: () => socket, getActiveView: () => activeView, resolveName: resolvePeerName });
         const { handleTyping } = typing;
         // Room members panel (no host state). requestRoomMembers comes from rooms.js.
         const { toggleMembersPanel, renderMembersPanel } = createMembers({
@@ -3218,6 +3218,27 @@ import { createIdentityResolver } from './identity.js';
         rendering.attach();
 
 
+        // Display name for a peer webid, from the same sources the UI already
+        // shows: room members, rendered message headers, DM peers. Returns "" when
+        // unknown so callers can fall back to shortWebId().
+        function resolvePeerName(webid) {
+            if (!webid) return "";
+            const m = currentRoomMembers.find(x => x && x.webid === webid);
+            if (m && m.display_name) return m.display_name;
+            try {
+                const sel = `[data-profile-avatar][data-webid="${CSS.escape(webid)}"]`;
+                const n = document.querySelector(sel)?.dataset.name;
+                // The renderer falls back to the raw id prefix when it has no name.
+                if (n && n !== webid.slice(0, 12)) return n;
+            } catch { /* CSS.escape unavailable */ }
+            for (const p of Object.values(localDmPeers)) {
+                if (p && p.peer_webid === webid && p.display_name && !p.display_name.endsWith("…")) return p.display_name;
+            }
+            if (activeView && (activeView.type === "dm" || activeView.type === "local_dm")
+                && webid !== selfWebId && activeView.name) return activeView.name;
+            return "";
+        }
+
         // -- Round 60: Read receipt helpers --
         function updateReadReceipt(msgId, readers) {
             const el = document.querySelector(`.read-receipt[data-msg-id="${msgId}"]`);
@@ -3226,7 +3247,7 @@ import { createIdentityResolver } from './identity.js';
             if (!others.length) return;
             el.textContent = '✓✓';
             el.classList.add('read');
-            el.title = 'Read by: ' + others.slice(0,5).join(', ');
+            el.title = t('receipt.readBy', { names: others.slice(0, 5).map(w => resolvePeerName(w) || shortWebId(w)).join(', ') });
         }
 
         // -- Round 65: Disappear banner --

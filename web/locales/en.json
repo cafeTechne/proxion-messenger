@@ -676,5 +676,9 @@
   "mute.for5m": "Mute for 5 minutes",
   "mute.for1h": "Mute for 1 hour",
   "mute.for24h": "Mute for 24 hours",
-  "mute.untilUnmuted": "Mute until unmuted"
+  "mute.untilUnmuted": "Mute until unmuted",
+  "typing.one": "{name} is typing…",
+  "typing.two": "{a} and {b} are typing…",
+  "typing.several": "Several people are typing…",
+  "receipt.readBy": "Read by {names}"
 }

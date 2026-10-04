@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createTyping } from './typing.js';
+import en from './locales/en.json';
+
+// Interpolate real English strings so assertions read like the UI.
+vi.mock('./i18n.js', () => ({
+  t: (key, params) => String(en[key] ?? key).replace(/\{(\w+)\}/g, (m, k) => (params && k in params ? String(params[k]) : m)),
+}));
+
+import { createTyping, typingText, shortWebId } from './typing.js';
 
 let els, sent, socket, view;
 function mkEl(over = {}) {
@@ -81,5 +88,46 @@ describe('attach (outgoing typing)', () => {
     t.attach(input);
     handler();
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe('typing text', () => {
+  const names = { 'did:key:z6MkAlice': 'Alice', 'did:key:z6MkBob': 'Bob' };
+  const resolve = (w) => names[w] || '';
+  it('names a single typist', () => {
+    expect(typingText(['did:key:z6MkAlice'], resolve)).toBe('Alice is typing…');
+  });
+  it('names two typists', () => {
+    expect(typingText(['did:key:z6MkAlice', 'did:key:z6MkBob'], resolve)).toBe('Alice and Bob are typing…');
+  });
+  it('collapses three or more typists', () => {
+    expect(typingText(['did:key:z6MkAlice', 'did:key:z6MkBob', 'did:key:z6MkCarol'], resolve))
+      .toBe('Several people are typing…');
+  });
+  it('is empty with nobody typing', () => {
+    expect(typingText([], resolve)).toBe('');
+  });
+  it('never shows the did:key: prefix for an unknown typist', () => {
+    const s = typingText(['did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'], () => '');
+    expect(s).toBe('…ta2doK is typing…');
+  });
+  it('shortWebId uses the host for an https WebID', () => {
+    expect(shortWebId('https://alice.example/profile/card#me')).toBe('alice.example');
+  });
+  it('createTyping uses the resolver and only rewrites changed text', () => {
+    let writes = 0, text = '';
+    els['typing-indicator'] = {
+      get innerText() { return text; },
+      set innerText(v) { writes++; text = v; },
+    };
+    const t = createTyping({ getSocket: () => socket, getActiveView: () => view, resolveName: resolve });
+    t.handleTyping({ room_id: 'room-1', from_webid: 'did:key:z6MkAlice' });
+    expect(text).toBe('Alice is typing…');
+    const before = writes;
+    t.updateTypingDisplay();
+    t.updateTypingDisplay();
+    expect(writes).toBe(before);
+    t.handleTyping({ room_id: 'room-1', from_webid: 'did:key:z6MkBob' });
+    expect(text).toBe('Alice and Bob are typing…');
   });
 });
