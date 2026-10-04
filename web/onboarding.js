@@ -100,7 +100,7 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         };
         // Styled in-app confirm (native window.confirm looked out of place at the
         // wizard's key decision point); fall back if the host didn't inject it.
-        if (showConfirm) showConfirm(msg, proceed);
+        if (showConfirm) showConfirm(msg, proceed, null, { confirmLabel: t('confirm.skipPod.verb') });
         else if (window.confirm(msg)) proceed();
     }
 

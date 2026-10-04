@@ -60,7 +60,7 @@ export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoo
             : "Leave this room? You can rejoin with the invite link.";
         showConfirm(msg, () => {
             getSocket().send(JSON.stringify({ cmd: "leave_local_room", room_id: activeView.id }));
-        });
+        }, null, { title: t('confirm.leaveRoom.title'), confirmLabel: t('confirm.leaveRoom.verb'), danger: true });
     }
 
     function deleteRoom() {
@@ -68,7 +68,7 @@ export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoo
         if (!activeView || !getRoomCreatorOf().has(activeView.id)) return;
         showConfirm(t('confirm.deleteRoom'), () => {
             getSocket().send(JSON.stringify({ cmd: "delete_room", room_id: activeView.id }));
-        });
+        }, null, { title: t('confirm.deleteRoom.title'), confirmLabel: t('confirm.deleteRoom.verb'), danger: true });
     }
 
     function transferOwnership(roomId, toDid) {
@@ -111,10 +111,10 @@ export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoo
     }
 
     function kickMember(roomId, webid) {
-        showConfirm(t('confirm.kickMember'), () => {
+        showConfirm(t('confirm.kickMember.body'), () => {
             const socket = getSocket();
             if (socket) socket.send(JSON.stringify({ cmd: "kick_member", room_id: roomId, webid: webid }));
-        });
+        }, null, { title: t('confirm.kickMember.title'), confirmLabel: t('btn.kick'), danger: true });
     }
 
     function submitJoinRoom() {

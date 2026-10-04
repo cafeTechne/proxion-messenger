@@ -91,6 +91,8 @@ import { icon } from './icons.js';
 import { installFocusTrap, closeTopmostDialog } from './focus-trap.js';
 import { initSettingsNav, createDebouncedSaver } from './settings-panel.js';
 import { makeListNavigable, announce } from './a11y.js';
+import { openMenu, closeMenu, refreshMenu } from './menu.js';
+import { showConfirm, showPromptModal, installDialogDismiss, installFieldErrorSync, setFieldError } from './dialogs.js';
 import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport } from './dmhistory.js';
 import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } from './i18n.js';
 import { createIdentityResolver } from './identity.js';
@@ -184,15 +186,27 @@ import { createIdentityResolver } from './identity.js';
         // Modal a11y: focus-restore + Tab-trap for every dialog (observer-based,
         // so it covers all ~20 modals without retrofitting their open/close sites).
         installFocusTrap();
+        // Overlay click and header close button for data-dismissable dialogs.
+        installDialogDismiss();
+        installFieldErrorSync();
 
         // Keyboard nav for the sidebar conversation lists: their rows are <li>s
         // with click handlers but no tabindex, so without this a keyboard user
         // cannot open any conversation (WCAG 2.1.1). Roving tabindex → one tab
         // stop per list, arrows to move, Enter/Space to open. Delete on a DM row
         // hides it (its × button is otherwise made non-tabbable by the helper).
-        makeListNavigable(document.getElementById("room-list"));
+        // Shift+F10 / the ContextMenu key open the row's mute/read/emoji menu
+        // through the same contextmenu listener the mouse uses (view.js).
+        const _sidebarRowMenu = (li) => {
+            const r = li.getBoundingClientRect();
+            li.dispatchEvent(new MouseEvent("contextmenu", {
+                bubbles: true, cancelable: true, clientX: r.left + 24, clientY: r.bottom,
+            }));
+        };
+        makeListNavigable(document.getElementById("room-list"), { onContextMenu: _sidebarRowMenu });
         makeListNavigable(document.getElementById("dm-list"), {
             onDelete: (li) => li.querySelector(".dm-close-btn")?.click(),
+            onContextMenu: _sidebarRowMenu,
         });
         makeListNavigable(document.getElementById("contacts-list"));
         // Message feed: one tab stop, arrows move between messages, Enter or the
@@ -921,7 +935,7 @@ import { createIdentityResolver } from './identity.js';
                 showConfirm(t('confirm.clearDmHistory'), async () => {
                     await dmHistoryClearAll();
                     showToast(t('dm.historyCleared'), "success");
-                });
+                }, null, { title: t('confirm.clearDmHistory.title'), confirmLabel: t('confirm.clearDmHistory.verb'), danger: true });
             };
         }
 
@@ -1243,7 +1257,10 @@ import { createIdentityResolver } from './identity.js';
             setTimeout(() => document.getElementById("room-name-input").focus(), 50);
         };
 
-        document.getElementById("room-create-submit").onclick = () => {
+        // The modal body is a <form>: the Create button and Enter both submit it
+        // once, and the busy guard below drops any repeat while it is pending.
+        document.getElementById("room-create-form").onsubmit = (e) => {
+            e.preventDefault();
             const submitBtn = document.getElementById("room-create-submit");
             if (isButtonBusy(submitBtn)) return;
             const name = document.getElementById("room-name-input").value.trim();
@@ -1259,9 +1276,6 @@ import { createIdentityResolver } from './identity.js';
             socketSendOrQueue({cmd: "chat_room_create", name: name, history_mode: historyMode});
         };
 
-        document.getElementById("room-name-input").onkeydown = (e) => {
-            if (e.key === "Enter") document.getElementById("room-create-submit").click();
-        };
 
         // copyRoomInviteFromModal / copyRoomInvite / _copyInviteText:
         // moved to rooms.js (createRooms).
@@ -2182,9 +2196,10 @@ import { createIdentityResolver } from './identity.js';
                 }
                 case "ownership_transfer_offer": {
                     showConfirm(
-                        `${event.from_name} wants to transfer ownership of "${event.room_name}" to you. Accept?`,
+                        t('confirm.ownership.body', { name: event.from_name, room: event.room_name }),
                         () => socket.send(JSON.stringify({cmd: "accept_ownership", room_id: event.room_id})),
-                        () => socket.send(JSON.stringify({cmd: "decline_ownership", room_id: event.room_id}))
+                        () => socket.send(JSON.stringify({cmd: "decline_ownership", room_id: event.room_id})),
+                        { title: t('confirm.ownership.title'), confirmLabel: t('btn.accept'), cancelLabel: t('btn.decline') }
                     );
                     break;
                 }
@@ -2629,11 +2644,13 @@ import { createIdentityResolver } from './identity.js';
                                 <span class="session-time">${formatTimestamp(s.connected_at)}</span>
                                 ${s.is_current ? `<span class="session-current status-dot">${t('session.thisDevice')}</span>` : ''}
                             </div>
-                            ${!s.is_current ? `<button class="session-revoke-btn" data-session-id="${s.session_id}">Revoke</button>` : ''}
+                            ${!s.is_current ? `<button class="session-revoke-btn btn-danger" data-session-id="${escHtml(s.session_id)}">${t('confirm.revokeSession.verb')}</button>` : ''}
                         </div>`).join('') || inlineNotice('No sessions found.', 'empty');
                     sl.querySelectorAll('.session-revoke-btn').forEach(btn => {
                         btn.addEventListener('click', () => {
-                            if (socket) socket.send(JSON.stringify({cmd:'revoke_session',session_id:btn.dataset.sessionId}));
+                            showConfirm(t('confirm.revokeSession.body'), () => {
+                                if (socket) socket.send(JSON.stringify({cmd:'revoke_session',session_id:btn.dataset.sessionId}));
+                            }, null, { title: t('confirm.revokeSession.title'), confirmLabel: t('confirm.revokeSession.verb'), danger: true });
                         });
                     });
                     break;
@@ -2799,7 +2816,7 @@ import { createIdentityResolver } from './identity.js';
                             showConfirm(t('confirm.revokeDevice', { id: id.slice(0, 16) }), () => {
                                 socket.send(JSON.stringify({cmd: "unregister_device", device_id: id}));
                                 btn.closest("div").remove();
-                            });
+                            }, null, { title: t('confirm.revokeDevice.title'), confirmLabel: t('confirm.revokeDevice.verb'), danger: true });
                         });
                     });
                     break;
@@ -2897,71 +2914,7 @@ import { createIdentityResolver } from './identity.js';
 
         // renderReactions: moved to reactions.js (createReactions).
 
-        /* Confirmation Modal — Replace confirm() dialogs */
-        function showConfirm(message, onConfirm, onCancel) {
-            let modal = document.getElementById("confirm-modal");
-            if (!modal) {
-                modal = document.createElement("div");
-                modal.id = "confirm-modal";
-                modal.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;" +
-                    "display:flex;align-items:center;justify-content:center";
-                modal.innerHTML =
-                    '<div style="background:#1e293b;padding:clamp(12px,4vw,24px);border-radius:12px;width:min(360px,95vw)">' +
-                    '<p id="confirm-msg" style="color:#f8fafc;margin:0 0 16px;font-size:0.95rem"></p>' +
-                    '<div style="display:flex;gap:8px;justify-content:flex-end">' +
-                    '<button id="confirm-cancel" style="background:#334155;color:#94a3b8;border:none;' +
-                    'border-radius:6px;padding:6px 16px;cursor:pointer">Cancel</button>' +
-                    '<button id="confirm-ok" style="background:#dc2626;color:#fff;border:none;' +
-                    'border-radius:6px;padding:6px 16px;cursor:pointer">Confirm</button>' +
-                    '</div></div>';
-                document.body.appendChild(modal);
-            }
-            document.getElementById("confirm-cancel").setAttribute("data-modal-cancel", "");
-            document.getElementById("confirm-msg").textContent = message;
-            document.getElementById("confirm-cancel").onclick = () => { modal.style.display = "none"; if (onCancel) onCancel(); };
-            document.getElementById("confirm-ok").onclick = () => { modal.style.display = "none"; onConfirm(); };
-            modal.style.display = "flex";
-        }
-
-        // Styled replacement for window.prompt() — resolves the entered string, or
-        // null on cancel/Escape. type:"password" masks input (the native prompt
-        // showed backup passphrases in cleartext).
-        function showPromptModal(message, { type = "text", placeholder = "" } = {}) {
-            return new Promise((resolve) => {
-                let modal = document.getElementById("prompt-modal");
-                if (!modal) {
-                    modal = document.createElement("div");
-                    modal.id = "prompt-modal";
-                    modal.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:3000;" +
-                        "display:flex;align-items:center;justify-content:center";
-                    modal.innerHTML =
-                        '<div style="background:#1e293b;padding:clamp(12px,4vw,24px);border-radius:12px;width:min(360px,95vw)">' +
-                        '<p id="prompt-msg" style="color:#f8fafc;margin:0 0 12px;font-size:0.95rem"></p>' +
-                        '<input id="prompt-input" style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;' +
-                        'border-radius:6px;color:#f1f5f9;padding:8px 10px;font-size:0.95rem;margin-bottom:16px">' +
-                        '<div style="display:flex;gap:8px;justify-content:flex-end">' +
-                        '<button id="prompt-cancel" style="background:#334155;color:#94a3b8;border:none;' +
-                        'border-radius:6px;padding:6px 16px;cursor:pointer">Cancel</button>' +
-                        '<button id="prompt-ok" style="background:var(--accent,#e94560);color:#fff;border:none;' +
-                        'border-radius:6px;padding:6px 16px;cursor:pointer">OK</button>' +
-                        '</div></div>';
-                    document.body.appendChild(modal);
-                }
-                const input = document.getElementById("prompt-input");
-                document.getElementById("prompt-msg").textContent = message;
-                input.type = type; input.placeholder = placeholder; input.value = "";
-                const done = (val) => { modal.style.display = "none"; input.onkeydown = null; resolve(val); };
-                document.getElementById("prompt-cancel").onclick = () => done(null);
-                document.getElementById("prompt-cancel").setAttribute("data-modal-cancel", "");
-                document.getElementById("prompt-ok").onclick = () => done(input.value);
-                input.onkeydown = (e) => {
-                    if (e.key === "Enter") done(input.value);
-                    else if (e.key === "Escape") { e.stopPropagation(); done(null); }
-                };
-                modal.style.display = "flex";
-                setTimeout(() => input.focus(), 50);
-            });
-        }
+        // showConfirm / showPromptModal: moved to dialogs.js.
 
         /* Profile Card (B2) — Show user profile popover on avatar click */
         // showProfileCard / profileCardOpenDM / hideProfileCard: moved to profile.js.
@@ -3098,7 +3051,7 @@ import { createIdentityResolver } from './identity.js';
                 }
                 await window.proxionWebJoin?.sendApproval(req.from_webid, roomId, desc.title || '');
                 showToast(t('join.approved', { who }));
-            });
+            }, null, { title: t('confirm.joinApprove.title'), confirmLabel: t('confirm.joinApprove.verb') });
         }
 
         async function _onWebJoinApproved(appr) {
@@ -3219,7 +3172,7 @@ import { createIdentityResolver } from './identity.js';
                     message_id: msgId,
                     thread_id: activeView.id,
                 }));
-            });
+            }, null, { title: t('confirm.deleteMessage.title'), confirmLabel: t('confirm.deleteMessage.verb'), danger: true });
         }
 
         // "Delete for me": remove this message from THIS device only — DOM +
@@ -4188,22 +4141,22 @@ import { createIdentityResolver } from './identity.js';
                 if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = t('contact.sendRequest'); }
             }
         }
-        document.getElementById("add-peer-input").addEventListener("keydown", e => {
-            if (e.key === "Enter") submitAddPeer();
+        // The modal body is a <form>: the Add button and Enter both submit it.
+        document.getElementById("add-peer-form").addEventListener("submit", e => {
+            e.preventDefault();
+            submitAddPeer();
         });
-        // The "Add" button had no handler — only Enter worked. Wire the obvious click.
-        document.getElementById("add-peer-submit-btn").addEventListener("click", submitAddPeer);
 
         // --------------- Join Room modal ---------------
         // submitJoinRoom: moved to rooms.js (createRooms).
-        document.getElementById("join-room-input").addEventListener("keydown", e => {
-            if (e.key === "Enter") submitJoinRoom();
+        document.getElementById("join-room-form").addEventListener("submit", e => {
+            e.preventDefault();
+            submitJoinRoom();
         });
         // Several modal buttons had NO click handler — only the input's Enter key
         // worked (the "Join" button did nothing), and the copy-modal fallback
         // (shown when the Clipboard API fails) couldn't be dismissed OR copied at
         // all. Wire each button to the obvious action.
-        document.getElementById("join-room-submit-btn").addEventListener("click", submitJoinRoom);
         document.getElementById("join-room-cancel-btn").addEventListener("click", () => {
             document.getElementById("join-room-modal").style.display = "none";
         });
@@ -4244,10 +4197,7 @@ import { createIdentityResolver } from './identity.js';
             const _sctxEmoji = document.getElementById("sctx-emoji");
             if (_sctxEmoji) _sctxEmoji.style.display = localDmPeers[threadId] ? "none" : "";
             const menu = document.getElementById("sidebar-ctx-menu");
-            menu.style.display = "block";
-            const vw = window.innerWidth, vh = window.innerHeight;
-            menu.style.left = Math.min(e.clientX, vw - 170) + "px";
-            menu.style.top  = Math.min(e.clientY, vh - 110) + "px";
+            openMenu(menu, { x: e.clientX, y: e.clientY, opener: document.activeElement });
         }
         // The gateway keys mute by the PEER's webid (DMs) or room_id (rooms) so it
         // can honor mute for OFFLINE push. The thread-id -> identity reduction lives in
@@ -4262,11 +4212,11 @@ import { createIdentityResolver } from './identity.js';
         }
         document.getElementById("sctx-mute").onclick = () => {
             if (_sctxTargetId) { muteThread(_sctxTargetId); _sendServerMute(_sctxTargetId, true); }
-            document.getElementById("sidebar-ctx-menu").style.display = "none";
+            closeMenu(document.getElementById("sidebar-ctx-menu"));
         };
         document.getElementById("sctx-unmute").onclick = () => {
             if (_sctxTargetId) { unmuteThread(_sctxTargetId); _sendServerMute(_sctxTargetId, false); }
-            document.getElementById("sidebar-ctx-menu").style.display = "none";
+            closeMenu(document.getElementById("sidebar-ctx-menu"));
         };
         document.getElementById("sctx-mark-read").onclick = () => {
             if (_sctxTargetId) {
@@ -4274,10 +4224,10 @@ import { createIdentityResolver } from './identity.js';
                 updateSidebarBadge(_sctxTargetId);
                 _sendUpdateLastRead(_sctxTargetId);
             }
-            document.getElementById("sidebar-ctx-menu").style.display = "none";
+            closeMenu(document.getElementById("sidebar-ctx-menu"));
         };
         document.addEventListener("click", () => {
-            document.getElementById("sidebar-ctx-menu").style.display = "none";
+            closeMenu(document.getElementById("sidebar-ctx-menu"));
         });
 
         // --------------- @Mention Autocomplete ---------------
@@ -4303,7 +4253,7 @@ import { createIdentityResolver } from './identity.js';
         // R59G: custom room emoji management modal
         roomEmoji.wireRoomEmoji();
         document.getElementById('sctx-emoji')?.addEventListener('click', () => {
-            document.getElementById('sidebar-ctx-menu').style.display = 'none';
+            closeMenu(document.getElementById('sidebar-ctx-menu'));
             if (_sctxTargetId) roomEmoji.openManageModal(_sctxTargetId);
         });
 
@@ -4357,38 +4307,29 @@ import { createIdentityResolver } from './identity.js';
                 isOwn && (msg.local || activeView?.local) ? "" : "none";
 
             const menu = document.getElementById("ctx-menu");
-            menu.style.display = "block";
-            const vw = window.innerWidth, vh = window.innerHeight;
-            const mw = menu.offsetWidth || 200, mh = menu.offsetHeight || 180;
-            menu.style.left = Math.max(4, Math.min(e.clientX, vw - mw - 4)) + "px";
-            menu.style.top  = Math.max(4, Math.min(e.clientY, vh - mh - 4)) + "px";
-            // Keyboard access: when opened from a focused message (Enter / F10 /
-            // ContextMenu key), move focus into the menu so it's operable, and
-            // remember the message to restore focus to on close.
-            const opener = document.activeElement && document.activeElement.closest(".message");
-            _ctxOpener = opener || null;
-            if (opener) {
-                requestAnimationFrame(() => {
-                    const firstBtn = [...menu.querySelectorAll("button")].find(b => b.style.display !== "none");
-                    if (firstBtn) firstBtn.focus();
-                });
-            }
+            // Focus moves into the menu (menu.js). Escape/Tab, or activating an
+            // item, returns it to the focused message, or to whatever had focus.
+            const active = document.activeElement;
+            const opener = (active && active.closest && active.closest(".message")) || active;
+            openMenu(menu, { x: e.clientX, y: e.clientY, opener, onClose: () => { _ctxTarget = null; } });
         }
-        let _ctxOpener = null;
 
         function closeCtxMenu() {
-            const menu = document.getElementById("ctx-menu");
-            const wasOpen = menu.style.display !== "none";
-            menu.style.display = "none";
+            closeMenu(document.getElementById("ctx-menu"));
             _ctxTarget = null;
-            if (wasOpen && _ctxOpener && document.contains(_ctxOpener)) {
-                try { _ctxOpener.focus(); } catch { /* gone */ }
-            }
-            _ctxOpener = null;
         }
 
         document.addEventListener("click", closeCtxMenu);
-        document.addEventListener("keydown", e => { if (e.key === "Escape") closeCtxMenu(); });
+        // Escape with focus outside a menu still closes any open one (inside a
+        // menu, menu.js handles it and restores focus to the opener).
+        document.addEventListener("keydown", e => {
+            if (e.key !== "Escape") return;
+            closeCtxMenu();
+            ["sidebar-ctx-menu", "delete-submenu", "member-context-menu"].forEach(id => {
+                const m = document.getElementById(id);
+                if (m) closeMenu(m);
+            });
+        });
 
         document.getElementById("ctx-reply").onclick = () => {
             if (!_ctxTarget) return;
@@ -4450,7 +4391,7 @@ import { createIdentityResolver } from './identity.js';
             if (!_ctxTarget) return;
             const _delId = _ctxTarget.msgId;
             closeCtxMenu();
-            showConfirm(t('confirm.deleteMessage'), () => deleteMsg(_delId));
+            deleteMsg(_delId);
         };
 
         // Long-press for mobile (touch)
@@ -4760,7 +4701,7 @@ import { createIdentityResolver } from './identity.js';
                     socket.send(JSON.stringify({ cmd: 'revoke_contact', cert_id: certId }));
                     document.getElementById('contact-profile-panel').style.display = 'none';
                     showToast(t('contact.removed'));
-                });
+                }, null, { title: t('confirm.removeContact.title'), confirmLabel: t('btn.removeContact'), danger: true });
             });
 
             // Message feed: Scroll to bottom button
@@ -4816,7 +4757,14 @@ import { createIdentityResolver } from './identity.js';
                 const url = (document.getElementById('calls-relay-url')?.value || '').trim();
                 const username = (document.getElementById('calls-relay-user')?.value || '').trim();
                 const password = (document.getElementById('calls-relay-pass')?.value || '').trim();
-                if (!/^turns?:/i.test(url)) { showToast(t('conn.relay.badUrl'), 'error'); return; }
+                // Inline error under the field (role=alert), not only a toast.
+                const _relayInput = document.getElementById('calls-relay-url');
+                if (!/^turns?:/i.test(url)) {
+                    setFieldError(_relayInput, t('conn.relay.badUrl'));
+                    _relayInput?.focus();
+                    return;
+                }
+                setFieldError(_relayInput, '');
                 try {
                     localStorage.setItem('proxion_user_relay', JSON.stringify({ url, username, password }));
                     voice.state._turnIceServer = null;   // re-resolve on next call
@@ -4824,12 +4772,15 @@ import { createIdentityResolver } from './identity.js';
                 } catch (_) {}
             });
             attachListener('#calls-relay-clear', 'click', () => {
-                try { localStorage.removeItem('proxion_user_relay'); } catch (_) {}
-                ['calls-relay-url', 'calls-relay-user', 'calls-relay-pass'].forEach(id => {
-                    const el = document.getElementById(id); if (el) el.value = '';
-                });
-                voice.state._turnIceServer = null;
-                showToast(t('conn.relay.cleared'));
+                showConfirm(t('confirm.removeRelay.body'), () => {
+                    try { localStorage.removeItem('proxion_user_relay'); } catch (_) {}
+                    ['calls-relay-url', 'calls-relay-user', 'calls-relay-pass'].forEach(id => {
+                        const el = document.getElementById(id); if (el) el.value = '';
+                    });
+                    setFieldError(document.getElementById('calls-relay-url'), '');
+                    voice.state._turnIceServer = null;
+                    showToast(t('conn.relay.cleared'));
+                }, null, { title: t('confirm.removeRelay.title'), confirmLabel: t('confirm.removeRelay.verb'), danger: true });
             });
             attachListener('#calls-default-relay-toggle', 'change', (e) => {
                 try {
@@ -4908,14 +4859,14 @@ import { createIdentityResolver } from './identity.js';
             // Round 63: Delete submenu buttons
             document.addEventListener('click', e => {
                 const sub = document.getElementById('delete-submenu');
-                if (sub && !sub.contains(e.target)) sub.style.display = 'none';
+                if (sub && !sub.contains(e.target)) closeMenu(sub);
                 if (e.target.id === 'delete-for-me-btn') {
                     // LOCAL-only removal (this device). Was wired to deleteMsg,
                     // which sends delete_local_message — a store-delete that
                     // broadcasts to ALL participants, i.e. it deleted for
                     // everyone. "Delete for me" must not touch the peer.
                     deleteForMeLocal(e.target.dataset.msgId);
-                    sub.style.display = 'none';
+                    closeMenu(sub);
                 } else if (e.target.id === 'delete-for-everyone-btn') {
                     // Was: cmd 'delete_message' — a command the gateway has NO
                     // handler for, so it only cleared local DOM and never
@@ -4927,7 +4878,7 @@ import { createIdentityResolver } from './identity.js';
                         }));
                     }
                     document.getElementById(`msg-${mid}`)?.remove();
-                    sub.style.display = 'none';
+                    closeMenu(sub);
                 }
             });
 
@@ -5217,7 +5168,11 @@ import { createIdentityResolver } from './identity.js';
                 } catch (_) {}
                 window.location.reload();
             }
-            attachListener('#settings-pod-logout-btn', 'click', _signOutOfPod);
+            attachListener('#settings-pod-logout-btn', 'click', () => {
+                showConfirm(t('confirm.signOutPod.body'), _signOutOfPod, null, {
+                    title: t('confirm.signOutPod.title'), confirmLabel: t('confirm.signOutPod.verb'), danger: true,
+                });
+            });
             // R18.1.3: autostart toggle
             attachListener('#settings-autostart-toggle', 'change', (e) => {
                 if (!window.__TAURI__?.invoke) return;
@@ -5235,7 +5190,12 @@ import { createIdentityResolver } from './identity.js';
             });
             attachListener('#settings-reset-identity-btn', 'click', () => {
                 showConfirm(t('confirm.deleteIdentity'),
-                    () => { _resetIdentity(); });
+                    () => { _resetIdentity(); }, null, {
+                        title: t('confirm.deleteIdentity.title'),
+                        confirmLabel: t('confirm.deleteIdentity.verb'),
+                        checkLabel: t('confirm.deleteIdentity.check'),
+                        danger: true,
+                    });
             });
 
             // R14.3: Export/Import
@@ -5250,7 +5210,11 @@ import { createIdentityResolver } from './identity.js';
             // Import Data is now a real button (was a <label>, which isn't
             // keyboard-focusable) that opens the hidden file input, like Restore.
             const importBtn = document.getElementById('import-data-btn');
-            if (importBtn && importInput) importBtn.onclick = () => importInput.click();
+            if (importBtn && importInput) importBtn.onclick = () => {
+                showConfirm(t('confirm.importData.body'), () => importInput.click(), null, {
+                    title: t('confirm.importData.title'), confirmLabel: t('confirm.importData.verb'),
+                });
+            };
             if (importInput) importInput.onchange = async (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -5368,13 +5332,12 @@ import { createIdentityResolver } from './identity.js';
                             sub.querySelector('#delete-for-me-btn').dataset.msgId = msgId;
                             sub.querySelector('#delete-for-everyone-btn').dataset.msgId = msgId;
                             sub.querySelector('#delete-for-everyone-btn').style.display = isSender ? '' : 'none';
-                            sub.style.cssText = 'display:block;visibility:hidden;';
-                            // Clamp to the viewport so the submenu doesn't open
-                            // off-screen when deleting a message near a phone edge.
-                            const _dr = sub.getBoundingClientRect();
-                            const _dx = Math.max(4, Math.min(e.clientX, window.innerWidth - _dr.width - 8));
-                            const _dy = Math.max(4, Math.min(e.clientY, window.innerHeight - _dr.height - 8));
-                            sub.style.cssText = `display:block;top:${_dy}px;left:${_dx}px;`;
+                            // Clamped to the viewport after measuring (menu.js) so
+                            // it doesn't open off-screen near a phone edge.
+                            // A keyboard click has no pointer position: anchor to the button.
+                            const _kb = !e.clientX && !e.clientY;
+                            const _br = _kb ? el.getBoundingClientRect() : null;
+                            openMenu(sub, { x: _kb ? _br.left : e.clientX, y: _kb ? _br.bottom : e.clientY, opener: el });
                         } else { deleteMsg(msgId); }
                         break;
                     }
@@ -5408,7 +5371,7 @@ import { createIdentityResolver } from './identity.js';
                             menu.style.left = Math.max(4, Math.min(x, window.innerWidth - mw - 4)) + 'px';
                             menu.style.top = Math.max(4, y) + 'px';
                             // Return focus to the More button, not the whole row.
-                            _ctxOpener = el;
+                            menu._menuOpener = el;
                         }
                         break;
                     }
@@ -5461,13 +5424,35 @@ import { createIdentityResolver } from './identity.js';
                 if (menu.dataset.defaultHtml) menu.innerHTML = menu.dataset.defaultHtml;
                 else menu.dataset.defaultHtml = menu.innerHTML;
                 menu.dataset.targetWebid = targetWebid;
-                menu.style.display = 'block';
-                // Clamp to the viewport so the menu never opens off-screen on a
-                // phone (measured after display:block; leave an 8px gutter).
-                const _mr = menu.getBoundingClientRect();
-                menu.style.left = Math.max(4, Math.min(e.clientX, window.innerWidth - _mr.width - 8)) + 'px';
-                menu.style.top = Math.max(4, Math.min(e.clientY, window.innerHeight - _mr.height - 8)) + 'px';
+                // Clamped to the viewport after measuring (menu.js).
+                openMenu(menu, { x: e.clientX, y: e.clientY, opener: item });
             });
+            // Member rows: click (or Enter) opens the profile card; arrows move
+            // between rows; Shift+F10 / the ContextMenu key opens the menu above.
+            {
+                const _membersList = document.getElementById('members-list');
+                const _openMemberProfile = (item, x, y) => {
+                    showProfileCard(item.dataset.webid, item.dataset.name, x, y);
+                };
+                const _rowPoint = (item) => {
+                    const r = item.getBoundingClientRect();
+                    return { x: r.left + 24, y: r.top + r.height / 2 };
+                };
+                _membersList?.addEventListener('click', e => {
+                    const item = e.target.closest('.member-item');
+                    if (!item) return;
+                    e.stopPropagation();
+                    const p = (e.clientX || e.clientY) ? { x: e.clientX, y: e.clientY } : _rowPoint(item);
+                    _openMemberProfile(item, p.x, p.y);
+                });
+                makeListNavigable(_membersList, {
+                    itemSelector: '.member-item',
+                    onContextMenu: (item) => {
+                        const p = _rowPoint(item);
+                        item.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y }));
+                    },
+                });
+            }
 
             // Mobile: dismiss the members drawer by tapping outside it. The toggle
             // that opens the drawer sits UNDER it (static header vs. z-indexed
@@ -5484,7 +5469,7 @@ import { createIdentityResolver } from './identity.js';
                 if (!btn) return;
                 const menu = document.getElementById('member-context-menu');
                 const targetWebid = menu?.dataset.targetWebid;
-                if (!targetWebid || !activeView || !socket) { menu.style.display = 'none'; return; }
+                if (!targetWebid || !activeView || !socket) { closeMenu(menu); return; }
                 const action = btn.dataset.roleAction;
                 const _rid = activeView.id;
                 if (action === 'kick') {
@@ -5494,7 +5479,7 @@ import { createIdentityResolver } from './identity.js';
                 } else if (action === 'ban') {
                     showConfirm(t('confirm.banMember'), () => {
                         socket.send(JSON.stringify({cmd: 'ban_member', room_id: _rid, webid: targetWebid, reason: ''}));
-                    });
+                    }, null, { title: t('confirm.banMember.title'), confirmLabel: t('confirm.banMember.verb'), danger: true });
                 } else if (action === 'mute') {
                     // Second-stage menu: swap in duration choices instead of the old
                     // native prompt() that made the user TYPE "5m"/"1h"/"24h".
@@ -5504,6 +5489,7 @@ import { createIdentityResolver } from './identity.js';
                         `<button data-role-action="mute-86400">${t('mute.for24h')}</button>` +
                         `<button data-role-action="mute-0">${t('mute.untilUnmuted')}</button>` +
                         `<hr><button data-role-action="mute-cancel">${t('btn.cancel')}</button>`;
+                    refreshMenu(menu);
                     return; // keep the menu open on the duration choices
                 } else if (action.startsWith('mute-')) {
                     const secs = parseInt(action.slice(5), 10);
@@ -5522,12 +5508,13 @@ import { createIdentityResolver } from './identity.js';
                 } else {
                     socket.send(JSON.stringify({cmd: 'set_member_role', room_id: _rid, webid: targetWebid, role: action}));
                 }
-                menu.style.display = 'none';
+                closeMenu(menu);
             });
 
             document.addEventListener('click', e => {
                 if (!e.target.closest('#member-context-menu')) {
-                    document.getElementById('member-context-menu')?.style && (document.getElementById('member-context-menu').style.display = 'none');
+                    const _mm = document.getElementById('member-context-menu');
+                    if (_mm) closeMenu(_mm);
                 }
             }, true);
 
@@ -5669,14 +5656,16 @@ import { createIdentityResolver } from './identity.js';
 
             // R11.3.2: Logout all other devices button
             document.getElementById('settings-logout-all-btn')?.addEventListener('click', () => {
-                if (socket && socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({cmd: "logout_all_devices"}));
-                }
+                showConfirm(t('confirm.logoutAll.body'), () => {
+                    if (socket && socket.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({cmd: "logout_all_devices"}));
+                    }
+                }, null, { title: t('confirm.logoutAll.title'), confirmLabel: t('confirm.logoutAll.verb'), danger: true });
             });
 
             // E1: recovery-kit UX (generated code download / verify / restore,
             // settings + onboarding entry points) — moved to recovery.js.
-            const recovery = createRecovery({ showToast, showPromptModal });
+            const recovery = createRecovery({ showToast, showPromptModal, showConfirm });
             recovery.wireRecovery({ getSocket: () => socket });
 
             // Wire up E2E verify modal buttons
@@ -5966,8 +5955,8 @@ import { createIdentityResolver } from './identity.js';
                                 if (_err) _err.textContent = t('web.signin.failed');
                             });
                         };
-                        document.getElementById('web-signin-btn').onclick = _go;
-                        document.getElementById('web-signin-url').onkeydown = (e) => { if (e.key === 'Enter') _go(); };
+                        // The sign-in body is a <form>: the button and Enter both submit it.
+                        document.getElementById('web-signin-form').onsubmit = (e) => { e.preventDefault(); _go(); };
                     } else {
                         showOnboarding();
                     }

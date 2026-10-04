@@ -61,7 +61,7 @@ export function passphraseFromInput(raw) {
     return normalizeRecoveryCode(raw) ?? raw;
 }
 
-export function createRecovery({ showToast, showPromptModal }) {
+export function createRecovery({ showToast, showPromptModal, showConfirm }) {
     let _code = null;
 
     function _authHeaders(extra = {}) {
@@ -205,8 +205,15 @@ export function createRecovery({ showToast, showPromptModal }) {
         });
 
         // Settings: restore
+        // Restoring replaces the identity on this device, so say so before the
+        // file picker opens. (The onboarding entry below skips this: a
+        // first-run identity has nothing worth keeping yet.)
         document.getElementById('settings-restore-btn')?.addEventListener('click', () => {
-            document.getElementById('settings-restore-input')?.click();
+            const pick = () => document.getElementById('settings-restore-input')?.click();
+            if (!showConfirm) { pick(); return; }
+            showConfirm(t('confirm.restore.body'), pick, null, {
+                title: t('confirm.restore.title'), confirmLabel: t('confirm.restore.verb'), danger: true,
+            });
         });
         document.getElementById('settings-restore-input')?.addEventListener('change', async (e) => {
             const file = e.target.files?.[0];
