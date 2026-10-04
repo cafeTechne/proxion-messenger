@@ -7,8 +7,12 @@
 // lastEmojiMsgId is owned entirely by this cluster, so it lives in `state`.
 // The returned functions are destructured into same-named bindings in main.js.
 import { podWriteReactions, podWriteReactionAction, podWriteReactionActionAt } from './pod.js';
+import { t } from './i18n.js';
+import { icon } from './icons.js';
 
-export function createReactions({ getSocket, getActiveView, getSelfWebId, getMessageReactions, getRoomEmojiMap, getMessageTs, getRemoteRoom }) {
+// resolveName(webid) -> display name or "" (the same resolver the typing
+// indicator uses); it names the reactors in each pill's tooltip.
+export function createReactions({ getSocket, getActiveView, getSelfWebId, getMessageReactions, getRoomEmojiMap, getMessageTs, getRemoteRoom, resolveName }) {
     const state = { lastEmojiMsgId: null };
 
     // R60A: a reaction key like ":name:" refers to the room's custom emoji.
@@ -56,6 +60,17 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         }
     }
 
+    // Comma list of who reacted ("You, Alice, Bob"), at most 10 names.
+    function reactorNames(webids) {
+        const self = getSelfWebId();
+        const names = (webids || []).map(w => (w && w === self) ? t('reaction.you')
+            : ((resolveName && resolveName(w)) || String(w || "").slice(0, 16)));
+        if (names.length > 10) {
+            return t('reaction.namesMore', { names: names.slice(0, 10).join(", "), count: names.length - 10 });
+        }
+        return names.join(", ");
+    }
+
     function renderReactions(mid, animateEmoji) {
         const container = document.getElementById(`reactions-${mid}`);
         if (!container) return;
@@ -63,6 +78,7 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         const selfWebId = getSelfWebId();
         const reacts = messageReactions[mid] || {};
         container.innerHTML = "";
+        let shown = 0;
         Object.keys(reacts).forEach(emoji => {
             const count = reacts[emoji].length;
             if (count === 0) return;
@@ -76,6 +92,9 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
             if (typeof span.setAttribute === "function") {
                 span.setAttribute("role", "button");
                 span.setAttribute("aria-pressed", alreadyReacted ? "true" : "false");
+                const label = t('reaction.by', { emoji, names: reactorNames(reacts[emoji]) });
+                span.setAttribute("aria-label", label);
+                span.title = label;
             }
             span.tabIndex = 0;
             // R60A: ":name:" keys render the room's custom emoji image (safe:
@@ -104,7 +123,26 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
                 });
             }
             container.appendChild(span);
+            shown++;
         });
+        // A small "add reaction" pill at the end of a non-empty row opens the
+        // same picker as the hover bar's react button.
+        if (shown > 0) {
+            const add = document.createElement("button");
+            add.className = "reaction reaction-add";
+            if (typeof add.setAttribute === "function") {
+                add.setAttribute("type", "button");
+                add.setAttribute("aria-label", t('reaction.add'));
+            }
+            add.title = t('reaction.add');
+            add.innerHTML = icon('face-smile', { size: 14 }) + '<span aria-hidden="true">+</span>';
+            add.onclick = (e) => {
+                if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+                const r = typeof add.getBoundingClientRect === "function" ? add.getBoundingClientRect() : { left: 0, top: 0 };
+                togglePicker(mid, r.left, r.top);
+            };
+            container.appendChild(add);
+        }
     }
 
     function togglePicker(msgId, x, y) {

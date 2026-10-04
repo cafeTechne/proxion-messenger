@@ -169,3 +169,57 @@ describe('reaction send is socket-state safe (silent-failure fix)', () => {
     expect(sent).toHaveLength(0);   // graceful no-op, nothing sent on a non-open socket
   });
 });
+
+describe('reaction pills name the reactors and offer an add pill', () => {
+  function render(reactions, resolveName) {
+    const container = { innerHTML: '', children: [], appendChild(c) { this.children.push(c); } };
+    global.document = {
+      getElementById: (id) => (id === 'reactions-m1' ? container : null),
+      createElement: (tag) => {
+        const attrs = {};
+        return { tag, style: {}, className: '', innerText: '', innerHTML: '', title: '', attrs,
+          setAttribute(k, v) { attrs[k] = v; }, addEventListener() {} };
+      },
+      createTextNode: (t) => ({ text: t }),
+    };
+    const r = createReactions({
+      getSocket: () => null,
+      getActiveView: () => ({ type: 'local_room', id: 'room-1' }),
+      getSelfWebId: () => 'did:key:zSelf',
+      getMessageReactions: () => ({ m1: reactions }),
+      resolveName,
+    });
+    r.renderReactions('m1');
+    return { container, r };
+  }
+  it('sets title and aria-label from the resolver, with "You" for self', () => {
+    const { container } = render({ '👍': ['did:key:zSelf', 'did:key:zBob'] }, (w) => (w === 'did:key:zBob' ? 'Bob' : ''));
+    const pill = container.children[0];
+    expect(pill.attrs['aria-label']).toBe('reaction.by');   // key only: no locale in tests
+    expect(pill.title).toBe(pill.attrs['aria-label']);
+  });
+  it('appends one add-reaction button after the pills', () => {
+    const { container } = render({ '👍': ['did:key:zBob'], '🎉': ['did:key:zCarol'] });
+    const last = container.children[container.children.length - 1];
+    expect(container.children).toHaveLength(3);
+    expect(last.tag).toBe('button');
+    expect(last.className).toContain('reaction-add');
+    expect(last.attrs['aria-label']).toBe('reaction.add');
+    expect(last.innerHTML).toContain('<svg');
+    expect(typeof last.onclick).toBe('function');
+  });
+  it('shows no add pill when the row is empty', () => {
+    const { container } = render({ '👍': [] });
+    expect(container.children).toHaveLength(0);
+  });
+  it('the add pill opens the picker for this message', () => {
+    const { container, r } = render({ '👍': ['did:key:zBob'] });
+    const picker = { style: { display: 'none' }, offsetWidth: 160, offsetHeight: 120 };
+    const prev = global.document.getElementById;
+    global.document.getElementById = (id) => (id === 'emoji-picker' ? picker : prev(id));
+    global.window = { innerWidth: 1000 };
+    container.children[1].onclick({ stopPropagation() {} });
+    expect(r.state.lastEmojiMsgId).toBe('m1');
+    expect(picker.style.display).toBe('grid');
+  });
+});
