@@ -27,6 +27,15 @@ export function b64attr(x) {
     return String(x == null ? '' : x).replace(/[^A-Za-z0-9+/=]/g, '');
 }
 
+// Scroll behavior that honours prefers-reduced-motion. The CSS guard does not
+// reach scrollIntoView/scrollTo calls that pass behavior: 'smooth' from script.
+export function scrollBehavior() {
+    try {
+        if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return 'auto';
+    } catch { /* no matchMedia */ }
+    return 'smooth';
+}
+
 export function formatTimestamp(ts) {
     if (!ts) return '';
     const d = new Date(typeof ts === 'number' ? ts * 1000 : ts);

@@ -37,7 +37,7 @@ import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
 import { buildRoomDescriptor, withMembers, descriptorSigningBytes } from './roomdesc.js';
 import {
     didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, timeAgo,
-    expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8,
+    expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8, scrollBehavior,
 } from './util.js';
 import { createFileTransfer } from './filetransfer.js';
 import { createVoice, CallState, audioLevel } from './voice.js';
@@ -5494,7 +5494,7 @@ import { createIdentityResolver } from './identity.js';
                         showProfileCard(webid, name, e.clientX, e.clientY);
                         showContactProfile(webid);
                         break;
-                    case 'scroll-reply': document.getElementById(`msg-${replyId}`)?.scrollIntoView({ behavior: 'smooth' }); break;
+                    case 'scroll-reply': document.getElementById(`msg-${replyId}`)?.scrollIntoView({ behavior: scrollBehavior() }); break;
                     case 'bookmark':
                         savedMsgs.toggleBookmark(messageMap[msgId], activeView);
                         break;

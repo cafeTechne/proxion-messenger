@@ -6,7 +6,7 @@
 // working unchanged.
 import { inlineNotice } from './states.js';
 import { t } from './i18n.js';
-import { escHtml } from './util.js';
+import { escHtml, scrollBehavior } from './util.js';
 
 export function createPins({ getSocket, getActiveView }) {
 
@@ -66,7 +66,7 @@ export function createPins({ getSocket, getActiveView }) {
 
     function jumpToMsg(msgId) {
         const el = document.getElementById(`msg-${msgId}`);
-        if (el) { el.scrollIntoView({ behavior: "smooth" }); el.style.background = "#334155"; setTimeout(() => el.style.background = "", 1500); }
+        if (el) { el.scrollIntoView({ behavior: scrollBehavior() }); el.style.background = "#334155"; setTimeout(() => el.style.background = "", 1500); }
     }
 
     return { pinMsg, showPinPanel, renderPins, unpinMsg, jumpToMsg };

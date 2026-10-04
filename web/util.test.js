@@ -1,8 +1,25 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import {
   didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown,
-  expireLabel, timeAgo, u8ToB64, b64ToU8, b64attr,
+  expireLabel, timeAgo, u8ToB64, b64ToU8, b64attr, scrollBehavior,
 } from './util.js';
+
+describe('scrollBehavior (reduced motion)', () => {
+  const orig = globalThis.matchMedia;
+  afterEach(() => { globalThis.matchMedia = orig; });
+  it('is smooth when the user has no motion preference', () => {
+    globalThis.matchMedia = () => ({ matches: false });
+    expect(scrollBehavior()).toBe('smooth');
+  });
+  it('is instant when prefers-reduced-motion is set', () => {
+    globalThis.matchMedia = (q) => ({ matches: q === '(prefers-reduced-motion: reduce)' });
+    expect(scrollBehavior()).toBe('auto');
+  });
+  it('falls back to smooth without matchMedia', () => {
+    globalThis.matchMedia = undefined;
+    expect(scrollBehavior()).toBe('smooth');
+  });
+});
 
 describe('b64attr (attribute-injection guard)', () => {
   it('keeps a valid base64 string intact', () => {
