@@ -87,6 +87,7 @@ import { createPolls } from './polls.js';
 import { createRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { createMeme } from './meme.js';
 import { inlineNotice, feedEmptyState } from './states.js';
+import { icon } from './icons.js';
 import { installFocusTrap, closeTopmostDialog } from './focus-trap.js';
 import { initSettingsNav, createDebouncedSaver } from './settings-panel.js';
 import { makeListNavigable, announce } from './a11y.js';
@@ -859,18 +860,20 @@ import { createIdentityResolver } from './identity.js';
         const _podReadLastFetch = {};
         const POD_READ_DEBOUNCE_MS = 30000;
 
-        const _SVG_BELL = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"/></svg>';
-        const _SVG_BELL_SLASH = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M9.143 17.082a24.248 24.248 0 0 0 3.844.148m-3.844-.148a23.856 23.856 0 0 1-5.455-1.31 8.964 8.964 0 0 0 2.3-5.542m3.155 6.852a3 3 0 0 0 5.667 1.97m1.965-2.277L21 21m-4.225-4.225a23.81 23.81 0 0 0 3.536-1.003A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6.53 6.53m10.245 10.245L6.53 6.53M3 3l3.53 3.53"/></svg>';
+        // Notification-sound toggle: a speaker, crossed out when off (the bell
+        // stays reserved for mute).
+        const _SVG_SOUND_ON = icon('speaker-wave', { size: 20 });
+        const _SVG_SOUND_OFF = icon('speaker-x-mark', { size: 20 });
         // Desktop-notification toggle icons (a monitor; slashed when disabled).
-        const _SVG_DESKTOP = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25"/></svg>';
-        const _SVG_DESKTOP_SLASH = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M3 3l18 18M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-.53 1.44M18.75 17.25H5.25A2.25 2.25 0 0 1 3 15V5.25c0-.35.08-.682.22-.978"/></svg>';
+        const _SVG_DESKTOP = icon('desktop', { size: 20 });
+        const _SVG_DESKTOP_SLASH = icon('desktop-slash', { size: 20 });
         let soundEnabled = localStorage.getItem("soundEnabled") === "true";
         const soundBtn = document.getElementById("sound-toggle");
-        soundBtn.innerHTML = soundEnabled ? _SVG_BELL : _SVG_BELL_SLASH;
+        soundBtn.innerHTML = soundEnabled ? _SVG_SOUND_ON : _SVG_SOUND_OFF;
         soundBtn.onclick = () => {
             soundEnabled = !soundEnabled;
             localStorage.setItem("soundEnabled", soundEnabled);
-            soundBtn.innerHTML = soundEnabled ? _SVG_BELL : _SVG_BELL_SLASH;
+            soundBtn.innerHTML = soundEnabled ? _SVG_SOUND_ON : _SVG_SOUND_OFF;
         };
 
         // Desktop/OS notifications are INDEPENDENT of the sound chime (was
@@ -960,8 +963,8 @@ import { createIdentityResolver } from './identity.js';
                     ${last ? `<div class="dm-item-preview" dir="auto">${last.snippet.replace(/</g,"&lt;")}</div>` : ""}`;
                 const closeBtn = document.createElement("button");
                 closeBtn.className = "dm-close-btn";
-                closeBtn.innerText = "×";
-                closeBtn.title = "Hide this DM";
+                closeBtn.innerHTML = icon('x-mark', { size: 14 });
+                closeBtn.title = t('dm.hideConversation');
                 closeBtn.setAttribute("aria-label", t('dm.hideConversation'));
                 closeBtn.onclick = (e) => { e.stopPropagation(); hideDm(id); };
                 li.appendChild(body);
@@ -1566,8 +1569,8 @@ import { createIdentityResolver } from './identity.js';
                     if (el && !el.querySelector(".relay-pending-badge")) {
                         const badge = document.createElement("span");
                         badge.className = "relay-pending-badge";
-                        badge.title = "Queued — peer gateway unreachable, will retry";
-                        badge.textContent = "⏳";
+                        badge.title = t('relay.queuedHint');
+                        _setStatusBadge(badge, 'clock', t('relay.queued'));
                         el.appendChild(badge);
                     }
                     break;
@@ -1577,7 +1580,11 @@ import { createIdentityResolver } from './identity.js';
                     const msgEl = document.querySelector(`[data-message-id="${CSS.escape(event.message_id)}"]`);
                     if (msgEl) {
                         const badge = msgEl.querySelector('.relay-pending-badge');
-                        if (badge) { badge.textContent = '✓'; badge.classList.replace('relay-pending', 'relay-delivered'); }
+                        if (badge) {
+                            _setStatusBadge(badge, 'check', t('relay.delivered'));
+                            badge.title = t('relay.delivered');
+                            badge.classList.replace('relay-pending', 'relay-delivered');
+                        }
                     }
                     break;
                 }
@@ -1595,7 +1602,7 @@ import { createIdentityResolver } from './identity.js';
                                 msgEl.appendChild(b);
                                 return b;
                             })();
-                        badge.textContent = '⚠';
+                        _setStatusBadge(badge, 'exclamation-triangle', t('relay.failedShort'));
                         badge.classList.remove('relay-pending', 'relay-delivered');
                         badge.classList.add('relay-failed');
                         let title = t('relay.failed');
@@ -1781,7 +1788,11 @@ import { createIdentityResolver } from './identity.js';
                         const msgEl = document.querySelector(`[data-message-id="${CSS.escape(event.message_id)}"]`);
                         if (msgEl) {
                             const badge = msgEl.querySelector('.relay-pending-badge, .relay-delivered');
-                            if (badge) { badge.textContent = '✓✓'; badge.className = 'relay-read'; }
+                            if (badge) {
+                                _setStatusBadge(badge, 'check-double', t('receipt.read'));
+                                badge.title = t('receipt.read');
+                                badge.className = 'relay-read';
+                            }
                         }
                     })();
                     break;
@@ -2423,8 +2434,9 @@ import { createIdentityResolver } from './identity.js';
                         const contactEl = document.querySelector(`[data-cert-id="${certId}"]`);
                         if (contactEl) {
                             const badge = document.createElement("span");
-                            badge.textContent = " ⛔";
-                            badge.title = "Contact revoked";
+                            badge.className = "revoked-badge";
+                            _setStatusBadge(badge, 'no-symbol', t('contact.revokedBadge'));
+                            badge.title = t('contact.revokedBadge');
                             contactEl.appendChild(badge);
                         }
                         // Disable message input if this contact is currently open
@@ -2615,7 +2627,7 @@ import { createIdentityResolver } from './identity.js';
                             <div class="session-info">
                                 <span class="session-ip">${escHtml(s.ip_addr || "unknown")}</span>
                                 <span class="session-time">${formatTimestamp(s.connected_at)}</span>
-                                ${s.is_current ? '<span class="session-current">● this device</span>' : ''}
+                                ${s.is_current ? `<span class="session-current status-dot">${t('session.thisDevice')}</span>` : ''}
                             </div>
                             ${!s.is_current ? `<button class="session-revoke-btn" data-session-id="${s.session_id}">Revoke</button>` : ''}
                         </div>`).join('') || inlineNotice('No sessions found.', 'empty');
@@ -3321,13 +3333,20 @@ import { createIdentityResolver } from './identity.js';
             return "";
         }
 
+        // Delivery / read / revoked badges: an icon for sighted users plus a
+        // visually hidden status word for screen readers (the glyphs used to be
+        // read out literally).
+        function _setStatusBadge(el, name, label) {
+            el.innerHTML = icon(name, { size: 12 }) + `<span class="sr-only">${escHtml(label)}</span>`;
+        }
+
         // -- Round 60: Read receipt helpers --
         function updateReadReceipt(msgId, readers) {
             const el = document.querySelector(`.read-receipt[data-msg-id="${msgId}"]`);
             if (!el) return;
             const others = (readers || []).filter(w => w !== selfWebId);
             if (!others.length) return;
-            el.textContent = '✓✓';
+            _setStatusBadge(el, 'check-double', t('receipt.read'));
             el.classList.add('read');
             el.title = t('receipt.readBy', { names: others.slice(0, 5).map(w => resolvePeerName(w) || shortWebId(w)).join(', ') });
         }
@@ -3357,7 +3376,7 @@ import { createIdentityResolver } from './identity.js';
                         delete messageMap[msgId];
                     }
                 } else if (exp) {
-                    const countdownEl = el.querySelector('.msg-expire-countdown');
+                    const countdownEl = el.querySelector('.msg-expire-label');
                     if (countdownEl) countdownEl.textContent = _expireLabel(exp - now);
                 }
             });
@@ -4019,6 +4038,11 @@ import { createIdentityResolver } from './identity.js';
             if (ok) await sendAttachmentFile(file, { spoiler });
         }
 
+        // The attach control is a real button (a <label> for a hidden input is
+        // not focusable); it forwards to the hidden file input.
+        document.getElementById("attach-btn")?.addEventListener("click", () => {
+            document.getElementById("file-input")?.click();
+        });
         document.getElementById("file-input").onchange = (e) => {
             const file = e.target.files[0];
             if (file) confirmAndSend(file);
@@ -4284,6 +4308,29 @@ import { createIdentityResolver } from './identity.js';
         });
 
         // --------------- Context Menu ---------------
+        const _GIF_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif'];
+        function _isImageAttachment(m) {
+            return !!(m?.file?.data_b64 && _GIF_MIMES.includes((m.file.mime_type || '').toLowerCase()));
+        }
+        // R60B: caption an image attachment into a meme.
+        function _memeFromMsg(msgId) {
+            const mm = messageMap[msgId];
+            if (!mm?.file?.data_b64) return;
+            const bin = atob(mm.file.data_b64);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            meme.openWithBlob(new Blob([bytes], { type: mm.file.mime_type }));
+        }
+        // R58: star an image attachment into the local GIF tray.
+        function _saveGifFromMsg(msgId) {
+            const m = messageMap[msgId];
+            if (!m?.file?.data_b64) return;
+            saveFavorite({
+                filename: m.file.filename, mime: m.file.mime_type, data_b64: m.file.data_b64,
+            }).then((r) => showToast(t(r === 'exists' ? 'gif.alreadySaved' : 'gif.saved')))
+              .catch(() => showToast(t('common.updateFailed')));
+        }
+
         let _ctxTarget = null; // { msgId, fromWebid, content, isOwn }
 
         function openCtxMenu(e, msgId) {
@@ -4295,18 +4342,26 @@ import { createIdentityResolver } from './identity.js';
                 msgId,
                 fromWebid: msg.from_webid,
                 content: msg.content || "",
-                isOwn: msg.from_webid === selfWebId,
+                // Same ownership test the message renderer uses for its Edit button.
+                isOwn: msg.own === true || (!!selfWebId && msg.from_webid === selfWebId) ||
+                    (!!selfPubHex && msg.from_pub_hex === selfPubHex),
             };
             const isOwn = _ctxTarget.isOwn;
+            const isImage = _isImageAttachment(msg);
             document.getElementById("ctx-edit").style.display  = isOwn ? "" : "none";
             document.getElementById("ctx-delete").style.display = isOwn ? "" : "none";
+            document.getElementById("ctx-save-gif").style.display = isImage ? "" : "none";
+            document.getElementById("ctx-meme").style.display = isImage ? "" : "none";
+            // Local-only removal: offered where the hover bar used to offer it.
+            document.getElementById("ctx-delete-me").style.display =
+                isOwn && (msg.local || activeView?.local) ? "" : "none";
 
             const menu = document.getElementById("ctx-menu");
             menu.style.display = "block";
             const vw = window.innerWidth, vh = window.innerHeight;
-            const mw = 200, mh = 180;
-            menu.style.left = Math.min(e.clientX, vw - mw) + "px";
-            menu.style.top  = Math.min(e.clientY, vh - mh) + "px";
+            const mw = menu.offsetWidth || 200, mh = menu.offsetHeight || 180;
+            menu.style.left = Math.max(4, Math.min(e.clientX, vw - mw - 4)) + "px";
+            menu.style.top  = Math.max(4, Math.min(e.clientY, vh - mh - 4)) + "px";
             // Keyboard access: when opened from a focused message (Enter / F10 /
             // ContextMenu key), move focus into the menu so it's operable, and
             // remember the message to restore focus to on close.
@@ -4363,6 +4418,33 @@ import { createIdentityResolver } from './identity.js';
             if (!_ctxTarget) return;
             pinMsg(_ctxTarget.msgId);
             closeCtxMenu();
+        };
+        document.getElementById("ctx-forward").onclick = () => {
+            if (!_ctxTarget) return;
+            const _id = _ctxTarget.msgId;
+            closeCtxMenu();
+            openForwardModal(_id);
+        };
+        document.getElementById("ctx-bookmark").onclick = () => {
+            if (!_ctxTarget) return;
+            savedMsgs.toggleBookmark(messageMap[_ctxTarget.msgId], activeView);
+            closeCtxMenu();
+        };
+        document.getElementById("ctx-save-gif").onclick = () => {
+            if (!_ctxTarget) return;
+            _saveGifFromMsg(_ctxTarget.msgId);
+            closeCtxMenu();
+        };
+        document.getElementById("ctx-meme").onclick = () => {
+            if (!_ctxTarget) return;
+            _memeFromMsg(_ctxTarget.msgId);
+            closeCtxMenu();
+        };
+        document.getElementById("ctx-delete-me").onclick = () => {
+            if (!_ctxTarget) return;
+            const _delId = _ctxTarget.msgId;
+            closeCtxMenu();
+            deleteForMeLocal(_delId);
         };
         document.getElementById("ctx-delete").onclick = () => {
             if (!_ctxTarget) return;
@@ -5308,23 +5390,25 @@ import { createIdentityResolver } from './identity.js';
                     case 'bookmark':
                         savedMsgs.toggleBookmark(messageMap[msgId], activeView);
                         break;
-                    case 'meme': {
-                        const mm = messageMap[msgId];
-                        if (mm?.file?.data_b64) {
-                            const bin = atob(mm.file.data_b64);
-                            const bytes = new Uint8Array(bin.length);
-                            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-                            meme.openWithBlob(new Blob([bytes], { type: mm.file.mime_type }));
-                        }
-                        break;
-                    }
-                    case 'save-gif': {
-                        const m = messageMap[msgId];
-                        if (m?.file?.data_b64) {
-                            saveFavorite({
-                                filename: m.file.filename, mime: m.file.mime_type, data_b64: m.file.data_b64,
-                            }).then((r) => showToast(t(r === 'exists' ? 'gif.alreadySaved' : 'gif.saved')))
-                              .catch(() => showToast(t('common.updateFailed')));
+                    case 'meme':         _memeFromMsg(msgId); break;
+                    case 'save-gif':     _saveGifFromMsg(msgId); break;
+                    case 'more': {
+                        // Open the message context menu under the More button,
+                        // right-aligned to it, holding the less frequent actions.
+                        const r = el.getBoundingClientRect();
+                        openCtxMenu({ clientX: r.left, clientY: r.bottom + 4,
+                                      preventDefault: () => {}, stopPropagation: () => {} }, msgId);
+                        const menu = document.getElementById('ctx-menu');
+                        if (menu && menu.style.display !== 'none') {
+                            const mw = menu.offsetWidth, mh = menu.offsetHeight;
+                            const rtl = document.documentElement.dir === 'rtl';
+                            const x = rtl ? r.left : r.right - mw;
+                            let y = r.bottom + 4;
+                            if (y + mh > window.innerHeight - 4) y = r.top - mh - 4;
+                            menu.style.left = Math.max(4, Math.min(x, window.innerWidth - mw - 4)) + 'px';
+                            menu.style.top = Math.max(4, y) + 'px';
+                            // Return focus to the More button, not the whole row.
+                            _ctxOpener = el;
                         }
                         break;
                     }

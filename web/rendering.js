@@ -23,6 +23,7 @@ import { didSuffix, escHtml, webidColor, renderMarkdown, timeAgo, expireLabel as
 import { parsePoll } from './polls.js';
 import { applyRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { t, getLocale } from './i18n.js';
+import { icon } from './icons.js';
 
 // R59A: attachment kind by mime — pure, exported for tests. Video/audio get
 // inline players (CSP already allows media-src data:), everything else falls
@@ -403,7 +404,7 @@ export function createRendering({
                     ${_dlLink}</div>`;
             } else {
                 // Force octet-stream to prevent data URI MIME injection
-                fileHtml = `<div class="attachment"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13"/></svg> ${safeFilename} (${Math.round(msg.file.size/1024)} KB)
+                fileHtml = `<div class="attachment">${icon('paperclip', { size: 18 })} ${safeFilename} (${Math.round(msg.file.size/1024)} KB)
                     <a href="data:application/octet-stream;base64,${_b64}" download="${safeFilename}"
                        style="color:var(--accent-text);margin-left:10px;">${t('file.download')}</a></div>`;
             }
@@ -416,24 +417,11 @@ export function createRendering({
             (selfWebId && msg.from_webid === selfWebId) ||
             (selfPubHex && msg.from_pub_hex === selfPubHex);
 
+        // Hover bar keeps the frequent actions (react, reply, own-message edit)
+        // and a More button that opens the message context menu, which holds
+        // the rest (copy, forward, pin, save, save GIF, meme, delete).
         const editBtn = isOwn
-            ? `<button data-msg-action="edit" data-msg-id="${msgIdEsc}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="Edit"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"/></svg></button>`
-            : "";
-        const deleteBtn = isOwn && (msg.local || activeView?.local)
-            ? `<button data-msg-action="delete" data-msg-id="${msgIdEsc}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg></button>`
-            : "";
-        const forwardBtn = `<button data-msg-action="forward" data-msg-id="${msgIdEsc}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="${t('msg.forward')}">&#8599;</button>`;
-        // R59E: bookmark any message into the private Saved list
-        const bookmarkBtn = `<button data-msg-action="bookmark" data-msg-id="${msgIdEsc}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="${t('msg.bookmark')}">&#128278;</button>`;
-        // R58: star an image attachment into the local GIF tray
-        const _mimeForGif = (msg.file?.mime_type || '').toLowerCase();
-        const _isImageMsg = !!(msg.file?.data_b64 && ['image/jpeg','image/png','image/gif','image/webp','image/avif'].includes(_mimeForGif));
-        const saveGifBtn = _isImageMsg
-            ? `<button data-msg-action="save-gif" data-msg-id="${msgIdEsc}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.85rem;" title="${t('gif.saveAction')}">&#9734;</button>`
-            : "";
-        // R60B: caption an image into a meme
-        const memeBtn = _isImageMsg
-            ? `<button data-msg-action="meme" data-msg-id="${msgIdEsc}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.72rem;font-weight:700;" title="${t('msg.makeMeme')}">M</button>`
+            ? `<button data-msg-action="edit" data-msg-id="${msgIdEsc}" class="icon-btn" aria-label="${t('msg.edit')}" title="${t('msg.edit')}">${icon('edit')}</button>`
             : "";
 
         // --- Avatar column ---
@@ -469,7 +457,7 @@ export function createRendering({
 
         // Round 68: forwarded banner
         if (msg.forwarded) {
-            body.innerHTML += `<div class="forwarded-banner">↗ ${t('msg.forwardedFrom', { name: escHtml(msg.forwarded_from_name || '') })}</div>`;
+            body.innerHTML += `<div class="forwarded-banner">${icon('forward', { size: 12 })} ${t('msg.forwardedFrom', { name: escHtml(msg.forwarded_from_name || '') })}</div>`;
         }
 
         // Header: name + timestamp (first in group only)
@@ -495,7 +483,7 @@ export function createRendering({
             let expireHtml = "";
             if (currentDisappearMs > 0 && msg.timestamp) {
                 const expiresAt = new Date(msg.timestamp).getTime() + currentDisappearMs;
-                expireHtml = `<span class="msg-expire-countdown" style="font-size:0.7em;color:#8091a7;margin-left:6px;" title="${t('msg.expires')}">⏱ ${_expireLabel(expiresAt - Date.now())}</span>`;
+                expireHtml = `<span class="msg-expire-countdown" style="font-size:0.7em;color:#8091a7;margin-left:6px;" title="${t('msg.expires')}">${icon('clock', { size: 12 })} <span class="msg-expire-label">${_expireLabel(expiresAt - Date.now())}</span></span>`;
             }
             body.innerHTML += `<div class="msg-header"><span class="msg-sender" style="color:${avatarColor}">${escHtml(name)}${botBadge}${suffixHtml}${shieldHtml}${dmAuthHtml}</span><span class="msg-ts-header" title="${exactTs}">${timeAgo(msg.timestamp)}${importedBadge}${expireHtml}</span></div>`;
         }
@@ -507,7 +495,7 @@ export function createRendering({
         // Delivery tick rides inline at the end of the content's last line —
         // as a block-level sibling it used to cost every own message a whole
         // extra line just for a "✓".
-        const receiptHtml = isOwn ? `<span class="read-receipt" data-msg-id="${msgIdEsc}">&#10003;</span>` : "";
+        const receiptHtml = isOwn ? `<span class="read-receipt" data-msg-id="${msgIdEsc}">${icon('check', { size: 12 })}<span class="sr-only">${t('receipt.sent')}</span></span>` : "";
         const _poll = parsePoll(rawText);
         if (msg.content_type === "audio" && msg.audio_b64) {
             const _durSecs = msg.duration_ms ? Math.round(msg.duration_ms / 1000) : 0;
@@ -532,10 +520,10 @@ export function createRendering({
 
         // Hover action bar
         body.innerHTML += `<div class="msg-actions">
-            <button data-msg-action="react" data-msg-id="${msgIdEsc}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.8rem;" title="${t('msg.react')}">+</button>
-            <button data-msg-action="reply" data-msg-id="${msgIdEsc}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.85rem;" title="${t('msg.reply')}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3"/></svg></button>
-            ${editBtn}${deleteBtn}${forwardBtn}${saveGifBtn}${memeBtn}${bookmarkBtn}
-            <button data-msg-action="pin" data-msg-id="${msgIdEsc}" class="icon-btn" style="min-width:28px;min-height:28px;font-size:0.78rem;" title="${t('msg.pin')}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z"/></svg></button>
+            <button data-msg-action="react" data-msg-id="${msgIdEsc}" class="icon-btn" aria-label="${t('msg.react')}" title="${t('msg.react')}">${icon('face-smile')}</button>
+            <button data-msg-action="reply" data-msg-id="${msgIdEsc}" class="icon-btn" aria-label="${t('msg.reply')}" title="${t('msg.reply')}">${icon('reply')}</button>
+            ${editBtn}
+            <button data-msg-action="more" data-msg-id="${msgIdEsc}" class="icon-btn" aria-label="${t('ui.moreActions')}" title="${t('ui.moreActions')}" aria-haspopup="true">${icon('ellipsis-horizontal')}</button>
         </div>`;
 
         div.appendChild(avatarCol);

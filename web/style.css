@@ -429,7 +429,9 @@ nav li.dm-item > svg { flex: 0 0 16px; }
     width: 40px;
     white-space: nowrap;
 }
-.message:hover .msg-compact-ts { color: var(--text-secondary, #94a3b8); }
+.message:hover .msg-compact-ts,
+.message:focus-within .msg-compact-ts,
+.message:focus-visible .msg-compact-ts { color: var(--text-secondary, #94a3b8); }
 
 /* Body column: grows, wraps long words */
 .msg-body { flex: 1; min-width: 0; }
@@ -456,7 +458,8 @@ nav li.dm-item > svg { flex: 0 0 16px; }
     max-width: 75ch;
 }
 
-/* Hover action bar (react / reply / edit / delete / pin) */
+/* Hover action bar (react / reply / edit / more). The rest of the message
+   actions live in the context menu that "more" opens. */
 .msg-actions {
     display: none;
     position: absolute;
@@ -469,15 +472,19 @@ nav li.dm-item > svg { flex: 0 0 16px; }
     z-index: 10;
     gap: 2px;
 }
-.message:hover .msg-actions { display: flex; }
+.message:hover .msg-actions,
+.message:focus-within .msg-actions,
+.message:focus-visible .msg-actions { display: flex; }
+.msg-actions .icon-btn { min-width: 28px; min-height: 28px; }
+.msg-actions svg { width: 16px; height: 16px; }
 
 /* Gateway-free (web) build: hide the per-message and context-menu controls that
    speak gateway-only commands the pod transport drops, so nothing fakes success
    or silently fails. Toggled by applyTransportGating (transport.js) via a class
    on the document root; gateway mode never sets these, so it is unaffected.
    !important is required because openCtxMenu resets the ctx-* inline display.
-   ctx-delete and delete-for-everyone are hidden; the hover delete button and its
-   "delete for me" option stay, since that removal is genuinely local. */
+   ctx-delete and delete-for-everyone are hidden; "delete for me" (ctx-delete-me)
+   stays, since that removal is genuinely local. */
 .gate-no-edit [data-msg-action="edit"],
 .gate-no-edit #ctx-edit,
 .gate-no-reactions [data-msg-action="react"],
@@ -584,6 +591,9 @@ nav li.dm-item > svg { flex: 0 0 16px; }
     flex-shrink: 0;
     width: 36px;
     height: 36px;
+    background: transparent;
+    border: none;
+    padding: 0;
     border-radius: 4px;
     cursor: pointer;
     color: var(--text-secondary);
@@ -596,7 +606,8 @@ nav li.dm-item > svg { flex: 0 0 16px; }
 }
 
 .voice-record-btn,
-.schedule-btn {
+.schedule-btn,
+.composer-icon-btn {
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -614,7 +625,8 @@ nav li.dm-item > svg { flex: 0 0 16px; }
     transition: color var(--transition-fast), background var(--transition-fast);
 }
 .voice-record-btn:hover,
-.schedule-btn:hover {
+.schedule-btn:hover,
+.composer-icon-btn:hover {
     background: rgba(255,255,255,0.06) !important;
     color: var(--text-primary);
 }
@@ -940,6 +952,8 @@ button:hover { background: var(--accent-hover); }
 }
 
 .relay-pending-badge { margin-inline-start: 4px; font-size: 0.75em; opacity: 0.7; vertical-align: middle; }
+.revoked-badge { margin-inline-start: 4px; color: var(--color-danger); }
+.relay-pending-badge svg, .relay-read svg, .revoked-badge svg, .read-receipt svg { width: 13px; height: 13px; }
 .relay-pending-badge.relay-failed { color: var(--danger, #c0392b); opacity: 0.9; cursor: help; }
 
 /* ── R13: Round 13 additions ── */
@@ -950,6 +964,24 @@ button:hover { background: var(--accent-hover); }
     margin: -1px; overflow: hidden; clip: rect(0,0,0,0);
     white-space: nowrap; border: 0;
 }
+/* Icons: decorative inline SVGs sit on the text baseline and never shrink in a
+   flex row. Size comes from the context rules below, not per-element attributes. */
+svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
+/* Directional icons (back, reply, forward) point the other way in RTL. */
+:root[dir="rtl"] .icon-dir { transform: scaleX(-1); }
+#chat-header-actions > button:not(#leave-room-btn):not(#delete-room-btn) > svg { width: 18px; height: 18px; }
+#sidebar header button svg,
+.compose-actions svg,
+.voice-record-btn svg,
+.schedule-btn svg { width: 20px; height: 20px; }
+.ctx-menu svg { width: 16px; height: 16px; }
+/* Status dot drawn in CSS so locale strings carry no glyph. */
+.status-dot::before {
+    content: ""; display: inline-block; width: 0.6em; height: 0.6em;
+    border-radius: 50%; background: currentColor;
+    margin-inline-end: 0.4em; vertical-align: 0.05em;
+}
+.status-dot:empty::before { display: none; }
 .skip-nav {
     position: absolute; top: -40px; inset-inline-start: 0;
     background: var(--accent, #e94560); color: #fff;
@@ -977,8 +1009,8 @@ button:hover { background: var(--accent-hover); }
 #join-pending-banner.visible { display: flex !important; }
 #join-pending-dismiss {
     background: transparent; border: none; color: var(--text-secondary);
-    cursor: pointer; margin-left: auto; font-size: 1.1em; line-height: 1;
-    padding: 0 var(--space-1);
+    cursor: pointer; margin-left: auto; line-height: 0;
+    padding: var(--space-1);
 }
 #join-pending-dismiss:hover { color: var(--text-primary); }
 
@@ -1368,7 +1400,8 @@ button:hover { background: var(--accent-hover); }
         .gif-remove {
             position: absolute; top: 2px; inset-inline-end: 2px; min-width: 22px; min-height: 22px;
             border: none; border-radius: 4px; background: rgba(0,0,0,0.65);
-            color: var(--slate-50); cursor: pointer; font-size: 0.9em; line-height: 1;
+            color: var(--slate-50); cursor: pointer; line-height: 0;
+            display: inline-flex; align-items: center; justify-content: center;
         }
         .gif-remove:hover, .gif-remove:focus-visible { background: var(--color-danger, #b91c1c); }
         /* R58: drag-drop target highlight */
@@ -1682,7 +1715,7 @@ button:hover { background: var(--accent-hover); }
 
         /* Round 47: Message context menu + sidebar context menu */
         .ctx-menu { position: fixed; background: var(--slate-800); border: 1px solid var(--slate-700); border-radius: 6px; z-index: 1300; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,.5); min-width: 160px; }
-        .ctx-menu button { display: block; width: 100%; background: none; border: none; color: var(--slate-50); padding: 9px 16px; cursor: pointer; text-align: left; font-size: 0.9em; white-space: nowrap; }
+        .ctx-menu button { display: flex; align-items: center; gap: 8px; width: 100%; background: none; border: none; color: var(--slate-50); padding: 9px 16px; cursor: pointer; text-align: start; font-size: 0.9em; white-space: nowrap; }
         .ctx-menu button:hover { background: var(--slate-700); }
         .ctx-menu button.danger { color: var(--color-danger); }
         .ctx-menu hr { border: none; border-top: 1px solid var(--slate-700); margin: 2px 0; }

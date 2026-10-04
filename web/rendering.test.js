@@ -361,3 +361,48 @@ describe('media load re-sticks a bottom-pinned feed', () => {
     expect(feed.scrollTop).toBe(500);
   });
 });
+
+describe('hover action bar', () => {
+  function renderHtml(msg) {
+    els['message-feed'] = mkEl({ scrollHeight: 500, clientHeight: 500 });
+    const created = [];
+    const orig = global.document.createElement;
+    global.document.createElement = () => { const el = mkEl(); created.push(el); return el; };
+    try {
+      make().renderMessage({ thread_id: 'room-1', content: 'hi', timestamp: new Date().toISOString(), ...msg });
+      return created.map(e => e.innerHTML).join('');
+    } finally {
+      global.document.createElement = orig;
+    }
+  }
+  const barOf = (html) => html.slice(html.indexOf('<div class="msg-actions">'));
+  const actions = (html) => [...barOf(html).matchAll(/data-msg-action="([\w-]+)"/g)].map(m => m[1]);
+
+  it('shows react, reply, edit and more for own messages, nothing else', () => {
+    const html = renderHtml({ message_id: 'm1', from_webid: 'did:key:zSelf', local: true,
+      file: { data_b64: 'AAAA', mime_type: 'image/png', filename: 'a.png', size: 3 } });
+    expect(actions(html)).toEqual(['react', 'reply', 'edit', 'more']);
+  });
+
+  it("drops edit on other people's messages", () => {
+    const html = renderHtml({ message_id: 'm2', from_webid: 'did:key:zOther' });
+    expect(actions(html)).toEqual(['react', 'reply', 'more']);
+  });
+
+  it('uses SVG icons with a translated name instead of text glyphs', () => {
+    const bar = barOf(renderHtml({ message_id: 'm3', from_webid: 'did:key:zSelf' }));
+    for (const key of ['msg.react', 'msg.reply', 'msg.edit', 'ui.moreActions']) {
+      expect(bar).toContain(`aria-label="${key}" title="${key}"`);
+    }
+    expect(bar).not.toMatch(/style="min-width/);
+    expect(bar).not.toMatch(/>\+<|>M<|&#8599;|&#128278;|&#9734;/);
+    expect((bar.match(/<svg /g) || []).length).toBe(4);
+  });
+
+  it('renders the delivery tick as an icon with a hidden status word', () => {
+    const html = renderHtml({ message_id: 'm4', from_webid: 'did:key:zSelf' });
+    expect(html).toContain('class="read-receipt"');
+    expect(html).toContain('<span class="sr-only">receipt.sent</span>');
+    expect(html).not.toContain('&#10003;');
+  });
+});
