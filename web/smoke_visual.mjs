@@ -75,7 +75,7 @@ try {
         const e = document.getElementById(id); if (e) e.textContent = '—';
       }
       const dot = document.getElementById('settings-pod-status-dot');
-      if (dot) { dot.textContent = '● status'; dot.style.color = '#64748b'; }
+      if (dot) { dot.textContent = 'status'; dot.style.color = '#64748b'; }
     });
     await new Promise(r => setTimeout(r, 120));    // let the freeze take effect
     const shot = await page.screenshot();          // Buffer (PNG)
