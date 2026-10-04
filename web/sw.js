@@ -72,6 +72,7 @@ const SHELL = [
   "dmhistory.js",
   "push.js",
   "states.js",
+  "icons.js",
   "ssrf.js",
   "dmsig.js",
   "auth.js",
