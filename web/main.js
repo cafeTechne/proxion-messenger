@@ -1026,7 +1026,7 @@ import { createIdentityResolver } from './identity.js';
             const _myName = localStorage.getItem("proxion_display_name") || "";
             const _mySuffix = didSuffix(_myDid);
             document.getElementById("settings-did").innerHTML = _myDid
-                ? `<span style="color:#f1f5f9">${_myName || "(no name set)"}</span><span style="color:#8091a7;margin-left:4px;">Â·${_mySuffix}</span><br><span style="font-size:0.85em;color:#8091a7;">${_myDid}</span>`
+                ? `<span style="color:#f1f5f9">${escHtml(_myName || "(no name set)")}</span><span style="color:#8091a7;margin-left:4px;">·${_mySuffix}</span><br><span style="font-size:0.85em;color:#8091a7;">${escHtml(_myDid)}</span>`
                 : "(generating…)";
             document.getElementById("settings-proxion-address").textContent =
                 localStorage.getItem("proxion_my_address") || "(not connected)";
