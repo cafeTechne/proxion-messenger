@@ -1017,27 +1017,12 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
 /* (single :focus-visible ring is defined once near the top of the file) */
 
 /* 13.6: Backup nudge banner */
-#backup-nudge {
-    display: none; background: var(--color-warning-bg); color: var(--color-warning-text);
-    padding: 7px 16px; font-size: 0.85em; align-items: center;
-    gap: 12px; flex-shrink: 0;
-}
+#backup-nudge { display: none; }
 #backup-nudge.visible { display: flex !important; }
 
 /* Persistent join-request indicator: awaiting the room owner's approval */
-#join-pending-banner {
-    display: none; align-items: center; gap: var(--space-3);
-    padding: var(--space-2) var(--space-4); flex-shrink: 0;
-    background: var(--surface-1); color: var(--text-secondary);
-    border-bottom: 1px solid var(--border); font-size: 0.85em;
-}
+#join-pending-banner { display: none; }
 #join-pending-banner.visible { display: flex !important; }
-#join-pending-dismiss {
-    background: transparent; border: none; color: var(--text-secondary);
-    cursor: pointer; margin-left: auto; line-height: 0;
-    padding: var(--space-1);
-}
-#join-pending-dismiss:hover { color: var(--text-primary); }
 
 /* 13.7: Inline image preview */
 .msg-image-preview {
@@ -1639,10 +1624,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         .state-cta:hover { background: var(--slate-600); }
 
         /* Connection banner */
-        #conn-banner {
-            display: none; background: var(--color-warning-bg); color: var(--color-warning-text); text-align: center;
-            padding: 5px 12px; font-size: 0.82em; z-index: 5; flex-shrink: 0;
-        }
+        #conn-banner { display: none; }
 
         /* Profile card popover (B2) */
         .profile-popover {
@@ -2015,7 +1997,71 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
     --z-toast: 2000;
     /* Solid destructive fill: white text clears 4.5:1 (--color-danger does not). */
     --color-danger-strong: #b91c1c;
+    /* Status fills for toasts and banners. Each passes 4.5:1 with its text
+       color (scripts/contrast_audit.mjs). */
+    --color-success-bg: #15803d;
+    --color-danger-bg: #b91c1c;
+    --color-info-bg: #1e3a5f;
+    --color-info-text: #dbeafe;
+    --color-on-status: #ffffff;
 }
+
+/* ── Toasts. Top-right on desktop, under the header on phones, so a toast
+   never covers the composer's Send and mic buttons. ── */
+#toast-container {
+    position: fixed; z-index: var(--z-toast);
+    top: calc(var(--header-h) + var(--space-2));
+    left: var(--space-3); right: var(--space-3);
+    display: flex; flex-direction: column; gap: var(--space-2);
+    pointer-events: none;
+}
+@media (min-width: 769px) {
+    #toast-container { left: auto; right: var(--space-4); width: 340px; }
+}
+.toast {
+    display: flex; align-items: center; gap: var(--space-2);
+    padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+    border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+    font-size: 0.875rem; line-height: 1.4;
+    background: var(--surface-2); color: var(--slate-50);
+    pointer-events: auto; cursor: pointer;
+    transition: opacity 0.3s;
+}
+.toast--leaving { opacity: 0; }
+.toast--success { background: var(--color-success-bg); color: var(--color-on-status); }
+.toast--error { background: var(--color-danger-bg); color: var(--color-on-status); }
+.toast--warning { background: var(--color-warning-bg); color: var(--color-warning-text); }
+.toast__msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.toast__count { font-weight: 600; font-variant-numeric: tabular-nums; }
+.toast__action, .banner__action {
+    flex-shrink: 0; background: transparent; color: inherit; font: inherit;
+    border: 1px solid currentColor; border-radius: var(--radius-sm);
+    padding: 2px var(--space-3); cursor: pointer; white-space: nowrap;
+}
+.toast__close, .banner__close {
+    flex-shrink: 0; background: transparent; border: none; color: inherit;
+    cursor: pointer; line-height: 0; padding: var(--space-1);
+    min-width: 24px; min-height: 24px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: var(--radius-sm);
+}
+.toast__close:hover, .banner__close:hover { background: rgba(255, 255, 255, 0.12); }
+@media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+
+/* ── Page banners. They all live in #banner-slot and only the most important
+   active one shows (status-banners.js applyBannerPriority adds
+   .banner--suppressed to the rest). ── */
+.banner-slot { flex-shrink: 0; }
+.banner {
+    display: flex; align-items: center; gap: var(--space-3);
+    padding: var(--space-2) var(--space-4); flex-shrink: 0;
+    font-size: 0.85em; line-height: 1.5;
+}
+.banner__text { flex: 1; min-width: 0; }
+.banner--warning { background: var(--color-warning-bg); color: var(--color-warning-text); }
+.banner--info { background: var(--color-info-bg); color: var(--color-info-text); }
+.banner--danger { background: var(--color-danger-bg); color: var(--color-on-status); }
+#banner-slot > .banner.banner--suppressed { display: none !important; }
 
 /* ── Modal component: overlay + panel. Visibility stays on the inline
    style.display the JS toggles; these classes own everything else. ── */

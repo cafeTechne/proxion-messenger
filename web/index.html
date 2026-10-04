@@ -126,7 +126,7 @@
     </div>
 
     <!-- Round 47: Toast container -->
-    <div id="toast-container" style="position:fixed;bottom:24px;right:24px;z-index:var(--z-toast);display:flex;flex-direction:column;gap:8px;pointer-events:none;"></div>
+    <div id="toast-container"></div>
 
     <!-- Round 47: Generic confirm dialog -->
     <div id="confirm-modal" class="modal modal--stacked" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-msg" style="display:none;">
@@ -276,20 +276,38 @@
       </div>
     </div>
 
-    <!-- R13.6: backup nudge banner (shown if no backup downloaded after 24h) -->
-    <div id="backup-nudge" role="alert" style="display:none;background:var(--color-warning-bg);color:var(--color-warning-text);padding:7px 16px;font-size:0.85em;display:none;align-items:center;gap:12px;flex-shrink:0;">
-      <span>Back up your identity before you lose access.</span>
-      <button id="backup-nudge-action" style="background:var(--color-warning-text);color:var(--color-warning-bg);border:none;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:0.85em;flex-shrink:0;" data-i18n="btn.backUpNow">Back up now</button>
-      <button id="backup-nudge-dismiss" aria-label="Dismiss backup reminder" style="background:transparent;border:none;color:var(--color-warning-text);cursor:pointer;margin-left:auto;line-height:0;" data-i18n-attr="aria-label:ui.dismissBackupReminder"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
-    </div>
+    <!-- One slot for page-level banners. Only the most important active one is
+         shown (connection, join pending, NAT, backup, pod); see
+         status-banners.js applyBannerPriority. -->
+    <div id="banner-slot" class="banner-slot">
+      <div id="conn-banner" class="banner banner--warning" role="status">
+        <span id="conn-banner-text" class="banner__text" data-i18n="conn.reconnecting">Reconnecting…</span>
+        <button type="button" id="conn-retry-btn" class="banner__action" data-i18n="conn.retryNow">Retry now</button>
+      </div>
 
-    <!-- Persistent indicator: a ?join= room request is awaiting the owner's
-         approval (R106 gateway-free join handshake). Unlike the one-shot
-         "request sent" toast, this stays visible until the room appears, the
-         request fails, or the user dismisses it. -->
-    <div id="join-pending-banner" role="status" aria-live="polite">
-      <span id="join-pending-text" data-i18n="join.pendingApproval">Waiting for the room owner to approve your join request.</span>
-      <button id="join-pending-dismiss" aria-label="Dismiss" data-i18n-attr="aria-label:ui.dismiss"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+      <!-- R13.6: backup nudge banner (shown if no backup downloaded after 24h) -->
+      <div id="backup-nudge" class="banner banner--warning" role="status">
+        <span class="banner__text" data-i18n="ui.backupNudge">Back up your identity before you lose access.</span>
+        <button type="button" id="backup-nudge-action" class="banner__action" data-i18n="btn.backUpNow">Back up now</button>
+        <button type="button" id="backup-nudge-dismiss" class="banner__close" aria-label="Dismiss backup reminder" data-i18n-attr="aria-label:ui.dismissBackupReminder"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+      </div>
+
+      <!-- Persistent indicator: a ?join= room request is awaiting the owner's
+           approval (R106 gateway-free join handshake). Unlike the one-shot
+           "request sent" toast, this stays visible until the room appears, the
+           request fails, or the user dismisses it. -->
+      <div id="join-pending-banner" class="banner banner--info" role="status" aria-live="polite">
+        <span id="join-pending-text" class="banner__text" data-i18n="join.pendingApproval">Waiting for the room owner to approve your join request.</span>
+        <button type="button" id="join-pending-dismiss" class="banner__close" aria-label="Dismiss" data-i18n-attr="aria-label:ui.dismiss"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+      </div>
+
+      <div id="pod-connect-banner" class="banner banner--info" role="status" style="display:none;">
+        <span id="pod-banner-text" class="banner__text" style="cursor:pointer;">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15a4.5 4.5 0 0 0 4.5 4.5H18a3.75 3.75 0 0 0 1.332-7.257 3 3 0 0 0-3.758-3.848 5.25 5.25 0 0 0-10.233 2.33A4.502 4.502 0 0 0 2.25 15Z"/></svg> <span data-i18n="ui.podBanner">Connect a Solid Pod to sync messages across devices</span>
+        </span>
+        <button type="button" id="pod-banner-connect-btn" class="banner__action" data-i18n="btn.connect">Connect</button>
+        <button type="button" id="pod-banner-dismiss-btn" class="banner__close" aria-label="Dismiss" title="Dismiss" data-i18n-attr="aria-label:ui.dismiss;title:ui.dismiss"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+      </div>
     </div>
 
     <!-- R13.7: image lightbox -->
@@ -313,7 +331,7 @@
             <div class="sidebar-identity">
                 <div id="self-presence">
                     <span class="dot offline"></span>
-                    <span id="username">Connecting...</span>
+                    <span id="username">Connecting…</span>
                 </div>
                 <div id="my-address-bar"
                      style="display:none; padding:2px 10px 6px; font-size:0.65em; color:var(--slate-600);
@@ -430,24 +448,6 @@
               </form>
             </section>
 
-            <div id="conn-banner">Reconnecting…</div>
-            <div id="pod-connect-banner"
-                 style="display:none; background:#1e3a5f; color:#93c5fd;
-                        padding:5px 12px; font-size:0.8em; flex-shrink:0;
-                        border-bottom:1px solid #1d4ed8; display:none;
-                        align-items:center; justify-content:center; gap:12px;">
-              <span id="pod-banner-text" style="cursor:pointer;">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15a4.5 4.5 0 0 0 4.5 4.5H18a3.75 3.75 0 0 0 1.332-7.257 3 3 0 0 0-3.758-3.848 5.25 5.25 0 0 0-10.233 2.33A4.502 4.502 0 0 0 2.25 15Z"/></svg> Connect a Solid Pod to sync messages across devices
-              </span>
-              <button id="pod-banner-connect-btn"
-                      style="background:#1d4ed8;border:none;color:#fff;padding:3px 10px;
-                             border-radius:3px;cursor:pointer;font-size:0.9em;white-space:nowrap;" data-i18n="btn.connect">
-                Connect
-              </button>
-              <button id="pod-banner-dismiss-btn" aria-label="Dismiss"
-                      style="background:transparent;border:none;color:var(--slate-500);cursor:pointer;
-                             padding:0 2px;line-height:0;" title="Dismiss" data-i18n-attr="aria-label:ui.dismiss;title:ui.dismiss"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
-            </div>
             <header id="chat-header" style="display: flex; align-items: center;">
                 <button id="menu-toggle" aria-label="Open menu" style="background: transparent; border: none; cursor: pointer; color: inherit; padding-right: 15px; line-height: 0;" data-i18n-attr="aria-label:ui.openMenu"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="24" height="24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg></button>
                 <div id="chat-header-title" class="chat-header-title">

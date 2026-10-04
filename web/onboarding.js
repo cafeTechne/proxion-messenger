@@ -9,6 +9,7 @@
 import { t } from './i18n.js';
 import { podWriteProfile } from './pod.js';
 import { solidLogin } from './auth.js';
+import { POD_BANNER_SNOOZE_KEY, POD_BANNER_SNOOZE_MS } from './status-banners.js';
 
 export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyModal, showConfirm }) {
 
@@ -95,6 +96,9 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         const proceed = () => {
             localStorage.setItem("proxion_pod_setup_skipped", "1");
             localStorage.removeItem("proxion_pod_banner_dismissed");
+            // The user just declined a pod: snooze the "Connect a Solid Pod"
+            // banner for a week instead of showing it straight away.
+            localStorage.setItem(POD_BANNER_SNOOZE_KEY, String(Date.now() + POD_BANNER_SNOOZE_MS));
             setPodBanner(true);
             obGoto(5);
         };

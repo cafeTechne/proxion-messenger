@@ -9,7 +9,64 @@ import { t } from './i18n.js';
 import { escHtml } from './util.js';
 import { icon } from './icons.js';
 
+// ── Banner slot ─────────────────────────────────────────────────────────────
+// Every page-level banner lives in #banner-slot, and only the most important
+// active one is shown, so they never stack into a wall above the app. Callers
+// keep toggling their banner exactly as before (style.display, the .visible
+// class, or creating/removing the NAT banner); the slot watches for those
+// changes and hides every active banner below the top one.
+export const BANNER_PRIORITY = [
+    ['conn-banner', (el) => !!el.style?.display && el.style.display !== 'none'],
+    ['join-pending-banner', (el) => !!el.classList?.contains('visible')],
+    ['nat-warning-banner', () => true],
+    ['backup-nudge', (el) => !!el.classList?.contains('visible')],
+    ['pod-connect-banner', (el) => !!el.style?.display && el.style.display !== 'none'],
+];
+
+// Re-evaluate which banner shows. Returns the id of the visible banner or null.
+export function applyBannerPriority(doc = document) {
+    let top = null;
+    for (const [id, isActive] of BANNER_PRIORITY) {
+        const el = doc.getElementById(id);
+        if (!el || !el.classList) continue;
+        const active = isActive(el);
+        const suppress = active && top !== null;
+        if (active && top === null) top = id;
+        // Only touch the class when it changes: the slot observer watches class
+        // mutations, and an unconditional add/remove would retrigger it forever.
+        if (el.classList.contains('banner--suppressed') !== suppress) {
+            el.classList.toggle('banner--suppressed', suppress);
+        }
+    }
+    return top;
+}
+
+// Start watching #banner-slot. Idempotent; a no-op without the slot.
+export function initBannerSlot(doc = document) {
+    const slot = doc.getElementById?.('banner-slot');
+    if (!slot || slot._bannerWatch || typeof MutationObserver === 'undefined') return;
+    slot._bannerWatch = new MutationObserver(() => applyBannerPriority(doc));
+    slot._bannerWatch.observe(slot, {
+        childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'],
+    });
+    applyBannerPriority(doc);
+}
+
+// Choosing "Start now, no account needed" in onboarding snoozes the pod banner
+// for a week, so it does not pop up the moment the user declined a pod.
+export const POD_BANNER_SNOOZE_KEY = 'proxion_pod_banner_snooze_until';
+export const POD_BANNER_SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function _podBannerSnoozed() {
+    try {
+        const until = parseInt(localStorage.getItem(POD_BANNER_SNOOZE_KEY) || '0', 10);
+        return Date.now() < until;
+    } catch { return false; }
+}
+
 export function createStatusBanners() {
+    initBannerSlot();
+
     // R16.4.2: pod status dot in the settings modal header
     function _updateSettingsPodDot(state) {
         const dot = document.getElementById('settings-pod-status-dot');
@@ -33,7 +90,7 @@ export function createStatusBanners() {
 
     function setPodBanner(show) {
         const el = document.getElementById("pod-connect-banner");
-        if (el) el.style.display = show ? "flex" : "none";
+        if (el) el.style.display = show && !_podBannerSnoozed() ? "flex" : "none";
     }
 
     // Web build (gateway-free): there is no gateway pod_status event, so the
@@ -80,10 +137,11 @@ export function createStatusBanners() {
             if (c.public_url_set || c.relay_fallback_active) return;
             const banner = document.createElement("div");
             banner.id = "nat-warning-banner";
-            // Normal-flow block prepended to <body> (a column flex): it pushes the
+            // Normal-flow block in the banner slot above the app: it pushes the
             // app down rather than overlaying the sidebar header (position:fixed
             // used to cover the logo and nothing repositioned around it).
-            banner.style.cssText = "flex-shrink:0;background:#78350f;color:#fef3c7;padding:10px 16px;font-size:0.85em;line-height:1.5;";
+            banner.className = "banner banner--warning";
+            banner.setAttribute?.("role", "status");
             const port = c.local_port || 8080;
             const localIp = c.local_ip || "192.168.x.x";
             const triedUpnp = c.upnp_mapped === false;
@@ -112,22 +170,23 @@ export function createStatusBanners() {
             } else {
                 guide = t('nat.simpleGuide');
             }
-            banner.innerHTML = `<div style="display:flex;gap:12px;align-items:flex-start;max-width:900px;margin:0 auto;">
-                <span style="flex:1;">${guide}</span>
-                <button style="background:transparent;border:none;color:#fef3c7;cursor:pointer;flex-shrink:0;padding:0 4px;line-height:0;" aria-label="${t('common.dismiss')}" title="${t('common.dismiss')}">${icon('x-mark', { size: 14 })}</button>
+            banner.innerHTML = `<div style="flex:1;display:flex;gap:12px;align-items:flex-start;max-width:900px;margin:0 auto;">
+                <span class="banner__text">${guide}</span>
+                <button type="button" class="banner__close" aria-label="${t('common.dismiss')}" title="${t('common.dismiss')}">${icon('x-mark', { size: 14 })}</button>
             </div>`;
             banner.querySelector("button").onclick = () => {
                 banner.remove();
                 sessionStorage.setItem("proxion_nat_dismissed", "1");
             };
-            document.body.prepend(banner);
+            (document.getElementById("banner-slot") || document.body).prepend(banner);
         }).catch(() => {
             // Fallback: minimal banner if /connectivity unreachable
             const banner = document.createElement("div");
             banner.id = "nat-warning-banner";
-            banner.style.cssText = "flex-shrink:0;background:#78350f;color:#fef3c7;padding:8px 16px;font-size:0.85em;display:flex;gap:8px;";
-            banner.innerHTML = `<span style="flex:1">${t('nat.fallback', { env: '<code>PROXION_PUBLIC_URL</code>', file: '<code>.env</code>' })}</span><button onclick="this.closest('#nat-warning-banner').remove()" style="background:transparent;border:none;color:#fef3c7;cursor:pointer;line-height:0;" aria-label="${t('common.dismiss')}" title="${t('common.dismiss')}">${icon('x-mark', { size: 14 })}</button>`;
-            document.body.prepend(banner);
+            banner.className = "banner banner--warning";
+            banner.setAttribute?.("role", "status");
+            banner.innerHTML = `<span class="banner__text">${t('nat.fallback', { env: '<code>PROXION_PUBLIC_URL</code>', file: '<code>.env</code>' })}</span><button type="button" class="banner__close" onclick="this.closest('#nat-warning-banner').remove()" aria-label="${t('common.dismiss')}" title="${t('common.dismiss')}">${icon('x-mark', { size: 14 })}</button>`;
+            (document.getElementById("banner-slot") || document.body).prepend(banner);
         });
     }
 

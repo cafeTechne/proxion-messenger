@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createStatusBanners } from './status-banners.js';
+import { createStatusBanners, applyBannerPriority, POD_BANNER_SNOOZE_KEY } from './status-banners.js';
 
 let els, session, local, body, prepended;
 function mkEl(over = {}) {
@@ -138,5 +138,84 @@ describe('_showNatWarning', () => {
     await flush();
     expect(prepended).toHaveLength(1);
     expect(prepended[0].innerHTML).toContain('9000');
+  });
+  it('builds the banner on the shared warning class, not inline colors', async () => {
+    global.fetch = vi.fn(async () => ({ json: async () => ({ public_url_set: false, relay_fallback_active: false }) }));
+    make()._showNatWarning();
+    await flush();
+    expect(prepended[0].className).toBe('banner banner--warning');
+    expect(prepended[0].style.cssText || '').not.toContain('#78350f');
+  });
+});
+
+describe('banner slot priority', () => {
+  // A banner element with a real-ish classList so the slot can mark it.
+  function mkBanner({ display, visible = false } = {}) {
+    const cls = new Set(visible ? ['banner', 'visible'] : ['banner']);
+    return {
+      style: display ? { display } : {},
+      classList: {
+        contains: (c) => cls.has(c),
+        add: (c) => cls.add(c),
+        remove: (c) => cls.delete(c),
+        toggle: (c, on) => (on ? cls.add(c) : cls.delete(c)),
+      },
+      _cls: cls,
+    };
+  }
+  const suppressed = (el) => el._cls.has('banner--suppressed');
+
+  it('shows only the highest-priority active banner', () => {
+    els['conn-banner'] = mkBanner({ display: 'flex' });
+    els['backup-nudge'] = mkBanner({ visible: true });
+    els['pod-connect-banner'] = mkBanner({ display: 'flex' });
+    expect(applyBannerPriority(global.document)).toBe('conn-banner');
+    expect(suppressed(els['conn-banner'])).toBe(false);
+    expect(suppressed(els['backup-nudge'])).toBe(true);
+    expect(suppressed(els['pod-connect-banner'])).toBe(true);
+  });
+
+  it('follows connection > join pending > NAT > backup > pod', () => {
+    els['conn-banner'] = mkBanner({ display: 'none' });
+    els['join-pending-banner'] = mkBanner();
+    els['nat-warning-banner'] = mkBanner();
+    els['backup-nudge'] = mkBanner({ visible: true });
+    els['pod-connect-banner'] = mkBanner({ display: 'flex' });
+    expect(applyBannerPriority(global.document)).toBe('nat-warning-banner');
+    delete els['nat-warning-banner'];
+    expect(applyBannerPriority(global.document)).toBe('backup-nudge');
+    els['join-pending-banner']._cls.add('visible');
+    expect(applyBannerPriority(global.document)).toBe('join-pending-banner');
+    expect(suppressed(els['backup-nudge'])).toBe(true);
+  });
+
+  it('un-suppresses a banner once the one above it goes away', () => {
+    els['conn-banner'] = mkBanner({ display: 'flex' });
+    els['pod-connect-banner'] = mkBanner({ display: 'flex' });
+    applyBannerPriority(global.document);
+    expect(suppressed(els['pod-connect-banner'])).toBe(true);
+    els['conn-banner'].style.display = 'none';
+    expect(applyBannerPriority(global.document)).toBe('pod-connect-banner');
+    expect(suppressed(els['pod-connect-banner'])).toBe(false);
+  });
+
+  it('returns null when nothing is active', () => {
+    els['conn-banner'] = mkBanner({ display: 'none' });
+    expect(applyBannerPriority(global.document)).toBe(null);
+  });
+});
+
+describe('pod banner snooze', () => {
+  it('stays hidden while snoozed after skipping pod setup', () => {
+    els['pod-connect-banner'] = mkEl({ style: { display: 'none' } });
+    local[POD_BANNER_SNOOZE_KEY] = String(Date.now() + 60_000);
+    make().setPodBanner(true);
+    expect(els['pod-connect-banner'].style.display).toBe('none');
+  });
+  it('shows again once the snooze has passed', () => {
+    els['pod-connect-banner'] = mkEl({ style: { display: 'none' } });
+    local[POD_BANNER_SNOOZE_KEY] = String(Date.now() - 1);
+    make().setPodBanner(true);
+    expect(els['pod-connect-banner'].style.display).toBe('flex');
   });
 });

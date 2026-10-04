@@ -6,6 +6,8 @@
 // main.js, so existing call sites (showToast(...), playNotificationSound(), ...)
 // keep working unchanged.
 import { announce } from './a11y.js';
+import { t } from './i18n.js';
+import { icon } from './icons.js';
 
 export function createNotifications({ getSoundEnabled, getDesktopNotifEnabled, navigateToThread }) {
     // Desktop notifications default to enabled if the host doesn't inject a
@@ -14,37 +16,97 @@ export function createNotifications({ getSoundEnabled, getDesktopNotifEnabled, n
     const desktopOn = () => (typeof getDesktopNotifEnabled === "function" ? getDesktopNotifEnabled() : true);
 
     // --------------- Toast ---------------
-    function showToast(message, type) {
+    // At most MAX_TOASTS are visible (the oldest drops first) so a burst never
+    // walls off the composer or a dialog. A repeat of a toast that is still on
+    // screen bumps a "x2" counter on it instead of stacking a copy.
+    const MAX_TOASTS = 3;
+    const _toasts = [];   // live entries, oldest first
+
+    function _kindOf(type) {
+        return type === "error" || type === "success" || type === "warning" ? type : "info";
+    }
+
+    // showToast(message, type?, { action?: { label, onClick } })
+    function showToast(message, type, opts = {}) {
         const container = document.getElementById("toast-container");
         if (!container) return;
-        const el = document.createElement("div");
-        const bg = type === "error" ? "#dc2626" : type === "success" ? "#16a34a" : type === "warning" ? "#b45309" : "#1e293b";
-        el.style.cssText = `background:${bg};color:#f8fafc;padding:10px 16px;border-radius:8px;` +
-            `font-size:0.875rem;max-width:320px;box-shadow:0 4px 12px rgba(0,0,0,0.4);` +
-            `pointer-events:auto;opacity:1;transition:opacity 0.3s;cursor:pointer`;
-        el.textContent = message;
-        el.title = "Dismiss";
-        container.appendChild(el);
+        const text = String(message ?? "");
+        const kind = _kindOf(type);
+        const action = opts && opts.action && opts.action.label ? opts.action : null;
         // Screen readers: the toast is a visual popup, so mirror it to a live
         // region (assertive for errors so they interrupt, polite otherwise).
-        announce(message, type === "error");
+        announce(text, kind === "error");
 
-        let hideTimer = null, removed = false;
-        const remove = () => {
-            if (removed) return;
-            removed = true;
-            el.style.opacity = "0";
-            setTimeout(() => el.remove(), 300);
-        };
-        // Errors linger longer (they may need reading or acting on); others use
-        // the short default. Hovering pauses the countdown so a toast never
-        // vanishes mid-read, and a click dismisses it immediately.
-        const dwell = type === "error" ? 8000 : 3500;
-        const arm = () => { hideTimer = setTimeout(remove, dwell); };
+        const dup = _toasts.find(e => e.text === text && e.kind === kind);
+        if (dup) {
+            dup.count++;
+            dup.countEl.textContent = t('toast.count', { count: dup.count });
+            dup.countEl.hidden = false;
+            dup.rearm();
+            return;
+        }
+        while (_toasts.length >= MAX_TOASTS) _toasts[0].remove(true);
+
+        const el = document.createElement("div");
+        el.className = `toast toast--${kind}`;
+        const msgEl = document.createElement("span");
+        msgEl.className = "toast__msg";
+        msgEl.textContent = text;
+        el.appendChild(msgEl);
+        const countEl = document.createElement("span");
+        countEl.className = "toast__count";
+        countEl.hidden = true;
+        el.appendChild(countEl);
+        if (action) {
+            const actBtn = document.createElement("button");
+            actBtn.type = "button";
+            actBtn.className = "toast__action";
+            actBtn.textContent = action.label;
+            actBtn.addEventListener("click", (e) => {
+                e.stopPropagation?.();
+                try { action.onClick?.(); } finally { entry.remove(); }
+            });
+            el.appendChild(actBtn);
+        }
+        const closeBtn = document.createElement("button");
+        closeBtn.type = "button";
+        closeBtn.className = "toast__close";
+        closeBtn.setAttribute("aria-label", t('toast.dismiss'));
+        closeBtn.title = t('toast.dismiss');
+        closeBtn.innerHTML = icon('x-mark', { size: 14 });
+        closeBtn.addEventListener("click", (e) => { e.stopPropagation?.(); entry.remove(); });
+        el.appendChild(closeBtn);
+        container.appendChild(el);
+
+        let hideTimer = null;
+        // Errors linger longer (they may need reading or acting on), and an
+        // error that offers an action stays until the user deals with it.
+        // Hovering or focusing pauses the countdown so a toast never vanishes
+        // mid-read, and clicking the body still dismisses it.
+        const sticky = kind === "error" && !!action;
+        const dwell = kind === "error" ? 8000 : 3500;
         const disarm = () => { if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; } };
+        const arm = () => { disarm(); if (!sticky) hideTimer = setTimeout(() => entry.remove(), dwell); };
+        const entry = {
+            el, text, kind, count: 1, countEl, removed: false,
+            rearm: arm,
+            remove(immediate = false) {
+                if (entry.removed) return;
+                entry.removed = true;
+                disarm();
+                const i = _toasts.indexOf(entry);
+                if (i >= 0) _toasts.splice(i, 1);
+                if (immediate) { el.remove(); return; }
+                el.classList.add("toast--leaving");
+                setTimeout(() => el.remove(), 300);
+            },
+        };
+        _toasts.push(entry);
         el.addEventListener("mouseenter", disarm);
         el.addEventListener("mouseleave", arm);
-        el.addEventListener("click", remove);
+        el.addEventListener("focusin", disarm);
+        el.addEventListener("focusout", arm);
+        el.addEventListener("click", () => entry.remove());
         arm();
     }
 

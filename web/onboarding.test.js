@@ -135,5 +135,8 @@ describe('obSkipPod', () => {
     ob.obSkipPod();
     expect(localStorage.getItem('proxion_pod_setup_skipped')).toBe('1');
     expect(setPodBanner).toHaveBeenCalledWith(true);
+    // The banner is snoozed for a week so it does not pop up right away.
+    const until = Number(localStorage.getItem('proxion_pod_banner_snooze_until'));
+    expect(until - Date.now()).toBeGreaterThan(6 * 24 * 60 * 60 * 1000);
   });
 });

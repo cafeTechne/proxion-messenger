@@ -41,6 +41,11 @@ const T = {
   slate500: '#8598ae',               // bumped from #64748b (D1) — used as body text
   slate600: '#8091a7',               // bumped from #475569 (D1) so small secondary text passes
   white: '#ffffff',
+  // Toast + banner status fills (style.css --color-*-bg / -text)
+  colorSuccessBg: '#15803d', colorDangerBg: '#b91c1c',
+  colorWarningBg: '#92400e', colorWarningText: '#fef3c7',
+  colorInfoBg: '#1e3a5f', colorInfoText: '#dbeafe',
+  surface2: '#1e293b', slate50: '#f1f5f9',
 };
 
 // [label, fg, bg, minRatio]. minRatio 3 for large text / non-text UI.
@@ -59,6 +64,11 @@ const PAIRS = [
   ['danger-soft error text on bg', T.colorDangerSoft, T.bgPrimary, 4.5],
   ['success-soft text on bg', T.colorSuccessSoft, T.bgPrimary, 4.5],
   ['accent (link/focus ring) on bg — UI component', T.accent, T.bgPrimary, 3],
+  ['white on success toast', T.white, T.colorSuccessBg, 4.5],
+  ['white on error toast / danger banner', T.white, T.colorDangerBg, 4.5],
+  ['warning text on warning toast / banner', T.colorWarningText, T.colorWarningBg, 4.5],
+  ['info text on info banner', T.colorInfoText, T.colorInfoBg, 4.5],
+  ['slate-50 on info toast', T.slate50, T.surface2, 4.5],
 ];
 
 let fails = 0;
