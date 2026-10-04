@@ -13,6 +13,7 @@ import { escHtml } from './util.js';
 import { podWriteReadState } from './pod.js';
 
 import { t } from './i18n.js';
+import { showFeedNotice } from './states.js';
 
 // Make a sidebar conversation row operable by keyboard and announced to assistive
 // tech (it is otherwise a click-only <li>: no tab stop, no role, no Enter/Space).
@@ -139,6 +140,10 @@ export function createView({
             if (contact.peer_did) {
                 socket.send(JSON.stringify({cmd: "get_peer_device_keys", peer_webid: contact.peer_did}));
             }
+        } else if (feed && window.proxionTransport?.mode === "gateway") {
+            // Offline: say so instead of leaving a blank pane. main.js fetches
+            // this history once the gateway is back (see _postAuthInit).
+            showFeedNotice(feed, t('feed.offline'));
         }
         // Clear unread badge
         unreadCounts[contact.certificate_id] = 0;

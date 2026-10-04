@@ -31,3 +31,26 @@ export function feedEmptyState({ title = 'Nothing here yet.', hint = '', icon = 
         (hint ? `<div class="empty-state-hint">${escHtml(hint)}</div>` : '');
     return el;
 }
+
+// Feed status notice (#feed-notice): "you're offline" or "couldn't load" in
+// place of a blank pane, with an optional Retry button. Replaces any previous
+// notice in the feed; returns the element.
+export function showFeedNotice(feed, message, { onRetry, retryLabel = 'Retry' } = {}) {
+    if (!feed) return null;
+    feed.querySelector?.('#feed-notice')?.remove();
+    const el = document.createElement('div');
+    el.id = 'feed-notice';
+    el.className = 'feed-notice';
+    el.setAttribute?.('role', 'status');
+    el.innerHTML = inlineNotice(message, onRetry ? 'error' : 'empty');
+    if (onRetry) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'state-cta';
+        btn.textContent = retryLabel;
+        btn.addEventListener('click', () => { el.remove(); onRetry(); });
+        el.appendChild(btn);
+    }
+    feed.appendChild(el);
+    return el;
+}

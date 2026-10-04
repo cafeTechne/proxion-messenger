@@ -53,6 +53,7 @@ import { createEdit } from './edit.js';
 import { createMute } from './mute.js';
 import { createMentions } from './mentions.js';
 import { createRooms, setButtonBusy, clearButtonBusy, isButtonBusy } from './rooms.js';
+import { friendlyErrorKey } from './errors.js';
 import { createAddress } from './address.js';
 import { createTyping, shortWebId } from './typing.js';
 import { createMembers } from './members.js';
@@ -86,7 +87,7 @@ import { createSendStatus } from './send-status.js';
 import { createPolls } from './polls.js';
 import { createRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { createMeme } from './meme.js';
-import { inlineNotice, feedEmptyState } from './states.js';
+import { inlineNotice, feedEmptyState, showFeedNotice } from './states.js';
 import { icon } from './icons.js';
 import { installFocusTrap, closeTopmostDialog } from './focus-trap.js';
 import { initSettingsNav, createDebouncedSaver } from './settings-panel.js';
@@ -1687,6 +1688,11 @@ import { createIdentityResolver } from './identity.js';
                         // if flushed at onopen, before registration.
                         flushPending();
                         sendStatus.resumeWaiting();   // queued sends just went out
+                        // A contact DM opened while offline shows a notice in
+                        // place of history: fetch that history now.
+                        if (activeView?.type === "dm" && document.getElementById("feed-notice")) {
+                            socket.send(JSON.stringify({cmd: "read_dm", cert_id: activeView.id}));
+                        }
                         const _podWid = localStorage.getItem("proxion_pod_webid");
                         if (_podWid) socket.send(JSON.stringify({cmd: "link_pod", webid: _podWid}));
                         const _statusMsg = localStorage.getItem("proxion_status_message");
@@ -1901,11 +1907,15 @@ import { createIdentityResolver } from './identity.js';
                     _showJoinPendingBanner();
                     { const _jm = document.getElementById("join-room-modal"); if (_jm) _jm.style.display = "none"; }
                     break;
-                case "join_invalid_invite":
-                    showToast(t('join.invalidInvite'), 'error');
-                    clearButtonBusy(document.getElementById("join-room-submit-btn"));
+                case "join_invalid_invite": {
+                    const _jb = document.getElementById("join-room-submit-btn");
+                    const _je = document.getElementById("join-room-error");
+                    if (isButtonBusy(_jb) && _je) _je.textContent = t('join.invalidInvite');
+                    else showToast(t('join.invalidInvite'), 'error');
+                    clearButtonBusy(_jb);
                     _clearJoinPendingBanner();
                     break;
+                }
                 case "room_joined":
                     _clearJoinPendingBanner();
                     document.getElementById("room-create-modal").style.display = "none";
@@ -2214,6 +2224,7 @@ import { createIdentityResolver } from './identity.js';
                     const tid = event.thread_id;
                     const isActive = activeView && activeView.id === tid;
                     const feed = document.getElementById("message-feed");
+                    if (isActive) feed.querySelector("#feed-notice")?.remove();
                     // A11y: mark the log busy during a bulk restore so screen
                     // readers don't announce every one of the loaded messages.
                     feed.setAttribute("aria-busy", "true");
@@ -2243,9 +2254,10 @@ import { createIdentityResolver } from './identity.js';
                     const lastReadTs = event.last_read_ts || 0;
                     const feed = document.getElementById("message-feed");
                     feed.setAttribute("aria-busy", "true");
-                    // Remove loading skeleton
+                    // Remove loading skeleton (and any offline / load-failed notice)
                     const skel = document.getElementById("history-skeleton");
                     if (skel) skel.remove();
+                    feed.querySelector("#feed-notice")?.remove();
                     const isActive = activeView && activeView.id === tid;
                     const isPagination = msgs.length > 0 && isActive && allMessages.length > 0
                         && msgs[msgs.length - 1].timestamp < allMessages[0].timestamp;
@@ -2590,38 +2602,20 @@ import { createIdentityResolver } from './identity.js';
                         if (_errEl) _errEl.textContent = _friendRequestErrors[event.message] ? t(_friendRequestErrors[event.message]) : (event.detail || event.message);
                         break;
                     }
-                    // Friendly text for the errors a user can actually trigger;
-                    // fall back to the raw gateway message for the rest.
-                    // Backend error code -> i18n key (keep the indirection so raw
-                    // backend strings never render untranslated).
-                    const _errNice = {
-                        "empty_content": "error.empty_content",
-                        "content_too_large": "error.content_too_large",
-                        "invalid_sequence": "error.invalid_sequence",
-                        "file_too_large": "error.file_too_large",
-                        "chunk_too_large": "error.chunk_too_large",
-                        "not_a_room_member": "error.not_a_room_member",
-                        "banned_from_room": "error.banned_from_room",
-                        "invalid_code": "error.invalid_code",
-                        "room_not_found": "error.room_not_found",
-                        "call_too_frequent": "error.call_too_frequent",
-                        "voice_invite_not_allowed": "error.voice_invite_not_allowed",
-                        "voice_sessions_full": "error.voice_sessions_full",
-                        "voice_note_remote_unsupported": "error.voice_note_remote_unsupported",
-                        "reaction_limit_reached": "error.reaction_limit_reached",
-                        "contact_revoked": "error.contact_revoked",
-                        "Not registered": "error.not_registered",
-                        "send_at must be in the future": "error.send_at_future",
-                        "Cannot delete another user's message": "error.cannot_delete_others",
-                        "Cannot edit another user's message": "error.cannot_edit_others",
-                    };
+                    // Friendly, translated text for known backend errors
+                    // (errors.js); anything else shows a generic message and the
+                    // raw text goes to the console.
                     const _raw = event.message || "";
-                    const _key = _errNice[_raw]
-                        || (_raw.startsWith("file_type_not_allowed") ? "error.file_type_not_allowed" : null);
-                    showToast(_key ? t(_key) : t('error.gatewayGeneric', { raw: _raw }), "error");
+                    const _msg = t(friendlyErrorKey(_raw));
+                    // The join modal stays open while a join is pending, so a
+                    // failed join shows its error inline there, not as a toast.
+                    const _joinBtn = document.getElementById("join-room-submit-btn");
+                    const _joinErrEl = document.getElementById("join-room-error");
+                    if (isButtonBusy(_joinBtn) && _joinErrEl) _joinErrEl.textContent = _msg;
+                    else showToast(_msg, "error");
                     // A pending room create/join failed: let the user retry.
                     clearButtonBusy(document.getElementById("room-create-submit"));
-                    clearButtonBusy(document.getElementById("join-room-submit-btn"));
+                    clearButtonBusy(_joinBtn);
                     // A join request that was pending owner approval failed
                     // (banned, room full, expired invite, rate limit, not
                     // found), so stop showing it as still awaiting approval.
@@ -2969,9 +2963,21 @@ import { createIdentityResolver } from './identity.js';
             document.getElementById("reply-bar").style.display = "none";
         }
 
+        let _historyTimeout = null;
         function loadLocalHistory(threadId, limit) {
-            if (!socket || socket.readyState !== WebSocket.OPEN) return;
             const feed = document.getElementById("message-feed");
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                // Opening a conversation offline used to leave a blank pane.
+                // The reconnect re-requests history, which clears this notice.
+                // (The gateway-less web build has no socket by design: its
+                // history comes from the pod, so it never shows this.)
+                if (window.proxionTransport?.mode === "gateway" && feed && activeView
+                    && activeView.id === threadId && !feed.childElementCount) {
+                    showFeedNotice(feed, t('feed.offline'));
+                }
+                return;
+            }
+            feed.querySelector("#feed-notice")?.remove();
             if (!document.getElementById("history-skeleton")) {
                 const skel = document.createElement("div");
                 skel.id = "history-skeleton";
@@ -2979,6 +2985,20 @@ import { createIdentityResolver } from './identity.js';
                     <div class="skeleton-msg short"></div>
                     <div class="skeleton-msg"></div>`;
                 feed.appendChild(skel);
+                feed.setAttribute("aria-busy", "true");
+                // No history after 10s: swap the skeleton for an error + Retry
+                // rather than leaving it pulsing forever.
+                clearTimeout(_historyTimeout);
+                _historyTimeout = setTimeout(() => {
+                    const stale = document.getElementById("history-skeleton");
+                    if (!stale) return;
+                    stale.remove();
+                    feed.setAttribute("aria-busy", "false");
+                    showFeedNotice(feed, t('feed.loadFailed'), {
+                        retryLabel: t('btn.retry'),
+                        onRetry: () => { if (activeView) loadRoomHistory(activeView.id, limit); },
+                    });
+                }, 10000);
             }
             socket.send(JSON.stringify({cmd: "get_local_history", thread_id: threadId, limit: limit || 100}));
         }
@@ -5263,6 +5283,7 @@ import { createIdentityResolver } from './identity.js';
                 const _podKeys = [
                     'proxion_pod_connected', 'proxion_pod_webid', 'proxion_css_url',
                     'proxion_pod_setup_skipped', 'proxion_pod_banner_dismissed',
+                    'proxion_pod_banner_snooze_until',
                 ];
                 _podKeys.forEach(k => localStorage.removeItem(k));
                 window.location.reload();
