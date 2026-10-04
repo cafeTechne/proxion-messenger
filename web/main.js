@@ -87,7 +87,7 @@ import { createPolls } from './polls.js';
 import { createRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { createMeme } from './meme.js';
 import { inlineNotice, feedEmptyState } from './states.js';
-import { installFocusTrap } from './focus-trap.js';
+import { installFocusTrap, closeTopmostDialog } from './focus-trap.js';
 import { makeListNavigable, announce } from './a11y.js';
 import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport } from './dmhistory.js';
 import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } from './i18n.js';
@@ -2851,6 +2851,7 @@ import { createIdentityResolver } from './identity.js';
                     '</div></div>';
                 document.body.appendChild(modal);
             }
+            document.getElementById("confirm-cancel").setAttribute("data-modal-cancel", "");
             document.getElementById("confirm-msg").textContent = message;
             document.getElementById("confirm-cancel").onclick = () => { modal.style.display = "none"; if (onCancel) onCancel(); };
             document.getElementById("confirm-ok").onclick = () => { modal.style.display = "none"; onConfirm(); };
@@ -2886,6 +2887,7 @@ import { createIdentityResolver } from './identity.js';
                 input.type = type; input.placeholder = placeholder; input.value = "";
                 const done = (val) => { modal.style.display = "none"; input.onkeydown = null; resolve(val); };
                 document.getElementById("prompt-cancel").onclick = () => done(null);
+                document.getElementById("prompt-cancel").setAttribute("data-modal-cancel", "");
                 document.getElementById("prompt-ok").onclick = () => done(input.value);
                 input.onkeydown = (e) => {
                     if (e.key === "Enter") done(input.value);
@@ -3573,11 +3575,11 @@ import { createIdentityResolver } from './identity.js';
                 const modal = document.getElementById("shortcut-modal");
                 modal.style.display = modal.style.display === "flex" ? "none" : "flex";
             } else if (e.key === "Escape") {
-                // Keyboard a11y: Escape dismisses ANY open dialog/modal. Generic
-                // (every modal now has role="dialog"; the id suffix catches any without).
-                document.querySelectorAll('[role="dialog"], [id$="-modal"]').forEach(el => {
-                    if (getComputedStyle(el).display !== "none") el.style.display = "none";
-                });
+                // Keyboard a11y: Escape closes the TOPMOST open dialog through its
+                // own cancel control (so cancel callbacks run), never a required
+                // gate. Only when no dialog closed does it fall through to the
+                // composer-level dismissals below.
+                if (closeTopmostDialog()) return;
                 document.getElementById("pin-panel").style.display = "none";
                 cancelReply();
                 if (edit.state.editingMsgId) {
@@ -3953,6 +3955,7 @@ import { createIdentityResolver } from './identity.js';
                     resolve({ ok, spoiler: !!(isImage && cb?.checked) });
                 };
                 document.getElementById('file-confirm-cancel').onclick = () => done(false);
+                document.getElementById('file-confirm-cancel').setAttribute('data-modal-cancel', '');
                 document.getElementById('file-confirm-ok').onclick = () => done(true);
                 modal.style.display = 'flex';
             });
@@ -5652,9 +5655,8 @@ import { createIdentityResolver } from './identity.js';
                 if (e.target === document.getElementById("lightbox"))
                     document.getElementById("lightbox").classList.remove("visible");
             });
-            document.addEventListener("keydown", (e) => {
-                if (e.key === "Escape") document.getElementById("lightbox")?.classList.remove("visible");
-            });
+            // Escape is handled by the generic topmost-dialog close (lightbox-close
+            // carries data-modal-cancel).
             const _openLightbox = (img) => {
                 const lb = document.getElementById("lightbox");
                 const lbImg = document.getElementById("lightbox-img");

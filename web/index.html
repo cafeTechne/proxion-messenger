@@ -96,7 +96,7 @@
       <div style="background:var(--slate-800); border-radius:8px; padding:20px; min-width:320px; max-width:420px; color:var(--slate-50);">
         <h3 style="margin:0 0 12px;" data-i18n="heading.forward">Forward to…</h3>
         <div id="forward-thread-list" style="max-height:260px; overflow-y:auto;"></div>
-        <button id="forward-modal-close" style="margin-top:12px; background:var(--slate-700); border:none; color:var(--slate-50); padding:8px 16px; border-radius:4px; cursor:pointer;" data-i18n="btn.cancel">Cancel</button>
+        <button id="forward-modal-close" data-modal-cancel style="margin-top:12px; background:var(--slate-700); border:none; color:var(--slate-50); padding:8px 16px; border-radius:4px; cursor:pointer;" data-i18n="btn.cancel">Cancel</button>
       </div>
     </div>
     <!-- Round 70: Webhook created modal -->
@@ -107,7 +107,7 @@
         <code id="webhook-url-display" class="copyable-code"></code>
         <div style="display:flex; gap:8px; margin-top:10px;">
           <button id="copy-webhook-url-btn" style="background:var(--slate-700); border:none; color:var(--slate-50); padding:8px 14px; border-radius:4px; cursor:pointer;" data-i18n="btn.copyUrl">Copy URL</button>
-          <button id="webhook-created-close" style="background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 14px; border-radius:4px; cursor:pointer;" data-i18n="btn.done">Done</button>
+          <button id="webhook-created-close" data-modal-cancel style="background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 14px; border-radius:4px; cursor:pointer;" data-i18n="btn.done">Done</button>
         </div>
       </div>
     </div>
@@ -120,7 +120,7 @@
       <div style="background:var(--slate-800);border-radius:8px;padding:24px;min-width:300px;max-width:400px;color:var(--slate-50);">
         <p id="confirm-msg" style="margin:0 0 20px;font-size:0.95em;"></p>
         <div class="btn-row">
-          <button id="confirm-cancel" class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
+          <button id="confirm-cancel" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
           <button id="confirm-ok" class="btn btn--accent btn--lg" data-i18n="btn.confirm">Confirm</button>
         </div>
       </div>
@@ -133,7 +133,7 @@
         <textarea id="copy-modal-text" readonly style="width:100%;box-sizing:border-box;padding:8px;background:var(--slate-900);border:1px solid var(--slate-700);color:var(--text-secondary);border-radius:4px;font-size:0.85em;resize:none;min-height:80px;"></textarea>
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
           <button id="copy-modal-copy-btn" class="btn btn--accent btn--lg" data-i18n="heading.copy">Copy</button>
-          <button id="copy-modal-close-btn" class="btn btn--slate btn--lg" data-i18n="btn.close">Close</button>
+          <button id="copy-modal-close-btn" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.close">Close</button>
         </div>
       </div>
     </div>
@@ -146,7 +146,7 @@
         <p id="deeplink-confirm-address" style="margin:0 0 14px;font-size:0.82em;color:#e2e8f0;word-break:break-all;background:var(--slate-900);padding:8px 10px;border-radius:4px;"></p>
         <p style="margin:0 0 16px;font-size:0.8em;color:var(--slate-500);">This link came from outside the app. Continue only if you recognise this address.</p>
         <div style="display:flex;gap:10px;justify-content:flex-end;">
-          <button id="deeplink-confirm-cancel" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 16px;border-radius:4px;cursor:pointer;font-size:0.9em;" data-i18n="btn.cancel">Cancel</button>
+          <button id="deeplink-confirm-cancel" data-modal-cancel style="background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 16px;border-radius:4px;cursor:pointer;font-size:0.9em;" data-i18n="btn.cancel">Cancel</button>
           <button id="deeplink-confirm-ok" style="background:var(--accent);border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:0.9em;" data-i18n="btn.addContact">Add contact</button>
         </div>
       </div>
@@ -171,7 +171,7 @@
           <span id="scan-qr-error" style="display:none;color:var(--color-danger-soft);font-size:0.82em;margin-left:8px;"></span>
         </div>
         <div class="btn-row">
-          <button id="add-peer-cancel-btn" class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
+          <button id="add-peer-cancel-btn" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
           <button id="add-peer-submit-btn" class="btn btn--accent btn--lg" data-i18n="btn.add">Add</button>
         </div>
       </div>
@@ -218,7 +218,7 @@
                style="width:100%;box-sizing:border-box;padding:8px;border-radius:4px;border:1px solid #555;background:var(--slate-900);color:var(--slate-50);font-size:0.9em;margin-bottom:8px;" data-i18n-attr="placeholder:ui.pasteInviteLinkCode">
         <p id="join-room-error" style="color:var(--color-danger-soft);font-size:0.85em;margin:0 0 12px;min-height:1.2em;"></p>
         <div class="btn-row">
-          <button id="join-room-cancel-btn" class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
+          <button id="join-room-cancel-btn" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
           <button id="join-room-submit-btn" class="btn btn--accent btn--lg" data-i18n="btn.join">Join</button>
         </div>
       </div>
@@ -243,7 +243,7 @@
           <button id="invite-modal-copy-code"
                   style="flex-shrink:0;background:var(--slate-700);border:none;color:var(--slate-50);padding:6px 12px;border-radius:4px;cursor:pointer;font-size:0.82em;" data-i18n="heading.copy">Copy</button>
         </div>
-        <button id="invite-modal-close"
+        <button id="invite-modal-close" data-modal-cancel
                 style="background:var(--accent);border:none;color:#fff;padding:8px 20px;border-radius:4px;cursor:pointer;width:100%;" data-i18n="btn.done">Done</button>
       </div>
     </div>
@@ -267,7 +267,7 @@
     <!-- R13.7: image lightbox -->
     <div id="lightbox" role="dialog" aria-modal="true" aria-label="Image preview" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:2000;align-items:center;justify-content:center;" data-i18n-attr="aria-label:ui.imagePreview">
       <img id="lightbox-img" alt="Full-size image" style="max-width:90vw;max-height:90vh;border-radius:6px;box-shadow:0 4px 32px rgba(0,0,0,.8);">
-      <button id="lightbox-close" aria-label="Close image preview" style="position:absolute;top:16px;right:20px;background:transparent;border:none;color:#fff;font-size:2em;cursor:pointer;line-height:1;" data-i18n-attr="aria-label:ui.closeImagePreview">×</button>
+      <button id="lightbox-close" data-modal-cancel aria-label="Close image preview" style="position:absolute;top:16px;right:20px;background:transparent;border:none;color:#fff;font-size:2em;cursor:pointer;line-height:1;" data-i18n-attr="aria-label:ui.closeImagePreview">×</button>
     </div>
 
     <div id="app">
@@ -552,7 +552,7 @@
                 <input id="meme-bottom" type="text" maxlength="120" placeholder="Bottom text" data-i18n-attr="placeholder:ui.memeBottom"
                        style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:12px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);">
                 <div class="btn-row">
-                  <button id="meme-cancel" class="btn btn--slate" data-i18n="btn.cancel">Cancel</button>
+                  <button id="meme-cancel" data-modal-cancel class="btn btn--slate" data-i18n="btn.cancel">Cancel</button>
                   <button id="meme-send" class="btn btn--accent" data-i18n="btn.send">Send</button>
                 </div>
               </div>
@@ -580,7 +580,7 @@
             <span style="font-size:0.9em; color:var(--text-secondary);">Share message history with new members</span>
           </label>
           <div style="display:flex; gap:8px; justify-content:flex-end;">
-            <button id="room-create-cancel-btn"
+            <button id="room-create-cancel-btn" data-modal-cancel
                     style="background:var(--slate-700); border:none; color:var(--slate-50); padding:8px 16px; border-radius:4px; cursor:pointer;" data-i18n="btn.cancel">Cancel</button>
             <button id="room-create-submit"
                     style="background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer;" data-i18n="btn.create">Create</button>
@@ -592,7 +592,7 @@
           <div id="room-invite-url"
                style="font-size:0.8em; color:var(--text-secondary); word-break:break-all; padding:8px; background:var(--slate-900); border-radius:4px; cursor:pointer; user-select:all; margin-bottom:12px;"></div>
           <p style="font-size:0.8em; color:var(--text-secondary); margin:0 0 12px;">Share this link with a friend. When they open it, Proxion adds you automatically — they'll be prompted to install it first if they don't have it yet.</p>
-          <button id="room-create-done-btn"
+          <button id="room-create-done-btn" data-modal-cancel
                   style="background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer; width:100%;" data-i18n="btn.done">Done</button>
         </div>
       </div>
@@ -829,7 +829,7 @@
         <div id="settings-blocked-list" style="font-size:0.85em;color:var(--text-secondary);min-height:24px;"></div>
         </div><!-- /settings-advanced -->
         <div style="display:flex; gap:8px; justify-content:flex-end;">
-          <button id="settings-cancel-btn"
+          <button id="settings-cancel-btn" data-modal-cancel
                   style="background:var(--slate-700); border:none; color:var(--slate-50); padding:8px 16px; border-radius:4px; cursor:pointer;" data-i18n="btn.cancel">Cancel</button>
           <button id="settings-save-btn"
                   style="background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer;" data-i18n="btn.saveReconnect">Save &amp; Reconnect</button>
@@ -846,7 +846,7 @@
           <span data-i18n="file.spoilerOption">Mark as spoiler (blurred until revealed)</span>
         </label>
         <div class="btn-row">
-          <button id="file-confirm-cancel" class="btn btn--slate" data-i18n="btn.cancel">Cancel</button>
+          <button id="file-confirm-cancel" data-modal-cancel class="btn btn--slate" data-i18n="btn.cancel">Cancel</button>
           <button id="file-confirm-ok" class="btn btn--accent" data-i18n="btn.send">Send</button>
         </div>
       </div>
@@ -864,7 +864,7 @@
         <input type="file" id="room-emoji-upload-input" accept="image/png,image/webp,image/gif,image/jpeg" style="display:none">
         <div class="btn-row">
           <button id="room-emoji-upload-btn" class="btn btn--slate" data-i18n="btn.uploadEmoji">Upload emoji</button>
-          <button id="room-emoji-close" class="btn btn--accent" data-i18n="btn.close">Close</button>
+          <button id="room-emoji-close" data-modal-cancel class="btn btn--accent" data-i18n="btn.close">Close</button>
         </div>
       </div>
     </div>
@@ -882,7 +882,7 @@
         <input id="poll-opt-4" type="text" maxlength="100" placeholder="Option 4 (optional)" data-i18n-attr="placeholder:ui.pollOptionN" style="width:100%;box-sizing:border-box;padding:7px;margin-bottom:6px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);">
         <input id="poll-opt-5" type="text" maxlength="100" placeholder="Option 5 (optional)" data-i18n-attr="placeholder:ui.pollOptionN" style="width:100%;box-sizing:border-box;padding:7px;margin-bottom:12px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);">
         <div class="btn-row">
-          <button id="poll-cancel" class="btn btn--slate" data-i18n="btn.cancel">Cancel</button>
+          <button id="poll-cancel" data-modal-cancel class="btn btn--slate" data-i18n="btn.cancel">Cancel</button>
           <button id="poll-submit" class="btn btn--accent" data-i18n="btn.createPoll">Create poll</button>
         </div>
       </div>
@@ -905,7 +905,7 @@
         </label>
         <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;">
           <a id="recovery-custom-pp" href="#" style="margin-right:auto;font-size:0.8em;color:var(--text-secondary);text-decoration:underline;" data-i18n="recovery.useCustom">Use my own passphrase instead</a>
-          <button id="recovery-cancel-btn" class="btn btn--slate" data-i18n="btn.cancel">Cancel</button>
+          <button id="recovery-cancel-btn" data-modal-cancel class="btn btn--slate" data-i18n="btn.cancel">Cancel</button>
           <button id="recovery-download-btn" disabled style="background:var(--accent);border:none;color:#fff;padding:7px 16px;border-radius:4px;cursor:not-allowed;opacity:0.45;" data-i18n="btn.downloadRecoveryKit">Download recovery kit</button>
         </div>
       </div>
@@ -926,7 +926,7 @@
             <button id="device-link-deny" class="btn btn--slate" data-i18n="btn.deny">Deny</button>
           </div>
         </div>
-        <button id="device-link-close" class="btn btn--slate" data-i18n="btn.close">Close</button>
+        <button id="device-link-close" data-modal-cancel class="btn btn--slate" data-i18n="btn.close">Close</button>
       </div>
     </div>
 
@@ -944,7 +944,7 @@
         <p id="pair-device-status" style="margin:8px 0;font-size:0.85em;color:var(--text-secondary);"></p>
         <p id="pair-device-safety" style="margin:0 0 12px;font-family:monospace;font-size:1.3em;letter-spacing:2px;color:var(--color-success-soft);text-align:center;"></p>
         <div class="btn-row">
-          <button id="pair-device-cancel" class="btn btn--slate" data-i18n="btn.cancel">Cancel</button>
+          <button id="pair-device-cancel" data-modal-cancel class="btn btn--slate" data-i18n="btn.cancel">Cancel</button>
           <button id="pair-device-submit" class="btn btn--accent" data-i18n="heading.linkThisDevice">Link this device</button>
         </div>
       </div>
@@ -964,7 +964,7 @@
         <label for="preview-mic" style="display:block;font-size:0.78em;margin-bottom:3px;color:var(--text-secondary,var(--slate-400))" data-i18n="preview.microphone">Microphone</label>
         <select id="preview-mic" style="width:100%;box-sizing:border-box;margin-bottom:14px;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:7px 8px;"></select>
         <div style="display:flex;justify-content:flex-end;gap:8px;">
-          <button id="preview-cancel" type="button" data-i18n="btn.cancel" style="background:transparent;border:1px solid var(--slate-600,#475569);color:var(--text-secondary,var(--slate-400));padding:7px 14px;border-radius:6px;cursor:pointer;">Cancel</button>
+          <button id="preview-cancel" data-modal-cancel type="button" data-i18n="btn.cancel" style="background:transparent;border:1px solid var(--slate-600,#475569);color:var(--text-secondary,var(--slate-400));padding:7px 14px;border-radius:6px;cursor:pointer;">Cancel</button>
           <button id="preview-join" type="button" data-i18n="preview.join" style="background:var(--accent,#d61f52);border:none;color:#fff;padding:7px 16px;border-radius:6px;cursor:pointer;">Join call</button>
         </div>
       </div>
@@ -996,7 +996,7 @@
         </div>
         <ul id="solidchat-discover-list" aria-label="Discovered chats" data-i18n-attr="aria-label:solidchat.discoveredChats" style="list-style:none;margin:0 0 16px;padding:0;max-height:180px;overflow:auto;"></ul>
         <div style="text-align:right;">
-          <button id="solidchat-dialog-close" type="button" data-i18n="btn.cancel" style="background:transparent;border:1px solid var(--slate-600,#475569);color:var(--text-secondary,var(--slate-400));padding:6px 14px;border-radius:4px;cursor:pointer;">Cancel</button>
+          <button id="solidchat-dialog-close" data-modal-cancel type="button" data-i18n="btn.cancel" style="background:transparent;border:1px solid var(--slate-600,#475569);color:var(--text-secondary,var(--slate-400));padding:6px 14px;border-radius:4px;cursor:pointer;">Cancel</button>
         </div>
       </div>
     </div>
@@ -1017,13 +1017,13 @@
           <tr><td><kbd>Enter</kbd></td><td data-i18n="kbd.sendMessage">Send message</td></tr>
           <tr><td><kbd>Escape</kbd></td><td data-i18n="kbd.cancelClose">Cancel reply / edit / close modal or menu</td></tr>
         </table>
-        <button id="shortcut-close-btn"
+        <button id="shortcut-close-btn" data-modal-cancel
                 style="margin-top:16px; background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer;" data-i18n="btn.close">Close</button>
       </div>
     </div>
 
     <!-- Web build sign-in (shown in gateway-less browser mode instead of the wizard) -->
-    <div id="web-signin-modal" role="dialog" aria-modal="true" aria-label="Sign in to Proxion" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1002; align-items:center; justify-content:center;">
+    <div id="web-signin-modal" data-modal-persistent role="dialog" aria-modal="true" aria-label="Sign in to Proxion" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1002; align-items:center; justify-content:center;">
       <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:10px; padding:28px; max-width:420px; width:calc(100vw - 32px); color:var(--text-primary,var(--slate-50));">
         <h2 style="margin:0 0 8px;" data-i18n="web.signin.title">Welcome to Proxion Web</h2>
         <p id="web-signin-invite" hidden style="background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:10px; font-size:0.88em; margin:0 0 14px;" data-i18n="web.signin.invited">You have been invited to a room. Sign in with your Solid pod, or get a free one below, to join.</p>
@@ -1045,7 +1045,7 @@
     </div>
 
     <!-- Onboarding wizard -->
-    <div id="onboarding-modal" role="dialog" aria-modal="true" aria-label="Welcome to Proxion" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1001; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.welcomeProxion">
+    <div id="onboarding-modal" data-modal-persistent role="dialog" aria-modal="true" aria-label="Welcome to Proxion" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1001; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.welcomeProxion">
       <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:10px; padding:32px; min-width:380px; max-width:480px; color:var(--text-primary,var(--slate-50));">
         <div id="ob-step-1">
           <h2 data-i18n="heading.welcomeProxion">Welcome to Proxion</h2>
@@ -1282,7 +1282,7 @@
         </div>
         <input type="hidden" id="e2e-modal-current-peer" value="">
         <div class="btn-row">
-          <button id="e2e-modal-cancel" style="padding:6px 16px;background:#374151;border:none;border-radius:4px;color:#d1d5db;cursor:pointer;" data-i18n="btn.cancel">Cancel</button>
+          <button id="e2e-modal-cancel" data-modal-cancel style="padding:6px 16px;background:#374151;border:none;border-radius:4px;color:#d1d5db;cursor:pointer;" data-i18n="btn.cancel">Cancel</button>
           <button id="e2e-modal-verify" style="padding:6px 16px;background:#134e26;border:none;border-radius:4px;color:var(--color-success-soft);cursor:pointer;" data-i18n="btn.markAsVerified2">Mark as Verified</button>
         </div>
       </div>

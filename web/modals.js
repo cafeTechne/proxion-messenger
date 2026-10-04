@@ -72,7 +72,7 @@ export function createModals({ getSocket, getActiveView, sendCmd, showToast, ren
             '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">' +
             '<button id="ci-incoming-btn" style="background:var(--accent,#e94560);border:none;color:#fff;padding:7px 14px;border-radius:4px;cursor:pointer">+ Incoming Webhook</button>' +
             '<button id="ci-outgoing-btn" style="background:#334155;border:none;color:#f1f5f9;padding:7px 14px;border-radius:4px;cursor:pointer">+ Outgoing Webhook</button>' +
-            '</div><button id="ci-close-btn" style="background:#334155;border:none;color:#f1f5f9;padding:7px 14px;border-radius:4px;cursor:pointer">Close</button>';
+            '</div><button id="ci-close-btn" data-modal-cancel style="background:#334155;border:none;color:#f1f5f9;padding:7px 14px;border-radius:4px;cursor:pointer">Close</button>';
         modal.appendChild(box);
         document.body.appendChild(modal);
         box.querySelector('#ci-close-btn').addEventListener('click', () => modal.remove());

@@ -109,14 +109,21 @@ try {
   await page.waitForFunction(() => document.querySelector('.dot')?.classList.contains('online'), { timeout: 15000 }).catch(() => {});
   await sleep(400);
 
-  // 1. Dismiss first-run onboarding with the keyboard (Escape closes any modal).
+  // 1. First-run onboarding is a required gate: Escape must NOT dismiss it
+  //    (Escape closes only the topmost non-persistent dialog). Hide it directly
+  //    to continue the journey, as smoke_browser does.
   await page.keyboard.press('Escape');
   await sleep(200);
-  const onboardingHidden = await page.evaluate(() => {
+  const onboardingKept = await page.evaluate(() => {
     const m = document.getElementById('onboarding-modal');
-    return !m || getComputedStyle(m).display === 'none';
+    return !m || getComputedStyle(m).display !== 'none';
   });
-  check('Escape dismisses onboarding', onboardingHidden);
+  check('Escape leaves the onboarding gate open', onboardingKept);
+  await page.evaluate(() => {
+    const m = document.getElementById('onboarding-modal');
+    if (m) m.style.display = 'none';
+  });
+  await sleep(200);
 
   // 2. Skip link is the first tab stop, and activating it focuses the composer.
   await page.evaluate(() => document.body.focus());
