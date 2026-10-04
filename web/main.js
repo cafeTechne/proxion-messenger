@@ -2800,7 +2800,11 @@ import { createIdentityResolver } from './identity.js';
                     ${preview.description ? `<div class="preview-desc">${escHtml(preview.description)}</div>` : ""}
                 </div>
             `;
-            msgEl.appendChild(card);
+            // .message is a flex row (avatar | body), so the card belongs inside
+            // the body column, above the reactions, not beside it.
+            const body = msgEl.querySelector('.msg-body');
+            if (!body) { msgEl.appendChild(card); return; }
+            body.insertBefore(card, body.querySelector(':scope > .reactions'));
         }
 
         // renderReactions: moved to reactions.js (createReactions).
