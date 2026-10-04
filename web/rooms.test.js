@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createRooms } from './rooms.js';
+import { createRooms, setButtonBusy, clearButtonBusy, isButtonBusy } from './rooms.js';
 
 let els;
 function mkEl(over = {}) {
@@ -107,5 +107,52 @@ describe('submitJoinRoom', () => {
     const { rooms, sent } = make();
     rooms.submitJoinRoom();
     expect(sent).toContainEqual({ cmd: 'join_room', code: 'XYZ' });
+  });
+});
+
+describe('join double-submit guard', () => {
+  it('sends join_room once while the first request is pending', () => {
+    els['join-room-input'] = mkEl({ value: 'PLAINCODE' });
+    els['join-room-submit-btn'] = mkEl({ textContent: 'Join', setAttribute() {}, removeAttribute() {} });
+    const { rooms, sent } = make();
+    rooms.submitJoinRoom();
+    rooms.submitJoinRoom();
+    expect(sent.filter((m) => m.cmd === 'join_room')).toHaveLength(1);
+    expect(els['join-room-submit-btn'].disabled).toBe(true);
+  });
+});
+
+describe('setButtonBusy / clearButtonBusy', () => {
+  function btn() {
+    const attrs = {};
+    return {
+      textContent: 'Create', disabled: false, attrs,
+      setAttribute(k, v) { attrs[k] = v; }, removeAttribute(k) { delete attrs[k]; },
+    };
+  }
+  it('disables, marks aria-busy and swaps the label, then restores', () => {
+    const b = btn();
+    setButtonBusy(b, 'Creating...');
+    expect(b.disabled).toBe(true);
+    expect(b.attrs['aria-busy']).toBe('true');
+    expect(b.textContent).toBe('Creating...');
+    expect(isButtonBusy(b)).toBe(true);
+    clearButtonBusy(b);
+    expect(b.disabled).toBe(false);
+    expect(b.attrs['aria-busy']).toBeUndefined();
+    expect(b.textContent).toBe('Create');
+    expect(isButtonBusy(b)).toBe(false);
+  });
+  it('clears itself after the timeout when no reply arrives', () => {
+    vi.useFakeTimers();
+    try {
+      const b = btn();
+      setButtonBusy(b, 'Creating...', 15000);
+      vi.advanceTimersByTime(14999);
+      expect(b.disabled).toBe(true);
+      vi.advanceTimersByTime(1);
+      expect(b.disabled).toBe(false);
+      expect(b.textContent).toBe('Create');
+    } finally { vi.useRealTimers(); }
   });
 });

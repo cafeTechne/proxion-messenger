@@ -52,7 +52,7 @@ import { createProfile } from './profile.js';
 import { createEdit } from './edit.js';
 import { createMute } from './mute.js';
 import { createMentions } from './mentions.js';
-import { createRooms } from './rooms.js';
+import { createRooms, setButtonBusy, clearButtonBusy, isButtonBusy } from './rooms.js';
 import { createAddress } from './address.js';
 import { createTyping, shortWebId } from './typing.js';
 import { createMembers } from './members.js';
@@ -1182,15 +1182,25 @@ import { createIdentityResolver } from './identity.js';
             document.getElementById("room-create-form").style.display = "";
             document.getElementById("room-invite-result").style.display = "none";
             document.getElementById("room-name-input").value = "";
+            { const _ce = document.getElementById("room-create-error"); if (_ce) _ce.textContent = ""; }
             document.getElementById("room-history-toggle").checked = false;
             document.getElementById("room-create-modal").style.display = "flex";
             setTimeout(() => document.getElementById("room-name-input").focus(), 50);
         };
 
         document.getElementById("room-create-submit").onclick = () => {
+            const submitBtn = document.getElementById("room-create-submit");
+            if (isButtonBusy(submitBtn)) return;
             const name = document.getElementById("room-name-input").value.trim();
-            if (!name) { document.getElementById("room-name-input").focus(); return; }
+            const errEl = document.getElementById("room-create-error");
+            if (!name) {
+                if (errEl) errEl.textContent = t('room.enterName');
+                document.getElementById("room-name-input").focus();
+                return;
+            }
+            if (errEl) errEl.textContent = "";
             const historyMode = document.getElementById("room-history-toggle").checked ? "all" : "none";
+            setButtonBusy(submitBtn, t('room.creating'));
             socketSendOrQueue({cmd: "chat_room_create", name: name, history_mode: historyMode});
         };
 
@@ -1754,6 +1764,7 @@ import { createIdentityResolver } from './identity.js';
                     });
                     break;
                 case "room_created":
+                    clearButtonBusy(document.getElementById("room-create-submit"));
                     roomCreatorOf.add(event.room_id);
                     _local_rooms[event.room_id] = { memberWebIds: new Set(selfWebId ? [selfWebId] : []) };
                     addRoomToSidebar(event.room_id, event.name, event.invite_url);
@@ -1803,16 +1814,25 @@ import { createIdentityResolver } from './identity.js';
                     break;
                 case "join_request_sent":
                     showToast(t('join.requestSent'));
+                    clearButtonBusy(document.getElementById("join-room-submit-btn"));
                     _showJoinPendingBanner();
                     { const _jm = document.getElementById("join-room-modal"); if (_jm) _jm.style.display = "none"; }
                     break;
                 case "join_invalid_invite":
                     showToast(t('join.invalidInvite'), 'error');
+                    clearButtonBusy(document.getElementById("join-room-submit-btn"));
                     _clearJoinPendingBanner();
                     break;
                 case "room_joined":
                     _clearJoinPendingBanner();
                     document.getElementById("room-create-modal").style.display = "none";
+                    {
+                        const _jb = document.getElementById("join-room-submit-btn");
+                        if (isButtonBusy(_jb)) {
+                            clearButtonBusy(_jb);
+                            document.getElementById("join-room-modal").style.display = "none";
+                        }
+                    }
                     addRoomToSidebar(event.room_id, event.name, event.invite_url);
                     _podUpdateRoomIndex(event.room_id, true).catch(() => {});
                     setTimeout(() => {
@@ -2509,6 +2529,9 @@ import { createIdentityResolver } from './identity.js';
                     const _key = _errNice[_raw]
                         || (_raw.startsWith("file_type_not_allowed") ? "error.file_type_not_allowed" : null);
                     showToast(_key ? t(_key) : t('error.gatewayGeneric', { raw: _raw }), "error");
+                    // A pending room create/join failed: let the user retry.
+                    clearButtonBusy(document.getElementById("room-create-submit"));
+                    clearButtonBusy(document.getElementById("join-room-submit-btn"));
                     // A join request that was pending owner approval failed
                     // (banned, room full, expired invite, rate limit, not
                     // found), so stop showing it as still awaiting approval.

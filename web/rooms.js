@@ -14,6 +14,34 @@
 // Returned functions are destructured into same-named bindings in main.js.
 import { t } from './i18n.js';
 
+// Busy state for a submit button whose request waits on a gateway reply
+// (room create / join). Disables the button, sets aria-busy and a pending
+// label, and clears itself after timeoutMs if no reply ever arrives.
+export function setButtonBusy(btn, busyLabel, timeoutMs = 15000) {
+    if (!btn) return;
+    if (btn._busyTimer) clearTimeout(btn._busyTimer);
+    if (!btn._busy) btn._idleLabel = btn.textContent;
+    btn._busy = true;
+    btn.disabled = true;
+    btn.setAttribute?.('aria-busy', 'true');
+    btn.textContent = busyLabel;
+    btn._busyTimer = setTimeout(() => clearButtonBusy(btn), timeoutMs);
+}
+
+export function clearButtonBusy(btn) {
+    if (!btn || !btn._busy) return;
+    clearTimeout(btn._busyTimer);
+    btn._busyTimer = null;
+    btn._busy = false;
+    btn.disabled = false;
+    btn.removeAttribute?.('aria-busy');
+    btn.textContent = btn._idleLabel;
+}
+
+export function isButtonBusy(btn) {
+    return !!(btn && btn._busy);
+}
+
 export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoomInviteUrls, showConfirm, showCopyModal }) {
 
     function requestRoomMembers(roomId) {
@@ -92,6 +120,8 @@ export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoo
     function submitJoinRoom() {
         const raw = document.getElementById("join-room-input").value.trim();
         const errEl = document.getElementById("join-room-error");
+        const submitBtn = document.getElementById("join-room-submit-btn");
+        if (isButtonBusy(submitBtn)) return;
         const socket = getSocket();
         if (!socket || socket.readyState !== WebSocket.OPEN) {
             errEl.textContent = t('conn.notConnectedGateway'); return;
@@ -114,7 +144,11 @@ export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoo
         } else {
             socket.send(JSON.stringify({ cmd: "join_room", code: raw }));
         }
-        document.getElementById("join-room-modal").style.display = "none";
+        // Stay open until the gateway answers (room_joined / join_request_sent
+        // close it, an error clears the busy state) so a second click cannot
+        // send a duplicate join.
+        errEl.textContent = "";
+        setButtonBusy(submitBtn, t('room.joining'));
     }
 
     return {
