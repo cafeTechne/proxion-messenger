@@ -53,6 +53,7 @@ const SHELL = [
   "view.js",
   "invite.js",
   "focus-trap.js",
+  "settings-panel.js",
   "a11y.js",
   "device-cert.js",
   "pairing.js",
