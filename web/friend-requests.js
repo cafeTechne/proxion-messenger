@@ -25,18 +25,18 @@ export function createFriendRequests({ getSocket }) {
         const li = document.createElement("li");
         li.id = "fri-" + req.invitation_id;
         li.dataset.peerDid = req.from_did || "";
-        li.style.cssText = "padding:6px 8px;background:#1e293b;border-radius:6px;margin:3px 0";
+        li.className = "fr-card";
         const nameLine = claimed
-            ? `<div style="color:#e2e8f0;margin-bottom:2px">From <b>${escHtml(claimed)}</b> <span style="color:#f59e0b;font-size:0.72em">claimed name, unverified</span></div>`
-            : `<div style="color:#e2e8f0;margin-bottom:2px">Friend request</div>`;
+            ? `<div class="fr-card__name">From <b>${escHtml(claimed)}</b> <span class="fr-card__claim">claimed name, unverified</span></div>`
+            : `<div class="fr-card__name">Friend request</div>`;
         li.innerHTML =
             nameLine +
-            `<div style="color:var(--text-secondary);font-size:0.72em;margin-bottom:4px;word-break:break-all" title="${escHtml(fromDid)}">${escHtml(fromDid)}</div>` +
-            `<div style="display:flex;gap:6px">` +
+            `<div class="fr-card__did" title="${escHtml(fromDid)}">${escHtml(fromDid)}</div>` +
+            `<div class="fr-card__actions">` +
             `<button data-fr-action="accept" data-inv-id="${escHtml(req.invitation_id)}" ` +
-            `style="background:#7c3aed;color:#fff;border:none;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:0.8em">Accept</button>` +
+            `class="btn btn--sm btn--accent">Accept</button>` +
             `<button data-fr-action="dismiss" data-inv-id="${escHtml(req.invitation_id)}" ` +
-            `style="background:#334155;color:var(--text-secondary);border:none;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:0.8em">Ignore</button>` +
+            `class="btn btn--sm btn--slate">Ignore</button>` +
             `</div>`;
         list.appendChild(li);
         refreshFriendRequestsBadge();

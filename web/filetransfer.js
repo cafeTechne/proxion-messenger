@@ -49,7 +49,7 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
                 el.setAttribute("aria-valuemin", "0");
                 el.setAttribute("aria-valuemax", "100");
             }
-            el.style.cssText = "position:fixed;bottom:8px;right:8px;z-index:1500;background:#1e293b;color:#f1f5f9;padding:6px 12px;border-radius:6px;font-size:0.8em;box-shadow:0 2px 8px rgba(0,0,0,.4);";
+            el.className = "xfer-progress";
             document.body.appendChild(el);
         }
         if (el.setAttribute) el.setAttribute("aria-valuenow", String(pct));

@@ -36,7 +36,7 @@ describe('_updateSettingsPodDot', () => {
     const s = make();
     s._updateSettingsPodDot('connected');
     expect(els['settings-pod-status-dot'].textContent).toContain('connected');
-    expect(els['settings-pod-status-dot'].style.color).toBe('#4ade80');
+    expect(els['settings-pod-status-dot'].style.color).toBe('var(--color-success-soft)');
     s._updateSettingsPodDot('unreachable');
     expect(els['settings-pod-status-dot'].textContent).toContain('unreachable');
     s._updateSettingsPodDot('none');

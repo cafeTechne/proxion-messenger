@@ -43,7 +43,7 @@ export function createMentions({ getCurrentRoomMembers }) {
                 dot.style.width = "6px";
                 dot.style.height = "6px";
                 dot.style.borderRadius = "50%";
-                dot.style.background = "#22c55e";
+                dot.style.background = "var(--color-success)";
                 dot.style.display = "inline-block";
                 dot.style.marginLeft = "auto";
                 dot.style.flexShrink = "0";

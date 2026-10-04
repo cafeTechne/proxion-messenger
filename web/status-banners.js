@@ -72,13 +72,13 @@ export function createStatusBanners() {
         const dot = document.getElementById('settings-pod-status-dot');
         if (!dot) return;
         if (state === 'connected') {
-            dot.style.color = '#4ade80';
+            dot.style.color = 'var(--color-success-soft)';
             dot.textContent = t('pod.dot.connected');
         } else if (state === 'unreachable') {
-            dot.style.color = '#fb923c';
+            dot.style.color = 'var(--color-warning-soft)';
             dot.textContent = t('pod.dot.unreachable');
         } else {
-            dot.style.color = '#8091a7';
+            dot.style.color = 'var(--slate-600)';
             dot.textContent = t('pod.dot.none');
         }
     }
@@ -151,8 +151,7 @@ export function createStatusBanners() {
                 // markup skeleton lives HERE, never inside a locale value. Text
                 // fragments come from t(); dynamic server values (port/ip) are
                 // escaped before being wrapped in the styled <code> spans.
-                const cs = "background:#451a03;padding:1px 4px;border-radius:3px;";
-                const code = (x) => `<code style="${cs}">${escHtml(String(x))}</code>`;
+                const code = (x) => `<code class="banner-code">${escHtml(String(x))}</code>`;
                 const envLine = `PROXION_PUBLIC_URL=http://YOUR_EXTERNAL_IP:${port}`;
                 guide = `<strong>${t('nat.title')}</strong>
                     ${t('nat.subtitle')}
@@ -161,7 +160,7 @@ export function createStatusBanners() {
                       <div style="margin-top:8px;line-height:1.9;padding:0 4px;">
                         <strong>${t('nat.opt1Title')}</strong> ${t('nat.opt1Note')}<br>
                         ${t('nat.opt1Body', { port: code(port), ip: code(localIp), env: code(envLine) })}
-                        &nbsp;<a href="https://portforward.com" target="_blank" rel="noopener" style="color:#fcd34d;">portforward.com</a> ${t('nat.opt1Guides')}<br><br>
+                        &nbsp;<a href="https://portforward.com" target="_blank" rel="noopener" class="link-inherit">portforward.com</a> ${t('nat.opt1Guides')}<br><br>
                         <strong>${t('nat.opt2Title')}</strong> ${t('nat.opt2Note')}<br>
                         ${t('nat.opt2Run')} ${code('cloudflared tunnel --url http://localhost:' + port)}<br>
                         ${t('nat.opt2Copy', { url: code('https://xxxx.trycloudflare.com'), env: code('PROXION_PUBLIC_URL') })}

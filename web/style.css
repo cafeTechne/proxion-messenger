@@ -2227,3 +2227,94 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .member-item { display: flex; align-items: center; padding: 4px 12px; margin: 0 4px; cursor: pointer; border-radius: 4px; }
 .member-item:hover { background: rgba(255, 255, 255, 0.05); }
 .member-item:focus-visible { background: rgba(255, 255, 255, 0.05); outline-offset: -2px; }
+
+/* ── Classes for JS-built UI ── */
+:root {
+    /* Amber status text and dots on dark surfaces. */
+    --color-warning-soft: #fbbf24;
+    /* Quiet green fill behind success-soft text (verified badge). */
+    --color-success-tint: #134e26;
+}
+/* Status and emphasis colors for words built in JS. */
+.text-primary { color: var(--text-primary); }
+.text-muted { color: var(--slate-600); }
+.text-success { color: var(--color-success-soft); }
+.text-danger { color: var(--color-danger-soft); }
+.text-warning { color: var(--color-warning-soft); }
+.text-sm { font-size: 0.8125rem; }
+.text-xs { font-size: 0.6875rem; }
+.link-inherit { color: inherit; text-decoration: underline; }
+/* Short id shown after a display name (sidebar rows, message headers). */
+.id-suffix { color: var(--slate-600); font-size: 0.6875rem; font-weight: 400; margin-inline-start: var(--space-1); }
+.mute-icon { font-size: 0.75rem; color: var(--slate-600); margin-inline-start: var(--space-1); flex-shrink: 0; }
+.sidebar-icon-btn {
+    background: transparent; border: none; color: var(--slate-600); cursor: pointer;
+    padding: 2px var(--space-1); font-size: 0.8125rem; flex-shrink: 0;
+}
+/* Text-only action buttons inside lists (Jump, Unpin, Revoke, Unban). */
+.link-btn {
+    background: transparent; border: none; padding: 0 var(--space-1); min-height: 24px;
+    cursor: pointer; font-size: 0.8125rem; color: var(--text-secondary);
+}
+.link-btn--info { color: var(--accent-text); padding-inline-start: 0; }
+.link-btn--danger { color: var(--color-danger-soft); }
+.link-btn--success { color: var(--color-success-soft); }
+/* Settings / modal list rows (webhooks, scheduled, devices, bans). */
+.list-row {
+    display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+    padding: var(--space-1) 0; border-bottom: 1px solid var(--border); font-size: 0.8125rem;
+}
+.list-row__main { flex: 1; min-width: 0; }
+.list-row__meta { color: var(--slate-600); font-size: 0.75rem; }
+/* Pinned and saved message rows. */
+.ref-row { border-bottom: 1px solid var(--slate-700); padding: var(--space-2) 0; color: var(--slate-50); }
+.ref-row__meta { font-size: 0.8125rem; color: var(--text-secondary); }
+.ref-row__body { margin: 2px 0; }
+.ref-row__actions { display: flex; gap: var(--space-2); margin-top: var(--space-1); }
+/* Friend request card in the sidebar. */
+.fr-card { padding: var(--space-2); background: var(--surface-2); border-radius: var(--radius-md); margin: var(--space-1) 0; }
+.fr-card__name { color: var(--text-primary); margin-bottom: 2px; }
+.fr-card__claim { color: var(--color-warning-soft); font-size: 0.6875rem; }
+.fr-card__did { color: var(--text-secondary); font-size: 0.6875rem; margin-bottom: var(--space-1); word-break: break-all; }
+.fr-card__actions { display: flex; gap: var(--space-2); }
+/* File transfer progress chip. */
+.xfer-progress {
+    position: fixed; bottom: var(--space-2); right: var(--space-2); z-index: 1500;
+    background: var(--surface-2); color: var(--slate-50); padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-md); font-size: 0.8125rem; box-shadow: var(--shadow-sm);
+}
+/* Message header extras. */
+.msg-badge-imported {
+    font-size: 0.6875rem; color: var(--text-secondary); background: var(--surface-2);
+    border: 1px solid var(--slate-700); border-radius: var(--radius-sm);
+    padding: 1px var(--space-1); margin-inline-start: var(--space-2); vertical-align: middle;
+}
+.msg-trust-icon { margin-inline-start: var(--space-1); font-size: 0.8125rem; }
+.msg-expire-countdown { font-size: 0.6875rem; color: var(--slate-600); margin-inline-start: var(--space-2); }
+.attachment-name { display: block; margin-top: var(--space-1); font-size: 0.8125rem; color: var(--slate-600); }
+/* Voice channel participant pills and video tiles. */
+.vc-pill {
+    display: flex; align-items: center; gap: var(--space-1);
+    background: var(--surface-2); color: var(--slate-50); padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-pill); font-size: 0.75rem;
+}
+.vc-pill__dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; }
+.vc-video-tile { width: 160px; max-height: 120px; background: #000; border-radius: var(--radius-md); object-fit: cover; }
+/* NAT help banner: inline code and links on the warning fill. */
+.banner-code { background: rgba(0, 0, 0, 0.3); padding: 1px var(--space-1); border-radius: var(--radius-sm); }
+/* Desktop update banner (Tauri). */
+.update-banner {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 2100;
+    display: flex; align-items: center; gap: var(--space-3);
+    background: var(--color-success-bg); color: var(--color-on-status);
+    padding: var(--space-2) var(--space-4); font-size: 0.875rem;
+}
+.update-banner__msg { flex: 1; }
+.update-banner__install {
+    background: var(--color-success-soft); color: var(--slate-900); border: none; font-weight: 600;
+    padding: var(--space-1) var(--space-3); border-radius: var(--radius-md); cursor: pointer; font-size: 0.875rem;
+}
+.update-banner__dismiss {
+    background: transparent; border: none; color: inherit; cursor: pointer;
+    font-size: 1.125rem; padding: 0 var(--space-1); min-width: 24px; min-height: 24px;
+}

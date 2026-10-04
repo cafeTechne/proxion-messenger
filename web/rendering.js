@@ -500,7 +500,7 @@ export function createRendering({
                 fileHtml = `<div class="attachment">
                     <audio controls class="msg-audio-preview" aria-label="${safeFilename}"
                            src="data:${_mime};base64,${_b64}"></audio>
-                    <span style="font-size:0.8em;color:#8091a7;display:block;margin-top:2px;">${safeFilename}</span>
+                    <span class="attachment-name">${safeFilename}</span>
                     ${_dlLink}</div>`;
             } else {
                 // Force octet-stream to prevent data URI MIME injection
@@ -558,14 +558,14 @@ export function createRendering({
 
         // Header: name + timestamp (first in group only)
         if (!isGrouped) {
-            const suffixHtml = suffix ? `<span style="font-size:0.72em;color:#8091a7;margin-left:4px;font-weight:400;">·${suffix}</span>` : "";
+            const suffixHtml = suffix ? `<span class="id-suffix">·${suffix}</span>` : "";
             const botBadge = msg.is_bot ? `<span class="bot-badge">BOT</span>` : "";
-            const importedBadge = msg.imported ? `<span style="font-size:0.7em;color:#94a3b8;background:#1e293b;border:1px solid #334155;border-radius:3px;padding:1px 5px;margin-left:6px;vertical-align:middle;">Imported</span>` : "";
+            const importedBadge = msg.imported ? `<span class="msg-badge-imported">Imported</span>` : "";
             // R11.2.3: unverified shield for DID contacts not yet verified
             const isVerified = !msg.from_webid || msg.from_webid === selfWebId ||
                 localStorage.getItem(e2eScopedKey("proxion_verified_" + msg.from_webid)) === "1";
             const shieldHtml = (!isVerified && msg.from_webid && msg.from_webid.startsWith("did:key:"))
-                ? `<span title="${t('msg.identityUnverified')}" style="color:#8091a7;margin-left:4px;font-size:0.85em;">&#x1F6E1;</span>`
+                ? `<span title="${t('msg.identityUnverified')}" class="msg-trust-icon text-muted">&#x1F6E1;</span>`
                 : "";
             // R107 / #4: an incoming DM or Long Chat room message whose signature
             // did not verify against the author's published identity — surfaced, not
@@ -573,13 +573,13 @@ export function createRendering({
             // carry a proof (gateway-free DM single + fanout, and pod-read room
             // messages), so it already scopes this to those messages.
             const dmAuthHtml = (msg.sender_verified === false && msg.from_webid && msg.from_webid !== selfWebId)
-                ? `<span title="${t('msg.senderUnverified')}" style="color:#e0a458;margin-left:4px;font-size:0.85em;">&#x26A0;&#xFE0F;</span>`
+                ? `<span title="${t('msg.senderUnverified')}" class="msg-trust-icon text-warning">&#x26A0;&#xFE0F;</span>`
                 : "";
             // R11.1.3: expiry countdown label
             let expireHtml = "";
             if (currentDisappearMs > 0 && msg.timestamp) {
                 const expiresAt = new Date(msg.timestamp).getTime() + currentDisappearMs;
-                expireHtml = `<span class="msg-expire-countdown" style="font-size:0.7em;color:#8091a7;margin-left:6px;" title="${t('msg.expires')}">${icon('clock', { size: 12 })} <span class="msg-expire-label">${_expireLabel(expiresAt - Date.now())}</span></span>`;
+                expireHtml = `<span class="msg-expire-countdown" title="${t('msg.expires')}">${icon('clock', { size: 12 })} <span class="msg-expire-label">${_expireLabel(expiresAt - Date.now())}</span></span>`;
             }
             body.innerHTML += `<div class="msg-header"><span class="msg-sender" style="color:${avatarColor}">${escHtml(name)}${botBadge}${suffixHtml}${shieldHtml}${dmAuthHtml}</span><span class="msg-ts-header">${timeHtml(msg.timestamp, "msg-ts-time")}${importedBadge}${expireHtml}</span></div>`;
         }

@@ -76,13 +76,13 @@ export function createE2EStatus() {
             const verified = safetyNum ? (stored === safetyNum) : (stored === "1");
             if (verified) {
                 verifyBtn.textContent = '✓ ' + t('e2e.verified');
-                verifyBtn.style.background = "#134e26";
-                verifyBtn.style.color = "#4ade80";
+                verifyBtn.style.background = "var(--color-success-tint)";
+                verifyBtn.style.color = "var(--color-success-soft)";
                 verifyBtn.disabled = true;
             } else {
                 verifyBtn.textContent = t('e2e.markVerified');
-                verifyBtn.style.background = "#1e293b";
-                verifyBtn.style.color = "#94a3b8";
+                verifyBtn.style.background = "var(--surface-2)";
+                verifyBtn.style.color = "var(--text-secondary)";
                 verifyBtn.disabled = false;
             }
         } catch (_) {

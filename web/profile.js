@@ -157,9 +157,9 @@ export function createProfile({ getSocket, showToast, getUserPresence, getMessag
         setText('contact-profile-status-msg', d.status_message || '');
         const statusEl = document.getElementById('contact-profile-status');
         if (statusEl) {
-            const colors = { online: '#4ade80', away: '#fbbf24', busy: '#f87171', offline: '#475569' };
+            const colors = { online: 'var(--color-success-soft)', away: 'var(--color-warning-soft)', busy: 'var(--color-danger-soft)', offline: 'var(--slate-600)' };
             const st = d.status || 'offline';
-            statusEl.innerHTML = `<span style="color:${colors[st] || '#475569'}">&#x25cf;</span> ${escHtml(st)}`;
+            statusEl.innerHTML = `<span style="color:${colors[st] || 'var(--slate-600)'}">&#x25cf;</span> ${escHtml(st)}`;
         }
         const avatarEl = document.getElementById('contact-profile-avatar');
         if (avatarEl) {

@@ -172,22 +172,22 @@ export function createSaved({ showToast, jumpToMsg }) {
         }
         for (const row of rows) {
             const div = document.createElement('div');
-            div.style.cssText = 'border-bottom:1px solid #334155;padding:8px 0;color:#f1f5f9;';
+            div.className = 'ref-row';
             const meta = document.createElement('div');
-            meta.style.cssText = 'font-size:0.85em;color:var(--text-secondary);';
+            meta.className = 'ref-row__meta';
             meta.textContent = `${row.from_name} · ${row.thread_label}`;
             const body = document.createElement('div');
-            body.style.cssText = 'margin:2px 0;';
+            body.className = 'ref-row__body';
             body.textContent = (row.content || (row.has_file ? `[${row.file_kind || 'file'}]` : '')).slice(0, 80);
             const actions = document.createElement('div');
-            actions.style.cssText = 'display:flex;gap:8px;margin-top:4px;';
+            actions.className = 'ref-row__actions';
             const jump = document.createElement('button');
             jump.textContent = `[${t('saved.jump')}]`;
-            jump.style.cssText = 'background:transparent;border:none;color:#7dd3fc;cursor:pointer;padding:0;font-size:0.8em;';
+            jump.className = 'link-btn link-btn--info';
             jump.addEventListener('click', () => jumpToMsg?.(row.id));
             const rm = document.createElement('button');
             rm.textContent = t('saved.remove');
-            rm.style.cssText = 'background:transparent;border:none;color:var(--text-secondary);cursor:pointer;padding:0;font-size:0.8em;';
+            rm.className = 'link-btn';
             rm.addEventListener('click', async () => {
                 await removeSaved(row.id).catch(() => {});
                 podSyncRemoveSavedMessage(row.id).catch(() => {});   // R62

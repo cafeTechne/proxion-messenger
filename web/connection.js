@@ -65,7 +65,7 @@ export function createConnection({
             socket.send(JSON.stringify(payload));
             return;
         }
-        if (statusEl) { statusEl.textContent = t('conn.connecting'); statusEl.style.color = "#94a3b8"; }
+        if (statusEl) { statusEl.textContent = t('conn.connecting'); statusEl.style.color = "var(--text-secondary)"; }
         // If socket is closed (not just still connecting), restart immediately — don't wait
         // for the exponential-backoff timer which may be up to 60s.
         if (!socket || socket.readyState === WebSocket.CLOSED) {

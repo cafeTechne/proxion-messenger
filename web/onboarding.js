@@ -187,7 +187,7 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         const contBtn = document.getElementById("ob-pod-continue-btn");
         if (!cssUrl || !email || !password) {
             statusEl.textContent = t('onboarding.fillAllFields');
-            statusEl.style.color = "#f87171";
+            statusEl.style.color = "var(--color-danger-soft)";
             return;
         }
         testBtn.textContent = t('onboarding.testing');
@@ -206,7 +206,7 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
                 // is connected. The next step is a browser sign-in, which is what
                 // powers the cross-app features, so say so and enable that button.
                 statusEl.textContent = '✓ ' + t('onboarding.podReadySignIn');
-                statusEl.style.color = "#4ade80";
+                statusEl.style.color = "var(--color-success-soft)";
                 contBtn.disabled = false;
                 contBtn.style.opacity = "1";
                 contBtn.style.cursor = "pointer";
@@ -216,11 +216,11 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
                 }
             } else {
                 statusEl.textContent = data.message || t('onboarding.connectionFailed');
-                statusEl.style.color = "#f87171";
+                statusEl.style.color = "var(--color-danger-soft)";
             }
         } catch (e) {
             statusEl.textContent = t('onboarding.cantConnect');
-            statusEl.style.color = "#f87171";
+            statusEl.style.color = "var(--color-danger-soft)";
         }
         testBtn.textContent = t('onboarding.testConnection');
         testBtn.disabled = false;
@@ -244,7 +244,7 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
             const statusEl = document.getElementById("ob-pod-status");
             if (statusEl) {
                 statusEl.textContent = t('onboarding.signInFailed');
-                statusEl.style.color = "#f87171";
+                statusEl.style.color = "var(--color-danger-soft)";
             }
         });
     }

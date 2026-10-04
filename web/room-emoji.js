@@ -109,7 +109,7 @@ export function createRoomEmoji({ getSocket, getActiveView, showToast, showPromp
             const del = document.createElement('button');
             del.innerHTML = icon('x-mark', { size: 14 });
             del.setAttribute('aria-label', t('roomEmoji.removeNamed', { name }));
-            del.style.cssText = 'background:transparent;border:none;color:var(--color-danger-soft,#f87171);cursor:pointer;min-width:24px;min-height:24px;line-height:0;';
+            del.style.cssText = 'background:transparent;border:none;color:var(--color-danger-soft);cursor:pointer;min-width:24px;min-height:24px;line-height:0;';
             del.addEventListener('click', () => {
                 getSocket()?.send(JSON.stringify({ cmd: 'remove_room_emoji', room_id: roomId, name }));
             });

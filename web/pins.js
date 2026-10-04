@@ -40,19 +40,19 @@ export function createPins({ getSocket, getActiveView }) {
             : "";
         pins.forEach(pin => {
             const div = document.createElement("div");
-            div.style.cssText = "border-bottom:1px solid #334155;padding:8px 0;color:#f1f5f9;";
+            div.className = "ref-row";
             const pinner = escHtml((pin.pinned_by || "").slice(0, 20)) || "unknown";
             const preview = escHtml((pin.content || "").slice(0, 80));
             // message_id is client-supplied and stored verbatim, so escape it before
             // it lands in these innerHTML attributes (stored XSS otherwise).
             const msgIdEsc = escHtml(pin.message_id);
-            div.innerHTML = `<div style="font-size:0.85em;color:var(--text-secondary)">${pinner}</div>
-                <div style="margin:2px 0;">${preview}</div>
-                <div style="display:flex;gap:8px;margin-top:4px;">
+            div.innerHTML = `<div class="ref-row__meta">${pinner}</div>
+                <div class="ref-row__body">${preview}</div>
+                <div class="ref-row__actions">
                     <button data-pin-action="jump" data-msg-id="${msgIdEsc}"
-                        style="background:transparent;border:none;color:#7dd3fc;cursor:pointer;padding:0;font-size:0.8em;">${escHtml(t('pin.jump'))}</button>
+                        class="link-btn link-btn--info">${escHtml(t('pin.jump'))}</button>
                     <button data-pin-action="unpin" data-msg-id="${msgIdEsc}" data-thread-id="${threadId}"
-                        style="background:transparent;border:none;color:var(--text-secondary);cursor:pointer;padding:0;font-size:0.8em;">${escHtml(t('pin.unpin'))}</button>
+                        class="link-btn">${escHtml(t('pin.unpin'))}</button>
                 </div>`;
             list.appendChild(div);
         });
@@ -66,7 +66,7 @@ export function createPins({ getSocket, getActiveView }) {
 
     function jumpToMsg(msgId) {
         const el = document.getElementById(`msg-${msgId}`);
-        if (el) { el.scrollIntoView({ behavior: scrollBehavior() }); el.style.background = "#334155"; setTimeout(() => el.style.background = "", 1500); }
+        if (el) { el.scrollIntoView({ behavior: scrollBehavior() }); el.style.background = "var(--slate-700)"; setTimeout(() => el.style.background = "", 1500); }
     }
 
     return { pinMsg, showPinPanel, renderPins, unpinMsg, jumpToMsg };

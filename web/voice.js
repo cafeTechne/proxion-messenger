@@ -132,7 +132,7 @@ export function createVoice(deps) {
     function _setConnIndicator(level) {
         const el = document.getElementById('vw-conn');
         if (!el) return;
-        const color = { good: '#4ade80', fair: '#fbbf24', poor: '#f87171' }[level] || '#94a3b8';
+        const color = { good: 'var(--color-success-soft)', fair: 'var(--color-warning-soft)', poor: 'var(--color-danger-soft)' }[level] || 'var(--text-secondary)';
         // Literal t() calls so the i18n checker sees these keys referenced.
         const label = level === 'good' ? t('voice.conn.good')
             : level === 'fair' ? t('voice.conn.fair') : t('voice.conn.poor');
@@ -761,7 +761,6 @@ export function createVoice(deps) {
                 el.autoplay = true; el.playsInline = true;
                 el.className = 'vc-video-tile';
                 el.dataset.vcWebid = webid;
-                el.style.cssText = 'width:160px;max-height:120px;background:#000;border-radius:6px;object-fit:cover;';
                 state.peerVideoElements[webid] = el;
                 grid.appendChild(el);
             }
@@ -863,9 +862,9 @@ export function createVoice(deps) {
         function _renderChannelPanel() {
             const container = document.getElementById("voice-channel-participants");
             if (!container) return;
-            const stateColor = { connected: "#4ade80", connecting: "#fbbf24",
-                                  checking: "#fbbf24", completed: "#4ade80",
-                                  disconnected: "#f87171", failed: "#f87171", closed: "#64748b" };
+            const ok = "var(--color-success-soft)", warn = "var(--color-warning-soft)", bad = "var(--color-danger-soft)";
+            const stateColor = { connected: ok, connecting: warn, checking: warn, completed: ok,
+                                  disconnected: bad, failed: bad, closed: "var(--slate-600)" };
             // The status dot is colour-only; pair it with a word (title tooltip + an
             // sr-only span) so the connection state is not lost to colour-blind or
             // screen-reader users.
@@ -874,10 +873,10 @@ export function createVoice(deps) {
                                 disconnected: "disconnected", failed: "connection failed",
                                 closed: "left" };
             container.innerHTML = Object.entries(state._channelParticipants).map(([webid, info]) => {
-                const color = stateColor[info.state] || "#94a3b8";
+                const color = stateColor[info.state] || "var(--text-secondary)";
                 const word = stateWord[info.state] || "unknown";
-                return `<span data-vc-webid="${escHtml(webid)}" title="${escHtml(info.name)}: ${escHtml(word)}" style="background:#1e293b;padding:3px 8px;border-radius:12px;font-size:0.78em;color:#f1f5f9;display:flex;align-items:center;gap:4px;">
-                    <span style="width:6px;height:6px;border-radius:50%;background:${color};display:inline-block;" aria-hidden="true"></span>
+                return `<span data-vc-webid="${escHtml(webid)}" title="${escHtml(info.name)}: ${escHtml(word)}" class="vc-pill">
+                    <span class="vc-pill__dot" style="background:${color}" aria-hidden="true"></span>
                     ${escHtml(info.name)}<span class="sr-only"> (${escHtml(word)})</span>
                 </span>`;
             }).join("");
