@@ -213,7 +213,7 @@ import { createIdentityResolver } from './identity.js';
             const metaUrl = document.querySelector('meta[name="x-gateway-url"]')?.content;
             const stored = metaUrl || localStorage.getItem("proxion_gateway_url") || "ws://127.0.0.1:7474";
             if (metaUrl) localStorage.setItem("proxion_gateway_url", metaUrl);
-            // Normalize "localhost" â†’ "127.0.0.1": on Windows, localhost can resolve to ::1
+            // Normalize "localhost" → "127.0.0.1": on Windows, localhost can resolve to ::1
             // (IPv6) first but the gateway only binds IPv4 (0.0.0.0), causing silent failures.
             return stored.replace(/^(wss?):\/\/localhost([:\/])/i, "$1://127.0.0.1$2")
                          .replace(/^(wss?):\/\/localhost$/i,      "$1://127.0.0.1");
@@ -925,7 +925,7 @@ import { createIdentityResolver } from './identity.js';
         // Room members panel (toggleMembersPanel / memberHtml / renderMembersPanel)
         // and requestRoomMembers: moved to members.js + rooms.js.
 
-        // â"€â"€ DM sidebar with last message preview + recency sort â"€â"€
+        // ── DM sidebar with last message preview + recency sort ──
         function renderDmSidebar() {
             const list = document.getElementById("dm-list");
             const entries = Object.entries(localDmPeers);
@@ -1011,7 +1011,7 @@ import { createIdentityResolver } from './identity.js';
             }
         }
 
-        // â"€â"€ Leave / delete room â"€â"€
+        // ── Leave / delete room ──
         // leaveRoom / deleteRoom / transferOwnership: moved to rooms.js (createRooms).
 
         // Settings modal
