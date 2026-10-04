@@ -532,9 +532,9 @@ main { background: var(--surface-0); }
 .gate-no-pins #ctx-pin,
 .gate-no-delete #ctx-delete { display: none !important; }
 
-/* Icon buttons inside the action bar — override the global red accent */
+/* Icon buttons inside the action bar. */
 .icon-btn {
-    background: transparent !important;
+    background: transparent;
     border: none;
     color: var(--text-secondary);
     cursor: pointer;
@@ -546,14 +546,12 @@ main { background: var(--surface-0); }
     transition: color var(--transition-fast), background var(--transition-fast);
 }
 .icon-btn:hover {
-    background: var(--tint-active) !important;
+    background: var(--tint-active);
     color: var(--text-primary);
 }
 
-/* Sidebar-header and chat-header icon buttons carry inline transparent styles and
-   had no hover feedback. Give the icon-only controls the same raised hover as the
-   compose/action icon buttons. The inline background/color are overridden with
-   !important (the icon-btn rule above does the same for the same reason). */
+/* Sidebar-header and chat-header icon-only controls: transparent, with the same
+   raised hover as the compose/action icon buttons. */
 #sound-toggle,
 #desktop-notif-toggle,
 #settings-btn,
@@ -563,9 +561,15 @@ main { background: var(--surface-0); }
 #saved-panel-btn,
 #members-toggle,
 #integrations-btn {
+    background: transparent;
+    color: var(--text-secondary);
     border-radius: var(--radius-sm);
     transition: background var(--transition-fast), color var(--transition-fast);
 }
+#sound-toggle,
+#desktop-notif-toggle,
+#settings-btn,
+#menu-toggle { color: var(--text-primary); }
 #sound-toggle:hover,
 #desktop-notif-toggle:hover,
 #settings-btn:hover,
@@ -575,8 +579,8 @@ main { background: var(--surface-0); }
 #saved-panel-btn:hover,
 #members-toggle:hover,
 #integrations-btn:hover {
-    background: var(--surface-2) !important;
-    color: var(--text-primary) !important;
+    background: var(--surface-2);
+    color: var(--text-primary);
 }
 
 .time {
@@ -666,7 +670,7 @@ main { background: var(--surface-0); }
 .voice-record-btn:hover,
 .schedule-btn:hover,
 .composer-icon-btn:hover {
-    background: var(--tint-hover) !important;
+    background: var(--tint-hover);
     color: var(--text-primary);
 }
 
@@ -715,17 +719,20 @@ main { background: var(--surface-0); }
     flex-shrink: 0;
 }
 
+/* Bare buttons are neutral. The one primary action in a view opts in with
+   .btn--accent. The hover sits in :where() so any class that sets its own
+   background (icon buttons, menu rows) keeps it without !important. */
 button {
-    background: var(--accent);
-    color: var(--color-on-accent);
+    background: var(--slate-700);
+    color: var(--text-primary);
     border: none;
-    padding: 0 25px;
+    padding: 0 var(--space-4);
     border-radius: 4px;
     cursor: pointer;
-    font-weight: bold;
+    font-weight: 600;
 }
 
-button:hover { background: var(--accent-hover); }
+:where(button:not(:disabled):hover) { background: color-mix(in srgb, var(--slate-700) 85%, white); }
 
 /* Mobile Responsive */
 @media (max-width: 768px) {
