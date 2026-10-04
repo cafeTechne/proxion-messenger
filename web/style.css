@@ -2250,6 +2250,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 }
 .ob-skip-link:hover { color: var(--text-primary); }
 .check-row { display: flex; align-items: flex-start; gap: var(--space-2); cursor: pointer; font-size: var(--text-md); margin: 0 0 var(--space-3); }
+.check-row[hidden] { display: none; }
 .check-row input { margin-top: 2px; }
 
 /* ── Picker list inside a dialog (e.g. "Forward to…"): menu-like rows. ── */
