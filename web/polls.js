@@ -100,7 +100,12 @@ export function createPolls({ showToast, addEmoji, getAllMessages }) {
     function wirePolls() {
         document.getElementById('poll-btn')?.addEventListener('click', openPollModal);
         document.getElementById('poll-cancel')?.addEventListener('click', closePollModal);
-        document.getElementById('poll-submit')?.addEventListener('click', submitPoll);
+        // The modal body is a <form>: the Create button and Enter in any field
+        // both submit it, once.
+        document.getElementById('poll-form')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            submitPoll();
+        });
     }
 
     return { openPollModal, closePollModal, submitPoll, wirePolls };

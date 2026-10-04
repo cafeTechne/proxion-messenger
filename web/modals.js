@@ -8,6 +8,24 @@
 import { t } from './i18n.js';
 import { escHtml } from './util.js';
 import { inlineNotice } from './states.js';
+import { showPromptModal, closeButtonHtml } from './dialogs.js';
+
+// Rooms to offer in the "Forward to…" picker. Each sidebar room row carries a
+// [data-room-id] control; the row itself (li[data-name]) holds the room's
+// display name, so show that instead of the raw room id.
+export function forwardTargets(doc) {
+    const seen = new Set();
+    const out = [];
+    doc.querySelectorAll('[data-room-id]').forEach(el => {
+        const id = el.dataset.roomId;
+        if (!id || seen.has(id)) return;
+        seen.add(id);
+        const row = el.closest ? el.closest('li[data-name]') : null;
+        const name = (row && row.getAttribute('data-name')) || id;
+        out.push({ id, name });
+    });
+    return out;
+}
 
 export function createModals({ getSocket, getActiveView, sendCmd, showToast, renderMessage, getMessageContent }) {
     const state = { forwardingMsgId: null };
@@ -18,17 +36,14 @@ export function createModals({ getSocket, getActiveView, sendCmd, showToast, ren
         const modal = document.getElementById('forward-modal');
         const list = document.getElementById('forward-thread-list');
         if (!modal || !list) return;
-        const threads = [];
-        document.querySelectorAll('[data-room-id]').forEach(el => {
-            const name = el.querySelector('.room-name')?.textContent || el.dataset.roomId;
-            threads.push({ id: el.dataset.roomId, name });
-        });
+        const threads = forwardTargets(document);
         if (!threads.length) { list.innerHTML = inlineNotice(t('modal.noRoomsToForward')); }
         else {
             list.innerHTML = '';
             threads.forEach(thr => {
-                const item = document.createElement('div');
-                item.className = 'forward-thread-item';
+                const item = document.createElement('button');
+                item.type = 'button';
+                item.className = 'forward-thread-item picker-item';
                 item.textContent = thr.name;
                 item.addEventListener('click', () => {
                     if (socket && state.forwardingMsgId) {
@@ -64,27 +79,45 @@ export function createModals({ getSocket, getActiveView, sendCmd, showToast, ren
         if (existing) existing.remove();
         const modal = document.createElement('div');
         modal.id = 'integrations-modal';
-        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1003;display:flex;align-items:center;justify-content:center;';
+        modal.className = 'modal';
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-labelledby', 'integrations-title');
+        modal.setAttribute('data-dismissable', '');
+        modal.style.display = 'flex';
         const box = document.createElement('div');
-        box.style.cssText = 'background:#1e293b;border-radius:8px;padding:20px;min-width:340px;color:#f1f5f9;';
-        box.innerHTML = '<h3 style="margin:0 0 12px">Room Integrations</h3>' +
+        box.className = 'modal__panel modal__panel--md';
+        box.innerHTML =
+            '<div class="modal__header"><h3 id="integrations-title" class="modal__title"></h3>' + closeButtonHtml() + '</div>' +
             '<div id="webhook-list-area" style="margin-bottom:12px;min-height:40px;"></div>' +
-            '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">' +
-            '<button id="ci-incoming-btn" style="background:var(--accent,#e94560);border:none;color:#fff;padding:7px 14px;border-radius:4px;cursor:pointer">+ Incoming Webhook</button>' +
-            '<button id="ci-outgoing-btn" style="background:#334155;border:none;color:#f1f5f9;padding:7px 14px;border-radius:4px;cursor:pointer">+ Outgoing Webhook</button>' +
-            '</div><button id="ci-close-btn" data-modal-cancel style="background:#334155;border:none;color:#f1f5f9;padding:7px 14px;border-radius:4px;cursor:pointer">Close</button>';
+            '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+            '<button type="button" id="ci-incoming-btn" class="btn btn--slate"></button>' +
+            '<button type="button" id="ci-outgoing-btn" class="btn btn--slate"></button>' +
+            '</div>' +
+            '<div class="btn-row modal__footer"><button type="button" id="ci-close-btn" data-modal-cancel class="btn btn--slate btn--lg"></button></div>';
+        box.querySelector('#integrations-title').textContent = t('ui.roomIntegrations2');
+        box.querySelector('#ci-incoming-btn').textContent = t('integrations.addIncoming');
+        box.querySelector('#ci-outgoing-btn').textContent = t('integrations.addOutgoing');
+        box.querySelector('#ci-close-btn').textContent = t('btn.close');
         modal.appendChild(box);
         document.body.appendChild(modal);
         box.querySelector('#ci-close-btn').addEventListener('click', () => modal.remove());
-        box.querySelector('#ci-incoming-btn').addEventListener('click', () => {
-            const name = prompt('Bot display name:', 'Bot') || 'Bot';
-            sendCmd('create_webhook', { thread_id: activeView.id, direction: 'incoming', bot_name: name });
+        box.querySelector('#ci-incoming-btn').addEventListener('click', async () => {
+            const name = await showPromptModal(t('integrations.botNamePrompt'), {
+                title: t('integrations.addIncoming'), confirmLabel: t('integrations.create'), value: 'Bot',
+            });
+            if (name === null) return;
+            sendCmd('create_webhook', { thread_id: activeView.id, direction: 'incoming', bot_name: name.trim() || 'Bot' });
             modal.remove();
         });
-        box.querySelector('#ci-outgoing-btn').addEventListener('click', () => {
-            const url = prompt('Target HTTPS URL:');
-            if (!url || !url.startsWith('https://')) { showToast(t('modal.mustBeHttps'), 'error'); return; }
-            sendCmd('create_webhook', { thread_id: activeView.id, direction: 'outgoing', url, bot_name: 'Bot' });
+        box.querySelector('#ci-outgoing-btn').addEventListener('click', async () => {
+            const url = await showPromptModal(t('integrations.urlPrompt'), {
+                title: t('integrations.addOutgoing'), confirmLabel: t('integrations.create'),
+                type: 'url', placeholder: 'https://',
+            });
+            if (url === null) return;
+            if (!url.trim().startsWith('https://')) { showToast(t('modal.mustBeHttps'), 'error'); return; }
+            sendCmd('create_webhook', { thread_id: activeView.id, direction: 'outgoing', url: url.trim(), bot_name: 'Bot' });
             modal.remove();
         });
     }

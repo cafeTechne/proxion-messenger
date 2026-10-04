@@ -1713,28 +1713,35 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         .audio-message audio { max-width: 280px; height: 36px; }
         .audio-duration { font-size: 0.78em; color: var(--text-secondary); margin-left: 6px; }
 
-        /* Round 47: Message context menu + sidebar context menu */
-        .ctx-menu { position: fixed; background: var(--slate-800); border: 1px solid var(--slate-700); border-radius: 6px; z-index: 1300; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,.5); min-width: 160px; }
-        .ctx-menu button { display: flex; align-items: center; gap: 8px; width: 100%; background: none; border: none; color: var(--slate-50); padding: 9px 16px; cursor: pointer; text-align: start; font-size: 0.9em; white-space: nowrap; }
-        .ctx-menu button:hover { background: var(--slate-700); }
-        .ctx-menu button.danger { color: var(--color-danger); }
-        .ctx-menu hr { border: none; border-top: 1px solid var(--slate-700); margin: 2px 0; }
-
-        /* Round 63: Delete submenu */
-        .delete-submenu { position: fixed; background: var(--slate-800); border: 1px solid var(--slate-700); border-radius: 6px; z-index: 1200; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,.4); }
-        .delete-submenu button { display: block; width: 100%; background: none; border: none; color: var(--slate-50); padding: 9px 18px; cursor: pointer; text-align: left; font-size: 0.9em; }
-        .delete-submenu button:hover { background: var(--slate-700); }
-        .delete-submenu button.danger { color: var(--color-danger); }
+        /* Popup menus: message (.ctx-menu), sidebar (.ctx-menu), delete
+           submenu and member moderation menu share one look. The old class
+           names stay as aliases so existing markup and JS keep working. */
+        .menu, .ctx-menu, .delete-submenu, .member-context-menu {
+            position: fixed; z-index: var(--z-menu);
+            background: var(--surface-2); border: 1px solid var(--slate-700);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-md);
+            min-width: 180px; padding: var(--space-1) 0; overflow: hidden;
+        }
+        :is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) button {
+            display: flex; align-items: center; gap: var(--space-2);
+            width: 100%; min-height: 32px; padding: 6px var(--space-4);
+            background: none; border: none; color: var(--slate-50);
+            cursor: pointer; text-align: start; font-size: 0.9em; white-space: nowrap;
+        }
+        :is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) button:hover { background: var(--slate-700); }
+        /* overflow:hidden clips an outside focus ring, so draw it inset. */
+        :is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) button:focus-visible {
+            background: var(--slate-700); outline-offset: -2px;
+        }
+        :is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) button.danger { color: var(--color-danger); }
+        :is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) hr {
+            border: none; border-top: 1px solid var(--slate-700); margin: var(--space-1) 0;
+        }
 
         /* Round 64: Role badges */
         .role-badge { font-size: 0.65rem; font-weight: 700; border-radius: 3px; padding: 1px 5px; margin-left: 4px; letter-spacing: 0.04em; vertical-align: middle; }
         .role-badge.role-admin { background: #7c3aed; color: white; }
         .role-badge.role-mod { background: #0891b2; color: white; }
-        .member-context-menu { position: fixed; background: var(--slate-800); border: 1px solid var(--slate-700); border-radius: 6px; z-index: 1200; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,.4); }
-        .member-context-menu button { display: block; width: 100%; background: none; border: none; color: var(--slate-50); padding: 9px 18px; cursor: pointer; text-align: left; font-size: 0.9em; }
-        .member-context-menu button:hover { background: var(--slate-700); }
-        .member-context-menu hr { border: none; border-top: 1px solid var(--slate-700); margin: 2px 0; }
-        .member-context-menu button.danger { color: var(--color-danger); }
 
         /* Round 65: Disappearing messages */
         .disappear-banner { background: var(--slate-800); color: var(--text-secondary); font-size: 0.8em; text-align: center; padding: 4px 12px; border-bottom: 1px solid var(--slate-700); align-items: center; justify-content: center; gap: 6px; display: none; }
@@ -1748,8 +1755,8 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         .session-ip { font-family: var(--font-mono); font-size: 0.9em; color: var(--text-secondary); }
         .session-time { font-size: 0.8em; color: var(--slate-500); }
         .session-current { color: var(--color-success-soft); font-size: 0.8em; font-weight: 600; }
-        .session-revoke-btn { background: #7f1d1d; border: none; color: #fca5a5; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.8em; }
-        .session-revoke-btn:hover, .session-revoke-btn:focus-visible { background: #991b1b; }
+        /* Colors come from .btn-danger; this only sizes the button. */
+        .session-revoke-btn { padding: 4px 10px; border-radius: var(--radius-sm); cursor: pointer; font-size: 0.8em; }
 
         /* Round 68: Forward messages */
         .forwarded-banner { font-size: 0.8em; color: var(--text-secondary); margin-bottom: 3px; font-style: italic; }
@@ -1934,3 +1941,94 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
     .settings-danger-row { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--space-4); }
     .settings-danger-row .btn { flex-shrink: 0; }
 }
+
+/* ── Layering scale. Menus open from the page; dialogs sit above them;
+   confirm/prompt and other dialogs that open on top of a dialog use the
+   stacked layer. The first-run gates sit below ordinary dialogs because the
+   wizard opens room-create, pairing and the recovery kit on top of itself. ── */
+:root {
+    --z-menu: 1300;
+    --z-modal-gate: 1050;
+    --z-modal: 1100;
+    --z-modal-stacked: 1400;
+    --z-toast: 2000;
+    /* Solid destructive fill: white text clears 4.5:1 (--color-danger does not). */
+    --color-danger-strong: #b91c1c;
+}
+
+/* ── Modal component: overlay + panel. Visibility stays on the inline
+   style.display the JS toggles; these classes own everything else. ── */
+.modal {
+    position: fixed; inset: 0; z-index: var(--z-modal);
+    align-items: center; justify-content: center;
+    padding: var(--space-4); box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.6);
+}
+.modal--stacked { z-index: var(--z-modal-stacked); }
+.modal--gate { z-index: var(--z-modal-gate); }
+.modal__panel {
+    box-sizing: border-box; width: 100%; max-width: 480px;
+    max-height: 90vh; overflow-y: auto;
+    padding: var(--space-5);
+    background: var(--surface-2); color: var(--slate-50);
+    border: 1px solid var(--border); border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+}
+.modal__panel--sm { max-width: 400px; }
+.modal__panel--md { max-width: 480px; }
+.modal__panel--lg { max-width: 640px; }
+.modal__header {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: var(--space-3); margin: 0 0 var(--space-3);
+}
+.modal__title { margin: 0 0 var(--space-3); font-size: 1.125rem; font-weight: 600; line-height: 1.35; }
+.modal__header .modal__title { margin: 0; }
+.modal__desc { margin: 0 0 var(--space-3); font-size: 0.875rem; color: var(--text-secondary); }
+.modal__close {
+    flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; margin: -6px -8px 0 0; padding: 0;
+    background: transparent; border: none; border-radius: var(--radius-sm);
+    color: var(--text-secondary); cursor: pointer;
+}
+.modal__close:hover, .modal__close:focus-visible { background: var(--slate-700); color: var(--slate-50); }
+.modal__footer {
+    display: flex; flex-wrap: wrap; gap: var(--space-2); justify-content: flex-end;
+    margin-top: var(--space-4);
+}
+.btn--danger { background: var(--color-danger-strong); color: #fff; }
+.btn--ghost {
+    background: transparent; color: var(--text-secondary);
+    border: 1px solid var(--slate-600);
+}
+
+/* ── Form fields ── */
+.field-label { display: block; margin: 0 0 var(--space-1); font-size: 0.85rem; color: var(--text-secondary); }
+.input {
+    display: block; box-sizing: border-box; width: 100%; min-height: 36px;
+    padding: var(--space-2) 10px; margin: 0 0 var(--space-2);
+    background: var(--slate-900); color: var(--slate-50);
+    border: 1px solid var(--slate-600); border-radius: var(--radius-sm);
+    font-size: 0.9rem;
+}
+.input::placeholder { color: var(--slate-500); }
+.input[aria-invalid="true"] { border-color: var(--color-danger-soft); }
+.modal__panel--lg .input { max-width: 480px; }
+.field-error { margin: 0 0 var(--space-3); min-height: 1.2em; font-size: 0.85em; color: var(--color-danger-soft); }
+.field-error:empty { margin-bottom: var(--space-2); }
+.check-row { display: flex; align-items: flex-start; gap: var(--space-2); cursor: pointer; font-size: 0.88em; margin: 0 0 var(--space-3); }
+.check-row input { margin-top: 2px; }
+
+/* ── Picker list inside a dialog (e.g. "Forward to…"): menu-like rows. ── */
+.picker-list { max-height: 260px; overflow-y: auto; margin: 0 calc(-1 * var(--space-2)); }
+.picker-item {
+    display: flex; align-items: center; width: 100%; min-height: 32px;
+    padding: 6px var(--space-2); background: none; border: none; border-radius: var(--radius-sm);
+    color: var(--slate-50); text-align: start; font-size: 0.9em; cursor: pointer;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.picker-item:hover, .picker-item:focus-visible { background: var(--slate-700); outline-offset: -2px; }
+
+/* ── Members panel rows: clickable (profile) and keyboard-navigable. ── */
+.member-item { display: flex; align-items: center; padding: 4px 12px; margin: 0 4px; cursor: pointer; border-radius: 4px; }
+.member-item:hover { background: rgba(255, 255, 255, 0.05); }
+.member-item:focus-visible { background: rgba(255, 255, 255, 0.05); outline-offset: -2px; }

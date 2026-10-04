@@ -1,5 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createModals } from './modals.js';
+import { createModals, forwardTargets } from './modals.js';
+
+describe('forwardTargets', () => {
+  const ctl = (id, name) => ({
+    dataset: { roomId: id },
+    closest: () => (name ? { getAttribute: () => name } : null),
+  });
+  it('labels each room by its sidebar name, not the raw id', () => {
+    const doc = { querySelectorAll: () => [ctl('room-a11435c9f740', 'general'), ctl('room-2', 'random')] };
+    expect(forwardTargets(doc)).toEqual([
+      { id: 'room-a11435c9f740', name: 'general' },
+      { id: 'room-2', name: 'random' },
+    ]);
+  });
+  it('falls back to the id when no named row is found, and lists each room once', () => {
+    const doc = { querySelectorAll: () => [ctl('room-x', null), ctl('room-x', 'dup')] };
+    expect(forwardTargets(doc)).toEqual([{ id: 'room-x', name: 'room-x' }]);
+  });
+});
 
 let els;
 function mkEl(over = {}) {
@@ -8,7 +26,7 @@ function mkEl(over = {}) {
     style: {}, innerHTML: '', textContent: '', className: '', id: '',
     dataset: {}, _children: children,
     appendChild: (c) => children.push(c),
-    addEventListener() {}, remove() {},
+    addEventListener() {}, remove() {}, setAttribute() {},
     querySelector: () => mkEl(), querySelectorAll: () => [],
     ...over,
   };

@@ -38,7 +38,7 @@ export function createMembers({ getActiveView, requestRoomMembers }) {
         const idTag = m.display_name
             ? ` <span class="member-id-suffix" style="color:var(--slate-600);font-size:0.72em">${escHtml((m.webid || "").slice(8, 22) + "…")}</span>`
             : "";
-        return `<div class="member-item" data-msg-action="profile" data-webid="${escHtml(m.webid)}" data-name="${escHtml(displayName)}">
+        return `<div class="member-item" role="button" tabindex="-1" data-msg-action="profile" data-webid="${escHtml(m.webid)}" data-name="${escHtml(displayName)}">
                 <div style="position:relative;display:inline-block;margin-right:8px;">
                     <div class="avatar placeholder" style="background:${color};width:28px;height:28px;line-height:28px;font-size:12px;font-weight:bold;text-align:center;">${initial}</div>
                     <div class="avatar-presence ${presenceClass}" title="${escHtml(m.status || '')}"></div>

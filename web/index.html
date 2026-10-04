@@ -97,76 +97,93 @@
         <button data-role-action="ban" class="danger" data-i18n="btn.ban">Ban…</button>
     </div>
     <!-- Round 68: Forward modal -->
-    <div id="forward-modal" role="dialog" aria-modal="true" aria-label="Forward message" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1003; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.forwardMessage">
-      <div style="background:var(--slate-800); border-radius:8px; padding:20px; min-width:320px; max-width:420px; color:var(--slate-50);">
-        <h3 style="margin:0 0 12px;" data-i18n="heading.forward">Forward to…</h3>
-        <div id="forward-thread-list" style="max-height:260px; overflow-y:auto;"></div>
-        <button id="forward-modal-close" data-modal-cancel style="margin-top:12px; background:var(--slate-700); border:none; color:var(--slate-50); padding:8px 16px; border-radius:4px; cursor:pointer;" data-i18n="btn.cancel">Cancel</button>
+    <div id="forward-modal" class="modal" data-dismissable role="dialog" aria-modal="true" aria-labelledby="forward-modal-title" style="display:none;">
+      <div class="modal__panel modal__panel--sm">
+        <div class="modal__header">
+          <h3 id="forward-modal-title" class="modal__title" data-i18n="heading.forward">Forward to…</h3>
+          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" data-i18n-attr="aria-label:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+        </div>
+        <div id="forward-thread-list" class="picker-list"></div>
+        <div class="btn-row modal__footer">
+          <button type="button" id="forward-modal-close" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
+        </div>
       </div>
     </div>
     <!-- Round 70: Webhook created modal -->
-    <div id="webhook-created-modal" role="dialog" aria-modal="true" aria-label="Webhook created" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1003; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.webhookCreated">
-      <div style="background:var(--slate-800); border-radius:8px; padding:20px; min-width:340px; max-width:480px; color:var(--slate-50);">
-        <h3 style="margin:0 0 8px;" data-i18n="heading.webhookCreated">Webhook Created</h3>
-        <p style="color:var(--text-secondary); font-size:0.88em; margin:0 0 4px;">POST JSON to this URL to send messages to the room:</p>
+    <div id="webhook-created-modal" class="modal modal--stacked" data-dismissable role="dialog" aria-modal="true" aria-labelledby="webhook-created-title" style="display:none;">
+      <div class="modal__panel modal__panel--md">
+        <div class="modal__header">
+          <h3 id="webhook-created-title" class="modal__title" data-i18n="heading.webhookCreated">Webhook Created</h3>
+          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" data-i18n-attr="aria-label:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+        </div>
+        <p class="modal__desc">POST JSON to this URL to send messages to the room:</p>
         <code id="webhook-url-display" class="copyable-code"></code>
-        <div style="display:flex; gap:8px; margin-top:10px;">
-          <button id="copy-webhook-url-btn" style="background:var(--slate-700); border:none; color:var(--slate-50); padding:8px 14px; border-radius:4px; cursor:pointer;" data-i18n="btn.copyUrl">Copy URL</button>
-          <button id="webhook-created-close" data-modal-cancel style="background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 14px; border-radius:4px; cursor:pointer;" data-i18n="btn.done">Done</button>
+        <div class="btn-row modal__footer">
+          <button type="button" id="webhook-created-close" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.done">Done</button>
+          <button type="button" id="copy-webhook-url-btn" class="btn btn--accent btn--lg" data-i18n="btn.copyUrl">Copy URL</button>
         </div>
       </div>
     </div>
 
     <!-- Round 47: Toast container -->
-    <div id="toast-container" style="position:fixed;bottom:24px;right:24px;z-index:2000;display:flex;flex-direction:column;gap:8px;pointer-events:none;"></div>
+    <div id="toast-container" style="position:fixed;bottom:24px;right:24px;z-index:var(--z-toast);display:flex;flex-direction:column;gap:8px;pointer-events:none;"></div>
 
     <!-- Round 47: Generic confirm dialog -->
-    <div id="confirm-modal" role="dialog" aria-modal="true" aria-label="Confirmation" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1400;align-items:center;justify-content:center;" data-i18n-attr="aria-label:ui.confirmation">
-      <div style="background:var(--slate-800);border-radius:8px;padding:24px;min-width:300px;max-width:400px;color:var(--slate-50);">
-        <p id="confirm-msg" style="margin:0 0 20px;font-size:0.95em;"></p>
-        <div class="btn-row">
-          <button id="confirm-cancel" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
-          <button id="confirm-ok" class="btn btn--accent btn--lg" data-i18n="btn.confirm">Confirm</button>
+    <div id="confirm-modal" class="modal modal--stacked" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-msg" style="display:none;">
+      <div class="modal__panel modal__panel--sm">
+        <h3 id="confirm-title" class="modal__title" data-i18n="confirm.title">Are you sure?</h3>
+        <p id="confirm-msg" style="margin:0;font-size:0.95em;"></p>
+        <label id="confirm-check-row" class="check-row" hidden style="margin:var(--space-4) 0 0;">
+          <input type="checkbox" id="confirm-check">
+          <span id="confirm-check-label"></span>
+        </label>
+        <div class="btn-row modal__footer">
+          <button type="button" id="confirm-cancel" data-modal-cancel class="btn btn--slate btn--lg">Cancel</button>
+          <button type="button" id="confirm-ok" class="btn btn--accent btn--lg">Confirm</button>
         </div>
       </div>
     </div>
 
     <!-- Round 47: Copy-to-clipboard modal -->
-    <div id="copy-modal" role="dialog" aria-modal="true" aria-label="Copy" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1400;align-items:center;justify-content:center;" data-i18n-attr="aria-label:ui.copy">
-      <div style="background:var(--slate-800);border-radius:8px;padding:24px;min-width:320px;max-width:480px;color:var(--slate-50);">
-        <h3 style="margin:0 0 12px;" data-i18n="heading.copy">Copy</h3>
-        <textarea id="copy-modal-text" readonly style="width:100%;box-sizing:border-box;padding:8px;background:var(--slate-900);border:1px solid var(--slate-700);color:var(--text-secondary);border-radius:4px;font-size:0.85em;resize:none;min-height:80px;"></textarea>
-        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
-          <button id="copy-modal-copy-btn" class="btn btn--accent btn--lg" data-i18n="heading.copy">Copy</button>
-          <button id="copy-modal-close-btn" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.close">Close</button>
+    <div id="copy-modal" class="modal modal--stacked" data-dismissable role="dialog" aria-modal="true" aria-labelledby="copy-modal-title" style="display:none;">
+      <div class="modal__panel modal__panel--md">
+        <div class="modal__header">
+          <h3 id="copy-modal-title" class="modal__title" data-i18n="heading.copy">Copy</h3>
+          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" data-i18n-attr="aria-label:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+        </div>
+        <label for="copy-modal-text" class="sr-only" data-i18n="heading.copy">Copy</label>
+        <textarea id="copy-modal-text" class="input" readonly style="font-size:0.85em;resize:none;min-height:80px;margin:0;"></textarea>
+        <div class="btn-row modal__footer">
+          <button type="button" id="copy-modal-close-btn" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.close">Close</button>
+          <button type="button" id="copy-modal-copy-btn" class="btn btn--accent btn--lg" data-i18n="heading.copy">Copy</button>
         </div>
       </div>
     </div>
 
     <!-- R10.6.1: Deep link confirmation modal -->
-    <div id="deeplink-confirm-modal" role="dialog" aria-modal="true" aria-label="Add contact" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1010;align-items:center;justify-content:center;" data-i18n-attr="aria-label:ui.addContact">
-      <div style="background:var(--slate-800);border-radius:8px;padding:24px;min-width:320px;max-width:440px;color:var(--slate-50);">
-        <h3 style="margin:0 0 10px;font-size:1em;" data-i18n="heading.addContactViaLink">Add contact via link?</h3>
+    <div id="deeplink-confirm-modal" class="modal modal--stacked" role="dialog" aria-modal="true" aria-labelledby="deeplink-confirm-title" style="display:none;">
+      <div class="modal__panel modal__panel--sm">
+        <h3 id="deeplink-confirm-title" class="modal__title" data-i18n="heading.addContactViaLink">Add contact via link?</h3>
         <p style="margin:0 0 6px;font-size:0.85em;color:var(--text-secondary);">Proxion received a link asking to add:</p>
         <p id="deeplink-confirm-address" style="margin:0 0 14px;font-size:0.82em;color:#e2e8f0;word-break:break-all;background:var(--slate-900);padding:8px 10px;border-radius:4px;"></p>
-        <p style="margin:0 0 16px;font-size:0.8em;color:var(--slate-500);">This link came from outside the app. Continue only if you recognise this address.</p>
-        <div style="display:flex;gap:10px;justify-content:flex-end;">
-          <button id="deeplink-confirm-cancel" data-modal-cancel style="background:var(--slate-700);border:none;color:var(--slate-50);padding:8px 16px;border-radius:4px;cursor:pointer;font-size:0.9em;" data-i18n="btn.cancel">Cancel</button>
-          <button id="deeplink-confirm-ok" style="background:var(--accent);border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:0.9em;" data-i18n="btn.addContact">Add contact</button>
+        <p style="margin:0;font-size:0.8em;color:var(--slate-500);">This link came from outside the app. Continue only if you recognise this address.</p>
+        <div class="btn-row modal__footer">
+          <button type="button" id="deeplink-confirm-cancel" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
+          <button type="button" id="deeplink-confirm-ok" class="btn btn--accent btn--lg" data-i18n="btn.addContact">Add contact</button>
         </div>
       </div>
     </div>
 
     <!-- Round 47: Add peer modal -->
-    <div id="add-peer-modal" role="dialog" aria-modal="true" aria-label="Add contact" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1002;align-items:center;justify-content:center;" data-i18n-attr="aria-label:ui.addContact">
-      <div style="background:var(--slate-800);border-radius:8px;padding:24px;min-width:340px;max-width:480px;color:var(--slate-50);">
-        <h3 style="margin:0 0 12px;" data-i18n="heading.addPeer">Add Peer</h3>
-        <label style="display:block;margin-bottom:4px;font-size:0.9em;" data-i18n="label.peerDidProxionAddress">Peer DID or Proxion address</label>
-        <input id="add-peer-input" type="text" placeholder="Paste an invite link or your friend's address"
-               style="width:100%;box-sizing:border-box;padding:8px;border-radius:4px;border:1px solid #555;background:var(--slate-900);color:var(--slate-50);font-size:0.9em;margin-bottom:8px;" data-i18n-attr="placeholder:ui.pasteInviteLinkFriend">
-        <p id="add-peer-error" style="color:var(--color-danger-soft);font-size:0.85em;margin:0 0 12px;min-height:1.2em;"></p>
+    <div id="add-peer-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="add-peer-title" style="display:none;">
+      <div class="modal__panel modal__panel--md">
+        <form id="add-peer-form" novalidate>
+        <h3 id="add-peer-title" class="modal__title" data-i18n="heading.addPeer">Add Peer</h3>
+        <label for="add-peer-input" class="field-label" data-i18n="label.peerDidProxionAddress">Peer DID or Proxion address</label>
+        <input id="add-peer-input" class="input" type="text" placeholder="Paste an invite link or your friend's address" aria-describedby="add-peer-error" data-i18n-attr="placeholder:ui.pasteInviteLinkFriend">
+        <p id="add-peer-error" class="field-error" role="alert"></p>
         <!-- R17.3: QR scan -->
-        <div style="margin-bottom:12px;">
+        <div>
           <label id="scan-qr-label" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;
                  background:var(--slate-700);padding:7px 14px;border-radius:4px;font-size:0.85em;color:var(--slate-50);">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="16" height="16" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 3.75 9.375v-4.5ZM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 0 1-1.125-1.125v-4.5ZM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 13.5 9.375v-4.5ZM6.75 6.75h.75v.75h-.75v-.75ZM6.75 16.5h.75v.75h-.75v-.75ZM16.5 6.75h.75v.75h-.75v-.75ZM13.5 13.5h.75v.75h-.75v-.75ZM13.5 19.5h.75v.75h-.75v-.75ZM19.5 13.5h.75v.75h-.75v-.75ZM19.5 19.5h.75v.75h-.75v-.75ZM16.5 16.5h.75v.75h-.75v-.75Z"/></svg>
@@ -175,10 +192,11 @@
           </label>
           <span id="scan-qr-error" style="display:none;color:var(--color-danger-soft);font-size:0.82em;margin-left:8px;"></span>
         </div>
-        <div class="btn-row">
-          <button id="add-peer-cancel-btn" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
-          <button id="add-peer-submit-btn" class="btn btn--accent btn--lg" data-i18n="btn.add">Add</button>
+        <div class="btn-row modal__footer">
+          <button type="button" id="add-peer-cancel-btn" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
+          <button type="submit" id="add-peer-submit-btn" class="btn btn--accent btn--lg" data-i18n="btn.add">Add</button>
         </div>
+        </form>
       </div>
     </div>
 
@@ -215,25 +233,29 @@
     </div>
 
     <!-- Round 47: Join room modal -->
-    <div id="join-room-modal" role="dialog" aria-modal="true" aria-label="Join room" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1002;align-items:center;justify-content:center;" data-i18n-attr="aria-label:ui.joinRoom">
-      <div style="background:var(--slate-800);border-radius:8px;padding:24px;min-width:340px;max-width:480px;color:var(--slate-50);">
-        <h3 style="margin:0 0 12px;" data-i18n="heading.joinRoom">Join Room</h3>
-        <label style="display:block;margin-bottom:4px;font-size:0.9em;" data-i18n="label.inviteLinkRoomCode">Invite link or room code</label>
-        <input id="join-room-input" type="text" placeholder="Paste invite link or code"
-               style="width:100%;box-sizing:border-box;padding:8px;border-radius:4px;border:1px solid #555;background:var(--slate-900);color:var(--slate-50);font-size:0.9em;margin-bottom:8px;" data-i18n-attr="placeholder:ui.pasteInviteLinkCode">
-        <p id="join-room-error" style="color:var(--color-danger-soft);font-size:0.85em;margin:0 0 12px;min-height:1.2em;"></p>
-        <div class="btn-row">
-          <button id="join-room-cancel-btn" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
-          <button id="join-room-submit-btn" class="btn btn--accent btn--lg" data-i18n="btn.join">Join</button>
+    <div id="join-room-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="join-room-title" style="display:none;">
+      <div class="modal__panel modal__panel--md">
+        <form id="join-room-form" novalidate>
+        <h3 id="join-room-title" class="modal__title" data-i18n="heading.joinRoom">Join Room</h3>
+        <label for="join-room-input" class="field-label" data-i18n="label.inviteLinkRoomCode">Invite link or room code</label>
+        <input id="join-room-input" class="input" type="text" placeholder="Paste invite link or code" aria-describedby="join-room-error" data-i18n-attr="placeholder:ui.pasteInviteLinkCode">
+        <p id="join-room-error" class="field-error" role="alert"></p>
+        <div class="btn-row modal__footer">
+          <button type="button" id="join-room-cancel-btn" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
+          <button type="submit" id="join-room-submit-btn" class="btn btn--accent btn--lg" data-i18n="btn.join">Join</button>
         </div>
+        </form>
       </div>
     </div>
 
     <!-- Room invite modal -->
-    <div id="room-invite-modal" role="dialog" aria-modal="true" aria-label="Invite to room" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1002;align-items:center;justify-content:center;" data-i18n-attr="aria-label:ui.inviteRoom">
-      <div style="background:var(--slate-800);border-radius:8px;padding:24px;min-width:340px;max-width:480px;color:var(--slate-50);">
-        <h3 style="margin:0 0 4px;" data-i18n="heading.inviteRoom">Invite to Room</h3>
-        <p style="margin:0 0 16px;font-size:0.85em;color:var(--text-secondary);">Share the link or code with anyone you want to join.</p>
+    <div id="room-invite-modal" class="modal" data-dismissable role="dialog" aria-modal="true" aria-labelledby="room-invite-title" style="display:none;">
+      <div class="modal__panel modal__panel--md">
+        <div class="modal__header">
+          <h3 id="room-invite-title" class="modal__title" data-i18n="heading.inviteRoom">Invite to Room</h3>
+          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" data-i18n-attr="aria-label:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+        </div>
+        <p class="modal__desc" style="margin-bottom:16px;">Share the link or code with anyone you want to join.</p>
         <label style="display:block;margin-bottom:4px;font-size:0.85em;color:var(--text-secondary);" data-i18n="label.inviteLink">Invite link</label>
         <div style="display:flex;gap:6px;margin-bottom:14px;">
           <div id="invite-modal-url"
@@ -242,14 +264,15 @@
                   style="flex-shrink:0;background:var(--slate-700);border:none;color:var(--slate-50);padding:6px 12px;border-radius:4px;cursor:pointer;font-size:0.82em;" data-i18n="heading.copy">Copy</button>
         </div>
         <label style="display:block;margin-bottom:4px;font-size:0.85em;color:var(--text-secondary);" data-i18n="label.roomCodePasteInto">Room code (paste into "Join Room")</label>
-        <div style="display:flex;gap:6px;margin-bottom:20px;">
+        <div style="display:flex;gap:6px;">
           <div id="invite-modal-code"
                style="flex:1;font-size:0.9em;font-family:monospace;letter-spacing:0.05em;color:var(--slate-50);padding:8px;background:var(--slate-900);border-radius:4px;user-select:all;cursor:text;"></div>
           <button id="invite-modal-copy-code"
                   style="flex-shrink:0;background:var(--slate-700);border:none;color:var(--slate-50);padding:6px 12px;border-radius:4px;cursor:pointer;font-size:0.82em;" data-i18n="heading.copy">Copy</button>
         </div>
-        <button id="invite-modal-close" data-modal-cancel
-                style="background:var(--accent);border:none;color:#fff;padding:8px 20px;border-radius:4px;cursor:pointer;width:100%;" data-i18n="btn.done">Done</button>
+        <div class="btn-row modal__footer">
+          <button type="button" id="invite-modal-close" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.done">Done</button>
+        </div>
       </div>
     </div>
 
@@ -270,7 +293,7 @@
     </div>
 
     <!-- R13.7: image lightbox -->
-    <div id="lightbox" role="dialog" aria-modal="true" aria-label="Image preview" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:2000;align-items:center;justify-content:center;" data-i18n-attr="aria-label:ui.imagePreview">
+    <div id="lightbox" role="dialog" aria-modal="true" aria-label="Image preview" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:var(--z-modal-stacked);align-items:center;justify-content:center;" data-i18n-attr="aria-label:ui.imagePreview">
       <img id="lightbox-img" alt="Full-size image" style="max-width:90vw;max-height:90vh;border-radius:6px;box-shadow:0 4px 32px rgba(0,0,0,.8);">
       <button id="lightbox-close" data-modal-cancel aria-label="Close image preview" style="position:absolute;top:16px;right:20px;background:transparent;border:none;color:#fff;cursor:pointer;line-height:0;padding:4px;" data-i18n-attr="aria-label:ui.closeImagePreview"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="24" height="24" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
     </div>
@@ -547,19 +570,17 @@
               <input type="file" id="meme-file-input" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" style="display:none">
             </div>
             <!-- R60B: meme editor modal -->
-            <div id="meme-modal" role="dialog" aria-modal="true" aria-label="Meme editor" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1002; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.memeEditor">
-              <div style="background:var(--slate-800); border-radius:10px; padding:20px; width:min(480px, 94vw); max-height:90vh; overflow-y:auto; color:var(--slate-50);">
-                <h3 style="margin:0 0 10px;" data-i18n="heading.memeEditor">Meme editor</h3>
-                <canvas id="meme-canvas" style="display:block;max-width:100%;height:auto;border-radius:6px;border:1px solid var(--slate-600);margin-bottom:10px;"></canvas>
-                <label for="meme-top" class="sr-only" data-i18n="meme.topLabel">Top text</label>
-                <input id="meme-top" type="text" maxlength="120" placeholder="Top text" data-i18n-attr="placeholder:ui.memeTop"
-                       style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:6px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);">
-                <label for="meme-bottom" class="sr-only" data-i18n="meme.bottomLabel">Bottom text</label>
-                <input id="meme-bottom" type="text" maxlength="120" placeholder="Bottom text" data-i18n-attr="placeholder:ui.memeBottom"
-                       style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:12px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);">
-                <div class="btn-row">
-                  <button id="meme-cancel" data-modal-cancel class="btn btn--slate" data-i18n="btn.cancel">Cancel</button>
-                  <button id="meme-send" class="btn btn--accent" data-i18n="btn.send">Send</button>
+            <div id="meme-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="meme-modal-title" style="display:none;">
+              <div class="modal__panel modal__panel--md">
+                <h3 id="meme-modal-title" class="modal__title" data-i18n="heading.memeEditor">Meme editor</h3>
+                <canvas id="meme-canvas" style="display:block;max-width:100%;height:auto;border-radius:6px;border:1px solid var(--slate-600);margin-bottom:12px;"></canvas>
+                <label for="meme-top" class="field-label" data-i18n="meme.topLabel">Top text</label>
+                <input id="meme-top" class="input" type="text" maxlength="120" placeholder="Top text" data-i18n-attr="placeholder:ui.memeTop">
+                <label for="meme-bottom" class="field-label" data-i18n="meme.bottomLabel">Bottom text</label>
+                <input id="meme-bottom" class="input" type="text" maxlength="120" placeholder="Bottom text" data-i18n-attr="placeholder:ui.memeBottom">
+                <div class="btn-row modal__footer">
+                  <button type="button" id="meme-cancel" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
+                  <button type="button" id="meme-send" class="btn btn--accent btn--lg" data-i18n="btn.send">Send</button>
                 </div>
               </div>
             </div>
@@ -573,33 +594,31 @@
     </div>
 
     <!-- Room create modal -->
-    <div id="room-create-modal" role="dialog" aria-modal="true" aria-label="Create a room" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1002; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.createRoom">
-      <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:8px; padding:24px; min-width:360px; max-width:480px; color:var(--text-primary,var(--slate-50));">
-        <h3 style="margin:0 0 16px;" data-i18n="heading.createRoom">Create a Room</h3>
-        <div id="room-create-form">
-          <label style="display:block; margin-bottom:6px; font-size:0.9em;" data-i18n="label.roomName">Room name</label>
-          <input id="room-name-input" type="text" placeholder="e.g. general"
-                 style="width:100%; box-sizing:border-box; padding:8px; border-radius:4px; border:1px solid #555; background:var(--slate-900); color:var(--slate-50); font-size:0.95em; margin-bottom:12px;" data-i18n-attr="placeholder:ui.eGGeneral">
-          <p id="room-create-error" role="alert" style="color:var(--color-danger-soft);font-size:0.85em;margin:0 0 8px;"></p>
-          <label style="display:flex; align-items:center; gap:8px; margin-bottom:16px; cursor:pointer;">
+    <div id="room-create-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="room-create-title" style="display:none;">
+      <div class="modal__panel modal__panel--md">
+        <h3 id="room-create-title" class="modal__title" data-i18n="heading.createRoom">Create a Room</h3>
+        <form id="room-create-form" novalidate>
+          <label for="room-name-input" class="field-label" data-i18n="label.roomName">Room name</label>
+          <input id="room-name-input" class="input" type="text" placeholder="e.g. general" aria-describedby="room-create-error" data-i18n-attr="placeholder:ui.eGGeneral">
+          <p id="room-create-error" class="field-error" role="alert"></p>
+          <label class="check-row" style="margin:0;">
             <input type="checkbox" id="room-history-toggle">
-            <span style="font-size:0.9em; color:var(--text-secondary);">Share message history with new members</span>
+            <span style="color:var(--text-secondary);">Share message history with new members</span>
           </label>
-          <div style="display:flex; gap:8px; justify-content:flex-end;">
-            <button id="room-create-cancel-btn" data-modal-cancel
-                    style="background:var(--slate-700); border:none; color:var(--slate-50); padding:8px 16px; border-radius:4px; cursor:pointer;" data-i18n="btn.cancel">Cancel</button>
-            <button id="room-create-submit"
-                    style="background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer;" data-i18n="btn.create">Create</button>
+          <div class="btn-row modal__footer">
+            <button type="button" id="room-create-cancel-btn" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
+            <button type="submit" id="room-create-submit" class="btn btn--accent btn--lg" data-i18n="btn.create">Create</button>
           </div>
-        </div>
+        </form>
         <div id="room-invite-result" style="display:none;">
           <p style="margin:0 0 8px; color:var(--color-success); font-weight:600;">Room created!</p>
           <label style="display:block; margin-bottom:4px; font-size:0.9em;" data-i18n="label.inviteLinkClickCopy">Invite link (click to copy)</label>
           <div id="room-invite-url"
                style="font-size:0.8em; color:var(--text-secondary); word-break:break-all; padding:8px; background:var(--slate-900); border-radius:4px; cursor:pointer; user-select:all; margin-bottom:12px;"></div>
           <p style="font-size:0.8em; color:var(--text-secondary); margin:0 0 12px;">Share this link with a friend. When they open it, Proxion adds you automatically — they'll be prompted to install it first if they don't have it yet.</p>
-          <button id="room-create-done-btn" data-modal-cancel
-                  style="background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer; width:100%;" data-i18n="btn.done">Done</button>
+          <div class="btn-row modal__footer">
+            <button type="button" id="room-create-done-btn" data-modal-cancel class="btn btn--accent btn--lg" data-i18n="btn.done">Done</button>
+          </div>
         </div>
       </div>
     </div>
@@ -835,173 +854,189 @@
     </div>
 
     <!-- R60C: attachment-send confirm with mark-as-spoiler (images) -->
-    <div id="file-confirm-modal" role="dialog" aria-modal="true" aria-label="Send file" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:3000; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.sendFile">
-      <div style="background:var(--slate-800); border-radius:10px; padding:20px; width:min(360px, 92vw); color:var(--slate-50);">
+    <div id="file-confirm-modal" class="modal modal--stacked" role="dialog" aria-modal="true" aria-labelledby="file-confirm-title" aria-describedby="file-confirm-msg" style="display:none;">
+      <div class="modal__panel modal__panel--sm">
+        <h3 id="file-confirm-title" class="modal__title" data-i18n="ui.sendFile">Send file</h3>
         <p id="file-confirm-msg" style="margin:0 0 12px;font-size:0.95em;"></p>
-        <label id="file-confirm-spoiler-row" style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.88em;margin-bottom:14px;">
+        <label id="file-confirm-spoiler-row" class="check-row" style="margin:0;">
           <input type="checkbox" id="file-confirm-spoiler">
           <span data-i18n="file.spoilerOption">Mark as spoiler (blurred until revealed)</span>
         </label>
-        <div class="btn-row">
-          <button id="file-confirm-cancel" data-modal-cancel class="btn btn--slate" data-i18n="btn.cancel">Cancel</button>
-          <button id="file-confirm-ok" class="btn btn--accent" data-i18n="btn.send">Send</button>
+        <div class="btn-row modal__footer">
+          <button type="button" id="file-confirm-cancel" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
+          <button type="button" id="file-confirm-ok" class="btn btn--accent btn--lg" data-i18n="btn.send">Send</button>
         </div>
       </div>
     </div>
 
     <!-- R59G: custom room emoji management (admins; server enforces) -->
-    <div id="room-emoji-modal" role="dialog" aria-modal="true" aria-label="Custom room emoji" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1002; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.customRoomEmoji">
-      <div style="background:var(--slate-800); border-radius:10px; padding:24px; width:min(400px, 92vw); max-height:80vh; overflow-y:auto; color:var(--slate-50);">
-        <h3 style="margin:0 0 8px;" data-i18n="heading.customRoomEmoji">Custom room emoji</h3>
-        <p style="margin:0 0 12px;font-size:0.82em;color:var(--text-secondary);" data-i18n="roomEmoji.hint">
+    <div id="room-emoji-modal" class="modal" data-dismissable role="dialog" aria-modal="true" aria-labelledby="room-emoji-title" style="display:none;">
+      <div class="modal__panel modal__panel--sm">
+        <div class="modal__header">
+          <h3 id="room-emoji-title" class="modal__title" data-i18n="heading.customRoomEmoji">Custom room emoji</h3>
+          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" data-i18n-attr="aria-label:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+        </div>
+        <p class="modal__desc" data-i18n="roomEmoji.hint">
           Up to 50 small images (64 KB max) usable as :name: in this room.
           Large images are shrunk automatically.
         </p>
-        <div id="room-emoji-list" style="margin-bottom:12px;"></div>
+        <div id="room-emoji-list"></div>
         <input type="file" id="room-emoji-upload-input" accept="image/png,image/webp,image/gif,image/jpeg" style="display:none">
-        <div class="btn-row">
-          <button id="room-emoji-upload-btn" class="btn btn--slate" data-i18n="btn.uploadEmoji">Upload emoji</button>
-          <button id="room-emoji-close" data-modal-cancel class="btn btn--accent" data-i18n="btn.close">Close</button>
+        <div class="btn-row modal__footer">
+          <button type="button" id="room-emoji-close" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.close">Close</button>
+          <button type="button" id="room-emoji-upload-btn" class="btn btn--accent btn--lg" data-i18n="btn.uploadEmoji">Upload emoji</button>
         </div>
       </div>
     </div>
 
     <!-- R59F: poll creation modal — output is a plain-text message + seeded reactions -->
-    <div id="poll-modal" role="dialog" aria-modal="true" aria-label="Create a poll" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1002; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.createPoll">
-      <div style="background:var(--slate-800); border-radius:10px; padding:24px; width:min(420px, 92vw); color:var(--slate-50);">
-        <h3 style="margin:0 0 12px;" data-i18n="heading.createPoll">Create a poll</h3>
-        <label for="poll-question" class="sr-only" data-i18n="poll.questionLabel">Question</label>
-        <input id="poll-question" type="text" maxlength="200" placeholder="Ask a question…" data-i18n-attr="placeholder:ui.pollQuestion"
-               style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:10px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);">
-        <input id="poll-opt-1" type="text" maxlength="100" placeholder="Option 1" data-i18n-attr="placeholder:ui.pollOption1" style="width:100%;box-sizing:border-box;padding:7px;margin-bottom:6px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);">
-        <input id="poll-opt-2" type="text" maxlength="100" placeholder="Option 2" data-i18n-attr="placeholder:ui.pollOption2" style="width:100%;box-sizing:border-box;padding:7px;margin-bottom:6px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);">
-        <input id="poll-opt-3" type="text" maxlength="100" placeholder="Option 3 (optional)" data-i18n-attr="placeholder:ui.pollOptionN" style="width:100%;box-sizing:border-box;padding:7px;margin-bottom:6px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);">
-        <input id="poll-opt-4" type="text" maxlength="100" placeholder="Option 4 (optional)" data-i18n-attr="placeholder:ui.pollOptionN" style="width:100%;box-sizing:border-box;padding:7px;margin-bottom:6px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);">
-        <input id="poll-opt-5" type="text" maxlength="100" placeholder="Option 5 (optional)" data-i18n-attr="placeholder:ui.pollOptionN" style="width:100%;box-sizing:border-box;padding:7px;margin-bottom:12px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);">
-        <div class="btn-row">
-          <button id="poll-cancel" data-modal-cancel class="btn btn--slate" data-i18n="btn.cancel">Cancel</button>
-          <button id="poll-submit" class="btn btn--accent" data-i18n="btn.createPoll">Create poll</button>
+    <div id="poll-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="poll-modal-title" style="display:none;">
+      <div class="modal__panel modal__panel--md">
+        <form id="poll-form" novalidate>
+        <h3 id="poll-modal-title" class="modal__title" data-i18n="heading.createPoll">Create a poll</h3>
+        <label for="poll-question" class="field-label" data-i18n="poll.questionLabel">Question</label>
+        <input id="poll-question" class="input" type="text" maxlength="200" placeholder="Ask a question…" data-i18n-attr="placeholder:ui.pollQuestion" style="margin-bottom:var(--space-3);">
+        <fieldset style="border:none;margin:0;padding:0;">
+          <legend class="field-label" data-i18n="poll.optionsLabel">Options</legend>
+          <input id="poll-opt-1" class="input" type="text" maxlength="100" placeholder="Option 1" aria-label="Option 1" data-i18n-attr="placeholder:ui.pollOption1;aria-label:ui.pollOption1">
+          <input id="poll-opt-2" class="input" type="text" maxlength="100" placeholder="Option 2" aria-label="Option 2" data-i18n-attr="placeholder:ui.pollOption2;aria-label:ui.pollOption2">
+          <input id="poll-opt-3" class="input" type="text" maxlength="100" placeholder="Option 3 (optional)" aria-label="Option 3" data-i18n-attr="placeholder:ui.pollOptionN;aria-label:poll.option3">
+          <input id="poll-opt-4" class="input" type="text" maxlength="100" placeholder="Option 4 (optional)" aria-label="Option 4" data-i18n-attr="placeholder:ui.pollOptionN;aria-label:poll.option4">
+          <input id="poll-opt-5" class="input" type="text" maxlength="100" placeholder="Option 5 (optional)" aria-label="Option 5" data-i18n-attr="placeholder:ui.pollOptionN;aria-label:poll.option5">
+        </fieldset>
+        <div class="btn-row modal__footer">
+          <button type="button" id="poll-cancel" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
+          <button type="submit" id="poll-submit" class="btn btn--accent btn--lg" data-i18n="btn.createPoll">Create poll</button>
         </div>
+        </form>
       </div>
     </div>
 
     <!-- E1: recovery-kit modal — shows the generated recovery code once, then
          downloads the encrypted kit after the user confirms they stored it -->
-    <div id="recovery-kit-modal" role="dialog" aria-modal="true" aria-label="Your recovery code" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1002; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.recoveryCode">
-      <div style="background:var(--slate-800); border-radius:10px; padding:24px; max-width:420px; color:var(--slate-50);">
-        <h3 style="margin:0 0 10px;" data-i18n="heading.recoveryCode">Your recovery code</h3>
-        <p style="margin:0 0 12px;font-size:0.85em;color:var(--text-secondary);" data-i18n="recovery.explain">
+    <div id="recovery-kit-modal" class="modal modal--stacked" role="dialog" aria-modal="true" aria-labelledby="recovery-kit-title" style="display:none;">
+      <div class="modal__panel modal__panel--sm">
+        <h3 id="recovery-kit-title" class="modal__title" data-i18n="heading.recoveryCode">Your recovery code</h3>
+        <p class="modal__desc" data-i18n="recovery.explain">
           This code encrypts your recovery kit. Write it down and keep it somewhere
           safe — you will need it to restore your identity, and it is shown only once.
         </p>
         <p id="recovery-code-display" style="margin:0 0 10px;font-family:monospace;font-size:1.15em;letter-spacing:1px;text-align:center;padding:12px 8px;background:var(--slate-900);border:1px solid var(--slate-600);border-radius:6px;user-select:all;"></p>
-        <button id="recovery-copy-btn" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;margin-bottom:14px;" data-i18n="btn.copyCode">Copy code</button>
-        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:0.88em;margin-bottom:14px;">
-          <input type="checkbox" id="recovery-confirm-saved" style="margin-top:2px;">
+        <button type="button" id="recovery-copy-btn" class="btn btn--slate btn--sm" style="margin-bottom:14px;" data-i18n="btn.copyCode">Copy code</button>
+        <label class="check-row" style="margin:0;">
+          <input type="checkbox" id="recovery-confirm-saved">
           <span data-i18n="recovery.confirmSaved">I have written down my recovery code</span>
         </label>
-        <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;">
-          <a id="recovery-custom-pp" href="#" style="margin-right:auto;font-size:0.8em;color:var(--text-secondary);text-decoration:underline;" data-i18n="recovery.useCustom">Use my own passphrase instead</a>
-          <button id="recovery-cancel-btn" data-modal-cancel class="btn btn--slate" data-i18n="btn.cancel">Cancel</button>
-          <button id="recovery-download-btn" disabled style="background:var(--accent);border:none;color:#fff;padding:7px 16px;border-radius:4px;cursor:not-allowed;opacity:0.45;" data-i18n="btn.downloadRecoveryKit">Download recovery kit</button>
+        <div class="btn-row modal__footer" style="align-items:center;">
+          <a id="recovery-custom-pp" href="#" style="margin-inline-end:auto;font-size:0.8em;color:var(--text-secondary);text-decoration:underline;" data-i18n="recovery.useCustom">Use my own passphrase instead</a>
+          <button type="button" id="recovery-cancel-btn" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
+          <button type="button" id="recovery-download-btn" disabled class="btn btn--accent btn--lg" data-i18n="btn.downloadRecoveryKit">Download recovery kit</button>
         </div>
       </div>
     </div>
 
     <!-- Multi-device: primary shows a pairing QR/code, then approves the new device -->
-    <div id="device-link-modal" role="dialog" aria-modal="true" aria-label="Link a device" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1002; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.linkDevice">
-      <div style="background:var(--slate-800); border-radius:10px; padding:24px; max-width:360px; color:var(--slate-50); text-align:center;">
-        <h3 style="margin:0 0 12px;" data-i18n="heading.linkDevice">Link a device</h3>
+    <div id="device-link-modal" class="modal modal--stacked" role="dialog" aria-modal="true" aria-labelledby="device-link-title" style="display:none;">
+      <div class="modal__panel modal__panel--sm" style="text-align:center;">
+        <h3 id="device-link-title" class="modal__title" data-i18n="heading.linkDevice">Link a device</h3>
         <div id="device-link-qr" style="width:200px;height:200px;border-radius:6px;background:#fff;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;overflow:hidden;"></div>
         <p style="margin:0 0 4px;font-size:0.8em;color:var(--text-secondary);">Pairing code</p>
         <p id="device-link-code" style="margin:0 0 12px;font-family:monospace;font-size:0.95em;word-break:break-all;"></p>
         <p id="device-link-status" style="margin:0 0 12px;font-size:0.85em;color:var(--text-secondary);"></p>
         <div id="device-link-approve-row" style="display:none;flex-direction:column;gap:8px;margin-bottom:12px;">
           <p id="device-link-safety" style="margin:0;font-family:monospace;font-size:1.3em;letter-spacing:2px;color:var(--color-success-soft);"></p>
-          <div style="display:flex;gap:8px;justify-content:center;">
-            <button id="device-link-approve" class="btn btn--accent" data-i18n="btn.approve">Approve</button>
-            <button id="device-link-deny" class="btn btn--slate" data-i18n="btn.deny">Deny</button>
+          <div class="btn-row" style="justify-content:center;">
+            <button type="button" id="device-link-deny" class="btn btn--slate btn--lg" data-i18n="btn.deny">Deny</button>
+            <button type="button" id="device-link-approve" class="btn btn--accent btn--lg" data-i18n="btn.approve">Approve</button>
           </div>
         </div>
-        <button id="device-link-close" data-modal-cancel class="btn btn--slate" data-i18n="btn.close">Close</button>
+        <div class="btn-row modal__footer">
+          <button type="button" id="device-link-close" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.close">Close</button>
+        </div>
       </div>
     </div>
 
     <!-- Multi-device: new device enters/scans a pairing code to join an account -->
-    <div id="pair-device-modal" role="dialog" aria-modal="true" aria-label="Link this device" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1002; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.linkThisDevice">
-      <div style="background:var(--slate-800); border-radius:10px; padding:24px; max-width:360px; color:var(--slate-50);">
-        <h3 style="margin:0 0 12px;" data-i18n="heading.linkThisDevice">Link this device</h3>
-        <p style="margin:0 0 10px;font-size:0.85em;color:var(--text-secondary);">On your other device, open Settings &rarr; Link a device, then enter the code shown there (or scan its QR).</p>
-        <input id="pair-code-input" type="text" placeholder="Pairing code" autocomplete="off"
-               style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:8px;border-radius:4px;border:1px solid var(--slate-600);background:var(--slate-900);color:var(--slate-50);font-family:monospace;" data-i18n-attr="placeholder:ui.pairingCode">
+    <div id="pair-device-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="pair-device-title" style="display:none;">
+      <div class="modal__panel modal__panel--sm">
+        <h3 id="pair-device-title" class="modal__title" data-i18n="heading.linkThisDevice">Link this device</h3>
+        <p class="modal__desc">On your other device, open Settings &rarr; Link a device, then enter the code shown there (or scan its QR).</p>
+        <label for="pair-code-input" class="field-label" data-i18n="ui.pairingCode">Pairing code</label>
+        <input id="pair-code-input" class="input" type="text" placeholder="Pairing code" autocomplete="off" style="font-family:var(--font-mono);" data-i18n-attr="placeholder:ui.pairingCode">
         <label id="pair-scan-label" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:0.82em;color:var(--text-secondary);margin-bottom:10px;">
           Scan QR code
           <input type="file" id="pair-scan-input" accept="image/*" capture="environment" style="display:none;">
         </label>
         <p id="pair-device-status" style="margin:8px 0;font-size:0.85em;color:var(--text-secondary);"></p>
         <p id="pair-device-safety" style="margin:0 0 12px;font-family:monospace;font-size:1.3em;letter-spacing:2px;color:var(--color-success-soft);text-align:center;"></p>
-        <div class="btn-row">
-          <button id="pair-device-cancel" data-modal-cancel class="btn btn--slate" data-i18n="btn.cancel">Cancel</button>
-          <button id="pair-device-submit" class="btn btn--accent" data-i18n="heading.linkThisDevice">Link this device</button>
+        <div class="btn-row modal__footer">
+          <button type="button" id="pair-device-cancel" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
+          <button type="button" id="pair-device-submit" class="btn btn--accent btn--lg" data-i18n="heading.linkThisDevice">Link this device</button>
         </div>
       </div>
     </div>
 
     <!-- R81 R2: pre-join camera/mic check for video calls -->
-    <div id="call-preview" role="dialog" aria-modal="true" aria-label="Check your camera and microphone" data-i18n-attr="aria-label:preview.title" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1100; align-items:center; justify-content:center;">
-      <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:8px; padding:20px; width:min(92vw,420px);">
-        <h3 style="margin:0 0 12px;color:var(--text-primary,var(--slate-50))" data-i18n="preview.title">Check your camera and microphone</h3>
+    <div id="call-preview" class="modal" role="dialog" aria-modal="true" aria-labelledby="call-preview-title" style="display:none;">
+      <div class="modal__panel modal__panel--sm">
+        <h3 id="call-preview-title" class="modal__title" data-i18n="preview.title">Check your camera and microphone</h3>
         <video id="preview-video" autoplay playsinline muted style="width:100%;max-height:220px;background:#000;border-radius:8px;object-fit:cover;transform:scaleX(-1);"></video>
         <div style="display:flex;align-items:center;gap:8px;margin:10px 0;">
           <span style="font-size:0.75em;color:var(--text-secondary,var(--slate-400));min-width:32px;" data-i18n="preview.mic">Mic</span>
           <div style="flex:1;height:8px;background:var(--slate-900,#0f172a);border-radius:4px;overflow:hidden;"><div id="preview-mic-level" role="meter" aria-label="Microphone level" data-i18n-attr="aria-label:preview.micLevel" style="height:100%;width:0;background:var(--color-success,#4ade80);transition:width .08s;"></div></div>
         </div>
         <label for="preview-camera" style="display:block;font-size:0.78em;margin-bottom:3px;color:var(--text-secondary,var(--slate-400))" data-i18n="preview.camera">Camera</label>
-        <select id="preview-camera" style="width:100%;box-sizing:border-box;margin-bottom:10px;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:7px 8px;"></select>
+        <select id="preview-camera" class="input" style="margin-bottom:10px;"></select>
         <label for="preview-mic" style="display:block;font-size:0.78em;margin-bottom:3px;color:var(--text-secondary,var(--slate-400))" data-i18n="preview.microphone">Microphone</label>
-        <select id="preview-mic" style="width:100%;box-sizing:border-box;margin-bottom:14px;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:7px 8px;"></select>
-        <div style="display:flex;justify-content:flex-end;gap:8px;">
-          <button id="preview-cancel" data-modal-cancel type="button" data-i18n="btn.cancel" style="background:transparent;border:1px solid var(--slate-600,#475569);color:var(--text-secondary,var(--slate-400));padding:7px 14px;border-radius:6px;cursor:pointer;">Cancel</button>
-          <button id="preview-join" type="button" data-i18n="preview.join" style="background:var(--accent,#d61f52);border:none;color:#fff;padding:7px 16px;border-radius:6px;cursor:pointer;">Join call</button>
+        <select id="preview-mic" class="input" style="margin:0;"></select>
+        <div class="btn-row modal__footer">
+          <button id="preview-cancel" data-modal-cancel type="button" class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
+          <button id="preview-join" type="button" class="btn btn--accent btn--lg" data-i18n="preview.join">Join call</button>
         </div>
       </div>
     </div>
 
     <!-- Keyboard shortcut help modal -->
-    <div id="solidchat-dialog" role="dialog" aria-modal="true" aria-label="New Solid conversation" data-i18n-attr="aria-label:solidchat.new" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1000; align-items:center; justify-content:center;">
-      <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:8px; padding:22px; min-width:340px; max-width:460px;">
-        <h3 style="margin:0 0 6px; color:var(--text-primary,var(--slate-50))" data-i18n="solidchat.new">New Solid conversation</h3>
-        <p style="margin:0 0 16px; font-size:0.82em; color:var(--text-secondary,var(--slate-400))" data-i18n="solidchat.newHint">Talk to anyone with a Solid pod, in any Solid chat app. These messages are shared plaintext, not end-to-end encrypted.</p>
+    <div id="solidchat-dialog" class="modal" data-dismissable role="dialog" aria-modal="true" aria-labelledby="solidchat-dialog-title" style="display:none;">
+      <div class="modal__panel modal__panel--md">
+        <div class="modal__header">
+          <h3 id="solidchat-dialog-title" class="modal__title" data-i18n="solidchat.new">New Solid conversation</h3>
+          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" data-i18n-attr="aria-label:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+        </div>
+        <p class="modal__desc" style="margin-bottom:16px;" data-i18n="solidchat.newHint">Talk to anyone with a Solid pod, in any Solid chat app. These messages are shared plaintext, not end-to-end encrypted.</p>
         <label style="display:block;font-size:0.8em;margin-bottom:4px;color:var(--text-secondary,var(--slate-400))" data-i18n="solidchat.invitationsLabel">Invitations</label>
         <ul id="solidchat-invites-list" aria-label="Chat invitations" data-i18n-attr="aria-label:solidchat.invitationsLabel" style="list-style:none;margin:0 0 16px;padding:0;max-height:140px;overflow:auto;"></ul>
         <label for="solidchat-host-title" style="display:block;font-size:0.8em;margin-bottom:4px;color:var(--text-secondary,var(--slate-400))" data-i18n="solidchat.hostLabel">Host a new conversation</label>
         <div style="display:flex;gap:8px;margin-bottom:8px;">
-          <input id="solidchat-host-title" type="text" placeholder="Conversation name" data-i18n-attr="placeholder:solidchat.namePlaceholder" style="flex:1;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:8px 10px;">
-          <button id="solidchat-host-submit" type="button" data-i18n="solidchat.host" style="background:var(--accent,#d61f52);border:none;color:#fff;padding:0 14px;border-radius:6px;cursor:pointer;">Host</button>
+          <input id="solidchat-host-title" class="input" type="text" placeholder="Conversation name" data-i18n-attr="placeholder:solidchat.namePlaceholder" style="flex:1;margin:0;">
+          <button id="solidchat-host-submit" type="button" class="btn btn--accent" data-i18n="solidchat.host">Host</button>
         </div>
-        <input id="solidchat-host-participant" list="solidchat-contacts" type="url" inputmode="url" placeholder="Invite a WebID (optional)" data-i18n-attr="placeholder:solidchat.participantPlaceholder" style="width:100%;box-sizing:border-box;margin-bottom:16px;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:8px 10px;">
+        <input id="solidchat-host-participant" class="input" list="solidchat-contacts" type="url" inputmode="url" placeholder="Invite a WebID (optional)" aria-label="Invite a WebID (optional)" data-i18n-attr="placeholder:solidchat.participantPlaceholder;aria-label:solidchat.participantPlaceholder" style="margin-bottom:16px;">
         <label for="solidchat-join-url" style="display:block;font-size:0.8em;margin-bottom:4px;color:var(--text-secondary,var(--slate-400))" data-i18n="solidchat.joinLabel">Join with a link</label>
         <div style="display:flex;gap:8px;margin-bottom:16px;">
-          <input id="solidchat-join-url" type="url" inputmode="url" placeholder="https://…/chat/" data-i18n-attr="placeholder:solidchat.linkPlaceholder" style="flex:1;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:8px 10px;">
-          <button id="solidchat-join-submit" type="button" data-i18n="solidchat.join" style="background:var(--slate-700,#334155);border:none;color:#fff;padding:0 14px;border-radius:6px;cursor:pointer;">Join</button>
+          <input id="solidchat-join-url" class="input" type="url" inputmode="url" placeholder="https://…/chat/" data-i18n-attr="placeholder:solidchat.linkPlaceholder" style="flex:1;margin:0;">
+          <button id="solidchat-join-submit" type="button" class="btn btn--slate" data-i18n="solidchat.join">Join</button>
         </div>
         <label for="solidchat-discover-webid" style="display:block;font-size:0.8em;margin-bottom:4px;color:var(--text-secondary,var(--slate-400))" data-i18n="solidchat.discoverLabel">Find someone's chats by WebID</label>
         <div style="display:flex;gap:8px;margin-bottom:8px;">
-          <input id="solidchat-discover-webid" list="solidchat-contacts" type="url" inputmode="url" placeholder="https://…/profile/card#me" data-i18n-attr="placeholder:solidchat.webidPlaceholder" style="flex:1;background:var(--slate-900,#0f172a);border:1px solid var(--slate-700,#334155);color:var(--text-primary,var(--slate-50));border-radius:6px;padding:8px 10px;">
+          <input id="solidchat-discover-webid" class="input" list="solidchat-contacts" type="url" inputmode="url" placeholder="https://…/profile/card#me" data-i18n-attr="placeholder:solidchat.webidPlaceholder" style="flex:1;margin:0;">
           <datalist id="solidchat-contacts"></datalist>
-          <button id="solidchat-discover-btn" type="button" data-i18n="solidchat.find" style="background:var(--slate-700,#334155);border:none;color:#fff;padding:0 14px;border-radius:6px;cursor:pointer;">Find</button>
+          <button id="solidchat-discover-btn" type="button" class="btn btn--slate" data-i18n="solidchat.find">Find</button>
         </div>
         <ul id="solidchat-discover-list" aria-label="Discovered chats" data-i18n-attr="aria-label:solidchat.discoveredChats" style="list-style:none;margin:0 0 16px;padding:0;max-height:180px;overflow:auto;"></ul>
-        <div style="text-align:right;">
-          <button id="solidchat-dialog-close" data-modal-cancel type="button" data-i18n="btn.cancel" style="background:transparent;border:1px solid var(--slate-600,#475569);color:var(--text-secondary,var(--slate-400));padding:6px 14px;border-radius:4px;cursor:pointer;">Cancel</button>
+        <div class="btn-row">
+          <button id="solidchat-dialog-close" data-modal-cancel type="button" class="btn btn--slate btn--lg" data-i18n="btn.close">Close</button>
         </div>
       </div>
     </div>
 
-    <div id="shortcut-modal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1000; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.keyboardShortcuts">
-      <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:8px; padding:24px; min-width:360px; max-width:500px;">
-        <h3 style="margin:0 0 16px; color:var(--text-primary,var(--slate-50))" data-i18n="kbd.title">Keyboard Shortcuts</h3>
-        <table style="width:100%; border-collapse:collapse; color:var(--text-primary,var(--slate-50))">
+    <div id="shortcut-modal" class="modal" data-dismissable role="dialog" aria-modal="true" aria-labelledby="shortcut-modal-title" style="display:none;">
+      <div class="modal__panel modal__panel--md">
+        <div class="modal__header">
+          <h3 id="shortcut-modal-title" class="modal__title" data-i18n="kbd.title">Keyboard Shortcuts</h3>
+          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" data-i18n-attr="aria-label:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+        </div>
+        <table style="width:100%; border-collapse:collapse;">
           <tr><td><kbd>Ctrl+K</kbd></td><td data-i18n="kbd.focusSearch">Focus search</td></tr>
           <tr><td><kbd>Ctrl+/</kbd></td><td data-i18n="kbd.showHelp">Show this help</td></tr>
           <tr><td><kbd>Alt+↑ / ↓</kbd></td><td data-i18n="kbd.prevNextThread">Previous / next thread</td></tr>
@@ -1014,15 +1049,17 @@
           <tr><td><kbd>Enter</kbd></td><td data-i18n="kbd.sendMessage">Send message</td></tr>
           <tr><td><kbd>Escape</kbd></td><td data-i18n="kbd.cancelClose">Cancel reply / edit / close modal or menu</td></tr>
         </table>
-        <button id="shortcut-close-btn" data-modal-cancel
-                style="margin-top:16px; background:var(--accent,var(--accent)); border:none; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer;" data-i18n="btn.close">Close</button>
+        <div class="btn-row modal__footer">
+          <button type="button" id="shortcut-close-btn" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.close">Close</button>
+        </div>
       </div>
     </div>
 
     <!-- Web build sign-in (shown in gateway-less browser mode instead of the wizard) -->
-    <div id="web-signin-modal" data-modal-persistent role="dialog" aria-modal="true" aria-label="Sign in to Proxion" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1002; align-items:center; justify-content:center;">
-      <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:10px; padding:28px; max-width:420px; width:calc(100vw - 32px); color:var(--text-primary,var(--slate-50));">
-        <h2 style="margin:0 0 8px;" data-i18n="web.signin.title">Welcome to Proxion Web</h2>
+    <div id="web-signin-modal" class="modal modal--gate" data-modal-persistent role="dialog" aria-modal="true" aria-labelledby="web-signin-title" style="display:none;background:rgba(0,0,0,.7);">
+      <div class="modal__panel modal__panel--md">
+        <form id="web-signin-form" novalidate>
+        <h2 id="web-signin-title" class="modal__title" style="font-size:1.35rem;" data-i18n="web.signin.title">Welcome to Proxion Web</h2>
         <p id="web-signin-invite" hidden style="background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:10px; font-size:0.88em; margin:0 0 14px;" data-i18n="web.signin.invited">You have been invited to a room. Sign in with your Solid pod, or get a free one below, to join.</p>
         <p style="color:var(--text-secondary); font-size:0.9em; margin:0 0 12px;" data-i18n="web.signin.what">
           Proxion is an end-to-end encrypted messenger. Your messages live in your own Solid pod, a personal data store that only you control.
@@ -1030,20 +1067,21 @@
         <p style="color:var(--text-secondary); font-size:0.9em; margin:0 0 16px;" data-i18n="web.signin.body">
           Have a Solid pod? Enter your provider to sign in.
         </p>
-        <label for="web-signin-url" style="display:block; font-size:0.85em; color:var(--text-secondary); margin-bottom:4px;" data-i18n="web.signin.provider">Pod provider</label>
-        <input id="web-signin-url" type="url" value="https://solidcommunity.net" autocomplete="url" style="width:100%; box-sizing:border-box; padding:9px 10px; border-radius:4px; border:1px solid var(--slate-700); background:var(--slate-900); color:var(--text-primary); margin-bottom:6px;">
-        <p id="web-signin-error" style="color:var(--color-danger); font-size:0.82em; min-height:1em; margin:0 0 10px;"></p>
-        <button id="web-signin-btn" style="background:var(--accent); border:none; color:#fff; padding:10px 24px; border-radius:4px; cursor:pointer; font-size:1em; width:100%;" data-i18n="web.signin.button">Sign in</button>
+        <label for="web-signin-url" class="field-label" data-i18n="web.signin.provider">Pod provider</label>
+        <input id="web-signin-url" class="input" type="url" value="https://solidcommunity.net" autocomplete="url" aria-describedby="web-signin-error">
+        <p id="web-signin-error" class="field-error" role="alert"></p>
+        <button type="submit" id="web-signin-btn" class="btn btn--accent btn--lg" style="width:100%;padding:10px 24px;font-size:1em;" data-i18n="web.signin.button">Sign in</button>
         <p style="margin:14px 0 0; font-size:0.83em; color:var(--text-secondary);">
           <span data-i18n="web.signin.noPod">New to Solid? Get a free pod in about a minute at</span>
           <a href="https://solidcommunity.net/.account/login/password/register/" target="_blank" rel="noopener" style="color:var(--accent-text);">solidcommunity.net</a>.
         </p>
+        </form>
       </div>
     </div>
 
     <!-- Onboarding wizard -->
-    <div id="onboarding-modal" data-modal-persistent role="dialog" aria-modal="true" aria-label="Welcome to Proxion" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1001; align-items:center; justify-content:center;" data-i18n-attr="aria-label:ui.welcomeProxion">
-      <div style="background:var(--bg-secondary,var(--slate-800)); border-radius:10px; padding:32px; min-width:380px; max-width:480px; color:var(--text-primary,var(--slate-50));">
+    <div id="onboarding-modal" class="modal modal--gate" data-modal-persistent role="dialog" aria-modal="true" aria-label="Welcome to Proxion" style="display:none;background:rgba(0,0,0,.7);" data-i18n-attr="aria-label:ui.welcomeProxion">
+      <div class="modal__panel modal__panel--md" style="padding:var(--space-6);">
         <div id="ob-step-1">
           <h2 data-i18n="heading.welcomeProxion">Welcome to Proxion</h2>
           <p style="color:var(--text-secondary);font-size:0.92em;margin:0 0 12px;" data-i18n="onboarding.welcomeBody">
@@ -1063,7 +1101,8 @@
         </div>
         <div id="ob-step-2" style="display:none">
           <h2 data-i18n="heading.whatSName">What's your name?</h2>
-          <input id="ob-name" placeholder="Display name" style="width:100%;padding:8px;border-radius:4px;border:1px solid #555;background:var(--slate-900);color:var(--slate-50);font-size:1em;box-sizing:border-box;margin-bottom:12px;" data-i18n-attr="placeholder:ui.displayName">
+          <label for="ob-name" class="field-label" data-i18n="ui.displayName">Display name</label>
+          <input id="ob-name" class="input" placeholder="Display name" autocomplete="nickname" style="margin-bottom:12px;" data-i18n-attr="placeholder:ui.displayName">
           <button id="ob-step2-btn" style="background:var(--accent,var(--accent));border:none;color:#fff;padding:10px 24px;border-radius:4px;cursor:pointer;font-size:1em;" data-i18n="btn.continue">Continue</button>
         </div>
         <!-- Step 4: Connect Solid Pod (R16) -->
@@ -1158,7 +1197,7 @@
           <button id="ob-step5-create" style="background:var(--accent,var(--accent));border:none;color:#fff;padding:10px 20px;border-radius:4px;cursor:pointer;margin-right:10px;" data-i18n="heading.createRoom">Create a Room</button>
           <br><br>
           <p style="margin:8px 0 4px;">Or join with an invite code:</p>
-          <input id="ob-invite-code" placeholder="prx1_..." style="width:100%;padding:8px;border-radius:4px;border:1px solid #555;background:var(--slate-900);color:var(--slate-50);font-size:1em;box-sizing:border-box;" data-i18n-attr="placeholder:ui.prx1">
+          <input id="ob-invite-code" class="input" placeholder="prx1_..." aria-label="Invite code" data-i18n-attr="placeholder:ui.prx1;aria-label:onboarding.inviteCodeLabel">
           <button id="ob-step5-join" style="margin-top:8px;background:var(--slate-700);border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;" data-i18n="btn.joinCode">Join with Code</button>
         </div>
         <!-- Step 6: Done (was step 5) -->
@@ -1207,11 +1246,16 @@
     </div>
 
     <!-- R32: Room ban list panel -->
-    <div id="room-bans-panel" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1010;align-items:center;justify-content:center;">
-      <div style="background:#1c1917;border-radius:8px;padding:20px;min-width:340px;max-width:480px;color:#f5f5f4;">
-        <h3 style="margin:0 0 12px;color:#f5f5f4;" data-i18n="heading.bannedMembers">Banned members</h3>
+    <div id="room-bans-panel" class="modal" data-dismissable role="dialog" aria-modal="true" aria-labelledby="room-bans-title" style="display:none;">
+      <div class="modal__panel modal__panel--md">
+        <div class="modal__header">
+          <h3 id="room-bans-title" class="modal__title" data-i18n="heading.bannedMembers">Banned members</h3>
+          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" data-i18n-attr="aria-label:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+        </div>
         <div id="room-bans-list" style="min-height:40px;max-height:300px;overflow-y:auto;"></div>
-        <button id="room-bans-close" style="margin-top:14px;background:#292524;border:none;color:#f5f5f4;padding:6px 14px;border-radius:4px;cursor:pointer;" data-i18n="btn.close">Close</button>
+        <div class="btn-row modal__footer">
+          <button type="button" id="room-bans-close" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.close">Close</button>
+        </div>
       </div>
     </div>
 
@@ -1268,19 +1312,19 @@
     <script src="sw-register.js"></script>
 
     <!-- E2E identity verification modal -->
-    <div id="e2e-verify-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:999;align-items:center;justify-content:center;">
-      <div style="background:#1a1a2e;border-radius:8px;padding:24px;max-width:420px;width:90%;color:#e0e0e0;">
-        <h3 style="margin:0 0 12px;color:var(--color-success-soft);" data-i18n="heading.verifyContact">Verify Contact</h3>
-        <p style="font-size:.82em;color:#9ca3af;margin:0 0 14px;">Compare this safety number with your contact out-of-band (voice call, in person). If it matches, tap <strong>Mark as Verified</strong>.</p>
-        <div id="e2e-modal-safety-number" style="font-family:monospace;font-size:1.25em;letter-spacing:.12em;text-align:center;padding:14px;background:#0d0d1a;border-radius:4px;margin-bottom:14px;">— — — —</div>
-        <div style="font-size:.75em;color:#6b7280;margin-bottom:16px;">
-          <div>You: <span id="e2e-modal-my-key" style="font-family:monospace;color:#9ca3af;"></span></div>
-          <div>Them: <span id="e2e-modal-their-key" style="font-family:monospace;color:#9ca3af;"></span></div>
+    <div id="e2e-verify-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="e2e-verify-title" style="display:none;">
+      <div class="modal__panel modal__panel--sm">
+        <h3 id="e2e-verify-title" class="modal__title" data-i18n="heading.verifyContact">Verify Contact</h3>
+        <p class="modal__desc" style="margin-bottom:14px;">Compare this safety number with your contact out-of-band (voice call, in person). If it matches, tap <strong>Mark as Verified</strong>.</p>
+        <div id="e2e-modal-safety-number" style="font-family:monospace;font-size:1.25em;letter-spacing:.12em;text-align:center;padding:14px;background:var(--slate-900);border-radius:var(--radius-sm);margin-bottom:14px;">— — — —</div>
+        <div style="font-size:.75em;color:var(--text-secondary);">
+          <div>You: <span id="e2e-modal-my-key" style="font-family:var(--font-mono);"></span></div>
+          <div>Them: <span id="e2e-modal-their-key" style="font-family:var(--font-mono);"></span></div>
         </div>
         <input type="hidden" id="e2e-modal-current-peer" value="">
-        <div class="btn-row">
-          <button id="e2e-modal-cancel" data-modal-cancel style="padding:6px 16px;background:#374151;border:none;border-radius:4px;color:#d1d5db;cursor:pointer;" data-i18n="btn.cancel">Cancel</button>
-          <button id="e2e-modal-verify" style="padding:6px 16px;background:#134e26;border:none;border-radius:4px;color:var(--color-success-soft);cursor:pointer;" data-i18n="btn.markAsVerified2">Mark as Verified</button>
+        <div class="btn-row modal__footer">
+          <button type="button" id="e2e-modal-cancel" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
+          <button type="button" id="e2e-modal-verify" class="btn btn--accent btn--lg" data-i18n="btn.markAsVerified2">Mark as Verified</button>
         </div>
       </div>
     </div>

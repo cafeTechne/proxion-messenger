@@ -36,7 +36,7 @@ const T = {
   accent: '#d61f52',                 // brand accent (darkened in D1 for AA on white text)
   accentText: '#f06a8a',             // accent used AS link text on dark surfaces
   colorSuccess: '#22c55e', colorSuccessSoft: '#4ade80',
-  colorDanger: '#ef4444', colorDangerSoft: '#f87171',
+  colorDanger: '#ef4444', colorDangerSoft: '#f87171', colorDangerStrong: '#b91c1c',
   slate300: '#cbd5e1', slate400: '#94a3b8',
   slate500: '#8598ae',               // bumped from #64748b (D1) — used as body text
   slate600: '#8091a7',               // bumped from #475569 (D1) so small secondary text passes
@@ -50,6 +50,7 @@ const PAIRS = [
   ['secondary text on secondary bg', T.textSecondary, T.bgSecondary, 4.5],
   ['secondary text on accent bg', T.textSecondary, T.bgAccent, 4.5],
   ['white on accent button', T.white, T.accent, 4.5],
+  ['white on solid danger button', T.white, T.colorDangerStrong, 4.5],
   ['accent-text link on secondary bg', T.accentText, T.bgSecondary, 4.5],
   ['accent-text link on bg', T.accentText, T.bgPrimary, 4.5],
   ['slate-500 status text on secondary bg', T.slate500, T.bgSecondary, 4.5],
