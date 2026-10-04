@@ -61,6 +61,22 @@ export function passphraseFromInput(raw) {
     return normalizeRecoveryCode(raw) ?? raw;
 }
 
+// Friendly copy for a failed /backup, /restore or verify request, by HTTP
+// status (null for a network error). The raw status or exception text is
+// never shown: it means nothing to the user.
+export function recoveryErrorKey(op, status) {
+    if (status === 429) return 'recovery.tooManyAttempts';
+    if (op === 'backup') {
+        if (status === 401) return 'backup.needPassphrase';
+        if (status === 403) return 'backup.localOnly';
+        return 'backup.failedGeneric';
+    }
+    if (status === 403) return 'restore.localOnly';
+    if (op === 'verify') return 'recovery.verifyFailed';
+    if (status === 401) return 'restore.needPassphrase';
+    return 'restore.failedGeneric';
+}
+
 export function createRecovery({ showToast, showPromptModal, showConfirm }) {
     let _code = null;
 
@@ -80,7 +96,7 @@ export function createRecovery({ showToast, showPromptModal, showConfirm }) {
         try {
             const resp = await fetch('/backup',
                 { headers: _authHeaders({ 'x-proxion-passphrase': passphrase }) });
-            if (!resp.ok) { showToast(t('backup.failed', { status: resp.status })); return false; }
+            if (!resp.ok) { showToast(t(recoveryErrorKey('backup', resp.status)), 'error'); return false; }
             const blob = await resp.blob();
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -91,10 +107,11 @@ export function createRecovery({ showToast, showPromptModal, showConfirm }) {
             a.click();
             URL.revokeObjectURL(url);
             _markBackedUp();
-            showToast(t('backup.downloaded'));
+            showToast(t('backup.downloaded'), 'success');
             return true;
         } catch (e) {
-            showToast(t('backup.error', { error: e.message }));
+            console.warn('[Proxion] backup failed:', e);
+            showToast(t(recoveryErrorKey('backup', null)), 'error');
             return false;
         }
     }
@@ -141,10 +158,14 @@ export function createRecovery({ showToast, showPromptModal, showConfirm }) {
                 body: data,
             });
             const body = await resp.json().catch(() => ({}));
-            if (resp.ok && body.valid) showToast(t('recovery.verifyOk'));
-            else showToast(t('recovery.verifyFail', { error: body.error || String(resp.status) }));
+            if (resp.ok && body.valid) showToast(t('recovery.verifyOk'), 'success');
+            else {
+                if (body.error) console.warn('[Proxion] kit verify failed:', body.error);
+                showToast(t(recoveryErrorKey('verify', resp.status)), 'error');
+            }
         } catch (e) {
-            showToast(t('recovery.verifyFail', { error: e.message }));
+            console.warn('[Proxion] kit verify failed:', e);
+            showToast(t(recoveryErrorKey('verify', null)), 'error');
         }
     }
 
@@ -160,11 +181,12 @@ export function createRecovery({ showToast, showPromptModal, showConfirm }) {
                 headers: _authHeaders({ 'Content-Type': 'application/json', 'x-proxion-passphrase': pp }),
                 body: data,
             });
-            if (!resp.ok) { showToast(t('restore.failed', { status: resp.status })); return; }
-            showToast(t('restore.done'));
+            if (!resp.ok) { showToast(t(recoveryErrorKey('restore', resp.status)), 'error'); return; }
+            showToast(t('restore.done'), 'success');
             setTimeout(() => { getSocket?.()?.close(); }, 1000);
         } catch (err) {
-            showToast(t('restore.error', { error: err.message }));
+            console.warn('[Proxion] restore failed:', err);
+            showToast(t(recoveryErrorKey('restore', null)), 'error');
         }
     }
 

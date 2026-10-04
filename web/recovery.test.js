@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
     CODE_ALPHABET, generateRecoveryCode, normalizeRecoveryCode,
-    passphraseFromInput, createRecovery,
+    passphraseFromInput, createRecovery, recoveryErrorKey,
 } from './recovery.js';
 
 describe('generateRecoveryCode', () => {
@@ -173,5 +173,31 @@ describe('passphrase transport (never in the URL)', () => {
         expect(calls[1].url).toBe('/restore');
         expect(calls[1].url).not.toContain('passphrase=');
         expect(calls[1].opts.headers['x-proxion-passphrase']).toBe('MYPASSPHRASE');
+    });
+});
+
+describe('backup / restore error copy', () => {
+    it('maps statuses to friendly keys, never the raw status', () => {
+        expect(recoveryErrorKey('restore', 401)).toBe('restore.needPassphrase');
+        expect(recoveryErrorKey('restore', 403)).toBe('restore.localOnly');
+        expect(recoveryErrorKey('restore', 429)).toBe('recovery.tooManyAttempts');
+        expect(recoveryErrorKey('restore', 500)).toBe('restore.failedGeneric');
+        expect(recoveryErrorKey('restore', null)).toBe('restore.failedGeneric');
+        expect(recoveryErrorKey('backup', 401)).toBe('backup.needPassphrase');
+        expect(recoveryErrorKey('backup', 403)).toBe('backup.localOnly');
+        expect(recoveryErrorKey('backup', 429)).toBe('recovery.tooManyAttempts');
+        expect(recoveryErrorKey('backup', 500)).toBe('backup.failedGeneric');
+        expect(recoveryErrorKey('verify', 400)).toBe('recovery.verifyFailed');
+        expect(recoveryErrorKey('verify', 403)).toBe('restore.localOnly');
+    });
+
+    it('shows a failed restore as an error toast without the status code', async () => {
+        global.fetch = () => Promise.resolve({ ok: false, status: 429, json: async () => ({}) });
+        const toasts = [];
+        const recovery = createRecovery({ showToast: (m, type) => toasts.push([m, type]), showPromptModal: async () => 'PP' });
+        recovery.wireRecovery({ getSocket: () => null });
+        const file = { arrayBuffer: async () => new ArrayBuffer(4) };
+        await els['settings-restore-input'].handlers['change']({ target: { files: [file], value: '' } });
+        expect(toasts).toEqual([['recovery.tooManyAttempts', 'error']]);
     });
 });
