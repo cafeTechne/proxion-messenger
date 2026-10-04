@@ -3620,6 +3620,8 @@ import { createIdentityResolver } from './identity.js';
         // Send on Enter (not Shift+Enter)
         document.getElementById("message-input").addEventListener("keydown", function(e) {
             if (e.key === "Enter" && !e.shiftKey) {
+                // Enter that confirms an IME candidate (CJK input) must not send.
+                if (e.isComposing || e.keyCode === 229) return;
                 e.preventDefault();
                 document.getElementById("message-form").dispatchEvent(new Event("submit", { cancelable: true }));
             }
@@ -3683,12 +3685,32 @@ import { createIdentityResolver } from './identity.js';
             return false;
         }
 
+        // In-flight guard: the DM path awaits fanout/encryption/key discovery, so
+        // a second Enter during those awaits used to re-send the same text under
+        // a new clientMsgId. Snapshot and clear the composer before the first
+        // await, and put the text back if the send throws.
+        let _sendInFlight = false;
         document.getElementById("message-form").onsubmit = async (e) => {
             e.preventDefault();
+            if (_sendInFlight) return;
             const input = document.getElementById("message-input");
             const content = input.value.trim();
-            if (!socket || !activeView) return;
+            if (!socket || !activeView || !content) return;
+            const draft = input.value;
+            _sendInFlight = true;
+            input.value = "";
+            input.style.height = "auto";
+            try {
+                await _sendComposed(content);
+            } catch (err) {
+                console.warn('[send] failed:', err);
+                if (!input.value) input.value = draft;
+            } finally {
+                _sendInFlight = false;
+            }
+        };
 
+        async function _sendComposed(content) {
             if (content) {
                 let payload;
                 let _e2ePlainTarget = null; // peer to ratchet-encrypt for, ONLY if the plain path actually sends
@@ -3853,11 +3875,8 @@ import { createIdentityResolver } from './identity.js';
                         }).catch(() => {});
                     }
                 }
-
-                input.value = "";
-                input.style.height = "auto";
             }
-        };
+        }
 
         // Chunked file transfer (R39) lives in filetransfer.js (R40 extraction).
         const fileTransfer = createFileTransfer({
