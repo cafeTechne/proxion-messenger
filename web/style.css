@@ -439,10 +439,10 @@ nav li.dm-item > svg { flex: 0 0 16px; }
     display: flex;
     align-items: baseline;
     gap: 8px;
-    margin-bottom: 3px;
+    margin-bottom: var(--space-1);
 }
-.msg-sender { font-weight: 600; font-size: 0.95em; }
-.msg-ts-header { font-size: 0.72em; color: var(--text-secondary, #94a3b8); }
+.msg-sender { font-weight: 600; font-size: 0.95em; max-width: 40ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msg-ts-header { font-size: 0.72em; color: var(--text-secondary, #94a3b8); white-space: nowrap; flex-shrink: 0; }
 
 /* Message text */
 .msg-content {
@@ -543,7 +543,7 @@ nav li.dm-item > svg { flex: 0 0 16px; }
     text-align: center;
     font-size: 0.85em;
     color: var(--text-secondary);
-    margin: 10px 0;
+    margin: var(--space-2) 0;
 }
 /* Pre-selection welcome in the message feed: a first action for a brand-new user
    with no rooms or contacts, so the empty pane is not a dead end. */
@@ -1234,6 +1234,9 @@ button:hover { background: var(--accent-hover); }
             display: inline-block;
             position: relative;
         }
+        /* The message avatar column is exactly avatar-wide; the margin pushed the
+           wrapper to 48px and left the presence dot floating in the gap. */
+        .msg-avatar-col .avatar { margin: 0; }
         .avatar.placeholder {
             background: var(--accent);
             color: white;
@@ -1263,8 +1266,8 @@ button:hover { background: var(--accent-hover); }
         }
         .reactions {
             display: flex;
-            gap: 5px;
-            margin-top: 5px;
+            gap: var(--space-1);
+            margin-top: var(--space-2);
             flex-wrap: wrap;
         }
         .reaction {
@@ -1461,20 +1464,22 @@ button:hover { background: var(--accent-hover); }
 
         /* Date divider */
         .date-divider {
-            text-align: center; margin: 12px 0 8px; position: relative;
+            display: flex; align-items: center; gap: var(--space-3);
+            text-align: center; margin: 12px 0 8px; padding-inline: var(--space-4);
             color: var(--text-secondary, #94a3b8); font-size: 0.78em; user-select: none;
         }
         .date-divider::before, .date-divider::after {
-            content: ''; position: absolute; top: 50%;
-            width: 38%; height: 1px; background: var(--slate-700);
+            content: ''; flex: 1; height: 1px; background: var(--slate-700);
         }
-        .date-divider::before { left: 0; }
-        .date-divider::after { right: 0; }
 
         /* Unread divider */
         .unread-divider {
-            text-align: center; margin: 8px 0; color: var(--accent); font-size: 0.78em;
-            user-select: none; border-top: 1px solid var(--accent); padding-top: 6px;
+            display: flex; align-items: center; gap: var(--space-3);
+            text-align: center; margin: 8px 0; padding-inline: var(--space-4);
+            color: var(--accent); font-size: 0.78em; user-select: none;
+        }
+        .unread-divider::before, .unread-divider::after {
+            content: ''; flex: 1; height: 1px; background: var(--accent);
         }
 
         /* Markdown */
