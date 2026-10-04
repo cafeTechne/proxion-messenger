@@ -69,6 +69,8 @@ const SHELL = [
   "polls.js",
   "room-emoji.js",
   "meme.js",
+  "dialogs.js",
+  "menu.js",
   "dmhistory.js",
   "push.js",
   "states.js",
