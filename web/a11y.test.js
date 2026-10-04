@@ -68,6 +68,25 @@ describe('makeListNavigable — roving tabindex', () => {
     expect(items[0]._kids.every(b => b.tabIndex === -1)).toBe(true);
   });
 
+  it('skips .sidebar-empty rows so their CTA button stays in the tab order', () => {
+    const empty = mkItem({ buttons: 1 });
+    empty.classList = { contains: (c) => c === 'sidebar-empty' };
+    const { el } = mkList([empty]);
+    makeListNavigable(el);
+    expect(empty._kids[0].tabIndex).toBe(0);
+    expect(empty.tabIndex).toBe(-1);
+  });
+
+  it('keeps real rows navigable alongside an empty-state row', () => {
+    const empty = mkItem({ buttons: 1 });
+    empty.classList = { contains: (c) => c === 'sidebar-empty' };
+    const row = mkItem();
+    const { el } = mkList([empty, row]);
+    makeListNavigable(el);
+    expect(row.tabIndex).toBe(0);
+    expect(empty._kids[0].tabIndex).toBe(0);
+  });
+
   it('is idempotent — a second call on the same list is a no-op', () => {
     const items = [mkItem()];
     const { el } = mkList(items);

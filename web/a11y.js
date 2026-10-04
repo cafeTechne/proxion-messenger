@@ -15,9 +15,13 @@ export function makeListNavigable(listEl, { onActivate, onDelete, onContextMenu,
     if (!listEl || listEl._a11yNav) return;
     listEl._a11yNav = true;
 
-    const items = () => itemSelector
+    // Empty-state rows (.sidebar-empty) are not conversations: they hold a CTA
+    // button ("Create a room") that must stay in the normal tab order.
+    const isEmptyRow = (el) => !!el.classList?.contains('sidebar-empty');
+    const items = () => (itemSelector
         ? Array.from(listEl.querySelectorAll(itemSelector))
-        : Array.from(listEl.children).filter(el => el.tagName === 'LI');
+        : Array.from(listEl.children).filter(el => el.tagName === 'LI'))
+        .filter(el => !isEmptyRow(el));
     const itemOf = (target) => items().find(el => el === target || el.contains(target)) || null;
 
     // Exactly one item is a tab stop (the active row if present, else the first).
