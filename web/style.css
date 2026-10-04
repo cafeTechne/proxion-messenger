@@ -1294,6 +1294,9 @@ button:hover { background: var(--accent-hover); }
         }
         .quoted-context:hover { color: var(--text-primary); }
         
+        /* Autolinked URLs in message text (renderMarkdown) */
+        .msg-text a { color: var(--accent-text); text-decoration: underline; overflow-wrap: anywhere; }
+
         /* Link Previews */
         .link-preview {
             margin-top: 10px;
