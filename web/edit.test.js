@@ -84,3 +84,66 @@ describe('handleMessageEdited', () => {
     expect(textEl.innerText).toBe('fresh');
   });
 });
+
+describe('multi-line inline editor', () => {
+  function open() {
+    const created = [];
+    global.document.createElement = (tag) => { const el = mkEl({ tag }); created.push(el); return el; };
+    const textEl = mkEl({ innerText: 'line one' });
+    let current = textEl;
+    textEl.replaceWith = (n) => { current = n; };
+    const msgEl = mkEl({
+      querySelector: (sel) => {
+        if (sel === '.msg-text') return current === textEl ? textEl : null;
+        if (sel === '.edit-input') return current !== textEl && current.tag === 'textarea' ? current : null;
+        return null;
+      },
+    });
+    els['msg-m1'] = msgEl;
+    const h = make();
+    h.edit.startEdit('m1');
+    const ta = created.find(e => e.tag === 'textarea');
+    const restore = (n) => { current = n; };
+    ta.replaceWith = restore;
+    return { ...h, ta, textEl, current: () => current };
+  }
+  const key = (over) => ({ key: 'Enter', shiftKey: false, isComposing: false, preventDefault: vi.fn(), stopPropagation: vi.fn(), ...over });
+
+  it('uses an auto-growing textarea with the edit-input class', () => {
+    const { ta } = open();
+    expect(ta.tag).toBe('textarea');
+    expect(ta.className).toBe('edit-input');
+    expect(ta.value).toBe('line one');
+    expect(typeof ta.oninput).toBe('function');
+  });
+  it('Enter saves, Shift+Enter leaves the newline to the textarea', () => {
+    const { ta, sent } = open();
+    const shift = key({ shiftKey: true });
+    ta.onkeydown(shift);
+    expect(shift.preventDefault).not.toHaveBeenCalled();
+    expect(sent).toHaveLength(0);
+    ta.value = 'line one\nline two';
+    ta.onkeydown(key());
+    expect(sent[0]).toMatchObject({ cmd: 'edit_local_message', content: 'line one\nline two' });
+  });
+  it('ignores Enter while an IME composition is active', () => {
+    const { ta, sent } = open();
+    ta.onkeydown(key({ isComposing: true }));
+    ta.onkeydown(key({ keyCode: 229 }));
+    expect(sent).toHaveLength(0);
+  });
+  it('Escape cancels, restores the original element and stops the global handler', () => {
+    const { ta, edit, textEl, current } = open();
+    const esc = key({ key: 'Escape' });
+    ta.onkeydown(esc);
+    expect(esc.stopPropagation).toHaveBeenCalled();
+    expect(edit.state.editingMsgId).toBe(null);
+    expect(current()).toBe(textEl);
+  });
+  it('cancelEdit from outside (global Escape) still restores the text', () => {
+    const { edit, textEl, current } = open();
+    edit.cancelEdit('m1', 'line one');
+    expect(current()).toBe(textEl);
+    expect(edit.state.editingMsgId).toBe(null);
+  });
+});
