@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('./pod.js', () => ({ podWriteReadState: vi.fn(() => Promise.resolve()) }));
 
-import { createView } from './view.js';
+import { createView, appendSidebarEmpty } from './view.js';
 
 let els, host, sent, calls;
 function mkEl(over = {}) {
@@ -61,7 +61,7 @@ function make() {
     getPeerDidToCertId: () => host.peerDidToCertId, getThreadNames: () => host.threadNames,
     getRoomInviteUrls: () => host.roomInviteUrls, getRoomCreatorOf: () => host.roomCreatorOf,
     getUnreadCounts: () => host.unreadCounts, getMutedThreads: () => host.mutedThreads,
-    hideEmptyState: spy('hideEmptyState'), updateE2EStatus: spy('updateE2EStatus'),
+    updateE2EStatus: spy('updateE2EStatus'),
     updateIdentityFingerprint: spy('updateIdentityFingerprint'), closeMentionDropdown: spy('closeMentionDropdown'),
     updateSidebarBadge: spy('updateSidebarBadge'), sendUpdateLastRead: spy('sendUpdateLastRead'),
     loadRoomHistory: spy('loadRoomHistory'), toggleSidebar: spy('toggleSidebar'),
@@ -173,6 +173,20 @@ describe('populateSidebar + its click', () => {
     expect(createRoomClick).toHaveBeenCalled();
   });
 
+  it('appendSidebarEmpty gives the DM list the same add-contact CTA', () => {
+    const list = mkEl();
+    const addPeerClick = vi.fn();
+    els['add-peer-btn'] = mkEl({ onclick: addPeerClick });
+    const ctaBtn = mkEl();
+    global.document.createElement = () => mkEl({ querySelector: () => ctaBtn });
+    appendSidebarEmpty(list, 'dm-list');
+    expect(list._children).toHaveLength(1);
+    expect(list._children[0].className).toBe('sidebar-empty');
+    expect(list._children[0].innerHTML).toContain('sidebar.empty.dms');
+    ctaBtn.onclick();
+    expect(addPeerClick).toHaveBeenCalled();
+  });
+
   it('renders no CTA for lists without an empty-state mapping', () => {
     const v = make();
     els['voice-list'] = mkEl();
@@ -205,7 +219,7 @@ describe('opening a conversation (chat conventions)', () => {
       getPeerDidToCertId: () => host.peerDidToCertId, getThreadNames: () => host.threadNames,
       getRoomInviteUrls: () => host.roomInviteUrls, getRoomCreatorOf: () => host.roomCreatorOf,
       getUnreadCounts: () => host.unreadCounts, getMutedThreads: () => host.mutedThreads,
-      hideEmptyState() {}, updateE2EStatus() {}, updateIdentityFingerprint() {}, closeMentionDropdown() {},
+      updateE2EStatus() {}, updateIdentityFingerprint() {}, closeMentionDropdown() {},
       updateSidebarBadge() {}, sendUpdateLastRead: () => sent.push({ cmd: 'update_last_read' }),
       loadRoomHistory: (id) => sent.push({ cmd: 'load_history', id }), toggleSidebar() {},
       updateDisappearBanner() {}, requestRoomMembers() {}, renderMembersPanel() {},

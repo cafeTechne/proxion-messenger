@@ -407,7 +407,6 @@
   "onboarding.startNowHint": "Try Proxion right away on this device. You can connect storage later to sync across devices and reach people on other Solid apps.",
   "onboarding.yourAddress": "Your Proxion address. Share it so people can add you:",
   "onboarding.yourAddressHint": "Anyone can add you with this address to start a private conversation.",
-  "empty.noContacts": "No one here yet. Add someone with their invite link, or share your own so they can add you.",
   "empty.orStartNew": "Or start something new:",
   "onboarding.podTwoStep": "Test the connection, then sign in through your pod provider. That browser sign-in is what unlocks cross-app chat, and you will come right back here.",
   "onboarding.redirecting": "Taking you to your pod provider to sign in, then back to Proxion…",
@@ -483,7 +482,6 @@
   "e2e.tip.encrypted": "End-to-end encrypted. Tap Verify to confirm their identity.",
   "e2e.tip.verified": "End-to-end encrypted and verified.",
   "e2e.tip.notExchanged": "Encryption starts after your first message.",
-  "dm.addContactHint": "Add a contact to start a DM",
   "dm.hideConversation": "Hide this DM",
   "room.someoneJoined": "Someone joined the room.",
   "room.enterLinkOrCode": "Please enter a link or code.",
@@ -812,5 +810,14 @@
   "search.resultsFor": "Results for \"{query}\"",
   "search.noMatches": "No messages match \"{query}\".",
   "search.tooShort": "Type at least 3 characters.",
-  "search.offline": "Search needs a connection to Proxion."
+  "search.offline": "Search needs a connection to Proxion.",
+  "feed.dmHidden": "Conversation hidden. It comes back when they send a new message.",
+  "feed.removedFromRoom": "You were removed from this room.",
+  "feed.roomDeletedLastMember": "Room deleted. You were the last member.",
+  "feed.leftRoomTransferred": "You left the room. Ownership went to {name}.",
+  "feed.leftRoom": "You left the room.",
+  "feed.roomDeletedByOwner": "The room \"{name}\" was deleted by its owner.",
+  "feed.invitePeople": "Invite people to start the conversation.",
+  "feed.inviteAction": "Invite people",
+  "pin.noneHint": "Pin a message from its menu to keep it here."
 }

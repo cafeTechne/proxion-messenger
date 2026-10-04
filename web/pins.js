@@ -31,7 +31,7 @@ export function createPins({ getSocket, getActiveView }) {
         const list = document.getElementById("pin-list");
         list.innerHTML = "";
         if (!pins || pins.length === 0) {
-            list.innerHTML = inlineNotice(t('pin.noneP'));
+            list.innerHTML = inlineNotice(t('pin.noneP')) + inlineNotice(t('pin.noneHint'));
             return;
         }
         const activeView = getActiveView();

@@ -64,7 +64,7 @@ import { createConnection } from './connection.js';
 import { createTransport, detectMode, applyTransportGating } from './transport.js';
 import { createPodSocket } from './podtransport.js';
 import { createRendering, replyQuoteHtml } from './rendering.js';
-import { createView } from './view.js';
+import { createView, appendSidebarEmpty } from './view.js';
 import { createInvite } from './invite.js';
 import { createPush, closedAppPushStatus } from './push.js';
 import { subscribeWebhook, watchResource } from './notify.js';
@@ -819,7 +819,7 @@ import { createIdentityResolver } from './identity.js';
             getCertCapableContacts: () => certCapableContacts,
             getRoomInviteUrls: () => roomInviteUrls, getRoomCreatorOf: () => roomCreatorOf,
             getUnreadCounts: () => unreadCounts, getMutedThreads: () => mutedThreads,
-            hideEmptyState, updateE2EStatus: _updateE2EStatus,
+            updateE2EStatus: _updateE2EStatus,
             updateIdentityFingerprint: _updateIdentityFingerprint, closeMentionDropdown,
             updateSidebarBadge, sendUpdateLastRead: _sendUpdateLastRead, loadRoomHistory,
             toggleSidebar, updateDisappearBanner, requestRoomMembers, renderMembersPanel,
@@ -1003,25 +1003,23 @@ import { createIdentityResolver } from './identity.js';
                 list.appendChild(li);
                 updateSidebarBadge(id);
             });
-            if (!dmCount) {
-                const hint = document.createElement("li");
-                hint.style.cssText = "padding:6px 10px;color:#8091a7;font-size:0.78em;cursor:default;pointer-events:none;";
-                hint.textContent = t('dm.addContactHint');
-                list.appendChild(hint);
-            }
+            if (!dmCount) appendSidebarEmpty(list, "dm-list");
         }
 
-        function hideEmptyState() {
-            const el = document.getElementById("empty-state");
-            if (el) el.style.display = "none";
-        }
-        function showEmptyState() {
-            const el = document.getElementById("empty-state");
-            if (el) {
-                el.style.display = "flex";
-                const addBtn = document.getElementById("empty-add-contact-btn");
-                if (addBtn) addBtn.style.display = "";
-            }
+        // The conversation on screen went away (left, removed, deleted, hidden):
+        // say what happened and offer the same first actions as the welcome pane.
+        function _showThreadClosed(title) {
+            const feed = document.getElementById("message-feed");
+            if (!feed) return;
+            feed.innerHTML = "";
+            feed.appendChild(feedEmptyState({
+                title,
+                hint: t('empty.orStartNew'),
+                actions: [
+                    { label: t('control.createRoom'), variant: 'accent', onClick: () => document.getElementById('create-room-btn')?.click() },
+                    { label: t('btn.addContact2'), onClick: () => document.getElementById('add-peer-btn')?.click() },
+                ],
+            }));
         }
 
         // _updateE2EStatus / _updateIdentityFingerprint / _openVerifyModal:
@@ -1035,8 +1033,7 @@ import { createIdentityResolver } from './identity.js';
             renderDmSidebar();
             if (activeView && activeView.id === threadId) {
                 activeView = null;
-                showEmptyState();
-                document.getElementById("message-feed").innerHTML = '<div class="system-msg">DM hidden. It will reappear when you receive a new message.</div>';
+                _showThreadClosed(t('feed.dmHidden'));
             }
         }
 
@@ -2125,6 +2122,11 @@ import { createIdentityResolver } from './identity.js';
                     currentRoomMembers = event.members || [];
                     renderMembersPanel(event.members);
                     _updateHeaderSubtitle();
+                    {
+                        // Members arrive after history: refresh the "no messages" hint.
+                        const _empty = document.querySelector('#message-feed [data-feed-empty="new-thread"]');
+                        if (_empty && allMessages.length === 0) _empty.replaceWith(_newThreadEmptyState());
+                    }
                     // B1: keep the pod room descriptor's membership current. Owner
                     // only (only the owner's pod holds the room's descriptor), and
                     // only when logged in. Read-modify-write preserves title/owner.
@@ -2155,8 +2157,7 @@ import { createIdentityResolver } from './identity.js';
                     if (navEl) navEl.remove();
                     if (activeView && activeView.id === event.room_id) {
                         activeView = null;
-                        showEmptyState();
-                        document.getElementById("message-feed").innerHTML = '<div class="system-msg">You were removed from this room.</div>';
+                        _showThreadClosed(t('feed.removedFromRoom'));
                     }
                     break;
                 }
@@ -2167,13 +2168,11 @@ import { createIdentityResolver } from './identity.js';
                     if (leftLi) leftLi.remove();
                     if (activeView && activeView.id === leftId) {
                         activeView = null;
-                        showEmptyState();
-                        const msg = event.deleted
-                            ? "Room deleted — you were the last member."
+                        _showThreadClosed(event.deleted
+                            ? t('feed.roomDeletedLastMember')
                             : event.transferred_to
-                            ? `You left the room. Ownership transferred to ${escHtml(event.transferred_to)}.`
-                            : "You left the room.";
-                        document.getElementById("message-feed").innerHTML = `<div class="system-msg">${msg}</div>`;
+                            ? t('feed.leftRoomTransferred', { name: event.transferred_to })
+                            : t('feed.leftRoom'));
                         document.getElementById("members-toggle").style.display = "none";
                         document.getElementById("leave-room-btn").style.display = "none";
                         document.getElementById("delete-room-btn").style.display = "none";
@@ -2188,8 +2187,7 @@ import { createIdentityResolver } from './identity.js';
                     if (delLi) delLi.remove();
                     if (activeView && activeView.id === event.room_id) {
                         activeView = null;
-                        showEmptyState();
-                        document.getElementById("message-feed").innerHTML = `<div class="system-msg">The room "${escHtml(event.room_name)}" was deleted by its owner.</div>`;
+                        _showThreadClosed(t('feed.roomDeletedByOwner', { name: event.room_name || "" }));
                         document.getElementById("members-toggle").style.display = "none";
                         document.getElementById("leave-room-btn").style.display = "none";
                         document.getElementById("delete-room-btn").style.display = "none";
@@ -3272,8 +3270,23 @@ import { createIdentityResolver } from './identity.js';
         function maybeShowEmptyState() {
             const feed = document.getElementById("message-feed");
             if (allMessages.length === 0 && !feed.querySelector(".empty-state, .system-msg")) {
-                feed.appendChild(feedEmptyState({ title: t('feed.noMessages'), hint: t('feed.beFirst') }));
+                feed.appendChild(_newThreadEmptyState());
             }
+        }
+
+        // "No messages yet": a room's owner alone in it is told to invite
+        // people (with the invite action) rather than to say hello to nobody.
+        function _newThreadEmptyState() {
+            const isRoom = activeView && (activeView.type === "room" || activeView.type === "local_room");
+            const alone = isRoom && roomCreatorOf.has(activeView.id) && currentRoomMembers.length <= 1;
+            const canInvite = alone && !!roomInviteUrls[activeView.id];
+            const el = feedEmptyState({
+                title: t('feed.noMessages'),
+                hint: alone ? t('feed.invitePeople') : t('feed.beFirst'),
+                actions: canInvite ? [{ label: t('feed.inviteAction'), variant: 'accent', onClick: () => copyRoomInvite() }] : [],
+            });
+            el.setAttribute("data-feed-empty", "new-thread");
+            return el;
         }
 
         // _dateLabelForTimestamp: moved to rendering.js (createRendering).
@@ -5451,7 +5464,6 @@ import { createIdentityResolver } from './identity.js';
 
             // Empty state quick-action buttons
             attachListener('#empty-create-room-btn', 'click', () => document.getElementById('create-room-btn').click());
-            attachListener('#empty-add-contact-btn', 'click', () => document.getElementById('add-peer-btn').click());
             // The message feed's pre-selection state offers a first action so a brand
             // new user with no rooms or contacts is not left on a blank pane.
             attachListener('#feed-welcome-create-btn', 'click', () => document.getElementById('create-room-btn').click());
@@ -5727,7 +5739,6 @@ import { createIdentityResolver } from './identity.js';
         // R18.2.2: navigate to a thread from tray unread click
         // _navigateToThread: moved to view.js (createView).
 
-        showEmptyState();
         setupEventListeners();
 
         // Web-push notification click → open that conversation. When the app is

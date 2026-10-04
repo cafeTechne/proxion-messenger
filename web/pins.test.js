@@ -61,6 +61,7 @@ describe('renderPins', () => {
     const { pins } = make();
     pins.renderPins([]);
     expect(document.getElementById('pin-list').innerHTML).toContain('pin.noneP');
+    expect(document.getElementById('pin-list').innerHTML).toContain('pin.noneHint');
   });
   it('renders a row per pin', () => {
     const { pins } = make();

@@ -20,15 +20,29 @@ export function inlineNotice(message, kind = 'empty') {
 // Chat-bubble glyph used by the main-feed empty state.
 const _FEED_ICON = svgIcon('chat-bubble', { size: 48 });
 
-// Rich centred empty-state for the main message feed (icon + title + hint).
+// Rich centred empty-state for the main message feed (icon + title + hint),
+// with optional action buttons ({ label, onClick, variant: 'accent'|'slate' }).
 // Returns a detached element so the caller controls insertion.
-export function feedEmptyState({ title = 'Nothing here yet.', hint = '', icon = _FEED_ICON } = {}) {
+export function feedEmptyState({ title = 'Nothing here yet.', hint = '', icon = _FEED_ICON, actions = [] } = {}) {
     const el = document.createElement('div');
     el.className = 'empty-state';
     el.innerHTML =
         `<div class="empty-state-icon">${icon}</div>` +
         `<div class="empty-state-title">${escHtml(title)}</div>` +
         (hint ? `<div class="empty-state-hint">${escHtml(hint)}</div>` : '');
+    if (actions && actions.length) {
+        const row = document.createElement('div');
+        row.className = 'feed-welcome-actions empty-state-actions';
+        for (const a of actions) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = `btn btn--${a.variant === 'accent' ? 'accent' : 'slate'}`;
+            btn.textContent = a.label;
+            if (a.onClick) btn.addEventListener('click', a.onClick);
+            row.appendChild(btn);
+        }
+        el.appendChild(row);
+    }
     return el;
 }
 

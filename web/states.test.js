@@ -5,7 +5,13 @@ import { inlineNotice, feedEmptyState, showFeedNotice } from './states.js';
 // The suite runs in the node environment (no jsdom), so stub createElement the
 // same way the other DOM-touching tests do and assert on the generated markup.
 beforeEach(() => {
-    global.document = { createElement: () => ({ className: '', innerHTML: '' }) };
+    global.document = {
+        createElement: (tag) => ({
+            tagName: tag, className: '', innerHTML: '', textContent: '', children: [], listeners: {},
+            appendChild(c) { this.children.push(c); },
+            addEventListener(ev, fn) { this.listeners[ev] = fn; },
+        }),
+    };
 });
 
 describe('inlineNotice', () => {
@@ -83,6 +89,25 @@ describe('feedEmptyState', () => {
     it('omits the hint node when no hint is given', () => {
         const el = feedEmptyState({ title: 'Nothing here.' });
         expect(el.innerHTML).not.toContain('empty-state-hint');
+    });
+
+    it('adds action buttons that run their handler', () => {
+        let clicked = 0;
+        const el = feedEmptyState({
+            title: 'You left the room.',
+            actions: [{ label: 'Create room', variant: 'accent', onClick: () => clicked++ }, { label: 'Add contact' }],
+        });
+        const row = el.children[0];
+        expect(row.className).toContain('empty-state-actions');
+        expect(row.children.map(b => b.textContent)).toEqual(['Create room', 'Add contact']);
+        expect(row.children[0].className).toBe('btn btn--accent');
+        expect(row.children[1].className).toBe('btn btn--slate');
+        row.children[0].listeners.click();
+        expect(clicked).toBe(1);
+    });
+
+    it('adds no action row by default', () => {
+        expect(feedEmptyState({ title: 'x' }).children).toHaveLength(0);
     });
 
     it('escapes the title (no raw HTML injection)', () => {

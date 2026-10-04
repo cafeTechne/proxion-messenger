@@ -46,13 +46,31 @@ function _setActiveNavRow(li) {
     }
 }
 
+// Sidebar empty-state CTAs, keyed by list id (G3/G4). These rows are the only
+// sidebar empty states; each fires the section's existing header button.
+const _SIDEBAR_EMPTY = {
+    "room-list": { msg: "sidebar.empty.rooms", label: "sidebar.empty.createRoom", btn: "create-room-btn" },
+    "dm-list":   { msg: "sidebar.empty.dms", label: "sidebar.empty.addSomeone", btn: "add-peer-btn" },
+};
+
+export function appendSidebarEmpty(list, listId) {
+    const cta = _SIDEBAR_EMPTY[listId];
+    if (!cta || !list) return;
+    const li = document.createElement("li");
+    li.className = "sidebar-empty";
+    li.innerHTML = `<p class="state-msg state-empty">${escHtml(t(cta.msg))}</p>` +
+        `<button type="button" class="state-cta">${escHtml(t(cta.label))}</button>`;
+    li.querySelector("button").onclick = () => document.getElementById(cta.btn)?.click();
+    list.appendChild(li);
+}
+
 export function createView({
     getSocket,
     setActiveView, setMessageMap, setAllMessages, setCurrentRoomMembers, getAllMessages,
     getPeerDidToCertId, getThreadNames, getRoomInviteUrls, getRoomCreatorOf,
     getCertCapableContacts,
     getUnreadCounts, getMutedThreads,
-    hideEmptyState, updateE2EStatus, updateIdentityFingerprint, closeMentionDropdown,
+    updateE2EStatus, updateIdentityFingerprint, closeMentionDropdown,
     updateSidebarBadge, sendUpdateLastRead, loadRoomHistory, toggleSidebar,
     updateDisappearBanner, requestRoomMembers, renderMembersPanel, updateVoiceChannels,
     openSidebarCtx, resetDateDivider,
@@ -68,7 +86,6 @@ export function createView({
         list.innerHTML = "";
         if (!contacts || contacts.length === 0) { section.style.display = "none"; return; }
         section.style.display = "";
-        hideEmptyState();
         for (const k in peerDidToCertId) delete peerDidToCertId[k]; // reset (mutate in place)
         // R86: which contacts advertise call binding (authenticated, from their signed
         // relationship). Rebuilt from the server's contacts list each time.
@@ -102,7 +119,6 @@ export function createView({
     function openContactThread(contact) {
         const socket = getSocket();
         const unreadCounts = getUnreadCounts();
-        hideEmptyState();
         const view = {
             type: "dm",
             id: contact.certificate_id,
@@ -153,7 +169,6 @@ export function createView({
     function openLocalDmThread(id, name, peerWebid) {
         const socket = getSocket();
         const unreadCounts = getUnreadCounts();
-        hideEmptyState();
         setActiveView({ type: "local_dm", id: id, name: name, local: true, peerWebid: peerWebid });
         document.getElementById("chat-header-name").innerText = "@ " + name;
         onViewOpened();
@@ -224,8 +239,7 @@ export function createView({
             const socket = getSocket();
             const unreadCounts = getUnreadCounts();
             const roomCreatorOf = getRoomCreatorOf();
-            hideEmptyState();
-            setActiveView({type: "local_room", id: roomId, name: name, local: true});
+                setActiveView({type: "local_room", id: roomId, name: name, local: true});
             document.getElementById("chat-header-name").innerText = "# " + name;
             onViewOpened();
             updateIdentityFingerprint(null); // hide fingerprint bar in room views
@@ -295,8 +309,7 @@ export function createView({
                 const socket = getSocket();
                 const roomInviteUrls = getRoomInviteUrls();
                 const unreadCounts = getUnreadCounts();
-                hideEmptyState();
-                setActiveView({ type: type, id: id, name: name });
+                        setActiveView({ type: type, id: id, name: name });
                 document.getElementById("chat-header-name").innerText = (type === "room" ? "# " : "@ ") + name;
                 onViewOpened();
                 document.getElementById("message-feed").innerHTML = "";
@@ -338,33 +351,16 @@ export function createView({
             // Mute icon
             const muteIcon = document.createElement("span");
             muteIcon.className = "mute-icon";
-            muteIcon.title = "Muted";
+            muteIcon.title = t('ui.muted');
             muteIcon.style.cssText = `display:${mutedThreads.has(id) ? "" : "none"};font-size:0.75em;color:#8091a7;margin-left:4px;flex-shrink:0;`;
             muteIcon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M9.143 17.082a24.248 24.248 0 0 0 3.844.148m-3.844-.148a23.856 23.856 0 0 1-5.455-1.31 8.964 8.964 0 0 0 2.3-5.542m3.155 6.852a3 3 0 0 0 5.667 1.97m1.965-2.277L21 21m-4.225-4.225a23.81 23.81 0 0 0 3.536-1.003 8.967 8.967 0 0 1-2.312-6.022V9A6 6 0 0 0 9.239 3.477L3 3m6.239.477A5.965 5.965 0 0 0 6 9v.75a8.966 8.966 0 0 1-2.312 6.022"/></svg>';
             li.appendChild(muteIcon);
             list.appendChild(li);
             updateSidebarBadge(id); // apply existing unreads
         });
-        // G3/G4: an empty list is a dead end — show an actionable CTA that fires
-        // the section's existing header button (create-room / add-peer).
-        if (items.length === 0) {
-            const cta = _SIDEBAR_EMPTY[listId];
-            if (cta) {
-                const li = document.createElement("li");
-                li.className = "sidebar-empty";
-                li.innerHTML = `<p class="state-msg state-empty">${t(cta.msg)}</p>` +
-                    `<button type="button" class="state-cta">${t(cta.label)}</button>`;
-                li.querySelector("button").onclick = () => document.getElementById(cta.btn)?.click();
-                list.appendChild(li);
-            }
-        }
+        // G3/G4: an empty list is a dead end, so show an actionable CTA.
+        if (items.length === 0) appendSidebarEmpty(list, listId);
     }
-
-    // Sidebar empty-state CTAs, keyed by list id (G3/G4).
-    const _SIDEBAR_EMPTY = {
-        "room-list": { msg: "sidebar.empty.rooms", label: "sidebar.empty.createRoom", btn: "create-room-btn" },
-        "dm-list":   { msg: "sidebar.empty.dms", label: "sidebar.empty.addSomeone", btn: "add-peer-btn" },
-    };
 
     // R18.2.2: navigate to a thread from tray unread click (clicks the nav item,
     // whose onclick is the view-switcher above).
