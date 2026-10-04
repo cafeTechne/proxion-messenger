@@ -452,6 +452,7 @@
   "conn.relay.badUrl": "Enter a relay address starting with turn: or turns:",
   "e2e.none": "Not yet encrypted",
   "dm.addContactHint": "Add a contact to start a DM",
+  "dm.hideConversation": "Hide this DM",
   "room.someoneJoined": "Someone joined the room.",
   "room.enterLinkOrCode": "Please enter a link or code.",
   "room.enterName": "Enter a room name.",

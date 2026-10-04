@@ -961,6 +961,7 @@ import { createIdentityResolver } from './identity.js';
                 closeBtn.className = "dm-close-btn";
                 closeBtn.innerText = "×";
                 closeBtn.title = "Hide this DM";
+                closeBtn.setAttribute("aria-label", t('dm.hideConversation'));
                 closeBtn.onclick = (e) => { e.stopPropagation(); hideDm(id); };
                 li.appendChild(body);
                 li.appendChild(closeBtn);
