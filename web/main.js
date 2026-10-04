@@ -1110,7 +1110,7 @@ import { createIdentityResolver } from './identity.js';
                     ? (c.upnp_mapped ? ' <span class="text-muted">(via UPnP)</span>'
                        : c.relay_fallback_active && !c.public_url_set ? ' <span class="text-muted">(via relay)</span>'
                        : ' <span class="text-muted">(manual)</span>')
-                    : ` <span class="text-warning">not reachable — <a href="#" id="fix-conn-link" class="link-inherit">fix this</a></span>`;
+                    : ` <span class="text-warning">not reachable. <a href="#" id="fix-conn-link" class="link-inherit">Fix this</a></span>`;
                 el.innerHTML = [
                     `${tick(reachable)} Internet reachable:${reachHow}`,
                     `${tick(h.turn_configured)} TURN: ${h.turn_configured ? 'configured' : '<span class="text-warning">not set</span>'}`,
@@ -2688,7 +2688,7 @@ import { createIdentityResolver } from './identity.js';
                     showToast(tn('session.loggedOutOthers', event.revoked_count || 0));
                     break;
                 case "pod_auth_error": {
-                    showToast((event.message || "Pod credentials expired") + " — re-enter in Settings", "warning");
+                    showToast((event.message || "Pod credentials expired") + ". Re-enter them in Settings.", "warning");
                     break;
                 }
                 case "pod_auth_restored": {
@@ -5998,7 +5998,7 @@ import { createIdentityResolver } from './identity.js';
                             if (!edits.length) { popover.innerHTML = inlineNotice(t('edit.noHistory')); return; }
                             popover.innerHTML = edits.map(ed =>
                                 `<div class="edit-history-entry">
-                                  <div class="edit-history-meta">${escHtml(new Date(ed.edited_at).toLocaleString(getLocale()))} — ${escHtml(ed.edited_by)}</div>
+                                  <div class="edit-history-meta">${escHtml(new Date(ed.edited_at).toLocaleString(getLocale()))} · ${escHtml(ed.edited_by)}</div>
                                   <div>${escHtml(ed.prev_content)}</div>
                                 </div>`
                             ).join("");
