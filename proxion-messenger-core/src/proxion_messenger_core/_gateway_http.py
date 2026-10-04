@@ -2057,12 +2057,13 @@ class HttpEndpointsMixin:
                                      + str(len(ok)).encode() + b"\r\n\r\n" + ok)
                     except Exception as exc:
                         msg = str(exc)
-                        if "401" in msg or "Unauthorized" in msg or "Invalid credentials" in msg.lower():
+                        logger.warning("/setup/pod failed for %s: %s", css_url, msg)
+                        if "401" in msg or "Unauthorized" in msg or "invalid credentials" in msg.lower():
                             human = "Incorrect email or password."
                         elif "connect" in msg.lower() or "refused" in msg.lower():
-                            human = f"Could not reach {css_url} — check the URL and try again."
+                            human = f"Could not reach {css_url}. Check the URL and try again."
                         else:
-                            human = f"Connection failed: {msg[:120]}"
+                            human = "Couldn't connect to that pod. Check the address and try again."
                         err = json.dumps({"status": "error", "message": human}).encode()
                         writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                                      b"Access-Control-Allow-Origin: *\r\nContent-Length: "

@@ -97,6 +97,36 @@ async def test_post_setup_pod_bad_credentials_returns_error_message(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("raised, expected, leaked", [
+    ("Login failed: Invalid credentials", "Incorrect email or password.", None),
+    ("HTTP 401 Unauthorized", "Incorrect email or password.", None),
+    ("Connection refused", "Could not reach https://pod.example. Check the URL and try again.", None),
+    ("KeyError: 'controls' in /internal/path.py",
+     "Couldn't connect to that pod. Check the address and try again.", "controls"),
+])
+async def test_post_setup_pod_error_messages_are_friendly(tmp_path, raised, expected, leaked):
+    """Failures map to a fixed human message; raw exception text stays server-side."""
+    gw, http_port, ready = _start_gateway(tmp_path)
+    assert ready.wait(timeout=5), "gateway failed to start"
+
+    def _fail(css_url, email, password):
+        raise RuntimeError(raised)
+
+    gw._connect_css_sync = _fail
+    resp = httpx.post(
+        f"http://127.0.0.1:{http_port}/setup/pod",
+        json={"css_url": "https://pod.example", "email": "a@example.com", "password": "pw"},
+        timeout=10,
+    )
+    data = resp.json()
+    assert data["status"] == "error"
+    assert data["message"] == expected
+    assert "—" not in data["message"]
+    if leaked:
+        assert leaked not in data["message"]
+
+
+@pytest.mark.asyncio
 async def test_get_setup_pod_returns_connected_after_mock_pod(tmp_path):
     """R16.5.1 (partial): GET /setup/pod returns connected: true after _pod_available set."""
     gw, http_port, ready = _start_gateway(tmp_path)
