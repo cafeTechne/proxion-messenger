@@ -114,6 +114,68 @@ describe('socketSendOrQueue', () => {
   });
 });
 
+describe('reconnect banner', () => {
+  function withRetryButton() {
+    const handlers = {};
+    els['conn-retry-btn'] = mkEl({ addEventListener: (type, fn) => { handlers[type] = fn; } });
+    return handlers;
+  }
+  // Drive one failed attempt on the current socket.
+  function failCurrent() { hostSocket.readyState = FakeWS.CLOSED; hostSocket.onclose(); }
+  // connect(), drop once (instant retry), then fail the retry: the second
+  // failure schedules a 6s backoff and shows the banner.
+  function startOffline(c) {
+    c.connect();
+    failCurrent();
+    expect(els['conn-banner'].style.display).toBe('none'); // instant retry, no banner
+    vi.advanceTimersByTime(0);
+    failCurrent();
+  }
+
+  it('shows the offline copy with a countdown and an offline sidebar label', () => {
+    withRetryButton();
+    startOffline(make());
+    expect(els['conn-banner'].style.display).toBe('flex');
+    expect(els['conn-banner-text'].textContent).toBe('conn.unreachable');
+    expect(els.username.innerText).toBe('conn.offline');
+  });
+
+  it('asks whether the app is running after three failures in a row', () => {
+    withRetryButton();
+    startOffline(make());
+    expect(els['conn-banner-text'].textContent).not.toContain('conn.isAppRunning');
+    vi.advanceTimersByTime(6000); // backoff connect fires
+    failCurrent();
+    expect(els['conn-banner-text'].textContent).toContain('conn.isAppRunning');
+  });
+
+  it('"Retry now" reconnects at once and cancels the scheduled attempt', () => {
+    const handlers = withRetryButton();
+    const c = make();
+    startOffline(c);
+    const before = made.length;
+    handlers.click();
+    expect(made.length).toBe(before + 1);           // fresh socket right away
+    const fresh = hostSocket;
+    vi.advanceTimersByTime(7000);                   // the old 6s backoff must not fire
+    expect(hostSocket).toBe(fresh);
+    expect(c.state._retryTimeout).toBe(null);
+  });
+
+  it('a successful connect resets the failure count and hides the banner', async () => {
+    withRetryButton();
+    const c = make();
+    startOffline(c);
+    vi.advanceTimersByTime(6000);
+    const ws = hostSocket;
+    ws.readyState = FakeWS.OPEN;
+    await ws.onopen();
+    expect(c.state._failures).toBe(0);
+    expect(els['conn-banner'].style.display).toBe('none');
+    expect(els.username.innerText).toBe('conn.online');
+  });
+});
+
 describe('forceReconnect', () => {
   it('no-ops when the socket is already open', () => {
     const c = make();

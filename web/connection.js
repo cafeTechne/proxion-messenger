@@ -25,7 +25,35 @@ export function createConnection({
         _reconnectDelay: 3000,  // exponential backoff; resets to 3000 on successful connect
         _pendingOnConnect: [],  // commands queued while socket is still connecting
         _wasConnected: false,   // for one-shot SR announcements on state change
+        _retryTimeout: null,    // the scheduled backoff connect(), cancelled by "Retry now"
+        _failures: 0,           // consecutive failed connects; reset on open
     };
+
+    // After this many failed attempts in a row the banner also asks whether the
+    // app is running at all (the usual cause on a desktop install).
+    const HINT_AFTER_FAILURES = 3;
+
+    function _bannerText(el, text) {
+        const span = document.getElementById("conn-banner-text");
+        if (span) span.textContent = text; else if (el) el.textContent = text;
+    }
+    function _offlineText(secs) {
+        const base = t('conn.unreachable', { secs });
+        return state._failures >= HINT_AFTER_FAILURES ? `${base} ${t('conn.isAppRunning')}` : base;
+    }
+    // The banner's "Retry now" button. Wired lazily on the first connect so the
+    // module stays importable without a DOM.
+    let _retryWired = false;
+    function _wireRetry() {
+        if (_retryWired) return;
+        const btn = document.getElementById("conn-retry-btn");
+        if (!btn || typeof btn.addEventListener !== "function") return;
+        _retryWired = true;
+        btn.addEventListener("click", () => {
+            _bannerText(document.getElementById("conn-banner"), t('conn.connectingShort'));
+            forceReconnect();
+        });
+    }
 
     // Send payload now if socket is open; otherwise queue it and send on next onopen.
     // If socket is stuck in a closed/backoff state, kicks off a fresh connect immediately.
@@ -49,7 +77,7 @@ export function createConnection({
         const nudgeTimer = setTimeout(() => {
             const stillQueued = state._pendingOnConnect.some(p => p.nudgeTimer === nudgeTimer);
             if (stillQueued && statusEl) {
-                statusEl.innerHTML = 'Still connecting… <span style="color:#fbbf24">Is the gateway running?</span>';
+                statusEl.textContent = t('conn.stillConnecting');
             }
         }, 8000);
         // Cap the queue (drop-oldest) so a long outage doesn't accumulate an
@@ -65,6 +93,9 @@ export function createConnection({
         const socket = getSocket();
         if (socket && socket.readyState === WebSocket.OPEN) return;
         if (state._reconnectTimer) { clearInterval(state._reconnectTimer); state._reconnectTimer = null; }
+        // Cancel the scheduled backoff connect too, or it would fire later and
+        // supersede the socket this call opens.
+        if (state._retryTimeout) { clearTimeout(state._retryTimeout); state._retryTimeout = null; }
         state._reconnectDelay = 3000;
         const oldSocket = socket;
         setSocket(null); // disown before closing so its onclose is ignored
@@ -75,6 +106,13 @@ export function createConnection({
     function connect() {
         // Each call captures its own ws reference so stale onclose/onopen events
         // from a superseded socket cannot overwrite state or schedule extra reconnects.
+        _wireRetry();
+        // First attempt: replace the static index.html placeholder with the
+        // localized label.
+        if (!state._wasConnected && state._failures === 0) {
+            const nameEl = document.getElementById("username");
+            if (nameEl) nameEl.innerText = t('conn.connectingShort');
+        }
         const ws = new WebSocket(wsUrl);
         setSocket(ws);
 
@@ -100,9 +138,10 @@ export function createConnection({
             if (state._wasConnected) announce(t('conn.reconnected'));
             state._wasConnected = true;
             state._reconnectDelay = 3000;
+            state._failures = 0;
             document.querySelector(".dot").className = "dot online";
             const _connName = localStorage.getItem("proxion_display_name");
-            document.getElementById("username").innerText = _connName || "Online";
+            document.getElementById("username").innerText = _connName || t('conn.online');
             document.getElementById("conn-banner").style.display = "none";
             if (state._reconnectTimer) { clearTimeout(state._reconnectTimer); state._reconnectTimer = null; }
             // NOTE: queued commands are NOT flushed here — they must wait until we
@@ -157,6 +196,7 @@ export function createConnection({
             // would otherwise announce every second).
             if (state._wasConnected) announce(t('conn.lost'), true);
             state._wasConnected = false;
+            state._failures++;
             document.querySelector(".dot").className = "dot offline";
             const banner = document.getElementById("conn-banner");
             // First attempt: retry immediately. Subsequent attempts: exponential backoff.
@@ -168,20 +208,21 @@ export function createConnection({
                 banner.style.display = "none";
                 setTimeout(connect, 0);
             } else {
-                document.getElementById("username").innerText = localStorage.getItem("proxion_display_name") ? t('conn.offline') : t('conn.gatewayOffline');
-                banner.textContent = t('conn.reconnectingIn', { secs: Math.round(retryMs / 1000) });
-                banner.style.display = "block";
+                document.getElementById("username").innerText = t('conn.offline');
+                _bannerText(banner, _offlineText(Math.round(retryMs / 1000)));
+                banner.style.display = "flex";
                 let remaining = Math.round(retryMs / 1000);
                 state._reconnectTimer = setInterval(() => {
                     remaining--;
                     if (remaining > 0) {
-                        banner.textContent = t('conn.reconnectingIn', { secs: remaining });
+                        _bannerText(banner, _offlineText(remaining));
                     } else {
                         clearInterval(state._reconnectTimer);
                         state._reconnectTimer = null;
                     }
                 }, 1000);
-                setTimeout(() => {
+                state._retryTimeout = setTimeout(() => {
+                    state._retryTimeout = null;
                     if (state._reconnectTimer) { clearInterval(state._reconnectTimer); state._reconnectTimer = null; }
                     connect();
                 }, retryMs);
