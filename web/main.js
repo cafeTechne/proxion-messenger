@@ -973,7 +973,7 @@ import { createIdentityResolver } from './identity.js';
                 // as the sidebar identity. That name can copy a trusted contact's,
                 // so when one is shown, surface the stable short id inline too.
                 const idTag = peer.display_name
-                    ? `<span class="dm-item-id" style="color:#8091a7;font-size:0.72em;margin-inline-start:6px">${escHtml((peer.peer_webid || id || "").slice(8, 22) + "…")}</span>`
+                    ? `<span class="dm-item-id id-suffix">${escHtml((peer.peer_webid || id || "").slice(8, 22) + "…")}</span>`
                     : "";
                 const li = document.createElement("li");
                 li.id = `nav-${id}`;
@@ -997,7 +997,7 @@ import { createIdentityResolver } from './identity.js';
                 const muteIcon = document.createElement("span");
                 muteIcon.className = "mute-icon";
                 muteIcon.title = t('ui.muted');
-                muteIcon.style.cssText = `display:${mutedThreads.has(id) ? "" : "none"};font-size:0.75em;color:#8091a7;margin-left:4px;flex-shrink:0;`;
+                muteIcon.style.display = mutedThreads.has(id) ? "" : "none";
                 muteIcon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M9.143 17.082a24.248 24.248 0 0 0 3.844.148m-3.844-.148a23.856 23.856 0 0 1-5.455-1.31 8.964 8.964 0 0 0 2.3-5.542m3.155 6.852a3 3 0 0 0 5.667 1.97m1.965-2.277L21 21m-4.225-4.225a23.81 23.81 0 0 0 3.536-1.003 8.967 8.967 0 0 1-2.312-6.022V9A6 6 0 0 0 9.239 3.477L3 3m6.239.477A5.965 5.965 0 0 0 6 9v.75a8.966 8.966 0 0 1-2.312 6.022"/></svg>';
                 li.appendChild(muteIcon);
                 list.appendChild(li);
@@ -1049,7 +1049,7 @@ import { createIdentityResolver } from './identity.js';
             const _myName = localStorage.getItem("proxion_display_name") || "";
             const _mySuffix = didSuffix(_myDid);
             el.innerHTML = _myDid
-                ? `<span style="color:#f1f5f9">${escHtml(_myName || t('settings.noNameSet'))}</span><span style="color:#8091a7;margin-left:4px;">·${escHtml(_mySuffix)}</span><br><span style="font-size:0.85em;color:#8091a7;">${escHtml(_myDid)}</span>`
+                ? `<span class="text-primary">${escHtml(_myName || t('settings.noNameSet'))}</span><span class="id-suffix">·${escHtml(_mySuffix)}</span><br><span class="text-muted">${escHtml(_myDid)}</span>`
                 : escHtml(t('settings.didGenerating'));
         }
 
@@ -1104,16 +1104,16 @@ import { createIdentityResolver } from './identity.js';
               .then(([c, h]) => {
                 const el = document.getElementById('settings-federation-status');
                 if (!el) return;
-                const tick = ok => ok ? '<span style="color:#4ade80">&#x2713;</span>' : '<span style="color:#f87171">&#x2717;</span>';
+                const tick = ok => ok ? '<span class="text-success">&#x2713;</span>' : '<span class="text-danger">&#x2717;</span>';
                 const reachable = c.public_url_set || c.relay_capable || c.relay_fallback_active;
                 const reachHow = reachable
-                    ? (c.upnp_mapped ? ' <span style="color:#8091a7;font-size:0.85em;">(via UPnP)</span>'
-                       : c.relay_fallback_active && !c.public_url_set ? ' <span style="color:#8091a7;font-size:0.85em;">(via relay)</span>'
-                       : ' <span style="color:#8091a7;font-size:0.85em;">(manual)</span>')
-                    : ` <span style="color:#fbbf24">not reachable — <a href="#" id="fix-conn-link" style="color:#fbbf24;text-decoration:underline;">fix this</a></span>`;
+                    ? (c.upnp_mapped ? ' <span class="text-muted">(via UPnP)</span>'
+                       : c.relay_fallback_active && !c.public_url_set ? ' <span class="text-muted">(via relay)</span>'
+                       : ' <span class="text-muted">(manual)</span>')
+                    : ` <span class="text-warning">not reachable — <a href="#" id="fix-conn-link" class="link-inherit">fix this</a></span>`;
                 el.innerHTML = [
                     `${tick(reachable)} Internet reachable:${reachHow}`,
-                    `${tick(h.turn_configured)} TURN: ${h.turn_configured ? 'configured' : '<span style="color:#fbbf24">not set</span>'}`,
+                    `${tick(h.turn_configured)} TURN: ${h.turn_configured ? 'configured' : '<span class="text-warning">not set</span>'}`,
                     `${tick(h.pod_available)} Solid Pod: ${h.pod_available ? 'connected' : 'offline'}`,
                 ].join('<br>');
                 document.getElementById('fix-conn-link')?.addEventListener('click', e => {
@@ -2745,9 +2745,9 @@ import { createIdentityResolver } from './identity.js';
                     const wl = document.getElementById("webhook-list-area");
                     if (!wl) break;
                     if (!event.webhooks || !event.webhooks.length) { wl.innerHTML = inlineNotice('No webhooks.', 'empty'); break; }
-                    wl.innerHTML = event.webhooks.map(h => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:0.85em;">
-                        <span style="flex:1">${escHtml(h.bot_name)} (${escHtml(h.direction)})</span>
-                        <button data-del-wh="${escHtml(h.id)}" style="background:#7f1d1d;border:none;color:#fca5a5;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:0.8em;">Delete</button>
+                    wl.innerHTML = event.webhooks.map(h => `<div class="list-row">
+                        <span class="list-row__main">${escHtml(h.bot_name)} (${escHtml(h.direction)})</span>
+                        <button data-del-wh="${escHtml(h.id)}" class="btn btn--sm btn-danger">Delete</button>
                     </div>`).join('');
                     wl.querySelectorAll('[data-del-wh]').forEach(btn => {
                         btn.addEventListener('click', () => socket && socket.send(JSON.stringify({cmd:'delete_webhook',id:btn.dataset.delWh})));
@@ -2785,9 +2785,9 @@ import { createIdentityResolver } from './identity.js';
                     const sp = document.getElementById("scheduled-msgs-list");
                     if (!sp) break;
                     if (!event.scheduled || !event.scheduled.length) { sp.innerHTML = inlineNotice('None scheduled.', 'empty'); break; }
-                    sp.innerHTML = event.scheduled.map(s => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:0.85em;">
-                        <span style="flex:1">${escHtml((s.content||'').slice(0,40))} <em style="color:#94a3b8">(${new Date(s.send_at*1000).toLocaleString(getLocale())})</em></span>
-                        <button data-cancel-sched="${s.id}" style="background:#334155;border:none;color:#f1f5f9;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:0.8em;">Cancel</button>
+                    sp.innerHTML = event.scheduled.map(s => `<div class="list-row">
+                        <span class="list-row__main">${escHtml((s.content||'').slice(0,40))} <em class="list-row__meta">(${new Date(s.send_at*1000).toLocaleString(getLocale())})</em></span>
+                        <button data-cancel-sched="${s.id}" class="btn btn--sm btn--slate">Cancel</button>
                     </div>`).join('');
                     sp.querySelectorAll('[data-cancel-sched]').forEach(btn => {
                         btn.addEventListener('click', () => socket && socket.send(JSON.stringify({cmd:'cancel_scheduled',id:btn.dataset.cancelSched})));
@@ -2817,9 +2817,9 @@ import { createIdentityResolver } from './identity.js';
                         const label = escHtml(d.display_name || d.device_id.slice(0, 16));
                         const since = d.registered_at
                             ? new Date(d.registered_at * 1000).toLocaleDateString(getLocale()) : "";
-                        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid #1e293b;gap:8px;">
-                            <span style="flex:1">${label}<br><span style="color:#8091a7;font-size:0.8em;">${since}</span></span>
-                            <button data-device-id="${escHtml(d.device_id)}" style="background:transparent;border:none;color:#f87171;font-size:0.8em;cursor:pointer;padding:2px 6px;">Revoke</button>
+                        return `<div class="list-row">
+                            <span class="list-row__main">${label}<br><span class="list-row__meta">${since}</span></span>
+                            <button data-device-id="${escHtml(d.device_id)}" class="link-btn link-btn--danger">Revoke</button>
                         </div>`;
                     }).join("");
                     container.querySelectorAll("[data-device-id]").forEach(btn => {
@@ -2852,17 +2852,17 @@ import { createIdentityResolver } from './identity.js';
                     if (!list) break;
                     const bans = event.bans || [];
                     if (bans.length === 0) {
-                        list.innerHTML = '<p style="color:#78716c;font-size:0.85em;">No banned members.</p>';
+                        list.innerHTML = inlineNotice('No banned members.', 'empty');
                         break;
                     }
                     list.innerHTML = bans.map(b => `
-                        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #292524;">
-                          <span style="flex:1;font-size:0.85em;">
-                            <span style="color:#f5f5f4;">${escHtml(b.display_name || b.banned_did.slice(-12))}</span>
-                            ${b.reason ? `<br><span style="color:#78716c;font-size:0.8em;">${escHtml(b.reason)}</span>` : ''}
+                        <div class="list-row">
+                          <span class="list-row__main">
+                            <span class="text-primary">${escHtml(b.display_name || b.banned_did.slice(-12))}</span>
+                            ${b.reason ? `<br><span class="list-row__meta">${escHtml(b.reason)}</span>` : ''}
                           </span>
                           <button data-unban-did="${escHtml(b.banned_did)}" data-room-id="${escHtml(event.room_id)}"
-                                  style="background:transparent;border:none;color:#4ade80;font-size:0.8em;cursor:pointer;">
+                                  class="link-btn link-btn--success">
                             Unban
                           </button>
                         </div>`).join("");
@@ -4304,7 +4304,7 @@ import { createIdentityResolver } from './identity.js';
                     return;
                 }
                 // Show discovered info briefly, then send friend request
-                errEl.style.color = "#4ade80";
+                errEl.style.color = "var(--color-success-soft)";
                 errEl.textContent = t('contact.found', { name: discovered.display_name || discovered.did.slice(0, 20), fingerprint: discovered.fingerprint || "" });
                 setTimeout(() => { errEl.textContent = ""; errEl.style.color = ""; }, 3000);
             }
@@ -4927,9 +4927,9 @@ import { createIdentityResolver } from './identity.js';
                 try { out = await voice.testConnectivity(); } catch (_) { out = null; }
                 if (!res) return;
                 const level = out?.verdict?.level || 'none';
-                const color = level === 'relay' ? 'var(--color-success,#4ade80)'
-                    : level === 'stun' ? '#f59e0b'
-                        : 'var(--color-danger,#f87171)';
+                const color = level === 'relay' ? 'var(--color-success-soft)'
+                    : level === 'stun' ? 'var(--color-warning-soft)'
+                        : 'var(--color-danger-soft)';
                 res.style.color = color;
                 res.textContent = t(out?.verdict?.i18nKey || 'conn.test.none');
             });
@@ -5112,7 +5112,8 @@ import { createIdentityResolver } from './identity.js';
                 const btn = document.getElementById("voice-channel-mute-btn");
                 if (btn) {
                     btn.textContent = voice.state.isMuted ? t('btn.unmute') : t('btn.mute2');
-                    btn.style.background = voice.state.isMuted ? "#7f1d1d" : "#334155";
+                    btn.classList.toggle("btn--danger", voice.state.isMuted);
+                    btn.classList.toggle("btn--slate", !voice.state.isMuted);
                 }
             });
 
@@ -5898,10 +5899,10 @@ import { createIdentityResolver } from './identity.js';
                 const ver = (info && info.manifest && info.manifest.version) || "";
                 const banner = document.createElement("div");
                 banner.id = "update-banner";
-                banner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:2100;background:#134e26;color:#d1fae5;padding:9px 16px;font-size:0.88em;display:flex;align-items:center;gap:12px;";
-                banner.innerHTML = `<span style="flex:1"></span>
-                    <button id="update-install-btn" style="background:#4ade80;border:none;color:#052e16;font-weight:600;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:0.95em;"></button>
-                    <button id="update-dismiss-btn" style="background:transparent;border:none;color:#d1fae5;cursor:pointer;font-size:1.1em;padding:0 4px;">&#x2715;</button>`;
+                banner.className = "update-banner";
+                banner.innerHTML = `<span class="update-banner__msg"></span>
+                    <button id="update-install-btn" class="update-banner__install"></button>
+                    <button id="update-dismiss-btn" class="update-banner__dismiss">&#x2715;</button>`;
                 banner.querySelector("span").textContent = ver ? t('update.availableVersion', { version: ver }) : t('update.available');
                 const installBtn = banner.querySelector("#update-install-btn");
                 installBtn.textContent = t('update.install');
@@ -5932,9 +5933,9 @@ import { createIdentityResolver } from './identity.js';
                 if (res) { res.style.display = ""; res.style.color = "var(--text-secondary)"; res.textContent = t('update.checking'); }
                 let info;
                 try { info = await updater.checkUpdate(); }
-                catch (_) { if (res) { res.style.color = "var(--color-danger,#f87171)"; res.textContent = t('common.updateFailed'); } return; }
+                catch (_) { if (res) { res.style.color = "var(--color-danger-soft)"; res.textContent = t('common.updateFailed'); } return; }
                 if (info && info.shouldUpdate) {
-                    if (res) { res.style.color = "var(--color-success,#4ade80)"; res.textContent = t('update.available'); }
+                    if (res) { res.style.color = "var(--color-success-soft)"; res.textContent = t('update.available'); }
                     _showUpdateBanner(info);
                 } else if (res) {
                     res.style.color = "var(--text-secondary)"; res.textContent = t('update.upToDate');
