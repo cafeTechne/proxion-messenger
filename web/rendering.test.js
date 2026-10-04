@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createRendering } from './rendering.js';
+import { createRendering, captureScrollAnchor, restoreScrollAnchor, isFeedAtBottom } from './rendering.js';
 
 // Minimal DOM element stub supporting the operations rendering.js uses.
 function mkEl(over = {}) {
@@ -68,7 +68,9 @@ describe('mergeOlderHistory (C3 federated pagination)', () => {
     expect(added).toBe(2);
     expect(host.allMessages.map(m => m.message_id)).toEqual(['a', 'b', 'c']); // chronological
     expect(host.messageMap.a).toBeTruthy();
-    expect(els['message-feed'].scrollTop).toBe(10); // held near top for more paging
+    // No anchor in the stub feed, so it falls back to keeping the distance from
+    // the bottom of the content (the old code jumped to scrollTop = 10).
+    expect(els['message-feed'].scrollTop).toBe(0);
   });
   it('returns 0 and no-ops when every message is already present', () => {
     els['message-feed'] = mkEl();
@@ -261,5 +263,101 @@ describe('attachmentKind (R59A pure)', () => {
     expect(attachmentKind(undefined)).toBe('file');
     // SVG stays OUT of inline types (scriptable) — download row only.
     expect(attachmentKind('image/svg+xml')).toBe('file');
+  });
+});
+
+// Fake scroller for the anchoring math: each message has a content-space top
+// and height; its viewport rect is derived from the feed's scrollTop.
+function fakeFeed(msgs, { scrollTop = 0, clientHeight = 300 } = {}) {
+  const feed = {
+    scrollTop, clientHeight, _msgs: msgs,
+    get scrollHeight() { return msgs.reduce((h, m) => Math.max(h, m.top + m.height), 0); },
+    getBoundingClientRect: () => ({ top: 50, height: clientHeight }),
+    querySelectorAll: () => msgs.map(m => ({
+      dataset: { messageId: m.id },
+      getBoundingClientRect: () => ({ top: 50 + m.top - feed.scrollTop, height: m.height }),
+    })),
+  };
+  return feed;
+}
+const rows = (ids, start = 0, h = 40) => ids.map((id, i) => ({ id, top: start + i * h, height: h }));
+
+describe('scroll anchoring helpers', () => {
+  it('captures the first message intersecting the viewport and its offset', () => {
+    const feed = fakeFeed(rows(['a', 'b', 'c', 'd']), { scrollTop: 50 });
+    // a spans 0-40 (above), b spans 40-80 and is partly visible at offset -10
+    expect(captureScrollAnchor(feed)).toEqual({ id: 'b', offset: -10 });
+  });
+  it('returns null for an empty or missing feed', () => {
+    expect(captureScrollAnchor(fakeFeed([]))).toBeNull();
+    expect(captureScrollAnchor(null)).toBeNull();
+  });
+  it('keeps the anchored message in place after older history is prepended', () => {
+    const before = fakeFeed(rows(['m5', 'm6', 'm7', 'm8']), { scrollTop: 0 });
+    const anchor = captureScrollAnchor(before);
+    expect(anchor).toEqual({ id: 'm5', offset: 0 });
+    // Re-render: five older messages now sit above, the DOM was rebuilt and
+    // the browser left scrollTop at whatever it was.
+    const after = fakeFeed(rows(['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8']), { scrollTop: 0 });
+    expect(restoreScrollAnchor(after, anchor)).toBe(true);
+    expect(after.scrollTop).toBe(200);
+    expect(captureScrollAnchor(after)).toEqual(anchor);
+  });
+  it('preserves a partial offset, not just the message', () => {
+    const before = fakeFeed(rows(['x', 'y', 'z']), { scrollTop: 15 });
+    const anchor = captureScrollAnchor(before); // x at -15
+    const after = fakeFeed(rows(['o1', 'o2', 'x', 'y', 'z']), { scrollTop: 0 });
+    restoreScrollAnchor(after, anchor);
+    expect(after.scrollTop).toBe(95);
+  });
+  it('reports failure when the anchor is no longer rendered', () => {
+    const feed = fakeFeed(rows(['a']), { scrollTop: 0 });
+    expect(restoreScrollAnchor(feed, { id: 'gone', offset: 0 })).toBe(false);
+    expect(restoreScrollAnchor(feed, null)).toBe(false);
+    expect(feed.scrollTop).toBe(0);
+  });
+  it('isFeedAtBottom uses the 60px slack of the scroll-to-bottom button', () => {
+    expect(isFeedAtBottom({ scrollHeight: 1000, scrollTop: 500, clientHeight: 500 })).toBe(true);
+    expect(isFeedAtBottom({ scrollHeight: 1000, scrollTop: 441, clientHeight: 500 })).toBe(true);
+    expect(isFeedAtBottom({ scrollHeight: 1000, scrollTop: 440, clientHeight: 500 })).toBe(false);
+  });
+});
+
+describe('media load re-sticks a bottom-pinned feed', () => {
+  function attachWithListeners() {
+    const listeners = {};
+    const feed = mkEl({
+      addEventListener(type, fn) { (listeners[type] ||= []).push(fn); },
+    });
+    els['message-feed'] = feed;
+    els['scroll-bottom-btn'] = mkEl();
+    const r = make();
+    r.attach();
+    const fire = (type, target) => listeners[type].forEach(fn => fn({ type, target }));
+    return { r, feed, fire };
+  }
+  it('scrolls to the new bottom when an image loads while pinned', () => {
+    const { feed, fire } = attachWithListeners();
+    feed.scrollTop = 500; // at bottom (1000 - 500 - 500 = 0)
+    fire('scroll', feed);
+    feed.scrollHeight = 1300; // image decoded and grew the feed
+    fire('load', { tagName: 'IMG' });
+    expect(feed.scrollTop).toBe(1300);
+  });
+  it('does not yank the reader down after they scrolled up', () => {
+    const { feed, fire } = attachWithListeners();
+    feed.scrollTop = 200;
+    fire('scroll', feed);
+    feed.scrollHeight = 1300;
+    fire('load', { tagName: 'IMG' });
+    expect(feed.scrollTop).toBe(200);
+  });
+  it('ignores load events from non-media elements', () => {
+    const { feed, fire } = attachWithListeners();
+    feed.scrollTop = 500;
+    fire('scroll', feed);
+    feed.scrollHeight = 1300;
+    fire('load', { tagName: 'LINK' });
+    expect(feed.scrollTop).toBe(500);
   });
 });

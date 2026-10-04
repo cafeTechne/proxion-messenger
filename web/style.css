@@ -221,6 +221,8 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
 #message-feed {
     flex: 1;
     overflow-y: auto;
+    /* Keep the visible message still when content above it grows (lazy images). */
+    overflow-anchor: auto;
     padding: 20px;
     display: flex;
     flex-direction: column;

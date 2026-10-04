@@ -2116,19 +2116,8 @@ import { createIdentityResolver } from './identity.js';
                         && msgs[msgs.length - 1].timestamp < allMessages[0].timestamp;
 
                     if (isPagination) {
-                        const oldHeight = feed.scrollHeight;
-                        msgs.forEach(m => {
-                            if (!allMessages.find(x => x.message_id === m.message_id)) {
-                                allMessages.unshift(m);
-                                messageMap[m.message_id] = m;
-                            }
-                        });
-                        const slice = allMessages.slice(0, RENDER_WINDOW);
-                        feed.innerHTML = "";
-                        rendering.state._lastRenderedDate = null;
-                        _renderThreaded(slice, feed);
-                        feed.scrollTop = feed.scrollHeight - oldHeight;
                         rendering.state._loadingOlderHistory = false;
+                        rendering.mergeOlderHistory(msgs);
                     } else if (isActive) {
                         if (msgs.length > 0) {
                             msgs.forEach(m => renderMessage(m));
@@ -2157,22 +2146,10 @@ import { createIdentityResolver } from './identity.js';
                         && msgs[msgs.length - 1].timestamp < allMessages[0].timestamp;
 
                     if (isPagination) {
-                        // Prepend older messages at the top
-                        const oldHeight = feed.scrollHeight;
-                        rendering.state._lastRenderedDate = null; // rebuild date dividers from scratch
-                        msgs.forEach(m => {
-                            if (!allMessages.find(x => x.message_id === m.message_id)) {
-                                allMessages.unshift(m);
-                                messageMap[m.message_id] = m;
-                            }
-                        });
-                        // Re-render keeping scroll position
-                        const slice = allMessages.slice(0, RENDER_WINDOW);
-                        feed.innerHTML = "";
-                        rendering.state._lastRenderedDate = null;
-                        _renderThreaded(slice, feed);
-                        feed.scrollTop = feed.scrollHeight - oldHeight;
+                        // Prepend older messages, keeping the newest ones rendered
+                        // and the message the reader was on anchored in place.
                         rendering.state._loadingOlderHistory = false;
+                        rendering.mergeOlderHistory(msgs);
                     } else if (isActive) {
                         // Initial load or catch-up
                         if (msgs.length > 0) {

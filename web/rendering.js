@@ -38,6 +38,43 @@ export function attachmentKind(mime) {
     return 'file';
 }
 
+// Scroll anchoring (pure, exported for tests). "At bottom" uses the same 60px
+// slack as the scroll-to-bottom button logic.
+export function isFeedAtBottom(feed) {
+    return feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
+}
+
+function _relTop(el, feed) {
+    return el.getBoundingClientRect().top - feed.getBoundingClientRect().top;
+}
+
+// Record the first message visible in the feed viewport and its offset from
+// the viewport top, so a re-render can put it back in the same place.
+export function captureScrollAnchor(feed) {
+    if (!feed) return null;
+    const els = feed.querySelectorAll(".message[data-message-id]");
+    for (const el of els) {
+        const top = _relTop(el, feed);
+        if (top + el.getBoundingClientRect().height > 0) {
+            return { id: el.dataset.messageId, offset: top };
+        }
+    }
+    return null;
+}
+
+// Scroll so the anchored message sits at the recorded offset again. Returns
+// false when there is no anchor or it is no longer rendered.
+export function restoreScrollAnchor(feed, anchor) {
+    if (!feed || !anchor) return false;
+    for (const el of feed.querySelectorAll(".message[data-message-id]")) {
+        if (el.dataset.messageId === anchor.id) {
+            feed.scrollTop += _relTop(el, feed) - anchor.offset;
+            return true;
+        }
+    }
+    return false;
+}
+
 export function createRendering({
     getActiveView, getSocket, getSelfWebId, getSelfPubHex,
     getCurrentDisappearMs, getMessageMap, getAllMessages, getUserPresence,
@@ -54,12 +91,14 @@ export function createRendering({
         _lastRenderedDate: null,    // for date dividers (reset by view-switching)
         _scrollBottomUnread: 0,     // count of messages arrived while scrolled up
         _loadingOlderHistory: false,
+        _pinnedToBottom: true,      // feed was at the bottom as of the last scroll
     };
 
     function scrollToBottom() {
         const activeView = getActiveView();
         const feed = document.getElementById("message-feed");
         feed.scrollTop = feed.scrollHeight;
+        state._pinnedToBottom = true;
         state._scrollBottomUnread = 0;
         document.getElementById("scroll-bottom-btn").style.display = "none";
         if (activeView) sendUpdateLastRead(activeView.id);
@@ -82,6 +121,21 @@ export function createRendering({
         state._lastRenderedDate = null;
         _renderThreaded(slice, feed);
         feed.scrollTop = feed.scrollHeight;
+        state._pinnedToBottom = true;
+    }
+
+    // Re-render the feed with `slice` (used when older history is prepended)
+    // while keeping the message the reader was looking at in the same place.
+    // Falls back to preserving the distance from the bottom of the content.
+    function rerenderKeepingAnchor(slice, feed) {
+        const anchor = captureScrollAnchor(feed);
+        const fromBottom = feed.scrollHeight - feed.scrollTop;
+        feed.innerHTML = "";
+        state._lastRenderedDate = null;
+        _renderThreaded(slice, feed);
+        if (!restoreScrollAnchor(feed, anchor)) {
+            feed.scrollTop = feed.scrollHeight - fromBottom;
+        }
     }
 
     function renderMessage(msg) {
@@ -107,7 +161,7 @@ export function createRendering({
             // clear it the moment real content arrives, or it floats above the
             // messages forever (same stale-empty-state class as the sidebar CTA).
             feed.querySelector(".empty-state")?.remove();
-            const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
+            const atBottom = isFeedAtBottom(feed);
             if (msg.reply_to_id) {
                 _insertReplyInFeed(msg, feed);
             } else {
@@ -120,6 +174,7 @@ export function createRendering({
             }
             if (atBottom) {
                 feed.scrollTop = feed.scrollHeight;
+                state._pinnedToBottom = true;
             } else {
                 // Scrolled up — show scroll-to-bottom button with unread count
                 state._scrollBottomUnread++;
@@ -492,7 +547,7 @@ export function createRendering({
 
     // C3: merge a batch of older messages (e.g. a federated /room-history page)
     // into the buffer — dedupe, keep chronological order, re-render the expanded
-    // window and hold the scroll near the top so the user can keep paging up.
+    // window and keep the message the reader was on anchored in place.
     // Returns the number of new messages actually merged.
     function mergeOlderHistory(olderMsgs) {
         const am = getAllMessages();
@@ -504,25 +559,34 @@ export function createRendering({
         const renderedCount = feed ? feed.querySelectorAll(".message").length : 0;
         older.forEach(m => { mm[m.message_id] = m; am.push(m); });
         am.sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || ""));
-        if (feed) {
-            feed.innerHTML = "";
-            state._lastRenderedDate = null;
-            _renderThreaded(am.slice(-(renderedCount + older.length)), feed);
-            feed.scrollTop = 10;
-        }
+        if (feed) rerenderKeepingAnchor(am.slice(-(renderedCount + older.length)), feed);
         return older.length;
     }
 
     // Virtual scroll + persistent history: load earlier messages on scroll to top.
     // Wired once via attach() so the #message-feed element exists.
     function attach() {
-        document.getElementById("message-feed").addEventListener("scroll", (e) => {
+        const _feedEl = document.getElementById("message-feed");
+        // Images and video posters have no intrinsic size until they load, so a
+        // feed pinned to the bottom ends up short of it once they grow. Re-stick
+        // on load, but only if the reader had not scrolled away. load does not
+        // bubble, hence the capture listener.
+        const _restick = (e) => {
+            const tag = e.target && e.target.tagName;
+            if ((tag === "IMG" || tag === "VIDEO") && state._pinnedToBottom) {
+                _feedEl.scrollTop = _feedEl.scrollHeight;
+            }
+        };
+        _feedEl.addEventListener("load", _restick, true);
+        _feedEl.addEventListener("loadedmetadata", _restick, true);
+        _feedEl.addEventListener("scroll", (e) => {
             const allMessages = getAllMessages();
             const activeView = getActiveView();
             const socket = getSocket();
             const feed = e.target;
+            state._pinnedToBottom = isFeedAtBottom(feed);
             // Hide scroll-to-bottom btn when user scrolls to bottom
-            if (feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60) {
+            if (state._pinnedToBottom) {
                 state._scrollBottomUnread = 0;
                 document.getElementById("scroll-bottom-btn").style.display = "none";
             }
@@ -532,10 +596,7 @@ export function createRendering({
                 const rendered = feed.querySelectorAll(".message").length;
                 const totalLoaded = rendered + SCROLL_BATCH;
                 const slice = allMessages.slice(-Math.min(totalLoaded, allMessages.length));
-                feed.innerHTML = "";
-                state._lastRenderedDate = null;
-                _renderThreaded(slice, feed);
-                feed.scrollTop = 10;
+                rerenderKeepingAnchor(slice, feed);
                 return;
             }
             // C3: federated room (hosted on another gateway) — page older history
@@ -584,6 +645,6 @@ export function createRendering({
     return {
         renderMessages, renderMessage, _renderThreaded, scrollToBottom,
         _renderMessageEl, _insertReplyInFeed, _buildThreadedMessages, _dateLabelForTimestamp,
-        mergeOlderHistory, attach, state,
+        mergeOlderHistory, rerenderKeepingAnchor, attach, state,
     };
 }
