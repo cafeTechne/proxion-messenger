@@ -1,4 +1,5 @@
 import { t } from './i18n.js';
+import { icon } from './icons.js';
 // address.js — the user's own Proxion address bar + invite sharing: copy
 // address, render the QR code, open the QR share panel, and update the address
 // bar from a gateway event.
@@ -15,9 +16,17 @@ export function createAddress({ showToast, showCopyModal }) {
             showToast(t('address.copied'));
             const btn = document.getElementById("copy-addr-btn");
             if (btn) {
-                const orig = btn.textContent;
-                btn.textContent = "✓ " + t('common.copied');
-                setTimeout(() => { btn.textContent = orig; }, 2000);
+                // Swap the icon to a check and the name to "Copied", then restore.
+                const label = t('ui.copyAddress');
+                const copied = t('common.copied');
+                btn.innerHTML = icon('check', { size: 14 });
+                btn.setAttribute('aria-label', copied);
+                btn.title = copied;
+                setTimeout(() => {
+                    btn.innerHTML = icon('copy', { size: 14 });
+                    btn.setAttribute('aria-label', label);
+                    btn.title = label;
+                }, 2000);
             }
         }).catch(() => { showCopyModal(addr); });
     }

@@ -7,6 +7,7 @@
 
 import { t } from './i18n.js';
 import { escHtml } from './util.js';
+import { icon } from './icons.js';
 
 export function createStatusBanners() {
     // R16.4.2: pod status dot in the settings modal header
@@ -15,13 +16,13 @@ export function createStatusBanners() {
         if (!dot) return;
         if (state === 'connected') {
             dot.style.color = '#4ade80';
-            dot.textContent = '● ' + t('pod.dot.connected');
+            dot.textContent = t('pod.dot.connected');
         } else if (state === 'unreachable') {
             dot.style.color = '#fb923c';
-            dot.textContent = '● ' + t('pod.dot.unreachable');
+            dot.textContent = t('pod.dot.unreachable');
         } else {
             dot.style.color = '#8091a7';
-            dot.textContent = '● ' + t('pod.dot.none');
+            dot.textContent = t('pod.dot.none');
         }
     }
 
@@ -98,7 +99,7 @@ export function createStatusBanners() {
                 guide = `<strong>${t('nat.title')}</strong>
                     ${t('nat.subtitle')}
                     <details style="margin-top:6px;cursor:pointer;">
-                      <summary><strong>${t('nat.howToFix')} ▾</strong></summary>
+                      <summary><strong>${t('nat.howToFix')} <span aria-hidden="true">▾</span></strong></summary>
                       <div style="margin-top:8px;line-height:1.9;padding:0 4px;">
                         <strong>${t('nat.opt1Title')}</strong> ${t('nat.opt1Note')}<br>
                         ${t('nat.opt1Body', { port: code(port), ip: code(localIp), env: code(envLine) })}
@@ -113,7 +114,7 @@ export function createStatusBanners() {
             }
             banner.innerHTML = `<div style="display:flex;gap:12px;align-items:flex-start;max-width:900px;margin:0 auto;">
                 <span style="flex:1;">${guide}</span>
-                <button style="background:transparent;border:none;color:#fef3c7;cursor:pointer;font-size:1.2em;flex-shrink:0;padding:0 4px;line-height:1;" aria-label="${t('common.dismiss')}">×</button>
+                <button style="background:transparent;border:none;color:#fef3c7;cursor:pointer;flex-shrink:0;padding:0 4px;line-height:0;" aria-label="${t('common.dismiss')}" title="${t('common.dismiss')}">${icon('x-mark', { size: 14 })}</button>
             </div>`;
             banner.querySelector("button").onclick = () => {
                 banner.remove();
@@ -125,7 +126,7 @@ export function createStatusBanners() {
             const banner = document.createElement("div");
             banner.id = "nat-warning-banner";
             banner.style.cssText = "flex-shrink:0;background:#78350f;color:#fef3c7;padding:8px 16px;font-size:0.85em;display:flex;gap:8px;";
-            banner.innerHTML = `<span style="flex:1">${t('nat.fallback', { env: '<code>PROXION_PUBLIC_URL</code>', file: '<code>.env</code>' })}</span><button onclick="this.closest('#nat-warning-banner').remove()" style="background:transparent;border:none;color:#fef3c7;cursor:pointer;" aria-label="${t('common.dismiss')}">×</button>`;
+            banner.innerHTML = `<span style="flex:1">${t('nat.fallback', { env: '<code>PROXION_PUBLIC_URL</code>', file: '<code>.env</code>' })}</span><button onclick="this.closest('#nat-warning-banner').remove()" style="background:transparent;border:none;color:#fef3c7;cursor:pointer;line-height:0;" aria-label="${t('common.dismiss')}" title="${t('common.dismiss')}">${icon('x-mark', { size: 14 })}</button>`;
             document.body.prepend(banner);
         });
     }

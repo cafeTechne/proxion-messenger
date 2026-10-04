@@ -11,6 +11,7 @@
 
 import { t } from './i18n.js';
 import { b64attr } from './util.js';
+import { icon } from './icons.js';
 
 // Mirror the server's emoji mime allowlist client-side so this render path is
 // safe on its own, even if a future delivery route (pod, relay) ever supplied a
@@ -106,9 +107,9 @@ export function createRoomEmoji({ getSocket, getActiveView, showToast, showPromp
             label.style.cssText = 'flex:1;font-size:0.85em;';
             label.textContent = `:${name}:`;
             const del = document.createElement('button');
-            del.textContent = '×';
+            del.innerHTML = icon('x-mark', { size: 14 });
             del.setAttribute('aria-label', t('roomEmoji.removeNamed', { name }));
-            del.style.cssText = 'background:transparent;border:none;color:var(--color-danger-soft,#f87171);cursor:pointer;font-size:1em;min-width:24px;min-height:24px;';
+            del.style.cssText = 'background:transparent;border:none;color:var(--color-danger-soft,#f87171);cursor:pointer;min-width:24px;min-height:24px;line-height:0;';
             del.addEventListener('click', () => {
                 getSocket()?.send(JSON.stringify({ cmd: 'remove_room_emoji', room_id: roomId, name }));
             });

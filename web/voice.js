@@ -138,7 +138,7 @@ export function createVoice(deps) {
             : level === 'fair' ? t('voice.conn.fair') : t('voice.conn.poor');
         el.style.display = state._callState === CallState.CONNECTED ? '' : 'none';
         el.style.color = color;
-        el.textContent = '● ' + label;
+        el.textContent = label;  // the dot is drawn by .status-dot
         el.title = label;
     }
 

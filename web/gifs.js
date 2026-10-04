@@ -9,6 +9,7 @@
 // are exported separately for tests.
 
 import { t } from './i18n.js';
+import { icon } from './icons.js';
 import { podSyncGifFavorite, podSyncRemoveGifFavorite, podReadGifFavorites } from './pod.js';
 import { accountDbName } from './auth.js';
 
@@ -225,7 +226,7 @@ export function createGifTray({ showToast, sendAttachmentFile }) {
             const rmBtn = document.createElement('button');
             rmBtn.type = 'button';
             rmBtn.className = 'gif-remove';
-            rmBtn.textContent = '×';
+            rmBtn.innerHTML = icon('x-mark', { size: 14 });
             rmBtn.setAttribute('aria-label', t('gif.removeNamed', { name: row.filename }));
             rmBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();

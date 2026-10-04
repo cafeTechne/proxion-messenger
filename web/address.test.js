@@ -60,6 +60,26 @@ describe('copyMyAddress', () => {
     await Promise.resolve();
     expect(toasts).toContain('address.copied');
   });
+  it('swaps the button to a check icon and "Copied" name, then restores it', async () => {
+    vi.useFakeTimers();
+    store['proxion_my_address'] = 'did:key:zAbc@https://gw.example';
+    const attrs = {};
+    els['copy-addr-btn'] = mkEl({ setAttribute: (k, v) => { attrs[k] = v; } });
+    const addr = make();
+    addr.copyMyAddress();
+    await Promise.resolve();
+    await Promise.resolve();
+    const btn = els['copy-addr-btn'];
+    expect(btn.innerHTML).toContain('<svg');
+    expect(btn.innerHTML).toContain('aria-hidden="true"');
+    expect(btn.textContent).toBe('');
+    expect(attrs['aria-label']).toBe('common.copied');
+    expect(btn.title).toBe('common.copied');
+    vi.advanceTimersByTime(2000);
+    expect(attrs['aria-label']).toBe('ui.copyAddress');
+    expect(btn.title).toBe('ui.copyAddress');
+    vi.useRealTimers();
+  });
 });
 
 describe('shareInviteLink', () => {
