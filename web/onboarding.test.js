@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // real solid-authn bundle trying to redirect.
 vi.mock('./auth.js', () => ({ solidLogin: vi.fn(() => Promise.resolve()) }));
 import { solidLogin } from './auth.js';
-import { createOnboarding } from './onboarding.js';
+import { createOnboarding, obProgress, OB_STEPS } from './onboarding.js';
 
 // Flexible element stub: every getElementById returns a fresh fake element that
 // records whatever the wizard sets on it.
@@ -53,12 +53,41 @@ describe('obGoto', () => {
   });
 });
 
+describe('wizard progress', () => {
+  it('counts only the visible steps (1, 2, 4, 5, 6)', () => {
+    expect(OB_STEPS).toEqual([1, 2, 4, 5, 6]);
+    expect(obProgress(1)).toEqual({ n: 1, total: 5 });
+    expect(obProgress(4)).toEqual({ n: 3, total: 5 });
+    expect(obProgress(6)).toEqual({ n: 5, total: 5 });
+    expect(obProgress(3)).toBeNull();
+  });
+  it('obGoto writes the progress label', () => {
+    const { ob } = make();
+    ob.obGoto(5);
+    expect(els['ob-progress'].textContent).toBe('onboarding.progress');
+  });
+  it('obGoto(6) shows a localized placeholder until the address is known', () => {
+    const { ob } = make();
+    ob.obGoto(6);
+    expect(els['ob-my-addr'].textContent).toBe('onboarding.addressPending');
+  });
+});
+
 describe('obStep2', () => {
   it('rejects an empty name without sending', () => {
     const { ob, sent } = make();
     els['ob-name'] = mkEl({ value: '   ' });
     ob.obStep2();
     expect(sent).toHaveLength(0);
+    expect(els['ob-name-error'].textContent).toBe('onboarding.nameRequired');
+  });
+  it('clears the name error once a name is given', () => {
+    const { ob } = make();
+    els['ob-name'] = mkEl({ value: '' });
+    ob.obStep2();
+    els['ob-name'].value = 'Alice';
+    ob.obStep2();
+    expect(els['ob-name-error'].textContent).toBe('');
   });
   it('persists the name and sends set_identity', () => {
     const { ob, sent } = make();
@@ -81,6 +110,15 @@ describe('obStep4Join', () => {
     els['ob-invite-code'] = mkEl({ value: 'PLAINCODE' });
     ob.obStep4Join();
     expect(sent).toContainEqual({ cmd: 'join_room', code: 'PLAINCODE' });
+  });
+  it('explains an empty invite field instead of doing nothing', () => {
+    const { ob, sent } = make();
+    let focused = false;
+    els['ob-invite-code'] = mkEl({ value: '  ', focus() { focused = true; } });
+    ob.obStep4Join();
+    expect(sent).toHaveLength(0);
+    expect(els['ob-join-error'].textContent).toBe('onboarding.inviteRequired');
+    expect(focused).toBe(true);
   });
   it('is a no-op with no socket', () => {
     const { ob, sent } = make({ socket: null });

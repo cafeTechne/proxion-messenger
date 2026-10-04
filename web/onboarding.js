@@ -11,6 +11,15 @@ import { podWriteProfile } from './pod.js';
 import { solidLogin } from './auth.js';
 import { POD_BANNER_SNOOZE_KEY, POD_BANNER_SNOOZE_MS } from './status-banners.js';
 
+// The wizard's visible steps in order (step 3 was retired, so ids skip it).
+export const OB_STEPS = [1, 2, 4, 5, 6];
+
+// "Step N of M" for a step id, or null for an id outside the sequence.
+export function obProgress(step) {
+    const i = OB_STEPS.indexOf(Number(step));
+    return i < 0 ? null : { n: i + 1, total: OB_STEPS.length };
+}
+
 export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyModal, showConfirm }) {
 
     function openSettingsToPod() {
@@ -32,8 +41,25 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         }
     }
 
+    function _setProgress(step) {
+        const el = document.getElementById("ob-progress");
+        if (!el) return;
+        const p = obProgress(step);
+        el.textContent = p ? t('onboarding.progress', { n: p.n, total: p.total }) : "";
+    }
+
+    function _setError(id, text) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text || "";
+    }
+
     function showOnboarding() {
         document.getElementById("onboarding-modal").style.display = "flex";
+        const visible = OB_STEPS.find(n => {
+            const el = document.getElementById(`ob-step-${n}`);
+            return el && el.style.display !== "none";
+        });
+        _setProgress(visible || 1);
         const defaultCss = document.querySelector('meta[name="x-css-default-url"]')?.content || localStorage.getItem("proxion_css_default_url") || "";
         if (defaultCss && !defaultCss.includes("localhost") && !defaultCss.includes("127.0.0.1")) {
             // External CSS: pre-fill the custom URL input for easy sign-in
@@ -52,18 +78,26 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         }
         const target = document.getElementById(`ob-step-${step}`);
         if (target) target.style.display = "block";
+        _setProgress(step);
+        _setError("ob-name-error", "");
+        _setError("ob-join-error", "");
         if (step === 6) {
             const obAddr = document.getElementById("ob-my-addr");
             if (obAddr) {
                 const addr = window.proxionAddress || localStorage.getItem("proxion_my_address") || "";
-                obAddr.textContent = addr || "(connecting…)";
+                obAddr.textContent = addr || t('onboarding.addressPending');
             }
         }
     }
 
     function obStep2() {
         const name = document.getElementById("ob-name").value.trim();
-        if (!name) { document.getElementById("ob-name").focus(); return; }
+        if (!name) {
+            _setError("ob-name-error", t('onboarding.nameRequired'));
+            document.getElementById("ob-name").focus();
+            return;
+        }
+        _setError("ob-name-error", "");
         localStorage.setItem("proxion_display_name", name);
         document.getElementById("username").innerText = name;
         const socket = getSocket();
@@ -235,9 +269,16 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
     }
 
     function obStep4Join() {
-        let val = document.getElementById("ob-invite-code").value.trim();
+        const input = document.getElementById("ob-invite-code");
+        let val = input.value.trim();
+        if (!val) {
+            _setError("ob-join-error", t('onboarding.inviteRequired'));
+            if (input.focus) input.focus();
+            return;
+        }
+        _setError("ob-join-error", "");
         const socket = getSocket();
-        if (!val || !socket) return;
+        if (!socket) return;
         let code = val;
         try {
             const u = new URL(val);

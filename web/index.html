@@ -1088,6 +1088,7 @@
     <!-- Onboarding wizard -->
     <div id="onboarding-modal" class="modal modal--gate" data-modal-persistent role="dialog" aria-modal="true" aria-label="Welcome to Proxion" style="display:none;background:rgba(0,0,0,.7);" data-i18n-attr="aria-label:ui.welcomeProxion">
       <div class="modal__panel modal__panel--md" style="padding:var(--space-6);">
+        <p id="ob-progress" class="ob-progress"></p>
         <div id="ob-step-1">
           <h2 data-i18n="heading.welcomeProxion">Welcome to Proxion</h2>
           <p style="color:var(--text-secondary);font-size:0.92em;margin:0 0 12px;" data-i18n="onboarding.welcomeBody">
@@ -1097,8 +1098,8 @@
           </p>
           <button id="ob-start-btn" style="background:var(--accent,var(--accent));border:none;color:#fff;padding:10px 24px;border-radius:4px;cursor:pointer;font-size:1em;" data-i18n="btn.getStarted">Get Started</button>
           <p style="margin:14px 0 0;font-size:0.85em;color:var(--text-secondary);">
-            Already using Proxion elsewhere?
-            <a id="ob-link-device" href="#" style="color:var(--accent-text);">Link this device</a>
+            <span data-i18n="onboarding.usingElsewhere">Already using Proxion elsewhere?</span>
+            <a id="ob-link-device" href="#" style="color:var(--accent-text);" data-i18n="ui.linkThisDevice">Link this device</a>
           </p>
           <p style="margin:6px 0 0;font-size:0.85em;color:var(--text-secondary);">
             <span data-i18n="onboarding.haveKit">Have a recovery kit from a previous install?</span>
@@ -1108,7 +1109,8 @@
         <div id="ob-step-2" style="display:none">
           <h2 data-i18n="heading.whatSName">What's your name?</h2>
           <label for="ob-name" class="field-label" data-i18n="ui.displayName">Display name</label>
-          <input id="ob-name" class="input" placeholder="Display name" autocomplete="nickname" style="margin-bottom:12px;" data-i18n-attr="placeholder:ui.displayName">
+          <input id="ob-name" class="input" placeholder="Display name" autocomplete="nickname" aria-describedby="ob-name-error" data-i18n-attr="placeholder:ui.displayName">
+          <p id="ob-name-error" class="field-error" role="alert"></p>
           <button id="ob-step2-btn" style="background:var(--accent,var(--accent));border:none;color:#fff;padding:10px 24px;border-radius:4px;cursor:pointer;font-size:1em;" data-i18n="btn.continue">Continue</button>
         </div>
         <!-- Step 4: Connect Solid Pod (R16) -->
@@ -1126,19 +1128,19 @@
                     style="background:#1a56db;border:none;color:#fff;padding:12px 16px;border-radius:6px;
                            cursor:pointer;font-size:0.92em;text-align:left;line-height:1.4;">
               <strong>solidcommunity.net</strong>
-              <span style="display:block;font-size:0.82em;opacity:0.85;margin-top:2px;">Free. Run by the Solid community.</span>
+              <span style="display:block;font-size:0.82em;opacity:0.85;margin-top:2px;" data-i18n="onboarding.provider.solidcommunity">Free. Run by the Solid community.</span>
             </button>
             <button class="ob-provider-card" data-css="https://inrupt.net"
                     style="background:#0f766e;border:none;color:#fff;padding:12px 16px;border-radius:6px;
                            cursor:pointer;font-size:0.92em;text-align:left;line-height:1.4;">
               <strong>Inrupt PodSpaces</strong>
-              <span style="display:block;font-size:0.82em;opacity:0.85;margin-top:2px;">Free tier. Founded by Tim Berners-Lee.</span>
+              <span style="display:block;font-size:0.82em;opacity:0.85;margin-top:2px;" data-i18n="onboarding.provider.inrupt">Free tier. Founded by Tim Berners-Lee.</span>
             </button>
             <button class="ob-provider-card" data-css="custom"
                     style="background:var(--slate-700);border:none;color:var(--slate-50);padding:12px 16px;border-radius:6px;
                            cursor:pointer;font-size:0.92em;text-align:left;line-height:1.4;">
-              <strong>My own server</strong>
-              <span style="display:block;font-size:0.82em;opacity:0.85;margin-top:2px;">Self-hosted Community Solid Server.</span>
+              <strong data-i18n="onboarding.provider.ownServer">My own server</strong>
+              <span style="display:block;font-size:0.82em;opacity:0.85;margin-top:2px;" data-i18n="onboarding.provider.ownServerHint">Self-hosted Community Solid Server.</span>
             </button>
           </div>
 
@@ -1200,16 +1202,20 @@
         <!-- Step 5: Join or create a room (was step 4) -->
         <div id="ob-step-5" style="display:none">
           <h2 data-i18n="heading.joinCreateRoom">Join or create a room</h2>
-          <button id="ob-step5-create" style="background:var(--accent,var(--accent));border:none;color:#fff;padding:10px 20px;border-radius:4px;cursor:pointer;margin-right:10px;" data-i18n="heading.createRoom">Create a Room</button>
+          <button id="ob-step5-create" style="background:var(--accent,var(--accent));border:none;color:#fff;padding:10px 20px;border-radius:4px;cursor:pointer;margin-right:10px;" data-i18n="heading.createRoom">Create a room</button>
           <br><br>
-          <p style="margin:8px 0 4px;">Or join with an invite code:</p>
-          <input id="ob-invite-code" class="input" placeholder="prx1_..." aria-label="Invite code" data-i18n-attr="placeholder:ui.prx1;aria-label:onboarding.inviteCodeLabel">
-          <button id="ob-step5-join" style="margin-top:8px;background:var(--slate-700);border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;" data-i18n="btn.joinCode">Join with Code</button>
+          <p style="margin:8px 0 4px;" data-i18n="onboarding.orJoinCode">Or join with an invite code:</p>
+          <input id="ob-invite-code" class="input" placeholder="prx1_…" aria-label="Invite code" aria-describedby="ob-join-error" data-i18n-attr="placeholder:ui.prx1;aria-label:onboarding.inviteCodeLabel">
+          <p id="ob-join-error" class="field-error" role="alert"></p>
+          <button id="ob-step5-join" style="background:var(--slate-700);border:none;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;" data-i18n="btn.joinCode">Join with code</button>
+          <p style="margin:14px 0 0;">
+            <button id="ob-step5-skip" type="button" class="ob-skip-link" data-i18n="onboarding.skipForNow">Skip for now</button>
+          </p>
         </div>
         <!-- Step 6: Done (was step 5) -->
         <div id="ob-step-6" style="display:none">
           <h2 data-i18n="heading.reAllSet">You're all set!</h2>
-          <p>Start chatting with your Proxion network.</p>
+          <p data-i18n="onboarding.startChatting">Start chatting with your Proxion network.</p>
           <div id="ob-my-addr-section" style="margin-bottom:14px;padding:10px;background:var(--slate-900);border-radius:6px;border:1px solid var(--slate-700);">
             <p style="margin:0 0 4px;font-size:0.82em;color:var(--text-secondary);" data-i18n="onboarding.yourAddress">Your Proxion address. Share it so people can add you:</p>
             <code id="ob-my-addr" style="font-size:0.82em;color:#e2e8f0;word-break:break-all;">(connecting…)</code>
@@ -1218,7 +1224,7 @@
             </p>
           </div>
           <div id="ob-invite-display" style="display:none; margin-bottom:12px;">
-            <p style="margin:0 0 4px; font-size:0.85em; color:var(--text-secondary);">
+            <p style="margin:0 0 4px; font-size:0.85em; color:var(--text-secondary);" data-i18n="onboarding.shareInviteLink">
               Share this invite link with a contact:
             </p>
             <div id="ob-room-invite-url"

@@ -5069,6 +5069,7 @@ import { createIdentityResolver } from './identity.js';
 
             // Onboarding: Step 5 - Join with Code
             attachListener('#ob-step5-join', 'click', obStep4Join);
+            attachListener('#ob-step5-skip', 'click', () => obGoto(6));
 
             // Onboarding: Step 6 - Finish (Open Proxion)
             attachListener('#ob-finish-btn', 'click', () => {
