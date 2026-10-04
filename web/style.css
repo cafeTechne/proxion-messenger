@@ -151,6 +151,12 @@ body {
     padding: 20px;
     border-bottom: 1px solid var(--border);
 }
+/* Presence and address sit just below the brand row, so the brand row can match
+   the chat header's height on desktop. */
+.sidebar-identity {
+    padding: var(--space-2) var(--space-4);
+    border-bottom: 1px solid var(--border);
+}
 
 #self-presence {
     display: flex;
@@ -264,11 +270,46 @@ nav li.dm-item > svg { flex: 0 0 16px; }
 }
 
 #chat-header {
-    padding: 15px 25px;
+    padding: 15px var(--space-4);
     /* Clear the notch/status bar in standalone PWA mode (0 on non-notch/desktop). */
     padding-top: calc(15px + env(safe-area-inset-top, 0px));
     background: var(--bg-primary);
     border-bottom: 1px solid var(--bg-secondary);
+}
+#chat-header-name {
+    margin: 0;
+    min-width: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#chat-header-actions { gap: var(--space-1); }
+/* One hit box for every header icon button. Buttons with a visible label keep
+   their own inline padding, so the label still fits. */
+#chat-header-actions > button,
+#sidebar header button {
+    padding: 0;
+    min-width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+@media (min-width: 769px) {
+    /* Both headers share one height so their bottom borders line up. */
+    #sidebar header,
+    #chat-header {
+        min-height: var(--header-h);
+        display: flex;
+        align-items: center;
+    }
+    #sidebar header { padding: 0 var(--space-4); }
+    #sidebar header > div { flex: 1; min-width: 0; }
+    #chat-header { padding-block: var(--space-2); }
+    .app-title { margin: 0; }
 }
 
 #message-feed {
@@ -770,9 +811,6 @@ button:hover { background: var(--accent-hover); }
         /* flex:1 (inline) has flex-basis 0, so with a full row of action icons
            the title collapsed to nothing — keep a readable floor and ellipsize. */
         min-width: 72px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
         font-size: 1.1em;
     }
     .mobile-overlay {
@@ -806,6 +844,7 @@ button:hover { background: var(--accent-hover); }
        trimmed above), and the action strip scrolls internally rather than pushing
        the body, so no horizontal body scroll is introduced. */
     #sidebar > header button,
+    .sidebar-identity button,
     #chat-header > #menu-toggle,
     #chat-header-actions > button,
     #message-form > button[type="submit"],
@@ -824,6 +863,7 @@ button:hover { background: var(--accent-hover); }
        the icon inside the enlarged hit area. Pin the glyph so only the tap area
        grew, not the icon. */
     #sidebar > header button svg,
+    .sidebar-identity button svg,
     #chat-header > #menu-toggle svg,
     #chat-header-actions > button svg,
     #message-form .paperclip svg,
