@@ -1265,6 +1265,76 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             border-left: 4px solid var(--accent);
         }
         .search-match b { color: var(--accent); }
+        .search-hint {
+            margin: var(--space-1) 0 0;
+            font-size: 0.8em;
+            color: var(--text-secondary);
+        }
+        .search-hint:empty { display: none; }
+        /* Search results take the feed's place; the feed itself is only hidden. */
+        .search-panel {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .search-panel[hidden] { display: none; }
+        .search-panel__header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: var(--space-2);
+            padding: var(--space-3) var(--space-4);
+            border-bottom: 1px solid var(--border);
+        }
+        .search-panel__title {
+            margin: 0;
+            font-size: 1em;
+            font-weight: 600;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .search-panel__close {
+            flex-shrink: 0;
+            min-width: 32px;
+            min-height: 32px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            color: var(--text-secondary);
+            cursor: pointer;
+        }
+        .search-panel__close:hover { color: var(--text-primary); background: rgba(255,255,255,.06); }
+        .search-panel__results {
+            list-style: none;
+            margin: 0;
+            padding: var(--space-2) var(--space-4);
+            overflow-y: auto;
+            flex: 1;
+        }
+        .search-result {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            width: 100%;
+            text-align: start;
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid var(--border);
+            color: inherit;
+            font: inherit;
+            padding: var(--space-2) 0;
+            cursor: pointer;
+        }
+        .search-result:hover .search-result__text { text-decoration: underline; }
+        .search-result__meta { font-size: 0.8em; color: var(--text-secondary); }
+        .search-result__text { overflow-wrap: anywhere; }
         .voice-channel { color: var(--color-success-soft); cursor: pointer; padding: 5px 0; }
         .voice-channel:hover { text-decoration: underline; }
         .avatar {

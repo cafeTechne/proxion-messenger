@@ -347,7 +347,8 @@
             </div>
             <nav aria-label="Conversations" data-i18n-attr="aria-label:ui.conversations">
                 <div id="search-box">
-                    <input type="text" id="search-input" placeholder="Search messages..." autocomplete="off" data-i18n-attr="placeholder:control.search.placeholder">
+                    <input type="text" id="search-input" placeholder="Search messages…" autocomplete="off" aria-describedby="search-hint" data-i18n-attr="placeholder:control.search.placeholder">
+                    <p id="search-hint" class="search-hint" role="status" aria-live="polite"></p>
                 </div>
                 <section>
                     <div style="display:flex;align-items:center;justify-content:space-between;">

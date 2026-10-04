@@ -9,7 +9,7 @@
   "sidebar.friendRequests": "Friend Requests",
   "sidebar.contacts": "Contacts",
   "sidebar.dms": "DMs",
-  "control.search.placeholder": "Search messages...",
+  "control.search.placeholder": "Search messages…",
   "control.createRoom": "Create room",
   "control.settings": "Settings",
   "kbd.title": "Keyboard Shortcuts",
@@ -807,5 +807,10 @@
   "reaction.by": "{emoji} reacted by {names}",
   "reaction.you": "You",
   "reaction.namesMore": "{names} and {count} more",
-  "reaction.add": "Add reaction"
+  "reaction.add": "Add reaction",
+  "search.close": "Close search",
+  "search.resultsFor": "Results for \"{query}\"",
+  "search.noMatches": "No messages match \"{query}\".",
+  "search.tooShort": "Type at least 3 characters.",
+  "search.offline": "Search needs a connection to Proxion."
 }

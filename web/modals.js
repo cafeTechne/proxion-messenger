@@ -2,11 +2,12 @@
 // picker toggle, room-integrations (webhooks) panel, and search-results render.
 //
 // A factory. Reassignable host state (socket, activeView) is read live via
-// getters; sendCmd / showToast / renderMessage are injected. escHtml is
+// getters; sendCmd / showToast / openSearchResult are injected. escHtml is
 // imported directly. _forwardingMsgId is cluster-owned and lives in `state`.
 // The returned functions are destructured into same-named bindings in main.js.
 import { t } from './i18n.js';
-import { escHtml } from './util.js';
+import { escHtml, formatTimestamp } from './util.js';
+import { icon } from './icons.js';
 import { inlineNotice } from './states.js';
 import { showPromptModal, closeButtonHtml } from './dialogs.js';
 
@@ -27,7 +28,19 @@ export function forwardTargets(doc) {
     return out;
 }
 
-export function createModals({ getSocket, getActiveView, sendCmd, showToast, renderMessage, getMessageContent }) {
+// What the sidebar search box should do with the current text: close the
+// results (empty), ask for more characters, explain that search is offline, or
+// run the search.
+export const SEARCH_MIN_CHARS = 3;
+export function searchAction(raw, online) {
+    const query = String(raw == null ? '' : raw).trim();
+    if (!query) return { kind: 'close', query };
+    if (query.length < SEARCH_MIN_CHARS) return { kind: 'short', query };
+    if (!online) return { kind: 'offline', query };
+    return { kind: 'search', query };
+}
+
+export function createModals({ getSocket, getActiveView, sendCmd, showToast, getMessageContent, openSearchResult }) {
     const state = { forwardingMsgId: null };
 
     function openForwardModal(msgId) {
@@ -122,16 +135,133 @@ export function createModals({ getSocket, getActiveView, sendCmd, showToast, ren
         });
     }
 
-    function renderSearchResults(event) {
-        const feed = document.getElementById("message-feed");
-        feed.innerHTML = `<div class="system-msg">Search results for "${escHtml(event.query)}":</div>`;
-        if (event.results.length === 0) {
-            feed.innerHTML += '<div class="system-msg">No matches found.</div>';
+    // -- Search --
+    // Results open in their own panel in place of the feed. The feed is only
+    // hidden, never cleared, so closing the panel puts the conversation back
+    // exactly where it was.
+    let _searchTimer = null;
+    let _feedScrollTop = 0;
+
+    function _searchInput() { return document.getElementById('search-input'); }
+
+    function _setSearchHint(text) {
+        const hint = document.getElementById('search-hint');
+        if (!hint) return;
+        // Stays in the DOM (empty when idle) so its live region announces.
+        hint.textContent = text || '';
+    }
+
+    function isSearchOpen() {
+        const panel = document.getElementById('search-panel');
+        return !!(panel && !panel.hidden);
+    }
+
+    function _openSearchPanel() {
+        let panel = document.getElementById('search-panel');
+        const feed = document.getElementById('message-feed');
+        if (!panel) {
+            panel = document.createElement('section');
+            panel.id = 'search-panel';
+            panel.className = 'search-panel';
+            panel.setAttribute('role', 'region');
+            panel.setAttribute('aria-labelledby', 'search-panel-title');
+            panel.innerHTML =
+                '<div class="search-panel__header">' +
+                '<h2 id="search-panel-title" class="search-panel__title"></h2>' +
+                `<button type="button" class="search-panel__close" data-search-close>${icon('x-mark', { size: 18 })}</button>` +
+                '</div>' +
+                '<ul class="search-panel__results" data-search-results></ul>';
+            const close = panel.querySelector('[data-search-close]');
+            close.setAttribute('aria-label', t('search.close'));
+            close.setAttribute('title', t('search.close'));
+            close.addEventListener('click', () => closeSearch({ focusInput: true }));
+            if (feed && feed.parentNode) feed.parentNode.insertBefore(panel, feed);
+            else document.body.appendChild(panel);
         }
-        event.results.forEach(res => {
-            renderMessage({ ...res, is_search_result: true });
+        if (feed && feed.style.display !== 'none') {
+            _feedScrollTop = feed.scrollTop || 0;
+            feed.style.display = 'none';
+        }
+        panel.hidden = false;
+        return panel;
+    }
+
+    // Close the panel and bring the conversation back. Returns true when a
+    // panel was actually open (so an Escape handler knows it did something).
+    function closeSearch({ focusInput = false, clearInput = true } = {}) {
+        clearTimeout(_searchTimer);
+        _setSearchHint('');
+        const input = _searchInput();
+        if (clearInput && input) input.value = '';
+        const panel = document.getElementById('search-panel');
+        if (!panel || panel.hidden) return false;
+        panel.hidden = true;
+        const feed = document.getElementById('message-feed');
+        if (feed && feed.style.display === 'none') {
+            feed.style.display = '';
+            feed.scrollTop = _feedScrollTop;
+        }
+        if (focusInput && input && input.focus) input.focus();
+        return true;
+    }
+
+    // Debounced handler for the sidebar search box.
+    function onSearchInput(raw) {
+        clearTimeout(_searchTimer);
+        const socket = getSocket();
+        const online = !!(socket && socket.readyState === 1);
+        const action = searchAction(raw, online);
+        if (action.kind === 'close') { closeSearch(); return; }
+        if (action.kind === 'short') { _setSearchHint(t('search.tooShort')); return; }
+        if (action.kind === 'offline') { _setSearchHint(t('search.offline')); return; }
+        _setSearchHint('');
+        _searchTimer = setTimeout(() => {
+            const s = getSocket();
+            if (!s || s.readyState !== 1) { _setSearchHint(t('search.offline')); return; }
+            s.send(JSON.stringify({ cmd: 'search', query: action.query }));
+        }, 500);
+    }
+
+    function renderSearchResults(event) {
+        const query = String((event && event.query) || '');
+        // A late reply for a box the user has since cleared or changed.
+        const input = _searchInput();
+        if (input && typeof input.value === 'string' && input.value.trim() !== query) return;
+        const panel = _openSearchPanel();
+        const title = panel.querySelector('#search-panel-title');
+        if (title) title.textContent = t('search.resultsFor', { query });
+        const list = panel.querySelector('[data-search-results]');
+        if (!list) return;
+        list.innerHTML = '';
+        const results = (event && event.results) || [];
+        if (results.length === 0) {
+            list.innerHTML = `<li class="search-panel__empty">${inlineNotice(t('search.noMatches', { query }))}</li>`;
+            return;
+        }
+        results.forEach(res => {
+            const li = document.createElement('li');
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'search-result';
+            const who = res.from_display_name || String(res.from_webid || '').slice(0, 16);
+            const where = res.thread_name || '';
+            const when = res.timestamp ? formatTimestamp(res.timestamp) : '';
+            const meta = [who, where, when].filter(Boolean).map(escHtml).join(' · ');
+            const text = String(res.content || '');
+            btn.innerHTML =
+                `<span class="search-result__meta">${meta}</span>` +
+                `<span class="search-result__text">${escHtml(text.length > 200 ? text.slice(0, 200) + '…' : text)}</span>`;
+            btn.addEventListener('click', () => {
+                closeSearch();
+                if (openSearchResult) openSearchResult(res.thread_id, res.message_id);
+            });
+            li.appendChild(btn);
+            list.appendChild(li);
         });
     }
 
-    return { openForwardModal, openSchedulePicker, openIntegrationsPanel, renderSearchResults, state };
+    return {
+        openForwardModal, openSchedulePicker, openIntegrationsPanel, renderSearchResults,
+        onSearchInput, closeSearch, isSearchOpen, state,
+    };
 }

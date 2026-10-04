@@ -579,11 +579,14 @@ import { createIdentityResolver } from './identity.js';
                 resolveName: (w) => resolvePeerName(w),
             });
         // Standalone modals (forward / schedule / integrations / search results).
-        const { openForwardModal, openSchedulePicker, openIntegrationsPanel, renderSearchResults } =
-            createModals({
+        const {
+            openForwardModal, openSchedulePicker, openIntegrationsPanel, renderSearchResults,
+            onSearchInput, closeSearch, isSearchOpen,
+        } = createModals({
                 getSocket: () => socket, getActiveView: () => activeView,
-                sendCmd, showToast, renderMessage,
+                sendCmd, showToast,
                 getMessageContent: (id) => (messageMap[id] && messageMap[id].content) || '',
+                openSearchResult: (threadId, msgId) => _openSearchResult(threadId, msgId),
             });
         // Pinned messages: destructured into same-named bindings.
         const { pinMsg, showPinPanel, renderPins, unpinMsg, jumpToMsg } =
@@ -3370,16 +3373,25 @@ import { createIdentityResolver } from './identity.js';
         // openForwardModal / openSchedulePicker / openIntegrationsPanel /
         // renderSearchResults: moved to modals.js (createModals).
 
-        // Search debouncing
-        let searchTimeout = null;
-        document.getElementById("search-input").onkeyup = (e) => {
-            clearTimeout(searchTimeout);
-            const query = e.target.value.trim();
-            if (query.length < 3) return;
-            searchTimeout = setTimeout(() => {
-                socket.send(JSON.stringify({cmd: "search", query: query}));
-            }, 500);
-        };
+        // Search box: results open in a panel over the feed (modals.js).
+        document.getElementById("search-input").addEventListener("input", (e) => onSearchInput(e.target.value));
+
+        // A search result can live in another conversation: open that thread
+        // first, then scroll to the message once its history has rendered.
+        function _openSearchResult(threadId, msgId) {
+            if (!threadId || !msgId) return;
+            if (activeView && activeView.id === threadId) { jumpToMsg(msgId); return; }
+            const row = document.getElementById(`nav-${threadId}`);
+            if (!row) return;
+            row.click();
+            let tries = 0;
+            const wait = setInterval(() => {
+                if (document.getElementById(`msg-${msgId}`) || ++tries > 20) {
+                    clearInterval(wait);
+                    jumpToMsg(msgId);
+                }
+            }, 200);
+        }
 
         // Outgoing throttled "typing" + staleness sweep interval: wired by typing.js.
         typing.attach(document.getElementById("message-input"));
@@ -3632,6 +3644,7 @@ import { createIdentityResolver } from './identity.js';
                 // gate. Only when no dialog closed does it fall through to the
                 // composer-level dismissals below.
                 if (closeTopmostDialog()) return;
+                if (closeSearch({ focusInput: true })) return;
                 document.getElementById("pin-panel").style.display = "none";
                 cancelReply();
                 _closeRoomOptionsMenu();
@@ -3686,6 +3699,7 @@ import { createIdentityResolver } from './identity.js';
             }
             _updateHeaderSubtitle();
             _closeRoomOptionsMenu();
+            if (isSearchOpen()) closeSearch();
         }
 
         // Muted line under the conversation name: member count for rooms,
