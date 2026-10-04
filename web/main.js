@@ -3697,7 +3697,7 @@ import { createIdentityResolver } from './identity.js';
         // Phone: the full placeholder ("… (Shift+Enter for newline)") wraps to two
         // lines in the narrow composer; the hint is desktop-keyboard advice anyway.
         if (window.innerWidth <= 768) {
-            document.getElementById("message-input").placeholder = "Type a message…";
+            document.getElementById("message-input").placeholder = t('ui.typeMessage');
         }
 
         // Per-conversation placeholder ("Message #general" / "Message Alice")

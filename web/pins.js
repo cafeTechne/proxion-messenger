@@ -50,9 +50,9 @@ export function createPins({ getSocket, getActiveView }) {
                 <div style="margin:2px 0;">${preview}</div>
                 <div style="display:flex;gap:8px;margin-top:4px;">
                     <button data-pin-action="jump" data-msg-id="${msgIdEsc}"
-                        style="background:transparent;border:none;color:#7dd3fc;cursor:pointer;padding:0;font-size:0.8em;">[Jump]</button>
+                        style="background:transparent;border:none;color:#7dd3fc;cursor:pointer;padding:0;font-size:0.8em;">${escHtml(t('pin.jump'))}</button>
                     <button data-pin-action="unpin" data-msg-id="${msgIdEsc}" data-thread-id="${threadId}"
-                        style="background:transparent;border:none;color:var(--text-secondary);cursor:pointer;padding:0;font-size:0.8em;">Unpin</button>
+                        style="background:transparent;border:none;color:var(--text-secondary);cursor:pointer;padding:0;font-size:0.8em;">${escHtml(t('pin.unpin'))}</button>
                 </div>`;
             list.appendChild(div);
         });

@@ -77,7 +77,7 @@ async function startGateway() {
 // Raw-English sentinels that ARE externalized: under qps they must render as
 // pseudo (accented/bracketed), so their exact English must NOT be visible. A
 // match means a string escaped the i18n layer.
-const SENTINELS = ['Rooms', 'Voice Channels', 'Contacts', 'Friend Requests', 'Keyboard Shortcuts', 'No rooms yet.', 'Create a room'];
+const SENTINELS = ['Rooms', 'Voice channels', 'Contacts', 'Friend requests', 'Keyboard shortcuts', 'No rooms yet.', 'Create a room'];
 
 let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`  ${ok ? '✓' : '✗'} ${name}${extra ? ' — ' + extra : ''}`); if (!ok) failures++; };
