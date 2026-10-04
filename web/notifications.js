@@ -46,6 +46,11 @@ export function createNotifications({ getSoundEnabled, getDesktopNotifEnabled, n
             return;
         }
         while (_toasts.length >= MAX_TOASTS) _toasts[0].remove(true);
+        // Sit just below the chat header (its actions stay clickable). A page
+        // banner above the app pushes the header down, so measure it rather
+        // than trusting the CSS fallback offset.
+        const hdrBottom = document.getElementById("chat-header")?.getBoundingClientRect?.().bottom;
+        if (hdrBottom > 0) container.style.top = `${Math.round(hdrBottom + 8)}px`;
 
         const el = document.createElement("div");
         el.className = `toast toast--${kind}`;
