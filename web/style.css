@@ -317,7 +317,7 @@ nav li.dm-item > svg { flex: 0 0 16px; }
     overflow-y: auto;
     /* Keep the visible message still when content above it grows (lazy images). */
     overflow-anchor: auto;
-    padding: 20px;
+    padding: var(--space-4) 0;
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -328,7 +328,7 @@ nav li.dm-item > svg { flex: 0 0 16px; }
     display: flex;
     gap: 12px;
     align-items: flex-start;
-    padding: 2px 16px;
+    padding: 2px var(--space-4);
     border-radius: 4px;
     background: transparent;
     max-width: none;
@@ -619,8 +619,21 @@ nav li.dm-item > svg { flex: 0 0 16px; }
     color: var(--text-primary);
 }
 
+#typing-indicator { padding: 0 var(--space-4); }
+
 @media (min-width: 769px) {
-    #message-form { padding: 12px 20px; gap: 8px; }
+    #message-form { padding: var(--space-3) var(--space-4); gap: var(--space-2); align-items: flex-end; }
+    /* Wide screens: cap the conversation at a 960px centered column. The feed
+       pads itself (percent padding resolves against the chat area width) so its
+       children keep their own layout and the scrollbar stays at the edge. The
+       composer, reply bar and typing line keep their full-width background and
+       inset their content to the same column. */
+    main > #message-feed { padding-inline: max(0px, calc((100% - 960px) / 2)); }
+    main > #message-form,
+    main > #reply-bar,
+    main > #typing-indicator {
+        padding-inline: calc(max(0px, calc((100% - 960px) / 2)) + var(--space-4));
+    }
 }
 
 /* The compose "+" disclosure and its wrapper are a mobile-only affordance. On
@@ -1377,7 +1390,7 @@ button:hover { background: var(--accent-hover); }
         #reply-bar {
             display: none;
             background: var(--bg-secondary);
-            padding: 8px 20px;
+            padding: var(--space-2) var(--space-4);
             border-top: 1px solid var(--border);
             border-bottom: 1px solid var(--border);
             justify-content: space-between;
