@@ -42,6 +42,18 @@ jobs:
       - name: Run vitest
         working-directory: web
         run: npm test
+      - name: i18n keys and pseudo-locale
+        working-directory: web
+        run: npm run check:i18n
+      - name: Contrast
+        working-directory: web
+        run: npm run check:contrast
+      - name: Spacing scale
+        working-directory: web
+        run: npm run check:spacing
+      - name: No color literals in JS
+        working-directory: web
+        run: npm run check:js-colors
 
   test:
     name: Python tests (${{ matrix.os }})
