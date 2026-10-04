@@ -49,6 +49,8 @@ const T = {
   // Classes for JS-built UI (end of style.css)
   colorWarningSoft: '#fbbf24', colorSuccessTint: '#134e26',
   slate700: '#334155', slate900: '#0f172a',
+  colorWarning: '#f59e0b',
+  roleAdmin: '#7c3aed', roleMod: '#0e7490',
 };
 
 // [label, fg, bg, minRatio]. minRatio 3 for large text / non-text UI.
@@ -82,6 +84,9 @@ const PAIRS = [
   ['slate-50 on slate button', T.slate50, T.slate700, 4.5],
   ['slate-900 on update install button', T.slate900, T.colorSuccessSoft, 4.5],
   ['danger-soft text on surface-2', T.colorDangerSoft, T.surface2, 4.5],
+  ['warning (pod note) text on bg', T.colorWarning, T.bgPrimary, 4.5],
+  ['white on admin role badge', T.white, T.roleAdmin, 4.5],
+  ['white on mod role badge', T.white, T.roleMod, 4.5],
 ];
 
 let fails = 0;
