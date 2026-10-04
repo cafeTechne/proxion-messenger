@@ -88,6 +88,7 @@ import { createRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { createMeme } from './meme.js';
 import { inlineNotice, feedEmptyState } from './states.js';
 import { installFocusTrap, closeTopmostDialog } from './focus-trap.js';
+import { initSettingsNav, createDebouncedSaver } from './settings-panel.js';
 import { makeListNavigable, announce } from './a11y.js';
 import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport } from './dmhistory.js';
 import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } from './i18n.js';
@@ -1061,6 +1062,9 @@ import { createIdentityResolver } from './identity.js';
             document.getElementById("settings-advanced").style.display = "none";
             document.getElementById("settings-advanced-toggle").setAttribute("aria-expanded", "false");
             document.getElementById("settings-advanced-caret").textContent = "▾";
+            _settingsNav.reset();
+            _syncGwApplyBtn();
+            _setProfileSaveStatus("");
             // R33: Fetch connectivity + health for settings federation panel.
             // Gateway-only HTTP endpoints: skip in the web build (the panel is
             // hidden there by applyTransportGating) so we do not fire requests
@@ -1103,6 +1107,8 @@ import { createIdentityResolver } from './identity.js';
             if (window.__TAURI__?.invoke) {
                 const tauriSection = document.getElementById('settings-tauri-section');
                 if (tauriSection) tauriSection.style.display = '';
+                const updatesBtn = document.getElementById('check-updates-btn');
+                if (updatesBtn) updatesBtn.style.display = '';
                 // Load autostart state
                 window.__TAURI__.invoke('plugin:autostart|is_enabled').then(enabled => {
                     const toggle = document.getElementById('settings-autostart-toggle');
@@ -1118,30 +1124,73 @@ import { createIdentityResolver } from './identity.js';
                     .catch(() => {});
             }
         };
-        document.getElementById("settings-save-btn").onclick = () => {
-            const newGwUrl = document.getElementById("settings-gw-url").value.trim();
-            const gwUrlChanged = newGwUrl && newGwUrl !== localStorage.getItem("proxion_gateway_url");
-            if (newGwUrl) localStorage.setItem("proxion_gateway_url", newGwUrl);
+        // Settings apply immediately: toggles on change, display name and status
+        // autosave (debounced while typing, flushed on change/blur and on close),
+        // and the gateway URL through its own Apply button. Done only closes.
+        function _setProfileSaveStatus(text) {
+            const el = document.getElementById("settings-profile-status");
+            if (el) el.textContent = text;
+        }
+        let _profileSavedTimer = null;
+        function _flashProfileSaved() {
+            _setProfileSaveStatus(t('settings.saved'));
+            clearTimeout(_profileSavedTimer);
+            _profileSavedTimer = setTimeout(() => _setProfileSaveStatus(""), 2000);
+        }
+        function _saveDisplayName() {
             const displayName = document.getElementById("settings-display-name").value.trim();
-            if (displayName) {
-                localStorage.setItem("proxion_display_name", displayName);
-                document.getElementById("username").innerText = displayName;
-                if (socket && socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({cmd: "set_identity", display_name: displayName}));
-                }
-                podWriteProfile({ displayName }).catch(() => {});
-                // R100/A1: also publish the name into the standard WebID card so
-                // other Solid apps show a name, not an opaque id.
-                podEnsureProfileName(displayName).catch(() => {});
+            if (!displayName || displayName === (localStorage.getItem("proxion_display_name") || "")) return;
+            localStorage.setItem("proxion_display_name", displayName);
+            document.getElementById("username").innerText = displayName;
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({cmd: "set_identity", display_name: displayName}));
             }
+            podWriteProfile({ displayName }).catch(() => {});
+            // R100/A1: also publish the name into the standard WebID card so
+            // other Solid apps show a name, not an opaque id.
+            podEnsureProfileName(displayName).catch(() => {});
+            _flashProfileSaved();
+        }
+        function _saveStatusMessage() {
             const statusMessage = document.getElementById("settings-status-message").value.trim();
+            if (statusMessage === (localStorage.getItem("proxion_status_message") || "")) return;
             localStorage.setItem("proxion_status_message", statusMessage);
-            if (socket && socket.readyState === WebSocket.OPEN && statusMessage) {
+            if (socket && socket.readyState === WebSocket.OPEN) {
                 socket.send(JSON.stringify({cmd: "set_presence", status: "online", status_message: statusMessage}));
             }
+            _flashProfileSaved();
+        }
+        const _nameSaver = createDebouncedSaver(_saveDisplayName, 800);
+        const _statusSaver = createDebouncedSaver(_saveStatusMessage, 800);
+        for (const [id, saver] of [["settings-display-name", _nameSaver], ["settings-status-message", _statusSaver]]) {
+            const el = document.getElementById(id);
+            el.addEventListener("input", () => saver.schedule());
+            el.addEventListener("change", () => saver.flush());
+            el.addEventListener("blur", () => saver.flush());
+        }
+        function _closeSettings() {
+            _nameSaver.flush();
+            _statusSaver.flush();
             document.getElementById("settings-modal").style.display = "none";
-            if (gwUrlChanged) { if (socket) socket.close(); location.reload(); }
+        }
+        const _settingsNav = initSettingsNav(document);
+        function _savedGwUrl() {
+            return localStorage.getItem("proxion_gateway_url") || "ws://127.0.0.1:7474";
+        }
+        function _syncGwApplyBtn() {
+            const v = document.getElementById("settings-gw-url").value.trim();
+            document.getElementById("settings-gw-apply-btn").disabled = !v || v === _savedGwUrl();
+        }
+        document.getElementById("settings-gw-url").addEventListener("input", _syncGwApplyBtn);
+        document.getElementById("settings-gw-apply-btn").onclick = () => {
+            const newGwUrl = document.getElementById("settings-gw-url").value.trim();
+            if (!newGwUrl || newGwUrl === _savedGwUrl()) return;
+            _closeSettings();
+            localStorage.setItem("proxion_gateway_url", newGwUrl);
+            if (socket) socket.close();
+            location.reload();
         };
+        document.getElementById("settings-save-btn").onclick = _closeSettings;
 
         document.getElementById("add-peer-btn").onclick = () => {
             document.getElementById("add-peer-input").value = "";
@@ -4665,9 +4714,7 @@ import { createIdentityResolver } from './identity.js';
             });
 
             // Settings modal: Cancel button
-            attachListener('#settings-cancel-btn', 'click', () => {
-                document.getElementById('settings-modal').style.display = 'none';
-            });
+            attachListener('#settings-cancel-btn', 'click', _closeSettings);
 
             // R91: Calls / connectivity — self-test and in-app relay config.
             attachListener('#calls-test-btn', 'click', async () => {

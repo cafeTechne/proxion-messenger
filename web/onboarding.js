@@ -14,16 +14,9 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
 
     function openSettingsToPod() {
         document.getElementById("settings-btn").click();
-        // Pod controls live in the Advanced section (G1) — expand it and jump there.
-        const adv = document.getElementById("settings-advanced");
-        if (adv) {
-            adv.style.display = "";
-            document.getElementById("settings-advanced-toggle")?.setAttribute("aria-expanded", "true");
-            const caret = document.getElementById("settings-advanced-caret");
-            if (caret) caret.textContent = "▴";
-            (document.getElementById("settings-pod-disconnected") ||
-             document.getElementById("settings-pod-connected"))?.scrollIntoView({ block: "nearest" });
-        }
+        // Jump to the Pod & sync section (the nav button works on mobile too,
+        // where the nav itself is hidden).
+        document.querySelector('.settings-nav-item[data-settings-target="settings-sec-pod"]')?.click();
     }
 
     function obPodMode(mode) {
