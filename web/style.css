@@ -266,6 +266,10 @@ nav li.active { background: var(--bg-accent); color: var(--text-primary); }
 @keyframes msg-sending-spin { to { transform: rotate(360deg); } }
 /* R66: send-failure state — a message that never confirmed */
 .message.msg-failed { opacity: 1; }
+/* No "sent" check until the echo confirms; queued-offline sends say so. */
+.message.msg-pending .read-receipt,
+.message.msg-failed .read-receipt { display: none; }
+.msg-wait-note { margin-inline-start: 8px; font-size: 0.78em; color: var(--text-secondary); }
 .msg-fail-note {
     display: inline-flex; align-items: center; gap: 8px;
     margin-top: 4px; font-size: 0.78em; color: var(--color-danger-soft, #f87171);

@@ -16,20 +16,52 @@ import { announce } from './a11y.js';
 
 const CONFIRM_TIMEOUT_MS = 18000;
 
-export function createSendStatus() {
-    const pending = new Map();   // msgId -> { timer, resend }
+// isOnline (optional): true when the socket is OPEN. A message sent while
+// offline sits in the connection queue and goes out on reconnect, so its
+// confirm timer must not run until then; it shows "Waiting for connection"
+// instead, and resumeWaiting() (called after the queue flushes) arms it.
+export function createSendStatus({ isOnline } = {}) {
+    const pending = new Map();   // msgId -> { timer, resend, waiting }
 
     function _el(msgId) { return document.getElementById('msg-' + msgId); }
 
     function _clearNote(el) { el?.querySelector('.msg-fail-note')?.remove(); }
+
+    function _clearWaitNote(el) { el?.querySelector('.msg-wait-note')?.remove(); }
+
+    function _arm(msgId, resend) {
+        if (isOnline && !isOnline()) {
+            pending.set(msgId, { timer: null, resend, waiting: true });
+            const el = _el(msgId);
+            if (el && !el.querySelector('.msg-wait-note')) {
+                const note = document.createElement('span');
+                note.className = 'msg-wait-note';
+                note.textContent = t('send.waitingForConnection');
+                (el.querySelector('.msg-content') || el).appendChild(note);
+            }
+            return;
+        }
+        const timer = setTimeout(() => _fail(msgId), CONFIRM_TIMEOUT_MS);
+        pending.set(msgId, { timer, resend, waiting: false });
+    }
 
     // Register an optimistic send. `resend` re-sends the original bytes.
     function track(msgId, resend) {
         if (!msgId) return;
         const prior = pending.get(msgId);
         if (prior) clearTimeout(prior.timer);
-        const timer = setTimeout(() => _fail(msgId), CONFIRM_TIMEOUT_MS);
-        pending.set(msgId, { timer, resend });
+        _arm(msgId, resend);
+    }
+
+    // The offline queue was just flushed: start the confirm timer for every
+    // message that was waiting for the connection.
+    function resumeWaiting() {
+        for (const [msgId, rec] of pending) {
+            if (!rec.waiting) continue;
+            _clearWaitNote(_el(msgId));
+            rec.waiting = false;
+            rec.timer = setTimeout(() => _fail(msgId), CONFIRM_TIMEOUT_MS);
+        }
     }
 
     // Success — the echo or fanout ack arrived.
@@ -37,7 +69,7 @@ export function createSendStatus() {
         const rec = pending.get(msgId);
         if (rec) { clearTimeout(rec.timer); pending.delete(msgId); }
         const el = _el(msgId);
-        if (el) { el.classList.remove('msg-pending', 'msg-failed'); _clearNote(el); }
+        if (el) { el.classList.remove('msg-pending', 'msg-failed'); _clearNote(el); _clearWaitNote(el); }
     }
 
     // Failure — a correlated error, or (internally) the timeout.
@@ -45,8 +77,9 @@ export function createSendStatus() {
 
     function _fail(msgId) {
         const rec = pending.get(msgId);
-        if (rec) clearTimeout(rec.timer);           // keep rec (retain resend), drop the timer
+        if (rec) { clearTimeout(rec.timer); rec.waiting = false; }   // keep rec (retain resend), drop the timer
         const el = _el(msgId);
+        _clearWaitNote(el);
         if (!el || !el.classList.contains('msg-pending')) return;   // already confirmed / gone
         el.classList.remove('msg-pending');
         el.classList.add('msg-failed');
@@ -75,8 +108,7 @@ export function createSendStatus() {
         if (el) { el.classList.remove('msg-failed'); el.classList.add('msg-pending'); _clearNote(el); }
         if (rec && rec.resend) {
             try { rec.resend(); } catch (_) { /* stays pending; timeout re-fails */ }
-            const timer = setTimeout(() => _fail(msgId), CONFIRM_TIMEOUT_MS);
-            pending.set(msgId, { timer, resend: rec.resend });
+            _arm(msgId, rec.resend);
         }
     }
 
@@ -108,5 +140,5 @@ export function createSendStatus() {
         return false;
     }
 
-    return { track, confirm, fail, trackPodWrite };
+    return { track, confirm, fail, trackPodWrite, resumeWaiting };
 }

@@ -579,7 +579,9 @@ import { createIdentityResolver } from './identity.js';
             isBlocked: (webid) => blocks.isBlocked(webid),
         });
         // R66: optimistic-send failure tracking (mark unconfirmed messages failed + retry).
-        const sendStatus = createSendStatus();
+        const sendStatus = createSendStatus({
+            isOnline: () => !!socket && socket.readyState === WebSocket.OPEN,
+        });
         // R65: user blocking (the gateway enforces; this is the client feature).
         const blocks = createBlocks({
             getSocket: () => socket, showToast,
@@ -1609,6 +1611,7 @@ import { createIdentityResolver } from './identity.js';
                         // any commands queued while offline — they'd have been dropped
                         // if flushed at onopen, before registration.
                         flushPending();
+                        sendStatus.resumeWaiting();   // queued sends just went out
                         const _podWid = localStorage.getItem("proxion_pod_webid");
                         if (_podWid) socket.send(JSON.stringify({cmd: "link_pod", webid: _podWid}));
                         const _statusMsg = localStorage.getItem("proxion_status_message");

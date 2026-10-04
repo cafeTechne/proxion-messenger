@@ -20,6 +20,7 @@ function mkMsgEl() {
         querySelector: (sel) => {
             if (sel === '.msg-content') return content;
             if (sel === '.msg-fail-note') return children.find(c => c.className === 'msg-fail-note') || null;
+            if (sel === '.msg-wait-note') return children.find(c => c.className === 'msg-wait-note' && !c._removed) || null;
             return null;
         },
     };
@@ -147,5 +148,57 @@ describe('trackPodWrite (D2 write-through)', () => {
         const ss = createSendStatus();
         expect(await ss.trackPodWrite('', async () => false)).toBe(false);
         expect(await ss.trackPodWrite('nope', null)).toBe(false);
+    });
+});
+
+describe('createSendStatus while offline', () => {
+    const waitNote = (el) => el._children.find(c => c.className === 'msg-wait-note' && !c._removed);
+
+    it('does not fail a message queued while the socket is not open', () => {
+        let online = false;
+        const ss = createSendStatus({ isOnline: () => online });
+        els['msg-q1'] = mkMsgEl();
+        ss.track('q1', () => {});
+        vi.advanceTimersByTime(60000);
+        expect(els['msg-q1'].classList.contains('msg-failed')).toBe(false);
+        expect(els['msg-q1'].classList.contains('msg-pending')).toBe(true);
+        expect(waitNote(els['msg-q1']).textContent).toBeTruthy();
+    });
+
+    it('starts the confirm timer once the queue flushes', () => {
+        let online = false;
+        const ss = createSendStatus({ isOnline: () => online });
+        els['msg-q1'] = mkMsgEl();
+        ss.track('q1', () => {});
+        online = true;
+        ss.resumeWaiting();
+        expect(waitNote(els['msg-q1'])).toBeUndefined();
+        vi.advanceTimersByTime(17999);
+        expect(els['msg-q1'].classList.contains('msg-failed')).toBe(false);
+        vi.advanceTimersByTime(1);
+        expect(els['msg-q1'].classList.contains('msg-failed')).toBe(true);
+    });
+
+    it('a confirmed queued message clears the waiting note and never fails', () => {
+        let online = false;
+        const ss = createSendStatus({ isOnline: () => online });
+        els['msg-q1'] = mkMsgEl();
+        ss.track('q1', () => {});
+        online = true;
+        ss.resumeWaiting();
+        ss.confirm('q1');
+        vi.advanceTimersByTime(60000);
+        expect(els['msg-q1'].classList.contains('msg-failed')).toBe(false);
+        expect(waitNote(els['msg-q1'])).toBeUndefined();
+    });
+
+    it('resumeWaiting leaves messages sent while online alone', () => {
+        const ss = createSendStatus({ isOnline: () => true });
+        els['msg-o1'] = mkMsgEl();
+        ss.track('o1', () => {});
+        vi.advanceTimersByTime(10000);
+        ss.resumeWaiting();               // must not restart the running timer
+        vi.advanceTimersByTime(8000);
+        expect(els['msg-o1'].classList.contains('msg-failed')).toBe(true);
     });
 });
