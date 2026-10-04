@@ -121,7 +121,7 @@ async def test_post_setup_pod_error_messages_are_friendly(tmp_path, raised, expe
     data = resp.json()
     assert data["status"] == "error"
     assert data["message"] == expected
-    assert "—" not in data["message"]
+    assert "\N{EM DASH}" not in data["message"]
     if leaked:
         assert leaked not in data["message"]
 
