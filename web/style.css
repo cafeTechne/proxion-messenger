@@ -1438,6 +1438,11 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         .emoji-picker {
             display: none;
             position: absolute;
+            /* Resting spot above the composer at the chat column's edge, so the
+               picker never lands over the sidebar header before togglePicker()
+               anchors it to a message (which resets right/bottom). */
+            right: var(--space-4);
+            bottom: 96px;
             background: #16213e;
             border: 1px solid #0f3460;
             padding: 8px;

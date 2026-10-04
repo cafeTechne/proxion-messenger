@@ -176,6 +176,8 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         const ph = picker.offsetHeight || 120;
         const clampedLeft = Math.max(8, Math.min(x, window.innerWidth - pw - 8));
         const clampedTop = Math.max(8, y - ph - 8);
+        picker.style.right = "auto";
+        picker.style.bottom = "auto";
         picker.style.left = `${clampedLeft}px`;
         picker.style.top = `${clampedTop}px`;
         // Keyboard: remember the opener to restore focus to, move focus into the

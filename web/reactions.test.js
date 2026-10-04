@@ -103,6 +103,18 @@ describe('togglePicker', () => {
     r.togglePicker('m1', 100, 200);
     expect(r.state.lastEmojiMsgId).toBe('m1');
   });
+  it('anchors to the message, overriding the resting right/bottom spot', () => {
+    const { r } = make();
+    const picker = document.getElementById('emoji-picker');
+    const orig = document.getElementById;
+    document.getElementById = (id) => (id === 'emoji-picker' ? picker : orig(id));
+    r.togglePicker('m2', 100, 200);
+    document.getElementById = orig;
+    expect(picker.style.right).toBe('auto');
+    expect(picker.style.bottom).toBe('auto');
+    expect(picker.style.left).toMatch(/px$/);
+    expect(picker.style.top).toMatch(/px$/);
+  });
 });
 
 describe('custom-emoji reaction pills (R60A)', () => {
