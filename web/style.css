@@ -67,6 +67,13 @@
     --space-5: 24px;
     --space-6: 32px;
 
+    /* Shared row height for the sidebar header and the chat header, so their
+       bottom borders line up on desktop. */
+    --header-h: 64px;
+
+    /* Monospace stack for addresses, IPs and code. */
+    --font-mono: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace;
+
     /* Neutral slate scale — the palette the legacy inline styles draw from */
     --slate-50: #f1f5f9;
     --slate-300: #cbd5e1;
@@ -81,9 +88,15 @@
     --slate-700: #334155;
     --slate-800: #1e293b;
     --slate-900: #0f172a;
+
+    /* Dark native widgets (date pickers, select popups, scrollbars). */
+    color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
+/* Form controls do not inherit the page font by default (monospace textarea,
+   Arial buttons). */
+button, input, select, textarea { font: inherit; color: inherit; }
 /* Column layout so top-level banners (NAT warning) sit ABOVE the app in normal
    flow and push it down, instead of position:fixed overlaying the sidebar
    header. #app is the sidebar+chat row and takes the remaining height. */
@@ -987,7 +1000,7 @@ button:hover { background: var(--accent-hover); }
 }
 .contact-search-item:hover { background: rgba(255,255,255,0.06); }
 .contact-search-name { font-size: 0.9em; color: var(--text-primary, #f1f5f9); }
-.contact-search-did { font-size: 0.75em; color: var(--text-secondary); font-family: monospace; }
+.contact-search-did { font-size: 0.75em; color: var(--text-secondary); font-family: var(--font-mono); }
 
 /* ── PLAN_ROUND_56 D2/D3: high-contrast & forced-colors support ── */
 
@@ -1366,10 +1379,10 @@ button:hover { background: var(--accent-hover); }
 
         /* Markdown */
         .code-block { background: var(--slate-900); border-radius: 4px; padding: 8px 12px;
-            margin: 4px 0; overflow-x: auto; font-family: monospace;
+            margin: 4px 0; overflow-x: auto; font-family: var(--font-mono);
             font-size: 0.85em; white-space: pre; display: block; }
         .inline-code { background: var(--slate-800); border-radius: 3px; padding: 1px 4px;
-            font-family: monospace; font-size: 0.9em; }
+            font-family: var(--font-mono); font-size: 0.9em; }
 
         /* Scroll-to-bottom button */
         #scroll-bottom-btn {
@@ -1478,7 +1491,7 @@ button:hover { background: var(--accent-hover); }
             margin-bottom: 4px;
         }
         .profile-webid {
-            font-family: monospace;
+            font-family: var(--font-mono);
             font-size: 0.8em;
             color: var(--text-secondary, #94a3b8);
             word-break: break-all;
@@ -1595,7 +1608,7 @@ button:hover { background: var(--accent-hover); }
         /* Round 66: Session management */
         .session-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--slate-700); font-size: 0.85em; gap: 8px; }
         .session-info { display: flex; flex-direction: column; gap: 2px; flex: 1; }
-        .session-ip { font-family: monospace; font-size: 0.9em; color: var(--text-secondary); }
+        .session-ip { font-family: var(--font-mono); font-size: 0.9em; color: var(--text-secondary); }
         .session-time { font-size: 0.8em; color: var(--slate-500); }
         .session-current { color: var(--color-success-soft); font-size: 0.8em; font-weight: 600; }
         .session-revoke-btn { background: #7f1d1d; border: none; color: #fca5a5; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.8em; }
@@ -1611,7 +1624,7 @@ button:hover { background: var(--accent-hover); }
 
         /* Round 70: Bot/Webhook */
         .bot-badge { font-size: 0.65rem; font-weight: 700; background: var(--accent,var(--accent)); color: white; border-radius: 3px; padding: 1px 5px; margin-left: 6px; vertical-align: middle; letter-spacing: 0.05em; }
-        .copyable-code { display: block; background: var(--slate-900); padding: 10px; border-radius: 6px; font-size: 0.85rem; word-break: break-all; margin: 8px 0; user-select: all; font-family: monospace; border: 1px solid var(--slate-700); }
+        .copyable-code { display: block; background: var(--slate-900); padding: 10px; border-radius: 6px; font-size: 0.85rem; word-break: break-all; margin: 8px 0; user-select: all; font-family: var(--font-mono); border: 1px solid var(--slate-700); }
         .room-integrations-btn { background: transparent; border: none; color: var(--text-secondary); font-size: 1em; cursor: pointer; padding: 0 4px; }
 
 /* ── Component classes (R95/F2b): de-inlined from the repeated style= clusters
