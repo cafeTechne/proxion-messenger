@@ -71,6 +71,7 @@ const SHELL = [
   "meme.js",
   "dialogs.js",
   "menu.js",
+  "errors.js",
   "dmhistory.js",
   "push.js",
   "states.js",

@@ -140,7 +140,7 @@ export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoo
                 } else {
                     errEl.textContent = t('room.linkNoCode'); return;
                 }
-            } catch (e) { errEl.textContent = t('room.invalidUrl', { error: e.message }); return; }
+            } catch { errEl.textContent = t('room.invalidInviteLink'); return; }
         } else {
             socket.send(JSON.stringify({ cmd: "join_room", code: raw }));
         }
