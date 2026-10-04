@@ -1,4 +1,4 @@
-// Message rendering — the core message feed renderer. Builds message elements
+// Message rendering: the core message feed renderer. Builds message elements
 // in timestamp order (a reply carries an inline quote of its parent), draws
 // date and "New messages" dividers, manages the
 // scroll-to-bottom button and the virtual-scroll "load older on scroll-to-top"
