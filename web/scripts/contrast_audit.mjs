@@ -46,6 +46,9 @@ const T = {
   colorWarningBg: '#92400e', colorWarningText: '#fef3c7',
   colorInfoBg: '#1e3a5f', colorInfoText: '#dbeafe',
   surface2: '#1e293b', slate50: '#f1f5f9',
+  // Classes for JS-built UI (end of style.css)
+  colorWarningSoft: '#fbbf24', colorSuccessTint: '#134e26',
+  slate700: '#334155', slate900: '#0f172a',
 };
 
 // [label, fg, bg, minRatio]. minRatio 3 for large text / non-text UI.
@@ -69,6 +72,16 @@ const PAIRS = [
   ['warning text on warning toast / banner', T.colorWarningText, T.colorWarningBg, 4.5],
   ['info text on info banner', T.colorInfoText, T.colorInfoBg, 4.5],
   ['slate-50 on info toast', T.slate50, T.surface2, 4.5],
+  ['warning-soft text on bg', T.colorWarningSoft, T.bgPrimary, 4.5],
+  ['warning-soft text on secondary bg', T.colorWarningSoft, T.bgSecondary, 4.5],
+  ['warning-soft claim on friend-request card', T.colorWarningSoft, T.surface2, 4.5],
+  ['primary text on friend-request card', T.textPrimary, T.surface2, 4.5],
+  ['secondary text on surface-2 (badges, chips)', T.textSecondary, T.surface2, 4.5],
+  ['slate-600 meta text on surface-2', T.slate600, T.surface2, 4.5],
+  ['success-soft on verified tint', T.colorSuccessSoft, T.colorSuccessTint, 4.5],
+  ['slate-50 on slate button', T.slate50, T.slate700, 4.5],
+  ['slate-900 on update install button', T.slate900, T.colorSuccessSoft, 4.5],
+  ['danger-soft text on surface-2', T.colorDangerSoft, T.surface2, 4.5],
 ];
 
 let fails = 0;

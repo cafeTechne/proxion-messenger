@@ -10,6 +10,7 @@
     "check:solid-sdk": "node --experimental-vm-modules scripts/check_solid_sdk_versions.mjs",
     "check:contrast": "node scripts/contrast_audit.mjs",
     "check:i18n": "node scripts/i18n_check.mjs",
+    "check:js-colors": "node scripts/check_js_colors.mjs",
     "gen:pseudo": "node scripts/gen_pseudo_locale.mjs",
     "smoke:browser": "node smoke_browser.mjs",
     "smoke:webrtc": "node smoke_webrtc.mjs",
