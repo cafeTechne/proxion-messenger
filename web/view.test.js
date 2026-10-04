@@ -192,3 +192,46 @@ describe('_navigateToThread', () => {
     expect(() => make()._navigateToThread('')).not.toThrow();
   });
 });
+
+describe('opening a conversation (chat conventions)', () => {
+  function makeWith(onViewOpened) {
+    return createView({
+      getSocket: () => host.socket,
+      setActiveView: (v) => { host.activeView = v; },
+      setMessageMap: (m) => { host.messageMap = m; },
+      setAllMessages: (a) => { host.allMessages = a; },
+      setCurrentRoomMembers: (c) => { host.currentRoomMembers = c; },
+      getAllMessages: () => host.allMessages,
+      getPeerDidToCertId: () => host.peerDidToCertId, getThreadNames: () => host.threadNames,
+      getRoomInviteUrls: () => host.roomInviteUrls, getRoomCreatorOf: () => host.roomCreatorOf,
+      getUnreadCounts: () => host.unreadCounts, getMutedThreads: () => host.mutedThreads,
+      hideEmptyState() {}, updateE2EStatus() {}, updateIdentityFingerprint() {}, closeMentionDropdown() {},
+      updateSidebarBadge() {}, sendUpdateLastRead: () => sent.push({ cmd: 'update_last_read' }),
+      loadRoomHistory: (id) => sent.push({ cmd: 'load_history', id }), toggleSidebar() {},
+      updateDisappearBanner() {}, requestRoomMembers() {}, renderMembersPanel() {},
+      updateVoiceChannels() {}, openSidebarCtx() {}, resetDateDivider() {},
+      onViewOpened,
+    });
+  }
+  it('calls onViewOpened after the view is set, for rooms and DMs', () => {
+    const seen = [];
+    const v = makeWith(() => seen.push(host.activeView && host.activeView.id));
+    v.openLocalDmThread('dm-1', 'Carol', 'did:key:zCarol');
+    v.addRoomToSidebar('room-own', 'My Room', '');
+    els['room-list']._children[0].onclick();
+    v.openContactThread({ certificate_id: 'cert-9', peer_did: 'did:key:zBob', display_name: 'Bob' });
+    expect(seen).toEqual(['dm-1', 'room-own', 'cert-9']);
+  });
+  it('requests history before moving the read marker, so the divider sees the old one', () => {
+    const v = makeWith(() => {});
+    v.openLocalDmThread('dm-1', 'Carol', 'did:key:zCarol');
+    const order = sent.map(m => m.cmd);
+    expect(order.indexOf('load_history')).toBeLessThan(order.indexOf('mark_read'));
+    expect(order.indexOf('load_history')).toBeLessThan(order.indexOf('update_last_read'));
+    sent.length = 0;
+    v.addRoomToSidebar('room-own', 'My Room', '');
+    els['room-list']._children[0].onclick();
+    const order2 = sent.map(m => m.cmd);
+    expect(order2.indexOf('load_history')).toBeLessThan(order2.indexOf('mark_read'));
+  });
+});

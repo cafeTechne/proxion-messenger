@@ -253,6 +253,10 @@ nav li.dm-item > svg { flex: 0 0 16px; }
     overflow: hidden;
     text-overflow: ellipsis;
 }
+/* DM row: name truncates, the last-message time stays on the same line at the end. */
+.dm-item-name { display: flex; align-items: baseline; gap: 4px; }
+.dm-item-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dm-item-ts { flex-shrink: 0; color: var(--text-secondary); font-size: 0.75em; }
 .room-item-preview, .dm-item-preview {
     font-size: 0.8em;
     color: var(--text-secondary);
@@ -286,6 +290,27 @@ nav li.dm-item > svg { flex: 0 0 16px; }
     text-overflow: ellipsis;
 }
 #chat-header-actions { gap: var(--space-1); }
+/* Conversation name plus a muted subtitle (member count / presence). */
+.chat-header-title { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.chat-header-subtitle {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* Room options ("⋯") button and its dropdown (a .ctx-menu, fixed-positioned by JS). */
+.room-options { display: inline-flex; }
+#room-options-btn {
+    background: transparent; border: none; color: var(--text-secondary);
+    cursor: pointer; padding: 0; min-width: 32px; height: 32px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: var(--radius-sm);
+}
+#room-options-btn:hover,
+#room-options-btn[aria-expanded="true"] { background: rgba(255,255,255,0.1); color: var(--text-primary); }
+.room-options-menu { display: flex; flex-direction: column; }
+.room-options-menu[hidden] { display: none; }
 /* One hit box for every header icon button. Buttons with a visible label keep
    their own inline padding, so the label still fits. */
 #chat-header-actions > button,
@@ -838,6 +863,8 @@ button:hover { background: var(--accent-hover); }
         min-width: 72px;
         font-size: 1.1em;
     }
+    .chat-header-title { min-width: 72px; }
+    #room-options-btn { min-width: 44px; min-height: 44px; }
     .mobile-overlay {
         display: none;
         position: absolute;
@@ -1325,6 +1352,16 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             border-color: var(--accent-hover);
             background: rgba(233, 69, 96, 0.32);
         }
+        /* "Add reaction" pill at the end of a non-empty reaction row. */
+        .reaction.reaction-add {
+            display: inline-flex; align-items: center; gap: 2px;
+            background: rgba(255,255,255,0.06); color: var(--text-secondary);
+            font: inherit; font-size: 0.8em; font-weight: 400; line-height: inherit;
+        }
+        .reaction.reaction-add:hover,
+        .reaction.reaction-add:focus-visible {
+            background: rgba(255,255,255,0.18); color: var(--text-primary);
+        }
         /* D3: pop a reaction pill when it is added */
         @keyframes reaction-pop {
             0%   { transform: scale(0.6); }
@@ -1422,7 +1459,17 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         }
         .composer-emoji-panel button:hover,
         .composer-emoji-panel button:focus-visible { background: rgba(255,255,255,0.1); }
-        .mention { background: rgba(88,101,242,0.3); border-radius: 3px; padding: 0 2px; }
+        .mention {
+            background: color-mix(in srgb, var(--accent) 22%, transparent);
+            color: var(--accent-text);
+            border-radius: 3px; padding: 0 2px;
+        }
+        /* A message that mentions you: faint accent wash plus a start-edge bar. */
+        .message.mention-highlight {
+            background: color-mix(in srgb, var(--accent) 10%, transparent);
+            box-shadow: inset 2px 0 var(--accent);
+        }
+        [dir="rtl"] .message.mention-highlight { box-shadow: inset -2px 0 var(--accent); }
         #reply-bar {
             display: none;
             background: var(--bg-secondary);
@@ -1437,15 +1484,31 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         .cancel-reply { cursor: pointer; color: var(--accent); font-weight: bold; background: none; border: none; padding: 0; }
         .cancel-reply:hover, .cancel-reply:focus-visible { background: rgba(255,255,255,0.06); }
         
-        .quoted-context {
+        /* Reply quote: one muted line above a reply; click jumps to the parent. */
+        .reply-context {
             font-size: 0.85em;
             color: var(--text-secondary);
-            border-left: 2px solid var(--border);
-            padding-left: 8px;
-            margin-bottom: 4px;
+            border-inline-start: 2px solid var(--border);
+            padding-inline-start: var(--space-2);
+            margin-bottom: 2px;
+            max-width: 75ch;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
             cursor: pointer;
         }
-        .quoted-context:hover { color: var(--text-primary); }
+        .reply-context:hover { color: var(--text-primary); }
+        .reply-context .reply-author { font-weight: 600; }
+        .reply-context .reply-deleted,
+        .reply-context-loading { font-style: italic; }
+        /* Inline message editor (edit.js): grows with its content. */
+        .edit-input {
+            display: block; width: 100%; box-sizing: border-box; resize: none;
+            padding: 6px 8px; border-radius: var(--radius-sm);
+            border: 1px solid var(--border); background: var(--slate-900);
+            color: var(--text-primary); font: inherit; line-height: 1.4;
+            overflow-y: auto;
+        }
         
         /* Autolinked URLs in message text (renderMarkdown) */
         .msg-text a { color: var(--accent-text); text-decoration: underline; overflow-wrap: anywhere; }

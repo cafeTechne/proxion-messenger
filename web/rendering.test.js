@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createRendering, captureScrollAnchor, restoreScrollAnchor, isFeedAtBottom } from './rendering.js';
+import {
+  createRendering, captureScrollAnchor, restoreScrollAnchor, isFeedAtBottom,
+  replySnippet, replyQuoteHtml, highlightMentions, dateLabel, timeHtml, GROUP_WINDOW_MS,
+} from './rendering.js';
 
 // Minimal DOM element stub supporting the operations rendering.js uses.
 function mkEl(over = {}) {
@@ -79,30 +82,6 @@ describe('mergeOlderHistory (C3 federated pagination)', () => {
     const r = make();
     expect(r.mergeOlderHistory([{ message_id: 'a', timestamp: '2026-01-01' }])).toBe(0);
     expect(host.allMessages).toHaveLength(1);
-  });
-});
-
-describe('_buildThreadedMessages', () => {
-  it('orders replies immediately after their parent and assigns depth', () => {
-    const r = make();
-    const msgs = [
-      { message_id: 'a' },
-      { message_id: 'b', reply_to_id: 'a' },
-      { message_id: 'c' },
-      { message_id: 'b2', reply_to_id: 'b' },
-    ];
-    const out = r._buildThreadedMessages(msgs);
-    expect(out.map(m => m.message_id)).toEqual(['a', 'b', 'b2', 'c']);
-    expect(out.find(m => m.message_id === 'a')._threadDepth).toBe(0);
-    expect(out.find(m => m.message_id === 'b')._threadDepth).toBe(1);
-    expect(out.find(m => m.message_id === 'b2')._threadDepth).toBe(2);
-    expect(out.find(m => m.message_id === 'c')._threadDepth).toBe(0);
-  });
-  it('treats a reply to an unknown parent as a root', () => {
-    const r = make();
-    const out = r._buildThreadedMessages([{ message_id: 'x', reply_to_id: 'gone' }]);
-    expect(out.map(m => m.message_id)).toEqual(['x']);
-    expect(out[0]._threadDepth).toBe(0);
   });
 });
 
@@ -404,5 +383,356 @@ describe('hover action bar', () => {
     expect(html).toContain('class="read-receipt"');
     expect(html).toContain('<span class="sr-only">receipt.sent</span>');
     expect(html).not.toContain('&#10003;');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A tiny DOM (tree, classList, dataset, simple selectors) for the feed-order,
+// grouping, divider and delete tests. innerHTML is stored, not parsed.
+class MiniEl {
+  constructor(tag = 'div') {
+    this.tagName = tag.toUpperCase();
+    this.children = []; this.parentNode = null;
+    this.dataset = {}; this.style = {}; this._attrs = {}; this._html = '';
+    this.id = ''; this.className = ''; this.scrollTop = 0; this.textContent = '';
+  }
+  get classList() {
+    const el = this;
+    const list = () => el.className.split(/\s+/).filter(Boolean);
+    return {
+      add(...c) { el.className = [...new Set([...list(), ...c])].join(' '); },
+      remove(...c) { el.className = list().filter(x => !c.includes(x)).join(' '); },
+      contains(c) { return list().includes(c); },
+    };
+  }
+  _dkey(k) { return k.slice(5).replace(/-(\w)/g, (_, c) => c.toUpperCase()); }
+  setAttribute(k, v) {
+    v = String(v);
+    if (k === 'id') this.id = v;
+    else if (k === 'class') this.className = v;
+    else if (k.startsWith('data-')) this.dataset[this._dkey(k)] = v;
+    else this._attrs[k] = v;
+  }
+  getAttribute(k) {
+    if (k.startsWith('data-')) return this.dataset[this._dkey(k)] ?? null;
+    return this._attrs[k] ?? null;
+  }
+  addEventListener() {}
+  appendChild(c) { c.remove(); c.parentNode = this; this.children.push(c); return c; }
+  insertBefore(c, ref) {
+    c.remove(); c.parentNode = this;
+    const i = ref ? this.children.indexOf(ref) : -1;
+    if (i < 0) this.children.push(c); else this.children.splice(i, 0, c);
+    return c;
+  }
+  remove() {
+    if (!this.parentNode) return;
+    const p = this.parentNode;
+    p.children.splice(p.children.indexOf(this), 1);
+    this.parentNode = null;
+  }
+  replaceWith(n) { const p = this.parentNode; if (!p) return; p.insertBefore(n, this); this.remove(); }
+  get nextElementSibling() { const p = this.parentNode; return p ? p.children[p.children.indexOf(this) + 1] || null : null; }
+  get firstElementChild() { return this.children[0] || null; }
+  get lastElementChild() { return this.children[this.children.length - 1] || null; }
+  get innerHTML() { return this._html; }
+  set innerHTML(v) {
+    this._html = v;
+    if (v === '') { this.children.forEach(c => { c.parentNode = null; }); this.children = []; }
+  }
+  getBoundingClientRect() { return { top: 0, height: 0, left: 0 }; }
+  _all() { return this.children.flatMap(c => [c, ...c._all()]); }
+  matches(sel) {
+    const parts = sel.match(/\.[\w-]+|\[[^\]]+\]|#[\w-]+|^[a-z]+/gi) || [];
+    return parts.every(p => {
+      if (p[0] === '.') return this.classList.contains(p.slice(1));
+      if (p[0] === '#') return this.id === p.slice(1);
+      if (p[0] === '[') {
+        const m = /^\[([\w-]+)(?:="([^"]*)")?\]$/.exec(p);
+        const v = this.getAttribute(m[1]);
+        return m[2] === undefined ? v != null : v === m[2];
+      }
+      return this.tagName === p.toUpperCase();
+    });
+  }
+  querySelectorAll(sel) {
+    const last = sel.trim().split(/\s+/).pop(); // descendant prefixes ignored
+    return this._all().filter(e => e.matches(last));
+  }
+  querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
+}
+
+function miniDom() {
+  const root = new MiniEl('body');
+  const feed = root.appendChild(new MiniEl());
+  feed.id = 'message-feed';
+  feed.scrollHeight = 500; feed.clientHeight = 500; // always "at bottom"
+  const btn = root.appendChild(new MiniEl()); btn.id = 'scroll-bottom-btn';
+  const cnt = root.appendChild(new MiniEl()); cnt.id = 'scroll-bottom-count';
+  global.document = {
+    getElementById: (id) => root._all().find(e => e.id === id) || null,
+    createElement: (tag) => new MiniEl(tag),
+    querySelectorAll: (sel) => root.querySelectorAll(sel),
+    querySelector: (sel) => root.querySelector(sel),
+  };
+  global.CSS = { escape: (s) => s };
+  return { root, feed, btn, cnt };
+}
+const msgIds = (feed) => feed.children.filter(c => c.classList.contains('message')).map(c => c.dataset.messageId);
+const bodyOf = (feed, id) => feed.children.find(c => c.dataset.messageId === id).children.find(c => c.className === 'msg-body');
+const at = (iso) => new Date(iso).toISOString();
+
+describe('feed order: replies stay in timestamp order', () => {
+  it('appends a live reply to an old message at the bottom with an inline quote', () => {
+    const { feed } = miniDom();
+    const r = make();
+    r.renderMessage({ message_id: 'old', thread_id: 'room-1', from_webid: 'did:key:zA', content: 'first', timestamp: at('2026-10-04T10:00:00') });
+    r.renderMessage({ message_id: 'mid', thread_id: 'room-1', from_webid: 'did:key:zB', content: 'second', timestamp: at('2026-10-04T10:30:00') });
+    r.renderMessage({ message_id: 'rep', thread_id: 'room-1', from_webid: 'did:key:zB', content: 'answer', reply_to_id: 'old', timestamp: at('2026-10-04T11:00:00') });
+    expect(msgIds(feed)).toEqual(['old', 'mid', 'rep']);
+    const rep = feed.children.find(c => c.dataset.messageId === 'rep');
+    expect(rep.classList.contains('reply-nested')).toBe(false);
+    const html = bodyOf(feed, 'rep').innerHTML;
+    expect(html).toContain('class="reply-context" data-msg-action="scroll-reply" data-reply-id="old"');
+    expect(html).toContain('first');
+  });
+  it('_renderThreaded keeps the given order and never nests', () => {
+    const { feed } = miniDom();
+    const r = make();
+    r._renderThreaded([
+      { message_id: 'a', from_webid: 'x', timestamp: at('2026-10-04T10:00:00') },
+      { message_id: 'c', from_webid: 'y', timestamp: at('2026-10-04T10:01:00') },
+      { message_id: 'b', from_webid: 'y', reply_to_id: 'a', timestamp: at('2026-10-04T10:02:00') },
+    ], feed);
+    expect(msgIds(feed)).toEqual(['a', 'c', 'b']);
+  });
+});
+
+describe('reply quote text', () => {
+  it('uses the parent text, collapsed to one line', () => {
+    expect(replySnippet({ content: 'hello\n  world' })).toBe('hello world');
+  });
+  it('falls back to Photo / file name / voice for messages without text', () => {
+    expect(replySnippet({ content: '', file: { mime_type: 'image/png', filename: 'a.png' } })).toBe('msg.replyPhoto');
+    expect(replySnippet({ file: { mime_type: 'application/pdf', filename: 'report.pdf' } })).toBe('report.pdf');
+    expect(replySnippet({ file: { mime_type: 'application/pdf', filename: '' } })).toBe('msg.replyAttachment');
+    expect(replySnippet({ content_type: 'audio' })).toBe('msg.replyVoice');
+  });
+  it('says the original was deleted for a tombstone', () => {
+    expect(replySnippet({ deleted: true })).toBe('msg.replyDeleted');
+    expect(replyQuoteHtml({ deleted: true })).toContain('reply-deleted');
+  });
+  it('escapes the author and snippet', () => {
+    const html = replyQuoteHtml({ from_display_name: '<b>x', content: '<img src=x onerror=1>' });
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;img');
+    expect(html).toContain('&lt;b&gt;x');
+  });
+});
+
+describe('timestamps', () => {
+  it('renders a <time> with an ISO datetime and the full date as title', () => {
+    const html = timeHtml('2026-10-04T15:07:00Z', 'msg-ts-time');
+    expect(html).toMatch(/^<time class="msg-ts-time" datetime="2026-10-04T15:07:00.000Z" title="[^"]+">[^<]+<\/time>$/);
+    expect(html).toContain('2026');
+  });
+  it('header shows clock time, not a relative "ago" string', () => {
+    const { feed } = miniDom();
+    const r = make();
+    r.renderMessage({ message_id: 't1', thread_id: 'room-1', from_webid: 'did:key:zA', content: 'x', timestamp: new Date(Date.now() - 5 * 60000).toISOString() });
+    const html = bodyOf(feed, 't1').innerHTML;
+    expect(html).toContain('<time class="msg-ts-time"');
+    expect(html).not.toMatch(/ago|time\.justNow/);
+  });
+  it('date labels carry the weekday, and the year only when it differs', () => {
+    const now = new Date('2026-10-04T12:00:00');
+    const sameYear = dateLabel('2026-03-05T12:00:00', now);
+    expect(sameYear).toContain('Thursday');
+    expect(sameYear).not.toContain('2026');
+    expect(dateLabel('2020-03-05T12:00:00', now)).toContain('2020');
+    expect(dateLabel(now.toISOString(), now)).toBe('time.today');
+  });
+});
+
+describe('grouping', () => {
+  function render(list) {
+    const { feed } = miniDom();
+    const r = make();
+    list.forEach(m => r.renderMessage({ thread_id: 'room-1', content: 'x', ...m }));
+    return feed;
+  }
+  const grouped = (feed, id) => feed.children.find(c => c.dataset.messageId === id).classList.contains('msg-grouped');
+  it('groups the same sender within five minutes', () => {
+    expect(GROUP_WINDOW_MS).toBe(5 * 60 * 1000);
+    const feed = render([
+      { message_id: 'a', from_webid: 'w', timestamp: at('2026-10-04T10:00:00') },
+      { message_id: 'b', from_webid: 'w', timestamp: at('2026-10-04T10:04:00') },
+      { message_id: 'c', from_webid: 'w', timestamp: at('2026-10-04T10:10:00') },
+    ]);
+    expect(grouped(feed, 'b')).toBe(true);
+    expect(grouped(feed, 'c')).toBe(false);
+  });
+  it('breaks the group at a date divider', () => {
+    const feed = render([
+      { message_id: 'a', from_webid: 'w', timestamp: at('2026-10-03T23:58:00') },
+      { message_id: 'b', from_webid: 'w', timestamp: at('2026-10-04T00:01:00') },
+    ]);
+    expect(feed.children.filter(c => c.classList.contains('date-divider'))).toHaveLength(2);
+    expect(grouped(feed, 'b')).toBe(false);
+  });
+  it('a reply always starts its own group', () => {
+    const feed = render([
+      { message_id: 'a', from_webid: 'w', timestamp: at('2026-10-04T10:00:00') },
+      { message_id: 'b', from_webid: 'w', reply_to_id: 'a', timestamp: at('2026-10-04T10:01:00') },
+    ]);
+    expect(grouped(feed, 'b')).toBe(false);
+  });
+});
+
+describe('"New messages" divider', () => {
+  const msgs = [
+    { message_id: 'r1', thread_id: 'room-1', from_webid: 'w', content: 'read', timestamp: at('2026-10-04T10:00:00') },
+    { message_id: 'u1', thread_id: 'room-1', from_webid: 'w', content: 'new', timestamp: at('2026-10-04T10:02:00') },
+    { message_id: 'u2', thread_id: 'room-1', from_webid: 'w', content: 'new 2', timestamp: at('2026-10-04T10:03:00') },
+  ];
+  const lastRead = new Date('2026-10-04T10:01:00').getTime() / 1000;
+  it('goes before the first message newer than the read marker and breaks grouping', () => {
+    const { feed } = miniDom();
+    const r = make();
+    expect(r.markUnread(msgs, lastRead)).toBe('u1');
+    msgs.forEach(m => r.renderMessage({ ...m }));
+    const kinds = feed.children.map(c => c.className.split(' ')[0] + (c.dataset.messageId ? ':' + c.dataset.messageId : ''));
+    expect(kinds).toEqual(['date-divider', 'message:r1', 'unread-divider', 'message:u1', 'message:u2']);
+    expect(feed.children[2].innerHTML).toContain('feed.unreadDivider');
+    expect(feed.children[3].classList.contains('msg-grouped')).toBe(false);
+    expect(feed.children[4].classList.contains('msg-grouped')).toBe(true);
+  });
+  it('is skipped when there is no read marker or nothing newer', () => {
+    const r = make();
+    expect(r.markUnread(msgs, 0)).toBe(null);
+    expect(r.markUnread(msgs, new Date('2026-10-05').getTime() / 1000)).toBe(null);
+  });
+  it('survives a re-render, and is cleared on send only after the bottom was reached', () => {
+    const { feed } = miniDom();
+    const r = make();
+    r.markUnread(msgs, lastRead);
+    host.allMessages = msgs.map(m => ({ ...m }));
+    r.renderMessages();
+    expect(feed.querySelectorAll('.unread-divider')).toHaveLength(1);
+    r.state._unreadSeen = false;
+    expect(r.clearUnreadDivider()).toBe(false);
+    expect(feed.querySelectorAll('.unread-divider')).toHaveLength(1);
+    r.scrollToBottom();
+    expect(r.clearUnreadDivider()).toBe(true);
+    expect(feed.querySelectorAll('.unread-divider')).toHaveLength(0);
+  });
+  it('resetUnread (switching away) drops the marker', () => {
+    const r = make();
+    r.markUnread(msgs, lastRead);
+    r.resetUnread();
+    expect(r.state._unreadBeforeId).toBe(null);
+  });
+  it('the scroll-to-bottom button counts arrivals as "N new messages"', () => {
+    const { feed, cnt } = miniDom();
+    feed.scrollHeight = 2000; // scrolled up
+    const r = make();
+    r.renderMessage({ ...msgs[0] });
+    r.renderMessage({ ...msgs[1] });
+    expect(r.state._scrollBottomUnread).toBe(2);
+    expect(cnt.textContent).toBe('feed.newMessages'); // tn() key: no locale loaded in tests
+  });
+});
+
+describe('deleting a message', () => {
+  function setup() {
+    const dom = miniDom();
+    const r = make();
+    [
+      { message_id: 'h', from_webid: 'w', content: 'head', timestamp: at('2026-10-04T10:00:00') },
+      { message_id: 'g', from_webid: 'w', content: 'grouped', timestamp: at('2026-10-04T10:01:00') },
+    ].forEach(m => r.renderMessage({ thread_id: 'room-1', ...m }));
+    return { ...dom, r };
+  }
+  it('re-heads the group when its head is deleted', () => {
+    const { feed, r } = setup();
+    const g = feed.children.find(c => c.dataset.messageId === 'g');
+    expect(g.classList.contains('msg-grouped')).toBe(true);
+    expect(g.children[0].innerHTML).toContain('msg-compact-ts');
+    r.removeMessage('h');
+    expect(msgIds(feed)).toEqual(['g']);
+    expect(g.classList.contains('msg-grouped')).toBe(false);
+    expect(g.id).toBe('msg-g');
+    // The compact time column was swapped for the avatar.
+    expect(g.children[0].innerHTML).toContain('data-profile-avatar');
+  });
+  it('keeps a tombstone so replies say it was deleted without re-fetching', () => {
+    const { feed, r } = setup();
+    r.removeMessage('h');
+    expect(host.messageMap.h).toMatchObject({ message_id: 'h', deleted: true });
+    sent.length = 0;
+    r.renderMessage({ message_id: 'rep', thread_id: 'room-1', from_webid: 'v', content: 'reply', reply_to_id: 'h', timestamp: at('2026-10-04T10:05:00') });
+    expect(bodyOf(feed, 'rep').innerHTML).toContain('msg.replyDeleted');
+    expect(sent.filter(m => m.cmd === 'get_message')).toHaveLength(0);
+  });
+  it('asks for a missing reply parent only once across re-renders', () => {
+    miniDom();
+    const r = make();
+    host.allMessages = [{ message_id: 'x', thread_id: 'room-1', from_webid: 'v', content: 'r', reply_to_id: 'gone', timestamp: at('2026-10-04T10:05:00') }];
+    r.renderMessages();
+    r.renderMessages();
+    expect(sent.filter(m => m.cmd === 'get_message')).toEqual([{ cmd: 'get_message', message_id: 'gone' }]);
+  });
+});
+
+describe('mentions', () => {
+  it('highlights a known multi-word or non-ASCII name in full', () => {
+    const out = highlightMentions('hi @Ana María and @Zoë!', ['Ana María', 'Zoë']);
+    expect(out).toContain('<span class="mention">@Ana María</span>');
+    expect(out).toContain('<span class="mention">@Zoë</span>!');
+  });
+  it('prefers the longest known name and marks self mentions', () => {
+    const out = highlightMentions('@Bob Smith and @Bob', ['Bob', 'Bob Smith'], 'bob');
+    expect(out).toContain('<span class="mention">@Bob Smith</span>');
+    expect(out).toContain('<span class="mention mention-self">@Bob</span>');
+  });
+  it('falls back to a single word for unknown names, including non-ASCII', () => {
+    expect(highlightMentions('@Łukasz hi', [])).toBe('<span class="mention">@Łukasz</span> hi');
+  });
+  it('matches names that need HTML escaping against the escaped text', () => {
+    expect(highlightMentions('@Tom &amp; Jerry', ['Tom & Jerry'])).toContain('@Tom &amp; Jerry</span>');
+  });
+  it('uses msg.mentions resolved through resolveName', () => {
+    const { feed } = miniDom();
+    const r = make({ resolveName: (w) => (w === 'did:key:zAna' ? 'Ana María' : '') });
+    r.renderMessage({ message_id: 'mm', thread_id: 'room-1', from_webid: 'did:key:zB', content: 'ping @Ana María', mentions: ['did:key:zAna'], timestamp: at('2026-10-04T10:00:00') });
+    expect(bodyOf(feed, 'mm').innerHTML).toContain('<span class="mention">@Ana María</span>');
+  });
+});
+
+describe('scroll to top with the whole buffer rendered', () => {
+  function scrollTop(renderedCount) {
+    const listeners = {};
+    const all = Array.from({ length: 150 }, (_, i) => ({ message_id: 'm' + i, timestamp: at('2026-10-04T10:00:00') }));
+    host.allMessages = all;
+    const feed = mkEl({
+      addEventListener(type, fn) { (listeners[type] ||= []).push(fn); },
+      querySelectorAll: (sel) => (sel === '.message' ? all.slice(150 - renderedCount).map(() => ({})) : []),
+    });
+    els['message-feed'] = feed;
+    els['scroll-bottom-btn'] = mkEl();
+    view = { type: 'local_room', id: 'room-1', local: true };
+    const r = make();
+    r.attach();
+    feed.scrollTop = 0; feed.scrollHeight = 5000;
+    listeners.scroll.forEach(fn => fn({ target: feed }));
+    return all;
+  }
+  it('requests older history instead of re-expanding the in-memory buffer', () => {
+    const all = scrollTop(150);
+    expect(sent).toContainEqual({ cmd: 'get_local_history', thread_id: 'room-1', before_timestamp: all[0].timestamp, limit: 50 });
+  });
+  it('still expands the buffer first while some of it is not rendered', () => {
+    scrollTop(100);
+    expect(sent.filter(m => m.cmd === 'get_local_history')).toHaveLength(0);
   });
 });

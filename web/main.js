@@ -62,7 +62,7 @@ import { createStatusBanners } from './status-banners.js';
 import { createConnection } from './connection.js';
 import { createTransport, detectMode, applyTransportGating } from './transport.js';
 import { createPodSocket } from './podtransport.js';
-import { createRendering } from './rendering.js';
+import { createRendering, replyQuoteHtml } from './rendering.js';
 import { createView } from './view.js';
 import { createInvite } from './invite.js';
 import { createPush, closedAppPushStatus } from './push.js';
@@ -483,6 +483,8 @@ import { createIdentityResolver } from './identity.js';
             getRoomCode: (id) => _roomCodes[id] || "",
             e2eScopedKey,
             renderWindow: RENDER_WINDOW, scrollBatch: SCROLL_BATCH,
+            resolveName: (w) => resolvePeerName(w),
+            getMemberNames: () => currentRoomMembers.map(m => m && m.display_name).filter(Boolean),
         });
         const { renderMessages, renderMessage, _renderThreaded, scrollToBottom } = rendering;
         // R86: which contacts are known to bind their calls. Two sources, unioned:
@@ -573,6 +575,7 @@ import { createIdentityResolver } from './identity.js';
                 // R106: a joined room lives on the owner's pod; this returns its
                 // { container } so the reaction mirror targets the right pod.
                 getRemoteRoom: (id) => _remoteRooms[id],
+                resolveName: (w) => resolvePeerName(w),
             });
         // Standalone modals (forward / schedule / integrations / search results).
         const { openForwardModal, openSchedulePicker, openIntegrationsPanel, renderSearchResults } =
@@ -817,7 +820,8 @@ import { createIdentityResolver } from './identity.js';
             updateSidebarBadge, sendUpdateLastRead: _sendUpdateLastRead, loadRoomHistory,
             toggleSidebar, updateDisappearBanner, requestRoomMembers, renderMembersPanel,
             updateVoiceChannels: (id) => voice.updateVoiceChannels(id),
-            openSidebarCtx, resetDateDivider: () => { rendering.state._lastRenderedDate = null; },
+            openSidebarCtx, resetDateDivider: () => { rendering.state._lastRenderedDate = null; rendering.resetUnread(); },
+            onViewOpened: () => _onViewOpened(),
         });
         // Invite-link carry-through (A4): capture now (survives reload/first-run),
         // consume on the "registered" event via the deep-link confirm modal.
@@ -973,7 +977,7 @@ import { createIdentityResolver } from './identity.js';
                 const body = document.createElement("div");
                 body.className = "dm-item-body";
                 const ts = last ? timeAgo(last.timestamp) : "";
-                body.innerHTML = `<div class="dm-item-name" dir="auto">${escHtml(name)}${idTag}${ts ? `<span style="color:#8091a7;font-size:0.75em;float:inline-end;margin-inline-start:4px">${ts}</span>` : ""}</div>
+                body.innerHTML = `<div class="dm-item-name" dir="auto"><span class="dm-item-label">${escHtml(name)}${idTag}</span>${ts ? `<span class="dm-item-ts">${ts}</span>` : ""}</div>
                     ${last ? `<div class="dm-item-preview" dir="auto">${last.snippet.replace(/</g,"&lt;")}</div>` : ""}`;
                 const closeBtn = document.createElement("button");
                 closeBtn.className = "dm-close-btn";
@@ -1815,6 +1819,7 @@ import { createIdentityResolver } from './identity.js';
                     break;
                 case "presence_update":
                     handlePresenceUpdate(event);
+                    _updateHeaderSubtitle();
                     break;
                 case "all_presence": {
                     const map = event.presence || {};
@@ -2106,6 +2111,7 @@ import { createIdentityResolver } from './identity.js';
                 case "room_members": {
                     currentRoomMembers = event.members || [];
                     renderMembersPanel(event.members);
+                    _updateHeaderSubtitle();
                     // B1: keep the pod room descriptor's membership current. Owner
                     // only (only the owner's pod holds the room's descriptor), and
                     // only when logged in. Read-modify-write preserves title/owner.
@@ -2252,15 +2258,19 @@ import { createIdentityResolver } from './identity.js';
                     } else if (isActive) {
                         // Initial load or catch-up
                         if (msgs.length > 0) {
-                            // Unread divider: if this is catch-up (we had messages before), mark new ones
+                            // Unread divider. Catch-up batch while open: in front of
+                            // the first message we did not have. Initial load: in
+                            // front of the first message newer than the read marker,
+                            // and open the thread there instead of at the bottom.
                             const hadMessages = allMessages.length > 0;
                             if (hadMessages) {
-                                const divider = document.createElement("div");
-                                divider.className = "unread-divider";
-                                divider.innerHTML = "<span>New Messages</span>";
-                                feed.appendChild(divider);
+                                const firstNew = msgs.find(m => !messageMap[m.message_id]);
+                                if (firstNew) rendering.setUnreadBefore(firstNew.message_id);
+                            } else {
+                                rendering.markUnread(msgs, lastReadTs);
                             }
                             msgs.forEach(m => renderMessage(m));
+                            if (!hadMessages) rendering.scrollToUnread();
                         } else {
                             maybeShowEmptyState();
                         }
@@ -2295,10 +2305,10 @@ import { createIdentityResolver } from './identity.js';
                     // Original send time, before the local record is dropped: it
                     // says which UTC day file the Long Chat copy lives in.
                     const _deletedTs = messageMap[event.message_id]?.pod_ts || messageMap[event.message_id]?.timestamp;
-                    const el = document.getElementById(`msg-${event.message_id}`);
-                    if (el) el.remove();
+                    // Drops the element (re-heading a group it led) and leaves a
+                    // tombstone in messageMap for replies that quote it.
+                    rendering.removeMessage(event.message_id);
                     allMessages = allMessages.filter(m => m.message_id !== event.message_id);
-                    delete messageMap[event.message_id];
                     dmHistoryDelete(event.message_id);
                     if (event.message_id && event.thread_id) {
                         const _isRoom = !!(activeView && activeView.type === 'local_room');
@@ -2627,10 +2637,8 @@ import { createIdentityResolver } from './identity.js';
                     // Fill in any placeholders waiting for this message
                     document.querySelectorAll(`.reply-context-loading[data-reply-target="${CSS.escape(m.message_id)}"]`)
                         .forEach(el => {
-                            const parentName = m.from_display_name || (m.from_webid || "").slice(0, 12);
-                            const snippet = (m.content || "").slice(0, 80);
                             el.classList.remove("reply-context-loading");
-                            el.innerHTML = `<span class="reply-connector"></span><b style="color:${webidColor(m.from_webid)};margin-right:2px;">${escHtml(parentName)}</b><span>${escHtml(snippet)}</span>`;
+                            el.innerHTML = replyQuoteHtml(m);
                         });
                     break;
                 }
@@ -3181,9 +3189,8 @@ import { createIdentityResolver } from './identity.js';
         // re-appear via the history merge on the next open.)
         function deleteForMeLocal(msgId) {
             if (!msgId) return;
-            document.getElementById(`msg-${msgId}`)?.remove();
+            rendering.removeMessage(msgId);
             allMessages = allMessages.filter(m => m.message_id !== msgId);
-            delete messageMap[msgId];
             dmHistoryDelete(msgId);
         }
 
@@ -3607,10 +3614,11 @@ import { createIdentityResolver } from './identity.js';
                 if (closeTopmostDialog()) return;
                 document.getElementById("pin-panel").style.display = "none";
                 cancelReply();
+                _closeRoomOptionsMenu();
                 if (edit.state.editingMsgId) {
                     const eid = edit.state.editingMsgId;
                     const msgEl = document.getElementById(`msg-${eid}`);
-                    const inp = msgEl && msgEl.querySelector("input[type=text]");
+                    const inp = msgEl && msgEl.querySelector(".edit-input");
                     if (inp) cancelEdit(eid, messageMap[eid]?.content || "");
                 }
             } else if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
@@ -3632,10 +3640,12 @@ import { createIdentityResolver } from './identity.js';
             }
         });
 
-        // Auto-resize textarea
+        // Auto-resize textarea: grows with its content up to about 40% of the
+        // viewport on desktop (120px on phones), then scrolls.
         document.getElementById("message-input").addEventListener("input", function() {
             this.style.height = "auto";
-            this.style.height = Math.min(this.scrollHeight, 120) + "px";
+            const cap = window.innerWidth > 768 ? Math.max(120, Math.round(window.innerHeight * 0.4)) : 120;
+            this.style.height = Math.min(this.scrollHeight, cap) + "px";
         });
 
         // Phone: the full placeholder ("… (Shift+Enter for newline)") wraps to two
@@ -3644,8 +3654,128 @@ import { createIdentityResolver } from './identity.js';
             document.getElementById("message-input").placeholder = "Type a message…";
         }
 
+        // Per-conversation placeholder ("Message #general" / "Message Alice")
+        // and the header subtitle. Called by view.js whenever a thread opens.
+        function _onViewOpened() {
+            const inp = document.getElementById("message-input");
+            if (inp && activeView && !inp.disabled) {
+                const isRoom = activeView.type === "room" || activeView.type === "local_room";
+                inp.placeholder = isRoom
+                    ? t('composer.placeholderRoom', { name: activeView.name || "" })
+                    : t('composer.placeholderDm', { name: activeView.name || "" });
+            }
+            _updateHeaderSubtitle();
+            _closeRoomOptionsMenu();
+        }
+
+        // Muted line under the conversation name: member count for rooms,
+        // presence for DMs (nothing when unknown).
+        function _updateHeaderSubtitle() {
+            const el = document.getElementById("chat-header-subtitle");
+            if (!el) return;
+            let text = "";
+            if (activeView) {
+                const isRoom = activeView.type === "room" || activeView.type === "local_room";
+                if (isRoom) {
+                    if (currentRoomMembers.length) text = tn('header.members', currentRoomMembers.length);
+                } else {
+                    const peer = activeView.peerWebid || activeView.peerDid;
+                    const st = peer && userPresence[peer] && userPresence[peer].status;
+                    if (st === "online") text = t('header.presence.online');
+                    else if (st === "away") text = t('header.presence.away');
+                    else if (st === "busy") text = t('header.presence.busy');
+                }
+            }
+            el.textContent = text;
+            el.hidden = !text;
+        }
+
+        // Room options overflow menu ("⋯"): holds Leave room and Delete room.
+        // The view code still shows/hides those two buttons by id; the "⋯"
+        // button follows them, visible whenever either item is.
+        function _syncRoomOptionsBtn() {
+            const btn = document.getElementById("room-options-btn");
+            if (!btn) return;
+            const any = ["leave-room-btn", "delete-room-btn"].some(id => {
+                const b = document.getElementById(id);
+                return b && b.style.display && b.style.display !== "none";
+            });
+            btn.style.display = any ? "" : "none";
+            if (!any) _closeRoomOptionsMenu();
+        }
+        function _closeRoomOptionsMenu(restoreFocus = false) {
+            const menu = document.getElementById("room-options-menu");
+            const btn = document.getElementById("room-options-btn");
+            if (!menu || menu.hidden) return;
+            menu.hidden = true;
+            if (btn) {
+                btn.setAttribute("aria-expanded", "false");
+                if (restoreFocus) btn.focus();
+            }
+        }
+        function _openRoomOptionsMenu() {
+            const menu = document.getElementById("room-options-menu");
+            const btn = document.getElementById("room-options-btn");
+            if (!menu || !btn) return;
+            menu.hidden = false;
+            btn.setAttribute("aria-expanded", "true");
+            // Fixed position under the button, end-aligned and kept on screen
+            // (the phone header strip scrolls, which would clip an absolute menu).
+            const r = btn.getBoundingClientRect();
+            const w = menu.offsetWidth || 160;
+            const rtl = document.documentElement.dir === "rtl";
+            const left = rtl ? r.left : r.right - w;
+            menu.style.left = Math.max(8, Math.min(left, window.innerWidth - w - 8)) + "px";
+            menu.style.top = (r.bottom + 4) + "px";
+            [...menu.querySelectorAll("button")].find(b => b.style.display !== "none")?.focus();
+        }
+        {
+            const _roBtn = document.getElementById("room-options-btn");
+            const _roMenu = document.getElementById("room-options-menu");
+            if (_roBtn && _roMenu) {
+                _roBtn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    if (_roMenu.hidden) _openRoomOptionsMenu(); else _closeRoomOptionsMenu();
+                });
+                // Picking an item closes the menu (the item's own handler runs too).
+                _roMenu.addEventListener("click", (e) => {
+                    if (e.target.closest("button")) _closeRoomOptionsMenu();
+                });
+                _roMenu.addEventListener("keydown", (e) => {
+                    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); _closeRoomOptionsMenu(true); }
+                });
+                document.addEventListener("click", (e) => {
+                    if (!_roMenu.hidden && !_roMenu.contains(e.target) && !_roBtn.contains(e.target)) _closeRoomOptionsMenu();
+                });
+                const _obs = new MutationObserver(_syncRoomOptionsBtn);
+                ["leave-room-btn", "delete-room-btn"].forEach(id => {
+                    const b = document.getElementById(id);
+                    if (b) _obs.observe(b, { attributes: true, attributeFilter: ["style"] });
+                });
+                _syncRoomOptionsBtn();
+            }
+        }
+
+        // ArrowUp in an empty composer edits your last message in this view.
+        function _editLastOwnMessage() {
+            const els = [...document.querySelectorAll("#message-feed .message[data-message-id]")].reverse();
+            for (const el of els) {
+                const m = messageMap[el.dataset.messageId];
+                if (!m || m.deleted || m.content_type === "audio") continue;
+                const own = m.own === true || (selfWebId && m.from_webid === selfWebId)
+                    || (selfPubHex && m.from_pub_hex === selfPubHex);
+                if (own && el.querySelector(".msg-text")) { startEdit(m.message_id); return true; }
+            }
+            return false;
+        }
+
         // Send on Enter (not Shift+Enter)
         document.getElementById("message-input").addEventListener("keydown", function(e) {
+            if (e.key === "ArrowUp" && !this.value && !e.shiftKey && !e.altKey
+                    && !e.ctrlKey && !e.metaKey && !e.isComposing) {
+                if (_editLastOwnMessage()) e.preventDefault();
+                return;
+            }
             if (e.key === "Enter" && !e.shiftKey) {
                 // Enter that confirms an IME candidate (CJK input) must not send.
                 if (e.isComposing || e.keyCode === 229) return;
@@ -3727,6 +3857,10 @@ import { createIdentityResolver } from './identity.js';
             _sendInFlight = true;
             input.value = "";
             input.style.height = "auto";
+            // Reader already saw the bottom: the "New messages" line has done its job.
+            rendering.clearUnreadDivider();
+            // Your own message should be visible: jump to the bottom before it renders.
+            rendering.scrollToBottom();
             try {
                 await _sendComposed(content);
             } catch (err) {

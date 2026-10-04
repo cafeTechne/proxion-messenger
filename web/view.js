@@ -55,6 +55,8 @@ export function createView({
     updateSidebarBadge, sendUpdateLastRead, loadRoomHistory, toggleSidebar,
     updateDisappearBanner, requestRoomMembers, renderMembersPanel, updateVoiceChannels,
     openSidebarCtx, resetDateDivider,
+    // Called after a conversation opens (composer placeholder, header subtitle).
+    onViewOpened = () => {},
 }) {
     function renderContacts(contacts) {
         const peerDidToCertId = getPeerDidToCertId();
@@ -112,6 +114,7 @@ export function createView({
         setActiveView(view);
         const header = document.getElementById("chat-header-name");
         if (header) header.textContent = view.name;
+        onViewOpened();
         // A cert contact is a DM: reveal the call controls (this path previously left
         // them hidden, so calling a federated contact was impossible). R82 V3.
         const _cb = document.getElementById("start-call-btn"); if (_cb) _cb.style.display = "block";
@@ -148,6 +151,7 @@ export function createView({
         hideEmptyState();
         setActiveView({ type: "local_dm", id: id, name: name, local: true, peerWebid: peerWebid });
         document.getElementById("chat-header-name").innerText = "@ " + name;
+        onViewOpened();
         updateE2EStatus(peerWebid);
         updateIdentityFingerprint(peerWebid);
         document.getElementById("message-feed").innerHTML = "";
@@ -169,6 +173,9 @@ export function createView({
         if (li) li.classList.add("active");
         unreadCounts[id] = 0;
         updateSidebarBadge(id);
+        // History first: it reports the read marker as it was before this open,
+        // which places the "New messages" divider.
+        loadRoomHistory(id);
         if (socket && socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({cmd: "mark_read", thread_id: id}));
             sendUpdateLastRead(id);
@@ -179,7 +186,6 @@ export function createView({
         // Pod: persist read state
         const _lastMsgForRead = getAllMessages().filter(m => m.thread_id === id).at(-1);
         if (_lastMsgForRead) podWriteReadState(id, _lastMsgForRead.message_id).catch(() => {});
-        loadRoomHistory(id);
         if (window.innerWidth <= 768) toggleSidebar();
     }
 
@@ -216,6 +222,7 @@ export function createView({
             hideEmptyState();
             setActiveView({type: "local_room", id: roomId, name: name, local: true});
             document.getElementById("chat-header-name").innerText = "# " + name;
+            onViewOpened();
             updateIdentityFingerprint(null); // hide fingerprint bar in room views
             document.getElementById("message-feed").innerHTML = "";
             resetDateDivider();
@@ -233,14 +240,16 @@ export function createView({
             _setActiveNavRow(li);
             unreadCounts[roomId] = 0;
             updateSidebarBadge(roomId);
+            // History first: it reports the read marker as it was before this
+            // open, which places the "New messages" divider.
+            loadRoomHistory(roomId, 100);
             if (socket && socket.readyState === WebSocket.OPEN) {
                 socket.send(JSON.stringify({cmd: "mark_read", thread_id: roomId}));
                 sendUpdateLastRead(roomId);
             }
             localStorage.setItem("proxion_seen_" + roomId, new Date().toISOString());
             if (window.innerWidth <= 768) toggleSidebar();
-            // Load recent history from DB and fetch members
-            loadRoomHistory(roomId, 100);
+            // Fetch members (history was requested above)
             requestRoomMembers(roomId);
             // Auto-show members panel if it was previously open
             if (document.getElementById("members-panel").style.display === "block") {
@@ -284,6 +293,7 @@ export function createView({
                 hideEmptyState();
                 setActiveView({ type: type, id: id, name: name });
                 document.getElementById("chat-header-name").innerText = (type === "room" ? "# " : "@ ") + name;
+                onViewOpened();
                 document.getElementById("message-feed").innerHTML = "";
                 resetDateDivider();
                 setMessageMap({});

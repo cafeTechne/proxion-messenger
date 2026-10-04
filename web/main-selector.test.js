@@ -126,3 +126,33 @@ describe('CSS.escape neutralizes a quote-bearing message id', () => {
     expect(`[data-message-id="${cssEscape('m1')}"]`).toBe('[data-message-id="m1"]');
   });
 });
+
+describe('main.js chat conventions wiring', () => {
+  it('DM row keeps the time on the name line: label span first, then the time span', () => {
+    expect(src).toMatch(/<span class="dm-item-label">\$\{escHtml\(name\)\}\$\{idTag\}<\/span>\$\{ts \? `<span class="dm-item-ts">/);
+    expect(src).not.toMatch(/float:inline-end/);
+  });
+  it('composer placeholder is per conversation and translated', () => {
+    expect(src).toMatch(/t\('composer\.placeholderRoom', \{ name:/);
+    expect(src).toMatch(/t\('composer\.placeholderDm', \{ name:/);
+  });
+  it('composer grows to about 40% of the viewport on desktop', () => {
+    expect(src).toMatch(/window\.innerHeight \* 0\.4/);
+    expect(src).not.toMatch(/Math\.min\(this\.scrollHeight, 120\)/);
+  });
+  it('ArrowUp on an empty composer edits the last own message (not during IME)', () => {
+    expect(src).toMatch(/e\.key === "ArrowUp" && !this\.value[^\n]*\n[^\n]*!e\.isComposing/);
+    expect(src).toMatch(/function _editLastOwnMessage\(\)/);
+  });
+  it('deletes go through rendering.removeMessage (group re-head + tombstone)', () => {
+    expect(src).toMatch(/case "message_deleted": \{[\s\S]{0,1000}?rendering\.removeMessage\(event\.message_id\)/);
+  });
+  it('initial history load places the unread divider from last_read_ts', () => {
+    expect(src).toMatch(/rendering\.markUnread\(msgs, lastReadTs\)/);
+    expect(src).not.toMatch(/<span>New Messages<\/span>/);
+  });
+  it('the room options menu toggles aria-expanded and closes on Escape', () => {
+    expect(src).toMatch(/btn\.setAttribute\("aria-expanded", "true"\)/);
+    expect(src).toMatch(/e\.key === "Escape"\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); _closeRoomOptionsMenu\(true\)/);
+  });
+});

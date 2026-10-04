@@ -1,5 +1,6 @@
-// Message rendering — the core message feed renderer. Builds message elements,
-// threads replies under parents, draws date dividers, manages the
+// Message rendering — the core message feed renderer. Builds message elements
+// in timestamp order (a reply carries an inline quote of its parent), draws
+// date and "New messages" dividers, manages the
 // scroll-to-bottom button and the virtual-scroll "load older on scroll-to-top"
 // behavior. This is core slice 2: it is called by the WS dispatch and by
 // view-switching, but itself calls relatively few things back.
@@ -19,10 +20,10 @@
 //   renderWindow, scrollBatch,
 // })
 
-import { didSuffix, escHtml, webidColor, renderMarkdown, timeAgo, expireLabel as _expireLabel, b64attr } from './util.js';
+import { didSuffix, escHtml, webidColor, renderMarkdown, expireLabel as _expireLabel, b64attr } from './util.js';
 import { parsePoll } from './polls.js';
 import { applyRoomEmoji, getRoomEmoji } from './room-emoji.js';
-import { t, getLocale } from './i18n.js';
+import { t, tn, getLocale } from './i18n.js';
 import { icon } from './icons.js';
 
 // R59A: attachment kind by mime — pure, exported for tests. Video/audio get
@@ -37,6 +38,89 @@ export function attachmentKind(mime) {
     if (_VIDEO_TYPES.has(m)) return 'video';
     if (_AUDIO_TYPES.has(m)) return 'audio';
     return 'file';
+}
+
+// Consecutive messages from one sender within this window share a header.
+export const GROUP_WINDOW_MS = 5 * 60 * 1000;
+
+// Clock time for a message header ("3:07 PM" / "15:07" by locale).
+export function clockTime(ts) {
+    const d = new Date(ts);
+    if (isNaN(d)) return "";
+    return d.toLocaleTimeString(getLocale(), { hour: "numeric", minute: "2-digit" });
+}
+
+// Full date and time, used as the hover title of a message time.
+export function fullDateTime(ts) {
+    const d = new Date(ts);
+    if (isNaN(d)) return "";
+    return d.toLocaleString(getLocale(), {
+        weekday: "long", year: "numeric", month: "long", day: "numeric",
+        hour: "numeric", minute: "2-digit",
+    });
+}
+
+// <time> element for a message timestamp: clock time as text, the machine
+// readable instant in datetime, the full date and time as the title.
+export function timeHtml(ts, cls) {
+    const d = new Date(ts);
+    if (!ts || isNaN(d)) return "";
+    return `<time class="${cls}" datetime="${escHtml(d.toISOString())}" title="${escHtml(fullDateTime(ts))}">${escHtml(clockTime(ts))}</time>`;
+}
+
+// Day separator label: Today / Yesterday, else "Monday, March 5", with the
+// year added when it is not the current one.
+export function dateLabel(ts, now = new Date()) {
+    const d = new Date(ts);
+    const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+    if (d.toDateString() === now.toDateString()) return t('time.today');
+    if (d.toDateString() === yesterday.toDateString()) return t('time.yesterday');
+    const opts = { weekday: "long", month: "long", day: "numeric" };
+    if (d.getFullYear() !== now.getFullYear()) opts.year = "numeric";
+    return d.toLocaleDateString(getLocale(), opts);
+}
+
+// Plain-text summary of a quoted parent message for a reply. Messages with no
+// text fall back to "Photo" / the file name / "Voice message"; a deleted
+// parent (tombstone) says so.
+export function replySnippet(parent) {
+    if (!parent) return "";
+    if (parent.deleted) return t('msg.replyDeleted');
+    const text = String(parent.content || "").replace(/\s+/g, " ").trim();
+    if (text) return text.length > 200 ? text.slice(0, 200) + "…" : text;
+    if (parent.file) {
+        if (attachmentKind(parent.file.mime_type) === 'image') return t('msg.replyPhoto');
+        const fn = String(parent.file.filename || "").replace(/[/\\]/g, "").trim();
+        return fn || t('msg.replyAttachment');
+    }
+    if (parent.content_type === "audio") return t('msg.replyVoice');
+    return "";
+}
+
+// Inner HTML of the one-line reply quote: author then snippet, both escaped.
+export function replyQuoteHtml(parent) {
+    if (parent && parent.deleted) {
+        return `<span class="reply-snippet reply-deleted">${escHtml(replySnippet(parent))}</span>`;
+    }
+    const name = parent.from_display_name || (parent.from_webid || "").slice(0, 12);
+    return `<b class="reply-author" style="color:${webidColor(parent.from_webid)}">${escHtml(name)}</b> <span class="reply-snippet">${escHtml(replySnippet(parent))}</span>`;
+}
+
+// Wrap @mentions in already-escaped message HTML. `names` are known display
+// names (plain text) matched whole and case-insensitively, longest first, so
+// names with spaces or non-ASCII letters work; anything else falls back to a
+// single word of letters/digits/underscore.
+export function highlightMentions(html, names = [], selfName = "") {
+    const esc = [...new Set((names || []).filter(n => n && String(n).trim())
+        .map(n => escHtml(String(n).trim())))]
+        .sort((a, b) => b.length - a.length)
+        .map(n => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const word = "[\\p{L}\\p{N}_]";
+    const alt = esc.length ? `(?:${esc.join("|")})(?!${word})|` : "";
+    const re = new RegExp(`@(${alt}${word}+)`, "giu");
+    const self = escHtml(String(selfName || "")).toLowerCase();
+    return html.replace(re, (m, uname) =>
+        `<span class="${self && uname.toLowerCase() === self ? "mention mention-self" : "mention"}">@${uname}</span>`);
 }
 
 // Scroll anchoring (pure, exported for tests). "At bottom" uses the same 60px
@@ -85,6 +169,10 @@ export function createRendering({
     // on a shared browser can't read the first's trust marks (see e2e.js). Falls
     // back to identity for callers/tests that don't supply it.
     e2eScopedKey = (k) => k,
+    // Display name for a webid ("" when unknown), and the active room's member
+    // names: used to match @mentions of multi-word / non-ASCII names.
+    resolveName = () => "",
+    getMemberNames = () => [],
 }) {
     const RENDER_WINDOW = renderWindow;
     const SCROLL_BATCH = scrollBatch;
@@ -93,6 +181,9 @@ export function createRendering({
         _scrollBottomUnread: 0,     // count of messages arrived while scrolled up
         _loadingOlderHistory: false,
         _pinnedToBottom: true,      // feed was at the bottom as of the last scroll
+        _requestedReplies: new Set(), // reply parents already asked for via get_message
+        _unreadBeforeId: null,      // "New messages" divider goes before this message
+        _unreadSeen: false,         // reader reached the bottom since the divider appeared
     };
 
     function scrollToBottom() {
@@ -100,18 +191,34 @@ export function createRendering({
         const feed = document.getElementById("message-feed");
         feed.scrollTop = feed.scrollHeight;
         state._pinnedToBottom = true;
+        state._unreadSeen = true;
         state._scrollBottomUnread = 0;
         document.getElementById("scroll-bottom-btn").style.display = "none";
         if (activeView) sendUpdateLastRead(activeView.id);
     }
 
+    let _readTimer = null;
+    function _scheduleReadUpdate() {
+        if (_readTimer || typeof setTimeout !== "function") return;
+        _readTimer = setTimeout(() => {
+            _readTimer = null;
+            const v = getActiveView();
+            if (v && (typeof document.hidden !== "boolean" || !document.hidden)) sendUpdateLastRead(v.id);
+        }, 1500);
+    }
+
     function _dateLabelForTimestamp(ts) {
-        const d = new Date(ts);
-        const today = new Date();
-        const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
-        if (d.toDateString() === today.toDateString()) return t('time.today');
-        if (d.toDateString() === yesterday.toDateString()) return t('time.yesterday');
-        return d.toLocaleDateString(getLocale(), {month:"long", day:"numeric"});
+        return dateLabel(ts);
+    }
+
+    // "N new messages" on the scroll-to-bottom button while arrivals pile up
+    // below a reader who scrolled away.
+    function _updateScrollBottomBtn() {
+        const btn = document.getElementById("scroll-bottom-btn");
+        const cnt = document.getElementById("scroll-bottom-count");
+        const n = state._scrollBottomUnread;
+        if (cnt) cnt.textContent = n > 0 ? tn('feed.newMessages', n) : "";
+        if (btn) btn.style.display = "block";
     }
 
     function renderMessages() {
@@ -121,8 +228,62 @@ export function createRendering({
         feed.innerHTML = "";
         state._lastRenderedDate = null;
         _renderThreaded(slice, feed);
-        feed.scrollTop = feed.scrollHeight;
-        state._pinnedToBottom = true;
+        // Until the reader has reached the bottom once, a re-render keeps the
+        // "New messages" divider in view instead of jumping past it.
+        if (state._unreadSeen || !scrollToUnread()) {
+            feed.scrollTop = feed.scrollHeight;
+            state._pinnedToBottom = true;
+        }
+    }
+
+    // --- "New messages" divider ---------------------------------------------
+    // The divider is drawn by _renderMessageEl in front of the message whose id
+    // is state._unreadBeforeId, so it survives re-renders of the feed. It goes
+    // away once the reader has reached the bottom and then sends, or switches
+    // to another conversation (resetUnread).
+
+    // Pick the first message newer than lastReadTs (gateway seconds). Returns
+    // its id, or null when nothing is unread / there is no read marker yet.
+    function markUnread(messages, lastReadTs) {
+        state._unreadBeforeId = null;
+        state._unreadSeen = false;
+        const cutoff = Number(lastReadTs) * 1000;
+        if (!cutoff || !Array.isArray(messages)) return null;
+        const first = messages.find(m => m && m.timestamp && new Date(m.timestamp).getTime() > cutoff);
+        if (first) state._unreadBeforeId = first.message_id;
+        return state._unreadBeforeId;
+    }
+
+    // Mark `msgId` as the first unread message (catch-up batch while open).
+    function setUnreadBefore(msgId) {
+        document.querySelectorAll("#message-feed .unread-divider").forEach(el => el.remove());
+        state._unreadBeforeId = msgId || null;
+        state._unreadSeen = false;
+    }
+
+    // Scroll so the divider sits near the top of the feed. Returns false when
+    // there is no divider.
+    function scrollToUnread() {
+        const feed = document.getElementById("message-feed");
+        const div = feed && feed.querySelector(".unread-divider");
+        if (!div || typeof div.getBoundingClientRect !== "function") return false;
+        feed.scrollTop += div.getBoundingClientRect().top - feed.getBoundingClientRect().top - 48;
+        state._pinnedToBottom = isFeedAtBottom(feed);
+        if (state._pinnedToBottom) state._unreadSeen = true;
+        return true;
+    }
+
+    // Drop the divider once the reader has seen the bottom (or when forced).
+    function clearUnreadDivider(force = false) {
+        if (!force && !state._unreadSeen) return false;
+        document.querySelectorAll("#message-feed .unread-divider").forEach(el => el.remove());
+        state._unreadBeforeId = null;
+        return true;
+    }
+
+    function resetUnread() {
+        state._unreadBeforeId = null;
+        state._unreadSeen = false;
     }
 
     // Re-render the feed with `slice` (used when older history is prepended)
@@ -163,26 +324,22 @@ export function createRendering({
             // messages forever (same stale-empty-state class as the sidebar CTA).
             feed.querySelector(".empty-state")?.remove();
             const atBottom = isFeedAtBottom(feed);
-            if (msg.reply_to_id) {
-                _insertReplyInFeed(msg, feed);
-            } else {
-                // Root message: prev is the last root-level message visible
-                const visibleMsgs = [...feed.querySelectorAll(".message[data-message-id]")];
-                const lastEl = visibleMsgs[visibleMsgs.length - 1];
-                const prev = lastEl ? messageMap[lastEl.dataset.messageId] : null;
-                msg._threadDepth = 0;
-                _renderMessageEl(msg, feed, prev && (prev._threadDepth || 0) === 0 ? prev : null);
-            }
+            // Every message, replies included, goes at the end in arrival
+            // (timestamp) order; a reply shows an inline quote of its parent.
+            const visibleMsgs = [...feed.querySelectorAll(".message[data-message-id]")];
+            const lastEl = visibleMsgs[visibleMsgs.length - 1];
+            const prev = lastEl ? messageMap[lastEl.dataset.messageId] : null;
+            _renderMessageEl(msg, feed, prev);
             if (atBottom) {
                 feed.scrollTop = feed.scrollHeight;
                 state._pinnedToBottom = true;
+                // Seen as it arrived: move the read marker (coalesced), so the
+                // next open does not draw "New messages" above it.
+                _scheduleReadUpdate();
             } else {
-                // Scrolled up — show scroll-to-bottom button with unread count
+                // Scrolled up: show the scroll-to-bottom button with a count
                 state._scrollBottomUnread++;
-                const btn = document.getElementById("scroll-bottom-btn");
-                const cnt = document.getElementById("scroll-bottom-count");
-                cnt.textContent = state._scrollBottomUnread > 0 ? state._scrollBottomUnread : "";
-                btn.style.display = "block";
+                _updateScrollBottomBtn();
             }
         }
         // Track last-seen timestamp for the active thread (used for history catch-up)
@@ -194,84 +351,15 @@ export function createRendering({
         }
     }
 
-    // Inserts a real-time reply message after the last message in its parent's thread.
-    function _insertReplyInFeed(msg, feed) {
-        const messageMap = getMessageMap();
-        const parentMsg = messageMap[msg.reply_to_id];
-        msg._threadDepth = parentMsg ? (parentMsg._threadDepth || 0) + 1 : 1;
-
-        const parentEl = document.getElementById(`msg-${msg.reply_to_id}`);
-        if (!parentEl) {
-            // Parent not visible — append at end with no grouping context
-            _renderMessageEl(msg, feed, null);
-            renderReactions(msg.message_id);
-            return;
-        }
-
-        // Walk forward in the DOM to find the last element that belongs to this thread
-        // (i.e., has the same or deeper thread depth as the reply being inserted).
-        let insertAfterEl = parentEl;
-        let sibling = parentEl.nextElementSibling;
-        while (sibling && sibling.classList.contains("message")) {
-            const sibDepth = parseInt(sibling.dataset.threadDepth || "0", 10);
-            if (sibDepth >= msg._threadDepth) {
-                insertAfterEl = sibling;
-                sibling = sibling.nextElementSibling;
-            } else {
-                break;
-            }
-        }
-
-        // Build the element via a detached container
-        const prevMsgId = insertAfterEl.dataset.messageId;
-        const prevMsg = prevMsgId ? messageMap[prevMsgId] : null;
-        const tempFeed = document.createElement("div");
-        _renderMessageEl(msg, tempFeed, prevMsg);
-        const newEl = tempFeed.firstElementChild;
-        if (!newEl) return;
-
-        const insertBeforeEl = insertAfterEl.nextSibling;
-        if (insertBeforeEl) {
-            feed.insertBefore(newEl, insertBeforeEl);
-        } else {
-            feed.appendChild(newEl);
-        }
-        renderReactions(msg.message_id);
-    }
-
-    // Reorders a flat chronological list so each reply immediately follows its parent.
-    // Attaches _threadDepth (0 = root, 1 = reply, 2 = reply-to-reply) in-place.
-    function _buildThreadedMessages(messages) {
-        if (!messages.length) return [];
-        const byId = {};
-        messages.forEach(m => { byId[m.message_id] = m; });
-        const childrenOf = {};
-        const roots = [];
-        messages.forEach(m => {
-            if (m.reply_to_id && byId[m.reply_to_id]) {
-                (childrenOf[m.reply_to_id] = childrenOf[m.reply_to_id] || []).push(m);
-            } else {
-                roots.push(m);
-            }
-        });
-        const result = [];
-        function flatten(msg, depth) {
-            msg._threadDepth = depth;
-            result.push(msg);
-            (childrenOf[msg.message_id] || []).forEach(child => flatten(child, depth + 1));
-        }
-        roots.forEach(m => flatten(m, 0));
-        return result;
-    }
-
-    // Renders `messages` in thread order into `feed`, tracking prev for grouping.
+    // Renders `messages` in the given (chronological) order into `feed`,
+    // tracking prev for grouping. Replies are not moved under their parent:
+    // a live reply to an old message must land at the bottom where it is seen.
     function _renderThreaded(messages, feed) {
-        const threaded = _buildThreadedMessages(messages);
         let prev = null;
-        threaded.forEach(msg => { _renderMessageEl(msg, feed, prev); prev = msg; });
+        messages.forEach(msg => { _renderMessageEl(msg, feed, prev); prev = msg; });
     }
 
-    function _renderMessageEl(msg, feed, prevInThread) {
+    function _renderMessageEl(msg, feed, prevInThread, opts = {}) {
         const messageMap = getMessageMap();
         const currentDisappearMs = getCurrentDisappearMs();
         const userPresence = getUserPresence();
@@ -289,34 +377,43 @@ export function createRendering({
         // must be escaped or a crafted id breaks out of the attribute (stored XSS).
         const msgIdEsc = escHtml(msgId);
         messageMap[msgId] = msg;
-        const depth = msg._threadDepth || 0;
-
-        // --- Date divider (root messages only) ---
-        if (msg.timestamp && depth === 0) {
-            const dateLabel = _dateLabelForTimestamp(msg.timestamp);
-            if (dateLabel !== state._lastRenderedDate) {
-                state._lastRenderedDate = dateLabel;
+        // --- Date divider (every message, replies included) ---
+        let dividerEmitted = false;
+        if (msg.timestamp && !opts.noDivider) {
+            const label = _dateLabelForTimestamp(msg.timestamp);
+            if (label !== state._lastRenderedDate) {
+                state._lastRenderedDate = label;
+                dividerEmitted = true;
                 const divEl = document.createElement("div");
                 divEl.className = "date-divider";
-                divEl.innerHTML = `<span>${dateLabel}</span>`;
+                divEl.innerHTML = `<span>${escHtml(label)}</span>`;
                 feed.appendChild(divEl);
             }
         }
+        // --- "New messages" divider in front of the first unread message ---
+        if (!opts.noDivider && state._unreadBeforeId && msgId === state._unreadBeforeId) {
+            dividerEmitted = true;
+            const unreadEl = document.createElement("div");
+            unreadEl.className = "unread-divider";
+            unreadEl.setAttribute("role", "separator");
+            unreadEl.innerHTML = `<span>${escHtml(t('feed.unreadDivider'))}</span>`;
+            feed.appendChild(unreadEl);
+        }
 
-        // --- Message grouping: only group with messages at the same depth ---
-        const isGrouped = prevInThread &&
+        // --- Message grouping: same sender within GROUP_WINDOW_MS, never
+        // across a divider, and a reply always starts its own group so its
+        // quote sits above a visible sender line ---
+        const isGrouped = !!(prevInThread && !dividerEmitted && !msg.reply_to_id &&
             msg.from_webid && msg.from_webid !== "unknown" &&
             prevInThread.from_webid === msg.from_webid &&
-            (prevInThread._threadDepth || 0) === depth &&
             msg.timestamp && prevInThread.timestamp &&
-            (new Date(msg.timestamp) - new Date(prevInThread.timestamp)) < 120000;
+            (new Date(msg.timestamp) - new Date(prevInThread.timestamp)) < GROUP_WINDOW_MS);
 
         const div = document.createElement("div");
         div.id = `msg-${msgId}`;
         div.setAttribute("data-message-id", msgId);
-        div.setAttribute("data-thread-depth", depth);
         div.dataset.fromWebid = msg.from_webid || "";
-        div.className = "message" + (isGrouped ? " msg-grouped" : "") + (depth > 0 ? " reply-nested" : "");
+        div.className = "message" + (isGrouped ? " msg-grouped" : "");
         if (msg.is_search_result) div.classList.add("search-match");
         // R11.1.3: expiry tracking
         if (currentDisappearMs > 0 && msg.timestamp) {
@@ -331,7 +428,7 @@ export function createRendering({
         // body content that follows (grouped messages hide the visual header but
         // keep this label so they're never anonymous under SR).
         div.setAttribute("role", "article");
-        div.setAttribute("aria-label", msg.timestamp ? `${name}, ${timeAgo(msg.timestamp)}` : name);
+        div.setAttribute("aria-label", msg.timestamp ? `${name}, ${fullDateTime(msg.timestamp)}` : name);
         const avatarColor = webidColor(msg.from_webid);
 
         const presenceData = userPresence[msg.from_webid] || { status: "offline" };
@@ -351,9 +448,12 @@ export function createRendering({
         const mentionsMe = (msg.mentions && selfWebId && msg.mentions.includes(selfWebId)) ||
             (selfDisplayName && rawText.toLowerCase().includes("@" + selfDisplayName.toLowerCase()));
         if (mentionsMe) div.classList.add("mention-highlight");
-        let renderedText = renderMarkdown(rawText).replace(/@(\w+)/g, (match, uname) =>
-            `<span class="${selfDisplayName && uname.toLowerCase() === selfDisplayName.toLowerCase() ? "mention mention-self" : "mention"}">@${uname}</span>`
-        );
+        // Known names (the message's explicit mentions, room members, ourselves)
+        // match whole, so "@Ana María" and other multi-word or non-ASCII names
+        // highlight in full.
+        const _mentionNames = [selfDisplayName, ...getMemberNames(),
+            ...(Array.isArray(msg.mentions) ? msg.mentions.map(w => resolveName(w)) : [])];
+        let renderedText = highlightMentions(renderMarkdown(rawText), _mentionNames, selfDisplayName);
         // R59G: replace :name: tokens with this room's custom emoji (post-escape,
         // map-driven — unknown names pass through untouched).
         renderedText = applyRoomEmoji(renderedText, getRoomEmoji(msg.thread_id || activeView?.id || ''));
@@ -410,9 +510,6 @@ export function createRendering({
             }
         }
 
-        const exactTs = msg.timestamp ? new Date(msg.timestamp).toLocaleString() : "";
-        const compactTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}) : "";
-
         const isOwn = (msg.own === true) ||
             (selfWebId && msg.from_webid === selfWebId) ||
             (selfPubHex && msg.from_pub_hex === selfPubHex);
@@ -428,28 +525,27 @@ export function createRendering({
         const avatarCol = document.createElement("div");
         avatarCol.className = "msg-avatar-col";
         avatarCol.innerHTML = isGrouped
-            ? `<span class="msg-compact-ts" title="${exactTs}">${compactTime}</span>`
+            ? timeHtml(msg.timestamp, "msg-compact-ts")
             : avatarHtml;
 
         // --- Body column ---
         const body = document.createElement("div");
         body.className = "msg-body";
 
-        // Inline reply context (Discord-style)
+        // Inline reply quote: one muted line above the message, click jumps to
+        // the parent (scroll-reply). A deleted parent leaves a tombstone in
+        // messageMap, which renders as "Original message was deleted".
         if (msg.reply_to_id) {
             const parent = messageMap[msg.reply_to_id];
+            const replyIdEsc = escHtml(msg.reply_to_id);
             if (parent) {
-                const parentName = parent.from_display_name || (parent.from_webid || "").slice(0, 8);
-                const parentSnippet = (parent.content || "").slice(0, 50) + (parent.content && parent.content.length > 50 ? "…" : "");
-                body.innerHTML += `<div class="reply-context" data-msg-action="scroll-reply" data-reply-id="${escHtml(msg.reply_to_id)}" style="cursor:pointer;"><span class="reply-connector"></span><b style="color:${webidColor(parent.from_webid)};margin-right:2px;">${escHtml(parentName)}</b><span>${parentSnippet.replace(/</g,"&lt;")}</span></div>`;
+                body.innerHTML += `<div class="reply-context" data-msg-action="scroll-reply" data-reply-id="${replyIdEsc}">${replyQuoteHtml(parent)}</div>`;
             } else {
-                // Parent not in window — fetch it, render quote when it arrives
-                const placeholder = document.createElement("div");
-                placeholder.className = "reply-context reply-context-loading";
-                placeholder.dataset.replyTarget = msg.reply_to_id;
-                placeholder.innerHTML = `<span class="reply-connector"></span><em style="color:var(--slate-600)">${t('msg.loadingReply')}</em>`;
-                body.appendChild(placeholder);
-                if (socket && socket.readyState === WebSocket.OPEN) {
+                // Parent not in the buffer: fetch it once, fill the quote when it arrives
+                body.innerHTML += `<div class="reply-context reply-context-loading" data-msg-action="scroll-reply" data-reply-id="${replyIdEsc}" data-reply-target="${replyIdEsc}"><em>${t('msg.loadingReply')}</em></div>`;
+                if (!state._requestedReplies.has(msg.reply_to_id)
+                        && socket && socket.readyState === WebSocket.OPEN) {
+                    state._requestedReplies.add(msg.reply_to_id);
                     socket.send(JSON.stringify({ cmd: "get_message", message_id: msg.reply_to_id }));
                 }
             }
@@ -485,7 +581,7 @@ export function createRendering({
                 const expiresAt = new Date(msg.timestamp).getTime() + currentDisappearMs;
                 expireHtml = `<span class="msg-expire-countdown" style="font-size:0.7em;color:#8091a7;margin-left:6px;" title="${t('msg.expires')}">${icon('clock', { size: 12 })} <span class="msg-expire-label">${_expireLabel(expiresAt - Date.now())}</span></span>`;
             }
-            body.innerHTML += `<div class="msg-header"><span class="msg-sender" style="color:${avatarColor}">${escHtml(name)}${botBadge}${suffixHtml}${shieldHtml}${dmAuthHtml}</span><span class="msg-ts-header" title="${exactTs}">${timeAgo(msg.timestamp)}${importedBadge}${expireHtml}</span></div>`;
+            body.innerHTML += `<div class="msg-header"><span class="msg-sender" style="color:${avatarColor}">${escHtml(name)}${botBadge}${suffixHtml}${shieldHtml}${dmAuthHtml}</span><span class="msg-ts-header">${timeHtml(msg.timestamp, "msg-ts-time")}${importedBadge}${expireHtml}</span></div>`;
         }
 
         // Content
@@ -576,12 +672,15 @@ export function createRendering({
             // Hide scroll-to-bottom btn when user scrolls to bottom
             if (state._pinnedToBottom) {
                 state._scrollBottomUnread = 0;
+                state._unreadSeen = true;
                 document.getElementById("scroll-bottom-btn").style.display = "none";
             }
             if (feed.scrollTop !== 0) return;
-            // First expand in-memory buffer
-            if (allMessages.length > RENDER_WINDOW) {
-                const rendered = feed.querySelectorAll(".message").length;
+            // First expand the in-memory buffer, but only while it holds
+            // messages that are not rendered yet. Once everything buffered is on
+            // screen, fall through and ask for older history.
+            const rendered = feed.querySelectorAll(".message").length;
+            if (allMessages.length > rendered) {
                 const totalLoaded = rendered + SCROLL_BATCH;
                 const slice = allMessages.slice(-Math.min(totalLoaded, allMessages.length));
                 rerenderKeepingAnchor(slice, feed);
@@ -630,9 +729,65 @@ export function createRendering({
         });
     }
 
+    // Remove a message from the feed. If it headed a group, the next grouped
+    // message becomes the head (gets the name and avatar back). With
+    // `tombstone`, messageMap keeps a { deleted: true } stub so replies that
+    // quote it say "Original message was deleted" instead of re-fetching it.
+    function removeMessage(msgId, { tombstone = true } = {}) {
+        const messageMap = getMessageMap();
+        const el = document.getElementById(`msg-${msgId}`);
+        if (el) {
+            const wasHead = !el.classList.contains("msg-grouped");
+            const next = el.nextElementSibling;
+            el.remove();
+            if (wasHead && next && next.classList && next.classList.contains("msg-grouped")) {
+                _promoteToGroupHead(next);
+            }
+        }
+        const old = messageMap[msgId];
+        if (tombstone) {
+            messageMap[msgId] = { message_id: msgId, deleted: true,
+                thread_id: old?.thread_id, timestamp: old?.timestamp };
+            const sel = `.reply-context[data-reply-id="${typeof CSS !== "undefined" && CSS.escape ? CSS.escape(msgId) : msgId}"]`;
+            document.querySelectorAll(sel).forEach(q => {
+                q.classList.remove("reply-context-loading");
+                q.innerHTML = replyQuoteHtml(messageMap[msgId]);
+            });
+        } else {
+            delete messageMap[msgId];
+        }
+    }
+
+    // Give a grouped message its own header and avatar, keeping the element
+    // (and anything attached to it later, like a link preview) in place.
+    function _promoteToGroupHead(el) {
+        const msgId = el.dataset.messageId;
+        const msg = msgId && getMessageMap()[msgId];
+        if (!msg) { el.classList.remove("msg-grouped"); return; }
+        const tmp = document.createElement("div");
+        el.id = "";   // let _renderMessageEl build a fresh copy
+        try { _renderMessageEl(msg, tmp, null, { noDivider: true }); }
+        finally { el.id = `msg-${msgId}`; }
+        const fresh = tmp.firstElementChild;
+        el.classList.remove("msg-grouped");
+        if (!fresh) return;
+        const freshAvatar = fresh.querySelector(".msg-avatar-col");
+        const oldAvatar = el.querySelector(".msg-avatar-col");
+        if (freshAvatar && oldAvatar) oldAvatar.replaceWith(freshAvatar);
+        const header = fresh.querySelector(".msg-header");
+        const body = el.querySelector(".msg-body");
+        if (header && body && !body.querySelector(".msg-header")) {
+            const before = [...body.children].find(c =>
+                !c.classList.contains("reply-context") && !c.classList.contains("forwarded-banner"));
+            body.insertBefore(header, before || null);
+        }
+    }
+
     return {
         renderMessages, renderMessage, _renderThreaded, scrollToBottom,
-        _renderMessageEl, _insertReplyInFeed, _buildThreadedMessages, _dateLabelForTimestamp,
+        _renderMessageEl, _dateLabelForTimestamp,
+        markUnread, setUnreadBefore, scrollToUnread, clearUnreadDivider, resetUnread,
+        removeMessage,
         mergeOlderHistory, rerenderKeepingAnchor, attach, state,
     };
 }
