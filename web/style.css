@@ -299,7 +299,7 @@ nav li.dm-item > svg { flex: 0 0 16px; }
     overflow: hidden;
     text-overflow: ellipsis;
 }
-/* Room options ("⋯") button and its dropdown (a .ctx-menu, fixed-positioned by JS). */
+/* Room options ("⋯") button; its dropdown is a .ctx-menu opened by menu.js. */
 .room-options { display: inline-flex; }
 #room-options-btn {
     background: transparent; border: none; color: var(--text-secondary);
@@ -309,8 +309,6 @@ nav li.dm-item > svg { flex: 0 0 16px; }
 }
 #room-options-btn:hover,
 #room-options-btn[aria-expanded="true"] { background: rgba(255,255,255,0.1); color: var(--text-primary); }
-.room-options-menu { display: flex; flex-direction: column; }
-.room-options-menu[hidden] { display: none; }
 /* One hit box for every header icon button. Buttons with a visible label keep
    their own inline padding, so the label still fits. */
 #chat-header-actions > button,

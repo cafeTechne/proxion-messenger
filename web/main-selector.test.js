@@ -151,8 +151,9 @@ describe('main.js chat conventions wiring', () => {
     expect(src).toMatch(/rendering\.markUnread\(msgs, lastReadTs\)/);
     expect(src).not.toMatch(/<span>New Messages<\/span>/);
   });
-  it('the room options menu toggles aria-expanded and closes on Escape', () => {
+  it('the room options menu uses menu.js and tracks aria-expanded', () => {
     expect(src).toMatch(/btn\.setAttribute\("aria-expanded", "true"\)/);
-    expect(src).toMatch(/e\.key === "Escape"\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); _closeRoomOptionsMenu\(true\)/);
+    expect(src).toMatch(/openMenu\(menu, \{ x: r\.left, y: r\.bottom \+ 4, opener: btn,/);
+    expect(src).toMatch(/onClose: \(\) => btn\.setAttribute\("aria-expanded", "false"\)/);
   });
 });

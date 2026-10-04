@@ -91,7 +91,7 @@ import { icon } from './icons.js';
 import { installFocusTrap, closeTopmostDialog } from './focus-trap.js';
 import { initSettingsNav, createDebouncedSaver } from './settings-panel.js';
 import { makeListNavigable, announce } from './a11y.js';
-import { openMenu, closeMenu, refreshMenu } from './menu.js';
+import { openMenu, closeMenu, refreshMenu, isMenuOpen } from './menu.js';
 import { showConfirm, showPromptModal, installDialogDismiss, installFieldErrorSync, setFieldError } from './dialogs.js';
 import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport } from './dmhistory.js';
 import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } from './i18n.js';
@@ -3703,31 +3703,24 @@ import { createIdentityResolver } from './identity.js';
             btn.style.display = any ? "" : "none";
             if (!any) _closeRoomOptionsMenu();
         }
-        function _closeRoomOptionsMenu(restoreFocus = false) {
+        // Keyboard (arrows, Home/End, Escape/Tab back to the button) and roles
+        // come from menu.js, like the other popup menus.
+        function _closeRoomOptionsMenu(restoreFocus) {
             const menu = document.getElementById("room-options-menu");
-            const btn = document.getElementById("room-options-btn");
-            if (!menu || menu.hidden) return;
-            menu.hidden = true;
-            if (btn) {
-                btn.setAttribute("aria-expanded", "false");
-                if (restoreFocus) btn.focus();
-            }
+            if (menu) closeMenu(menu, restoreFocus === undefined ? {} : { restoreFocus });
         }
         function _openRoomOptionsMenu() {
             const menu = document.getElementById("room-options-menu");
             const btn = document.getElementById("room-options-btn");
             if (!menu || !btn) return;
-            menu.hidden = false;
             btn.setAttribute("aria-expanded", "true");
-            // Fixed position under the button, end-aligned and kept on screen
-            // (the phone header strip scrolls, which would clip an absolute menu).
             const r = btn.getBoundingClientRect();
+            openMenu(menu, { x: r.left, y: r.bottom + 4, opener: btn,
+                onClose: () => btn.setAttribute("aria-expanded", "false") });
+            // End-align under the button (start-align in RTL), kept on screen.
             const w = menu.offsetWidth || 160;
-            const rtl = document.documentElement.dir === "rtl";
-            const left = rtl ? r.left : r.right - w;
+            const left = document.documentElement.dir === "rtl" ? r.left : r.right - w;
             menu.style.left = Math.max(8, Math.min(left, window.innerWidth - w - 8)) + "px";
-            menu.style.top = (r.bottom + 4) + "px";
-            [...menu.querySelectorAll("button")].find(b => b.style.display !== "none")?.focus();
         }
         {
             const _roBtn = document.getElementById("room-options-btn");
@@ -3735,17 +3728,14 @@ import { createIdentityResolver } from './identity.js';
             if (_roBtn && _roMenu) {
                 _roBtn.addEventListener("click", (e) => {
                     e.stopPropagation();
-                    if (_roMenu.hidden) _openRoomOptionsMenu(); else _closeRoomOptionsMenu();
+                    if (isMenuOpen(_roMenu)) _closeRoomOptionsMenu(); else _openRoomOptionsMenu();
                 });
                 // Picking an item closes the menu (the item's own handler runs too).
                 _roMenu.addEventListener("click", (e) => {
-                    if (e.target.closest("button")) _closeRoomOptionsMenu();
-                });
-                _roMenu.addEventListener("keydown", (e) => {
-                    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); _closeRoomOptionsMenu(true); }
+                    if (e.target.closest("button")) _closeRoomOptionsMenu(false);
                 });
                 document.addEventListener("click", (e) => {
-                    if (!_roMenu.hidden && !_roMenu.contains(e.target) && !_roBtn.contains(e.target)) _closeRoomOptionsMenu();
+                    if (isMenuOpen(_roMenu) && !_roMenu.contains(e.target) && !_roBtn.contains(e.target)) _closeRoomOptionsMenu();
                 });
                 const _obs = new MutationObserver(_syncRoomOptionsBtn);
                 ["leave-room-btn", "delete-room-btn"].forEach(id => {
