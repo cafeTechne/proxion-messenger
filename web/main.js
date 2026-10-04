@@ -2657,7 +2657,7 @@ import { createIdentityResolver } from './identity.js';
                                 ${s.is_current ? `<span class="session-current status-dot">${t('session.thisDevice')}</span>` : ''}
                             </div>
                             ${!s.is_current ? `<button class="session-revoke-btn btn-danger" data-session-id="${escHtml(s.session_id)}">${t('confirm.revokeSession.verb')}</button>` : ''}
-                        </div>`).join('') || inlineNotice('No sessions found.', 'empty');
+                        </div>`).join('') || inlineNotice(t('empty.sessions'), 'empty');
                     sl.querySelectorAll('.session-revoke-btn').forEach(btn => {
                         btn.addEventListener('click', () => {
                             showConfirm(t('confirm.revokeSession.body'), () => {
@@ -2688,7 +2688,8 @@ import { createIdentityResolver } from './identity.js';
                     showToast(tn('session.loggedOutOthers', event.revoked_count || 0));
                     break;
                 case "pod_auth_error": {
-                    showToast((event.message || "Pod credentials expired") + ". Re-enter them in Settings.", "warning");
+                    if (event.message) console.warn("[Proxion] pod auth error:", event.message);
+                    showToast(t('toast.podAuthExpired'), "warning");
                     break;
                 }
                 case "pod_auth_restored": {
@@ -2744,7 +2745,7 @@ import { createIdentityResolver } from './identity.js';
                 case "webhook_list": {
                     const wl = document.getElementById("webhook-list-area");
                     if (!wl) break;
-                    if (!event.webhooks || !event.webhooks.length) { wl.innerHTML = inlineNotice('No webhooks.', 'empty'); break; }
+                    if (!event.webhooks || !event.webhooks.length) { wl.innerHTML = inlineNotice(t('empty.webhooks'), 'empty'); break; }
                     wl.innerHTML = event.webhooks.map(h => `<div class="list-row">
                         <span class="list-row__main">${escHtml(h.bot_name)} (${escHtml(h.direction)})</span>
                         <button data-del-wh="${escHtml(h.id)}" class="btn btn--sm btn-danger">Delete</button>
@@ -2784,7 +2785,7 @@ import { createIdentityResolver } from './identity.js';
                 case "scheduled_list": {
                     const sp = document.getElementById("scheduled-msgs-list");
                     if (!sp) break;
-                    if (!event.scheduled || !event.scheduled.length) { sp.innerHTML = inlineNotice('None scheduled.', 'empty'); break; }
+                    if (!event.scheduled || !event.scheduled.length) { sp.innerHTML = inlineNotice(t('empty.scheduled'), 'empty'); break; }
                     sp.innerHTML = event.scheduled.map(s => `<div class="list-row">
                         <span class="list-row__main">${escHtml((s.content||'').slice(0,40))} <em class="list-row__meta">(${new Date(s.send_at*1000).toLocaleString(getLocale())})</em></span>
                         <button data-cancel-sched="${s.id}" class="btn btn--sm btn--slate">Cancel</button>
@@ -2810,7 +2811,7 @@ import { createIdentityResolver } from './identity.js';
                     if (!container) break;
                     const devs = event.devices || [];
                     if (devs.length === 0) {
-                        container.innerHTML = inlineNotice('No linked devices.', 'empty');
+                        container.innerHTML = inlineNotice(t('empty.devices'), 'empty');
                         break;
                     }
                     container.innerHTML = devs.map(d => {
@@ -2852,7 +2853,7 @@ import { createIdentityResolver } from './identity.js';
                     if (!list) break;
                     const bans = event.bans || [];
                     if (bans.length === 0) {
-                        list.innerHTML = inlineNotice('No banned members.', 'empty');
+                        list.innerHTML = inlineNotice(t('empty.bans'), 'empty');
                         break;
                     }
                     list.innerHTML = bans.map(b => `

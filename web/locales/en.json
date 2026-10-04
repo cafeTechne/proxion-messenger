@@ -830,5 +830,11 @@
   "pin.jump": "Jump",
   "pin.unpin": "Unpin",
   "settings.noNameSet": "(no name set)",
-  "settings.didGenerating": "(generating…)"
+  "settings.didGenerating": "(generating…)",
+  "empty.sessions": "No sessions found.",
+  "empty.webhooks": "No webhooks yet.",
+  "empty.scheduled": "Nothing scheduled.",
+  "empty.devices": "No linked devices.",
+  "empty.bans": "No banned members.",
+  "toast.podAuthExpired": "Your pod sign-in expired. Sign in again in Settings."
 }

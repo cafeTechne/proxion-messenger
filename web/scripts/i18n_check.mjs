@@ -139,14 +139,14 @@ try {
   fail('qps.json is stale — run `node web/scripts/gen_pseudo_locale.mjs`');
 }
 
-// ── (d) hardcoded-sink scan → WARN (rollout; flips to FAIL after Phase G) ────
+// ── (d) hardcoded-sink scan → FAIL (every showToast/inlineNotice string goes through t()) ──
 const SINKS = [/showToast\(\s*["'][^"']/, /inlineNotice\(\s*["'][^"']/];
 let hardcoded = 0;
 for (const f of jsFiles) {
   const lines = readFileSync(join(WEB, f), 'utf8').split('\n');
   lines.forEach((ln) => { if (SINKS.some(re => re.test(ln))) hardcoded++; });
 }
-if (hardcoded) warn(`${hardcoded} hardcoded string(s) still in UI sinks (showToast/inlineNotice) — migrate in Phase G`);
+if (hardcoded) fail(`${hardcoded} hardcoded string(s) in UI sinks (showToast/inlineNotice): pass them through t()`);
 
 // ── Result ──────────────────────────────────────────────────────────────────
 console.log(`\ni18n_check: ${enKeys.size} canonical keys, ${referenced.size} referenced.`);
