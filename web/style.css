@@ -2133,6 +2133,21 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
     color: var(--text-secondary); font-size: var(--text-sm); font-weight: var(--weight-semibold);
     text-transform: uppercase; letter-spacing: 0.05em; text-align: start; cursor: pointer;
 }
+/* Phones: the Advanced fold grows open instead of snapping (JS flips its inline
+   display). interpolate-size lets height transition from 0 to auto; engines
+   without it keep the instant toggle. Desktop has no fold (forced open), so
+   this stays mobile-only or every settings open would replay it. The clip
+   margin leaves room for focus rings at the fold's edges. */
+@media (max-width: 768px) {
+    @supports (interpolate-size: allow-keywords) {
+        #settings-advanced {
+            interpolate-size: allow-keywords;
+            overflow: clip; overflow-clip-margin: var(--space-1);
+            transition: height var(--dur-3) var(--ease-out), opacity var(--dur-2) var(--ease-out);
+        }
+        @starting-style { #settings-advanced { height: 0; opacity: 0; } }
+    }
+}
 .settings-danger {
     margin-top: var(--space-5); padding: var(--space-4);
     border: 1px solid color-mix(in srgb, var(--color-danger) 45%, transparent);
