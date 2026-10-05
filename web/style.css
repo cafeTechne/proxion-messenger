@@ -49,9 +49,27 @@
     --tint-strong: rgba(255, 255, 255, 0.18);
     --scrim: rgba(0, 0, 0, 0.6);
 
-    /* Motion (R51/F4) — consistent transition timings; honour reduced-motion. */
-    --transition-fast: 0.15s ease;
-    --transition-base: 0.2s ease;
+    /* Motion. Three durations: --dur-1 for hover and press feedback, --dur-2
+       for small popups (menus, toasts), --dur-3 for dialogs and settling
+       motion. Ease-out for things arriving, ease-in for things leaving, and a
+       gentle spring (about 4% overshoot) for panels that land. The spring is a
+       cubic-bezier here and is upgraded to linear() below where supported.
+       The global prefers-reduced-motion guard cuts all of these to ~0. */
+    --dur-1: 120ms;
+    --dur-2: 200ms;
+    --dur-3: 320ms;
+    --ease-out: cubic-bezier(0.2, 0, 0, 1);
+    --ease-in: cubic-bezier(0.4, 0, 1, 1);
+    --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+    --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+    --transition-fast: var(--dur-1) var(--ease-out);
+    --transition-base: var(--dur-2) var(--ease-out);
+
+    /* Focus ring: one definition for every :focus-visible outline. */
+    --focus-ring-width: 2px;
+    --focus-ring-color: var(--accent);
+    --focus-ring: var(--focus-ring-width) solid var(--focus-ring-color);
+    --focus-ring-offset: 2px;
 
     /* Elevation surfaces (R125) — one named scale for panel backgrounds so new
        work stops drifting between the --bg-* and --slate-* ramps. Aliased to the
@@ -119,6 +137,13 @@
 
     /* Dark native widgets (date pickers, select popups, scrollbars). */
     color-scheme: dark;
+}
+/* A damped spring sampled into linear(): settles with a small overshoot. */
+@supports (transition-timing-function: linear(0, 1)) {
+    :root {
+        --ease-spring: linear(0, 0.087, 0.275, 0.484, 0.672, 0.819, 0.922, 0.987, 1.022,
+            1.036, 1.038, 1.033, 1.025, 1.017, 1.01, 1.005, 1);
+    }
 }
 
 * { box-sizing: border-box; }
@@ -1461,7 +1486,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             100% { transform: scale(1); }
         }
         .reaction.reaction-anim {
-            animation: reaction-pop 0.28s cubic-bezier(0.2, 0.7, 0.3, 1.35);
+            animation: reaction-pop var(--dur-3) var(--ease-out);
         }
         /* F4: honour reduced-motion globally — covers the reaction pop, skeleton
            shimmer, popover fade, recording pulse, every token transition, and
@@ -1752,7 +1777,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             min-width: 280px;
             z-index: 1001;
             box-shadow: var(--shadow-md);
-            animation: popoverFadeIn 0.15s ease-out;
+            animation: popoverFadeIn var(--dur-2) var(--ease-out);
         }
         @keyframes popoverFadeIn {
             from { opacity: 0; transform: scale(0.95); }
@@ -1838,7 +1863,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             cursor: pointer;
             font-size: var(--text-md);
             font-weight: var(--weight-medium);
-            transition: all var(--transition-base);
+            transition: background var(--transition-base), transform var(--transition-base), box-shadow var(--transition-base);
         }
         .profile-btn:hover {
             background: var(--accent-hover);
