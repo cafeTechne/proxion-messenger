@@ -97,6 +97,7 @@ import { showConfirm, showPromptModal, installDialogDismiss, installFieldErrorSy
 import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport } from './dmhistory.js';
 import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } from './i18n.js';
 import { createIdentityResolver } from './identity.js';
+import { initThemePicker } from './theme.js';
 
         // Populate the settings language picker from the locale manifest, mark the
         // active one, and reload on change (J1). Endonyms so each language reads
@@ -183,6 +184,7 @@ import { createIdentityResolver } from './identity.js';
         await initI18n();
         applyStaticI18n();
         _initLanguagePicker();
+        initThemePicker(document.getElementById('settings-theme'));
 
         // Modal a11y: focus-restore + Tab-trap for every dialog (observer-based,
         // so it covers all ~20 modals without retrofitting their open/close sites).

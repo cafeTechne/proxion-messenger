@@ -16,6 +16,8 @@
     <meta name="apple-mobile-web-app-title" content="Proxion">
     <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon-180.png">
     <link rel="icon" type="image/svg+xml" href="icons/icon-192.svg">
+    <!-- Saved theme choice, applied before first paint (see theme.js). -->
+    <script src="theme-boot.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -665,6 +667,12 @@
               <p id="settings-profile-status" class="settings-save-status" role="status" aria-live="polite"></p>
               <label for="settings-locale" class="settings-field-label" data-i18n="label.language">Language</label>
               <select id="settings-locale" class="settings-input"></select>
+              <label for="settings-theme" class="settings-field-label" data-i18n="label.theme">Theme</label>
+              <select id="settings-theme" class="settings-input">
+                <option value="system" data-i18n="settings.theme.system">System</option>
+                <option value="dark" data-i18n="settings.theme.dark">Dark</option>
+                <option value="light" data-i18n="settings.theme.light">Light</option>
+              </select>
               <div class="settings-field-label" data-i18n="label.didShareThisPeers">Your DID (share this with peers)</div>
               <div id="settings-did" class="settings-readout"></div>
               <div class="settings-field-label">

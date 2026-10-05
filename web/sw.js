@@ -5,6 +5,8 @@ const SHELL = [
   "style.css",
   "main.js",
   "i18n.js",
+  "theme.js",
+  "theme-boot.js",
   "locales/en.json",
   "locales/ja.json",
   "locales/zh-hans.json",
