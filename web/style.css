@@ -2376,6 +2376,41 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
    Small rules that keep long names, URLs, slow images and scrollbars from
    breaking the layout. Each one is harmless where it is not needed. */
 
+/* Scroll containers keep the scrollbar's space reserved, so content does not
+   shift sideways when a list grows past one screen. Overlay scrollbars (most
+   phones, macOS default) take no space, so this is a no-op there. */
+#message-feed,
+nav,
+.settings-content,
+.settings-nav,
+#members-panel,
+#pin-panel,
+#saved-panel,
+#contact-profile-panel,
+.search-panel__results,
+#solidchat-feed { scrollbar-gutter: stable; }
+
+/* Scrolling to the end of a panel, menu or dialog stops there instead of
+   handing the scroll on to the page or the feed behind it. */
+.modal__panel,
+[role="dialog"] > div,
+.settings-content,
+.settings-nav,
+#members-panel,
+#pin-panel,
+#saved-panel,
+#contact-profile-panel,
+.search-panel__results,
+.picker-list,
+.emoji-picker,
+#gif-tray,
+.composer-emoji-panel,
+.contact-search-dropdown,
+.edit-history-popover,
+#mention-dropdown,
+#scheduled-msgs-list,
+:is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) { overscroll-behavior: contain; }
+
 /* Own name in the sidebar: one line with an ellipsis. Unbounded, it spilled
    out of the sidebar, and on phones out of the parked off-canvas drawer onto
    the chat. */
