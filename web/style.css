@@ -1,3 +1,33 @@
+/* ── Cascade layers ──
+   The order is declared once, here. A rule in a later layer beats a rule in
+   an earlier one whatever their selectors, so specificity only decides ties
+   inside a layer. Unlayered CSS would beat every layer, so nothing in this
+   file is left unlayered.
+
+   reset       box-sizing and form controls inheriting the page font
+   tokens      custom properties: the dark default, both light-theme blocks,
+               the prefers-contrast and forced-colors swaps, the z-index scale
+   base        bare elements and :where() defaults: body, button, links,
+               code, the focus ring, scrollbars, selection, placeholders
+   layout      the app shell: #app, the sidebar and chat columns, the feed
+               and composer boxes, the phone off-canvas drawers
+   components  everything with a class or id of its own, with its
+               responsive and container-query variants next to it
+   utilities   single-purpose classes that must beat any component
+               (.sr-only, .text-*, .link-inherit, .vw-sharing, .vw-muted)
+   overrides   user settings that must win: forced colors, more contrast,
+               reduced motion
+
+   Each layer is opened many times through the file, so rules keep their
+   place and history; the @layer block a rule sits in sets its layer. A new
+   rule goes in components next to its relatives unless it is a token, a
+   bare-element default or a user-setting override. Layers never beat inline
+   style="" attributes, and the markup and JS set many (display, width,
+   border), so the few !important declarations left are there to beat those
+   and say so. ── */
+@layer reset, tokens, base, layout, components, utilities, overrides;
+
+@layer tokens {
 :root {
     /* ── Design tokens (R49/F1) — single source of truth, document-wide.
        Values are unchanged from the prior palette so this is pixel-identical;
@@ -282,6 +312,7 @@
         color-scheme: light;
     }
 }
+} /* tokens */
 
 * { box-sizing: border-box; }
 h1, h2, h3, h4 { line-height: 1.2; }
@@ -1382,13 +1413,15 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
     /* Promote the muted text to --slate-300 and borders to --border-strong,
        both of which have a value per theme. The selector pair matches with or
        without data-theme at (0,2,0), so it outranks the light-theme blocks. */
-    :root[data-theme], :root:not([data-theme]) {
-        --text-secondary: var(--slate-300);
-        --slate-500: var(--slate-300);
-        --slate-600: var(--slate-300);
-        --border: var(--border-strong);
+    @layer tokens {
+        :root[data-theme], :root:not([data-theme]) {
+            --text-secondary: var(--slate-300);
+            --slate-500: var(--slate-300);
+            --slate-600: var(--slate-300);
+            --border: var(--border-strong);
+        }
+        :root { --focus-ring-width: 3px; }
     }
-    :root { --focus-ring-width: 3px; }
     :focus-visible { outline-width: 3px; outline-offset: 2px; }
     .msg-actions, nav li.active { border: 1px solid var(--border); }
 }
@@ -1397,8 +1430,10 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
    visible (outline survives), and don't let presence/status be color-only:
    preserve the dots as shapes and lean on the system palette elsewhere. */
 @media (forced-colors: active) {
-    /* Every var(--focus-ring) outline, whatever its offset. */
-    :root { --focus-ring-color: CanvasText; }
+    @layer tokens {
+        /* Every var(--focus-ring) outline, whatever its offset. */
+        :root { --focus-ring-color: CanvasText; }
+    }
     :focus-visible { outline: 2px solid CanvasText; }
     .skip-nav { forced-color-adjust: none; }
     /* Ensure interactive rows have a perceivable active state without relying on
@@ -2547,6 +2582,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
     .settings-inline { flex-direction: column; align-items: stretch; }
 }
 
+@layer tokens {
 /* ── Layering scale. Menus open from the page; dialogs sit above them;
    confirm/prompt and other dialogs that open on top of a dialog use the
    stacked layer. The first-run gates sit below ordinary dialogs because the
@@ -2567,6 +2603,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
     --color-info-text: #dbeafe;
     --color-on-status: #ffffff;
 }
+} /* tokens */
 
 /* ── Toasts. Top-right on desktop, under the header on phones, so a toast
    never covers the composer's Send and mic buttons. ── */
@@ -2725,12 +2762,14 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 .member-item:focus-visible { background: var(--tint-hover); outline-offset: -2px; }
 
 /* ── Classes for JS-built UI ── */
+@layer tokens {
 :root {
     /* Amber status text and dots on dark surfaces. */
     --color-warning-soft: #fbbf24;
     /* Quiet green fill behind success-soft text (verified badge). */
     --color-success-tint: #134e26;
 }
+} /* tokens */
 /* Status and emphasis colors for words built in JS. */
 .text-primary { color: var(--text-primary); }
 .text-muted { color: var(--slate-600); }
@@ -2817,6 +2856,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 
 /* ── Typography and icon details. Kept together so the reasoning sits in one
    place; each rule only refines the components defined above. ── */
+@layer tokens {
 :root {
     /* Text selection: a deep accent fill under white text, so selected text
        stays readable everywhere, including over links that are accent-colored
@@ -2824,6 +2864,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
     --selection-bg: #8a1d44;
     --selection-text: #ffffff;
 }
+} /* tokens */
 /* Light text on dark surfaces looks heavier than intended under subpixel
    antialiasing on macOS; grayscale smoothing keeps weights true. No effect on
    Windows or Linux. */

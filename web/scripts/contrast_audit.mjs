@@ -77,7 +77,12 @@ export function readBlocks(css) {
   return blocks;
 }
 
-const pathIs = (b, ...p) => b.path.length === p.length && b.path.every((x, i) => x === p[i]);
+// @layer blocks only order the cascade, so they are skipped when matching a
+// block's path: a token block counts wherever it sits in the layers.
+const pathIs = (b, ...p) => {
+  const path = b.path.filter((x) => !x.startsWith('@layer'));
+  return path.length === p.length && path.every((x, i) => x === p[i]);
+};
 const merge = (blocks, ...p) => Object.assign({}, ...blocks.filter((b) => pathIs(b, ...p)).map((b) => b.decls));
 
 export function themeTokens(css) {
