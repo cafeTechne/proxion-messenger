@@ -358,9 +358,6 @@ body {
     outline-offset: var(--focus-ring-offset);
 }
 } /* base */
-/* The composer sets outline:none (an id rule, so it beat the ring above) and
-   had no focus style at all. Text fields match :focus-visible on any focus. */
-#message-input:focus-visible { outline: var(--focus-ring); outline-offset: 0; }
 
 @layer base {
 /* Pressed feedback: a 1px nudge on every button, instant on press. :where()
@@ -410,6 +407,7 @@ body {
 }
 } /* layout */
 
+@layer components {
 .dot {
     width: 10px;
     height: 10px;
@@ -417,6 +415,7 @@ body {
 }
 .dot.online { background: var(--color-success); box-shadow: 0 0 8px var(--color-success); }
 .dot.offline { background: var(--slate-500); }
+} /* components */
 
 @layer layout {
 nav {
@@ -427,6 +426,7 @@ nav {
 nav section + section { margin-top: var(--space-4); }
 } /* layout */
 
+@layer components {
 /* Sidebar brand: h1 for a valid single top-level heading; sized to match the
    previous h2 exactly so the visual is unchanged. */
 .app-title { font-size: var(--text-xl); font-weight: var(--weight-bold); margin: 0.83em 0; }
@@ -516,6 +516,7 @@ nav li.dm-item > svg { flex: 0 0 16px; }
     text-overflow: ellipsis;
     margin-top: 2px;
 }
+} /* components */
 
 @layer layout {
 /* The chat column is the page's only <main>; its flex layout is inline. */
@@ -529,6 +530,7 @@ main { background: var(--surface-0); }
     border-bottom: 1px solid var(--border);
 }
 } /* layout */
+@layer components {
 #chat-header-name {
     margin: 0;
     min-width: 0;
@@ -583,6 +585,7 @@ main { background: var(--surface-0); }
     #chat-header { padding-block: var(--space-2); }
     .app-title { margin: 0; }
 }
+} /* components */
 
 @layer layout {
 #message-feed {
@@ -597,6 +600,7 @@ main { background: var(--surface-0); }
 }
 } /* layout */
 
+@layer components {
 /* Discord-style message row: avatar column beside body column */
 .message {
     display: flex;
@@ -854,6 +858,7 @@ main { background: var(--surface-0); }
     justify-content: center;
 }
 
+} /* components */
 @layer layout {
 #message-form {
     padding: var(--space-2) var(--space-3);
@@ -866,6 +871,7 @@ main { background: var(--surface-0); }
 }
 } /* layout */
 
+@layer components {
 .paperclip {
     display: flex;
     align-items: center;
@@ -913,10 +919,12 @@ main { background: var(--surface-0); }
     color: var(--text-primary);
 }
 
+} /* components */
 @layer layout {
 #typing-indicator { padding: 0 var(--space-4); }
 } /* layout */
 
+@layer components {
 @media (min-width: 769px) {
     #message-form { padding: var(--space-3) var(--space-4); gap: var(--space-2); align-items: flex-end; }
     /* Wide screens: cap the conversation at a 960px centered column. The feed
@@ -952,6 +960,9 @@ main { background: var(--surface-0); }
     resize: none;
     line-height: 1.4;
 }
+/* The composer sets outline: none, so it repeats the focus ring here.
+   Text fields match :focus-visible on any focus. */
+#message-input:focus-visible { outline: var(--focus-ring); outline-offset: 0; }
 /* The global button rule has no height, so Send collapsed to a 15px strip. */
 #message-form button[type="submit"] {
     height: 36px;
@@ -959,6 +970,15 @@ main { background: var(--surface-0); }
     border-radius: var(--radius-sm);
     flex-shrink: 0;
 }
+
+#menu-toggle {
+    display: none;
+    background: transparent;
+    font-size: var(--text-xl);
+    padding: 0 var(--space-4) 0 0;
+    color: var(--text-primary);
+}
+} /* components */
 
 @layer base {
 /* Bare buttons are neutral. The one primary action in a view opts in with
@@ -1032,6 +1052,7 @@ button {
     #pin-panel { width: min(300px, 92vw) !important; }
 }
 } /* layout */
+@layer components {
 @media (max-width: 768px) {
     /* Phone composer: the message input was squeezed to ~37% width by four buttons.
        Reclaim room for the primary input by dropping the secondary schedule action
@@ -1207,17 +1228,13 @@ button {
         max-width: calc(100vw - 24px) !important;
     }
 }
+} /* components */
 
-#menu-toggle {
-    display: none;
-    background: transparent;
-    font-size: var(--text-xl);
-    padding: 0 var(--space-4) 0 0;
-    color: var(--text-primary);
-}
-
+@layer utilities {
 .vw-sharing { color: var(--accent) !important; }
+} /* utilities */
 
+@layer components {
 .vw-controls {
     display: flex;
     gap: var(--space-1);
@@ -1247,15 +1264,21 @@ button {
     background: color-mix(in srgb, var(--color-danger) 15%, transparent) !important;
     color: var(--color-danger);
 }
+} /* components */
+@layer utilities {
 .vw-muted {
     color: var(--color-danger) !important;
 }
+} /* utilities */
 
+@layer components {
 .relay-pending-badge { margin-inline-start: var(--space-1); font-size: var(--text-xs); opacity: 0.7; vertical-align: middle; }
 .revoked-badge { margin-inline-start: var(--space-1); color: var(--color-danger-soft); }
 .relay-pending-badge svg, .relay-read svg, .revoked-badge svg, .read-receipt svg { width: 13px; height: 13px; }
 .relay-pending-badge.relay-failed { color: var(--color-danger-soft); opacity: 0.9; cursor: help; }
+} /* components */
 
+@layer utilities {
 /* ── R13: Round 13 additions ── */
 
 /* 13.10: Accessibility utilities */
@@ -1264,11 +1287,13 @@ button {
     margin: -1px; overflow: hidden; clip: rect(0,0,0,0);
     white-space: nowrap; border: 0;
 }
+} /* utilities */
 @layer base {
 /* Icons: decorative inline SVGs sit on the text baseline and never shrink in a
    flex row. Size comes from the context rules below, not per-element attributes. */
 svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
 } /* base */
+@layer components {
 /* Directional icons (back, reply, forward) point the other way in RTL. */
 :root[dir="rtl"] .icon-dir { transform: scaleX(-1); }
 #chat-header-actions > button:not(#leave-room-btn):not(#delete-room-btn) > svg { width: 18px; height: 18px; }
@@ -1430,6 +1455,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
 .contact-search-item:hover { background: var(--tint-hover); }
 .contact-search-name { font-size: var(--text-md); color: var(--text-primary); }
 .contact-search-did { font-size: var(--text-xs); color: var(--text-secondary); font-family: var(--font-mono); }
+} /* components */
 
 /* ── PLAN_ROUND_56 D2/D3: high-contrast & forced-colors support ── */
 
@@ -1498,6 +1524,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
     .toast, .banner { border: 1px solid CanvasText; }
 }
 
+@layer components {
 /* R81 Q: call video — fullscreen layout, active-speaker ring, responsive */
 #vw-video-area:fullscreen,
 #voice-channel-videos:fullscreen {
@@ -1749,6 +1776,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         .reaction.reaction-anim {
             animation: reaction-pop var(--dur-3) var(--ease-out);
         }
+} /* components */
         /* F4: honour reduced-motion globally — covers the reaction pop, skeleton
            shimmer, popover fade, recording pulse, every token transition, and
            smooth scrolling, not just the one reaction rule it replaced. */
@@ -1761,6 +1789,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             }
         }
 
+@layer components {
 /* ── Entry motion. Dialogs, popup menus, the emoji picker, the hover action
    bar and toasts ease in with @starting-style: the first style an element
    gets after leaving display:none starts from these values and transitions
@@ -2611,6 +2640,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 @container settings (max-width: 320px) {
     .settings-inline { flex-direction: column; align-items: stretch; }
 }
+} /* components */
 
 @layer tokens {
 /* ── Layering scale. Menus open from the page; dialogs sit above them;
@@ -2635,6 +2665,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 }
 } /* tokens */
 
+@layer components {
 /* ── Toasts. Top-right on desktop, under the header on phones, so a toast
    never covers the composer's Send and mic buttons. ── */
 #toast-container {
@@ -2684,8 +2715,10 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
     border-radius: var(--radius-sm);
 }
 .toast__close:hover, .banner__close:hover { background: var(--tint-active); }
+} /* components */
 @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
 
+@layer components {
 /* ── Page banners. They all live in #banner-slot and only the most important
    active one shows (status-banners.js applyBannerPriority adds
    .banner--suppressed to the rest). ── */
@@ -2790,6 +2823,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 .member-item { display: flex; align-items: center; padding: var(--space-1) var(--space-3); margin: 0 var(--space-1); cursor: pointer; border-radius: 4px; }
 .member-item:hover { background: var(--tint-hover); }
 .member-item:focus-visible { background: var(--tint-hover); outline-offset: -2px; }
+} /* components */
 
 /* ── Classes for JS-built UI ── */
 @layer tokens {
@@ -2800,6 +2834,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
     --color-success-tint: #134e26;
 }
 } /* tokens */
+@layer utilities {
 /* Status and emphasis colors for words built in JS. */
 .text-primary { color: var(--text-primary); }
 .text-muted { color: var(--slate-600); }
@@ -2809,6 +2844,8 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 .text-sm { font-size: var(--text-sm); }
 .text-xs { font-size: var(--text-2xs); }
 .link-inherit { color: inherit; text-decoration: underline; }
+} /* utilities */
+@layer components {
 /* Short id shown after a display name (sidebar rows, message headers). */
 .id-suffix { color: var(--slate-600); font-size: var(--text-2xs); font-weight: 400; margin-inline-start: var(--space-1); }
 .mute-icon { font-size: var(--text-xs); color: var(--slate-600); margin-inline-start: var(--space-1); flex-shrink: 0; }
@@ -2884,6 +2921,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
     font-size: var(--text-lg); padding: 0 var(--space-1); min-width: 24px; min-height: 24px;
 }
 
+} /* components */
 /* ── Typography and icon details. Kept together so the reasoning sits in one
    place; each rule only refines the components defined above. ── */
 @layer tokens {
@@ -2906,6 +2944,7 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 ::placeholder { color: var(--slate-500); opacity: 1; }
 } /* base */
 
+@layer components {
 /* Digits that change in place (clocks, counts, timers, progress) get equal
    widths, so the text around them does not jitter as they tick. */
 .msg-ts-header, .msg-compact-ts, .msg-time, .time, .dm-item-ts,
@@ -2935,6 +2974,7 @@ h1, h2, h3, h4, .modal__title, .empty-state-title { text-wrap: balance; }
 .empty-state-hint, .feed-welcome-hint { max-width: 48ch; margin-inline: auto; }
 /* Opening quotes and bullets hang in the margin where supported (Safari). */
 .msg-content, .modal__desc, .settings-hint { hanging-punctuation: first; }
+} /* components */
 
 @layer base {
 /* Underlines clear descenders and follow the font's own stroke weight. */
@@ -2948,6 +2988,7 @@ h1, h2, h3, h4, .modal__title, .empty-state-title { text-wrap: balance; }
    scroll inside the block instead of widening the message. */
 :where(code, kbd, samp, pre) { font-family: var(--font-mono); font-size: 0.875em; tab-size: 4; }
 } /* base */
+@layer components {
 .inline-code, .code-block, .copyable-code { font-size: 0.875em; }
 .code-block { max-width: 100%; }
 .code-block code { font: inherit; }
@@ -2962,3 +3003,4 @@ h1, h2, h3, h4, .modal__title, .empty-state-title { text-wrap: balance; }
 .msg-expire-countdown svg, .forwarded-banner svg, .dm-close-btn svg,
 .toast__close svg, .banner__close svg, .gif-remove svg, .sidebar-icon-btn svg,
 .mute-icon svg, #disappear-banner svg, #pod-sync-indicator svg { stroke-width: 2; }
+} /* components */
