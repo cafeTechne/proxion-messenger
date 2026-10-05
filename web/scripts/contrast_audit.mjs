@@ -51,6 +51,7 @@ const T = {
   slate700: '#334155', slate900: '#0f172a',
   colorWarning: '#f59e0b',
   roleAdmin: '#7c3aed', roleMod: '#0e7490',
+  selectionBg: '#8a1d44',          // style.css --selection-bg (::selection fill)
 };
 
 // [label, fg, bg, minRatio]. minRatio 3 for large text / non-text UI.
@@ -87,6 +88,10 @@ const PAIRS = [
   ['warning (pod note) text on bg', T.colorWarning, T.bgPrimary, 4.5],
   ['white on admin role badge', T.white, T.roleAdmin, 4.5],
   ['white on mod role badge', T.white, T.roleMod, 4.5],
+  ['selected text on selection fill', T.white, T.selectionBg, 4.5],
+  ['selection fill stands out from bg', T.selectionBg, T.bgPrimary, 1.5],
+  ['placeholder (slate-500) on slate-900 input', T.slate500, T.slate900, 4.5],
+  ['placeholder (slate-500) on surface-2 input', T.slate500, T.surface2, 4.5],
 ];
 
 let fails = 0;

@@ -2460,3 +2460,76 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
     background: transparent; border: none; color: inherit; cursor: pointer;
     font-size: var(--text-lg); padding: 0 var(--space-1); min-width: 24px; min-height: 24px;
 }
+
+/* ── Typography and icon details. Kept together so the reasoning sits in one
+   place; each rule only refines the components defined above. ── */
+:root {
+    /* Text selection: a deep accent fill under white text, so selected text
+       stays readable everywhere, including over links that are accent-colored
+       themselves (scripts/contrast_audit.mjs). */
+    --selection-bg: #8a1d44;
+    --selection-text: #ffffff;
+}
+/* Light text on dark surfaces looks heavier than intended under subpixel
+   antialiasing on macOS; grayscale smoothing keeps weights true. No effect on
+   Windows or Linux. */
+body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+::selection { background: var(--selection-bg); color: var(--selection-text); }
+/* Firefox fades placeholders with opacity; pin it so the color alone sets the
+   contrast, which is audited against both input fills. */
+::placeholder { color: var(--slate-500); opacity: 1; }
+
+/* Digits that change in place (clocks, counts, timers, progress) get equal
+   widths, so the text around them does not jitter as they tick. */
+.msg-ts-header, .msg-compact-ts, .msg-time, .time, .dm-item-ts,
+.unread-badge, .unread-count-badge, .chat-header-subtitle,
+.msg-expire-countdown, .xfer-progress, #recording-timer, #vw-status,
+.audio-duration, .session-time, .edit-history-meta, .list-row__meta,
+.ref-row__meta, .search-result__meta, #fingerprint-words,
+#e2e-modal-safety-number, #device-link-safety, #pair-device-safety {
+    font-variant-numeric: tabular-nums;
+}
+
+/* Headings break into even lines instead of leaving one word behind; prose
+   avoids a lone last word where the engine supports it. */
+h1, h2, h3, h4, .modal__title, .empty-state-title { text-wrap: balance; }
+.modal__desc, .settings-hint, .empty-state-hint, .feed-welcome-hint { text-wrap: pretty; }
+
+/* Empty-state and welcome titles scale gently with the window, from today's
+   phone size up to the next step on the type scale. Message text stays fixed. */
+.empty-state-title {
+    font-size: clamp(var(--text-base), 0.8rem + 0.4vw, var(--text-lg));
+    font-weight: var(--weight-semibold);
+}
+.feed-welcome > .system-msg { font-size: clamp(var(--text-md), 0.75rem + 0.4vw, var(--text-lg)); }
+
+/* Keep long-form copy to a readable measure on wide dialogs and panes. */
+.modal__desc, .settings-hint, .settings-result { max-width: 65ch; }
+.empty-state-hint, .feed-welcome-hint { max-width: 48ch; margin-inline: auto; }
+/* Opening quotes and bullets hang in the margin where supported (Safari). */
+.msg-content, .modal__desc, .settings-hint { hanging-punctuation: first; }
+
+/* Underlines clear descenders and follow the font's own stroke weight. */
+:where(a, .link-inherit, .ob-skip-link) {
+    text-underline-offset: 0.18em;
+    text-decoration-thickness: from-font;
+}
+
+/* Code: one mono size relative to the surrounding text (mono faces run large,
+   so slightly under 1em reads as the same size), 4-column tabs, and long lines
+   scroll inside the block instead of widening the message. */
+:where(code, kbd, samp, pre) { font-family: var(--font-mono); font-size: 0.875em; tab-size: 4; }
+.inline-code, .code-block, .copyable-code { font-size: 0.875em; }
+.code-block { max-width: 100%; }
+.code-block code { font: inherit; }
+
+/* Clamp to two lines with the standard property next to the -webkit- one. */
+.preview-desc { line-clamp: 2; }
+
+/* Heroicons draw a 1.5 stroke on a 24 grid, which lands under 1px at 12-14px
+   and turns faint. Small icon contexts get a slightly heavier stroke so every
+   size reads at about the same weight. */
+.read-receipt svg, .relay-pending-badge svg, .relay-read svg, .revoked-badge svg,
+.msg-expire-countdown svg, .forwarded-banner svg, .dm-close-btn svg,
+.toast__close svg, .banner__close svg, .gif-remove svg, .sidebar-icon-btn svg,
+.mute-icon svg, #disappear-banner svg, #pod-sync-indicator svg { stroke-width: 2; }
