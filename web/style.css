@@ -1390,12 +1390,40 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
    visible (outline survives), and don't let presence/status be color-only:
    preserve the dots as shapes and lean on the system palette elsewhere. */
 @media (forced-colors: active) {
+    /* Every var(--focus-ring) outline, whatever its offset. */
+    :root { --focus-ring-color: CanvasText; }
     :focus-visible { outline: 2px solid CanvasText; }
-    .dot, .avatar-presence { forced-color-adjust: none; }
     .skip-nav { forced-color-adjust: none; }
     /* Ensure interactive rows have a perceivable active state without relying on
        a custom background the UA may drop. */
-    nav li.active { outline: 2px solid Highlight; outline-offset: -2px; }
+    nav li.active,
+    .settings-nav-item[aria-current="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
+    /* Presence dots: system colors, and the shape carries the state so it is
+       not color-only. Online is filled, away is half filled, busy is filled
+       with Highlight, offline is an empty ring. */
+    .dot, .avatar-presence {
+        forced-color-adjust: none;
+        background: Canvas; border-color: Canvas;
+        box-shadow: 0 0 0 1px CanvasText;
+    }
+    .dot.online, .avatar-presence.online { background: CanvasText; }
+    .avatar-presence.away { background: linear-gradient(90deg, CanvasText 50%, Canvas 50%); }
+    .avatar-presence.busy { background: Highlight; }
+    /* Buttons painted as a bare fill lose their edge once the fill is forced to
+       ButtonFace, and so do icon-only buttons. Menu rows and the settings nav
+       read as lists and keep their container's frame. !important because many
+       buttons reset border at higher specificity, and this is the user's
+       contrast setting. */
+    :is(button, .btn, .reaction):not([role="menuitem"], .settings-nav-item) { border: 1px solid ButtonText !important; }
+    /* Letter avatars lose their colored disc. */
+    .avatar.placeholder, .profile-avatar { border: 1px solid CanvasText; }
+    :is(button, .btn):disabled { border-color: GrayText !important; color: GrayText; }
+    /* Selected and highlighted states that were a fill. */
+    .reaction.active,
+    .unread-badge.mention { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight !important; }
+    .unread-badge, .unread-count-badge, .role-badge, .bot-badge { border: 1px solid CanvasText; }
+    /* Toasts and banners float over content with only a fill and a shadow. */
+    .toast, .banner { border: 1px solid CanvasText; }
 }
 
 /* R81 Q: call video — fullscreen layout, active-speaker ring, responsive */
