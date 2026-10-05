@@ -125,6 +125,11 @@ describe('renderContacts', () => {
     expect(row1.innerHTML).not.toBe(row2.innerHTML);
     expect(row1.innerHTML).toContain('RealAlice'.slice(0, 6));
   });
+  it('wraps the name in its own element so CSS can truncate it and keep the id', () => {
+    make().renderContacts([{ certificate_id: 'c1', peer_did: 'did:key:zRealAlice', display_name: '<b>Al</b>' }]);
+    const html = els['contacts-list']._children[0].innerHTML;
+    expect(html).toMatch(/<span class="contact-item-label" dir="auto"><span class="contact-item-name">&lt;b&gt;Al&lt;\/b&gt;<\/span> <span class="dm-id-suffix id-suffix">/);
+  });
 });
 
 describe('addRoomToSidebar + its click', () => {

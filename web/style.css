@@ -672,7 +672,7 @@ main { background: var(--surface-0); }
     gap: var(--space-2);
     margin-bottom: var(--space-1);
 }
-.msg-sender { font-weight: var(--weight-semibold); font-size: var(--text-base); max-width: 40ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msg-sender { font-weight: var(--weight-semibold); font-size: var(--text-base); min-width: 0; max-width: 40ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .msg-ts-header { font-size: var(--text-xs); color: var(--text-secondary); white-space: nowrap; flex-shrink: 0; }
 
 /* Message text */
@@ -680,8 +680,9 @@ main { background: var(--surface-0); }
     color: var(--text-primary);
     font-size: var(--text-base);
     line-height: 1.5;
-    word-break: break-word;
-    overflow-wrap: break-word;
+    /* anywhere (not break-word) also lowers the min-content width, so one
+       unbroken token can never widen the flex column it sits in. */
+    overflow-wrap: anywhere;
     /* Cap the reading measure so body text doesn't run to 100+ chars/line on wide
        (>1400px) windows; the row itself still spans the feed, text stays left. */
     max-width: 75ch;
@@ -1496,6 +1497,8 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             border-radius: 4px;
             margin-top: var(--space-2);
             font-size: var(--text-md);
+            max-width: 100%;
+            overflow-wrap: anywhere;
         }
         #file-input { display: none; }
         #search-box {
@@ -1826,7 +1829,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             align-items: center;
             font-size: var(--text-md);
         }
-        .reply-preview { color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .reply-preview { flex: 1; min-width: 0; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .cancel-reply { cursor: pointer; color: var(--accent); font-weight: var(--weight-semibold); background: none; border: none; padding: 0; }
         .cancel-reply:hover, .cancel-reply:focus-visible { background: var(--tint-hover); }
         
@@ -1884,6 +1887,8 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             display: flex;
             flex-direction: column;
             gap: var(--space-1);
+            min-width: 0;
+            overflow-wrap: anywhere;
         }
         .preview-title { font-weight: var(--weight-semibold); color: var(--accent-text); }
         .preview-title a { color: inherit; text-decoration: none; }
@@ -2367,6 +2372,39 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
     .settings-danger-row .btn { flex-shrink: 0; }
 }
 
+/* ── Defensive layout ──
+   Small rules that keep long names, URLs, slow images and scrollbars from
+   breaking the layout. Each one is harmless where it is not needed. */
+
+/* Own name in the sidebar: one line with an ellipsis. Unbounded, it spilled
+   out of the sidebar, and on phones out of the parked off-canvas drawer onto
+   the chat. */
+#self-presence { min-width: 0; }
+#self-presence .dot { flex-shrink: 0; }
+#username { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Contact rows match the DM rows: the name truncates and the short id stays. */
+.contact-item-label { flex: 1; min-width: 0; display: flex; align-items: baseline; }
+.contact-item-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The short id may take up to half the row, so a long name keeps the rest. */
+.contact-item-label > .id-suffix { flex-shrink: 0; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Members panel rows and section headers. */
+.members-section-header {
+    padding: var(--space-2) var(--space-4) var(--space-1);
+    font-size: var(--text-xs); color: var(--text-secondary);
+}
+.member-label { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--space-1); }
+.member-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-label > :not(.member-name) { flex-shrink: 0; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Contact profile drawer: names, DIDs and URLs wrap inside the drawer. */
+#contact-profile-panel { overflow-wrap: anywhere; }
+
+/* The composer placeholder names the room; a long name stays on one line
+   instead of showing half of a second line in the one-row textarea. */
+#message-input::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* ── Layering scale. Menus open from the page; dialogs sit above them;
    confirm/prompt and other dialogs that open on top of a dialog use the
    stacked layer. The first-run gates sit below ordinary dialogs because the
@@ -2401,7 +2439,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
     #toast-container { left: auto; right: var(--space-4); width: 340px; }
 }
 .toast {
-    display: flex; align-items: center; gap: var(--space-2);
+    display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
     padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
     border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
     font-size: var(--text-md); line-height: 1.4;
@@ -2419,7 +2457,10 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .toast--success { background: var(--color-success-bg); color: var(--color-on-status); }
 .toast--error { background: var(--color-danger-bg); color: var(--color-on-status); }
 .toast--warning { background: var(--color-warning-bg); color: var(--color-warning-text); }
-.toast__msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* A long message takes the whole first row and the action drops below it,
+   instead of squeezing the text into a one-word column. */
+.toast__msg { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; }
+.toast__action { margin-inline-start: auto; }
 .toast__count { font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
 .toast__action, .banner__action {
     flex-shrink: 0; background: transparent; color: inherit; font: inherit;
@@ -2580,7 +2621,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .list-row__main { flex: 1; min-width: 0; }
 .list-row__meta { color: var(--slate-600); font-size: var(--text-xs); }
 /* Pinned and saved message rows. */
-.ref-row { border-bottom: 1px solid var(--slate-700); padding: var(--space-2) 0; color: var(--slate-50); }
+.ref-row { border-bottom: 1px solid var(--slate-700); padding: var(--space-2) 0; color: var(--slate-50); overflow-wrap: anywhere; }
 .ref-row__meta { font-size: var(--text-sm); color: var(--text-secondary); }
 .ref-row__body { margin: 2px 0; }
 .ref-row__actions { display: flex; gap: var(--space-2); margin-top: var(--space-1); }
