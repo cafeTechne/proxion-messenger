@@ -129,7 +129,7 @@ describe('CSS.escape neutralizes a quote-bearing message id', () => {
 
 describe('main.js chat conventions wiring', () => {
   it('DM row keeps the time on the name line: label span first, then the time span', () => {
-    expect(src).toMatch(/<span class="dm-item-label">\$\{escHtml\(name\)\}\$\{idTag\}<\/span>\$\{ts \? `<span class="dm-item-ts">/);
+    expect(src).toMatch(/<span class="dm-item-label" title="\$\{escHtml\(name\)\}">\$\{escHtml\(name\)\}\$\{idTag\}<\/span>\$\{ts \? `<span class="dm-item-ts">/);
     expect(src).not.toMatch(/float:inline-end/);
   });
   it('composer placeholder is per conversation and translated', () => {

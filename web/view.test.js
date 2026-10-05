@@ -146,6 +146,12 @@ describe('addRoomToSidebar + its click', () => {
     v.addRoomToSidebar('dup', 'Dup', '');
     expect(els['room-list']._children).toHaveLength(0);
   });
+  it('keeps the full room name in a title, since the row ellipsizes it', () => {
+    const v = make();
+    v.addRoomToSidebar('room-long', 'A very long <room> name', '');
+    const li = els['room-list']._children[0];
+    expect(li.innerHTML).toContain('class="room-item-name" dir="auto" title="A very long &lt;room&gt; name"');
+  });
 });
 
 describe('populateSidebar + its click', () => {

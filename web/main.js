@@ -981,8 +981,8 @@ import { createIdentityResolver } from './identity.js';
                 const body = document.createElement("div");
                 body.className = "dm-item-body";
                 const ts = last ? timeAgo(last.timestamp) : "";
-                body.innerHTML = `<div class="dm-item-name" dir="auto"><span class="dm-item-label">${escHtml(name)}${idTag}</span>${ts ? `<span class="dm-item-ts">${ts}</span>` : ""}</div>
-                    ${last ? `<div class="dm-item-preview" dir="auto">${last.snippet.replace(/</g,"&lt;")}</div>` : ""}`;
+                body.innerHTML = `<div class="dm-item-name" dir="auto"><span class="dm-item-label" title="${escHtml(name)}">${escHtml(name)}${idTag}</span>${ts ? `<span class="dm-item-ts">${ts}</span>` : ""}</div>
+                    ${last ? `<div class="dm-item-preview" dir="auto" title="${escHtml(last.snippet)}">${last.snippet.replace(/</g,"&lt;")}</div>` : ""}`;
                 const closeBtn = document.createElement("button");
                 closeBtn.className = "dm-close-btn";
                 closeBtn.innerHTML = icon('x-mark', { size: 14 });
@@ -1323,6 +1323,7 @@ import { createIdentityResolver } from './identity.js';
             const previewEl = li.querySelector(".room-item-preview");
             if (previewEl && preview) {
                 previewEl.textContent = (preview.senderName ? preview.senderName + ": " : "") + preview.snippet;
+                previewEl.title = previewEl.textContent;
             }
         }
 
@@ -3720,6 +3721,9 @@ import { createIdentityResolver } from './identity.js';
                     ? t('composer.placeholderRoom', { name: activeView.name || "" })
                     : t('composer.placeholderDm', { name: activeView.name || "" });
             }
+            // The name ellipsizes in a narrow header, so keep the full text in a tooltip.
+            const hdr = document.getElementById("chat-header-name");
+            if (hdr) hdr.title = hdr.textContent || "";
             _updateHeaderSubtitle();
             _closeRoomOptionsMenu();
             if (isSearchOpen()) closeSearch();
@@ -3744,6 +3748,7 @@ import { createIdentityResolver } from './identity.js';
                 }
             }
             el.textContent = text;
+            el.title = text;
             el.hidden = !text;
         }
 

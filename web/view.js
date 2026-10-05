@@ -230,7 +230,7 @@ export function createView({
         li.style.gap = "6px";
         li.innerHTML = `
             <div class="room-item-body">
-                <div class="room-item-name" dir="auto">${escHtml(name)}</div>
+                <div class="room-item-name" dir="auto" title="${escHtml(name)}">${escHtml(name)}</div>
                 <div class="room-item-preview" dir="auto"></div>
             </div>
             <button data-sidebar-action="members" data-room-id="${escHtml(roomId)}" title="${escHtml(t('ui.members'))}" aria-label="${escHtml(t('ui.members'))}"
