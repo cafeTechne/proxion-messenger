@@ -1247,6 +1247,9 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
 /* 13.7: Inline image preview */
 .msg-image-preview {
     display: block; max-width: min(320px, 100%); max-height: 240px;
+    /* A floor so a very tall or very wide image is cropped into a usable
+       thumbnail instead of collapsing to a sliver (cover does the crop). */
+    min-width: 96px; min-height: 64px;
     border-radius: 6px; margin-top: var(--space-2); cursor: pointer;
     border: 1px solid var(--border);
     object-fit: cover;
@@ -1255,6 +1258,9 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
 /* R59A: inline media players — same footprint discipline as image previews */
 .msg-video-preview {
     display: block; max-width: min(420px, 100%); max-height: 320px;
+    /* Reserve a 16:9 box before metadata loads, so the feed does not jump
+       when the real size arrives; contain letterboxes other ratios. */
+    width: min(420px, 100%); height: auto; aspect-ratio: 16 / 9; object-fit: contain;
     border-radius: 6px; margin-top: var(--space-2);
     border: 1px solid var(--border);
     background: #000;
@@ -1875,12 +1881,17 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             font-size: var(--text-md);
             box-shadow: var(--shadow-sm);
         }
+        /* Fixed square thumbnail: reserves its box before the image loads and
+           stretches to the card height instead of following the image's own
+           (possibly very tall) ratio. */
         .link-preview img {
+            flex: 0 0 120px;
             width: 120px;
-            height: 100%;
-            min-height: 100px;
+            height: auto;
+            aspect-ratio: 1;
+            align-self: stretch;
             object-fit: cover;
-            border-right: 1px solid var(--border);
+            border-inline-end: 1px solid var(--border);
         }
         .preview-info {
             padding: var(--space-3);
@@ -2441,6 +2452,10 @@ nav,
 
 /* Contact profile drawer: names, DIDs and URLs wrap inside the drawer. */
 #contact-profile-panel { overflow-wrap: anywhere; }
+
+/* Message avatars that are real images keep their circle when the source is
+   not square. */
+img.avatar { object-fit: cover; aspect-ratio: 1; }
 
 /* The composer placeholder names the room; a long name stays on one line
    instead of showing half of a second line in the one-row textarea. */
