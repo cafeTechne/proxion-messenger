@@ -1536,7 +1536,7 @@ import { createIdentityResolver } from './identity.js';
                         renderDmSidebar();
                     }
 
-                    renderMessage(msg);
+                    renderMessage(msg, { live: true });
 
                     // Update unread badges + DM last-message preview
                     if (!activeView || activeView.id !== id) {
@@ -4026,7 +4026,7 @@ import { createIdentityResolver } from './identity.js';
                     pod_ts: activeView.type === 'local_room' ? _clientTs : undefined,
                     reply_to_id: payload.reply_to_id || null,
                     local: true,
-                });
+                }, { live: true });
                 document.getElementById('msg-' + clientMsgId)?.classList.add('msg-pending');
                 // R66: track the optimistic send; if unconfirmed, mark it failed + offer retry.
                 if (_resendPayload) sendStatus.track(clientMsgId, typeof _resendPayload === 'function' ? _resendPayload : () => socketSendOrQueue(_resendPayload));

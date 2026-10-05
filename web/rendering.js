@@ -184,6 +184,7 @@ export function createRendering({
         _requestedReplies: new Set(), // reply parents already asked for via get_message
         _unreadBeforeId: null,      // "New messages" divider goes before this message
         _unreadSeen: false,         // reader reached the bottom since the divider appeared
+        _unreadEnteredFor: null,    // divider id that already played its entry fade
     };
 
     function scrollToBottom() {
@@ -300,7 +301,9 @@ export function createRendering({
         }
     }
 
-    function renderMessage(msg) {
+    // opts.live: the message just arrived (or was just sent), so its row gets
+    // the .msg-enter fade. History loads and re-renders leave it off.
+    function renderMessage(msg, opts = {}) {
         const activeView = getActiveView();
         const allMessages = getAllMessages();
         const messageMap = getMessageMap();
@@ -329,7 +332,9 @@ export function createRendering({
             const visibleMsgs = [...feed.querySelectorAll(".message[data-message-id]")];
             const lastEl = visibleMsgs[visibleMsgs.length - 1];
             const prev = lastEl ? messageMap[lastEl.dataset.messageId] : null;
+            const isNew = opts.live && !document.getElementById(`msg-${msg.message_id}`);
             _renderMessageEl(msg, feed, prev);
+            if (isNew) document.getElementById(`msg-${msg.message_id}`)?.classList.add("msg-enter");
             if (atBottom) {
                 feed.scrollTop = feed.scrollHeight;
                 state._pinnedToBottom = true;
@@ -395,6 +400,11 @@ export function createRendering({
             dividerEmitted = true;
             const unreadEl = document.createElement("div");
             unreadEl.className = "unread-divider";
+            // Fade in the first time this divider is drawn, not on every re-render.
+            if (state._unreadEnteredFor !== msgId) {
+                state._unreadEnteredFor = msgId;
+                unreadEl.classList.add("unread-divider--enter");
+            }
             unreadEl.setAttribute("role", "separator");
             unreadEl.innerHTML = `<span>${escHtml(t('feed.unreadDivider'))}</span>`;
             feed.appendChild(unreadEl);

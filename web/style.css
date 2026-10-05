@@ -1499,6 +1499,43 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
                 scroll-behavior: auto !important;
             }
         }
+
+/* ── Entry motion. Dialogs, popup menus, the emoji picker, the hover action
+   bar and toasts ease in with @starting-style: the first style an element
+   gets after leaving display:none starts from these values and transitions
+   to its normal ones. Engines without @starting-style just show it.
+   There are no exit transitions for the display-toggled pieces on purpose:
+   JS hides them with an inline display:none, and keeping a closing overlay
+   painted and hit-testable for a few frames would swallow the next click and
+   break callers that check display right after closing. Menus animate
+   translate only (no scale) because openMenu measures the menu right after
+   showing it. ── */
+.modal, #settings-modal, #lightbox { transition: opacity var(--dur-2) var(--ease-out); }
+.modal__panel, #settings-modal > .settings-panel {
+    transition: opacity var(--dur-2) var(--ease-out), transform var(--dur-3) var(--ease-spring);
+}
+:is(.menu, .ctx-menu, .delete-submenu, .member-context-menu),
+.emoji-picker {
+    transition: opacity var(--dur-1) var(--ease-out), transform var(--dur-2) var(--ease-out);
+}
+.msg-actions { transition: opacity var(--dur-1) var(--ease-out); }
+@starting-style {
+    .modal, #settings-modal, #lightbox { opacity: 0; }
+    .modal__panel, #settings-modal > .settings-panel { opacity: 0; transform: translateY(8px) scale(0.98); }
+    :is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) { opacity: 0; transform: translateY(-4px); }
+    /* The picker opens above its anchor, so it rises into place. */
+    .emoji-picker { opacity: 0; transform: translateY(4px); }
+    .msg-actions { opacity: 0; }
+}
+
+/* Messages appended live at the bottom (rendering.js adds .msg-enter only for
+   live arrivals and sends, never for history or re-renders) and the "New
+   messages" divider the first time it is drawn. Opacity and transform only,
+   so nothing moves layout and scroll anchoring is unaffected. */
+@keyframes msg-enter { from { opacity: 0; transform: translateY(6px); } }
+@keyframes fade-in { from { opacity: 0; } }
+.message.msg-enter { animation: msg-enter var(--dur-3) var(--ease-out); }
+.unread-divider--enter { animation: fade-in var(--dur-3) var(--ease-out); }
         .emoji-picker {
             display: none;
             position: absolute;
@@ -2165,9 +2202,15 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
     font-size: var(--text-md); line-height: 1.4;
     background: var(--surface-2); color: var(--slate-50);
     pointer-events: auto; cursor: pointer;
-    transition: opacity 0.3s;
+    transition: opacity var(--dur-2) var(--ease-out), transform var(--dur-3) var(--ease-spring);
 }
-.toast--leaving { opacity: 0; }
+/* Arrives from just above, since the stack hangs from the top of the screen.
+   Leaving is quicker than the 300ms removal timer in notifications.js. */
+@starting-style { .toast { opacity: 0; transform: translateY(-8px); } }
+.toast--leaving {
+    opacity: 0; transform: translateY(-4px);
+    transition-duration: var(--dur-2); transition-timing-function: var(--ease-in);
+}
 .toast--success { background: var(--color-success-bg); color: var(--color-on-status); }
 .toast--error { background: var(--color-danger-bg); color: var(--color-on-status); }
 .toast--warning { background: var(--color-warning-bg); color: var(--color-warning-text); }

@@ -508,6 +508,36 @@ describe('feed order: replies stay in timestamp order', () => {
   });
 });
 
+describe('entry motion hooks', () => {
+  const m = (id, min) => ({ message_id: id, thread_id: 'room-1', from_webid: 'did:key:zA', content: id, timestamp: at(`2026-10-04T10:0${min}:00`) });
+  const entered = (feed, id) => feed.children.find(c => c.dataset.messageId === id).classList.contains('msg-enter');
+  it('marks only live arrivals with .msg-enter, not history or re-renders', () => {
+    const { feed } = miniDom();
+    const r = make();
+    r.renderMessage(m('hist', 0));
+    r.renderMessage(m('live', 1), { live: true });
+    expect(entered(feed, 'hist')).toBe(false);
+    expect(entered(feed, 'live')).toBe(true);
+    // The server echo of an already-rendered message does not re-tag it.
+    r.renderMessage(m('hist', 0), { live: true });
+    expect(entered(feed, 'hist')).toBe(false);
+    host.allMessages = [m('hist', 0), m('live', 1)];
+    r.renderMessages();
+    expect(entered(feed, 'live')).toBe(false);
+  });
+  it('fades the unread divider in once, not on every re-render', () => {
+    const { feed } = miniDom();
+    const r = make();
+    host.allMessages = [m('r1', 0), m('u1', 2)];
+    r.markUnread(host.allMessages, new Date('2026-10-04T10:01:00').getTime() / 1000);
+    r.renderMessages();
+    expect(feed.querySelector('.unread-divider').classList.contains('unread-divider--enter')).toBe(true);
+    r.renderMessages();
+    expect(feed.querySelectorAll('.unread-divider')).toHaveLength(1);
+    expect(feed.querySelector('.unread-divider').classList.contains('unread-divider--enter')).toBe(false);
+  });
+});
+
 describe('reply quote text', () => {
   it('uses the parent text, collapsed to one line', () => {
     expect(replySnippet({ content: 'hello\n  world' })).toBe('hello world');
