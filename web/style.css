@@ -1178,8 +1178,8 @@ button {
     .message:not(.msg-grouped) { padding-top: var(--space-3); }
     #menu-toggle {
         /* inline-flex (not block) so the glyph centers inside the enlarged hit
-           area below; !important still beats the base display:none. */
-        display: inline-flex !important;
+           area below. Comes after the base display:none in the same layer. */
+        display: inline-flex;
         align-items: center;
         justify-content: center;
     }
@@ -1231,7 +1231,7 @@ button {
 } /* components */
 
 @layer utilities {
-.vw-sharing { color: var(--accent) !important; }
+.vw-sharing { color: var(--accent); }
 } /* utilities */
 
 @layer components {
@@ -1261,13 +1261,13 @@ button {
     color: var(--color-danger);
 }
 #end-call:hover {
-    background: color-mix(in srgb, var(--color-danger) 15%, transparent) !important;
+    background: color-mix(in srgb, var(--color-danger) 15%, transparent);
     color: var(--color-danger);
 }
 } /* components */
 @layer utilities {
 .vw-muted {
-    color: var(--color-danger) !important;
+    color: var(--color-danger);
 }
 } /* utilities */
 
@@ -1320,11 +1320,11 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
 
 /* 13.6: Backup nudge banner */
 #backup-nudge { display: none; }
-#backup-nudge.visible { display: flex !important; }
+#backup-nudge.visible { display: flex; }
 
 /* Persistent join-request indicator: awaiting the room owner's approval */
 #join-pending-banner { display: none; }
-#join-pending-banner.visible { display: flex !important; }
+#join-pending-banner.visible { display: flex; }
 
 /* 13.7: Inline image preview */
 .msg-image-preview {
@@ -1396,6 +1396,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
     cursor: auto;
     user-select: auto;
 }
+/* The lightbox carries an inline display: none, hence !important. */
 #lightbox { display: none; }
 #lightbox.visible {
     display: flex !important;
@@ -1477,7 +1478,9 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
     @layer base {
         :focus-visible { outline-width: 3px; outline-offset: 2px; }
     }
-    .msg-actions, nav li.active { border: 1px solid var(--border); }
+    @layer overrides {
+        .msg-actions, nav li.active { border: 1px solid var(--border); }
+    }
 }
 
 /* D3 — Windows High Contrast / forced-colors strips custom colors. Keep focus
@@ -1491,37 +1494,40 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
     @layer base {
         :focus-visible { outline: 2px solid CanvasText; }
     }
-    .skip-nav { forced-color-adjust: none; }
-    /* Ensure interactive rows have a perceivable active state without relying on
-       a custom background the UA may drop. */
-    nav li.active,
-    .settings-nav-item[aria-current="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
-    /* Presence dots: system colors, and the shape carries the state so it is
-       not color-only. Online is filled, away is half filled, busy is filled
-       with Highlight, offline is an empty ring. */
-    .dot, .avatar-presence {
-        forced-color-adjust: none;
-        background: Canvas; border-color: Canvas;
-        box-shadow: 0 0 0 1px CanvasText;
+    @layer overrides {
+        .skip-nav { forced-color-adjust: none; }
+        /* Ensure interactive rows have a perceivable active state without relying on
+           a custom background the UA may drop. */
+        nav li.active,
+        .settings-nav-item[aria-current="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
+        /* Presence dots: system colors, and the shape carries the state so it is
+           not color-only. Online is filled, away is half filled, busy is filled
+           with Highlight, offline is an empty ring. */
+        .dot, .avatar-presence {
+            forced-color-adjust: none;
+            background: Canvas; border-color: Canvas;
+            box-shadow: 0 0 0 1px CanvasText;
+        }
+        .dot.online, .avatar-presence.online { background: CanvasText; }
+        .avatar-presence.away { background: linear-gradient(90deg, CanvasText 50%, Canvas 50%); }
+        .avatar-presence.busy { background: Highlight; }
+        /* Buttons painted as a bare fill lose their edge once the fill is forced to
+           ButtonFace, and so do icon-only buttons. Menu rows and the settings nav
+           read as lists and keep their container's frame. !important because many
+           buttons carry an inline border, which no layer can beat, and this is the
+           user's contrast setting. */
+        :is(button, .btn, .reaction):not([role="menuitem"], .settings-nav-item) { border: 1px solid ButtonText !important; }
+        /* Letter avatars lose their colored disc. */
+        .avatar.placeholder, .profile-avatar { border: 1px solid CanvasText; }
+        :is(button, .btn):disabled { border-color: GrayText !important; color: GrayText; }
+        /* Selected and highlighted states that were a fill. Their border-color is
+           !important to outrank the !important button border above. */
+        .reaction.active,
+        .unread-badge.mention { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight !important; }
+        .unread-badge, .unread-count-badge, .role-badge, .bot-badge { border: 1px solid CanvasText; }
+        /* Toasts and banners float over content with only a fill and a shadow. */
+        .toast, .banner { border: 1px solid CanvasText; }
     }
-    .dot.online, .avatar-presence.online { background: CanvasText; }
-    .avatar-presence.away { background: linear-gradient(90deg, CanvasText 50%, Canvas 50%); }
-    .avatar-presence.busy { background: Highlight; }
-    /* Buttons painted as a bare fill lose their edge once the fill is forced to
-       ButtonFace, and so do icon-only buttons. Menu rows and the settings nav
-       read as lists and keep their container's frame. !important because many
-       buttons reset border at higher specificity, and this is the user's
-       contrast setting. */
-    :is(button, .btn, .reaction):not([role="menuitem"], .settings-nav-item) { border: 1px solid ButtonText !important; }
-    /* Letter avatars lose their colored disc. */
-    .avatar.placeholder, .profile-avatar { border: 1px solid CanvasText; }
-    :is(button, .btn):disabled { border-color: GrayText !important; color: GrayText; }
-    /* Selected and highlighted states that were a fill. */
-    .reaction.active,
-    .unread-badge.mention { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight !important; }
-    .unread-badge, .unread-count-badge, .role-badge, .bot-badge { border: 1px solid CanvasText; }
-    /* Toasts and banners float over content with only a fill and a shadow. */
-    .toast, .banner { border: 1px solid CanvasText; }
 }
 
 @layer components {
@@ -1550,6 +1556,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
 }
 @media (max-width: 768px) {
   #vw-remote-video { max-height: 40vh; }
+  /* !important: #vc-local-video carries an inline width. */
   .vc-video-tile, #vc-local-video { width: 44vw !important; max-height: 30vh; }
 }
 
@@ -1777,9 +1784,11 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             animation: reaction-pop var(--dur-3) var(--ease-out);
         }
 } /* components */
+@layer overrides {
         /* F4: honour reduced-motion globally — covers the reaction pop, skeleton
            shimmer, popover fade, recording pulse, every token transition, and
-           smooth scrolling, not just the one reaction rule it replaced. */
+           smooth scrolling, not just the one reaction rule it replaced. !important
+           so it also beats inline transitions (the progress bars). */
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after {
                 animation-duration: 0.001ms !important;
@@ -1788,6 +1797,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
                 scroll-behavior: auto !important;
             }
         }
+} /* overrides */
 
 @layer components {
 /* ── Entry motion. Dialogs, popup menus, the emoji picker, the hover action
@@ -2469,7 +2479,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
     .settings-content { padding: var(--space-5) var(--space-6) var(--space-6); }
     /* No Advanced fold on desktop: the nav already makes every section one click away. */
     #settings-advanced-toggle { display: none; }
-    #settings-advanced { display: block !important; }
+    #settings-advanced { display: block !important; }   /* beats the inline display JS flips */
     .settings-input, .settings-inline, .settings-readout { max-width: 420px; }
     .settings-inline > .settings-input { max-width: none; }
     .settings-toggle { max-width: 560px; }
@@ -2570,7 +2580,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
     #chat-header .btn-label { display: none; }
     .chat-header-title { min-width: 6rem; }
     #chat-header-actions {
-        flex-shrink: 1 !important; min-width: 0;
+        flex-shrink: 1 !important; min-width: 0;   /* beats the inline flex-shrink: 0 */
         overflow-x: auto; scrollbar-width: none;
         padding-block: var(--space-1);
         /* Same edge-shadow overflow hint as the phone header (see the
@@ -2716,7 +2726,9 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 }
 .toast__close:hover, .banner__close:hover { background: var(--tint-active); }
 } /* components */
+@layer overrides {
 @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+} /* overrides */
 
 @layer components {
 /* ── Page banners. They all live in #banner-slot and only the most important
@@ -2732,6 +2744,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 .banner--warning { background: var(--color-warning-bg); color: var(--color-warning-text); }
 .banner--info { background: var(--color-info-bg); color: var(--color-info-text); }
 .banner--danger { background: var(--color-danger-bg); color: var(--color-on-status); }
+/* !important: the connection and pod banners are shown with an inline display. */
 #banner-slot > .banner.banner--suppressed { display: none !important; }
 
 /* ── Modal component: overlay + panel. Visibility stays on the inline
