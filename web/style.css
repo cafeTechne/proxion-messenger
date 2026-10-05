@@ -314,11 +314,14 @@
 }
 } /* tokens */
 
+@layer reset {
 * { box-sizing: border-box; }
 h1, h2, h3, h4 { line-height: 1.2; }
 /* Form controls do not inherit the page font by default (monospace textarea,
    Arial buttons). */
 button, input, select, textarea { font: inherit; color: inherit; }
+} /* reset */
+@layer base {
 /* Column layout so top-level banners (NAT warning) sit ABOVE the app in normal
    flow and push it down, instead of position:fixed overlaying the sidebar
    header. #app is the sidebar+chat row and takes the remaining height. */
@@ -354,10 +357,12 @@ body {
     outline: var(--focus-ring);
     outline-offset: var(--focus-ring-offset);
 }
+} /* base */
 /* The composer sets outline:none (an id rule, so it beat the ring above) and
    had no focus style at all. Text fields match :focus-visible on any focus. */
 #message-input:focus-visible { outline: var(--focus-ring); outline-offset: 0; }
 
+@layer base {
 /* Pressed feedback: a 1px nudge on every button, instant on press. :where()
    keeps it at zero specificity, so a button that positions itself with a
    transform keeps it. Menu rows stay put, a list row sliding reads as a glitch. */
@@ -367,7 +372,9 @@ body {
    which each theme tunes to read on its input fields. */
 :where(input[type="checkbox"], input[type="radio"], input[type="range"], progress) { accent-color: var(--accent); }
 :where(input, textarea, [contenteditable="true"]) { caret-color: var(--accent-text); }
+} /* base */
 
+@layer layout {
 #app {
     display: flex;
     width: 100%;
@@ -401,6 +408,7 @@ body {
     font-size: var(--text-md);
     color: var(--text-secondary);
 }
+} /* layout */
 
 .dot {
     width: 10px;
@@ -410,12 +418,14 @@ body {
 .dot.online { background: var(--color-success); box-shadow: 0 0 8px var(--color-success); }
 .dot.offline { background: var(--slate-500); }
 
+@layer layout {
 nav {
     flex: 1;
     overflow-y: auto;
     padding: var(--space-2);
 }
 nav section + section { margin-top: var(--space-4); }
+} /* layout */
 
 /* Sidebar brand: h1 for a valid single top-level heading; sized to match the
    previous h2 exactly so the visual is unchanged. */
@@ -507,6 +517,7 @@ nav li.dm-item > svg { flex: 0 0 16px; }
     margin-top: 2px;
 }
 
+@layer layout {
 /* The chat column is the page's only <main>; its flex layout is inline. */
 main { background: var(--surface-0); }
 
@@ -517,6 +528,7 @@ main { background: var(--surface-0); }
     background: var(--surface-0);
     border-bottom: 1px solid var(--border);
 }
+} /* layout */
 #chat-header-name {
     margin: 0;
     min-width: 0;
@@ -572,6 +584,7 @@ main { background: var(--surface-0); }
     .app-title { margin: 0; }
 }
 
+@layer layout {
 #message-feed {
     flex: 1;
     overflow-y: auto;
@@ -582,6 +595,7 @@ main { background: var(--surface-0); }
     flex-direction: column;
     gap: var(--space-3);
 }
+} /* layout */
 
 /* Discord-style message row: avatar column beside body column */
 .message {
@@ -840,6 +854,7 @@ main { background: var(--surface-0); }
     justify-content: center;
 }
 
+@layer layout {
 #message-form {
     padding: var(--space-2) var(--space-3);
     /* Clear the home indicator in standalone PWA mode (0 on non-notch/desktop). */
@@ -849,6 +864,7 @@ main { background: var(--surface-0); }
     align-items: center;
     background: var(--surface-0);
 }
+} /* layout */
 
 .paperclip {
     display: flex;
@@ -897,7 +913,9 @@ main { background: var(--surface-0); }
     color: var(--text-primary);
 }
 
+@layer layout {
 #typing-indicator { padding: 0 var(--space-4); }
+} /* layout */
 
 @media (min-width: 769px) {
     #message-form { padding: var(--space-3) var(--space-4); gap: var(--space-2); align-items: flex-end; }
@@ -942,6 +960,7 @@ main { background: var(--surface-0); }
     flex-shrink: 0;
 }
 
+@layer base {
 /* Bare buttons are neutral. The one primary action in a view opts in with
    .btn--accent. The hover sits in :where() so any class that sets its own
    background (icon buttons, menu rows) keeps it without !important. */
@@ -956,8 +975,10 @@ button {
 }
 
 :where(button:not(:disabled):hover) { background: color-mix(in oklch, var(--slate-700) 85%, var(--state-mix)); }
+} /* base */
 
 /* Mobile Responsive */
+@layer layout {
 @media (max-width: 768px) {
     #sidebar {
         position: absolute;
@@ -1009,6 +1030,9 @@ button {
     #contact-profile-panel,
     #saved-panel,
     #pin-panel { width: min(300px, 92vw) !important; }
+}
+} /* layout */
+@media (max-width: 768px) {
     /* Phone composer: the message input was squeezed to ~37% width by four buttons.
        Reclaim room for the primary input by dropping the secondary schedule action
        (still available on desktop) and tightening the Send button. */
@@ -1240,9 +1264,11 @@ button {
     margin: -1px; overflow: hidden; clip: rect(0,0,0,0);
     white-space: nowrap; border: 0;
 }
+@layer base {
 /* Icons: decorative inline SVGs sit on the text baseline and never shrink in a
    flex row. Size comes from the context rules below, not per-element attributes. */
 svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
+} /* base */
 /* Directional icons (back, reply, forward) point the other way in RTL. */
 :root[dir="rtl"] .icon-dir { transform: scaleX(-1); }
 #chat-header-actions > button:not(#leave-room-btn):not(#delete-room-btn) > svg { width: 18px; height: 18px; }
@@ -1422,7 +1448,9 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         }
         :root { --focus-ring-width: 3px; }
     }
-    :focus-visible { outline-width: 3px; outline-offset: 2px; }
+    @layer base {
+        :focus-visible { outline-width: 3px; outline-offset: 2px; }
+    }
     .msg-actions, nav li.active { border: 1px solid var(--border); }
 }
 
@@ -1434,7 +1462,9 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         /* Every var(--focus-ring) outline, whatever its offset. */
         :root { --focus-ring-color: CanvasText; }
     }
-    :focus-visible { outline: 2px solid CanvasText; }
+    @layer base {
+        :focus-visible { outline: 2px solid CanvasText; }
+    }
     .skip-nav { forced-color-adjust: none; }
     /* Ensure interactive rows have a perceivable active state without relying on
        a custom background the UA may drop. */
@@ -2865,6 +2895,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
     --selection-text: #ffffff;
 }
 } /* tokens */
+@layer base {
 /* Light text on dark surfaces looks heavier than intended under subpixel
    antialiasing on macOS; grayscale smoothing keeps weights true. No effect on
    Windows or Linux. */
@@ -2873,6 +2904,7 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 /* Firefox fades placeholders with opacity; pin it so the color alone sets the
    contrast, which is audited against both input fills. */
 ::placeholder { color: var(--slate-500); opacity: 1; }
+} /* base */
 
 /* Digits that change in place (clocks, counts, timers, progress) get equal
    widths, so the text around them does not jitter as they tick. */
@@ -2904,6 +2936,7 @@ h1, h2, h3, h4, .modal__title, .empty-state-title { text-wrap: balance; }
 /* Opening quotes and bullets hang in the margin where supported (Safari). */
 .msg-content, .modal__desc, .settings-hint { hanging-punctuation: first; }
 
+@layer base {
 /* Underlines clear descenders and follow the font's own stroke weight. */
 :where(a, .link-inherit, .ob-skip-link) {
     text-underline-offset: 0.18em;
@@ -2914,6 +2947,7 @@ h1, h2, h3, h4, .modal__title, .empty-state-title { text-wrap: balance; }
    so slightly under 1em reads as the same size), 4-column tabs, and long lines
    scroll inside the block instead of widening the message. */
 :where(code, kbd, samp, pre) { font-family: var(--font-mono); font-size: 0.875em; tab-size: 4; }
+} /* base */
 .inline-code, .code-block, .copyable-code { font-size: 0.875em; }
 .code-block { max-width: 100%; }
 .code-block code { font: inherit; }
