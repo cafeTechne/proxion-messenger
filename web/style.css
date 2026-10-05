@@ -13,7 +13,10 @@
     /* Brand accent — darkened from #e94560 so white button text meets WCAG
        4.5:1 (was 3.8:1). See scripts/contrast_audit.mjs. */
     --accent: #d61f52;
-    --accent-hover: #ec4468;
+    /* Hover and pressed states lean toward --state-mix (white here, ink in the
+       light theme), so one rule lightens on dark and darkens on light. */
+    --state-mix: #ffffff;
+    --accent-hover: color-mix(in oklch, var(--accent), var(--state-mix) 22%);
     /* Accent used as TEXT on dark surfaces (links) — lightened so it clears
        WCAG 4.5:1; the button accent (#d61f52) is tuned for white text ON it and
        is too dark to BE text. (scripts/contrast_audit.mjs) */
@@ -43,11 +46,21 @@
     --role-admin: #7c3aed;
     --role-mod: #0e7490;
 
-    /* White washes for hover/active on dark surfaces, and the modal scrim. */
-    --tint-hover: rgba(255, 255, 255, 0.06);
-    --tint-active: rgba(255, 255, 255, 0.1);
-    --tint-strong: rgba(255, 255, 255, 0.18);
+    /* Washes for hover/active rows: --tint-base at low alpha (white on dark,
+       ink on light). Mixed in sRGB so the dark values stay exactly the old
+       rgba(255, 255, 255, a). Plus the modal scrim. */
+    --tint-base: #ffffff;
+    --tint-faint: color-mix(in srgb, var(--tint-base) 2.5%, transparent);
+    --tint-hover: color-mix(in srgb, var(--tint-base) 6%, transparent);
+    --tint-active: color-mix(in srgb, var(--tint-base) 10%, transparent);
+    --tint-strong: color-mix(in srgb, var(--tint-base) 18%, transparent);
     --scrim: rgba(0, 0, 0, 0.6);
+    /* Edge shadow on scrollable strips, and the wash behind code in banners. */
+    --edge-shade: rgba(0, 0, 0, 0.45);
+    --code-wash: rgba(0, 0, 0, 0.3);
+    /* Lightness of the per-user sender colors (util.js webidColor builds
+       hsl(hue, 55%, var(--webid-l))). Tuned per theme for 4.5:1 text. */
+    --webid-l: 68%;
 
     /* Motion. Three durations: --dur-1 for hover and press feedback, --dur-2
        for small popups (menus, toasts), --dur-3 for dialogs and settling
@@ -427,7 +440,7 @@ main { background: var(--surface-0); }
     align-self: stretch;
     position: relative;
 }
-.message:hover { background: rgba(255,255,255,0.025); }
+.message:hover { background: var(--tint-faint); }
 /* Optimistic send: dim until the server echo confirms, then fade to full opacity. */
 .message { transition: opacity var(--transition-base); }
 .message.msg-pending { opacity: 0.6; }
@@ -786,7 +799,7 @@ button {
     font-weight: var(--weight-semibold);
 }
 
-:where(button:not(:disabled):hover) { background: color-mix(in srgb, var(--slate-700) 85%, white); }
+:where(button:not(:disabled):hover) { background: color-mix(in oklch, var(--slate-700) 85%, var(--state-mix)); }
 
 /* Mobile Responsive */
 @media (max-width: 768px) {
@@ -930,8 +943,8 @@ button {
         background:
             linear-gradient(to right, var(--bg-primary), transparent) left center,
             linear-gradient(to left,  var(--bg-primary), transparent) right center,
-            linear-gradient(to right, rgba(0, 0, 0, 0.45), transparent) left center,
-            linear-gradient(to left,  rgba(0, 0, 0, 0.45), transparent) right center;
+            linear-gradient(to right, var(--edge-shade), transparent) left center,
+            linear-gradient(to left,  var(--edge-shade), transparent) right center;
         background-repeat: no-repeat;
         background-size: 22px 100%, 22px 100%, 16px 100%, 16px 100%;
         background-attachment: local, local, scroll, scroll;
@@ -1777,7 +1790,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
 
         /* Loading skeleton */
         .skeleton-msg {
-            height: 38px; background: linear-gradient(90deg,var(--slate-800) 25%,#2d3f55 50%,var(--slate-800) 75%);
+            height: 38px; background: linear-gradient(90deg,var(--slate-800) 25%,color-mix(in oklch, var(--slate-800), var(--state-mix) 10%) 50%,var(--slate-800) 75%);
             background-size: 200% 100%; animation: shimmer 1.4s infinite;
             border-radius: 6px; margin: var(--space-2) var(--space-3);
         }
@@ -2443,7 +2456,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .vc-pill__dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; }
 .vc-video-tile { width: 160px; max-height: 120px; background: #000; border-radius: var(--radius-md); object-fit: cover; }
 /* NAT help banner: inline code and links on the warning fill. */
-.banner-code { background: rgba(0, 0, 0, 0.3); padding: 1px var(--space-1); border-radius: var(--radius-sm); }
+.banner-code { background: var(--code-wash); padding: 1px var(--space-1); border-radius: var(--radius-sm); }
 /* Desktop update banner (Tauri). */
 .update-banner {
     position: fixed; top: 0; left: 0; right: 0; z-index: 2100;
