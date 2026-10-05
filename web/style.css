@@ -29,6 +29,10 @@
     /* Keep the old flat value available for the rare case a fill-matching edge is
        wanted deliberately. */
     --border-flush: #0f3460;
+    /* Hovered or focused destructive menu row. */
+    --danger-row-hover: color-mix(in srgb, var(--color-danger) 12%, var(--surface-2));
+    /* The border prefers-contrast: more swaps in. */
+    --border-strong: #3b5a8a;
 
     /* Status */
     --color-success: #22c55e;
@@ -159,6 +163,126 @@
     }
 }
 
+/* ── Light theme. The dark palette above is the default. Light applies when
+   the user picks it in Settings (data-theme="light" on <html>, set before first
+   paint by theme-boot.js) or when the OS asks for light and the user has not
+   pinned dark. The slate ramp is mirrored: low numbers stay "strong ink",
+   high numbers stay "deep fill", so every var(--slate-*) site reads the same
+   way in both themes. The two blocks below must stay identical
+   (scripts/contrast_audit.mjs checks that, and audits every pair in both). ── */
+:root[data-theme="light"] {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f1f4f9;
+    --bg-accent: #dbe5f4;
+    --text-primary: #1a1f2e;
+    --text-secondary: #4a5568;
+    --accent: #d61f52;
+    --state-mix: #0f172a;
+    --accent-text: #a3143a;
+    --border: #d5dce6;
+    --border-flush: #dbe5f4;
+    --border-strong: #64748b;
+    --color-success: #15803d;
+    --color-success-soft: #15703a;
+    --color-danger: #c81e1e;
+    --color-danger-soft: #b91c1c;
+    --color-warning-bg: #fef3c7;
+    --color-warning-text: #713f12;
+    --color-warning: #a14a07;
+    --color-presence-away: #b7791f;
+    --color-on-accent: #ffffff;
+    --role-admin: #7c3aed;
+    --role-mod: #0e7490;
+    --tint-base: #0f172a;
+    --scrim: rgba(15, 23, 42, 0.45);
+    --edge-shade: rgba(15, 23, 42, 0.18);
+    --code-wash: rgba(15, 23, 42, 0.08);
+    --webid-l: 30%;
+    --surface-0: #ffffff;
+    --surface-1: #f1f4f9;
+    --surface-2: #ffffff;
+    --surface-3: #dbe5f4;
+    --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.12);
+    --shadow-md: 0 4px 15px rgba(15, 23, 42, 0.14);
+    --shadow-lg: 0 10px 40px rgba(15, 23, 42, 0.18);
+    --slate-50: #0f172a;
+    --slate-100: #0f172a;
+    --slate-200: #1e293b;
+    --slate-300: #334155;
+    --slate-400: #475569;
+    --slate-500: #4f5d71;
+    --slate-600: #536176;
+    --slate-700: #dde3eb;
+    --slate-800: #e8edf3;
+    --slate-900: #f8fafc;
+    --color-danger-strong: #b91c1c;
+    --color-success-bg: #15803d;
+    --color-danger-bg: #b91c1c;
+    --color-info-bg: #dbeafe;
+    --color-info-text: #1e3a8a;
+    --color-on-status: #ffffff;
+    --color-warning-soft: #946200;
+    --color-success-tint: #dcfce7;
+    color-scheme: light;
+}
+@media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+        --bg-primary: #ffffff;
+        --bg-secondary: #f1f4f9;
+        --bg-accent: #dbe5f4;
+        --text-primary: #1a1f2e;
+        --text-secondary: #4a5568;
+        --accent: #d61f52;
+        --state-mix: #0f172a;
+        --accent-text: #a3143a;
+        --border: #d5dce6;
+        --border-flush: #dbe5f4;
+        --border-strong: #64748b;
+        --color-success: #15803d;
+        --color-success-soft: #15703a;
+        --color-danger: #c81e1e;
+        --color-danger-soft: #b91c1c;
+        --color-warning-bg: #fef3c7;
+        --color-warning-text: #713f12;
+        --color-warning: #a14a07;
+        --color-presence-away: #b7791f;
+        --color-on-accent: #ffffff;
+        --role-admin: #7c3aed;
+        --role-mod: #0e7490;
+        --tint-base: #0f172a;
+        --scrim: rgba(15, 23, 42, 0.45);
+        --edge-shade: rgba(15, 23, 42, 0.18);
+        --code-wash: rgba(15, 23, 42, 0.08);
+        --webid-l: 30%;
+        --surface-0: #ffffff;
+        --surface-1: #f1f4f9;
+        --surface-2: #ffffff;
+        --surface-3: #dbe5f4;
+        --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.12);
+        --shadow-md: 0 4px 15px rgba(15, 23, 42, 0.14);
+        --shadow-lg: 0 10px 40px rgba(15, 23, 42, 0.18);
+        --slate-50: #0f172a;
+        --slate-100: #0f172a;
+        --slate-200: #1e293b;
+        --slate-300: #334155;
+        --slate-400: #475569;
+        --slate-500: #4f5d71;
+        --slate-600: #536176;
+        --slate-700: #dde3eb;
+        --slate-800: #e8edf3;
+        --slate-900: #f8fafc;
+        --color-danger-strong: #b91c1c;
+        --color-success-bg: #15803d;
+        --color-danger-bg: #b91c1c;
+        --color-info-bg: #dbeafe;
+        --color-info-text: #1e3a8a;
+        --color-on-status: #ffffff;
+        --color-warning-soft: #946200;
+        --color-success-tint: #dcfce7;
+        color-scheme: light;
+    }
+}
+
 * { box-sizing: border-box; }
 h1, h2, h3, h4 { line-height: 1.2; }
 /* Form controls do not inherit the page font by default (monospace textarea,
@@ -208,8 +332,8 @@ body {
    transform keeps it. Menu rows stay put, a list row sliding reads as a glitch. */
 :where(button:not(:disabled):not([role="menuitem"]):active) { transform: translateY(1px); }
 
-/* Native controls pick up the brand accent; the caret uses the lighter accent
-   that is tuned to read on dark fields. */
+/* Native controls pick up the brand accent; the caret uses --accent-text,
+   which each theme tunes to read on its input fields. */
 :where(input[type="checkbox"], input[type="radio"], input[type="range"], progress) { accent-color: var(--accent); }
 :where(input, textarea, [contenteditable="true"]) { caret-color: var(--accent-text); }
 
@@ -1072,7 +1196,7 @@ button {
 }
 
 .relay-pending-badge { margin-inline-start: var(--space-1); font-size: var(--text-xs); opacity: 0.7; vertical-align: middle; }
-.revoked-badge { margin-inline-start: var(--space-1); color: var(--color-danger); }
+.revoked-badge { margin-inline-start: var(--space-1); color: var(--color-danger-soft); }
 .relay-pending-badge svg, .relay-read svg, .revoked-badge svg, .read-receipt svg { width: 13px; height: 13px; }
 .relay-pending-badge.relay-failed { color: var(--color-danger-soft); opacity: 0.9; cursor: help; }
 
@@ -1248,11 +1372,14 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
 /* D2 — users who ask for more contrast get promoted secondary text, stronger
    borders, and a thicker focus ring. */
 @media (prefers-contrast: more) {
-    :root {
-        --text-secondary: #cbd5e1;
-        --slate-500: #cbd5e1;
-        --slate-600: #cbd5e1;
-        --border: #3b5a8a;
+    /* Promote the muted text to --slate-300 and borders to --border-strong,
+       both of which have a value per theme. The selector pair matches with or
+       without data-theme at (0,2,0), so it outranks the light-theme blocks. */
+    :root[data-theme], :root:not([data-theme]) {
+        --text-secondary: var(--slate-300);
+        --slate-500: var(--slate-300);
+        --slate-600: var(--slate-300);
+        --border: var(--border-strong);
     }
     :root { --focus-ring-width: 3px; }
     :focus-visible { outline-width: 3px; outline-offset: 2px; }
@@ -1985,7 +2112,10 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         :is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) button:focus-visible {
             background: var(--slate-700); outline-offset: -2px;
         }
-        :is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) button.danger { color: var(--color-danger); }
+        :is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) button.danger { color: var(--color-danger-soft); }
+        /* A red-tinted row instead of the slate one: danger-soft on --slate-700 is
+           under 4.5:1 in the dark theme. */
+        :is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) button.danger:is(:hover, :focus-visible) { background: var(--danger-row-hover); }
         :is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) hr {
             border: none; border-top: 1px solid var(--slate-700); margin: var(--space-1) 0;
         }

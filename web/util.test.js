@@ -72,7 +72,7 @@ describe('webidColor', () => {
     expect(webidColor('did:key:zAlice')).toBe(webidColor('did:key:zAlice'));
   });
   it('returns an hsl string', () => {
-    expect(webidColor('x')).toMatch(/^hsl\(\d+, 55%, 68%\)$/);
+    expect(webidColor('x')).toMatch(/^hsl\(\d+, 55%, var\(--webid-l, 68%\)\)$/);
   });
   it('handles empty/undefined without throwing', () => {
     expect(webidColor('')).toMatch(/^hsl\(/);

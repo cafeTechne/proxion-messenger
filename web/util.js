@@ -48,9 +48,10 @@ export function webidColor(webid) {
     for (let i = 0; i < (webid || "").length; i++)
         hash = (Math.imul(hash, 31) + webid.charCodeAt(i)) | 0;
     const hue = Math.abs(hash) % 360;
-    // 68% lightness so the darkest hue (blue) still meets WCAG 4.5:1 on the dark
-    // message feed — see scripts/contrast_audit.mjs (worst hue ≈ 4.9:1).
-    return `hsl(${hue}, 55%, 68%)`;
+    // Lightness comes from --webid-l in style.css (68% dark, 30% light) so the
+    // worst hue still meets WCAG 4.5:1 on the feed in each theme; checked by
+    // scripts/contrast_audit.mjs. The fallback keeps the dark value.
+    return `hsl(${hue}, 55%, var(--webid-l, 68%))`;
 }
 
 function _escText(str) {
