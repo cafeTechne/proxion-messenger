@@ -2379,8 +2379,6 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
     .settings-input, .settings-inline, .settings-readout { max-width: 420px; }
     .settings-inline > .settings-input { max-width: none; }
     .settings-toggle { max-width: 560px; }
-    .settings-danger-row { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--space-4); }
-    .settings-danger-row .btn { flex-shrink: 0; }
 }
 
 /* ── Defensive layout ──
@@ -2460,6 +2458,94 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 /* The composer placeholder names the room; a long name stays on one line
    instead of showing half of a second line in the one-row textarea. */
 #message-input::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Container queries: these parts respond to the width they actually get, not
+   the viewport. The feed narrows when the members panel opens on a laptop
+   screen, and the settings pane is narrow on small windows as well as phones. */
+#message-feed { container: feed / inline-size; }
+.settings-content { container: settings / inline-size; }
+
+#chat-header { container: chat-header / inline-size; }
+
+/* Narrow chat header on a desktop window (small window, or a DM with every
+   action showing): drop the Call/Video text labels first, keep a readable
+   floor for the title, and as a last resort let the action strip scroll
+   sideways like it does on phones instead of pushing buttons off-screen.
+   The block padding leaves room for the focus ring inside the scroller. */
+@container chat-header (max-width: 640px) {
+    #chat-header .btn-label { display: none; }
+    .chat-header-title { min-width: 6rem; }
+    #chat-header-actions {
+        flex-shrink: 1 !important; min-width: 0;
+        overflow-x: auto; scrollbar-width: none;
+        padding-block: var(--space-1);
+        /* Same edge-shadow overflow hint as the phone header (see the
+           max-width: 768px block): covers scroll with the content, shadows
+           stay put, so a shadow shows only on an edge that has more. */
+        background:
+            linear-gradient(to right, var(--bg-primary), transparent) left center,
+            linear-gradient(to left,  var(--bg-primary), transparent) right center,
+            linear-gradient(to right, var(--edge-shade), transparent) left center,
+            linear-gradient(to left,  var(--edge-shade), transparent) right center;
+        background-repeat: no-repeat;
+        background-size: 22px 100%, 22px 100%, 16px 100%, 16px 100%;
+        background-attachment: local, local, scroll, scroll;
+    }
+    #chat-header-actions::-webkit-scrollbar { display: none; }
+}
+
+/* Narrow composer on a desktop window (e.g. a half-screen window with the
+   members panel open): the four secondary buttons squeezed the textarea to a
+   few characters. Fold them behind the same "+" disclosure the phone layout
+   uses (see the max-width: 768px block), so the textarea keeps the row.
+   position: relative anchors that menu to the form. */
+#message-form { position: relative; container: composer / inline-size; }
+@container composer (max-width: 560px) {
+    .compose-more-toggle {
+        appearance: none; -webkit-appearance: none; opacity: 0;
+        display: block; position: absolute; width: 1px; height: 1px;
+        margin: -1px; padding: 0; border: 0; overflow: hidden;
+        clip: rect(0,0,0,0); white-space: nowrap;
+    }
+    .compose-more-btn {
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0; width: 36px; height: 36px; border-radius: var(--radius-sm);
+        cursor: pointer; color: var(--text-secondary); line-height: 0;
+    }
+    .compose-more-toggle:focus-visible ~ .compose-more-btn { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .compose-more-toggle:checked ~ .compose-more-btn { color: var(--text-primary); }
+    .compose-actions { display: none; }
+    .compose-more-toggle:checked ~ .compose-actions {
+        display: flex; align-items: center; gap: var(--space-2);
+        position: absolute; bottom: calc(100% + 6px); inset-inline-start: var(--space-2);
+        padding: var(--space-2); background: var(--surface-2);
+        border: 1px solid var(--border); border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-md); z-index: 1000;
+    }
+}
+/* Phone-narrow composer (a small window with a side panel open): drop the
+   schedule shortcut, as the phone layout does, to keep the textarea usable. */
+@container composer (max-width: 400px) {
+    #schedule-btn { display: none; }
+}
+
+/* Narrow feed: the link preview stacks its thumbnail above the text. */
+@container feed (max-width: 480px) {
+    .link-preview { flex-direction: column; }
+    .link-preview img {
+        flex: none; width: 100%; aspect-ratio: 1.91 / 1;
+        border-inline-end: none; border-bottom: 1px solid var(--border);
+    }
+}
+/* Wide settings pane: danger actions sit beside their explanation. */
+@container settings (min-width: 460px) {
+    .settings-danger-row { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--space-4); }
+    .settings-danger-row .btn { flex-shrink: 0; }
+}
+/* Very narrow settings pane: an input and its button stack. */
+@container settings (max-width: 320px) {
+    .settings-inline { flex-direction: column; align-items: stretch; }
+}
 
 /* ── Layering scale. Menus open from the page; dialogs sit above them;
    confirm/prompt and other dialogs that open on top of a dialog use the
