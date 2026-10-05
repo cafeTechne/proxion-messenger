@@ -2411,6 +2411,12 @@ nav,
 #scheduled-msgs-list,
 :is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) { overscroll-behavior: contain; }
 
+/* Other prose (onboarding steps, banners, dialog bodies without a class)
+   avoids a one-word last line too; headings and the named help classes are
+   covered by the text-wrap rules near the end of the file. The longhand only
+   picks how lines break, so it never re-enables wrapping on a nowrap line. */
+:where(p, .banner__text) { text-wrap-style: pretty; }
+
 /* Own name in the sidebar: one line with an ellipsis. Unbounded, it spilled
    out of the sidebar, and on phones out of the parked off-canvas drawer onto
    the chat. */
