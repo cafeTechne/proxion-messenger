@@ -216,6 +216,6 @@ export function closeButtonHtml() {
     return '<button type="button" class="modal__close" data-modal-cancel aria-label="' +
         t('btn.close').replace(/"/g, '&quot;') + '">' +
         '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" ' +
-        'stroke="currentColor" aria-hidden="true" width="18" height="18">' +
+        'stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18">' +
         '<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>';
 }

@@ -903,7 +903,12 @@ button {
         padding-top: calc(var(--space-2) + env(safe-area-inset-top, 0px));
         padding-bottom: var(--space-2);
     }
-    #chat-header .btn-label { display: none; }
+    /* Visually hidden, not display:none, so the icon-only phone buttons keep
+       the label as their accessible name. */
+    #chat-header .btn-label {
+        position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+        overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+    }
     /* If a view still shows more action icons than fit (owner room + voice),
        the action strip scrolls sideways instead of clipping or wrapping.
        flex-shrink/min-width override the inline flex-shrink:0 so the strip
