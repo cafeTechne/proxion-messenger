@@ -65,6 +65,9 @@ export function makeListNavigable(listEl, { onActivate, onDelete, onContextMenu,
             case 'End': e.preventDefault(); focusItem(its.length - 1); break;
             case 'Enter':
             case ' ':
+                // A real control inside the row (image button, GIF play/pause)
+                // handles its own activation.
+                if (e.target !== its[cur] && e.target.closest?.('button, a[href], input, textarea, select')) return;
                 e.preventDefault();
                 if (onActivate) onActivate(its[cur]); else its[cur].click();
                 break;

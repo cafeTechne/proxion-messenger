@@ -170,6 +170,20 @@ describe('makeListNavigable — keyboard movement', () => {
     expect(onContextMenu).toHaveBeenCalledTimes(2);
   });
 
+  it('leaves Enter/Space to a real control inside the row (image button, GIF toggle)', () => {
+    const btn = { tagName: 'BUTTON', closest: (sel) => (sel.includes('button') ? btn : null) };
+    const row = mkItem();
+    row.contains = (t) => t === row || t === btn;
+    const { el, fire } = mkList([row]);
+    const onActivate = vi.fn();
+    makeListNavigable(el, { onActivate });
+    const ev = keyEvent('Enter', btn);
+    fire(ev);
+    fire(keyEvent(' ', btn));
+    expect(onActivate).not.toHaveBeenCalled();
+    expect(ev.preventDefault).not.toHaveBeenCalled();
+  });
+
   it('ignores keys whose target is not a row', () => {
     const items = [mkItem()];
     const { el, fire } = mkList(items);
