@@ -462,14 +462,20 @@ nav li {
     transition: background var(--transition-base);
 }
 
-nav li:hover { background: var(--tint-hover); }
+/* Hover tints only where a hover exists: on touch screens :hover sticks to
+   the last tapped row until something else is tapped. */
+@media (hover: hover) {
+    nav li:hover { background: var(--tint-hover); }
+}
 /* Raised fill plus an accent edge, so the open conversation reads against both
    the sidebar and the chat canvas. */
 nav li.active { background: var(--surface-3); color: var(--text-primary); box-shadow: inset 3px 0 var(--accent); }
 :root[dir="rtl"] nav li.active { box-shadow: inset -3px 0 var(--accent); }
 /* Empty-state rows are not clickable conversations. */
 nav li.sidebar-empty, nav li.solidchat-empty { cursor: default; }
-nav li.sidebar-empty:hover, nav li.solidchat-empty:hover { background: none; }
+@media (hover: hover) {
+    nav li.sidebar-empty:hover, nav li.solidchat-empty:hover { background: none; }
+}
 
 /* DM rows: optional lock icon in a fixed slot, then the name body, then the
    hide button, all on one line. */
@@ -617,7 +623,9 @@ main { background: var(--surface-0); }
     align-self: stretch;
     position: relative;
 }
-.message:hover { background: var(--tint-faint); }
+@media (hover: hover) {
+    .message:hover { background: var(--tint-faint); }
+}
 /* Optimistic send: dim until the server echo confirms, then fade to full opacity. */
 .message { transition: opacity var(--transition-base); }
 .message.msg-pending { opacity: 0.6; }
@@ -711,9 +719,11 @@ main { background: var(--surface-0); }
     width: 40px;
     white-space: nowrap;
 }
-.message:hover .msg-compact-ts,
 .message:focus-within .msg-compact-ts,
 .message:focus-visible .msg-compact-ts { color: var(--text-secondary); }
+@media (hover: hover) {
+    .message:hover .msg-compact-ts { color: var(--text-secondary); }
+}
 
 /* Body column: grows, wraps long words */
 .msg-body { flex: 1; min-width: 0; }
@@ -756,9 +766,15 @@ main { background: var(--surface-0); }
     z-index: 10;
     gap: 2px;
 }
-.message:hover .msg-actions,
+/* Touch: a tap focuses the message (the feed's roving tabindex makes every
+   row focusable), so :focus-within opens the bar on tap and closes it when
+   focus moves on. Long-press still opens the full context menu. The :hover
+   reveal is for mouse users only; on touch it stuck after the tap. */
 .message:focus-within .msg-actions,
 .message:focus-visible .msg-actions { display: flex; }
+@media (hover: hover) {
+    .message:hover .msg-actions { display: flex; }
+}
 .msg-actions .icon-btn { min-width: 28px; min-height: 28px; }
 .msg-actions svg { width: 16px; height: 16px; }
 
@@ -998,7 +1014,10 @@ button {
     font-weight: var(--weight-semibold);
 }
 
-:where(button:not(:disabled):hover) { background: color-mix(in oklch, var(--slate-700) 85%, var(--state-mix)); }
+/* Gated on a real hover so a tapped button does not keep the hover fill. */
+@media (hover: hover) {
+    :where(button:not(:disabled):hover) { background: color-mix(in oklch, var(--slate-700) 85%, var(--state-mix)); }
+}
 } /* base */
 
 /* Mobile Responsive */
@@ -1457,7 +1476,9 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
     padding: var(--space-2) var(--space-3); cursor: pointer; display: flex;
     flex-direction: column; gap: 2px;
 }
-.contact-search-item:hover { background: var(--tint-hover); }
+@media (hover: hover) {
+    .contact-search-item:hover { background: var(--tint-hover); }
+}
 .contact-search-name { font-size: var(--text-md); color: var(--text-primary); }
 .contact-search-did { font-size: var(--text-xs); color: var(--text-secondary); font-family: var(--font-mono); }
 } /* components */
@@ -2259,7 +2280,9 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             background: none; border: none; color: var(--slate-50);
             cursor: pointer; text-align: start; font-size: var(--text-md); font-weight: normal; white-space: nowrap;
         }
-        :is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) button:hover { background: var(--slate-700); }
+        @media (hover: hover) {
+            :is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) button:hover { background: var(--slate-700); }
+        }
         /* overflow:hidden clips an outside focus ring, so draw it inset. */
         :is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) button:focus-visible {
             background: var(--slate-700); outline-offset: -2px;
@@ -2839,7 +2862,9 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 
 /* ── Members panel rows: clickable (profile) and keyboard-navigable. ── */
 .member-item { display: flex; align-items: center; padding: var(--space-1) var(--space-3); margin: 0 var(--space-1); cursor: pointer; border-radius: 4px; }
-.member-item:hover { background: var(--tint-hover); }
+@media (hover: hover) {
+    .member-item:hover { background: var(--tint-hover); }
+}
 .member-item:focus-visible { background: var(--tint-hover); outline-offset: -2px; }
 } /* components */
 
