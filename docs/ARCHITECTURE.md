@@ -117,7 +117,8 @@ DMs, rooms, reactions, edits, threads, pins, disappearing messages, scheduling,
 search, read receipts, presence, and typing are all implemented. The flow:
 
 1. Client sends `{"cmd": "send_dm"/"chat_room_send", …}` to its gateway.
-2. Gateway E2E-encrypts (below), persists to `local_store`, and delivers:
+2. For a DM the browser has already encrypted the text (below). The gateway
+   persists the message as received to `local_store` and delivers:
    local recipients over their WS; remote recipients via `/relay` to their
    gateway (which delivers over *their* WS).
 3. Optional: the sender's (and/or recipient's) gateway writes the message
@@ -130,17 +131,21 @@ store on restart); history catch-up is available over a REST endpoint.
 
 ## 5. End-to-end encryption
 
-- **Double Ratchet** sessions per DM (forward secrecy + post-compromise
-  recovery), bootstrapped from the peers' X25519 keys.
-- **Sealed sender** on the relay path so transit gateways don't see who is
-  talking to whom in the clear.
-- **Group sender keys** for room messages (efficient fan-out with E2E).
-- **Ed25519 signatures** for message integrity/authenticity.
-- Identity verification: safety-number / fingerprint comparison
-  (`/fingerprint/<did>`), surfaced in the DM E2E badge + verify modal.
+The full protocol, with its limits, is specified in
+[E2E_ENCRYPTION.md](E2E_ENCRYPTION.md). In short:
 
-What a transit/relay node can still infer is routing/timing metadata (the
-classic metadata problem); content, reactions, and edits are encrypted.
+- **Double Ratchet** sessions per DM peer (and per peer device), run in the
+  browser (`web/e2e.js`), bootstrapped from the recipient's published X25519 key.
+- **Gateway-to-gateway sealing** of the relay envelope (`sealed_relay.py`) when
+  the peer gateway's seal key is known, so HTTP intermediaries do not see the
+  sender.
+- **Ed25519 signatures** on gateway-free DM envelopes and on gateway relays.
+- Identity verification: safety-number comparison, surfaced in the DM E2E badge
+  and verify modal.
+
+Rooms are not end-to-end encrypted. DM edits, reactions and attachments are
+sent to the gateway outside the ratchet. Gateways see routing and timing
+metadata.
 
 ---
 
@@ -161,7 +166,8 @@ classic metadata problem); content, reactions, and edits are encrypted.
 
 | Data                    | Protection                 | Visible to a transit/relay node |
 | :---------------------- | :------------------------- | :------------------------------ |
-| Message / reaction text | E2E (Double Ratchet/AEAD)  | No                              |
+| DM message text         | E2E (Double Ratchet/AEAD) once a peer key is known | No              |
+| Room text, DM edits, reactions, attachments | Transport only | Yes, to gateways handling them |
 | Routing (who→who, when) | Sealed sender mitigates    | Limited routing/timing metadata |
 | Identity key (Ed25519)  | Local AgentState           | No (never transmitted)          |
 | Pod-stored history      | Owner-only Pod ACLs (open typed RDF, not encrypted at rest) | Only the user's own Pod host |

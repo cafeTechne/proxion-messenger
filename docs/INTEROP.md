@@ -16,7 +16,8 @@ Partial / Missing / N-A by design, with citations), see
 - **Direct messages do not, on purpose.** DMs are end-to-end encrypted. You cannot
   have bytes a third-party app can read and that no third party can read, so DMs stay
   Proxion-only and are deliberately not third-party readable. This is a design choice,
-  not a gap.
+  not a gap. The encryption protocol is specified in
+  [E2E_ENCRYPTION.md](E2E_ENCRYPTION.md) for any app that wants to implement it.
 
 ## What another Solid app sees
 

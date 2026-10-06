@@ -6,9 +6,10 @@ the mitigation. It complements `docs/CALLS.md` and `docs/NOTIFICATIONS.md`.
 
 ## Principles
 
-- The gateway relays and coordinates; it is not trusted with message or media content.
-  Direct messages are end-to-end encrypted, and 1:1 call media is DTLS-SRTP encrypted
-  between the peers.
+- The gateway relays and coordinates; it is not trusted with DM text or call media.
+  DM text is end-to-end encrypted once the sender has the peer's key (scope and limits
+  in `docs/E2E_ENCRYPTION.md`), and 1:1 call media is DTLS-SRTP encrypted between the
+  peers.
 - Data written to a pod is protected by that pod's ACLs. Proxion grants the narrowest
   access that makes a feature work and no more.
 - Anything read from another pod or another app is untrusted input. It is parsed

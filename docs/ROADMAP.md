@@ -2,7 +2,7 @@
 
 Strategic north star for architecture and development. Written June 2026
 after a full codebase review. This sits above the thematic roadmaps:
-- `docs/E2E_ENCRYPTION_ROADMAP.md` — crypto evolution
+- `docs/E2E_ENCRYPTION.md`: DM encryption protocol as implemented
 - `docs/security/post-baseline-roadmap.md` — security-governance
 - `docs/ARCHITECTURE.md` — protocol reference (Pod-centric; see Phase B.4)
 

@@ -12,7 +12,8 @@ Proxion draws a deliberate line between two things that are easy to conflate:
 
 - **Encryption in transit (end-to-end).** Direct messages are end-to-end
   encrypted on the wire between you and your contact, so no relay or gateway that
-  forwards them can read them. This is a property of *delivery*.
+  forwards them can read them. This is a property of *delivery*. The protocol
+  and its scope are in [E2E_ENCRYPTION.md](E2E_ENCRYPTION.md).
 - **Storage at rest (open).** What lands on your own pod is written as plain,
   typed JSON-LD, using a documented vocabulary. It is **not** an encrypted blob.
   Any app you authorize can read it. This is a property of *storage*.
@@ -570,7 +571,10 @@ Being honest about the boundary matters more than a tidy story:
   unless you choose it, because some people do not want conversations on their
   pod at all.
 - **Private keys.** Your Ed25519 identity key and message keys never leave the
-  device except through the explicit, passphrase-protected recovery kit.
+  device except through the explicit, passphrase-protected recovery kit. DM
+  ratchet state is written to `proxion/e2e/<peer>/state.enc`, encrypted under a
+  per-device key that stays in the browser; only the device that wrote it can
+  read it. See [E2E_ENCRYPTION.md](E2E_ENCRYPTION.md).
 
 ## Reading Proxion data from another Solid app
 
