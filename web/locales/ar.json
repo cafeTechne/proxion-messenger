@@ -803,6 +803,8 @@
   "feed.newMessages.few": "{count} رسائل جديدة",
   "feed.newMessages.many": "{count} رسالة جديدة",
   "composer.placeholderRoom": "رسالة إلى #{name}",
+  "a11y.openedView": "تم فتح {name}",
+  "page.titleView": "{view} · Proxion",
   "composer.placeholderDm": "رسالة إلى {name}",
   "header.members.one": "عضو واحد ({count})",
   "header.members.other": "{count} عضو",

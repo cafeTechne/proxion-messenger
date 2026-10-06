@@ -792,6 +792,8 @@
   "feed.newMessages.few": "{count} nowe wiadomości",
   "feed.newMessages.many": "{count} nowych wiadomości",
   "composer.placeholderRoom": "Wiadomość do #{name}",
+  "a11y.openedView": "Otwarto {name}",
+  "page.titleView": "{view} · Proxion",
   "composer.placeholderDm": "Wiadomość do {name}",
   "header.members.one": "{count} członek",
   "header.members.other": "{count} członka",

@@ -786,6 +786,8 @@
   "feed.newMessages.one": "{count} 件の新しいメッセージ",
   "feed.newMessages.other": "{count} 件の新しいメッセージ",
   "composer.placeholderRoom": "#{name} へのメッセージ",
+  "a11y.openedView": "{name} を開きました",
+  "page.titleView": "{view} · Proxion",
   "composer.placeholderDm": "{name} へのメッセージ",
   "header.members.one": "メンバー {count} 人",
   "header.members.other": "メンバー {count} 人",

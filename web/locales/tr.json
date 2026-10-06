@@ -786,6 +786,8 @@
   "feed.newMessages.one": "{count} yeni mesaj",
   "feed.newMessages.other": "{count} yeni mesaj",
   "composer.placeholderRoom": "#{name} kanalına mesaj",
+  "a11y.openedView": "{name} açıldı",
+  "page.titleView": "{view} · Proxion",
   "composer.placeholderDm": "{name} kişisine mesaj",
   "header.members.one": "{count} üye",
   "header.members.other": "{count} üye",

@@ -792,6 +792,8 @@
   "feed.newMessages.few": "{count} новых сообщения",
   "feed.newMessages.many": "{count} новых сообщений",
   "composer.placeholderRoom": "Сообщение в #{name}",
+  "a11y.openedView": "Открыто: {name}",
+  "page.titleView": "{view} · Proxion",
   "composer.placeholderDm": "Сообщение для {name}",
   "header.members.one": "{count} участник",
   "header.members.other": "{count} участника",

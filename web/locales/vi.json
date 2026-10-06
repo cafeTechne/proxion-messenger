@@ -786,6 +786,8 @@
   "feed.newMessages.one": "{count} tin nhắn mới",
   "feed.newMessages.other": "{count} tin nhắn mới",
   "composer.placeholderRoom": "Nhắn tin tới #{name}",
+  "a11y.openedView": "Đã mở {name}",
+  "page.titleView": "{view} · Proxion",
   "composer.placeholderDm": "Nhắn tin cho {name}",
   "header.members.one": "{count} thành viên",
   "header.members.other": "{count} thành viên",

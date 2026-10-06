@@ -93,6 +93,7 @@ import { icon } from './icons.js';
 import { installFocusTrap, closeTopmostDialog } from './focus-trap.js';
 import { initSettingsNav, createDebouncedSaver } from './settings-panel.js';
 import { makeListNavigable, announce } from './a11y.js';
+import { buildPageTitle, viewLabel, createFaviconBadge, jumpToMessage } from './wayfinding.js';
 import { openMenu, closeMenu, refreshMenu, isMenuOpen } from './menu.js';
 import { showConfirm, showPromptModal, installDialogDismiss, installFieldErrorSync, setFieldError } from './dialogs.js';
 import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport } from './dmhistory.js';
@@ -916,8 +917,27 @@ import { initThemePicker } from './theme.js';
                 desktopNotifEnabled = !desktopNotifEnabled;
                 localStorage.setItem("desktopNotifEnabled", desktopNotifEnabled);
                 _renderDesktopBtn();
-                if (desktopNotifEnabled) requestNotifPermission();
+                if (desktopNotifEnabled) {
+                    requestNotifPermission().then((perm) => {
+                        if (perm === "granted") push.enablePush().then(updatePushStatus);
+                    });
+                }
             };
+        }
+
+        // Notification permission is asked for once, in context (the first
+        // message the user sends), never on connect. The toggle above is the
+        // explicit path and works any time.
+        function _askNotifInContext() {
+            if (!desktopNotifEnabled || typeof Notification === "undefined"
+                || Notification.permission !== "default") return;
+            try {
+                if (localStorage.getItem("notifAskedInContext")) return;
+                localStorage.setItem("notifAskedInContext", "1");
+            } catch { /* storage blocked: still ask this once */ }
+            requestNotifPermission().then((perm) => {
+                if (perm === "granted") push.enablePush().then(updatePushStatus);
+            });
         }
 
         // DM history is stored locally (see dmhistory.js). Honor the user's
@@ -1035,7 +1055,7 @@ import { initThemePicker } from './theme.js';
             localStorage.setItem("proxion_hidden_dms", JSON.stringify([...hiddenDms]));
             renderDmSidebar();
             if (activeView && activeView.id === threadId) {
-                activeView = null;
+                activeView = null; updatePageTitle();
                 _showThreadClosed(t('feed.dmHidden'));
             }
         }
@@ -1729,9 +1749,9 @@ import { initThemePicker } from './theme.js';
                             socket.send(JSON.stringify({cmd: "list_friend_requests"}));
                             socket.send(JSON.stringify({cmd: "get_relationships"}));
                             blocks.requestBlocks();   // R65: hydrate block state
-                            requestNotifPermission();
                             // D4: subscribe to WebPush so messages arrive with the
-                            // window closed (idempotent; no-op if permission denied).
+                            // window closed (idempotent; no-op until permission is
+                            // granted, which is asked for in context, not here).
                             push.enablePush();
                             // A4: if we arrived via an invite link, add the inviter now
                             // that the socket is registered (routes via confirm modal).
@@ -2178,7 +2198,7 @@ import { initThemePicker } from './theme.js';
                     const navEl = document.getElementById(`nav-${event.room_id}`);
                     if (navEl) navEl.remove();
                     if (activeView && activeView.id === event.room_id) {
-                        activeView = null;
+                        activeView = null; updatePageTitle();
                         _showThreadClosed(t('feed.removedFromRoom'));
                     }
                     break;
@@ -2189,7 +2209,7 @@ import { initThemePicker } from './theme.js';
                     const leftLi = document.getElementById(`nav-${leftId}`);
                     if (leftLi) leftLi.remove();
                     if (activeView && activeView.id === leftId) {
-                        activeView = null;
+                        activeView = null; updatePageTitle();
                         _showThreadClosed(event.deleted
                             ? t('feed.roomDeletedLastMember')
                             : event.transferred_to
@@ -2208,7 +2228,7 @@ import { initThemePicker } from './theme.js';
                     const delLi = document.getElementById(`nav-${event.room_id}`);
                     if (delLi) delLi.remove();
                     if (activeView && activeView.id === event.room_id) {
-                        activeView = null;
+                        activeView = null; updatePageTitle();
                         _showThreadClosed(t('feed.roomDeletedByOwner', { name: event.room_name || "" }));
                         document.getElementById("members-toggle").style.display = "none";
                         document.getElementById("leave-room-btn").style.display = "none";
@@ -3280,9 +3300,17 @@ import { initThemePicker } from './theme.js';
             _syncTrayUnread();
         }
 
+        // Title names the open conversation; the favicon gets an unread dot
+        // only while the tab is in the background.
+        let _faviconBadge = null;
         function updatePageTitle() {
             const total = Object.values(unreadCounts).reduce((a, b) => a + b, 0);
-            document.title = total > 0 ? `(${total}) Proxion` : "Proxion";
+            document.title = buildPageTitle(total, activeView);
+            if (!_faviconBadge) {
+                _faviconBadge = createFaviconBadge();
+                document.addEventListener('visibilitychange', updatePageTitle);
+            }
+            _faviconBadge.update(total > 0 && document.hidden);
         }
 
         // Derive a consistent hue-based background color from a webid string
@@ -3742,6 +3770,10 @@ import { initThemePicker } from './theme.js';
             _updateHeaderSubtitle();
             _closeRoomOptionsMenu();
             if (isSearchOpen()) closeSearch();
+            // A view switch is a page change the browser does not announce.
+            updatePageTitle();
+            const _label = viewLabel(activeView);
+            if (_label) announce(t('a11y.openedView', { name: _label }));
         }
 
         // Muted line under the conversation name: member count for rooms,
@@ -3921,6 +3953,9 @@ import { initThemePicker } from './theme.js';
             if (!socket || !activeView || !content) return;
             const draft = input.value;
             _sendInFlight = true;
+            // First send is the moment replies start to matter: ask then, inside
+            // the user's gesture, not on load.
+            _askNotifInContext();
             input.value = "";
             input.style.height = "auto";
             // Reader already saw the bottom: the "New messages" line has done its job.
@@ -5551,7 +5586,7 @@ import { initThemePicker } from './theme.js';
                         showProfileCard(webid, name, e.clientX, e.clientY);
                         showContactProfile(webid);
                         break;
-                    case 'scroll-reply': document.getElementById(`msg-${replyId}`)?.scrollIntoView({ behavior: scrollBehavior() }); break;
+                    case 'scroll-reply': jumpToMessage(document.getElementById(`msg-${replyId}`), scrollBehavior()); break;
                     case 'bookmark':
                         savedMsgs.toggleBookmark(messageMap[msgId], activeView);
                         break;

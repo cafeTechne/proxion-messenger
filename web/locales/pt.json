@@ -786,6 +786,8 @@
   "feed.newMessages.one": "{count} nova mensagem",
   "feed.newMessages.other": "{count} novas mensagens",
   "composer.placeholderRoom": "Mensagem para #{name}",
+  "a11y.openedView": "{name} aberto",
+  "page.titleView": "{view} · Proxion",
   "composer.placeholderDm": "Mensagem para {name}",
   "header.members.one": "{count} membro",
   "header.members.other": "{count} membros",

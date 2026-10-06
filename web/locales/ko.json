@@ -786,6 +786,8 @@
   "feed.newMessages.one": "새 메시지 {count}개",
   "feed.newMessages.other": "새 메시지 {count}개",
   "composer.placeholderRoom": "#{name}에 메시지 보내기",
+  "a11y.openedView": "{name} 열림",
+  "page.titleView": "{view} · Proxion",
   "composer.placeholderDm": "{name} 님에게 메시지 보내기",
   "header.members.one": "멤버 {count}명",
   "header.members.other": "멤버 {count}명",

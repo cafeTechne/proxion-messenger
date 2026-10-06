@@ -786,6 +786,8 @@
   "feed.newMessages.one": "{count} 条新消息",
   "feed.newMessages.other": "{count} 条新消息",
   "composer.placeholderRoom": "发消息到 #{name}",
+  "a11y.openedView": "已打开 {name}",
+  "page.titleView": "{view} · Proxion",
   "composer.placeholderDm": "发消息给 {name}",
   "header.members.one": "{count} 位成员",
   "header.members.other": "{count} 位成员",

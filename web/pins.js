@@ -7,6 +7,7 @@
 import { inlineNotice } from './states.js';
 import { t } from './i18n.js';
 import { escHtml, scrollBehavior } from './util.js';
+import { jumpToMessage } from './wayfinding.js';
 
 export function createPins({ getSocket, getActiveView }) {
 
@@ -66,7 +67,7 @@ export function createPins({ getSocket, getActiveView }) {
 
     function jumpToMsg(msgId) {
         const el = document.getElementById(`msg-${msgId}`);
-        if (el) { el.scrollIntoView({ behavior: scrollBehavior() }); el.style.background = "var(--slate-700)"; setTimeout(() => el.style.background = "", 1500); }
+        jumpToMessage(el, scrollBehavior());
     }
 
     return { pinMsg, showPinPanel, renderPins, unpinMsg, jumpToMsg };

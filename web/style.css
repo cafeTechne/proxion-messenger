@@ -621,6 +621,19 @@ main { background: var(--surface-0); }
 @media (hover: hover) {
     .message:hover { background: var(--tint-faint); }
 }
+/* Jump to a message (reply quote, pins, saved; wayfinding.js jumpToMessage):
+   land with breathing room instead of flush against the feed's top edge, then
+   flash the row. The flash holds still under reduced motion and becomes an
+   outline in forced colors, where backgrounds are overridden. */
+.message { scroll-margin-block: var(--space-6); }
+.message.message--jumped { animation: msg-jumped 1.6s ease-out; }
+@keyframes msg-jumped { from, 30% { background: var(--slate-700); } }
+@media (prefers-reduced-motion: reduce) {
+    .message.message--jumped { animation: none; background: var(--slate-700); }
+}
+@media (forced-colors: active) {
+    .message.message--jumped { outline: 2px solid Highlight; outline-offset: -2px; }
+}
 /* Optimistic send: dim until the server echo confirms, then fade to full opacity. */
 .message { transition: opacity var(--transition-base); }
 .message.msg-pending { opacity: 0.6; }

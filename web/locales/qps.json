@@ -787,6 +787,8 @@
   "feed.newMessages.one": "⟦{count} ñéŵ ɱéššáǧé áéíóú⟧",
   "feed.newMessages.other": "⟦{count} ñéŵ ɱéššáǧéš áéíóú⟧",
   "composer.placeholderRoom": "⟦Ṁéššáǧé #{name} áéíó⟧",
+  "a11y.openedView": "⟦Óρéñéð {name} áéí⟧",
+  "page.titleView": "⟦{view} · Ρŕóẋíóñ áéíó⟧",
   "composer.placeholderDm": "⟦Ṁéššáǧé {name} áéí⟧",
   "header.members.one": "⟦{count} ɱéɱḅéŕ áéí⟧",
   "header.members.other": "⟦{count} ɱéɱḅéŕš áéí⟧",

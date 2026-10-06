@@ -786,6 +786,8 @@
   "feed.newMessages.one": "{count} pesan baru",
   "feed.newMessages.other": "{count} pesan baru",
   "composer.placeholderRoom": "Kirim pesan ke #{name}",
+  "a11y.openedView": "{name} dibuka",
+  "page.titleView": "{view} · Proxion",
   "composer.placeholderDm": "Kirim pesan ke {name}",
   "header.members.one": "{count} anggota",
   "header.members.other": "{count} anggota",
