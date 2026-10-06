@@ -18,7 +18,11 @@ export class E2EDecryptError extends Error {
 
 const _ENC = new TextEncoder();
 const _DEC = new TextDecoder();
+// Most message keys one incoming message may make us derive and buffer, per
+// chain step (anti-DoS bound on work per message; msg_num and pn come off the wire).
 export const MAX_SKIP = 20;
+// Most skipped message keys kept across all chains; the oldest are evicted first.
+export const MAX_SKIPPED_KEYS = 100;
 
 export let e2eSupported = false;
 
@@ -625,16 +629,25 @@ async function _dhRatchetReceive(state, newRatchetPubB64u, pn) {
     // unbounded HMAC loop and exhausts memory (a classic Double Ratchet DoS).
     // recvChain can be null when we have only ever sent (no recv chain yet);
     // there is nothing to buffer in that case.
+    //
+    // Keys of chains older than the one being retired are dropped here: after this
+    // step only the retiring chain and the new one can still have late messages
+    // worth waiting for. At most MAX_SKIP keys of the retiring chain are derived;
+    // if more of its messages are missing, the rest are given up rather than
+    // failing every message of the new chain (whose header repeats the same pn).
+    const retiring = state.theirRatchetPub;
+    for (const k of Object.keys(state.skippedKeys)) {
+        if (!k.startsWith(retiring + ':')) delete state.skippedKeys[k];
+    }
     let recvChain = state.recvChain ? new Uint8Array(state.recvChain) : null;
-    while (recvChain && state.recvMsgNum < pn) {
-        if (Object.keys(state.skippedKeys).length >= MAX_SKIP) {
-            throw new E2EDecryptError('Skip buffer overflow during DH ratchet at pn=' + pn);
-        }
+    const stop = Math.min(pn, state.recvMsgNum + MAX_SKIP);
+    while (recvChain && state.recvMsgNum < stop) {
         const { msgKey: sk, nextKey } = await advanceChain(recvChain);
         state.skippedKeys[state.theirRatchetPub + ':' + state.recvMsgNum] = b64uEnc(sk);
         recvChain = nextKey;
         state.recvMsgNum++;
     }
+    _capSkippedKeys(state);
 
     const newRatchetKey = await crypto.subtle.importKey(
         'raw', b64uDec(newRatchetPubB64u), { name: 'X25519' }, false, []);
@@ -652,6 +665,13 @@ async function _dhRatchetReceive(state, newRatchetPubB64u, pn) {
     state.theirRatchetPub = newRatchetPubB64u;
     state.pendingDhRatchet = true;
     return state;
+}
+
+// Keep at most MAX_SKIPPED_KEYS buffered keys, evicting the oldest. Object key
+// order is insertion order for these non-numeric keys, and survives JSON storage.
+function _capSkippedKeys(state) {
+    const keys = Object.keys(state.skippedKeys);
+    for (let i = 0; i < keys.length - MAX_SKIPPED_KEYS; i++) delete state.skippedKeys[keys[i]];
 }
 
 // Generate new ratchet keypair and advance send chain.
@@ -725,6 +745,11 @@ async function _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ra
     if (!_initDone) await initE2E();
     if (!e2eSupported) throw new E2EDecryptError('E2E not supported');
     if (!ratchetPubB64u) throw new E2EDecryptError('ratchet_pub required');
+    msgNum = Number(msgNum);
+    pn = Number(pn ?? 0);
+    if (!Number.isSafeInteger(msgNum) || msgNum < 0 || !Number.isSafeInteger(pn) || pn < 0) {
+        throw new E2EDecryptError('invalid msg_num or pn');
+    }
 
     let state = await loadRatchetState(peerId);
 
@@ -736,25 +761,29 @@ async function _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ra
     // reload. Signal commits post-decrypt for exactly this reason.
     if (state) state = JSON.parse(JSON.stringify(state));
 
-    if (!state) {
-        state = await _initReceiverState(ratchetPubB64u);
-    } else if (ratchetPubB64u !== state.theirRatchetPub) {
-        state = await _dhRatchetReceive(state, ratchetPubB64u, pn);
-    }
-
     const skipKey = ratchetPubB64u + ':' + msgNum;
     let msgKey;
 
-    if (Object.prototype.hasOwnProperty.call(state.skippedKeys, skipKey)) {
+    // A buffered key is tried before any ratchet step: a late message from an
+    // older chain must not DH-ratchet the session back onto that chain's key.
+    if (state && Object.prototype.hasOwnProperty.call(state.skippedKeys, skipKey)) {
         msgKey = b64uDec(state.skippedKeys[skipKey]);
         delete state.skippedKeys[skipKey];
-    } else if (msgNum < state.recvMsgNum) {
-        throw new E2EDecryptError('Message already consumed: msgNum=' + msgNum);
     } else {
+        if (!state) {
+            state = await _initReceiverState(ratchetPubB64u);
+        } else if (ratchetPubB64u !== state.theirRatchetPub) {
+            state = await _dhRatchetReceive(state, ratchetPubB64u, pn);
+        }
+        if (msgNum < state.recvMsgNum) {
+            throw new E2EDecryptError('Message already consumed: msgNum=' + msgNum);
+        }
+        // Checked before any key is derived: bounded work per message.
+        if (msgNum - state.recvMsgNum > MAX_SKIP) {
+            throw new E2EDecryptError('Skip buffer overflow at msgNum=' + msgNum);
+        }
+        if (!state.recvChain) throw new E2EDecryptError('no receiving chain');
         while (state.recvMsgNum < msgNum) {
-            if (Object.keys(state.skippedKeys).length >= MAX_SKIP) {
-                throw new E2EDecryptError('Skip buffer overflow at msgNum=' + msgNum);
-            }
             const { msgKey: sk, nextKey } = await advanceChain(new Uint8Array(state.recvChain));
             state.skippedKeys[state.theirRatchetPub + ':' + state.recvMsgNum] = b64uEnc(sk);
             state.recvChain = Array.from(nextKey);
@@ -764,6 +793,7 @@ async function _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ra
         msgKey = mk;
         state.recvChain = Array.from(nextKey);
         state.recvMsgNum++;
+        _capSkippedKeys(state);
     }
 
     try {
