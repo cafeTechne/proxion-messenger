@@ -1003,7 +1003,7 @@ main { background: var(--surface-0); }
     display: none;
     background: transparent;
     font-size: var(--text-xl);
-    padding: 0 var(--space-4) 0 0;
+    padding: 0; padding-inline-end: var(--space-4);
     color: var(--text-primary);
 }
 } /* components */
@@ -1586,7 +1586,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
   width: auto; height: 100%; max-height: 100vh; max-height: 100dvh; max-width: 100vw; border-radius: 0;
 }
 #vw-video-area:fullscreen #vw-local-video {
-  position: fixed; right: 24px; bottom: 24px; width: 220px; max-height: 160px;
+  position: fixed; inset-inline-end: 24px; bottom: 24px; width: 220px; max-height: 160px;
 }
 #voice-channel-videos:fullscreen .vc-video-tile,
 #voice-channel-videos:fullscreen #vc-local-video {
@@ -1664,7 +1664,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         }
         .search-match {
             background: var(--surface-3);
-            border-left: 4px solid var(--accent);
+            border-inline-start: 4px solid var(--accent);
         }
         .search-match b { color: var(--accent); }
         .search-hint {
@@ -1744,7 +1744,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             height: 24px;
             border-radius: 50%;
             vertical-align: middle;
-            margin-right: var(--space-2);
+            margin-inline-end: var(--space-2);
             display: inline-block;
             position: relative;
         }
@@ -1765,7 +1765,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             height: 8px;
             border-radius: 50%;
             bottom: -1px;
-            right: -1px;
+            inset-inline-end: -1px;
             border: 2px solid var(--slate-900);
             background: var(--slate-500);  /* offline (grey) */
         }
@@ -1885,7 +1885,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             /* Resting spot above the composer at the chat column's edge, so the
                picker never lands over the sidebar header before togglePicker()
                anchors it to a message (which resets right/bottom). */
-            right: var(--space-4);
+            inset-inline-end: var(--space-4);
             bottom: 96px;
             background: var(--surface-2);
             border: 1px solid var(--border);
@@ -2096,7 +2096,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
 
         /* Scroll-to-bottom button */
         #scroll-bottom-btn {
-            display: none; position: absolute; bottom: 80px; right: 20px;
+            display: none; position: absolute; bottom: 80px; inset-inline-end: 20px;
             background: var(--accent); color: var(--color-on-accent); border: none;
             border-radius: 20px; padding: var(--space-2) var(--space-4); cursor: pointer;
             font-size: var(--text-md); z-index: 10; box-shadow: var(--shadow-sm);
@@ -2126,7 +2126,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         /* Solid conversations (cross-app shared chats) */
         #solidchat-list { list-style: none; margin: 0; padding: 0; }
         .solidchat-item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
-            width: 100%; text-align: left; background: transparent; border: none; color: inherit;
+            width: 100%; text-align: start; background: transparent; border: none; color: inherit;
             cursor: pointer; padding: var(--space-2) var(--space-2); border-radius: 4px; font: inherit; }
         .solidchat-item:hover, .solidchat-item:focus-visible { background: var(--slate-800); }
         .solidchat-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2136,7 +2136,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             background: var(--slate-700); color: var(--slate-200);
             padding: 2px var(--space-2); border-radius: 10px; flex-shrink: 0; }
         .solidchat-msg { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--space-3); max-width: 78%; }
-        .solidchat-msg.mine { margin-left: auto; align-items: flex-end; }
+        .solidchat-msg.mine { margin-inline-start: auto; align-items: flex-end; }
         .solidchat-author { font-size: var(--text-xs); color: var(--text-secondary); }
         .solidchat-body { background: var(--slate-800); padding: var(--space-2) var(--space-3); border-radius: 10px;
             white-space: pre-wrap; word-break: break-word; }
@@ -2270,7 +2270,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
            (rendering.js places it inside .msg-content), WhatsApp-style — close
            to the content instead of floating at the feed's far edge, and never
            costing its own line. */
-        .read-receipt { margin-left: var(--space-2); font-size: var(--text-2xs); color: var(--slate-600); user-select: none; }
+        .read-receipt { margin-inline-start: var(--space-2); font-size: var(--text-2xs); color: var(--slate-600); user-select: none; }
         .read-receipt.read { color: var(--color-success-soft); }
 
         /* Round 62: Voice Messages */
@@ -2281,7 +2281,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
         .audio-message { margin-top: var(--space-1); }
         .audio-message audio { max-width: 280px; height: 36px; }
-        .audio-duration { font-size: var(--text-xs); color: var(--text-secondary); margin-left: var(--space-2); }
+        .audio-duration { font-size: var(--text-xs); color: var(--text-secondary); margin-inline-start: var(--space-2); }
 
         /* Popup menus: message (.ctx-menu), sidebar (.ctx-menu), delete
            submenu and member moderation menu share one look. The old class
@@ -2314,7 +2314,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         }
 
         /* Round 64: Role badges */
-        .role-badge { font-size: var(--text-2xs); font-weight: var(--weight-bold); border-radius: 3px; padding: 1px var(--space-2); margin-left: var(--space-1); letter-spacing: 0.04em; vertical-align: middle; }
+        .role-badge { font-size: var(--text-2xs); font-weight: var(--weight-bold); border-radius: 3px; padding: 1px var(--space-2); margin-inline-start: var(--space-1); letter-spacing: 0.04em; vertical-align: middle; }
         .role-badge.role-admin { background: var(--role-admin); color: var(--color-on-accent); }
         .role-badge.role-mod { background: var(--role-mod); color: var(--color-on-accent); }
 
@@ -2337,12 +2337,12 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         .forwarded-banner { font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--space-1); font-style: italic; }
 
         /* Round 69: Schedule picker */
-        .schedule-picker { position: absolute; bottom: 64px; right: 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: var(--space-4); z-index: 200; display: flex; flex-direction: column; gap: var(--space-2); min-width: 240px; box-shadow: var(--shadow-md); }
+        .schedule-picker { position: absolute; bottom: 64px; inset-inline-end: 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: var(--space-4); z-index: 200; display: flex; flex-direction: column; gap: var(--space-2); min-width: 240px; box-shadow: var(--shadow-md); }
         .schedule-picker input[type="datetime-local"] { background: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-50); padding: var(--space-2) var(--space-2); border-radius: 4px; font-size: var(--text-md); width: 100%; box-sizing: border-box; }
         .schedule-picker label { font-size: var(--text-md); color: var(--text-secondary); }
 
         /* Round 70: Bot/Webhook */
-        .bot-badge { font-size: var(--text-2xs); font-weight: var(--weight-bold); background: var(--accent); color: var(--color-on-accent); border-radius: 3px; padding: 1px var(--space-2); margin-left: var(--space-2); vertical-align: middle; letter-spacing: 0.05em; }
+        .bot-badge { font-size: var(--text-2xs); font-weight: var(--weight-bold); background: var(--accent); color: var(--color-on-accent); border-radius: 3px; padding: 1px var(--space-2); margin-inline-start: var(--space-2); vertical-align: middle; letter-spacing: 0.05em; }
         .copyable-code { display: block; background: var(--slate-900); padding: var(--space-3); border-radius: 6px; font-size: var(--text-md); word-break: break-all; margin: var(--space-2) 0; -webkit-user-select: all; user-select: all; font-family: var(--font-mono); border: 1px solid var(--slate-700); }
         .room-integrations-btn { background: transparent; border: none; color: var(--text-secondary); font-size: 1em; cursor: pointer; padding: 0 var(--space-1); }
         .room-integrations-btn:hover, .room-integrations-btn:focus-visible { background: var(--surface-2); }
@@ -2766,16 +2766,16 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 #toast-container {
     position: fixed; z-index: var(--z-toast);
     top: calc(var(--header-h) + var(--space-2));
-    left: var(--space-3); right: var(--space-3);
+    inset-inline: var(--space-3);
     display: flex; flex-direction: column; gap: var(--space-2);
     pointer-events: none;
 }
 @media (min-width: 769px) {
-    #toast-container { left: auto; right: var(--space-4); width: 340px; }
+    #toast-container { inset-inline-start: auto; inset-inline-end: var(--space-4); width: 340px; }
 }
 .toast {
     display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
-    padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+    padding-block: var(--space-2); padding-inline: var(--space-4) var(--space-2);
     border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
     font-size: var(--text-md); line-height: 1.4;
     background: var(--surface-2); color: var(--slate-50);
@@ -2862,7 +2862,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 .modal__desc { margin: 0 0 var(--space-3); font-size: var(--text-md); color: var(--text-secondary); }
 .modal__close {
     flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
-    width: 32px; height: 32px; margin: calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) 0 0; padding: 0;
+    width: 32px; height: 32px; margin: calc(-1 * var(--space-2)) 0 0; margin-inline-end: calc(-1 * var(--space-2)); padding: 0;
     background: transparent; border: none; border-radius: var(--radius-sm);
     color: var(--text-secondary); cursor: pointer;
 }
@@ -2981,7 +2981,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 .fr-card__actions { display: flex; gap: var(--space-2); }
 /* File transfer progress chip. */
 .xfer-progress {
-    position: fixed; bottom: var(--space-2); right: var(--space-2); z-index: 1500;
+    position: fixed; bottom: var(--space-2); inset-inline-end: var(--space-2); z-index: 1500;
     background: var(--surface-2); color: var(--slate-50); padding: var(--space-2) var(--space-3);
     border-radius: var(--radius-md); font-size: var(--text-sm); box-shadow: var(--shadow-sm);
 }

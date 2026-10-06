@@ -60,10 +60,10 @@ export function createAddress({ showToast, showCopyModal }) {
             ? `proxion://invite?from=${encodeURIComponent(addr)}`
             : (window.proxionShortInviteUrl || link);
         renderMyQR(qrUrl);
-        // position near top-right
+        // position near the top inline-end corner
         panel.style.top = '64px';
-        panel.style.right = '12px';
-        panel.style.left = 'auto';
+        panel.style.insetInlineEnd = '12px';
+        panel.style.insetInlineStart = 'auto';
         panel.style.display = 'block';
     }
 

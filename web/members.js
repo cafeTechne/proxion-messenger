@@ -30,7 +30,7 @@ export function createMembers({ getActiveView, requestRoomMembers }) {
         const initial = escHtml(displayName[0].toUpperCase());
         const presenceClass = m.status === "online" ? "online" : m.status === "away" ? "away" : m.status === "busy" ? "busy" : "";
         const fedBadge = m.federated
-            ? `<span title="Federated member (${escHtml(m.gateway || 'remote gateway')})" style="color:var(--slate-600);margin-left:4px;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg></span>`
+            ? `<span title="Federated member (${escHtml(m.gateway || 'remote gateway')})" style="color:var(--slate-600);margin-inline-start:4px;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg></span>`
             : "";
         // Member display names are peer-chosen and can collide. When a name is
         // shown, append the stable short id inline so same-named members stay
@@ -39,7 +39,7 @@ export function createMembers({ getActiveView, requestRoomMembers }) {
             ? ` <span class="member-id-suffix" style="color:var(--slate-600);font-size:0.72em">${escHtml((m.webid || "").slice(8, 22) + "…")}</span>`
             : "";
         return `<div class="member-item" role="button" tabindex="-1" data-msg-action="profile" data-webid="${escHtml(m.webid)}" data-name="${escHtml(displayName)}">
-                <div style="position:relative;display:inline-block;margin-right:8px;">
+                <div style="position:relative;display:inline-block;margin-inline-end:8px;">
                     <div class="avatar placeholder" style="background:${color};width:28px;height:28px;line-height:28px;font-size:12px;font-weight:bold;text-align:center;">${initial}</div>
                     <div class="avatar-presence ${presenceClass}" title="${escHtml(m.status || '')}"></div>
                 </div>
