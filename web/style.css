@@ -2466,6 +2466,34 @@ button:is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; opacity: 0.5
     background: var(--slate-900); color: var(--slate-50);
     border: 1px solid var(--slate-700); border-radius: var(--radius-sm);
 }
+/* Language and theme pickers: where the customizable select is supported the
+   open list is drawn in the app's own surface, radius and focus colors instead
+   of the OS menu (a white Windows list over the dark theme). Elsewhere the
+   native select above is unchanged. */
+@supports (appearance: base-select) {
+    select.settings-input,
+    select.settings-input::picker(select) { appearance: base-select; }
+    select.settings-input {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: var(--space-2); cursor: pointer;
+    }
+    select.settings-input::picker-icon { color: var(--text-secondary); transition: rotate var(--dur-2) var(--ease-out); }
+    select.settings-input:open::picker-icon { rotate: 180deg; }
+    select.settings-input::picker(select) {
+        margin-block: var(--space-1); padding: var(--space-1);
+        max-block-size: 50dvh;
+        background: var(--surface-2); color: var(--text-primary);
+        border: 1px solid var(--border); border-radius: var(--radius-md);
+        box-shadow: var(--shadow-md);
+    }
+    select.settings-input option {
+        padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm);
+        font-size: var(--text-base);
+    }
+    select.settings-input option:is(:hover, :focus-visible) { background: var(--tint-hover); }
+    select.settings-input option:checked { font-weight: var(--weight-semibold); }
+    select.settings-input option::checkmark { color: var(--accent-text); }
+}
 .settings-inline { display: flex; gap: var(--space-2); align-items: flex-start; }
 .settings-inline > .settings-input { flex: 1; min-width: 0; }
 .settings-inline > .btn { flex-shrink: 0; white-space: nowrap; height: 36px; padding-block: 0; font-size: var(--text-md); }
