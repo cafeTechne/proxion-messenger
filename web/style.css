@@ -2638,6 +2638,37 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
     #chat-header-actions::-webkit-scrollbar { display: none; }
 }
 
+/* iOS Safari does not paint background-attachment: local, so the edge
+   shadows above never show there, on exactly the phones that need them.
+   Where scroll-driven animations exist (Safari 26), iOS gets the same two
+   shadows drawn from the strip's own scroll position instead: each one grows
+   from 0 to full width as that edge gains hidden content. A strip that does
+   not scroll has an inactive timeline, so it shows no shadow. Other engines
+   keep the attachment trick; -webkit-touch-callout is the iOS-only test. */
+@supports (-webkit-touch-callout: none) and (animation-timeline: scroll()) {
+    @property --strip-shade-start { syntax: "<length>"; inherits: false; initial-value: 0px; }
+    @property --strip-shade-end { syntax: "<length>"; inherits: false; initial-value: 0px; }
+    @keyframes strip-shade {
+        from { --strip-shade-start: 0px; --strip-shade-end: 16px; }
+        8%   { --strip-shade-start: 16px; }
+        92%  { --strip-shade-end: 16px; }
+        to   { --strip-shade-start: 16px; --strip-shade-end: 0px; }
+    }
+    #chat-header-actions {
+        background:
+            linear-gradient(to right, var(--edge-shade), transparent) left center / var(--strip-shade-start) 100% no-repeat,
+            linear-gradient(to left,  var(--edge-shade), transparent) right center / var(--strip-shade-end) 100% no-repeat;
+        animation: strip-shade linear both;
+        animation-timeline: scroll(self inline);
+    }
+    /* RTL: the inline start is the right edge. */
+    :root[dir="rtl"] #chat-header-actions {
+        background:
+            linear-gradient(to left,  var(--edge-shade), transparent) right center / var(--strip-shade-start) 100% no-repeat,
+            linear-gradient(to right, var(--edge-shade), transparent) left center / var(--strip-shade-end) 100% no-repeat;
+    }
+}
+
 /* Narrow composer on a desktop window (e.g. a half-screen window with the
    members panel open): the four secondary buttons squeezed the textarea to a
    few characters. Fold them behind the same "+" disclosure the phone layout
