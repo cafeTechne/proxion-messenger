@@ -706,13 +706,11 @@ main { background: var(--surface-0); }
    bottom — including the action buttons — off-screen with no way to reach them. */
 [role="dialog"] > div { max-height: 90vh; max-height: 90dvh; overflow-y: auto; }
 /* While a dialog is open the page behind it stays put: no scroll, and a fling
-   inside the dialog does not chain to the page. Modals open by setting an
-   inline display (focus-trap.js matches the same elements); a native modal
-   <dialog> is covered by :modal. Without :has() the page simply scrolls. */
-:root:has(
-    :is([role="dialog"], [id$="-modal"]):is([style*="display: flex"], [style*="display: block"]),
-    dialog:modal
-) { overflow: hidden; overscroll-behavior: none; }
+   inside the dialog does not chain to the page. focus-trap.js marks the
+   background regions it makes inert with data-trap-inert exactly while a
+   dialog is open; a native modal <dialog> is covered by :modal. Without
+   :has() the page simply scrolls. */
+:root:has([data-trap-inert], dialog:modal) { overflow: hidden; overscroll-behavior: none; }
 .message:not(.msg-grouped) { padding-top: var(--space-4); }
 
 /* Avatar column: 40 px wide, fixed */
