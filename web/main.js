@@ -38,7 +38,7 @@ import { buildRoomDescriptor, withMembers, descriptorSigningBytes } from './room
 import {
     didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, timeAgo,
     expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8, scrollBehavior,
-    composerEnterAction, isCoarsePointer, supportsFieldSizing,
+    composerEnterAction, isCoarsePointer, supportsFieldSizing, canShareLinks, shareLink,
 } from './util.js';
 import { createFileTransfer } from './filetransfer.js';
 import { createVoice, CallState, audioLevel } from './voice.js';
@@ -5204,6 +5204,28 @@ import { initThemePicker } from './theme.js';
                 if (!link) return;
                 navigator.clipboard.writeText(link).then(() => showToast(t('onboarding.inviteCopied')));
             });
+            // Invite links also get a Share button where the platform has a
+            // share sheet (phones, some desktops). Elsewhere it stays hidden and
+            // Copy is the only action, so the layout is unchanged.
+            if (canShareLinks()) {
+                document.querySelectorAll('button[data-share-from]').forEach((btn) => {
+                    btn.hidden = false;
+                    btn.addEventListener('click', async () => {
+                        const src = btn.dataset.shareFrom || '';
+                        const url = (src.startsWith('#')
+                            ? document.querySelector(src)?.textContent
+                            : window[src]) || '';
+                        const link = String(url).trim();
+                        if (!/^[a-z][\w+.-]*:\/\//i.test(link)) return;
+                        const r = await shareLink(link, { title: t('share.inviteTitle'), text: t('share.inviteText') });
+                        if (r === 'failed' || r === 'unsupported') {
+                            navigator.clipboard.writeText(link)
+                                .then(() => showToast(t('onboarding.inviteCopied')))
+                                .catch(() => showCopyModal(link));
+                        }
+                    });
+                });
+            }
             attachListener('#qr-copy-short-btn', 'click', () => {
                 const link = window.proxionShortInviteUrl || window.proxionInviteLink || '';
                 if (!link) return;

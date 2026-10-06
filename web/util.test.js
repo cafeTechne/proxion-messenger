@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import {
   didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown,
   expireLabel, timeAgo, u8ToB64, b64ToU8, b64attr, scrollBehavior,
-  composerEnterAction, isCoarsePointer, supportsFieldSizing,
+  composerEnterAction, isCoarsePointer, supportsFieldSizing, canShareLinks, shareLink,
 } from './util.js';
 
 describe('composerEnterAction (Enter in the message composer)', () => {
@@ -43,6 +43,27 @@ describe('isCoarsePointer', () => {
   it('is false without matchMedia', () => {
     globalThis.matchMedia = undefined;
     expect(isCoarsePointer()).toBe(false);
+  });
+});
+
+describe('canShareLinks / shareLink (Web Share)', () => {
+  it('is unsupported without navigator.share, so only Copy shows', async () => {
+    expect(canShareLinks({})).toBe(false);
+    expect(canShareLinks(undefined)).toBe(false);
+    expect(await shareLink('https://x.test/i', {}, {})).toBe('unsupported');
+  });
+  it('passes url, title and text to the share sheet', async () => {
+    const calls = [];
+    const nav = { share: async (d) => { calls.push(d); } };
+    expect(canShareLinks(nav)).toBe(true);
+    expect(await shareLink('https://x.test/i', { title: 'T', text: 'Join' }, nav)).toBe('shared');
+    expect(calls).toEqual([{ url: 'https://x.test/i', title: 'T', text: 'Join' }]);
+  });
+  it('a closed sheet is a cancel, other errors and canShare=false fall back', async () => {
+    const abort = Object.assign(new Error('x'), { name: 'AbortError' });
+    expect(await shareLink('https://x.test', {}, { share: async () => { throw abort; } })).toBe('cancelled');
+    expect(await shareLink('https://x.test', {}, { share: async () => { throw new Error('denied'); } })).toBe('failed');
+    expect(await shareLink('https://x.test', {}, { share: async () => {}, canShare: () => false })).toBe('unsupported');
   });
 });
 

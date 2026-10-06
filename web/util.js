@@ -53,6 +53,29 @@ export function supportsFieldSizing() {
     } catch { return false; }
 }
 
+// The platform share sheet (Web Share API) exists here: phones, and some
+// desktops. Where it does not, Proxion only offers Copy.
+export function canShareLinks(nav = globalThis.navigator) {
+    return !!(nav && typeof nav.share === 'function');
+}
+
+// Open the share sheet for a link. Resolves to 'shared', 'cancelled' (the user
+// closed the sheet, nothing to do), 'unsupported' or 'failed' (the caller
+// falls back to copying).
+export async function shareLink(url, { title, text } = {}, nav = globalThis.navigator) {
+    const data = { url };
+    if (title) data.title = title;
+    if (text) data.text = text;
+    if (!canShareLinks(nav)) return 'unsupported';
+    try {
+        if (typeof nav.canShare === 'function' && !nav.canShare(data)) return 'unsupported';
+        await nav.share(data);
+        return 'shared';
+    } catch (e) {
+        return e && e.name === 'AbortError' ? 'cancelled' : 'failed';
+    }
+}
+
 // What Enter does in the message composer: 'send', 'newline' (let the
 // textarea break the line) or 'none' (not ours to handle). Desktop: Enter
 // sends, Shift+Enter breaks the line. Touch: Enter breaks the line and the

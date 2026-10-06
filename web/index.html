@@ -217,6 +217,10 @@
                 style="background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-4);border-radius:4px;cursor:pointer;font-size:var(--text-md);" data-i18n="btn.downloadQr">
           Download QR
         </button>
+        <button id="qr-share-invite-btn" type="button" hidden data-share-from="proxionInviteLink"
+                style="background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-4);border-radius:4px;cursor:pointer;font-size:var(--text-md);" data-i18n="btn.shareInviteLink">
+          Share invite link
+        </button>
         <button id="qr-copy-invite-btn"
                 style="background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-4);border-radius:4px;cursor:pointer;font-size:var(--text-md);" data-i18n="btn.copyInviteLink">
           Copy invite link
@@ -268,6 +272,8 @@
                style="flex:1;font-size:var(--text-xs);color:var(--text-secondary);word-break:break-all;padding:var(--space-2);background:var(--slate-900);border-radius:4px;user-select:all;cursor:text;"></div>
           <button id="invite-modal-copy-url"
                   style="flex-shrink:0;background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-3);border-radius:4px;cursor:pointer;font-size:var(--text-sm);" data-i18n="heading.copy">Copy</button>
+          <button id="invite-modal-share-url" type="button" hidden data-share-from="#invite-modal-url"
+                  style="flex-shrink:0;background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-3);border-radius:4px;cursor:pointer;font-size:var(--text-sm);" data-i18n="btn.share">Share</button>
         </div>
         <label style="display:block;margin-bottom:var(--space-1);font-size:var(--text-md);color:var(--text-secondary);" data-i18n="label.roomCodePasteInto">Room code (paste into "Join room")</label>
         <div style="display:flex;gap:var(--space-2);">
@@ -627,6 +633,8 @@
           <label style="display:block; margin-bottom:var(--space-1); font-size:var(--text-md);" data-i18n="label.inviteLinkClickCopy">Invite link (click to copy)</label>
           <div id="room-invite-url"
                style="font-size:var(--text-sm); color:var(--text-secondary); word-break:break-all; padding:var(--space-2); background:var(--slate-900); border-radius:4px; cursor:pointer; user-select:all; margin-bottom:var(--space-3);"></div>
+          <button id="room-invite-share-btn" type="button" hidden data-share-from="#room-invite-url"
+                  style="background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-4);border-radius:4px;cursor:pointer;font-size:var(--text-md);margin-bottom:var(--space-3);" data-i18n="btn.shareInviteLink">Share invite link</button>
           <p style="font-size:var(--text-sm); color:var(--text-secondary); margin:0 0 var(--space-3);" data-i18n="room.createdShareHint">Share this link with a friend. When they open it, Proxion adds you automatically. If they don't have Proxion yet, they are asked to install it first.</p>
           <div class="btn-row modal__footer">
             <button type="button" id="room-create-done-btn" data-modal-cancel class="btn btn--accent btn--lg" data-i18n="btn.done">Done</button>
@@ -1247,6 +1255,11 @@
                     style="background:var(--slate-700); border:none; color:var(--slate-50); padding:var(--space-2) var(--space-4);
                            border-radius:4px; cursor:pointer; font-size:var(--text-md);" data-i18n="btn.copyInviteLink">
               Copy invite link
+            </button>
+            <button id="ob-share-invite-btn" type="button" hidden data-share-from="#ob-room-invite-url"
+                    style="background:var(--slate-700); border:none; color:var(--slate-50); padding:var(--space-2) var(--space-4);
+                           border-radius:4px; cursor:pointer; font-size:var(--text-md);" data-i18n="btn.shareInviteLink">
+              Share invite link
             </button>
           </div>
           <!-- E1: identity is device-local until backed up — offer the kit before the wizard closes -->
