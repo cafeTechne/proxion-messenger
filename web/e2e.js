@@ -3,7 +3,8 @@
  *
  * Key exchange: X25519 ECDH. Each direction switch rotates the DH ratchet key,
  * re-derives the root key, and starts a new symmetric chain (break-in recovery).
- * State: AES-256-GCM encrypted, stored to pod (primary) + localStorage (fast cache).
+ * State: AES-256-GCM encrypted under a per-device key, kept in localStorage and in
+ * a per-device pod copy; the newest copy wins on load (see loadRatchetState).
  *
  * Phase 1 states (no rootKey field) are silently discarded on load.
  */
@@ -427,7 +428,16 @@ export async function fetchAndCachePeerPub(peerId, peerPodRoot) {
 //   recvMsgNum:       number          next expected recv message number in current chain
 //   skippedKeys:      { [k]: string } skip buffer keyed "ratchetPub:msgNum" → b64u msgKey
 //
+//   ver:              number          monotonic save counter; the newest copy wins on load
+//
 // Phase 1 states (no rootKey) are discarded on load → clean re-init.
+//
+// Storage: localStorage (written synchronously) plus a pod copy at a per-device
+// path, proxion/e2e/<peer>/state-<device>.enc, where <device> is this device's
+// X25519 public key: the blob is encrypted under this device's state key, so no
+// other device can use it and two devices of one account must not share a path.
+// The pre-device path proxion/e2e/<peer>/state.enc is read only as a migration
+// source when the per-device copy is missing.
 
 async function _encState(state) {
     const nonce = crypto.getRandomValues(new Uint8Array(12));
@@ -447,6 +457,55 @@ async function _decState(enc) {
     return JSON.parse(_DEC.decode(plain));
 }
 
+function _statePodUrls(peerId) {
+    const root = typeof podStorageRoot === 'function' ? podStorageRoot() : null;
+    if (!root || !solidSession?.info?.isLoggedIn || !_myPubB64u) return null;
+    const dir = root + 'proxion/e2e/' + encodeURIComponent(peerId) + '/';
+    return { device: dir + 'state-' + _myPubB64u + '.enc', legacy: dir + 'state.enc' };
+}
+
+// GET + decrypt a pod state copy. null when missing, unreadable, or written by a
+// different device (its state key differs, so the GCM tag fails here).
+async function _readPodState(url) {
+    try {
+        const res = await solidSession.fetch(url);
+        if (!res || !res.ok) return null;
+        return await _decState(await res.text());
+    } catch { return null; }
+}
+
+// One in-flight PUT per peer; overlapping saves coalesce to the latest blob so an
+// older write can never land after a newer one.
+const _podWrites = {};   // peerId -> { pending, running }
+function _queuePodWrite(peerId, url, enc) {
+    const q = _podWrites[peerId] || (_podWrites[peerId] = { pending: null, running: null });
+    q.pending = { url, enc };
+    if (q.running) return;
+    q.running = (async () => {
+        while (q.pending) {
+            const job = q.pending;
+            q.pending = null;
+            try {
+                await solidSession.fetch(job.url, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: job.enc,
+                });
+            } catch { /* best effort; localStorage holds the state */ }
+        }
+        q.running = null;
+    })();
+}
+
+// Test hook: resolves once every queued pod state write has been attempted.
+export async function _podStateWritesSettled() {
+    for (;;) {
+        const running = Object.values(_podWrites).map((q) => q.running).filter(Boolean);
+        if (!running.length) return;
+        await Promise.all(running);
+    }
+}
+
 export async function loadRatchetState(peerId) {
     if (_stateCache[peerId]) {
         const s = _stateCache[peerId];
@@ -454,48 +513,42 @@ export async function loadRatchetState(peerId) {
         return s;
     }
 
-    const root = typeof podStorageRoot === 'function' ? podStorageRoot() : null;
-    if (root && solidSession?.info?.isLoggedIn) {
-        try {
-            const url = root + 'proxion/e2e/' + encodeURIComponent(peerId) + '/state.enc';
-            const res = await solidSession.fetch(url);
-            if (res.ok) {
-                const state = await _decState(await res.text());
-                if (!state.rootKey) return null; // Phase 1 migration
-                _stateCache[peerId] = state;
-                return state;
-            }
-        } catch {}
-    }
-
+    // Gather every copy this device can decrypt and keep the newest, so a pod copy
+    // whose PUT was lost or is still in flight never rolls the session back (that
+    // would reuse message numbers and keys). On a tie localStorage wins.
+    let best = null;
     const ls = localStorage.getItem(e2eScopedKey('proxion_e2e_state_' + peerId));
     if (ls) {
-        try {
-            const state = await _decState(ls);
-            if (!state.rootKey) return null; // Phase 1 migration
-            _stateCache[peerId] = state;
-            return state;
-        } catch {}
+        try { best = await _decState(ls); } catch { best = null; }
     }
 
-    return null;
+    const urls = _statePodUrls(peerId);
+    let podHasDevice = false;
+    if (urls) {
+        let pod = await _readPodState(urls.device);
+        podHasDevice = !!pod;
+        if (!pod) pod = await _readPodState(urls.legacy);   // pre-device layout
+        if (pod && (!best || (pod.ver || 0) > (best.ver || 0))) best = pod;
+    }
+
+    if (!best || !best.rootKey) return null; // none, or Phase 1 migration
+    _stateCache[peerId] = best;
+    // Migrate: the per-device copy is missing (new device layout), write it now.
+    if (urls && !podHasDevice && _stateEncKey) {
+        try { _queuePodWrite(peerId, urls.device, await _encState(best)); } catch { /* ignore */ }
+    }
+    return best;
 }
 
 export async function saveRatchetState(peerId, state) {
+    state.ver = (Number.isSafeInteger(state.ver) ? state.ver : 0) + 1;
     _stateCache[peerId] = state;
     if (!_stateEncKey) return;
     const enc = await _encState(state);
     localStorage.setItem(e2eScopedKey('proxion_e2e_state_' + peerId), enc);
 
-    const root = typeof podStorageRoot === 'function' ? podStorageRoot() : null;
-    if (root && solidSession?.info?.isLoggedIn) {
-        const url = root + 'proxion/e2e/' + encodeURIComponent(peerId) + '/state.enc';
-        solidSession.fetch(url, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: enc,
-        }).catch(() => {});
-    }
+    const urls = _statePodUrls(peerId);
+    if (urls) _queuePodWrite(peerId, urls.device, enc);
 }
 
 // ── Internal DH ratchet helpers ───────────────────────────────────────────────
@@ -737,4 +790,5 @@ export function _resetForTesting() {
     _keyDbPromise = null;
     for (const k in _stateCache) delete _stateCache[k];
     for (const k in _peerQueues) delete _peerQueues[k];
+    for (const k in _podWrites) delete _podWrites[k];
 }
