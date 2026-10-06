@@ -19,6 +19,13 @@ export function escHtml(str) {
         .replace(/'/g, '&#39;');
 }
 
+// First letter or digit of a name for a letter avatar. Skips leading punctuation,
+// symbols and emoji ("…Alice" gives "A") and keeps surrogate pairs whole.
+export function avatarInitial(name) {
+    const m = String(name || '').match(/[\p{L}\p{N}]/u);
+    return m ? m[0].toLocaleUpperCase() : '?';
+}
+
 // Strip anything outside the base64 alphabet. Wire-supplied base64 (peer
 // avatars, voice notes) is interpolated into `src="data:...;base64,${x}"`
 // inside innerHTML strings; a stray double-quote there would break out of the

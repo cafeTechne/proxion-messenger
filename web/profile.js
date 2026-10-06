@@ -8,7 +8,7 @@
 // webidColor is imported. Returned functions are destructured into same-named
 // bindings in main.js so the dispatch and listener wiring keep working.
 import { t } from './i18n.js';
-import { webidColor, timeAgo, escHtml } from './util.js';
+import { webidColor, timeAgo, escHtml, avatarInitial } from './util.js';
 
 export function createProfile({ getSocket, showToast, getUserPresence, getMessageMap, isBlocked }) {
     const state = { profileCardActive: null };
@@ -47,7 +47,7 @@ export function createProfile({ getSocket, showToast, getUserPresence, getMessag
         // Get presence status for this user
         const presenceData = getUserPresence()[webid] || { status: "offline" };
         const avatarColor = webidColor(webid);
-        const shortName = (displayName || webid.slice(0, 12))[0].toUpperCase();
+        const shortName = avatarInitial(displayName || webid.slice(0, 12));
 
         // Update card contents
         document.getElementById("profile-name").textContent = displayName || webid.slice(0, 12);

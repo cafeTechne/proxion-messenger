@@ -8,7 +8,7 @@
 // and read live via getCurrentRoomMembers(); webidColor is imported.
 // closeMentionDropdown and _selectMention are also returned for the external
 // callers in main.js (thread switches and the dropdown click handler).
-import { webidColor } from './util.js';
+import { webidColor, avatarInitial } from './util.js';
 
 export function createMentions({ getCurrentRoomMembers }) {
     const state = { mentionStart: -1, mentionFocusIdx: 0 };
@@ -22,7 +22,7 @@ export function createMentions({ getCurrentRoomMembers }) {
         matches.forEach((m, i) => {
             const name = m.display_name || (m.webid || "").slice(0, 12);
             const color = webidColor(m.webid);
-            const initial = (name[0] || "?").toUpperCase();
+            const initial = avatarInitial(name);
             const row = document.createElement("div");
             row.className = "mention-option" + (i === 0 ? " focused" : "");
             row.dataset.idx = String(i);

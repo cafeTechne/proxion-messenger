@@ -302,3 +302,17 @@ describe('renderMarkdown code spans, autolinks and underscores', () => {
     expect(renderMarkdown('0 `x`')).toBe('0 <code class="inline-code">x</code>');
   });
 });
+
+describe('avatarInitial', () => {
+    it('takes the first letter or digit, skipping punctuation and emoji', async () => {
+        const { avatarInitial } = await import('./util.js');
+        expect(avatarInitial('alice')).toBe('A');
+        expect(avatarInitial('…Alice')).toBe('A');
+        expect(avatarInitial('🎉 party')).toBe('P');
+        expect(avatarInitial('علي')).toBe('ع');
+        expect(avatarInitial('9lives')).toBe('9');
+        expect(avatarInitial('')).toBe('?');
+        expect(avatarInitial('<<>>')).toBe('?');
+        expect(avatarInitial(null)).toBe('?');
+    });
+});
