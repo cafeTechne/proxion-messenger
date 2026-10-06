@@ -245,6 +245,8 @@ class DmHandlerMixin:
         # R60C: sender-marked media spoiler — validated to a strict bool and
         # echoed on the file object so receivers blur until revealed.
         _spoiler = data.get("spoiler") is True
+        from ._gateway_files import media_dims as _media_dims
+        _dims = _media_dims(data)
         mime_type = data.get("mime_type", "application/octet-stream")
         import base64 as _b64
         import posixpath as _posix
@@ -349,7 +351,7 @@ class DmHandlerMixin:
                 "message_id": message_id, "local": True,
                 "file": {"filename": filename, "mime_type": mime_type,
                          "size": len(file_bytes), "data_b64": data_b64,
-                         "spoiler": _spoiler},
+                         "spoiler": _spoiler, **_dims},
             }
             if self._store:
                 self._store.save_message(message_id, cert_id, "local_dm",
@@ -417,7 +419,7 @@ class DmHandlerMixin:
                                 "signature": sig,
                                 "file": {"filename": filename, "mime_type": mime_type,
                                          "size": len(file_bytes), "data_b64": data_b64,
-                                         "spoiler": _spoiler},
+                                         "spoiler": _spoiler, **_dims},
                             }
                             http_base = peer_gw.replace("wss://", "https://").replace("ws://", "http://")
                             delivered = await post_relay(http_base.rstrip("/") + "/relay", relay_payload)
@@ -447,7 +449,7 @@ class DmHandlerMixin:
                 "message_id": message_id, "local": True,
                 "file": {"filename": filename, "mime_type": mime_type,
                          "size": len(file_bytes), "data_b64": data_b64,
-                         "spoiler": _spoiler},
+                         "spoiler": _spoiler, **_dims},
             }
             if self._store:
                 self._store.save_message(message_id, room_id, "room", sender_webid, sender_name, f"📎 {filename}", ts)

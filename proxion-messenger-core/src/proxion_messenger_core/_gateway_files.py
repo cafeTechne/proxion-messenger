@@ -37,6 +37,32 @@ _CHUNK_FIELDS = ("file_id", "seq", "data")
 _ID_FIELDS = ("file_id",)
 _REJECT_FIELDS = ("file_id", "reason")
 
+# Optional natural pixel size of an image/video attachment, so receivers can
+# reserve its box before it decodes. Never required; anything that is not an
+# int in 1..MAX_MEDIA_DIM (bools excluded) is dropped rather than rejected.
+MAX_MEDIA_DIM = 16384
+
+
+def media_dims(src) -> dict:
+    """Return {"width": w, "height": h} when both are valid, else {}."""
+    if not isinstance(src, dict):
+        return {}
+    w, h = src.get("width"), src.get("height")
+
+    def _ok(v) -> bool:
+        return isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= MAX_MEDIA_DIM
+
+    return {"width": w, "height": h} if _ok(w) and _ok(h) else {}
+
+
+def sanitize_file_dims(file_obj):
+    """Strip width/height from a relayed file object unless both are valid."""
+    if not isinstance(file_obj, dict):
+        return file_obj
+    clean = {k: v for k, v in file_obj.items() if k not in ("width", "height")}
+    clean.update(media_dims(file_obj))
+    return clean
+
 
 class FileTransferMixin:
 

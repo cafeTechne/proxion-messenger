@@ -953,6 +953,10 @@ class HttpEndpointsMixin:
                 self._store.save_e2e_key(from_webid, data["x25519_pub"])
 
         _E2E_KEYS = ("e2e", "nonce", "msg_num", "key_header", "ratchet_pub", "pn", "x25519_pub", "file")
+        if isinstance(data.get("file"), dict):
+            # Peer-supplied media size: keep it only when both values are sane.
+            from ._gateway_files import sanitize_file_dims
+            data = {**data, "file": sanitize_file_dims(data["file"])}
         # Deliver to all connected sockets of the target identity. _sockets_for now
         # centrally handles the one-gateway-per-user fallback (a relay addressed to
         # this gateway's own identity reaches the local browser, which registered
