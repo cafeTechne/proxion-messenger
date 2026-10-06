@@ -147,7 +147,7 @@ export function createRecovery({ showToast, showPromptModal, showConfirm }) {
 
     // ── Verify (dry-run restore: proves the kit + code decrypt, no key change) ──
     async function _verifyKit(file) {
-        const raw = await showPromptModal(t('recovery.verifyPrompt'), { type: 'password' });
+        const raw = await showPromptModal(t('recovery.verifyPrompt'), { type: 'password', required: true });
         if (!raw) return;
         const pp = passphraseFromInput(raw);
         try {
@@ -171,7 +171,7 @@ export function createRecovery({ showToast, showPromptModal, showConfirm }) {
 
     // ── Restore (shared by the settings button and the onboarding entry) ────
     async function _restoreKit(file, getSocket) {
-        const raw = await showPromptModal(t('recovery.restorePrompt'), { type: 'password' });
+        const raw = await showPromptModal(t('recovery.restorePrompt'), { type: 'password', required: true });
         if (!raw) return;
         const pp = passphraseFromInput(raw);
         try {
@@ -211,7 +211,7 @@ export function createRecovery({ showToast, showPromptModal, showConfirm }) {
         document.getElementById('recovery-custom-pp')?.addEventListener('click', async (e) => {
             e.preventDefault();
             _closeKitModal();
-            const pp = await showPromptModal(t('prompt.choosePassphrase'), { type: 'password' });
+            const pp = await showPromptModal(t('prompt.choosePassphrase'), { type: 'password', required: true });
             if (pp) await _downloadKit(pp);
         });
         document.getElementById('recovery-cancel-btn')?.addEventListener('click', _closeKitModal);

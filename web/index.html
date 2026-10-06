@@ -182,7 +182,7 @@
         <form id="add-peer-form" novalidate>
         <h3 id="add-peer-title" class="modal__title" data-i18n="heading.addPeer">Add contact</h3>
         <label for="add-peer-input" class="field-label" data-i18n="label.peerDidProxionAddress">Peer DID or Proxion address</label>
-        <input id="add-peer-input" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" class="input" type="text" placeholder="Paste an invite link or your friend's address" aria-describedby="add-peer-error" data-i18n-attr="placeholder:ui.pasteInviteLinkFriend">
+        <input id="add-peer-input" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" class="input" type="text" required placeholder="Paste an invite link or your friend's address" aria-describedby="add-peer-error" data-i18n-attr="placeholder:ui.pasteInviteLinkFriend">
         <p id="add-peer-error" class="field-error" role="alert"></p>
         <!-- R17.3: QR scan -->
         <div>
@@ -240,7 +240,7 @@
         <form id="join-room-form" novalidate>
         <h3 id="join-room-title" class="modal__title" data-i18n="heading.joinRoom">Join room</h3>
         <label for="join-room-input" class="field-label" data-i18n="label.inviteLinkRoomCode">Invite link or room code</label>
-        <input id="join-room-input" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" class="input" type="text" placeholder="Paste invite link or code" aria-describedby="join-room-error" data-i18n-attr="placeholder:ui.pasteInviteLinkCode">
+        <input id="join-room-input" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" class="input" type="text" required placeholder="Paste invite link or code" aria-describedby="join-room-error" data-i18n-attr="placeholder:ui.pasteInviteLinkCode">
         <p id="join-room-error" class="field-error" role="alert"></p>
         <div class="btn-row modal__footer">
           <button type="button" id="join-room-cancel-btn" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
@@ -800,7 +800,7 @@
                 </label>
                 <p class="settings-hint settings-hint--block" data-i18n="conn.relay.defaultHint">Only calls with no direct path use it, and media stays end-to-end encrypted. Turn it off to use no third-party relay, or add your own below.</p>
                 <p class="settings-hint settings-hint--block" data-i18n="conn.relay.hint">On a restrictive network, calls need a relay (TURN) server to connect. Add one from your provider or self-host; it is used for your next call, no restart needed.</p>
-                <input id="calls-relay-url" inputmode="url" autocapitalize="off" autocorrect="off" class="settings-input" type="text" autocomplete="off" spellcheck="false" placeholder="turns:relay.example.com:5349" data-i18n-attr="placeholder:conn.relay.urlPlaceholder">
+                <input id="calls-relay-url" inputmode="url" autocapitalize="off" autocorrect="off" class="settings-input" type="text" pattern="(turns?|TURNS?):.+" autocomplete="off" spellcheck="false" placeholder="turns:relay.example.com:5349" data-i18n-attr="placeholder:conn.relay.urlPlaceholder">
                 <div class="settings-inline">
                   <input id="calls-relay-user" autocapitalize="off" autocorrect="off" class="settings-input" type="text" autocomplete="off" spellcheck="false" placeholder="username" data-i18n-attr="placeholder:conn.relay.userPlaceholder">
                   <input id="calls-relay-pass" class="settings-input" type="password" autocomplete="off" placeholder="password" data-i18n-attr="placeholder:conn.relay.passPlaceholder">
@@ -1082,7 +1082,7 @@
           Have a Solid pod? Enter your provider to sign in.
         </p>
         <label for="web-signin-url" class="field-label" data-i18n="web.signin.provider">Pod provider</label>
-        <input id="web-signin-url" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" class="input" type="url" value="https://solidcommunity.net" autocomplete="url" aria-describedby="web-signin-error">
+        <input id="web-signin-url" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" class="input" type="url" required value="https://solidcommunity.net" autocomplete="url" aria-describedby="web-signin-error">
         <p id="web-signin-error" class="field-error" role="alert"></p>
         <button type="submit" id="web-signin-btn" class="btn btn--accent btn--lg" style="width:100%;padding:var(--space-3) var(--space-5);font-size:1em;" data-i18n="web.signin.button">Sign in</button>
         <p style="margin:var(--space-4) 0 0; font-size:var(--text-sm); color:var(--text-secondary);">

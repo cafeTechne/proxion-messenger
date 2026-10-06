@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { showConfirm, cancelDialog, installDialogDismiss, fieldInvalidState } from './dialogs.js';
+import { showConfirm, showPromptModal, cancelDialog, installDialogDismiss, fieldInvalidState } from './dialogs.js';
 
 // i18n's t() returns the key itself when no locale is loaded.
 
@@ -171,5 +171,22 @@ describe('fieldInvalidState', () => {
     expect(fieldInvalidState({ textContent: '', style: {} })).toBe(false);
     expect(fieldInvalidState({ textContent: 'Enter a name', style: {} })).toBe(true);
     expect(fieldInvalidState({ textContent: 'Found Alice', style: { color: '#4ade80' } })).toBe(false);
+  });
+});
+
+describe('showPromptModal required option', () => {
+  function promptDoc() {
+    const ids = ['prompt-modal', 'prompt-input', 'prompt-title', 'prompt-msg', 'prompt-cancel', 'prompt-ok', 'prompt-form'];
+    const m = Object.fromEntries(ids.map((id) => [id, el({ setAttribute() {}, focus() {} })]));
+    return { m, doc: { getElementById: (id) => m[id] || null } };
+  }
+  it('marks the field required only when asked, so :user-invalid can flag it', () => {
+    const a = promptDoc();
+    showPromptModal('Passphrase', { type: 'password', required: true }, a.doc);
+    expect(a.m['prompt-input'].required).toBe(true);
+    expect(a.m['prompt-input'].type).toBe('password');
+    const b = promptDoc();
+    showPromptModal('Name', {}, b.doc);
+    expect(b.m['prompt-input'].required).toBe(false);
   });
 });

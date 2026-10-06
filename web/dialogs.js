@@ -77,7 +77,7 @@ function _buildPromptModal(doc) {
 }
 
 export function showPromptModal(message, opts = {}, doc = document) {
-    const { type = 'text', placeholder = '', title = '', confirmLabel = '', value = '' } = opts || {};
+    const { type = 'text', placeholder = '', title = '', confirmLabel = '', value = '', required = false } = opts || {};
     return new Promise((resolve) => {
         const modal = doc.getElementById('prompt-modal') || _buildPromptModal(doc);
         const $ = (id) => doc.getElementById(id);
@@ -91,6 +91,7 @@ export function showPromptModal(message, opts = {}, doc = document) {
         $('prompt-cancel').textContent = t('btn.cancel');
         $('prompt-ok').textContent = confirmLabel || t('btn.continue');
         input.type = type; input.placeholder = placeholder; input.value = value;
+        input.required = !!required;   // drives :user-invalid; the form is novalidate
         const form = $('prompt-form');
         const done = (val) => {
             closeDialog(modal);
