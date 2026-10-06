@@ -38,7 +38,7 @@ import { buildRoomDescriptor, withMembers, descriptorSigningBytes } from './room
 import {
     didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, timeAgo,
     expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8, scrollBehavior,
-    composerEnterAction, isCoarsePointer,
+    composerEnterAction, isCoarsePointer, supportsFieldSizing,
 } from './util.js';
 import { createFileTransfer } from './filetransfer.js';
 import { createVoice, CallState, audioLevel } from './voice.js';
@@ -3738,12 +3738,16 @@ import { initThemePicker } from './theme.js';
         });
 
         // Auto-resize textarea: grows with its content up to about 40% of the
-        // viewport on desktop (120px on phones), then scrolls.
-        document.getElementById("message-input").addEventListener("input", function() {
-            this.style.height = "auto";
-            const cap = window.innerWidth > 768 ? Math.max(120, Math.round(window.innerHeight * 0.4)) : 120;
-            this.style.height = Math.min(this.scrollHeight, cap) + "px";
-        });
+        // viewport on desktop (120px on phones), then scrolls. CSS
+        // field-sizing: content does this where supported (style.css); the
+        // script is the fallback, so it only runs without it.
+        if (!supportsFieldSizing()) {
+            document.getElementById("message-input").addEventListener("input", function() {
+                this.style.height = "auto";
+                const cap = window.innerWidth > 768 ? Math.max(120, Math.round(window.innerHeight * 0.4)) : 120;
+                this.style.height = Math.min(this.scrollHeight, cap) + "px";
+            });
+        }
 
         // Phone: the full placeholder ("… (Shift+Enter for newline)") wraps to two
         // lines in the narrow composer; the hint is desktop-keyboard advice anyway.

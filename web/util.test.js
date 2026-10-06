@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import {
   didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown,
   expireLabel, timeAgo, u8ToB64, b64ToU8, b64attr, scrollBehavior,
-  composerEnterAction, isCoarsePointer,
+  composerEnterAction, isCoarsePointer, supportsFieldSizing,
 } from './util.js';
 
 describe('composerEnterAction (Enter in the message composer)', () => {
@@ -43,6 +43,23 @@ describe('isCoarsePointer', () => {
   it('is false without matchMedia', () => {
     globalThis.matchMedia = undefined;
     expect(isCoarsePointer()).toBe(false);
+  });
+});
+
+describe('supportsFieldSizing', () => {
+  const orig = globalThis.CSS;
+  afterEach(() => { globalThis.CSS = orig; });
+  it('asks CSS.supports for field-sizing: content', () => {
+    const seen = [];
+    globalThis.CSS = { supports: (p, v) => { seen.push([p, v]); return true; } };
+    expect(supportsFieldSizing()).toBe(true);
+    expect(seen).toEqual([['field-sizing', 'content']]);
+    globalThis.CSS = { supports: () => false };
+    expect(supportsFieldSizing()).toBe(false);
+  });
+  it('is false without CSS.supports, so the JS resize runs', () => {
+    globalThis.CSS = undefined;
+    expect(supportsFieldSizing()).toBe(false);
   });
 });
 

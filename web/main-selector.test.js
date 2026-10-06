@@ -140,6 +140,9 @@ describe('main.js chat conventions wiring', () => {
     expect(src).toMatch(/window\.innerHeight \* 0\.4/);
     expect(src).not.toMatch(/Math\.min\(this\.scrollHeight, 120\)/);
   });
+  it('the JS composer resize is only a fallback for engines without field-sizing', () => {
+    expect(src).toMatch(/if \(!supportsFieldSizing\(\)\) \{\s*document\.getElementById\("message-input"\)\.addEventListener\("input"/);
+  });
   it('ArrowUp on an empty composer edits the last own message (not during IME)', () => {
     expect(src).toMatch(/e\.key === "ArrowUp" && !this\.value[^\n]*\n[^\n]*!e\.isComposing/);
     expect(src).toMatch(/function _editLastOwnMessage\(\)/);

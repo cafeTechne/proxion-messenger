@@ -7,12 +7,15 @@
 // lives in `state` — main.js's Escape-key handler reads edit.state.editingMsgId.
 // Returned functions are destructured into same-named bindings in main.js.
 import { getLocale, t } from './i18n.js';
+import { supportsFieldSizing } from './util.js';
 
 export function createEdit({ getSocket, getActiveView, getClientDid, getMessageMap }) {
     const state = { editingMsgId: null };
 
     // Grow the edit box with its content, up to about 40% of the viewport.
+    // Where CSS field-sizing: content is supported, style.css does it.
     function _autoGrow(ta) {
+        if (supportsFieldSizing()) return;
         ta.style.height = "auto";
         const cap = typeof window !== "undefined" && window.innerHeight ? Math.round(window.innerHeight * 0.4) : 320;
         ta.style.height = Math.min(ta.scrollHeight || 0, cap) + "px";

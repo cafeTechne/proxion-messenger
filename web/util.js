@@ -44,6 +44,15 @@ export function isCoarsePointer() {
     } catch { return false; }
 }
 
+// True when CSS can size a textarea to its content (field-sizing: content),
+// so the scrollHeight resize fallbacks can stand down.
+export function supportsFieldSizing() {
+    try {
+        return typeof CSS !== 'undefined' && typeof CSS.supports === 'function'
+            && CSS.supports('field-sizing', 'content');
+    } catch { return false; }
+}
+
 // What Enter does in the message composer: 'send', 'newline' (let the
 // textarea break the line) or 'none' (not ours to handle). Desktop: Enter
 // sends, Shift+Enter breaks the line. Touch: Enter breaks the line and the

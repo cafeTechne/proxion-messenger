@@ -2027,6 +2027,18 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             color: var(--text-primary); font: inherit; line-height: 1.4;
             overflow-y: auto;
         }
+        /* The composer and the inline editor grow with their text natively.
+           main.js and edit.js keep their scrollHeight resize only for engines
+           without field-sizing. Same caps as the script: about 40% of the
+           viewport on desktop, 120px for the composer on phones. The placeholder
+           counts as content, so min-inline-size: 0 keeps a long one from
+           widening the composer row. */
+        @supports (field-sizing: content) {
+            #message-input, .edit-input { field-sizing: content; min-inline-size: 0; }
+            #message-input { max-block-size: max(120px, 40dvh); }
+            .edit-input { max-block-size: 40dvh; }
+            @media (max-width: 768px) { #message-input { max-block-size: 120px; } }
+        }
         
         /* Autolinked URLs in message text (renderMarkdown) */
         .msg-text a { color: var(--accent-text); text-decoration: underline; overflow-wrap: anywhere; }
