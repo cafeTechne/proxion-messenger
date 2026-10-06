@@ -89,6 +89,9 @@
     --tint-active: color-mix(in srgb, var(--tint-base) 10%, transparent);
     --tint-strong: color-mix(in srgb, var(--tint-base) 18%, transparent);
     --scrim: rgba(0, 0, 0, 0.6);
+    --media-control-bg: rgba(0, 0, 0, 0.6);
+    --media-control-bg-hover: rgba(0, 0, 0, 0.8);
+    --media-control-fg: #ffffff;
     /* Edge shadow on scrollable strips, and the wash behind code in banners. */
     --edge-shade: rgba(0, 0, 0, 0.45);
     --code-wash: rgba(0, 0, 0, 0.3);
@@ -231,6 +234,9 @@
     --role-mod: #0e7490;
     --tint-base: #0f172a;
     --scrim: rgba(15, 23, 42, 0.45);
+    --media-control-bg: rgba(0, 0, 0, 0.6);
+    --media-control-bg-hover: rgba(0, 0, 0, 0.8);
+    --media-control-fg: #ffffff;
     --edge-shade: rgba(15, 23, 42, 0.18);
     --code-wash: rgba(15, 23, 42, 0.08);
     --webid-l: 30%;
@@ -289,6 +295,9 @@
         --role-mod: #0e7490;
         --tint-base: #0f172a;
         --scrim: rgba(15, 23, 42, 0.45);
+        --media-control-bg: rgba(0, 0, 0, 0.6);
+        --media-control-bg-hover: rgba(0, 0, 0, 0.8);
+        --media-control-fg: #ffffff;
         --edge-shade: rgba(15, 23, 42, 0.18);
         --code-wash: rgba(15, 23, 42, 0.08);
         --webid-l: 30%;
@@ -1404,6 +1413,44 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
     object-fit: cover;
 }
 .msg-image-preview:hover { opacity: 0.9; }
+/* The preview is a real button (opens the lightbox); strip the button chrome
+   so only the image shows, and put the focus ring around the image. */
+.msg-image-btn {
+    display: block; max-width: 100%; padding: 0; border: 0; border-radius: 6px;
+    background: none; color: inherit; font: inherit; cursor: pointer;
+}
+.msg-image-btn:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset); }
+/* Attachments that carry their natural size (mediaSizeAttrs in rendering.js)
+   get their final box before they decode: the fit a loaded image gets under
+   the max-width/max-height caps, expressed as a width plus an aspect-ratio.
+   No percentage in the width: the attachment box shrink-wraps its content,
+   and a percentage there would size the image to nothing until it loads
+   (max-width still caps it to the column). Messages without a size keep
+   the old load-then-grow behaviour. */
+.msg-image-preview[width][height] {
+    width: min(var(--media-w) * 1px, 320px, 240px * var(--media-w) / var(--media-h));
+    height: auto;
+    aspect-ratio: var(--media-w) / var(--media-h);
+}
+.msg-video-preview[width][height] {
+    width: min(var(--media-w) * 1px, 420px, 320px * var(--media-w) / var(--media-h));
+    aspect-ratio: var(--media-w) / var(--media-h);
+}
+/* Animated GIF/WebP: a play/pause button over the corner (gifmotion.js).
+   A paused image stays hidden until its still frame is drawn, so reduced
+   motion never sees the first loop. */
+.gif-wrap { position: relative; display: block; width: fit-content; max-width: 100%; }
+.gif-wrap[data-gif="paused"] img:not([data-anim-src]) { visibility: hidden; }
+.gif-toggle {
+    position: absolute; inset-block-end: var(--space-1); inset-inline-start: var(--space-1);
+    min-width: 28px; min-height: 28px; padding: 0; line-height: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: none; border-radius: var(--radius-pill); cursor: pointer;
+    background: var(--media-control-bg); color: var(--media-control-fg);
+}
+.gif-toggle:hover { background: var(--media-control-bg-hover); }
+.gif-toggle:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset); }
+.gif-toggle svg { width: 14px; height: 14px; }
 /* R59A: inline media players — same footprint discipline as image previews */
 .msg-video-preview {
     display: block; max-width: min(420px, 100%); max-height: 320px;
@@ -1954,6 +2001,16 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             margin: 0 0 var(--space-2); font-size: var(--text-xs); color: var(--text-secondary);
             text-transform: uppercase; letter-spacing: 0.05em; font-weight: var(--weight-semibold);
         }
+        .gif-tray-motion {
+            display: inline-flex; align-items: center; gap: var(--space-1);
+            margin: 0 0 var(--space-2); padding: var(--space-1) var(--space-2);
+            border: 1px solid var(--slate-700); border-radius: 4px; background: none;
+            color: var(--text-secondary); font-size: var(--text-xs); cursor: pointer;
+        }
+        .gif-tray-motion:hover, .gif-tray-motion:focus-visible { color: var(--text-primary); border-color: var(--accent); }
+        .gif-tray-motion svg { width: 14px; height: 14px; }
+        .gif-tray-motion[hidden] { display: none; }
+        #gif-tray-grid[data-gif="paused"] .gif-send img:not([data-anim-src]) { visibility: hidden; }
         .gif-tray-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: var(--space-2); }
         .gif-tray-empty { margin: var(--space-1) 0; font-size: var(--text-md); color: var(--text-secondary); grid-column: 1 / -1; }
         .gif-cell { position: relative; }
@@ -2111,6 +2168,17 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             display: flex; align-items: center; gap: var(--space-3);
             text-align: center; margin: var(--space-3) 0 var(--space-2); padding-inline: var(--space-4);
             color: var(--text-secondary); font-size: var(--text-xs); user-select: none;
+        }
+        /* The current day stays pinned at the top of the feed while its
+           messages scroll under it; the next day's divider slides over it.
+           Opaque feed background so text never shows through, and z-index 1
+           keeps it under every menu, picker and toast. Sticky offsets count
+           from the feed's content box, so a negative top cancels the feed's
+           top padding and the label sits flush with the scrollport edge. */
+        #message-feed > .date-divider {
+            position: sticky; top: calc(-1 * var(--space-4)); z-index: 1;
+            background: var(--surface-0);
+            padding-block: var(--space-1);
         }
         .date-divider::before, .date-divider::after {
             content: ''; flex: 1; height: 1px; background: var(--slate-700);

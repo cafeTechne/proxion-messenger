@@ -78,7 +78,9 @@ import { chatRootUrl } from './longchat.js';
 import { createPairing } from './pairing.js';
 import { createRecovery } from './recovery.js';
 import { createGifTray, saveFavorite, pushAllGifsToPod } from './gifs.js';
-import { needsDownscale, downscaleImage } from './media-resize.js';
+import { needsDownscale, downscaleImage, measureMedia } from './media-resize.js';
+import { attachGifMotion } from './gifmotion.js';
+import { createDropZone } from './dropzone.js';
 import { createEmoji } from './emoji.js';
 import { createSaved, syncSavedFromPod, pushAllSavedToPod } from './saved.js';
 import { createBlocks } from './blocks.js';
@@ -243,7 +245,7 @@ import { initThemePicker } from './theme.js';
         const CMD_ALLOWED_KEYS = {
             connect_css:      new Set(["cmd","css_url","email","password"]),
             create_webhook:   new Set(["cmd","thread_id","direction","url","bot_name"]),
-            send_file:        new Set(["cmd","cert_id","room_id","filename","mime_type","data_b64","spoiler"]),
+            send_file:        new Set(["cmd","cert_id","room_id","filename","mime_type","data_b64","spoiler","width","height"]),
             schedule_message: new Set(["cmd","thread_id","content","send_at"]),
             file_offer:       new Set(["cmd","to_webid","file_id","filename","mime_type","size_bytes","total_chunks"]),
             file_accept:      new Set(["cmd","to_webid","file_id"]),
@@ -4174,6 +4176,8 @@ import { initThemePicker } from './theme.js';
                 });
                 return;
             }
+            // Natural size travels with the file so receivers reserve the box.
+            const dims = await measureMedia(file);
             const reader = new FileReader();
             reader.onload = () => {
                 const base64 = reader.result.split(',')[1];
@@ -4183,6 +4187,7 @@ import { initThemePicker } from './theme.js';
                     mime_type: file.type || "application/octet-stream",
                     data_b64: base64,
                 };
+                if (dims) { payload.width = dims.width; payload.height = dims.height; }
                 if (opts.spoiler === true) payload.spoiler = true;   // R60C
                 if (activeView.type === "dm" || activeView.type === "local_dm") payload.cert_id = activeView.id;
                 else payload.room_id = activeView.id;
@@ -4203,12 +4208,14 @@ import { initThemePicker } from './theme.js';
         // R60C: one confirm for every attachment entry point (picker, paste,
         // drop) with a mark-as-spoiler option for images. Resolves
         // {ok, spoiler} — spoiler row only shows for image files.
-        function confirmAttachment(file) {
+        function confirmAttachment(file, batch = null) {
             return new Promise((resolve) => {
                 const modal = document.getElementById('file-confirm-modal');
                 if (!modal) { resolve({ ok: true, spoiler: false }); return; }
-                document.getElementById('file-confirm-msg').textContent =
-                    t('file.confirmSend', { filename: file.name || 'file' });
+                // Several dropped files are confirmed one at a time ("2 of 3").
+                document.getElementById('file-confirm-msg').textContent = batch && batch.total > 1
+                    ? t('file.confirmSendOf', { filename: file.name || 'file', index: batch.index, total: batch.total })
+                    : t('file.confirmSend', { filename: file.name || 'file' });
                 const row = document.getElementById('file-confirm-spoiler-row');
                 const cb = document.getElementById('file-confirm-spoiler');
                 const isImage = (file.type || '').startsWith('image/');
@@ -4225,8 +4232,8 @@ import { initThemePicker } from './theme.js';
             });
         }
 
-        async function confirmAndSend(file) {
-            const { ok, spoiler } = await confirmAttachment(file);
+        async function confirmAndSend(file, batch = null) {
+            const { ok, spoiler } = await confirmAttachment(file, batch);
             if (ok) await sendAttachmentFile(file, { spoiler });
         }
 
@@ -4265,15 +4272,18 @@ import { initThemePicker } from './theme.js';
             const _dropTargets = ["message-feed", "message-form"].map(id => document.getElementById(id)).filter(Boolean);
             document.addEventListener("dragover", (e) => e.preventDefault());
             document.addEventListener("drop", (e) => e.preventDefault());
-            for (const el of _dropTargets) {
-                el.addEventListener("dragover", () => el.classList.add("drop-active"));
-                el.addEventListener("dragleave", () => el.classList.remove("drop-active"));
-                el.addEventListener("drop", (e) => {
-                    el.classList.remove("drop-active");
-                    const file = e.dataTransfer?.files?.[0];
-                    if (file) confirmAndSend(file);   // R60C: shared confirm
-                });
-            }
+            // Every dropped file goes through the shared confirm (R60C), one
+            // after another, so size limits and the spoiler option still apply.
+            const _sendDropped = async (files) => {
+                for (let i = 0; i < files.length; i++) {
+                    await confirmAndSend(files[i], { index: i + 1, total: files.length });
+                }
+            };
+            const _zones = _dropTargets.map(el => createDropZone(el, { onFiles: _sendDropped }));
+            // Esc mid-drag or a drop outside the targets: clear any highlight.
+            const _resetZones = () => _zones.forEach(z => z.reset());
+            document.addEventListener("dragend", _resetZones);
+            document.addEventListener("drop", _resetZones);
         }
 
         // --------------- System messages ---------------
@@ -5568,6 +5578,8 @@ import { initThemePicker } from './theme.js';
                 sp.classList.add('revealed');
                 sp.removeAttribute('role');
                 sp.removeAttribute('tabindex');
+                // The image button inside joins the tab order once uncovered.
+                sp.querySelector('.msg-image-btn')?.removeAttribute('tabindex');
             };
             document.getElementById('message-feed')?.addEventListener('click', e => {
                 const sp = e.target.closest('.spoiler:not(.revealed), .media-spoiler:not(.revealed)');
@@ -6048,17 +6060,16 @@ import { initThemePicker } from './theme.js';
                 const lbImg = document.getElementById("lightbox-img");
                 if (lb && lbImg) { lbImg.src = img.src; lb.classList.add("visible"); }
             };
+            // The preview is a <button> wrapping the image, so Enter/Space and
+            // clicks all arrive here. A click that just revealed a media spoiler
+            // (defaultPrevented by the reveal handler) does not also open it.
             document.addEventListener("click", (e) => {
-                const img = e.target.closest(".msg-image-preview");
-                if (img) _openLightbox(img);
+                const btn = e.target.closest(".msg-image-btn");
+                const img = btn && btn.querySelector(".msg-image-preview");
+                if (img && !e.defaultPrevented) _openLightbox(img);
             });
-            // The image preview is a role=button/tabindex=0 control; open the lightbox
-            // on Enter/Space so it is operable without a mouse.
-            document.addEventListener("keydown", (e) => {
-                if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
-                const img = e.target.closest && e.target.closest(".msg-image-preview");
-                if (img) { e.preventDefault(); _openLightbox(img); }
-            });
+            // Animated GIFs in the feed: play/pause control, paused under reduced motion.
+            attachGifMotion(document.getElementById("message-feed"));
 
             // R13.11: Edit history popover (click on .edited-badge)
             document.addEventListener("click", (e) => {

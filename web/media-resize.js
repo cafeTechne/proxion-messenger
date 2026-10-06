@@ -62,3 +62,52 @@ export async function downscaleImage(file, {
     }
     throw new Error('downscale_failed');
 }
+
+// Natural pixel size of an attachment, sent alongside it so receivers can
+// reserve the image's box before it decodes (no feed jump when it loads).
+// Both fields are optional on the wire; anything outside 1..MAX_MEDIA_DIM or
+// not an integer is dropped, here and in the gateway.
+export const MAX_MEDIA_DIM = 16384;
+
+export function normalizeMediaDims(width, height) {
+    const ok = (v) => Number.isInteger(v) && v >= 1 && v <= MAX_MEDIA_DIM;
+    return ok(width) && ok(height) ? { width, height } : null;
+}
+
+function _videoDims(file, timeoutMs) {
+    return new Promise((resolve) => {
+        if (typeof URL === 'undefined' || !URL.createObjectURL) { resolve(null); return; }
+        const url = URL.createObjectURL(file);
+        const v = document.createElement('video');
+        let timer = null;
+        const done = (dims) => {
+            clearTimeout(timer);
+            v.removeAttribute('src');
+            URL.revokeObjectURL(url);
+            resolve(dims);
+        };
+        v.preload = 'metadata';
+        v.muted = true;
+        v.onloadedmetadata = () => done(normalizeMediaDims(v.videoWidth, v.videoHeight));
+        v.onerror = () => done(null);
+        timer = setTimeout(() => done(null), timeoutMs);
+        v.src = url;
+    });
+}
+
+// Resolves {width, height} for an image or video file, or null when the type
+// is not media, the browser cannot decode it, or it takes too long. Never
+// throws: a missing size only means the old load-then-grow behaviour.
+export async function measureMedia(file, { timeoutMs = 2000 } = {}) {
+    const type = (file && file.type || '').toLowerCase();
+    try {
+        if (type.startsWith('image/') && type !== 'image/svg+xml' && typeof createImageBitmap === 'function') {
+            const bmp = await createImageBitmap(file);
+            const dims = normalizeMediaDims(bmp.width, bmp.height);
+            bmp.close?.();
+            return dims;
+        }
+        if (type.startsWith('video/')) return await _videoDims(file, timeoutMs);
+    } catch (_) { /* undecodable: send without a size */ }
+    return null;
+}

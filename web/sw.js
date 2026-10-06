@@ -63,6 +63,8 @@ const SHELL = [
   "recovery.js",
   "gifs.js",
   "media-resize.js",
+  "gifmotion.js",
+  "dropzone.js",
   "emoji.js",
   "saved.js",
   "blocks.js",

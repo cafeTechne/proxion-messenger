@@ -10,6 +10,7 @@
 
 import { t } from './i18n.js';
 import { icon } from './icons.js';
+import { initialGifState, freezeImage, playImage } from './gifmotion.js';
 import { podSyncGifFavorite, podSyncRemoveGifFavorite, podReadGifFavorites } from './pod.js';
 import { accountDbName } from './auth.js';
 
@@ -184,8 +185,44 @@ export async function touchFavorite(id) {
 
 export function createGifTray({ showToast, sendAttachmentFile }) {
     let _open_ = false;
+    // One play/pause control for the whole tray (WCAG 2.2.2); starts paused
+    // under prefers-reduced-motion. Paused previews show a still frame.
+    let _gifState = initialGifState();
 
     function _panel() { return document.getElementById('gif-tray'); }
+
+    function _applyGifState(panel) {
+        const paused = _gifState === 'paused';
+        const btn = panel.querySelector('.gif-tray-motion');
+        if (btn) {
+            const label = t(paused ? 'gif.playAll' : 'gif.pauseAll');
+            btn.innerHTML = `${icon(paused ? 'play' : 'pause', { size: 14 })}<span>${label}</span>`;
+        }
+        const grid = panel.querySelector('#gif-tray-grid');
+        if (grid) grid.dataset.gif = _gifState;
+        for (const img of panel.querySelectorAll('.gif-send img')) {
+            if (paused) freezeImage(img); else playImage(img);
+        }
+    }
+
+    function _ensureMotionButton(panel) {
+        if (panel.querySelector('.gif-tray-motion')) return;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'gif-tray-motion';
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            _gifState = _gifState === 'paused' ? 'playing' : 'paused';
+            _applyGifState(panel);
+        });
+        const grid = panel.querySelector('#gif-tray-grid');
+        panel.insertBefore(btn, grid || null);
+        // Previews that finish loading while paused are frozen as they arrive.
+        panel.addEventListener('load', (e) => {
+            const img = e.target;
+            if (img && img.tagName === 'IMG' && _gifState === 'paused' && !img.dataset.animSrc) freezeImage(img);
+        }, true);
+    }
 
     async function _render() {
         const panel = _panel();
@@ -193,8 +230,12 @@ export function createGifTray({ showToast, sendAttachmentFile }) {
         const grid = panel.querySelector('#gif-tray-grid');
         if (!grid) return;
         grid.innerHTML = '';
+        _ensureMotionButton(panel);
+        _applyGifState(panel);
         let rows = [];
         try { rows = await listFavorites(); } catch (_) { /* no IDB — empty tray */ }
+        const motionBtn = panel.querySelector('.gif-tray-motion');
+        if (motionBtn) motionBtn.hidden = !rows.length;
         if (!rows.length) {
             const p = document.createElement('p');
             p.className = 'gif-tray-empty';

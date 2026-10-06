@@ -3,6 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     needsDownscale, downscalePlan, DOWNSCALE_TARGET_BYTES, DOWNSCALE_MAX_DIM,
+    normalizeMediaDims, measureMedia, MAX_MEDIA_DIM,
 } from './media-resize.js';
 
 const mk = (size, type) => ({ size, type, name: 'x' });
@@ -40,5 +41,33 @@ describe('downscalePlan', () => {
     it('sane exported constants', () => {
         expect(DOWNSCALE_TARGET_BYTES).toBeLessThan(524288);
         expect(DOWNSCALE_MAX_DIM).toBeGreaterThanOrEqual(1024);
+    });
+});
+
+describe('normalizeMediaDims / measureMedia', () => {
+    it('keeps integer pairs in range and drops everything else', () => {
+        expect(normalizeMediaDims(640, 480)).toEqual({ width: 640, height: 480 });
+        expect(normalizeMediaDims(1, MAX_MEDIA_DIM)).toEqual({ width: 1, height: MAX_MEDIA_DIM });
+        for (const [w, h] of [[0, 1], [1, 0], [-1, 5], [MAX_MEDIA_DIM + 1, 5], [1.5, 2], ['640', 480], [null, 4], [4, undefined], [NaN, 3]]) {
+            expect(normalizeMediaDims(w, h)).toBeNull();
+        }
+    });
+
+    it('measures an image through createImageBitmap and closes the bitmap', async () => {
+        let closed = false;
+        globalThis.createImageBitmap = async () => ({ width: 800, height: 600, close() { closed = true; } });
+        try {
+            expect(await measureMedia({ type: 'image/png' })).toEqual({ width: 800, height: 600 });
+            expect(closed).toBe(true);
+        } finally { delete globalThis.createImageBitmap; }
+    });
+
+    it('returns null for non-media files and undecodable images, never throws', async () => {
+        expect(await measureMedia({ type: 'application/pdf' })).toBeNull();
+        expect(await measureMedia(null)).toBeNull();
+        globalThis.createImageBitmap = async () => { throw new Error('bad'); };
+        try {
+            expect(await measureMedia({ type: 'image/jpeg' })).toBeNull();
+        } finally { delete globalThis.createImageBitmap; }
     });
 });

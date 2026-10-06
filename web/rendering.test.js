@@ -354,6 +354,47 @@ describe('hover action bar', () => {
       global.document.createElement = orig;
     }
   }
+  describe('image attachments', () => {
+    const img = (extra = {}) => renderHtml({ message_id: 'mi' + Math.random(), from_webid: 'did:key:zOther',
+      file: { data_b64: 'AAAA', mime_type: 'image/png', filename: 'a.png', size: 3, ...extra } });
+
+    it('wrap the preview in a real button instead of img role=button', () => {
+      const html = img();
+      expect(html).toContain('<button type="button" class="msg-image-btn"><img class="msg-image-preview"');
+      expect(html).not.toMatch(/<img[^>]*role="button"/);
+      expect(html).toContain('alt="a.png"');
+    });
+
+    it('reserve the box from wire dimensions', () => {
+      const html = img({ width: 800, height: 600 });
+      expect(html).toContain('width="800" height="600" style="--media-w: 800; --media-h: 600"');
+    });
+
+    it('ignore missing or hostile dimensions', () => {
+      expect(img()).not.toContain('--media-w');
+      expect(img({ width: '1" onerror="x', height: 5 })).not.toContain('onerror');
+      expect(img({ width: 0, height: 5 })).not.toContain('--media-w');
+    });
+
+    it('keep the spoiler image button out of the tab order until revealed', () => {
+      expect(img({ spoiler: true })).toContain('<button type="button" class="msg-image-btn" tabindex="-1">');
+    });
+
+    it('give animated GIFs a play/pause control', () => {
+      const html = renderHtml({ message_id: 'mg', from_webid: 'did:key:zOther',
+        file: { data_b64: 'AAAA', mime_type: 'image/gif', filename: 'a.gif', size: 3 } });
+      expect(html).toMatch(/<span class="gif-wrap" data-gif="playing"><button type="button" class="msg-image-btn">/);
+      expect(html).toContain('class="gif-toggle" aria-label="gif.pause"');
+      expect(img()).not.toContain('gif-wrap');
+    });
+  });
+
+  it('sizes video attachments from wire dimensions too', () => {
+    const html = renderHtml({ message_id: 'mv', from_webid: 'did:key:zOther',
+      file: { data_b64: 'AAAA', mime_type: 'video/mp4', filename: 'v.mp4', size: 3, width: 1280, height: 720 } });
+    expect(html).toContain('class="msg-video-preview" aria-label="v.mp4" width="1280" height="720"');
+  });
+
   const barOf = (html) => html.slice(html.indexOf('<div class="msg-actions">'));
   const actions = (html) => [...barOf(html).matchAll(/data-msg-action="([\w-]+)"/g)].map(m => m[1]);
 

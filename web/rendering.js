@@ -25,6 +25,8 @@ import { parsePoll } from './polls.js';
 import { applyRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { t, tn, getLocale } from './i18n.js';
 import { icon } from './icons.js';
+import { normalizeMediaDims } from './media-resize.js';
+import { isAnimatedImage, initialGifState, gifToggleHtml } from './gifmotion.js';
 
 // R59A: attachment kind by mime — pure, exported for tests. Video/audio get
 // inline players (CSP already allows media-src data:), everything else falls
@@ -121,6 +123,15 @@ export function highlightMentions(html, names = [], selfName = "") {
     const self = escHtml(String(selfName || "")).toLowerCase();
     return html.replace(re, (m, uname) =>
         `<span class="${self && uname.toLowerCase() === self ? "mention mention-self" : "mention"}">@${uname}</span>`);
+}
+
+// width/height attributes from an attachment's optional wire dimensions, plus
+// the same numbers as custom properties that style.css turns into a fitted
+// width and aspect-ratio, so the feed reserves the media box before it
+// decodes. Untrusted input: only integers in range get through, as numbers.
+export function mediaSizeAttrs(file) {
+    const d = normalizeMediaDims(file && file.width, file && file.height);
+    return d ? ` width="${d.width}" height="${d.height}" style="--media-w: ${d.width}; --media-h: ${d.height}"` : '';
 }
 
 // Scroll anchoring (pure, exported for tests). "At bottom" uses the same 60px
@@ -492,8 +503,17 @@ export function createRendering({
                 // renders blurred under a reveal cover — one-way, like text
                 // spoilers; the reveal handler lives in the feed delegation)
                 const _imgSrc = `data:${_mime};base64,${_b64}`;
-                const _img = `<img class="msg-image-preview" src="${_imgSrc}" alt="${safeFilename}" loading="lazy" tabindex="0" role="button">`;
-                fileHtml = msg.file.spoiler === true
+                // A real button wraps the preview (it opens the lightbox). Under a
+                // spoiler cover it stays out of the tab order until revealed.
+                const _spoiler = msg.file.spoiler === true;
+                let _img = `<button type="button" class="msg-image-btn"${_spoiler ? ' tabindex="-1"' : ''}><img class="msg-image-preview" src="${_imgSrc}" alt="${safeFilename}" loading="lazy"${mediaSizeAttrs(msg.file)}></button>`;
+                // Animated GIF/WebP: a play/pause control (WCAG 2.2.2), paused
+                // from the start under prefers-reduced-motion.
+                if (isAnimatedImage(_mime, msg.file.data_b64)) {
+                    const _gifState = initialGifState();
+                    _img = `<span class="gif-wrap" data-gif="${_gifState}">${_img}${gifToggleHtml(_gifState)}</span>`;
+                }
+                fileHtml = _spoiler
                     ? `<div class="attachment">
                         <div class="media-spoiler" role="button" tabindex="0" aria-label="${t('spoiler.reveal')}">
                           ${_img}<span class="media-spoiler-label">${t('spoiler.mediaLabel')}</span>
@@ -502,7 +522,7 @@ export function createRendering({
             } else if (_kind === 'video' && msg.file.data_b64) {
                 // R59A: inline video player (short clips are the modern GIF)
                 fileHtml = `<div class="attachment">
-                    <video controls preload="metadata" class="msg-video-preview" aria-label="${safeFilename}"
+                    <video controls preload="metadata" class="msg-video-preview" aria-label="${safeFilename}"${mediaSizeAttrs(msg.file)}
                            src="data:${_mime};base64,${_b64}"></video>
                     ${_dlLink}</div>`;
             } else if (_kind === 'audio' && msg.file.data_b64) {
