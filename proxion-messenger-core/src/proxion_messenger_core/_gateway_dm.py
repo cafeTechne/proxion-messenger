@@ -60,7 +60,18 @@ class DmHandlerMixin:
                         "detail": "This contact has been revoked. You can no longer send messages.",
                     }))
                     return
-        if cert_id in self.dm_clients:
+        # A ratchet-encrypted DM must keep its header (e2e, nonce, msg_num, pn,
+        # ratchet_pub, x25519_pub) and its ciphertext as the browser sent them.
+        # messaging.compose keeps only content/reply_to_id, so E2E sends never take
+        # the pod compose path; they go through the local_dm/relay path below.
+        _is_e2e = bool(data.get("e2e")) or "ratchet_pub" in data
+        if _is_e2e and cert_id in self.dm_clients:
+            _cert = self.dm_clients[cert_id][0]
+            if self._is_blocked_for(self._client_webids.get(websocket, ""),
+                                    getattr(_cert, "subject", "")):
+                await websocket.send(json.dumps({"type": "error", "message": "Recipient is blocked"}))
+                return
+        if cert_id in self.dm_clients and not _is_e2e:
             cert, client = self.dm_clients[cert_id]
 
             # Safety Catch: Blocked Recipients. Per-owner (this sender's own
@@ -84,7 +95,7 @@ class DmHandlerMixin:
                 self.outbox.enqueue(msg, target_cert_id=cert_id)
                 await websocket.send(json.dumps({"type": "info", "message": "Message queued (offline)"}))
         elif self._store:
-            # No pod client — fall back to relay delivery if we know the peer's gateway
+            # No pod client (or an E2E payload): relay delivery via the peer's gateway
             cert_dict = self._store.get_relationship_by_cert_id(cert_id)
             if cert_dict:
                 peer_did = cert_dict.get("peer_did")
@@ -616,7 +627,11 @@ class DmHandlerMixin:
         # Write-through to pod if a relationship cert exists for this peer. The outbound
         # target -> relationship -> pod client reduction (and the dm_clients cert_id/webid
         # key asymmetry) lives in _dm_client_for_target.
-        _resolved = self._dm_client_for_target(target_webid)
+        # Skipped for a ratchet-encrypted DM: that write re-composes the body
+        # without the ratchet header, so the copy could never be decrypted and a
+        # pod restore would import it as a duplicate. The full event (header
+        # included) is already written by _sync_local_dm_to_pod above.
+        _resolved = None if event.get("e2e") else self._dm_client_for_target(target_webid)
         if _resolved:
             cert_dict, _cert_id, client_entry = _resolved
             _, pod_client = client_entry
