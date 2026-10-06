@@ -208,4 +208,32 @@ describe('requestNotifPermission', () => {
     requestNotifPermission();
     expect(requestPermission).toHaveBeenCalled();
   });
+  it('resolves to the outcome of the prompt', async () => {
+    const requestPermission = vi.fn(async () => 'granted');
+    global.window = {};
+    global.Notification = { permission: 'default', requestPermission };
+    global.window.Notification = global.Notification;
+    const { requestNotifPermission } = make();
+    await expect(requestNotifPermission()).resolves.toBe('granted');
+  });
+  it('does not prompt again once the user has decided', async () => {
+    const requestPermission = vi.fn();
+    global.window = {};
+    global.Notification = { permission: 'denied', requestPermission };
+    global.window.Notification = global.Notification;
+    const { requestNotifPermission } = make();
+    await expect(requestNotifPermission()).resolves.toBe('denied');
+    expect(requestPermission).not.toHaveBeenCalled();
+  });
+});
+
+describe('notification permission is asked in context', () => {
+  it('main.js never prompts on connect, only from the composer and the settings toggle', async () => {
+    const { readFileSync } = await import('fs');
+    const src = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+    const calls = src.split('\n').filter((l) => /requestNotifPermission\(\)/.test(l));
+    // The settings toggle and _askNotifInContext.
+    expect(calls).toHaveLength(2);
+    expect(src).toMatch(/_sendInFlight = true;[\s\S]{0,200}_askNotifInContext\(\);/);
+  });
 });

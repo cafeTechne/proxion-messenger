@@ -56,16 +56,17 @@ export function createPush({ getSocket }) {
     }
 
     // Idempotently ensure a push subscription exists and is registered with the
-    // gateway. Requests notification permission if still undecided. Returns true
-    // if a subscription was registered this call. Safe to call on every connect.
+    // gateway. Never prompts: notification permission is asked for in context
+    // (notifications.js requestNotifPermission), so while it is still undecided
+    // this is a no-op. Returns true if a subscription was registered this call.
+    // Safe to call on every connect.
     async function enablePush() {
         try {
             if (!("serviceWorker" in navigator) || !("PushManager" in window) ||
                 typeof Notification === "undefined") {
                 return false;
             }
-            let perm = Notification.permission;
-            if (perm === "default") perm = await Notification.requestPermission();
+            const perm = Notification.permission;
             if (perm !== "granted") return false;
 
             const reg = await navigator.serviceWorker.ready;

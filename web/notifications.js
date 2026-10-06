@@ -141,9 +141,16 @@ export function createNotifications({ getSoundEnabled, getDesktopNotifEnabled, n
     }
 
     // ── Push notifications ──
-    function requestNotifPermission() {
-        if ("Notification" in window && Notification.permission === "default") {
-            Notification.requestPermission();
+    // Call only in context (a user gesture that shows why notifications help),
+    // never on load: browsers quiet or auto-block prompts nobody asked for.
+    // Resolves to the permission state ("unsupported" without the API).
+    async function requestNotifPermission() {
+        if (!("Notification" in window)) return "unsupported";
+        if (Notification.permission !== "default") return Notification.permission;
+        try {
+            return (await Notification.requestPermission()) || Notification.permission;
+        } catch {
+            return Notification.permission;
         }
     }
 
