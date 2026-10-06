@@ -2330,7 +2330,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
 
         /* Round 70: Bot/Webhook */
         .bot-badge { font-size: var(--text-2xs); font-weight: var(--weight-bold); background: var(--accent); color: var(--color-on-accent); border-radius: 3px; padding: 1px var(--space-2); margin-left: var(--space-2); vertical-align: middle; letter-spacing: 0.05em; }
-        .copyable-code { display: block; background: var(--slate-900); padding: var(--space-3); border-radius: 6px; font-size: var(--text-md); word-break: break-all; margin: var(--space-2) 0; user-select: all; font-family: var(--font-mono); border: 1px solid var(--slate-700); }
+        .copyable-code { display: block; background: var(--slate-900); padding: var(--space-3); border-radius: 6px; font-size: var(--text-md); word-break: break-all; margin: var(--space-2) 0; -webkit-user-select: all; user-select: all; font-family: var(--font-mono); border: 1px solid var(--slate-700); }
         .room-integrations-btn { background: transparent; border: none; color: var(--text-secondary); font-size: 1em; cursor: pointer; padding: 0 var(--space-1); }
         .room-integrations-btn:hover, .room-integrations-btn:focus-visible { background: var(--surface-2); }
 
@@ -2430,7 +2430,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .settings-readout {
     margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-2); min-height: 1.5em;
     font-size: var(--text-xs); color: var(--text-secondary); word-break: break-all;
-    background: var(--slate-900); border-radius: var(--radius-sm); cursor: text; user-select: all;
+    background: var(--slate-900); border-radius: var(--radius-sm); cursor: text; -webkit-user-select: all; user-select: all;
 }
 .settings-readout--small { font-size: var(--text-2xs); }
 .settings-readout--copy { cursor: pointer; margin-bottom: var(--space-1); }
