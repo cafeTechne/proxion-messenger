@@ -343,17 +343,12 @@ body {
 
 /* ── Desktop chrome polish ──
    Windows' default wide light scrollbars are the loudest "unstyled app" tell in
-   a dark theme; use thin dark ones everywhere. */
+   a dark theme; use thin dark ones everywhere. The standard properties are
+   the whole story: Chromium ignores ::-webkit-scrollbar on any element that
+   sets scrollbar-width or scrollbar-color, and this rule covers every element.
+   Engines without scrollbar-color draw their default bar, which follows the
+   page's color-scheme. */
 * { scrollbar-width: thin; scrollbar-color: var(--slate-700) transparent; }
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
-::-webkit-scrollbar-thumb {
-    background: var(--slate-700);
-    border-radius: 5px;
-    border: 2px solid transparent;
-    background-clip: padding-box;
-}
-::-webkit-scrollbar-thumb:hover { background: var(--slate-600); background-clip: padding-box; }
 
 /* Keyboard-visible focus: one consistent accent ring app-wide (mouse clicks
    don't trigger :focus-visible, so pointer UX is unchanged). */
