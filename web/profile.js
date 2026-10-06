@@ -80,6 +80,7 @@ export function createProfile({ getSocket, showToast, getUserPresence, getMessag
 
         const avatarEl = document.getElementById("profile-avatar-el");
         avatarEl.style.background = avatarColor;
+        avatarEl.style.color = "var(--avatar-initial)";
         avatarEl.textContent = shortName;
 
         // R65: reflect block state on the block/unblock button

@@ -237,6 +237,21 @@ function main() {
     const webidOk = worst.r >= 4.5;
     if (!webidOk) fails++;
     console.log(`  ${webidOk ? '✓' : '✗'} ${worst.r.toFixed(2)} (need 4.5)  webidColor hsl(*, ${WEBID_SAT}%, ${light}%) worst hue ${worst.hue} on ${feed}`);
+
+    // Letter avatars use the same hsl() as their fill and draw the initial in
+    // --avatar-initial. Every hue must still give 4.5:1 for the letter.
+    let ink;
+    try { ink = resolve(tokens, '--avatar-initial'); } catch (e) {
+      fails++; console.log(`  ✗ avatar initials: ${e.message}`); continue;
+    }
+    let worstInk = { r: Infinity, hue: 0 };
+    for (let hue = 0; hue < 360; hue++) {
+      const r = ratio(ink, hslToHex(hue, WEBID_SAT, light));
+      if (r < worstInk.r) worstInk = { r, hue };
+    }
+    const inkOk = worstInk.r >= 4.5;
+    if (!inkOk) fails++;
+    console.log(`  ${inkOk ? '✓' : '✗'} ${worstInk.r.toFixed(2)} (need 4.5)  avatar initial ${ink} on hsl(*, ${WEBID_SAT}%, ${light}%) worst hue ${worstInk.hue}`);
   }
 
   if (fails === 0) console.log('\n✓ contrast: all pairs pass in every theme.');

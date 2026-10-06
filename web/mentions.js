@@ -31,6 +31,7 @@ export function createMentions({ getCurrentRoomMembers }) {
             const avatar = document.createElement("div");
             avatar.className = "mo-avatar";
             avatar.style.background = color;
+            avatar.style.color = "var(--avatar-initial)";
             avatar.textContent = initial;
             row.appendChild(avatar);
 

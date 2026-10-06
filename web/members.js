@@ -40,7 +40,7 @@ export function createMembers({ getActiveView, requestRoomMembers }) {
             : "";
         return `<div class="member-item" role="button" tabindex="-1" data-msg-action="profile" data-webid="${escHtml(m.webid)}" data-name="${escHtml(displayName)}">
                 <div style="position:relative;display:inline-block;margin-inline-end:8px;">
-                    <div class="avatar placeholder" style="background:${color};width:28px;height:28px;line-height:28px;font-size:12px;font-weight:bold;text-align:center;">${initial}</div>
+                    <div class="avatar placeholder" style="background:${color};color:var(--avatar-initial);width:28px;height:28px;line-height:28px;font-size:12px;font-weight:bold;text-align:center;">${initial}</div>
                     <div class="avatar-presence ${presenceClass}" title="${escHtml(m.status || '')}"></div>
                 </div>
                 <span class="member-label" dir="auto"><span class="member-name">${escHtml(m.display_name || m.webid.slice(0, 12))}</span>${idTag}${fedBadge}</span>

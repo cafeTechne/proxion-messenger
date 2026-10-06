@@ -95,6 +95,10 @@
     /* Lightness of the per-user sender colors (util.js webidColor builds
        hsl(hue, 55%, var(--webid-l))). Tuned per theme for 4.5:1 text. */
     --webid-l: 68%;
+    /* Letter avatars fill with that same hsl(); their initial uses this ink.
+       Dark ink on the dark theme's pastel fills, white on the light theme's
+       deep fills; the worst hue is checked by scripts/contrast_audit.mjs. */
+    --avatar-initial: #0f172a;
 
     /* Motion. Three durations: --dur-1 for hover and press feedback, --dur-2
        for small popups (menus, toasts), --dur-3 for dialogs and settling
@@ -228,6 +232,7 @@
     --edge-shade: rgba(15, 23, 42, 0.18);
     --code-wash: rgba(15, 23, 42, 0.08);
     --webid-l: 30%;
+    --avatar-initial: #ffffff;
     --surface-0: #ffffff;
     --surface-1: #f1f4f9;
     --surface-2: #ffffff;
@@ -284,6 +289,7 @@
         --edge-shade: rgba(15, 23, 42, 0.18);
         --code-wash: rgba(15, 23, 42, 0.08);
         --webid-l: 30%;
+        --avatar-initial: #ffffff;
         --surface-0: #ffffff;
         --surface-1: #f1f4f9;
         --surface-2: #ffffff;
