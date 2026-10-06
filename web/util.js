@@ -36,6 +36,28 @@ export function scrollBehavior() {
     return 'smooth';
 }
 
+// True when the primary pointer is a finger (phones, tablets). Hybrid laptops
+// with a touch screen report their trackpad, so they count as desktop.
+export function isCoarsePointer() {
+    try {
+        return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+    } catch { return false; }
+}
+
+// What Enter does in the message composer: 'send', 'newline' (let the
+// textarea break the line) or 'none' (not ours to handle). Desktop: Enter
+// sends, Shift+Enter breaks the line. Touch: Enter breaks the line and the
+// Send button sends, as in most mobile chat apps; Ctrl/Cmd+Enter still sends
+// for a tablet with a keyboard. An Enter that confirms an IME candidate (CJK
+// input) is never a send.
+export function composerEnterAction(e, coarse) {
+    if (!e || e.key !== 'Enter') return 'none';
+    if (e.isComposing || e.keyCode === 229) return 'none';
+    if (e.shiftKey) return 'newline';
+    if (coarse && !e.ctrlKey && !e.metaKey) return 'newline';
+    return 'send';
+}
+
 export function formatTimestamp(ts) {
     if (!ts) return '';
     const d = new Date(typeof ts === 'number' ? ts * 1000 : ts);

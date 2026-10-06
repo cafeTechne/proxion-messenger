@@ -2,7 +2,49 @@ import { describe, it, expect, afterEach } from 'vitest';
 import {
   didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown,
   expireLabel, timeAgo, u8ToB64, b64ToU8, b64attr, scrollBehavior,
+  composerEnterAction, isCoarsePointer,
 } from './util.js';
+
+describe('composerEnterAction (Enter in the message composer)', () => {
+  const key = (o = {}) => ({ key: 'Enter', shiftKey: false, ctrlKey: false, metaKey: false,
+    isComposing: false, keyCode: 13, ...o });
+  it('desktop: Enter sends, Shift+Enter is a newline', () => {
+    expect(composerEnterAction(key(), false)).toBe('send');
+    expect(composerEnterAction(key({ shiftKey: true }), false)).toBe('newline');
+    expect(composerEnterAction(key({ ctrlKey: true }), false)).toBe('send');
+  });
+  it('touch: Enter is a newline, the Send button sends', () => {
+    expect(composerEnterAction(key(), true)).toBe('newline');
+    expect(composerEnterAction(key({ shiftKey: true }), true)).toBe('newline');
+  });
+  it('touch with a keyboard: Ctrl/Cmd+Enter still sends', () => {
+    expect(composerEnterAction(key({ ctrlKey: true }), true)).toBe('send');
+    expect(composerEnterAction(key({ metaKey: true }), true)).toBe('send');
+  });
+  it('an Enter that confirms an IME candidate never sends', () => {
+    expect(composerEnterAction(key({ isComposing: true }), false)).toBe('none');
+    expect(composerEnterAction(key({ keyCode: 229 }), false)).toBe('none');
+  });
+  it('ignores other keys', () => {
+    expect(composerEnterAction({ key: 'a' }, false)).toBe('none');
+    expect(composerEnterAction(null, false)).toBe('none');
+  });
+});
+
+describe('isCoarsePointer', () => {
+  const orig = globalThis.matchMedia;
+  afterEach(() => { globalThis.matchMedia = orig; });
+  it('follows (pointer: coarse)', () => {
+    globalThis.matchMedia = (q) => ({ matches: q === '(pointer: coarse)' });
+    expect(isCoarsePointer()).toBe(true);
+    globalThis.matchMedia = () => ({ matches: false });
+    expect(isCoarsePointer()).toBe(false);
+  });
+  it('is false without matchMedia', () => {
+    globalThis.matchMedia = undefined;
+    expect(isCoarsePointer()).toBe(false);
+  });
+});
 
 describe('scrollBehavior (reduced motion)', () => {
   const orig = globalThis.matchMedia;

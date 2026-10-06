@@ -38,6 +38,7 @@ import { buildRoomDescriptor, withMembers, descriptorSigningBytes } from './room
 import {
     didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, timeAgo,
     expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8, scrollBehavior,
+    composerEnterAction, isCoarsePointer,
 } from './util.js';
 import { createFileTransfer } from './filetransfer.js';
 import { createVoice, CallState, audioLevel } from './voice.js';
@@ -3709,9 +3710,12 @@ import { initThemePicker } from './theme.js';
 
         // Phone: the full placeholder ("… (Shift+Enter for newline)") wraps to two
         // lines in the narrow composer; the hint is desktop-keyboard advice anyway.
-        if (window.innerWidth <= 768) {
+        if (window.innerWidth <= 768 || isCoarsePointer()) {
             document.getElementById("message-input").placeholder = t('ui.typeMessage');
         }
+        // Touch keyboards label their Enter key from enterkeyhint. On touch,
+        // Enter breaks the line (see composerEnterAction), so say so.
+        if (isCoarsePointer()) document.getElementById("message-input").setAttribute("enterkeyhint", "enter");
 
         // Per-conversation placeholder ("Message #general" / "Message Alice")
         // and the header subtitle. Called by view.js whenever a thread opens.
@@ -3823,16 +3827,15 @@ import { initThemePicker } from './theme.js';
             return false;
         }
 
-        // Send on Enter (not Shift+Enter)
+        // Send on Enter (not Shift+Enter); on touch, Enter is a newline and the
+        // Send button sends.
         document.getElementById("message-input").addEventListener("keydown", function(e) {
             if (e.key === "ArrowUp" && !this.value && !e.shiftKey && !e.altKey
                     && !e.ctrlKey && !e.metaKey && !e.isComposing) {
                 if (_editLastOwnMessage()) e.preventDefault();
                 return;
             }
-            if (e.key === "Enter" && !e.shiftKey) {
-                // Enter that confirms an IME candidate (CJK input) must not send.
-                if (e.isComposing || e.keyCode === 229) return;
+            if (composerEnterAction(e, isCoarsePointer()) === "send") {
                 e.preventDefault();
                 document.getElementById("message-form").dispatchEvent(new Event("submit", { cancelable: true }));
             }
