@@ -3195,3 +3195,54 @@ h1, h2, h3, h4, .modal__title, .empty-state-title { text-wrap: balance; }
 .toast__close svg, .banner__close svg, .gif-remove svg, .sidebar-icon-btn svg,
 .mute-icon svg, #disappear-banner svg, #pod-sync-indicator svg { stroke-width: 2; }
 } /* components */
+
+@layer overrides {
+/* ── Print / Save as PDF: a clean transcript of the open conversation. ──
+   Only the title and the messages print: sender, time and full text, black on
+   white, one message never split across pages, link targets spelled out.
+   The app's chrome, menus, toasts and banners are hidden. !important is
+   needed here because the layout and many panels set display/overflow inline,
+   and inline styles beat every layer. Spoilers stay blurred on paper too. */
+@media print {
+    @page { margin: 15mm; }
+    :root { color-scheme: light; }
+    html, body {
+        display: block !important; height: auto !important; overflow: visible !important;
+        background: #fff !important; color: #000 !important;
+    }
+    #sidebar, #members-panel, #message-form, #chat-header-actions, #menu-toggle,
+    #chat-header-subtitle, #toast-container, #banner-slot, .banner, #voice-banner,
+    #voice-widget, #voice-channel-panel, #fingerprint-bar, #disappear-banner,
+    #scroll-bottom-btn, #typing-indicator, #reply-bar, #voice-recording-bar,
+    #schedule-picker, #composer-emoji-panel, #gif-tray, #solidchat-panel,
+    #contact-profile-panel, #saved-panel, #pin-panel, #emoji-picker, #profile-card,
+    .ctx-menu, .delete-submenu, .member-context-menu, .msg-actions, .unread-divider,
+    .feed-welcome, .msg-avatar-col .avatar, .avatar-presence, .msg-retry-btn,
+    [role="dialog"], dialog { display: none !important; }
+    #app, main, #message-feed {
+        display: block !important; position: static !important;
+        height: auto !important; max-height: none !important; overflow: visible !important;
+        background: none !important;
+    }
+    #chat-header {
+        display: block !important; position: static !important;
+        padding: 0 0 var(--space-3) !important; margin: 0 0 var(--space-3);
+        border: 0; border-block-end: 1px solid #000; background: none !important;
+    }
+    #chat-header-name { color: #000 !important; font-size: 16pt; white-space: normal; overflow: visible; }
+    .message {
+        break-inside: avoid; background: none !important; color: #000 !important;
+        padding-block: var(--space-1) !important; opacity: 1 !important; animation: none !important;
+    }
+    .msg-sender { color: #000 !important; max-width: none; overflow: visible; }
+    .msg-ts-header, .msg-compact-ts, .date-divider { color: #333 !important; }
+    .date-divider { position: static !important; background: none !important; break-after: avoid; }
+    .msg-content, .msg-text { color: #000 !important; max-width: none; }
+    a { color: #000 !important; }
+    .msg-text a[href^="http"]::after {
+        content: " (" attr(href) ")"; font-size: 0.85em; color: #333; overflow-wrap: anywhere;
+    }
+    img, video, canvas { max-width: 100% !important; height: auto; break-inside: avoid; }
+    pre, code { white-space: pre-wrap !important; overflow-wrap: anywhere; }
+}
+} /* overrides */
