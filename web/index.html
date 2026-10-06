@@ -182,7 +182,7 @@
         <form id="add-peer-form" novalidate>
         <h3 id="add-peer-title" class="modal__title" data-i18n="heading.addPeer">Add contact</h3>
         <label for="add-peer-input" class="field-label" data-i18n="label.peerDidProxionAddress">Peer DID or Proxion address</label>
-        <input id="add-peer-input" class="input" type="text" placeholder="Paste an invite link or your friend's address" aria-describedby="add-peer-error" data-i18n-attr="placeholder:ui.pasteInviteLinkFriend">
+        <input id="add-peer-input" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" class="input" type="text" placeholder="Paste an invite link or your friend's address" aria-describedby="add-peer-error" data-i18n-attr="placeholder:ui.pasteInviteLinkFriend">
         <p id="add-peer-error" class="field-error" role="alert"></p>
         <!-- R17.3: QR scan -->
         <div>
@@ -240,7 +240,7 @@
         <form id="join-room-form" novalidate>
         <h3 id="join-room-title" class="modal__title" data-i18n="heading.joinRoom">Join room</h3>
         <label for="join-room-input" class="field-label" data-i18n="label.inviteLinkRoomCode">Invite link or room code</label>
-        <input id="join-room-input" class="input" type="text" placeholder="Paste invite link or code" aria-describedby="join-room-error" data-i18n-attr="placeholder:ui.pasteInviteLinkCode">
+        <input id="join-room-input" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" class="input" type="text" placeholder="Paste invite link or code" aria-describedby="join-room-error" data-i18n-attr="placeholder:ui.pasteInviteLinkCode">
         <p id="join-room-error" class="field-error" role="alert"></p>
         <div class="btn-row modal__footer">
           <button type="button" id="join-room-cancel-btn" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
@@ -349,7 +349,7 @@
             </div>
             <nav aria-label="Conversations" data-i18n-attr="aria-label:ui.conversations">
                 <div id="search-box">
-                    <input type="text" id="search-input" placeholder="Search messages…" autocomplete="off" aria-describedby="search-hint" data-i18n-attr="placeholder:control.search.placeholder">
+                    <input type="search" id="search-input" enterkeyhint="search" placeholder="Search messages…" autocomplete="off" aria-describedby="search-hint" data-i18n-attr="placeholder:control.search.placeholder">
                     <p id="search-hint" class="search-hint" role="status" aria-live="polite"></p>
                 </div>
                 <section>
@@ -560,7 +560,7 @@
                 <button type="button" id="gif-tray-btn" class="gif-tray-btn" aria-expanded="false" aria-label="GIF tray" title="GIF tray" data-i18n-attr="aria-label:ui.gifTray;title:ui.gifTray">GIF</button>
                 </div>
                 <label for="message-input" class="sr-only" data-i18n="label.message">Message</label>
-                <textarea id="message-input" dir="auto" placeholder="Type a message… (Shift+Enter for newline)" rows="1" autocomplete="off" data-i18n-attr="placeholder:ui.typeMessageShiftEnter"></textarea>
+                <textarea id="message-input" enterkeyhint="send" dir="auto" placeholder="Type a message… (Shift+Enter for newline)" rows="1" autocomplete="off" data-i18n-attr="placeholder:ui.typeMessageShiftEnter"></textarea>
                 <!-- Round 62: Voice record button -->
                 <button type="button" id="voice-record-btn" aria-label="Record voice message" class="voice-record-btn" title="Hold to record voice message" data-i18n-attr="title:ui.holdRecordVoiceMessage;aria-label:ui.recordVoiceMessage"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z"/></svg></button>
                 <!-- Round 69: Schedule button -->
@@ -607,7 +607,7 @@
         <h3 id="room-create-title" class="modal__title" data-i18n="heading.createRoom">Create a room</h3>
         <form id="room-create-form" novalidate>
           <label for="room-name-input" class="field-label" data-i18n="label.roomName">Room name</label>
-          <input id="room-name-input" class="input" type="text" placeholder="e.g. general" aria-describedby="room-create-error" data-i18n-attr="placeholder:ui.eGGeneral">
+          <input id="room-name-input" enterkeyhint="go" class="input" type="text" placeholder="e.g. general" aria-describedby="room-create-error" data-i18n-attr="placeholder:ui.eGGeneral">
           <p id="room-create-error" class="field-error" role="alert"></p>
           <label class="check-row" style="margin:0;">
             <input type="checkbox" id="room-history-toggle">
@@ -661,9 +661,9 @@
             <section id="settings-sec-profile" class="settings-section" aria-labelledby="settings-h-profile" tabindex="-1">
               <h4 id="settings-h-profile" class="section-label" data-i18n="section.profile">Profile</h4>
               <label for="settings-display-name" class="settings-field-label" data-i18n="label.displayName">Display name</label>
-              <input id="settings-display-name" class="settings-input" type="text" placeholder="Your name" data-i18n-attr="placeholder:ui.name">
+              <input id="settings-display-name" enterkeyhint="done" class="settings-input" type="text" placeholder="Your name" data-i18n-attr="placeholder:ui.name">
               <label for="settings-status-message" class="settings-field-label" data-i18n="label.customStatusMax100">Custom status (max 100 characters)</label>
-              <input id="settings-status-message" class="settings-input" type="text" placeholder="What are you doing?" maxlength="100" data-i18n-attr="placeholder:ui.whatAreDoing">
+              <input id="settings-status-message" enterkeyhint="done" class="settings-input" type="text" placeholder="What are you doing?" maxlength="100" data-i18n-attr="placeholder:ui.whatAreDoing">
               <p id="settings-profile-status" class="settings-save-status" role="status" aria-live="polite"></p>
               <label for="settings-locale" class="settings-field-label" data-i18n="label.language">Language</label>
               <select id="settings-locale" class="settings-input"></select>
@@ -732,7 +732,7 @@
                 </div>
                 <label for="settings-solid-custom-url" class="settings-field-label" data-i18n="settings.pod.otherServer">Other pod server</label>
                 <div class="settings-inline">
-                  <input id="settings-solid-custom-url" class="settings-input" type="url"
+                  <input id="settings-solid-custom-url" autocapitalize="off" autocorrect="off" enterkeyhint="done" class="settings-input" type="url"
                          placeholder="https://your-pod-server.example"
                          autocomplete="off" spellcheck="false" data-i18n-attr="placeholder:ui.httpsPodServerExample">
                   <button id="settings-solid-custom-btn" class="btn btn--slate" data-i18n="btn.sign">Sign in</button>
@@ -800,9 +800,9 @@
                 </label>
                 <p class="settings-hint settings-hint--block" data-i18n="conn.relay.defaultHint">Only calls with no direct path use it, and media stays end-to-end encrypted. Turn it off to use no third-party relay, or add your own below.</p>
                 <p class="settings-hint settings-hint--block" data-i18n="conn.relay.hint">On a restrictive network, calls need a relay (TURN) server to connect. Add one from your provider or self-host; it is used for your next call, no restart needed.</p>
-                <input id="calls-relay-url" class="settings-input" type="text" autocomplete="off" spellcheck="false" placeholder="turns:relay.example.com:5349" data-i18n-attr="placeholder:conn.relay.urlPlaceholder">
+                <input id="calls-relay-url" inputmode="url" autocapitalize="off" autocorrect="off" class="settings-input" type="text" autocomplete="off" spellcheck="false" placeholder="turns:relay.example.com:5349" data-i18n-attr="placeholder:conn.relay.urlPlaceholder">
                 <div class="settings-inline">
-                  <input id="calls-relay-user" class="settings-input" type="text" autocomplete="off" spellcheck="false" placeholder="username" data-i18n-attr="placeholder:conn.relay.userPlaceholder">
+                  <input id="calls-relay-user" autocapitalize="off" autocorrect="off" class="settings-input" type="text" autocomplete="off" spellcheck="false" placeholder="username" data-i18n-attr="placeholder:conn.relay.userPlaceholder">
                   <input id="calls-relay-pass" class="settings-input" type="password" autocomplete="off" placeholder="password" data-i18n-attr="placeholder:conn.relay.passPlaceholder">
                 </div>
                 <div class="settings-actions">
@@ -815,7 +815,7 @@
                 <h4 id="settings-h-connection" class="section-label" data-i18n="section.connection">Connection</h4>
                 <label for="settings-gw-url" class="settings-field-label" data-i18n="label.gatewayWebsocketUrl">Gateway WebSocket URL</label>
                 <div class="settings-inline">
-                  <input id="settings-gw-url" class="settings-input" type="text" placeholder="ws://127.0.0.1:7474" data-i18n-attr="placeholder:ui.ws12700">
+                  <input id="settings-gw-url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" class="settings-input" type="text" placeholder="ws://127.0.0.1:7474" data-i18n-attr="placeholder:ui.ws12700">
                   <button type="button" id="settings-gw-apply-btn" class="btn btn--slate" disabled data-i18n="btn.applyReconnect">Apply and reconnect</button>
                 </div>
                 <!-- R28: Federation health status -->
@@ -976,7 +976,7 @@
         <h3 id="pair-device-title" class="modal__title" data-i18n="heading.linkThisDevice">Link this device</h3>
         <p class="modal__desc">On your other device, open Settings &rarr; Link a device, then enter the code shown there (or scan its QR).</p>
         <label for="pair-code-input" class="field-label" data-i18n="ui.pairingCode">Pairing code</label>
-        <input id="pair-code-input" class="input" type="text" placeholder="Pairing code" autocomplete="off" style="font-family:var(--font-mono);" data-i18n-attr="placeholder:ui.pairingCode">
+        <input id="pair-code-input" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" class="input" type="text" placeholder="Pairing code" autocomplete="off" style="font-family:var(--font-mono);" data-i18n-attr="placeholder:ui.pairingCode">
         <label id="pair-scan-label" style="display:inline-flex;align-items:center;gap:var(--space-2);cursor:pointer;font-size:var(--text-sm);color:var(--text-secondary);margin-bottom:var(--space-2);">
           Scan QR code
           <input type="file" id="pair-scan-input" accept="image/*" capture="environment" style="display:none;">
@@ -1025,15 +1025,15 @@
           <input id="solidchat-host-title" class="input" type="text" placeholder="Conversation name" data-i18n-attr="placeholder:solidchat.namePlaceholder" style="flex:1;margin:0;">
           <button id="solidchat-host-submit" type="button" class="btn btn--accent" data-i18n="solidchat.host">Host</button>
         </div>
-        <input id="solidchat-host-participant" class="input" list="solidchat-contacts" type="url" inputmode="url" placeholder="Invite a WebID (optional)" aria-label="Invite a WebID (optional)" data-i18n-attr="placeholder:solidchat.participantPlaceholder;aria-label:solidchat.participantPlaceholder" style="margin-bottom:var(--space-4);">
+        <input id="solidchat-host-participant" autocapitalize="off" autocorrect="off" spellcheck="false" class="input" list="solidchat-contacts" type="url" inputmode="url" placeholder="Invite a WebID (optional)" aria-label="Invite a WebID (optional)" data-i18n-attr="placeholder:solidchat.participantPlaceholder;aria-label:solidchat.participantPlaceholder" style="margin-bottom:var(--space-4);">
         <label for="solidchat-join-url" style="display:block;font-size:var(--text-sm);margin-bottom:var(--space-1);color:var(--text-secondary)" data-i18n="solidchat.joinLabel">Join with a link</label>
         <div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-4);">
-          <input id="solidchat-join-url" class="input" type="url" inputmode="url" placeholder="https://…/chat/" data-i18n-attr="placeholder:solidchat.linkPlaceholder" style="flex:1;margin:0;">
+          <input id="solidchat-join-url" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" class="input" type="url" inputmode="url" placeholder="https://…/chat/" data-i18n-attr="placeholder:solidchat.linkPlaceholder" style="flex:1;margin:0;">
           <button id="solidchat-join-submit" type="button" class="btn btn--slate" data-i18n="solidchat.join">Join</button>
         </div>
         <label for="solidchat-discover-webid" style="display:block;font-size:var(--text-sm);margin-bottom:var(--space-1);color:var(--text-secondary)" data-i18n="solidchat.discoverLabel">Find someone's chats by WebID</label>
         <div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-2);">
-          <input id="solidchat-discover-webid" class="input" list="solidchat-contacts" type="url" inputmode="url" placeholder="https://…/profile/card#me" data-i18n-attr="placeholder:solidchat.webidPlaceholder" style="flex:1;margin:0;">
+          <input id="solidchat-discover-webid" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" class="input" list="solidchat-contacts" type="url" inputmode="url" placeholder="https://…/profile/card#me" data-i18n-attr="placeholder:solidchat.webidPlaceholder" style="flex:1;margin:0;">
           <datalist id="solidchat-contacts"></datalist>
           <button id="solidchat-discover-btn" type="button" class="btn btn--slate" data-i18n="solidchat.find">Find</button>
         </div>
@@ -1082,7 +1082,7 @@
           Have a Solid pod? Enter your provider to sign in.
         </p>
         <label for="web-signin-url" class="field-label" data-i18n="web.signin.provider">Pod provider</label>
-        <input id="web-signin-url" class="input" type="url" value="https://solidcommunity.net" autocomplete="url" aria-describedby="web-signin-error">
+        <input id="web-signin-url" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" class="input" type="url" value="https://solidcommunity.net" autocomplete="url" aria-describedby="web-signin-error">
         <p id="web-signin-error" class="field-error" role="alert"></p>
         <button type="submit" id="web-signin-btn" class="btn btn--accent btn--lg" style="width:100%;padding:var(--space-3) var(--space-5);font-size:1em;" data-i18n="web.signin.button">Sign in</button>
         <p style="margin:var(--space-4) 0 0; font-size:var(--text-sm); color:var(--text-secondary);">
@@ -1117,7 +1117,7 @@
         <div id="ob-step-2" style="display:none">
           <h2 data-i18n="heading.whatSName">What's your name?</h2>
           <label for="ob-name" class="field-label" data-i18n="ui.displayName">Display name</label>
-          <input id="ob-name" class="input" placeholder="Display name" autocomplete="nickname" aria-describedby="ob-name-error" data-i18n-attr="placeholder:ui.displayName">
+          <input id="ob-name" enterkeyhint="next" class="input" placeholder="Display name" autocomplete="nickname" aria-describedby="ob-name-error" data-i18n-attr="placeholder:ui.displayName">
           <p id="ob-name-error" class="field-error" role="alert"></p>
           <button id="ob-step2-btn" class="btn btn--accent" style="padding:var(--space-3) var(--space-5);border-radius:4px;cursor:pointer;font-size:1em;" data-i18n="btn.continue">Continue</button>
         </div>
@@ -1155,7 +1155,7 @@
           <!-- Credential form (hidden until provider selected) -->
           <div id="ob-pod-cred-form" style="display:none;margin-top:var(--space-4);">
             <div id="ob-pod-provider-label" style="font-size:var(--text-sm);color:var(--text-secondary);margin-bottom:var(--space-2);"></div>
-            <input id="ob-pod-css-url" type="url" placeholder="Pod server URL (e.g. https://solidcommunity.net)"
+            <input id="ob-pod-css-url" autocapitalize="off" autocorrect="off" type="url" placeholder="Pod server URL (e.g. https://solidcommunity.net)"
                    autocomplete="off" spellcheck="false"
                    style="display:none;width:100%;box-sizing:border-box;padding:var(--space-2);border-radius:4px;
                           border:1px solid var(--slate-700);background:var(--slate-900);color:var(--slate-50);font-size:var(--text-md);margin-bottom:var(--space-2);" data-i18n-attr="placeholder:ui.podServerUrlE">
@@ -1164,7 +1164,7 @@
                    style="width:100%;box-sizing:border-box;padding:var(--space-2);border-radius:4px;
                           border:1px solid var(--slate-700);background:var(--slate-900);color:var(--slate-50);font-size:var(--text-md);margin-bottom:var(--space-2);" data-i18n-attr="placeholder:ui.emailAddress">
             <div style="position:relative;margin-bottom:var(--space-2);">
-              <input id="ob-pod-password" type="password" placeholder="Password"
+              <input id="ob-pod-password" enterkeyhint="done" type="password" placeholder="Password"
                      autocomplete="current-password"
                      style="width:100%;box-sizing:border-box;padding:var(--space-2) 36px var(--space-2) var(--space-2);border-radius:4px;
                             border:1px solid var(--slate-700);background:var(--slate-900);color:var(--slate-50);font-size:var(--text-md);" data-i18n-attr="placeholder:ui.password">
@@ -1213,7 +1213,7 @@
           <button id="ob-step5-create" class="btn btn--accent" style="padding:var(--space-3) var(--space-5);border-radius:4px;cursor:pointer;margin-right:var(--space-2);" data-i18n="heading.createRoom">Create a room</button>
           <br><br>
           <p style="margin:var(--space-2) 0 var(--space-1);" data-i18n="onboarding.orJoinCode">Or join with an invite code:</p>
-          <input id="ob-invite-code" class="input" placeholder="prx1_…" aria-label="Invite code" aria-describedby="ob-join-error" data-i18n-attr="placeholder:ui.prx1;aria-label:onboarding.inviteCodeLabel">
+          <input id="ob-invite-code" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" class="input" placeholder="prx1_…" aria-label="Invite code" aria-describedby="ob-join-error" data-i18n-attr="placeholder:ui.prx1;aria-label:onboarding.inviteCodeLabel">
           <p id="ob-join-error" class="field-error" role="alert"></p>
           <button id="ob-step5-join" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-4);border-radius:4px;cursor:pointer;" data-i18n="btn.joinCode">Join with code</button>
           <p style="margin:var(--space-4) 0 0;">
