@@ -705,6 +705,14 @@ main { background: var(--surface-0); }
    and let it scroll, so a tall modal (e.g. expanded settings) never pushes its top/
    bottom — including the action buttons — off-screen with no way to reach them. */
 [role="dialog"] > div { max-height: 90vh; max-height: 90dvh; overflow-y: auto; }
+/* While a dialog is open the page behind it stays put: no scroll, and a fling
+   inside the dialog does not chain to the page. Modals open by setting an
+   inline display (focus-trap.js matches the same elements); a native modal
+   <dialog> is covered by :modal. Without :has() the page simply scrolls. */
+:root:has(
+    :is([role="dialog"], [id$="-modal"]):is([style*="display: flex"], [style*="display: block"]),
+    dialog:modal
+) { overflow: hidden; overscroll-behavior: none; }
 .message:not(.msg-grouped) { padding-top: var(--space-4); }
 
 /* Avatar column: 40 px wide, fixed */
@@ -783,6 +791,9 @@ main { background: var(--surface-0); }
 @media (hover: hover) {
     .message:hover .msg-actions { display: flex; }
 }
+/* Keyboard focus inside the action bar keeps the row lit like hover does, so
+   it stays clear which message the buttons act on. */
+.message:has(.msg-actions :focus-visible) { background: var(--tint-faint); }
 .msg-actions .icon-btn { min-width: 28px; min-height: 28px; }
 .msg-actions svg { width: 16px; height: 16px; }
 
@@ -997,6 +1008,13 @@ main { background: var(--surface-0); }
     padding: 0 var(--space-4);
     border-radius: var(--radius-sm);
     flex-shrink: 0;
+}
+/* Nothing to send yet: Send steps back to a quiet neutral (still 4.5:1, it
+   is not disabled, and sendMessage() ignores an empty composer anyway). */
+#message-form:has(#message-input:placeholder-shown) button[type="submit"] {
+    background: var(--surface-2);
+    color: var(--text-secondary);
+    cursor: default;
 }
 
 #menu-toggle {
@@ -2468,6 +2486,21 @@ button:is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; opacity: 0.5
 .settings-toggle input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; cursor: pointer; accent-color: var(--accent); }
 .settings-check { display: flex; align-items: flex-start; gap: var(--space-2); margin: var(--space-2) 0; font-size: var(--text-md); cursor: pointer; }
 .settings-check input[type="checkbox"] { margin-top: 2px; flex-shrink: 0; accent-color: var(--accent); }
+/* The whole row is the control: an enabled setting reads brighter, and the
+   keyboard focus ring wraps the label instead of the 18px box. Browsers
+   without :has() keep the checkbox's own ring. */
+@supports selector(:has(a)) {
+    .settings-toggle, .settings-check { border-radius: var(--radius-sm); }
+    .settings-toggle:has(input:checked) .settings-toggle-text,
+    .settings-check:has(input:checked) { color: var(--text-primary); }
+    .settings-toggle:has(input:focus-visible),
+    .settings-check:has(input:focus-visible) {
+        outline: var(--focus-ring);
+        outline-offset: var(--focus-ring-offset);
+    }
+    .settings-toggle input:focus-visible,
+    .settings-check input:focus-visible { outline: none; }
+}
 .settings-advanced-toggle {
     display: flex; align-items: center; justify-content: space-between; width: 100%;
     margin-top: var(--space-4); padding: var(--space-3) 0 var(--space-1);
