@@ -2561,6 +2561,13 @@ nav,
 #mention-dropdown,
 #scheduled-msgs-list,
 :is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) { overscroll-behavior: contain; }
+/* The feeds and the sidebar lists contain only the vertical overscroll: on
+   Android, overscrolling the top of a short feed pulled to refresh, which
+   reloads the app and drops the connection. The x axis is left alone so the
+   browser's edge-swipe back gesture still works. */
+#message-feed,
+#solidchat-feed,
+nav { overscroll-behavior-y: contain; }
 
 /* Other prose (onboarding steps, banners, dialog bodies without a class)
    avoids a one-word last line too; headings and the named help classes are
