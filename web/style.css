@@ -3217,7 +3217,7 @@ h1, h2, h3, h4, .modal__title, .empty-state-title { text-wrap: balance; }
     #schedule-picker, #composer-emoji-panel, #gif-tray, #solidchat-panel,
     #contact-profile-panel, #saved-panel, #pin-panel, #emoji-picker, #profile-card,
     .ctx-menu, .delete-submenu, .member-context-menu, .msg-actions, .unread-divider,
-    .feed-welcome, .msg-avatar-col .avatar, .avatar-presence, .msg-retry-btn,
+    .feed-welcome, .msg-avatar-col .avatar, .avatar-presence, .msg-retry-btn, .read-receipt,
     [role="dialog"], dialog { display: none !important; }
     #app, main, #message-feed {
         display: block !important; position: static !important;
