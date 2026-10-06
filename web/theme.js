@@ -38,11 +38,24 @@ export function writeThemePref(pref, storage = defaultStorage()) {
     }
 }
 
-/** Set or clear data-theme on the root element. */
+/** Set or clear data-theme on the root element, and keep the theme-color
+ *  metas in step with it. */
 export function applyTheme(pref, root = globalThis.document && globalThis.document.documentElement) {
     if (!root) return;
     if (pref === 'dark' || pref === 'light') root.setAttribute('data-theme', pref);
     else root.removeAttribute('data-theme');
+    syncThemeColor(pref, root.ownerDocument || globalThis.document);
+}
+
+/** index.html carries one theme-color meta per scheme (media query), each
+ *  remembering its own colour in data-color. A pinned theme copies its colour
+ *  into both, so the toolbar matches whatever the OS prefers; "system" puts
+ *  each back. theme-boot.js does the same before first paint. */
+export function syncThemeColor(pref, doc) {
+    if (!doc || typeof doc.querySelectorAll !== 'function') return;
+    const metas = Array.from(doc.querySelectorAll('meta[name="theme-color"][data-color]'));
+    const pinned = metas.find((m) => m.getAttribute('data-scheme') === pref);
+    for (const m of metas) m.setAttribute('content', (pinned || m).getAttribute('data-color'));
 }
 
 /** The theme actually showing: the pinned one, or the OS preference. */

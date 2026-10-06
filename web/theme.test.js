@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import {
-    THEME_KEY, readThemePref, writeThemePref, applyTheme, effectiveTheme, initThemePicker,
+    THEME_KEY, readThemePref, writeThemePref, applyTheme, effectiveTheme, initThemePicker, syncThemeColor,
 } from './theme.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -145,5 +145,55 @@ describe('theme-boot.js (pre-paint)', () => {
     it('does not throw when localStorage access is denied', () => {
         expect(boot('deny')).toBe(null);
         expect(boot(throwing)).toBe(null);
+    });
+});
+
+describe('theme-color metas', () => {
+    function fakeMeta(scheme, color) {
+        const attrs = new Map([['name', 'theme-color'], ['data-scheme', scheme], ['data-color', color], ['content', color]]);
+        return { getAttribute: (k) => (attrs.has(k) ? attrs.get(k) : null), setAttribute: (k, v) => attrs.set(k, String(v)) };
+    }
+    function fakeDoc() {
+        const metas = [fakeMeta('dark', '#111111'), fakeMeta('light', '#eeeeee')];
+        const root = fakeRoot();
+        return { metas, root, documentElement: root, querySelectorAll: () => metas };
+    }
+    const contents = (d) => d.metas.map((m) => m.getAttribute('content'));
+
+    it('a pinned theme puts its colour in both metas; system restores each', () => {
+        const d = fakeDoc();
+        d.root.ownerDocument = d;
+        applyTheme('light', d.root);
+        expect(contents(d)).toEqual(['#eeeeee', '#eeeeee']);
+        applyTheme('dark', d.root);
+        expect(contents(d)).toEqual(['#111111', '#111111']);
+        applyTheme('system', d.root);
+        expect(contents(d)).toEqual(['#111111', '#eeeeee']);
+    });
+    it('theme-boot.js sets the metas the same way before first paint', () => {
+        const src = readFileSync(join(HERE, 'theme-boot.js'), 'utf8');
+        for (const v of ['dark', 'light', null]) {
+            const booted = fakeDoc();
+            const window = { localStorage: memStorage(v ? { [THEME_KEY]: v } : {}) };
+            vm.runInNewContext(src, { window, document: booted });
+            const viaModule = fakeDoc();
+            syncThemeColor(v || 'system', viaModule);
+            expect(contents(booted)).toEqual(contents(viaModule));
+        }
+    });
+    it("index.html has one meta per scheme, each matching that theme's --surface-0", () => {
+        const html = readFileSync(join(HERE, 'index.html'), 'utf8');
+        const css = readFileSync(join(HERE, 'style.css'), 'utf8');
+        const meta = (scheme) => html.match(new RegExp(
+            `<meta name="theme-color" media="\\(prefers-color-scheme: ${scheme}\\)" content="(#[0-9a-f]{6})" data-scheme="${scheme}" data-color="(#[0-9a-f]{6})">`));
+        const dark = meta('dark');
+        const light = meta('light');
+        expect(dark && light).toBeTruthy();
+        expect(dark[1]).toBe(dark[2]);
+        expect(light[1]).toBe(light[2]);
+        const surfaces = [...css.matchAll(/--surface-0:\s*(#[0-9a-f]{6})/g)].map((m) => m[1]);
+        expect(surfaces[0]).toBe(dark[2]);   // :root (dark)
+        expect(surfaces[1]).toBe(light[2]);  // :root[data-theme="light"]
+        expect(html).not.toMatch(/<meta name="theme-color" content=/);
     });
 });
