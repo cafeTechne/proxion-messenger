@@ -15,14 +15,29 @@
 import { t } from './i18n.js';
 
 // Busy state for a submit button whose request waits on a gateway reply
-// (room create / join). Disables the button, sets aria-busy and a pending
-// label, and clears itself after timeoutMs if no reply ever arrives.
+// (room create / join). Marks the button aria-disabled and aria-busy with a
+// pending label, and clears itself after timeoutMs if no reply ever arrives.
+// aria-disabled rather than disabled: a disabled button loses focus, and the
+// user just pressed this one, so focus would drop to <body>. A capture-phase
+// click guard does the blocking instead (it also cancels Enter's implicit
+// submit, which arrives as a click on the default button).
+function _busyClickGuard(e) {
+    if (e.currentTarget && e.currentTarget._busy) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+    }
+}
+
 export function setButtonBusy(btn, busyLabel, timeoutMs = 15000) {
     if (!btn) return;
     if (btn._busyTimer) clearTimeout(btn._busyTimer);
     if (!btn._busy) btn._idleLabel = btn.textContent;
     btn._busy = true;
-    btn.disabled = true;
+    if (!btn._busyGuarded && typeof btn.addEventListener === 'function') {
+        btn.addEventListener('click', _busyClickGuard, true);
+        btn._busyGuarded = true;
+    }
+    btn.setAttribute?.('aria-disabled', 'true');
     btn.setAttribute?.('aria-busy', 'true');
     btn.textContent = busyLabel;
     btn._busyTimer = setTimeout(() => clearButtonBusy(btn), timeoutMs);
@@ -33,7 +48,7 @@ export function clearButtonBusy(btn) {
     clearTimeout(btn._busyTimer);
     btn._busyTimer = null;
     btn._busy = false;
-    btn.disabled = false;
+    btn.removeAttribute?.('aria-disabled');
     btn.removeAttribute?.('aria-busy');
     btn.textContent = btn._idleLabel;
 }

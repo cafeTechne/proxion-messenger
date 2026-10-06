@@ -1908,6 +1908,15 @@ import { initThemePicker } from './theme.js';
                         document.getElementById("room-create-form").style.display = "none";
                         document.getElementById("room-invite-url").textContent = event.invite_url;
                         document.getElementById("room-invite-result").style.display = "";
+                        // The busy submit that held focus is now hidden with the
+                        // form; hand focus to the result's own button.
+                        {
+                            const _form = document.getElementById("room-create-form");
+                            const _a = document.activeElement;
+                            if (!_a || _a === document.body || _form.contains(_a)) {
+                                document.getElementById("room-create-done-btn")?.focus();
+                            }
+                        }
                         setTimeout(() => {
                             const li = document.getElementById(`nav-${event.room_id}`);
                             if (li) li.click();

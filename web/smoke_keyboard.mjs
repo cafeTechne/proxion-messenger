@@ -152,8 +152,13 @@ try {
   const roomExists = await page.evaluate(() => Array.from(document.querySelectorAll('nav li'))
     .some(li => /general/i.test(li.textContent || '')));
   check('room created via keyboard', roomExists);
+  // The busy submit keeps focus (aria-disabled, not disabled), and once the
+  // form gives way to the result its Done button takes over.
+  check('focus stays in the dialog after the busy submit', (await active(page))?.id === 'room-create-done-btn');
   await page.keyboard.press('Escape'); // close the "created" confirmation if shown
   await sleep(200);
+  check('closing the dialog returns focus to its opener',
+    (await active(page))?.id === 'create-room-btn');
 
   // 5. Send a message: focus the composer by keyboard, type, Enter.
   const atComposer = await tabTo(page, a => a.id === 'message-input');
@@ -183,11 +188,30 @@ try {
   await sleep(300);
   const modalOpen = await page.evaluate(() => getComputedStyle(document.getElementById('shortcut-modal')).display !== 'none');
   check('Ctrl+/ opens the shortcut modal', modalOpen);
+  const inertWhileOpen = await page.evaluate(() => ({
+    app: document.getElementById('app').inert,
+    dialog: document.getElementById('shortcut-modal').inert,
+    toasts: document.getElementById('toast-container').inert,
+  }));
+  check('the page behind the open modal is inert', inertWhileOpen.app === true);
+  check('the modal itself and the toasts stay live', !inertWhileOpen.dialog && !inertWhileOpen.toasts);
+  // Record every focus move during the close: focus must go straight from the
+  // dialog to the opener, never through <body> (a focusout with no target).
+  await page.evaluate(() => {
+    window.__focusLog = [];
+    document.addEventListener('focusout', (e) => {
+      window.__focusLog.push(e.relatedTarget ? (e.relatedTarget.id || e.relatedTarget.tagName) : 'BODY');
+    }, true);
+  });
   await page.keyboard.press('Escape');
   await sleep(300);
   const modalClosed = await page.evaluate(() => getComputedStyle(document.getElementById('shortcut-modal')).display === 'none');
   check('Escape closes the shortcut modal', modalClosed);
   check('focus restored to the opener (message-input)', (await active(page))?.id === 'message-input');
+  const focusLog = await page.evaluate(() => window.__focusLog);
+  check(`focus never dropped to <body> while closing (${focusLog.join(' > ') || 'none'})`, !focusLog.includes('BODY'));
+  check('the page is live again after the modal closes',
+    await page.evaluate(() => !document.getElementById('app').inert && !document.querySelector('[data-trap-inert]')));
 
 } catch (e) {
   console.error('  ✗ threw: ' + (e.stack || e.message));

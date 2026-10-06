@@ -1549,7 +1549,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         :is(button, .btn, .reaction):not([role="menuitem"], .settings-nav-item) { border: 1px solid ButtonText !important; }
         /* Letter avatars lose their colored disc. */
         .avatar.placeholder, .profile-avatar { border: 1px solid CanvasText; }
-        :is(button, .btn):disabled { border-color: GrayText !important; color: GrayText; }
+        :is(button, .btn):is(:disabled, [aria-disabled="true"]) { border-color: GrayText !important; color: GrayText; }
         /* Selected and highlighted states that were a fill. Their border-color is
            !important to outrank the !important button border above. */
         .reaction.active,
@@ -2348,10 +2348,11 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
 .btn--sm { padding: var(--space-1) var(--space-3); font-size: var(--text-sm); flex-shrink: 0; }
 /* Hover feedback via brightness so it works even where a button carries an
    inline background:, which would otherwise beat a background-based :hover. */
-.btn:hover:not(:disabled):not([disabled]) { filter: brightness(1.12); }
-.btn:disabled, .btn[disabled] { opacity: 0.5; cursor: not-allowed; filter: none; }
+.btn:hover:not(:disabled):not([disabled], [aria-disabled="true"]) { filter: brightness(1.12); }
+.btn:disabled, .btn[disabled], .btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; filter: none; }
 /* App-wide disabled affordance for the many plain <button>s that aren't .btn. */
-button:disabled { cursor: not-allowed; opacity: 0.55; }
+/* aria-disabled: busy buttons stay focusable (rooms.js setButtonBusy). */
+button:is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; opacity: 0.55; }
 /* Hover feedback for the many modal / settings buttons that carry an inline
    background: and are NOT .btn. Brightness works over an inline background where
    a background-based :hover would be overridden. focus-visible (the accent ring)

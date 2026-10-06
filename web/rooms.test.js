@@ -113,35 +113,67 @@ describe('submitJoinRoom', () => {
 describe('join double-submit guard', () => {
   it('sends join_room once while the first request is pending', () => {
     els['join-room-input'] = mkEl({ value: 'PLAINCODE' });
-    els['join-room-submit-btn'] = mkEl({ textContent: 'Join', setAttribute() {}, removeAttribute() {} });
+    const attrs = {};
+    els['join-room-submit-btn'] = mkEl({
+      textContent: 'Join', setAttribute(k, v) { attrs[k] = v; }, removeAttribute(k) { delete attrs[k]; },
+    });
     const { rooms, sent } = make();
     rooms.submitJoinRoom();
     rooms.submitJoinRoom();
     expect(sent.filter((m) => m.cmd === 'join_room')).toHaveLength(1);
-    expect(els['join-room-submit-btn'].disabled).toBe(true);
+    expect(attrs['aria-disabled']).toBe('true');
   });
 });
 
 describe('setButtonBusy / clearButtonBusy', () => {
   function btn() {
     const attrs = {};
-    return {
-      textContent: 'Create', disabled: false, attrs,
+    const listeners = [];
+    const b = {
+      textContent: 'Create', disabled: false, attrs, listeners,
       setAttribute(k, v) { attrs[k] = v; }, removeAttribute(k) { delete attrs[k]; },
+      addEventListener(type, fn, capture) { listeners.push({ type, fn, capture }); },
+      // Dispatch a click through the registered listeners; returns the event.
+      click() {
+        const e = {
+          currentTarget: b, defaultPrevented: false, stopped: false,
+          preventDefault() { this.defaultPrevented = true; },
+          stopImmediatePropagation() { this.stopped = true; },
+        };
+        listeners.filter((l) => l.type === 'click').forEach((l) => l.fn(e));
+        return e;
+      },
     };
+    return b;
   }
-  it('disables, marks aria-busy and swaps the label, then restores', () => {
+  it('marks aria-disabled and aria-busy and swaps the label, then restores', () => {
     const b = btn();
     setButtonBusy(b, 'Creating...');
-    expect(b.disabled).toBe(true);
+    // Never the disabled property: that would drop the user's focus to <body>.
+    expect(b.disabled).toBe(false);
+    expect(b.attrs['aria-disabled']).toBe('true');
     expect(b.attrs['aria-busy']).toBe('true');
     expect(b.textContent).toBe('Creating...');
     expect(isButtonBusy(b)).toBe(true);
     clearButtonBusy(b);
-    expect(b.disabled).toBe(false);
+    expect(b.attrs['aria-disabled']).toBeUndefined();
     expect(b.attrs['aria-busy']).toBeUndefined();
     expect(b.textContent).toBe('Create');
     expect(isButtonBusy(b)).toBe(false);
+  });
+  it('blocks clicks (and so implicit submit) only while busy', () => {
+    const b = btn();
+    setButtonBusy(b, 'Creating...');
+    setButtonBusy(b, 'Creating...');
+    expect(b.listeners.filter((l) => l.type === 'click')).toHaveLength(1);
+    expect(b.listeners[0].capture).toBe(true);
+    const busyClick = b.click();
+    expect(busyClick.defaultPrevented).toBe(true);
+    expect(busyClick.stopped).toBe(true);
+    clearButtonBusy(b);
+    const idleClick = b.click();
+    expect(idleClick.defaultPrevented).toBe(false);
+    expect(idleClick.stopped).toBe(false);
   });
   it('clears itself after the timeout when no reply arrives', () => {
     vi.useFakeTimers();
@@ -149,9 +181,9 @@ describe('setButtonBusy / clearButtonBusy', () => {
       const b = btn();
       setButtonBusy(b, 'Creating...', 15000);
       vi.advanceTimersByTime(14999);
-      expect(b.disabled).toBe(true);
+      expect(b.attrs['aria-disabled']).toBe('true');
       vi.advanceTimersByTime(1);
-      expect(b.disabled).toBe(false);
+      expect(b.attrs['aria-disabled']).toBeUndefined();
       expect(b.textContent).toBe('Create');
     } finally { vi.useRealTimers(); }
   });
