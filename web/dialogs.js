@@ -15,6 +15,7 @@
 //
 // `doc` is injectable for tests (default: the page document).
 import { t } from './i18n.js';
+import { closeDialog } from './focus-trap.js';
 
 export function showConfirm(message, onConfirm, onCancel, opts = {}, doc = document) {
     const { title, confirmLabel, cancelLabel, danger = false, checkLabel } = opts || {};
@@ -43,7 +44,7 @@ export function showConfirm(message, onConfirm, onCancel, opts = {}, doc = docum
     }
     okBtn.disabled = !!(checkLabel && check);
 
-    const close = () => { modal.style.display = 'none'; };
+    const close = () => { closeDialog(modal); };
     cancelBtn.onclick = () => { close(); if (onCancel) onCancel(); };
     okBtn.onclick = () => {
         if (okBtn.disabled) return;
@@ -92,7 +93,7 @@ export function showPromptModal(message, opts = {}, doc = document) {
         input.type = type; input.placeholder = placeholder; input.value = value;
         const form = $('prompt-form');
         const done = (val) => {
-            modal.style.display = 'none';
+            closeDialog(modal);
             input.onkeydown = null;
             form.onsubmit = null;
             $('prompt-cancel').onclick = null;
@@ -123,7 +124,7 @@ export function cancelDialog(dialog, shown = defaultShown) {
     const cancels = Array.from(dialog.querySelectorAll('[data-modal-cancel]'))
         .filter((b) => !b.classList.contains('modal__close') && shown(b));
     if (cancels.length) cancels[0].click();
-    else dialog.style.display = 'none';
+    else closeDialog(dialog);
 }
 
 function isDismissOverlay(el) {
