@@ -332,7 +332,11 @@ body {
     line-height: 1.45;
     background: var(--surface-0);
     color: var(--text-primary);
+    /* dvh is the visible viewport: on phones 100vh is the height with the
+       browser toolbar hidden, which put the composer under the toolbar.
+       The vh line is the fallback for engines without dvh. */
     height: 100vh;
+    height: 100dvh;
     display: flex;
     flex-direction: column;
 }
@@ -684,7 +688,7 @@ main { background: var(--surface-0); }
 /* Tall-modal safety (esp. mobile): cap a dialog's inner container to the viewport
    and let it scroll, so a tall modal (e.g. expanded settings) never pushes its top/
    bottom — including the action buttons — off-screen with no way to reach them. */
-[role="dialog"] > div { max-height: 90vh; overflow-y: auto; }
+[role="dialog"] > div { max-height: 90vh; max-height: 90dvh; overflow-y: auto; }
 .message:not(.msg-grouped) { padding-top: var(--space-4); }
 
 /* Avatar column: 40 px wide, fixed */
@@ -1535,19 +1539,19 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
 #vw-video-area:fullscreen,
 #voice-channel-videos:fullscreen {
   background: #000;
-  width: 100vw; height: 100vh;
+  width: 100vw; height: 100vh; height: 100dvh;
   display: flex; align-items: center; justify-content: center;
   flex-wrap: wrap; gap: var(--space-2); padding: var(--space-4); box-sizing: border-box;
 }
 #vw-video-area:fullscreen #vw-remote-video {
-  width: auto; height: 100%; max-height: 100vh; max-width: 100vw; border-radius: 0;
+  width: auto; height: 100%; max-height: 100vh; max-height: 100dvh; max-width: 100vw; border-radius: 0;
 }
 #vw-video-area:fullscreen #vw-local-video {
   position: fixed; right: 24px; bottom: 24px; width: 220px; max-height: 160px;
 }
 #voice-channel-videos:fullscreen .vc-video-tile,
 #voice-channel-videos:fullscreen #vc-local-video {
-  width: 42%; max-height: 46vh; height: auto;
+  width: 42%; max-height: 46vh; max-height: 46dvh; height: auto;
 }
 .vc-video-tile.vc-speaking,
 #vw-remote-video.vc-speaking {
@@ -2349,7 +2353,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
    the offset parent for the nav's scroll-to-section and scroll-spy. */
 #settings-modal > .settings-panel {
     display: flex; flex-direction: column;
-    width: 480px; max-width: 480px; max-height: 90vh;
+    width: 480px; max-width: 480px; max-height: 90vh; max-height: 90dvh;
     overflow: hidden; padding: 0;
     background: var(--surface-1); color: var(--text-primary);
     border: 1px solid var(--border); border-radius: var(--radius-lg);
@@ -2460,6 +2464,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
     #settings-modal > .settings-panel {
         width: min(800px, calc(100vw - 48px)); max-width: none;
         height: min(85vh, 760px); max-height: 85vh;
+        height: min(85dvh, 760px); max-height: 85dvh;
     }
     .settings-nav {
         display: flex; flex-direction: column; gap: 2px;
@@ -2759,7 +2764,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 .modal--gate { z-index: var(--z-modal-gate); }
 .modal__panel {
     box-sizing: border-box; width: 100%; max-width: 480px;
-    max-height: 90vh; overflow-y: auto;
+    max-height: 90vh; max-height: 90dvh; overflow-y: auto;
     padding: var(--space-5);
     background: var(--surface-2); color: var(--slate-50);
     border: 1px solid var(--border); border-radius: var(--radius-lg);
