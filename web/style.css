@@ -99,6 +99,8 @@
        Dark ink on the dark theme's pastel fills, white on the light theme's
        deep fills; the worst hue is checked by scripts/contrast_audit.mjs. */
     --avatar-initial: #0f172a;
+    /* Placeholder text: muted next to typed text, still 4.5:1 on inputs. */
+    --placeholder: var(--slate-500);
 
     /* Motion. Three durations: --dur-1 for hover and press feedback, --dur-2
        for small popups (menus, toasts), --dur-3 for dialogs and settling
@@ -233,6 +235,7 @@
     --code-wash: rgba(15, 23, 42, 0.08);
     --webid-l: 30%;
     --avatar-initial: #ffffff;
+    --placeholder: #667085;
     --surface-0: #ffffff;
     --surface-1: #f1f4f9;
     --surface-2: #ffffff;
@@ -290,6 +293,7 @@
         --code-wash: rgba(15, 23, 42, 0.08);
         --webid-l: 30%;
         --avatar-initial: #ffffff;
+        --placeholder: #667085;
         --surface-0: #ffffff;
         --surface-1: #f1f4f9;
         --surface-2: #ffffff;
@@ -1536,6 +1540,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             --text-secondary: var(--slate-300);
             --slate-500: var(--slate-300);
             --slate-600: var(--slate-300);
+            --placeholder: var(--slate-300);
             --border: var(--border-strong);
         }
         :root { --focus-ring-width: 3px; }
@@ -2963,7 +2968,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
     border: 1px solid var(--slate-600); border-radius: var(--radius-sm);
     font-size: var(--text-md);
 }
-.input::placeholder { color: var(--slate-500); }
+.input::placeholder { color: var(--placeholder); }
 .input[aria-invalid="true"] { border-color: var(--color-danger-soft); }
 /* Native constraints (required, type=url, pattern) flag a field only after the
    user has edited and left it, never on first paint. The inset ring doubles
@@ -3127,7 +3132,7 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 ::selection { background: var(--selection-bg); color: var(--selection-text); }
 /* Firefox fades placeholders with opacity; pin it so the color alone sets the
    contrast, which is audited against both input fills. */
-::placeholder { color: var(--slate-500); opacity: 1; }
+::placeholder { color: var(--placeholder); opacity: 1; }
 } /* base */
 
 @layer components {

@@ -169,9 +169,14 @@ const PAIRS = [
   ['busy dot on sidebar: UI component', '--color-danger', '--surface-1', 3],
   ['selected text on selection fill', '--selection-text', '--selection-bg', 4.5],
   ['selection fill stands out from bg', '--selection-bg', '--bg-primary', 1.5],
-  ['placeholder (slate-500) on slate-900 input', '--slate-500', '--slate-900', 4.5],
-  ['placeholder (slate-500) on surface-2 input', '--slate-500', '--surface-2', 4.5],
+  ['placeholder on slate-900 input', '--placeholder', '--slate-900', 4.5],
+  ['placeholder on surface-2 input', '--placeholder', '--surface-2', 4.5],
 ];
+
+// Placeholders must read as hints, not as typed text: in the default themes
+// (not under prefers-contrast: more) typed text must be at least this many
+// times the placeholder's contrast on the same input.
+const PLACEHOLDER_GAP = 2;
 
 const WEBID_SAT = 55;   // must match util.js webidColor
 
@@ -237,6 +242,15 @@ function main() {
     const webidOk = worst.r >= 4.5;
     if (!webidOk) fails++;
     console.log(`  ${webidOk ? '✓' : '✗'} ${worst.r.toFixed(2)} (need 4.5)  webidColor hsl(*, ${WEBID_SAT}%, ${light}%) worst hue ${worst.hue} on ${feed}`);
+
+    if (!name.includes('more')) {
+      const input = resolve(tokens, '--slate-900');
+      const typed = ratio(resolve(tokens, '--slate-50'), input);
+      const hint = ratio(resolve(tokens, '--placeholder'), input);
+      const gapOk = typed >= hint * PLACEHOLDER_GAP;
+      if (!gapOk) fails++;
+      console.log(`  ${gapOk ? '✓' : '✗'} typed ${typed.toFixed(2)} vs placeholder ${hint.toFixed(2)} (typed needs ${PLACEHOLDER_GAP}x)  placeholder reads muted`);
+    }
 
     // Letter avatars use the same hsl() as their fill and draw the initial in
     // --avatar-initial. Every hue must still give 4.5:1 for the letter.
