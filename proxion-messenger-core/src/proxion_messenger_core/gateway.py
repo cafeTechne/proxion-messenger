@@ -336,7 +336,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             self._own_x25519_pub_b64 = _b64_gw.urlsafe_b64encode(_x_pub_bytes).rstrip(b"=").decode()
             if self._store:
                 _gw_did_x = pub_key_to_did(agent.identity_pub_bytes)
-                self._store.save_x25519_pub(_gw_did_x, self._own_x25519_pub_b64)
+                self._store.save_gateway_seal_key(_gw_did_x, self._own_x25519_pub_b64)
+                self._store.migrate_seal_keys_out_of_x25519_pubs(_gw_did_x, self._own_x25519_pub_b64)
         except Exception as _xe:
             logger.debug("X25519 keypair derivation failed: %s", _xe)
 
@@ -1602,7 +1603,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             caps,
             endpoint_hints=[my_http_url],
             display_name=sender_dn or None,
-            e2e_pub=self._store.get_x25519_pub(self._client_webids.get(websocket, "")) if self._store else None,
+            e2e_pub=self._store.get_peer_browser_e2e_key(self._client_webids.get(websocket, "")) if self._store else None,
         )
 
         # POST invite to target gateway — accept both http:// and ws:// target URLs
@@ -1765,7 +1766,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                     # Browser-level E2E key (NOT the gateway store key used for sealing):
                     # carry the acceptor's client x25519 so the requester can encrypt the
                     # first DM to the right key. See federation-status memory.
-                    "from_e2e_key": self._store.get_x25519_pub(self._client_webids.get(websocket, "")) or "",
+                    "from_e2e_key": self._store.get_peer_browser_e2e_key(self._client_webids.get(websocket, "")) or "",
                 }
                 asyncio.create_task(self._post_invite_accept(accept_url, accept_payload))
             else:
@@ -1958,7 +1959,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if self.dm_clients and self._pod_url:
             data["pod_url"] = self._pod_url
         if self._store:
-            own_x25519 = self._store.get_x25519_pub(gw_did)
+            # The gateway's seal key, never a browser key registered under gw_did.
+            own_x25519 = getattr(self, "_own_x25519_pub_b64", None) or self._store.get_gateway_seal_key(gw_did)
             if own_x25519:
                 data["x25519_pub"] = own_x25519
             dn = self._store.get_display_name(gw_did)

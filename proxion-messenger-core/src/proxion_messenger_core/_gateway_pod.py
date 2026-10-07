@@ -232,7 +232,7 @@ class PodSyncMixin:
     def _resolve_peer_x25519_pub(self, did: str) -> Optional[str]:
         """Return the known X25519 public key (base64url) for a peer DID, or None."""
         if self._store:
-            return self._store.get_x25519_pub(did)
+            return self._store.get_gateway_seal_key(did)
         return None
 
     async def _discover_peer_gateway(self, address: str) -> Optional[dict]:
@@ -297,9 +297,10 @@ class PodSyncMixin:
         else:
             logger.debug("_discover_peer_gateway: rejected unsafe gateway_http_url %s", discovered_http)
 
-        # Cache x25519 pub for sealed relay
+        # Cache the peer gateway's seal key for sealed relay (a gateway key, kept
+        # apart from browser E2E keys so it is never served as one).
         if "x25519_pub" in result and self._store:
-            self._store.save_x25519_pub(discovered_did, result["x25519_pub"])
+            self._store.save_gateway_seal_key(discovered_did, result["x25519_pub"])
 
         return result
 

@@ -225,9 +225,18 @@ class _StoreBase(object):
                     updated_at INTEGER NOT NULL
                 );
 
-                -- Browser-level E2E x25519 keys, kept SEPARATE from x25519_pubs (which
-                -- holds gateway store keys used for sealed-sender). Conflating them
-                -- breaks either sealing or content E2E. Keyed by the peer's gateway DID.
+                -- Gateway seal keys (sealed relay transport only). x25519_pubs holds
+                -- browser keys registered by local accounts; older databases also
+                -- cached seal keys there (migrate_seal_keys_out_of_x25519_pubs).
+                CREATE TABLE IF NOT EXISTS gateway_seal_keys (
+                    did        TEXT PRIMARY KEY,
+                    pub_b64u   TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+
+                -- Browser-level E2E x25519 keys learned from peers, kept SEPARATE
+                -- from gateway seal keys. Conflating them breaks either sealing or
+                -- content E2E. Keyed by the peer's gateway DID.
                 CREATE TABLE IF NOT EXISTS e2e_keys (
                     did        TEXT PRIMARY KEY,
                     pub_b64u   TEXT NOT NULL,

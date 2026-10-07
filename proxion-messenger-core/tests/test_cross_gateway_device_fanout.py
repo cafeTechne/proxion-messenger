@@ -222,7 +222,7 @@ async def test_fanout_relay_is_sealed_when_peer_key_known(tmp_path, monkeypatch)
 
     gw_b._peer_gateway_urls[a_gw_did] = "http://peer-a.test"
     # B knows A's gateway SEAL key (as discovery would record it).
-    gw_b._store.save_x25519_pub(a_gw_did, gw_a._own_x25519_pub_b64)
+    gw_b._store.save_gateway_seal_key(a_gw_did, gw_a._own_x25519_pub_b64)
 
     posted = {}
     async def _fake_post(url, payload):

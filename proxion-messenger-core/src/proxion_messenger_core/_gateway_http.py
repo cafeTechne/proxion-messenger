@@ -944,11 +944,10 @@ class HttpEndpointsMixin:
             if cert_dict:
                 cert_id = cert_dict.get("certificate_id")
             # Cache sender's BROWSER X25519 pub for E2E bootstrap — into the
-            # e2e_key store, NOT save_x25519_pub. save_x25519_pub is the GATEWAY
-            # seal key used by _resolve_peer_x25519_pub for sealed-sender relay;
-            # overwriting it with the peer's browser key made every reply seal to
-            # the wrong key (recipient gateway can't unseal -> 400 -> reply lost).
-            # Discovery already stored the peer's gateway seal key; keep it.
+            # e2e_key store. The peer GATEWAY's seal key lives in gateway_seal_keys
+            # (read by _resolve_peer_x25519_pub for sealed relay); mixing the two
+            # made replies seal to the wrong key or browsers encrypt to a gateway
+            # key. Discovery already stored the peer's gateway seal key; keep it.
             if "x25519_pub" in data:
                 self._store.save_e2e_key(from_webid, data["x25519_pub"])
 
@@ -1610,7 +1609,7 @@ class HttpEndpointsMixin:
                         _dn = self._store.get_display_name(_prof_did)
                         if _dn:
                             _profile["display_name"] = _dn
-                        _x25 = self._store.get_x25519_pub(_prof_did)
+                        _x25 = self._store.get_peer_browser_e2e_key(_prof_did)
                         if _x25:
                             _profile["x25519_pub"] = _x25
                         _rel = self._store.get_relationship_by_did(_prof_did)

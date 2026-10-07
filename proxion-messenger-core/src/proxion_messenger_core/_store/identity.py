@@ -97,6 +97,68 @@ class IdentityStoreMixin(object):
             ).fetchone()
         return row["pub_b64u"] if row else None
 
+    # Gateway seal keys (X25519 derived from a gateway's Ed25519 key; sealed relay
+    # transport only) live in their own table so they can never be handed to a
+    # browser as a peer's E2E key.
+    def save_gateway_seal_key(self, did: str, pub_b64u: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO gateway_seal_keys (did, pub_b64u, updated_at) VALUES (?,?,?)",
+                (did, pub_b64u, int(time.time())),
+            )
+
+    def get_gateway_seal_key(self, did: str) -> Optional[str]:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT pub_b64u FROM gateway_seal_keys WHERE did = ?", (did,)
+            ).fetchone()
+        return row["pub_b64u"] if row else None
+
+    def get_peer_browser_e2e_key(self, did: str) -> Optional[str]:
+        """The browser E2E X25519 key for *did*: the relay/invite-learned key, else
+        the key the account registered here. A value known as any gateway's seal
+        key is never returned."""
+        with self._conn() as conn:
+            for table in ("e2e_keys", "x25519_pubs"):
+                row = conn.execute(
+                    f"SELECT pub_b64u FROM {table} WHERE did = ?", (did,)
+                ).fetchone()
+                if not row:
+                    continue
+                pub = row["pub_b64u"]
+                if conn.execute(
+                    "SELECT 1 FROM gateway_seal_keys WHERE pub_b64u = ?", (pub,)
+                ).fetchone():
+                    continue
+                return pub
+        return None
+
+    def migrate_seal_keys_out_of_x25519_pubs(self, own_did: str, own_seal_pub: str) -> int:
+        """Move seal keys written into x25519_pubs before the split: the gateway's
+        own seal key and keys cached by peer-gateway discovery. Idempotent."""
+        moved = 0
+        with self._conn() as conn:
+            if own_did and own_seal_pub:
+                conn.execute(
+                    "INSERT OR IGNORE INTO gateway_seal_keys (did, pub_b64u, updated_at) VALUES (?,?,?)",
+                    (own_did, own_seal_pub, int(time.time())),
+                )
+                moved += conn.execute(
+                    "DELETE FROM x25519_pubs WHERE pub_b64u = ?", (own_seal_pub,)
+                ).rowcount
+            rows = conn.execute(
+                "SELECT x.did, x.pub_b64u, x.updated_at FROM x25519_pubs x "
+                "JOIN peer_gateways p ON p.did = x.did"
+            ).fetchall()
+            for r in rows:
+                conn.execute(
+                    "INSERT OR IGNORE INTO gateway_seal_keys (did, pub_b64u, updated_at) VALUES (?,?,?)",
+                    (r["did"], r["pub_b64u"], r["updated_at"]),
+                )
+                conn.execute("DELETE FROM x25519_pubs WHERE did = ?", (r["did"],))
+                moved += 1
+        return moved
+
     def save_device_e2e_key(self, account_did: str, device_id: str, pub_b64u: str) -> None:
         """Persist one device's browser-level E2E x25519 pub under its account.
 

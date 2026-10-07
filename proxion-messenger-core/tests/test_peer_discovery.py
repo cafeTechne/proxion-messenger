@@ -73,11 +73,11 @@ async def test_discover_peer_gateway_timeout(gateway):
 
 @pytest.mark.asyncio
 async def test_discover_peer_gateway_caches_x25519(gateway):
-    """x25519_pub from .well-known is stored in x25519_pubs table."""
+    """x25519_pub from .well-known is stored as that gateway's seal key."""
     with _patch_fetch(_valid_well_known("did:key:z6MkABCD")):
         await gateway._discover_peer_gateway("did:key:z6MkABCD@https://bob.example.com")
 
-    stored = gateway._store.get_x25519_pub("did:key:z6MkABCD")
+    stored = gateway._store.get_gateway_seal_key("did:key:z6MkABCD")
     assert stored is not None
 
 @pytest.mark.asyncio

@@ -158,7 +158,7 @@ async def test_relay_endpoint_delivers_to_connected_client(gateway, two_clients)
 @pytest.mark.asyncio
 async def test_inbound_relay_does_not_clobber_sender_gateway_seal_key(gateway, two_clients):
     """An inbound relay carrying the sender's BROWSER x25519 must not overwrite
-    their GATEWAY seal key (save_x25519_pub), which _resolve_peer_x25519_pub uses
+    their GATEWAY seal key (save_gateway_seal_key), which _resolve_peer_x25519_pub uses
     to seal outbound relays. The clobber made every reply-after-receiving seal to
     the wrong key -> recipient gateway 400 -> reply silently lost. The browser key
     belongs in the e2e_key store instead.
@@ -172,7 +172,7 @@ async def test_inbound_relay_does_not_clobber_sender_gateway_seal_key(gateway, t
     alice_did = pub_key_to_did(pub_bytes)
 
     # Discovery already stored Alice's GATEWAY seal key.
-    gateway._store.save_x25519_pub(alice_did, "ALICE_GATEWAY_SEAL_KEY")
+    gateway._store.save_gateway_seal_key(alice_did, "ALICE_GATEWAY_SEAL_KEY")
 
     ts = datetime.now(timezone.utc).isoformat()
     msg_id = "relay-clobber-1"
@@ -188,7 +188,7 @@ async def test_inbound_relay_does_not_clobber_sender_gateway_seal_key(gateway, t
     status, _ = await gateway._handle_relay_post(body)
     assert status.startswith("200")
     # Seal key preserved; browser key cached separately.
-    assert gateway._store.get_x25519_pub(alice_did) == "ALICE_GATEWAY_SEAL_KEY"
+    assert gateway._store.get_gateway_seal_key(alice_did) == "ALICE_GATEWAY_SEAL_KEY"
     assert gateway._store.get_e2e_key(alice_did) == "ALICE_BROWSER_KEY"
 
 
