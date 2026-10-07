@@ -16,6 +16,13 @@ export class E2EDecryptError extends Error {
     constructor(msg) { super(msg); this.name = 'E2EDecryptError'; }
 }
 
+// Thrown by ratchetDecrypt({ allowInit: false }) when no session exists for the
+// peer: the caller has not authenticated the sender, so the message must not
+// start one. A subclass, so existing E2EDecryptError handling still applies.
+export class E2ENoSessionError extends E2EDecryptError {
+    constructor(msg) { super(msg); this.name = 'E2ENoSessionError'; }
+}
+
 const _ENC = new TextEncoder();
 const _DEC = new TextDecoder();
 // Most message keys one incoming message may make us derive and buffer, per
@@ -762,10 +769,19 @@ async function _ratchetEncryptImpl(peerId, plaintext) {
 
 // ── ratchetDecrypt ────────────────────────────────────────────────────────────
 
-export function ratchetDecrypt(peerId, ciphertextB64u, nonceB64u, msgNum, ratchetPubB64u, pn = 0) {
-    return _serialize(peerId, () => _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ratchetPubB64u, pn));
+// opts.allowInit (default true): when false and no session exists for peerId,
+// throw E2ENoSessionError instead of creating a responder session from the
+// message's ratchet_pub. Callers that have not authenticated the sender pass
+// false, so an unauthenticated message can never establish the peer's session.
+export function ratchetDecrypt(peerId, ciphertextB64u, nonceB64u, msgNum, ratchetPubB64u, pn = 0, opts = {}) {
+    return _serialize(peerId, () => _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ratchetPubB64u, pn, opts));
 }
-async function _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ratchetPubB64u, pn = 0) {
+
+// True when a ratchet session exists for peerId (serialized with ratchet ops).
+export function hasRatchetSession(peerId) {
+    return _serialize(peerId, async () => !!(await loadRatchetState(peerId)));
+}
+async function _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ratchetPubB64u, pn = 0, opts = {}) {
     if (!_initDone) await initE2E();
     if (!e2eSupported) throw new E2EDecryptError('E2E not supported');
     if (!ratchetPubB64u) throw new E2EDecryptError('ratchet_pub required');
@@ -795,6 +811,7 @@ async function _ratchetDecryptImpl(peerId, ciphertextB64u, nonceB64u, msgNum, ra
         delete state.skippedKeys[skipKey];
     } else {
         if (!state) {
+            if (opts && opts.allowInit === false) throw new E2ENoSessionError('No session for peer');
             state = await _initReceiverState(ratchetPubB64u);
         } else if (ratchetPubB64u !== state.theirRatchetPub) {
             state = await _dhRatchetReceive(state, ratchetPubB64u, pn);

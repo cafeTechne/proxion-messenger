@@ -1,7 +1,7 @@
 import { solidSession, initSolidAuth, solidLogin, solidLogout, podStorageRoot, discoverStorageRoot } from './auth.js';
 import {
     initE2E, e2eSupported, isE2EEnabled, isPeerVerified, markPeerVerified, myX25519PubB64u, cachePeerPub, onPeerPubChanged,
-    ratchetEncrypt, ratchetDecrypt, fetchAndCachePeerPub, E2EDecryptError, safetyNumber,
+    ratchetEncrypt, ratchetDecrypt, fetchAndCachePeerPub, E2EDecryptError, safetyNumber, hasRatchetSession,
     e2eScopedKey,
 } from './e2e.js';
 import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetContainerAcl,
@@ -71,7 +71,7 @@ import { createInvite } from './invite.js';
 import { createPush, closedAppPushStatus } from './push.js';
 import { subscribeWebhook, watchResource } from './notify.js';
 import { isPeerPodRootAllowed } from './ssrf.js';
-import { createWebDm, peerPodRootFromWebId } from './webdm.js';
+import { createWebDm, createSenderVerifier, peerPodRootFromWebId } from './webdm.js';
 import { createWebPresence } from './webpresence.js';
 import { createWebCalls } from './webcalls.js';
 import { createWebJoin, makeInvite, parseInvite } from './webjoin.js';
@@ -1478,8 +1478,11 @@ import { initThemePicker } from './theme.js';
             } else if (event.type === "file_offer") {
                 event = await secondary.openFileOffer(event);
             }
-            // Decrypt E2E messages before rendering
-            if (event.type === "message" && event.e2e && event.nonce) {
+            // Decrypt E2E messages before rendering. Gateway events only: the
+            // sender there is the gateway-authenticated identity. Pod-drop DMs are
+            // verified and decrypted in webdm.js, and nothing else read from a pod
+            // may start a ratchet session under a from_webid it merely claims.
+            if (!fromPod && event.type === "message" && event.e2e && event.nonce) {
                 const peerId = event.from_webid;
                 if (peerId && peerId !== selfWebId && peerId !== clientDid) {
                     try {
@@ -1529,8 +1532,12 @@ import { initThemePicker } from './theme.js';
                 let text = p.content;
                 if (p.e2e && p.nonce) {
                     try {
+                        // A pod-drop copy may start a session only when webdm
+                        // verified its envelope; a gateway copy is authenticated
+                        // by the gateway session.
                         text = await ratchetDecrypt(pid, p.content, p.nonce,
-                            p.msg_num ?? 0, p.ratchet_pub ?? null, p.pn ?? 0);
+                            p.msg_num ?? 0, p.ratchet_pub ?? null, p.pn ?? 0,
+                            { allowInit: !fromPod || event.allow_session_init === true });
                         if (isSealedPlain(text)) text = '[could not decrypt]';
                     } catch (err) {
                         text = err instanceof E2EDecryptError ? '[could not decrypt]' : '[decryption error]';
@@ -6359,7 +6366,7 @@ import { initThemePicker } from './theme.js';
                     // the peer's pod on send, and watches our own drop box to receive.
                     const webDm = createWebDm({
                         pod: { podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop },
-                        e2e: { cachePeerPub, ratchetDecrypt },
+                        e2e: { cachePeerPub, ratchetDecrypt, hasSession: hasRatchetSession },
                         notify: { watchResource },
                         handleEvent: (ev) => _handleEventAsync(ev, true),
                         getSelfWebId: () => selfWebId,
@@ -6381,19 +6388,23 @@ import { initThemePicker } from './theme.js';
                         // R107: is this DM's envelope really signed by from_webid's
                         // owner? Verify the signature, then confirm the signer is one
                         // the sender published at their OWN pod (or a device certified
-                        // by their published account). Non-gating (marks, never drops).
-                        verifySender: async (env) => {
-                            if (!env || !env.from_webid || !env.signer || !env.sig) return false;
-                            const sigOk = env.kind === 'fanout' ? await verifyFanoutSig(env) : await verifyDmSig(env);
-                            if (!sigOk) return false;
-                            const iddoc = await podFetchPeerSigner(peerPodRootFromWebId(env.from_webid));
-                            if (!iddoc) return false;
-                            if (env.signer === iddoc.signer) return true;
-                            if (iddoc.account_did && env.cert) {
-                                const acct = await verifyDeviceCert(env.cert, { expectedAccountDid: iddoc.account_did, expectedDeviceDid: env.signer });
-                                if (acct && acct === iddoc.account_did) return true;
-                            }
-                            return false;
+                        // by their published account). Only a verified envelope may
+                        // start a ratchet session (webdm.js).
+                        verifySender: createSenderVerifier({
+                            verifyDmSig, verifyFanoutSig, verifyDeviceCert,
+                            fetchSigner: (root) => podFetchPeerSigner(root),
+                        }),
+                        // A first-contact drop we could not verify: show that it
+                        // arrived, without its content, in the claimed sender's thread.
+                        onUnverifiedDrop: (info) => {
+                            _handleEventAsync({
+                                type: 'message',
+                                message_id: 'unverified-' + Math.random().toString(36).slice(2),
+                                thread_id: info.from_webid, from_webid: info.from_webid,
+                                content: t('dm.unverifiedNotOpened'),
+                                timestamp: new Date().toISOString(),
+                                source: 'local_dm', local: true, sender_verified: false,
+                            }, true);
                         },
                     });
                     // R105: gateway-free call signaling over the pod call-inbox.

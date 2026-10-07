@@ -143,7 +143,7 @@ describe('createWebDm.dropFanout', () => {
 
 describe('createWebDm fanout receive', () => {
     it('claims the fanout copy for this device and dispatches dm_fanout', async () => {
-        const { dm, events, deleted } = harness({ myDevice: 'dev-me', drops: [
+        const { dm, events, deleted } = harness({ myDevice: 'dev-me', verifySender: async () => true, drops: [
             { url: 'u1', envelope: { kind: 'fanout', from_webid: 'https://bob', message_id: 'm', to_device_id: 'dev-me', payload: { content: 'CT', e2e: true, from_device_id: 'bob-1' } } },
         ] });
         await dm.drainOnce();
@@ -172,7 +172,7 @@ describe('createWebDm receive', () => {
         ] });
         await dm.drainOnce();
         expect(e2e.cachePeerPub).toHaveBeenCalledWith('https://bob', 'XP');
-        expect(e2e.ratchetDecrypt).toHaveBeenCalledWith('https://bob', 'CT9', 'N', 0, 'RP', 0);
+        expect(e2e.ratchetDecrypt).toHaveBeenCalledWith('https://bob', 'CT9', 'N', 0, 'RP', 0, { allowInit: true });
         expect(events).toHaveLength(1);
         expect(events[0]).toMatchObject({
             type: 'message', message_id: 'm9', thread_id: 'https://bob',

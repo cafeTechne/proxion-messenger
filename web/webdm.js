@@ -38,7 +38,39 @@ export function envelopeFromDmPayload(payload, selfWebId, displayName = '') {
     };
 }
 
-export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDisplayName, getMyDeviceId, persistMessage, signEnvelope, verifySender }) {
+// Sender verification result for a received envelope:
+//   'verified'    the signature verifies and the sender's own pod names its signer
+//   'unavailable' the signature verifies but the sender's signer identity could
+//                 not be fetched this time (retry later)
+//   'rejected'    unsigned, bad signature, or a signer the sender did not publish
+// A boolean from an injected verifier maps true -> verified, false -> rejected.
+function _verifyStatus(v) {
+    if (v === true || v === 'verified') return 'verified';
+    if (v === 'unavailable') return 'unavailable';
+    return 'rejected';
+}
+
+// Build the verifySender used by createWebDm. Dependencies are injected so it is
+// testable without a pod: verifyDmSig/verifyFanoutSig (dmsig.js), fetchSigner
+// (pod.js podFetchPeerSigner, null when unreachable), verifyDeviceCert
+// (device-cert.js).
+export function createSenderVerifier({ verifyDmSig, verifyFanoutSig, fetchSigner, verifyDeviceCert }) {
+    return async function verifySender(env) {
+        if (!env || !env.from_webid || !env.signer || !env.sig) return 'rejected';
+        const sigOk = env.kind === 'fanout' ? await verifyFanoutSig(env) : await verifyDmSig(env);
+        if (!sigOk) return 'rejected';
+        const iddoc = await fetchSigner(peerPodRootFromWebId(env.from_webid));
+        if (!iddoc) return 'unavailable';
+        if (env.signer === iddoc.signer) return 'verified';
+        if (iddoc.account_did && env.cert && verifyDeviceCert) {
+            const acct = await verifyDeviceCert(env.cert, { expectedAccountDid: iddoc.account_did, expectedDeviceDid: env.signer });
+            if (acct && acct === iddoc.account_did) return 'verified';
+        }
+        return 'rejected';
+    };
+}
+
+export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDisplayName, getMyDeviceId, persistMessage, signEnvelope, verifySender, onUnverifiedDrop }) {
     let _unsub = null;
 
     // Drop an (already-encrypted) DM to the recipient's pod inbox.
@@ -83,6 +115,21 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
         return anyRecipientOk;
     }
 
+    async function _senderStatus(env) {
+        if (!verifySender) return 'rejected';
+        try { return _verifyStatus(await verifySender(env)); } catch { return 'unavailable'; }
+    }
+
+    // A drop that claims a sender we could not verify and that has no session to
+    // decrypt under: it must not start one (the inbox is public-Append, so anyone
+    // can drop an envelope naming any WebID). Tell the user it arrived without
+    // opening it, and remove it.
+    async function _rejectUnverified(url, env) {
+        console.warn('[webdm] unverified first-contact drop from', env.from_webid, '- not opened');
+        if (onUnverifiedDrop) { try { onUnverifiedDrop({ from_webid: env.from_webid, message_id: env.message_id }); } catch { /* notice is best effort */ } }
+        await pod.podDeleteDmDrop(url);
+    }
+
     async function _handleEnvelope(url, env) {
         const from = env && env.from_webid;
         if (!from) return;
@@ -91,16 +138,34 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
         // claim. Reuse the app's dm_fanout handler for the per-device decrypt.
         if (env.kind === 'fanout') {
             if (getMyDeviceId && env.to_device_id && env.to_device_id !== getMyDeviceId()) return;
-            let sender_verified = false;
-            if (verifySender) { try { sender_verified = !!(await verifySender(env)); } catch { sender_verified = false; } }
-            handleEvent({
+            const status = await _senderStatus(env);
+            const verified = status === 'verified';
+            const p = env.payload || {};
+            if (!verified && p.e2e) {
+                // Same session id main.js uses for a fanout copy.
+                const pid = from + '#' + (p.from_device_id || from);
+                const known = e2e.hasSession ? await e2e.hasSession(pid) : false;
+                if (!known) {
+                    if (status === 'unavailable') return;   // retry once the signer is reachable
+                    await _rejectUnverified(url, env);
+                    return;
+                }
+            }
+            await handleEvent({
                 type: 'dm_fanout', to_device_id: env.to_device_id,
                 from_webid: env.from_webid, message_id: env.message_id, payload: env.payload,
-                sender_verified,
+                sender_verified: verified,
+                // Only a verified envelope may start a new ratchet session.
+                allow_session_init: verified,
             });
             await pod.podDeleteDmDrop(url);
             return;
         }
+        // R107: is this envelope really signed by from_webid's owner? Checked
+        // BEFORE decrypting, because decrypting with no session would create one
+        // from the envelope's ratchet_pub.
+        const status = await _senderStatus(env);
+        const sender_verified = status === 'verified';
         let content = env.content;
         try {
             if (env.e2e) {
@@ -108,21 +173,27 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
                 // drop an e2e envelope into our public-Append inbox, and caching an
                 // unverified key here would pre-seed the trusted send-side key cache
                 // (isE2EEnabled) so our first reply encrypts under the attacker's key.
-                // Decrypt needs only env.ratchet_pub + our own key, never the cached
-                // long-term pub; cache it below, once the signature is verified.
-                content = await e2e.ratchetDecrypt(from, env.content, env.nonce, env.msg_num, env.ratchet_pub, env.pn || 0);
+                // Only a verified envelope may create the session. An unverified one
+                // decrypts only under an existing session, whose keys only the peer
+                // it was set up with can produce (the AEAD tag must verify, and a
+                // failed decrypt leaves the stored state unchanged).
+                content = await e2e.ratchetDecrypt(from, env.content, env.nonce, env.msg_num, env.ratchet_pub, env.pn || 0,
+                    { allowInit: sender_verified });
             }
         } catch (err) {
+            if (err && err.name === 'E2ENoSessionError') {
+                if (status === 'unavailable') {
+                    console.warn('[webdm] sender identity unreachable, leaving first-contact drop for retry');
+                    return;
+                }
+                await _rejectUnverified(url, env);
+                return;
+            }
             // Leave an undecryptable drop in place for a later retry (bounded by
             // the inbox cap); never delete a drop we could not read.
             console.warn('[webdm] decrypt failed, leaving drop for retry:', err);
             return;
         }
-        // R107: was this envelope really signed by from_webid's owner? Verified
-        // against the sender's published signer identity; non-gating (an unsigned
-        // or unverifiable message still shows, just marked unverified).
-        let sender_verified = false;
-        if (verifySender) { try { sender_verified = !!(await verifySender(env)); } catch { sender_verified = false; } }
         // Only now cache the sender's long-term x25519_pub (a signed field), and only
         // for a verified envelope: the send path (isE2EEnabled) trusts this cache to
         // skip the authenticated pod-key fetch, so an unverified key must never land.
