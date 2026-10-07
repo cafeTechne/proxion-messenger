@@ -19,7 +19,7 @@ for behavior the code enforces. Everything else is descriptive.
 4. [Key publication and discovery](#4-key-publication-and-discovery)
 5. [Session setup](#5-session-setup)
 6. [Message encryption](#6-message-encryption)
-7. [Envelope format](#7-envelope-format)
+7. [Envelope format](#7-envelope-format) (7.5: edits, reactions and files)
 8. [Delivery](#8-delivery)
 9. [Multiple devices](#9-multiple-devices)
 10. [Authentication and verification](#10-authentication-and-verification)
@@ -33,16 +33,15 @@ for behavior the code enforces. Everything else is descriptive.
 Covered: the text body of a one-to-one DM sent from the web client
 (`web/main.js` `_sendComposed`, `_tryDmFanout`), encrypted by `web/e2e.js`, and
 carried either over a Proxion gateway or dropped directly into the recipient's
-Solid pod (`web/webdm.js`).
+Solid pod (`web/webdm.js`). Also covered, over a gateway: DM edits, reactions and
+file attachments (inline and chunked), sealed with the same ratchet session
+([7.5](#75-edits-reactions-and-files)).
 
 Not covered by this encryption layer:
 
-- Room messages. Rooms are shared Solid Long Chat resources and are not end-to-end
-  encrypted (see [POD_DATA_MODEL.md](POD_DATA_MODEL.md)).
-- DM edits (`web/edit.js` `commitEdit` sends `edit_message` / `edit_local_message`
-  with the new text in `content`), reactions (`web/reactions.js`, `add_reaction`
-  with the emoji in `emoji`) and file attachments (`send_file` with `data_b64`).
-  These are sent to the gateway without ratchet encryption.
+- Room messages, and edits, reactions and files in rooms. Rooms are shared Solid
+  Long Chat resources and are not end-to-end encrypted (see
+  [POD_DATA_MODEL.md](POD_DATA_MODEL.md)).
 - Call media. 1:1 calls use DTLS-SRTP; `web/callsec.js` binds the DTLS fingerprint
   to the Ed25519 identity (see [CALLS.md](CALLS.md)). Only the identity relation is
   mentioned here.
@@ -81,6 +80,11 @@ here.
 - **Forged or corrupted ciphertext does not damage the session.** Decryption works
   on a copy of the state and commits only after the AES-GCM tag verifies
   (`_ratchetDecryptImpl`).
+- **DM edits, reactions and files against gateways and pods.** For a keyed peer,
+  the new text of an edit, the emoji of a reaction, and a file's bytes, name, type,
+  size, dimensions and spoiler flag leave the browser only inside ratchet messages
+  or under a per-file AES-256-GCM key carried in one ([7.5](#75-edits-reactions-and-files)).
+  A failed seal sends nothing.
 - **Sender authenticity on the gateway-free path,** via an Ed25519 envelope
   signature checked against a signer identity published in the sender's own pod
   ([10.1](#101-envelope-signatures)).
@@ -108,7 +112,10 @@ here.
   fields (`_gateway_dm.py` `_handle_local_dm` builds and stores this event). On the
   gateway-free path the recipient's pod stores the full envelope, including sender
   WebID, display name and timestamp, until the recipient deletes it. Push
-  notifications carry a thread id and display name (`_push_offline_dm`).
+  notifications carry a thread id and display name (`_push_offline_dm`). For
+  sealed edits, reactions and files the gateway also sees the id of the message
+  acted on, who reacted, an opaque reaction token per reaction, and the
+  ciphertext length (which reveals the edit or file size to within the 16-byte tag).
 - **Key distribution through the gateway.** On the gateway path, a peer's X25519
   key arrives from the user's own gateway (in `relationships`, `contact_added`, and
   on every gateway-delivered DM event) and is cached without further proof
@@ -391,7 +398,8 @@ with padding (`dmsig.js` `_b64`).
 | `ratchet_pub` | string | sender's current X25519 ratchet public key, base64url |
 | `x25519_pub` | string | sender's long-term X25519 public key, base64url (lets the recipient learn it) |
 
-There is no protocol version field in the ratchet header.
+There is no protocol version field in the ratchet header of a message. Sealed edits,
+reactions and files add `e2e_v` (7.5).
 
 ### 7.2 Gateway-free single envelope
 
@@ -470,6 +478,114 @@ Multi-device sends use `{"cmd": "send_dm_fanout", "message_id", "fanout": [{"to_
 MUST reject more than 16 entries, takes the sender from the authenticated session
 rather than the command, and delivers `{"type": "dm_fanout", "message_id",
 "from_webid", "to_device_id", "payload"}` (`_handle_send_dm_fanout`).
+
+### 7.5 Edits, reactions and files
+
+`web/e2e-secondary.js` `createSecondaryCrypto` seals these in a `dm` or `local_dm`
+view whose peer key is cached (`isE2EEnabled`, the test the message path uses).
+Each is its own ratchet message (6.3) on the session for the same peer id as the
+message text, and carries the fields of 7.1 (without `x25519_pub`) plus:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `e2e_v` | integer | `1`, the version of this format |
+
+The ratchet plaintext is the five bytes `0x00 'p' 'x' 's' '1'` followed by UTF-8
+JSON with `"v": 1`, a kind `k`, and:
+
+| `k` | Fields |
+|---|---|
+| `edit` | `mid` (id of the edited message), `text` |
+| `react` | `mid`, `emoji`, `tok` (the token below) |
+| `file` | `key` (32 bytes, base64url), `iv` (12 bytes, base64url), `name`, `mime`, `size`; optional `w`, `h`, `spoiler` |
+
+A receiver MUST drop the event when the kind differs from the event type, when
+`mid` differs from the event's `message_id`, or when `tok` differs from the event's
+`emoji` (`checkEditBody`, `checkReactionBody`). The message path treats a
+decrypted plaintext that starts with the prefix as undecryptable (`isSealedPlain`).
+
+**Edits.** `edit_message` and `edit_local_message` carry the ciphertext in
+`content`. The gateway delivers `message_edited` with the ciphertext in
+`new_content`, the header fields, and `from_webid` (the editor), which selects
+the session to decrypt with.
+
+**Reactions.** `add_reaction` carries a token in `emoji` (`~` followed by 11
+base64url characters, 64 random bits, `newReactionToken`) and the header with the
+ciphertext in `content`. The gateway stores and relays the token as the emoji.
+`remove_reaction` names the token and carries no header. Each device keeps the
+token-to-emoji map it learned in localStorage (`proxion_e2e_react_tokens`, account
+scoped, at most 2000 entries, cleared on logout) so stored reactions render after a
+reload; a token the device never decrypted is not shown.
+
+**Files.** The bytes are encrypted with AES-256-GCM under a fresh random 256-bit
+key and 96-bit nonce, without associated data (`encryptFile`). The key, nonce and
+metadata travel in the sealed `file` body.
+
+- Inline: `send_file` with `filename: "file"`, `mime_type:
+  "application/octet-stream"`, `data_b64` the base64 ciphertext, and the header
+  (ciphertext in `content`). No dimensions or spoiler flag outside the header. The
+  gateway applies only its size and executable-signature checks to a sealed file
+  (`_gateway_dm.py` `_handle_send_file`), replaces the declared name and type with
+  the placeholders, and stores the summary as a bare paperclip.
+- Chunked: the whole file is encrypted first and the ciphertext is split into
+  chunks (`filetransfer.js` `sendFileChunked`). `file_offer` carries the
+  placeholder name and type, the ciphertext size and the header. The receiver
+  opens the header before accepting and refuses the offer (`bad_offer`) when it
+  cannot.
+- The ciphertext is drawn again in the rare case its first bytes match an
+  executable signature the gateway refuses (`isBlockedMagic`).
+- After decrypting, the receiving client applies the MIME allowlist and the
+  executable-signature check the gateway applies to plaintext files
+  (`checkFileBody`, `openFileBytes`).
+
+**Own echoes.** A sender cannot decrypt its own ratchet messages. It keeps the
+plaintext of its last 32 sealed sends keyed by `ratchet_pub:msg_num` and matches
+the gateway's echo of each (`createSealedOutbox`).
+
+**Edit history.** Earlier versions of a DM message are kept in the local history
+cache (`dmhistory.js` `applyEditToRecord`, up to 50 per message). The edit-history
+view of a DM reads only that cache, since the gateway holds them as ciphertext.
+
+**Gateway checks.** `command_validation.py` `sealed_fields` accepts a header only
+with `e2e` true, `e2e_v` 1, base64url `content` (at most 16,384 characters for
+edits, 1,024 for reactions, 4,096 for files), `nonce` and `ratchet_pub` of at most
+32 and 64 characters, and integer `msg_num` and `pn` in [0, 2^31). Anything else
+claiming a header is refused with `invalid_e2e_fields`, by command and by relay.
+Rooms refuse sealed edits, reactions and files. Relays forward the header fields
+(`e2e_v` is on the relay key allow-list).
+
+**Compatibility.**
+
+- Reading: an edit, reaction or file event with neither `e2e` nor `e2e_v` comes
+  from a client that predates this format and is applied as before. One that claims
+  encryption in another version, or with a broken header, is dropped (edits,
+  reactions) or shown as `[could not decrypt]` without file data (files). It is
+  never shown as text.
+- Sending: clients exchange no capability or version signal, so a client seals
+  whenever it holds the peer's key and never falls back to plaintext for such a
+  peer; when sealing fails nothing is sent. A peer on an older client cannot read
+  sealed events: an edit replaces the shown text with ciphertext, a reaction shows a
+  token, and a sealed file shows as an unreadable attachment named `file`. A gateway
+  that predates this format refuses sealed inline files and chunked offers (type
+  check), rejects relays that carry `e2e_v`, and delivers same-gateway edits and
+  reactions without the header, so the peer cannot open them. None of these paths
+  carries plaintext.
+- To a peer whose key is unknown, edits, reactions and files are sent in plaintext,
+  as message text is (2.2).
+
+**Limits.**
+
+- Multi-device: events are sealed to the peer id used for single sends (the
+  account's key), not fanned out per device (9.1). Other devices of the peer, and
+  the sender's other devices, cannot open them and drop them.
+- Delivery is live or through the relay queue. A gateway that replays a stored
+  edit or reaction later (history) holds ciphertext or a token the forward ratchet
+  cannot reopen, so a device that was offline keeps the earlier text and does not
+  show that reaction.
+- The gateway-free build does not carry edits, reactions or files
+  (`podtransport.js` routes no such commands).
+- On the pod-backed certificate path (8.2) the pod copies written by
+  `messaging.py` and `files.py` contain the ciphertext without the header.
 
 ## 8. Delivery
 
@@ -716,9 +832,11 @@ Known open questions:
 - **Session reset and simultaneous initiation.** There is no message to reset a
   session, and no rule for two peers who both start a session before either message
   arrives.
-- **Versioning.** The ratchet header has no version field; only the envelope (`v`)
-  and the published key file (`version`) are versioned.
-- **Scope.** Edits, reactions and attachments are outside the encrypted channel (1).
+- **Versioning.** The ratchet header of a message has no version field; the envelope
+  (`v`), the published key file (`version`) and sealed edits, reactions and files
+  (`e2e_v`) are versioned. There is no capability exchange between clients.
+- **Secondary events and devices.** Sealed edits, reactions and files are not fanned
+  out to every device, and are not replayable from server history (7.5).
 - **Groups.** Rooms are not end-to-end encrypted. Messaging Layer Security (MLS,
   RFC 9420) is a candidate long-term direction for an interoperable specification
   that would cover both groups and multi-device; adopting it would replace the
@@ -797,5 +915,7 @@ sn = 24594 99591 04903 81211 44774 95312   (same for either argument order)
   chain (6.6); buffered keys are tried before a DH ratchet step (6.4); `send_dm`
   with a ratchet header always goes through the relay path (8.2); gateway seal keys
   are stored apart from browser E2E keys (8.3).
+- Unreleased: DM edits, reactions and file attachments are sealed with the DM
+  ratchet (7.5), with `e2e_v` 1.
 - Unreleased: first description of the protocol as implemented. Replaces
   `E2E_ENCRYPTION_ROADMAP.md`, which described an earlier plan.
