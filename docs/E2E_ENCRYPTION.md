@@ -68,6 +68,18 @@ here.
   (`isE2EEnabled`), a failed encryption aborts the send instead of falling back to
   plaintext (`main.js` `_sendComposed` `_encryptedSend`; `_tryDmFanout` skips the
   device on failure).
+- **No plaintext first message.** If no key is cached when the user sends a DM, the
+  client first tries to obtain one: from the peer's pod in the gateway-free build
+  (`fetchAndCachePeerPub`), otherwise from the gateway's device roster, where the
+  account key is the entry whose `device_id` is the account itself
+  (`main.js` `_obtainPeerKey`, `dmkey.js` `primaryKeyFromDevices`). If there is
+  still no key, the DM is not sent: the text stays in the composer and the user is
+  told the peer's key is missing (`_requireDmKey`, `dmkey.js` `resolveDmSendMode`).
+  A peer with two or more devices is reached through per-device fan-out
+  ([9.1](#91-per-device-sessions)) and needs no account key.
+- **Sessions start only from authenticated messages.** On the gateway-free path an
+  envelope's signature and signer are checked before decryption, and only a verified
+  envelope may create a ratchet session ([8.1](#81-pod-inbox-drop-no-gateway)).
 - **Forward secrecy within a session.** Message keys come from a hash chain that is
   stepped forward and not kept (`advanceChain`), so a later state snapshot does not
   contain earlier message keys, except keys held in the skipped-key buffer
@@ -91,11 +103,19 @@ here.
 
 ### 2.2 What it does not protect
 
-- **The first message to a peer whose key is unknown is sent in plaintext.** If no
-  X25519 key is cached for the peer when the user sends, `_sendComposed` sends the
-  `content` unencrypted. In the gateway-free build the client first tries to fetch
-  the key from the peer's pod (`fetchAndCachePeerPub`). The DM header shows the
-  thread as not encrypted in this state (`e2e-status.js` `_updateE2EStatus`).
+- **Peers that opted out of encryption by the user's choice.** Some DM peers cannot
+  do E2E (an MCP agent or other gateway client that registers without an X25519 key).
+  When a send is refused for lack of a key, the user can choose "Send unencrypted"
+  for that peer. The choice is stored locally per peer
+  (`proxion_dm_plaintext_ok_<peer>`, `dmkey.js` `setPlaintextOptIn`), the DM header
+  then shows the thread as unencrypted (`e2e-status.js` `_updateE2EStatus`), and
+  messages to that peer are sent without ratchet encryption while no key is known.
+  As soon as a key for the peer is cached, messages are encrypted again.
+- **First contact on the gateway path is only as authentic as the gateway.** A
+  gateway-delivered DM creates the recipient's session from the event's
+  `ratchet_pub` with no browser signature; the sender is the identity the gateway
+  authenticated ([10.2](#102-gateway-path)). A gateway that forges events can
+  impersonate a first contact, as it can substitute keys (below).
 - **Messages sent before the first reply have weaker properties.** There are no
   signed prekeys or one-time prekeys. The initiator derives its first sending chain
   from its own fresh ratchet key and the recipient's long-term X25519 identity key
@@ -263,8 +283,13 @@ state.theirRatchetPub = R_A
 The responder's sending chain is ready immediately; its first reply carries `R_B`,
 which makes the initiator perform a DH ratchet step ([6.5](#65-dh-ratchet)).
 
-A responder creates state from whichever message first decrypts for that peer id.
-The new state is committed only if the AES-GCM tag of that message verifies.
+A responder creates state from whichever message first decrypts for that peer id,
+and only from a message whose sender the caller has authenticated. A caller that has
+not passes `allowInit: false` to `ratchetDecrypt`, which then fails with
+`E2ENoSessionError` instead of creating state (`_ratchetDecryptImpl`). The gateway
+path allows creation (the gateway authenticated the sender, 10.2); the gateway-free
+path allows it only for a verified envelope (8.1). The new state is committed only if
+the AES-GCM tag of that message verifies.
 
 ## 6. Message encryption
 
@@ -602,14 +627,29 @@ each, and processes each independently (`_readDropBox`, `webdm.js` `drainOnce`).
 watches the container with Solid notifications to drain again on change
 (`webdm.js` `start`).
 
-For a single envelope (`_handleEnvelope`): decrypt with the ratchet; verify the
-signature ([10.1](#101-envelope-signatures)); cache `x25519_pub` only if the envelope
-verified; hand the message to the UI with `sender_verified`; store the plaintext in
-local history; then DELETE the drop. A drop that fails to decrypt is left in place
-for a later attempt.
+For a single envelope (`_handleEnvelope`): verify the sender first
+([10.1](#101-envelope-signatures)), then decrypt with the ratchet. Only a verified
+envelope may create a new session for `from_webid` ([5.2](#52-responder)). An
+unverified envelope decrypts only under an existing session; it cannot change that
+session unless its AES-GCM tag verifies under keys the session already holds. Then:
+cache `x25519_pub` only if the envelope verified; hand the message to the UI with
+`sender_verified`; store the plaintext in local history; DELETE the drop. A drop that
+fails to decrypt is left in place for a later attempt.
+
+An e2e envelope that is not verified and has no session to decrypt under is not
+opened:
+
+- if the sender's signer identity could not be fetched, the drop is left in place and
+  retried on a later drain (bounded by the inbox cap);
+- otherwise (unsigned, bad signature, or a signer the sender did not publish), the
+  drop is deleted and the claimed sender's thread shows a notice that an unverified
+  message arrived and was not opened (`onUnverifiedDrop`).
 
 A fan-out envelope addressed to a different `to_device_id` is left in place for the
-sibling device that shares the inbox.
+sibling device that shares the inbox. A fan-out envelope for this device follows the
+same rules, keyed by the session id `<from_webid>#<from_device_id>`; the event handed
+to `main.js` carries `allow_session_init`, true only for a verified envelope, and the
+`dm_fanout` handler passes it to `ratchetDecrypt` as `allowInit`.
 
 ### 8.2 Same-gateway delivery
 
@@ -736,22 +776,27 @@ A verifier tries this scheme, then, only if none of the fields added later (`e2e
 2-byte lengths and fewer fields (`verifyDmSig`, `verifyFanoutSig`).
 
 The recipient treats an envelope as from `from_webid` (`sender_verified`) when
-(`main.js`, `verifySender`):
+(`webdm.js` `createSenderVerifier`):
 
 1. the signature verifies under the key in `signer`, and
 2. the sender's `proxion/identity/signer.json`, fetched from the pod derived from
    `from_webid`, names that `signer`, or names an `account_did` for which the attached
    `cert` is a valid device certificate with `device_did == signer`.
 
-Verification marks messages; it does not reject them. An unverified message is
-shown with an unverified indicator.
+The verifier returns `verified`, `unavailable` (the signature verifies but
+`signer.json` could not be fetched) or `rejected`. Verification gates session
+creation ([8.1](#81-pod-inbox-drop-no-gateway)). A message decrypted under an existing
+session without verification is shown with an unverified indicator.
 
 ### 10.2 Gateway path
 
 On the gateway path the sender of an event is the identity the gateway
 authenticated for the sending socket (Ed25519 challenge signed by the browser,
 `main.js` `_respondToAuthChallenge`). Envelopes are not separately signed by the
-browser. Cross-gateway relays are signed by the sending gateway (8.3).
+browser. Cross-gateway relays are signed by the sending gateway (8.3). A
+gateway-delivered DM may therefore create the recipient's session; events read from a
+pod never go through that path (`_handleEventAsync` decrypts `message` events only
+when they came over the gateway socket).
 
 ### 10.3 Safety numbers
 
@@ -915,6 +960,10 @@ sn = 24594 99591 04903 81211 44774 95312   (same for either argument order)
   chain (6.6); buffered keys are tried before a DH ratchet step (6.4); `send_dm`
   with a ratchet header always goes through the relay path (8.2); gateway seal keys
   are stored apart from browser E2E keys (8.3).
+- Unreleased: on the gateway-free path the sender is verified before decryption and
+  only a verified envelope may create a session (5.2, 8.1, 10.1); a DM is no longer
+  sent in plaintext when the peer key is unknown, except to a peer the user opted in
+  to unencrypted messages (2.1, 2.2).
 - Unreleased: DM edits, reactions and file attachments are sealed with the DM
   ratchet (7.5), with `e2e_v` 1.
 - Unreleased: first description of the protocol as implemented. Replaces
