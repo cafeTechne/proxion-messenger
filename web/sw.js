@@ -48,6 +48,7 @@ const SHELL = [
   "transport.js",
   "podtransport.js",
   "webdm.js",
+  "dmkey.js",
   "webpresence.js",
   "webcalls.js",
   "webjoin.js",

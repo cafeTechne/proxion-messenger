@@ -72,6 +72,7 @@ import { createPush, closedAppPushStatus } from './push.js';
 import { subscribeWebhook, watchResource } from './notify.js';
 import { isPeerPodRootAllowed } from './ssrf.js';
 import { createWebDm, createSenderVerifier, peerPodRootFromWebId } from './webdm.js';
+import { resolveDmSendMode, primaryKeyFromDevices, createDeviceKeyWaiter, isPlaintextOptedIn, setPlaintextOptIn, DmKeyMissingError } from './dmkey.js';
 import { createWebPresence } from './webpresence.js';
 import { createWebCalls } from './webcalls.js';
 import { createWebJoin, makeInvite, parseInvite } from './webjoin.js';
@@ -2818,6 +2819,7 @@ import { initThemePicker } from './theme.js';
                 case "peer_device_keys":
                     // Multi-device: cache a peer's per-device E2E keys for DM fanout.
                     _peerDeviceKeys[event.peer_webid] = event.devices || [];
+                    _deviceKeyWaiter.resolve(event.peer_webid, event.devices || []);
                     break;
                 case "device_roster_changed":
                     // A device just linked/unlinked to our account — refresh our own
@@ -4160,12 +4162,64 @@ import { initThemePicker } from './theme.js';
             try {
                 await _sendComposed(content);
             } catch (err) {
-                console.warn('[send] failed:', err);
                 if (!input.value) input.value = draft;
+                if (err instanceof DmKeyMissingError) _explainMissingKey(err);
+                else console.warn('[send] failed:', err);
             } finally {
                 _sendInFlight = false;
             }
         };
+
+        // A DM is never sent in plaintext by default (dmkey.js). With no key for
+        // the peer the text stays in the composer and the user is told why; a peer
+        // that cannot do E2E at all (a bot or AI agent) can be opted in to
+        // unencrypted messages explicitly, and the thread header then says so.
+        function _explainMissingKey(err) {
+            const name = (activeView && activeView.name) || err.peerId || '';
+            showConfirm(t('dm.keyMissing.body', { name }), () => {
+                setPlaintextOptIn(err.peerId, true);
+                _updateE2EStatus(err.peerId);
+                document.getElementById("message-form").dispatchEvent(new Event("submit", { cancelable: true }));
+            }, null, {
+                title: t('dm.keyMissing.title'),
+                confirmLabel: t('dm.keyMissing.sendPlain'),
+                cancelLabel: t('dm.keyMissing.wait'),
+                danger: true,
+            });
+        }
+
+        // Try to learn a DM peer's X25519 key before sending. Gateway-free: read
+        // it from the peer's pod. Gateway: the account key is the roster entry
+        // whose device_id is the account itself; ask once if no roster is cached.
+        const _deviceKeyWaiter = createDeviceKeyWaiter();
+        async function _obtainPeerKey(peerId) {
+            if (transport.mode === 'web') {
+                if (peerId.startsWith('https://')) await fetchAndCachePeerPub(peerId, peerPodRootFromWebId(peerId));
+                return;
+            }
+            let devices = _peerDeviceKeys[peerId];
+            if (devices === undefined && socket && socket.readyState === WebSocket.OPEN) {
+                const reply = _deviceKeyWaiter.wait(peerId);
+                socket.send(JSON.stringify({ cmd: 'get_peer_device_keys', peer_webid: peerId }));
+                devices = await reply;
+            }
+            const pub = primaryKeyFromDevices(peerId, devices);
+            if (pub) cachePeerPub(peerId, pub);
+        }
+
+        // Throws DmKeyMissingError when the DM can't be encrypted and the user
+        // has not opted this peer in to unencrypted messages. A multi-device peer
+        // is reached through per-device fan-out, which needs no account key.
+        async function _requireDmKey(peerId, optInId) {
+            const mode = await resolveDmSendMode(peerId, {
+                hasKey: (id) => isE2EEnabled(id),
+                obtainKey: _obtainPeerKey,
+                optedIn: () => isPlaintextOptedIn(optInId),
+            });
+            if (mode === 'refuse' && !(peerId && identity.devicesForPeer(peerId).length >= 2)) {
+                throw new DmKeyMissingError(optInId);
+            }
+        }
 
         async function _sendComposed(content) {
             if (content) {
@@ -4182,12 +4236,9 @@ import { initThemePicker } from './theme.js';
                 if (activeView.type === "local_dm") {
                     const peerWebid = activeView.peerWebid || activeView.id;
                     let sendContent = content;
-                    // Web build: with no gateway to carry the peer's key, discover it
-                    // from their pod now so the FIRST message encrypts (else it would
-                    // fall back to plaintext because isE2EEnabled is still false).
-                    if (transport.mode === 'web' && !isE2EEnabled(peerWebid) && peerWebid?.startsWith('https://')) {
-                        await fetchAndCachePeerPub(peerWebid, peerPodRootFromWebId(peerWebid)).catch(() => {});
-                    }
+                    // Learn the peer's key now if we don't have it, so the FIRST
+                    // message encrypts too; with no key and no opt-in, don't send.
+                    await _requireDmKey(peerWebid, peerWebid || activeView.id);
                     payload = {
                         cmd: "local_dm",
                         target_webid: peerWebid,
@@ -4208,6 +4259,8 @@ import { initThemePicker } from './theme.js';
                     if (myPub) payload.x25519_pub = myPub;
                 } else {
                     const cmd = activeView.type === "dm" ? "send_dm" : "send_room";
+                    // Rooms are not E2E by design (POD_DATA_MODEL.md); only DMs need a key.
+                    if (activeView.type === "dm") await _requireDmKey(activeView.peerWebid, activeView.peerWebid || activeView.id);
                     payload = { cmd: cmd, content: content, message_id: clientMsgId };
                     if (activeView.type === "dm") {
                         payload.cert_id = activeView.id;

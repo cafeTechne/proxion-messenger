@@ -57,6 +57,13 @@ describe('_updateE2EStatus', () => {
     // Styled neutral, not with the encrypted state's green.
     expect(els['dm-e2e-status'].dataset.state).toBe('none');
   });
+  it('says "unencrypted" when the user opted this keyless peer in to plaintext', () => {
+    store['proxion_dm_plaintext_ok_did:key:zBot'] = '1';
+    els['dm-e2e-status'] = mkEl();
+    createE2EStatus()._updateE2EStatus('did:key:zBot');
+    expect(els['dm-e2e-status'].textContent).toBe('e2e.plain');
+    expect(els['dm-e2e-status'].style.display).toBe('inline');
+  });
   it('hides the badge entirely with no peer', () => {
     els['dm-e2e-status'] = mkEl({ style: { display: 'inline' } });
     createE2EStatus()._updateE2EStatus(null);

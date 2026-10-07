@@ -9,6 +9,7 @@
 
 import { e2eSupported, isE2EEnabled, isPeerVerified, myX25519PubB64u, safetyNumber, e2eScopedKey } from './e2e.js';
 import { t } from './i18n.js';
+import { isPlaintextOptedIn } from './dmkey.js';
 
 export function createE2EStatus() {
     const state = {
@@ -28,6 +29,13 @@ export function createE2EStatus() {
             el.style.display = 'inline';
             // Nothing left to verify once verified.
             if (btn) btn.style.display = verified ? 'none' : 'inline';
+        } else if (peerId && isPlaintextOptedIn(peerId)) {
+            // The user chose to message this peer unencrypted (dmkey.js).
+            el.textContent = t('e2e.plain');
+            el.title = t('e2e.tip.plain');
+            el.dataset.state = 'none';
+            el.style.display = 'inline';
+            if (btn) btn.style.display = 'none';
         } else if (peerId && e2eSupported) {
             // Open lock plus the words; on phones CSS keeps only the lock visible
             // (the words stay for screen readers) so the call buttons still fit.
