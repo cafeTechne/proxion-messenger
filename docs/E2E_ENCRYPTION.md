@@ -287,7 +287,8 @@ Per peer id (`e2e.js`, comment above `_encState`):
 | `pendingDhRatchet` | true after a DH ratchet on receive; the next send rotates the own ratchet key |
 | `sendChain`, `sendMsgNum`, `sendPrevLen` | sending chain key, next message number, length of the previous sending chain |
 | `recvChain`, `recvMsgNum` | receiving chain key and next expected message number |
-| `skippedKeys` | map `"<ratchet_pub>:<msg_num>"` to base64url message key |
+| `skippedKeys` | map `"<ratchet_pub>:<msg_num>"` to base64url message key, oldest first |
+| `ver` | save counter, incremented on every `saveRatchetState`; used to pick the newest stored copy ([11](#11-state-storage)) |
 
 A stored state without `rootKey` is from an earlier format and is discarded on load
 (`loadRatchetState`).
@@ -313,13 +314,17 @@ state.
 
 `_ratchetDecryptImpl(peerId, ciphertext, nonce, msg_num, ratchet_pub, pn)`:
 
-1. `ratchet_pub` MUST be present; otherwise decryption fails.
-2. Load state and deep-copy it. If none, set up as responder ([5.2](#52-responder)).
-   Else if `ratchet_pub` differs from `theirRatchetPub`, perform the receiving half of
-   the DH ratchet using `pn`.
-3. If `"<ratchet_pub>:<msg_num>"` is in `skippedKeys`, use and remove that key.
-4. Else if `msg_num < recvMsgNum`, fail ("already consumed").
-5. Else step the receiving chain, buffering each skipped message key, until
+1. `ratchet_pub` MUST be present, and `msg_num` and `pn` MUST be non-negative safe
+   integers; otherwise decryption fails.
+2. Load state and deep-copy it. If `"<ratchet_pub>:<msg_num>"` is in `skippedKeys`,
+   use and remove that key and go to step 6. No ratchet step is taken for such a
+   message, so a late message from an older chain does not move the session.
+3. If there is no state, set up as responder ([5.2](#52-responder)). Else if
+   `ratchet_pub` differs from `theirRatchetPub`, perform the receiving half of the DH
+   ratchet using `pn`.
+4. If `msg_num < recvMsgNum`, fail ("already consumed"). If
+   `msg_num - recvMsgNum > MAX_SKIP`, fail before deriving any key.
+5. Step the receiving chain, buffering each skipped message key, until
    `recvMsgNum == msg_num`, then derive `MK` and step once more.
 6. Decrypt. Only if the tag verifies is the updated state saved. On any failure the
    stored state is unchanged.
@@ -329,7 +334,8 @@ state.
 Receiving half (`_dhRatchetReceive`), on a new `ratchet_pub` `R'`:
 
 ```
-buffer skipped keys of the current receiving chain up to pn
+drop skipped keys of every chain except the current receiving chain
+buffer skipped keys of the current receiving chain up to min(pn, recvMsgNum + MAX_SKIP)
 dh                   = X25519(myRatchetPriv, R')
 (rootKey, recvChain) = KDF_RK(rootKey, dh)
 recvMsgNum = 0; theirRatchetPub = R'; pendingDhRatchet = true
@@ -346,11 +352,22 @@ sendPrevLen = sendMsgNum; sendMsgNum = 0; myRatchet = (r', R'); pendingDhRatchet
 
 ### 6.6 Skipped message keys
 
-`MAX_SKIP` is 20 (`e2e.js`). It bounds the total number of entries in `skippedKeys`
-across all chains, not per chain. A receiver MUST fail decryption, without changing
-stored state, when buffering one more skipped key would exceed the bound, both in
-the in-chain loop and while advancing to `pn` during a DH ratchet. Buffered keys
-have no expiry; they are removed only when the matching message arrives.
+Two bounds apply (`e2e.js`):
+
+- `MAX_SKIP` (20) bounds the keys one incoming message can make the receiver
+  derive, per chain. In the current chain, a message whose `msg_num` is more than
+  `MAX_SKIP` ahead of `recvMsgNum` MUST fail before any key is derived, without
+  changing stored state. During a DH ratchet, at most `MAX_SKIP` keys of the retiring
+  chain are derived; if `pn` asks for more, the remaining messages of that chain are
+  given up and the message on the new chain is still processed. A forged `msg_num` or
+  `pn` therefore costs at most `2 * MAX_SKIP` chain steps.
+- `MAX_SKIPPED_KEYS` (100) bounds the stored buffer. When it is exceeded the oldest
+  entries are evicted first (`_capSkippedKeys`).
+
+Buffered keys also expire by chain: a DH ratchet step drops the keys of every chain
+except the one being retired, so only the current and the previous receiving chain
+can still deliver late messages. Otherwise a key is removed when its message
+arrives.
 
 ### 6.7 Nonces
 
@@ -487,14 +504,21 @@ identity, stores the message (with `content` as received) in its SQLite store
 pod (`_sync_local_dm_to_pod`). For an encrypted DM the stored `content` is
 ciphertext.
 
-When the gateway also holds a relationship certificate and pod client for the
-conversation (`dm_clients`), `send_dm` instead composes a signed `Message` and writes
-it to the pod with an additional `enc1:` layer (`messaging.py` `compose`,
-`msgcrypto.py`: AES-256-GCM with a key from HKDF-SHA256 over the certificate's
-canonical JSON, info `proxion-message-key-v1`). That layer protects data between
-gateways and pods; any holder of the certificate can derive its key. It carries the
-`content` and `reply_to_id` of the command; it does not carry the ratchet header
-fields.
+A `send_dm` that carries the ratchet header (`e2e` set, or `ratchet_pub` present)
+always takes this path: the gateway resolves the peer from the relationship and
+handles it as a `local_dm`, so the header and ciphertext reach the recipient as
+sent (`_gateway_dm.py` `_handle_send_dm`). This holds also when the gateway has a
+pod client for the conversation (`dm_clients`). For such a message the gateway does
+not write the additional relationship-thread copy described next, because that copy
+would not carry the header.
+
+Only a `send_dm` without the ratchet header, to a conversation in `dm_clients`, is
+composed as a signed `Message` and written to the pod with an `enc1:` layer
+(`messaging.py` `compose`, `msgcrypto.py`: AES-256-GCM with a key from HKDF-SHA256
+over the certificate's canonical JSON, info `proxion-message-key-v1`). That layer
+protects data between gateways and pods; any holder of the certificate can derive
+its key, so it is not end-to-end encryption. It carries `content` and `reply_to_id`
+only.
 
 ### 8.3 Cross-gateway relay
 
@@ -510,8 +534,12 @@ the sender's gateway POSTs to `{peerGateway}/relay` (`_handle_local_dm`):
   `proxion-relay-seal-v1`), ChaCha20-Poly1305, encoded as
   `base64url(eph_pub || nonce || ciphertext)` (`sealed_relay.py`). The gateway's seal
   key is derived from its Ed25519 private key with HKDF-SHA256 (salt
-  `proxion-gw-x25519-v1`) and published in `/.well-known/proxion` (`gateway.py`).
-  It is a gateway key, distinct from any browser's X25519 key.
+  `proxion-gw-x25519-v1`) and published in `/.well-known/proxion` (`gateway.py`
+  `_build_discovery_data`).
+  It is a gateway key, distinct from any browser's X25519 key. Gateways keep seal
+  keys (their own and those learned by discovery) in a separate table
+  (`gateway_seal_keys`), and the key a gateway hands its clients as a peer's E2E key
+  (`get_peer_browser_e2e_key`) is never a value from that table.
 - The receiving gateway verifies, unseals if needed, stores the sender's browser
   X25519 key as an E2E key (`save_e2e_key`), and delivers the same event shape as 7.4
   with `source: "relay"` (`_gateway_http.py`).
@@ -634,15 +662,28 @@ Ratchet state for a peer id is serialized as JSON and encrypted with the state k
 `{"nonce": "<base64url>", "ct": "<base64url>"}` (`_encState`). It is written:
 
 - to localStorage under `proxion_e2e_state_<peerId>` (account-scoped by
-  `e2eScopedKey`), and
-- when signed in to a pod, to `{podRoot}proxion/e2e/<encodeURIComponent(peerId)>/state.enc`
-  with a non-awaited PUT. No ACL is written for this resource; it inherits the access
+  `e2eScopedKey`), synchronously, and
+- when signed in to a pod, to
+  `{podRoot}proxion/e2e/<encodeURIComponent(peerId)>/state-<device>.enc`, where
+  `<device>` is the device's X25519 public key (base64url). The PUT is not awaited;
+  writes for one peer run one at a time and overlapping saves collapse to the latest
+  (`_queuePodWrite`). No ACL is written for this resource; it inherits the access
   control of the containing `proxion/` container.
 
-On load the in-memory cache is used first, then the pod copy, then localStorage
-(`loadRatchetState`). Because the state key is a per-device, non-extractable key, a
-state blob is readable only on the device that wrote it. The state contains the
-current ratchet private key as a JWK, chain keys, root key and skipped message keys.
+Because the state key is a per-device, non-extractable key, a state blob is readable
+only on the device that wrote it, and each device writes its own pod resource.
+
+On load (`loadRatchetState`) the in-memory cache is used if present. Otherwise every
+copy this device can decrypt is read: localStorage and the per-device pod resource,
+or, when that resource is missing, the earlier shared path
+`proxion/e2e/<encodeURIComponent(peerId)>/state.enc`. The copy with the highest `ver`
+is used, localStorage on a tie, so a pod copy whose write was lost does not roll the
+session back. When the per-device pod resource was missing, the chosen state is
+written to it. A blob at the shared path written by another device fails to decrypt
+and is ignored. A state with no `ver` counts as 0.
+
+The state contains the current ratchet private key as a JWK, chain keys, root key,
+skipped message keys and `ver`.
 
 Peer keys are cached in localStorage as `proxion_e2e_peer_pub_<peerId>` (account
 scoped). Decrypted messages are cached in local IndexedDB for history.
@@ -751,5 +792,10 @@ sn = 24594 99591 04903 81211 44774 95312   (same for either argument order)
 
 ## 14. Changelog
 
+- Unreleased: ratchet state is stored per device on the pod and the newest copy is
+  loaded (11); skipped keys are bounded per message and in total, and expire by
+  chain (6.6); buffered keys are tried before a DH ratchet step (6.4); `send_dm`
+  with a ratchet header always goes through the relay path (8.2); gateway seal keys
+  are stored apart from browser E2E keys (8.3).
 - Unreleased: first description of the protocol as implemented. Replaces
   `E2E_ENCRYPTION_ROADMAP.md`, which described an earlier plan.
