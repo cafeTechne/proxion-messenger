@@ -931,6 +931,12 @@ class RoomHandlerMixin:
         if not caller_webid_edit:
             await websocket.send(json.dumps({"type": "error", "message": "Not registered"}))
             return
+        # E2E-sealed DM edit (content is ratchet ciphertext). Rooms are not E2E.
+        from .command_validation import sealed_fields, sealed_header
+        _sealed = sealed_fields(data)
+        if _sealed is None or (_sealed and thread_id in self._local_rooms):
+            await websocket.send(json.dumps({"type": "error", "message": "invalid_e2e_fields"}))
+            return
         # F2: a crafted id reaches the pod read-modify-write, so validate first.
         if not _is_safe_message_id(message_id):
             await websocket.send(json.dumps({"type": "error", "message": "Invalid message id"}))
@@ -997,7 +1003,10 @@ class RoomHandlerMixin:
                                 "from_webid": caller_webid_edit or "",
                             }))
             else:
-                # DM thread: deliver only to the two participants
+                # DM thread: deliver only to the two participants. The editor
+                # id lets the peer pick the ratchet session for a sealed edit.
+                event["from_webid"] = caller_webid_edit
+                event.update(sealed_header(_sealed))
                 participants_edit: set = {caller_webid_edit}
                 if self._store:
                     dm_threads_edit = [t for t in self._store.get_dm_threads(owner_webid=caller_webid_edit)
@@ -1384,7 +1393,8 @@ class RoomHandlerMixin:
         return {r for r in recips if r}
 
     async def _deliver_dm_reaction(self, sender_webid: str, cert_id: str, peer_did: str,
-                                   event: dict, action: str, message_id: str, emoji: str) -> None:
+                                   event: dict, action: str, message_id: str, emoji: str,
+                                   sealed: dict | None = None) -> None:
         """Deliver a DM reaction to the peer: local sessions if here, else RELAY
         to their gateway. Federated DM reactions were silently lost — branch 2
         did _send_to_identity(cert_id) where cert_id is a UUID (federated) that
@@ -1410,6 +1420,7 @@ class RoomHandlerMixin:
                 "message_id": message_id,
                 "emoji": emoji,
                 "action": action,
+                **(sealed or {}),
             }))
 
     async def _handle_add_reaction(self, websocket, data: dict) -> None:
@@ -1418,6 +1429,13 @@ class RoomHandlerMixin:
         message_id = data.get("message_id")
         emoji = data.get("emoji")
         sender_webid = self._client_webids.get(websocket, self.agent.identity_pub_bytes.hex())
+        # E2E-sealed DM reaction: `emoji` is an opaque token and the sealed
+        # header (forwarded to the peer, never parsed) maps it to the emoji.
+        from .command_validation import sealed_fields
+        _sealed = sealed_fields(data, max_content=1024)
+        if _sealed is None or (_sealed and not cert_id):
+            await websocket.send(json.dumps({"type": "error", "message": "invalid_e2e_fields"}))
+            return
 
         if room_id and room_id in self._local_rooms:
             if websocket not in self._local_rooms[room_id]["members"]:
@@ -1506,12 +1524,14 @@ class RoomHandlerMixin:
             event = {
                 "type": "reaction_added", "thread_id": cert_id,
                 "message_id": message_id, "emoji": emoji, "from_webid": sender_webid,
+                **_sealed,
             }
             await websocket.send(json.dumps(event))
             # Deliver to the peer — local sessions OR cross-gateway relay (was
             # _send_to_identity(cert_id), which silently dropped federated DM
             # reactions since cert_id is a UUID there).
-            await self._deliver_dm_reaction(sender_webid, cert_id, _peer_did, event, "add", message_id, emoji)
+            await self._deliver_dm_reaction(sender_webid, cert_id, _peer_did, event, "add", message_id, emoji,
+                                             sealed=_sealed)
         else:
             cert, client = None, None
             id_to_use = cert_id or room_id
@@ -1530,6 +1550,7 @@ class RoomHandlerMixin:
                     "emoji": emoji,
                     "from_webid": sender_webid,
                     "reaction_message_id": react.reaction_message_id,
+                    **_sealed,
                 })
                 # Scope to participants, not every gateway client (broadcast).
                 for _r in self._reaction_recipients(sender_webid, cert, room_id):

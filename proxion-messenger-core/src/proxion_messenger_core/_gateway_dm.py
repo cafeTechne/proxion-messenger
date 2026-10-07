@@ -123,6 +123,14 @@ class DmHandlerMixin:
         if not self._client_webids.get(websocket):
             await websocket.send(json.dumps({"type": "error", "message": "Not registered"}))
             return
+        # E2E-sealed edit: `content` is ratchet ciphertext and the header rides
+        # along to the peer, who decrypts it. Forwarded, never parsed.
+        from .command_validation import sealed_fields, sealed_header
+        _sealed = sealed_fields(data)
+        if _sealed is None:
+            await websocket.send(json.dumps({"type": "error", "message": "invalid_e2e_fields"}))
+            return
+        _hdr = sealed_header(_sealed)
         if cert_id in self.dm_clients:
             cert, client = self.dm_clients[cert_id]
             from .messaging import edit_message, send
@@ -139,13 +147,15 @@ class DmHandlerMixin:
                 logger.info(f"Sent edit for {message_id} to {cert_id}")
                 # Deliver the edit to the DM participants ONLY — never broadcast a
                 # private DM edit to every client on the gateway.
+                _caller = self._client_webids.get(websocket, "")
                 _edited_event = json.dumps({
                     "type": "message_edited",
                     "thread_id": cert_id,
                     "message_id": message_id,
                     "new_content": content,
+                    "from_webid": _caller,
+                    **_hdr,
                 })
-                _caller = self._client_webids.get(websocket, "")
                 _peer = getattr(cert, "subject", "")
                 # cert.subject is an ed25519 pub hex; _send_to_identity keys by
                 # did:key, so map it (a local cert-DM peer must still get the edit).
@@ -190,6 +200,7 @@ class DmHandlerMixin:
             _edited_event = json.dumps({
                 "type": "message_edited", "thread_id": cert_id,
                 "message_id": message_id, "new_content": content,
+                "from_webid": _caller, **_hdr,
             })
             await self._send_to_identity(_caller, _edited_event)
             if self._sockets_for(_peer):
@@ -204,6 +215,7 @@ class DmHandlerMixin:
                         "to_webid": _peer,
                         "message_id": message_id,
                         "new_content": content,
+                        **_hdr,
                     }))
 
     async def _handle_get_dms(self, websocket, data: dict) -> None:
@@ -262,6 +274,23 @@ class DmHandlerMixin:
         import base64 as _b64
         import posixpath as _posix
 
+        # E2E-sealed DM file: data_b64 is AES-GCM ciphertext and the key, name,
+        # type, size and dimensions are inside the sealed ratchet header, which
+        # only the peer can open. The content checks below cannot apply to
+        # ciphertext (the receiving client applies them after decryption), so
+        # the declared name and type are replaced and only the size and
+        # executable-signature checks remain. Rooms are not E2E.
+        from .command_validation import sealed_fields as _sealed_fields
+        _sealed = _sealed_fields(data, max_content=4096)
+        if _sealed is None:
+            await websocket.send(json.dumps({"type": "error", "message": "invalid_e2e_fields"}))
+            return
+        if _sealed and not cert_id:
+            await websocket.send(json.dumps({"type": "error", "message": "e2e_dm_only"}))
+            return
+        if _sealed:
+            filename, mime_type, _spoiler, _dims = "file", "application/octet-stream", False, {}
+
         # Filename normalization: strip directory traversal, control chars
         filename = _posix.basename(str(filename).replace("\\", "/"))
         filename = "".join(c for c in filename if c.isprintable() and c not in '/<>:"|?*')[:128] or "file"
@@ -297,7 +326,9 @@ class DmHandlerMixin:
 
         # Magic-byte sniffing to derive effective MIME (overrides declared MIME)
         sniffed_mime = None
-        if file_bytes[:4] == b"RIFF":
+        if _sealed:
+            pass
+        elif file_bytes[:4] == b"RIFF":
             # RIFF is a container shared by several formats — the kind lives at
             # bytes 8..12. A bare RIFF→audio/wav mapping mislabeled every WebP
             # upload as audio (R59B found this: downscaled room images came
@@ -317,12 +348,14 @@ class DmHandlerMixin:
 
         # Reject text/* MIME with >20% NUL bytes (binary disguised as text).
         # Only applied when the effective MIME (after sniffing) is still text/*.
-        if effective_mime.startswith("text/"):
+        if _sealed:
+            pass
+        elif effective_mime.startswith("text/"):
             _nul_count = file_bytes.count(b"\x00")
             if _nul_count / len(file_bytes) > 0.20:
                 await websocket.send(json.dumps({"type": "error", "message": "file_type_not_allowed: binary content in text file"}))
                 return
-        if effective_mime not in self._ALLOWED_FILE_MIMES:
+        if not _sealed and effective_mime not in self._ALLOWED_FILE_MIMES:
             await websocket.send(json.dumps({
                 "type": "error",
                 "message": f"file_type_not_allowed: {effective_mime}",
@@ -354,19 +387,23 @@ class DmHandlerMixin:
             ts = datetime.now(timezone.utc).isoformat()
             sender_webid = self._client_webids.get(websocket, "unknown")
             sender_name = self._name_for(websocket, sender_webid)
+            # Sealed: the event content is the sealed ciphertext and the stored
+            # summary carries no file name.
+            _summary = "📎" if _sealed else f"📎 {filename}"
             event = {
                 "type": "message", "source": "local_dm",
                 "thread_id": cert_id, "from_webid": sender_webid,
                 "from_display_name": sender_name,
-                "content": f"📎 {filename}", "timestamp": ts,
+                "content": _summary, "timestamp": ts,
                 "message_id": message_id, "local": True,
                 "file": {"filename": filename, "mime_type": mime_type,
                          "size": len(file_bytes), "data_b64": data_b64,
                          "spoiler": _spoiler, **_dims},
+                **_sealed,
             }
             if self._store:
                 self._store.save_message(message_id, cert_id, "local_dm",
-                                         sender_webid, sender_name, f"📎 {filename}", ts,
+                                         sender_webid, sender_name, _summary, ts,
                                          seq_num=int(data.get("seq_num") or 0),
                                          prev_hash=str(data.get("prev_hash") or ""))
             # Echo to all sender tabs
@@ -406,7 +443,7 @@ class DmHandlerMixin:
                             from .didkey import pub_key_to_did
                             import secrets as _sec
                             gw_did = pub_key_to_did(self.agent.identity_pub_bytes)
-                            summary = f"📎 {filename}"
+                            summary = _sealed["content"] if _sealed else f"📎 {filename}"
                             relay_nonce = _sec.token_hex(8)
                             sig = sign_relay_message(
                                 self.agent.identity_key,
@@ -431,6 +468,7 @@ class DmHandlerMixin:
                                 "file": {"filename": filename, "mime_type": mime_type,
                                          "size": len(file_bytes), "data_b64": data_b64,
                                          "spoiler": _spoiler, **_dims},
+                                **{k: v for k, v in _sealed.items() if k != "content"},
                             }
                             http_base = peer_gw.replace("wss://", "https://").replace("ws://", "http://")
                             delivered = await post_relay(http_base.rstrip("/") + "/relay", relay_payload)

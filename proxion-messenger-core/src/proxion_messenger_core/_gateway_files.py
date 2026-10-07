@@ -9,10 +9,10 @@ The recipient must be online — transfer is real-time, like a voice call.
 Small files continue to use the inline store-and-forward path in
 ``_gateway_dm._handle_send_file``.
 
-Consistency note: like the existing inline file relay, chunks travel as
-base64 of the raw bytes (files are not E2E-encrypted on the wire today).
-Client-side chunk encryption can be layered on later without changing this
-transport.
+In a DM with a keyed peer the browser encrypts the whole file first, so the
+chunks are base64 of AES-GCM ciphertext and the offer carries a sealed ratchet
+header with the key and real metadata (docs/E2E_ENCRYPTION.md). Otherwise
+chunks are base64 of the raw bytes.
 
 Requires on self: _client_webids, _sockets_for(), _resolve_peer_gateway(),
 _relay_ephemeral(), clients.
@@ -30,6 +30,11 @@ logger = logging.getLogger("proxion_messenger_core.gateway")
 # Safety bounds
 MAX_FILE_BYTES = 25 * 1024 * 1024   # 25 MB ceiling for chunked transfer
 MAX_CHUNK_B64_LEN = 96 * 1024       # 96 KB base64 per chunk (64 KB binary + overhead)
+
+# A sealed (E2E) transfer: ciphertext is the file plus a 16-byte AES-GCM tag,
+# and the offer declares this placeholder type.
+SEALED_TAG_BYTES = 16
+SEALED_FILE_MIME = "application/octet-stream"
 
 # Fields forwarded verbatim per control/data message
 _OFFER_FIELDS = ("file_id", "filename", "mime_type", "size_bytes", "total_chunks")
@@ -166,8 +171,18 @@ class FileTransferMixin:
             }))
 
     async def _handle_file_offer(self, websocket, data: dict) -> None:
+        # E2E-sealed offer: the chunks are AES-GCM ciphertext and the real name,
+        # type and file key are in the sealed header, which is forwarded to the
+        # peer and never parsed. The declared type is then a fixed placeholder.
+        from .command_validation import sealed_fields, SEALED_KEYS
+        _sealed = sealed_fields(data, max_content=4096)
+        if _sealed is None:
+            await websocket.send(json.dumps({
+                "type": "error", "message": "invalid_e2e_fields", "file_id": data.get("file_id", ""),
+            }))
+            return
         size = int(data.get("size_bytes", 0) or 0)
-        if size > MAX_FILE_BYTES:
+        if size > MAX_FILE_BYTES + (SEALED_TAG_BYTES if _sealed else 0):
             await websocket.send(json.dumps({
                 "type": "error", "message": "file_too_large",
                 "file_id": data.get("file_id", ""),
@@ -177,6 +192,10 @@ class FileTransferMixin:
         # MIME allowlist the inline 512 KB path applies, at offer time (the
         # stream's magic bytes are sniffed on the first chunk, in
         # _handle_file_chunk, since the content isn't present yet here).
+        if _sealed:
+            data = {**data, **_sealed, "filename": "file", "mime_type": SEALED_FILE_MIME}
+            await self._forward_file_signal(websocket, data, "file_offer", _OFFER_FIELDS + SEALED_KEYS)
+            return
         if not self._offer_mime_allowed(data.get("mime_type", "")):
             _declared = str(data.get("mime_type", "")).lower().split(";")[0].strip()
             await websocket.send(json.dumps({

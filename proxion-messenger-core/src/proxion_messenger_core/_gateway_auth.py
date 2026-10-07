@@ -315,8 +315,8 @@ class AuthHandlerMixin:
                     if isinstance(getattr(websocket, 'remote_address', None), (tuple, list))
                     else str(getattr(websocket, 'remote_address', 'unknown')),
             }
-            _E2E_KEYS = ("e2e", "nonce", "msg_num", "key_header",
-                         "ratchet_pub", "pn", "x25519_pub")
+            _E2E_KEYS = ("e2e", "e2e_v", "nonce", "msg_num", "key_header",
+                         "ratchet_pub", "pn", "x25519_pub", "file")
             queued = self._relay_queue.pop(identity, [])
             for msg in queued:
                 try:

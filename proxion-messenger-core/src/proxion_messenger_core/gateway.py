@@ -2523,6 +2523,12 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             return "400 Bad Request", '{"error":"missing_edit_fields"}'
         if len(new_content.encode("utf-8")) > 16_384:
             return "400 Bad Request", '{"error":"content_too_large"}'
+        # E2E-sealed edit: new_content is ratchet ciphertext; forward the header.
+        from .command_validation import sealed_fields, sealed_header, SEALED_KEYS
+        _sealed = sealed_fields({**{k: data.get(k) for k in SEALED_KEYS if k in data},
+                                 "content": new_content})
+        if _sealed is None:
+            return "400 Bad Request", '{"error":"invalid_e2e_fields"}'
         rel = self._authorized_relationship(from_webid)   # no relationship/revoked → no reveal
         if not rel:
             return "200 OK", '{"status":"received"}'
@@ -2548,6 +2554,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             "thread_id": our_cert_id,
             "message_id": message_id,
             "new_content": new_content,
+            "from_webid": from_webid,
+            **sealed_header(_sealed),
         }))
         return "200 OK", '{"status":"received"}'
 
@@ -2563,6 +2571,11 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         action     = data.get("action", "add")
         if not all([from_webid, to_webid, message_id, emoji]):
             return "400 Bad Request", '{"error":"missing_reaction_fields"}'
+        # E2E-sealed reaction: emoji is an opaque token, the header maps it.
+        from .command_validation import sealed_fields
+        _sealed = sealed_fields(data, max_content=1024)
+        if _sealed is None:
+            return "400 Bad Request", '{"error":"invalid_e2e_fields"}'
         # Anti-spoof: only accept reactions from a peer we hold a relationship
         # with. Unknown/revoked/blocked senders are silently accepted (200, no
         # block-reveal) but not delivered — matching the relay block-enforcement model.
@@ -2588,6 +2601,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             "message_id": message_id,
             "emoji": emoji,
             "from_webid": from_webid,
+            **_sealed,
         })
         await self._send_to_identity(_deliver, event)
         return "200 OK", '{"status":"received"}'

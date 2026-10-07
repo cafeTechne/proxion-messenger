@@ -122,6 +122,49 @@ HEAVY_COMMANDS: frozenset[str] = frozenset({
 })
 
 
+# E2E-sealed DM edits, reactions and files (docs/E2E_ENCRYPTION.md, web
+# e2e-secondary.js). The browser encrypts these with the DM ratchet; the gateway
+# only checks the header shape and forwards it. It never sees the plaintext.
+SEALED_V = 1
+SEALED_KEYS = ("e2e", "e2e_v", "content", "nonce", "msg_num", "pn", "ratchet_pub")
+_B64U_RE = _re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def sealed_fields(data: dict, max_content: int = _MAX_CONTENT):
+    """Validated sealed header of a DM edit, reaction or file command or relay.
+
+    Returns {} when *data* carries none (plaintext, as older clients send), the
+    header fields when it carries a valid v1 header, and None when it claims one
+    that is malformed or of an unknown version (callers reject those).
+    """
+    if not isinstance(data, dict):
+        return None
+    if data.get("e2e") is not True and data.get("e2e_v") is None:
+        return {}
+    e2e_v = data.get("e2e_v")
+    if data.get("e2e") is not True or type(e2e_v) is not int or e2e_v != SEALED_V:
+        return None
+
+    def _b64u(v, cap):
+        return isinstance(v, str) and 0 < len(v) <= cap and bool(_B64U_RE.match(v))
+
+    def _num(v):
+        return type(v) is int and 0 <= v < 2 ** 31
+
+    content, nonce, rpub = data.get("content"), data.get("nonce"), data.get("ratchet_pub")
+    msg_num, pn = data.get("msg_num"), data.get("pn", 0)
+    if not (_b64u(content, max_content) and _b64u(nonce, 32) and _b64u(rpub, 64)
+            and _num(msg_num) and _num(pn)):
+        return None
+    return {"e2e": True, "e2e_v": SEALED_V, "content": content, "nonce": nonce,
+            "msg_num": msg_num, "pn": pn, "ratchet_pub": rpub}
+
+
+def sealed_header(fields: dict) -> dict:
+    """The sealed fields minus the ciphertext (for events that carry it elsewhere)."""
+    return {k: v for k, v in (fields or {}).items() if k != "content"}
+
+
 class SchemaError(ValueError):
     """Raised when a command payload violates the declared schema."""
 
