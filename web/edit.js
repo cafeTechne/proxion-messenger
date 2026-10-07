@@ -9,7 +9,11 @@
 import { getLocale, t } from './i18n.js';
 import { supportsFieldSizing } from './util.js';
 
-export function createEdit({ getSocket, getActiveView, getClientDid, getMessageMap }) {
+// sealEdit(view, messageId, text) (optional): for a DM with a keyed peer,
+// returns the E2E-sealed fields that replace the plaintext `content`; null when
+// the view needs no sealing; throws when sealing failed, and then nothing is
+// sent and onSealFailed() is called.
+export function createEdit({ getSocket, getActiveView, getClientDid, getMessageMap, sealEdit, onSealFailed }) {
     const state = { editingMsgId: null };
 
     // Grow the edit box with its content, up to about 40% of the viewport.
@@ -82,6 +86,7 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
         const socket = getSocket();
         const activeView = getActiveView();
         if (!socket || !activeView || !newContent.trim()) return;
+        const original = state._original;
         const isLocal = activeView.local || activeView.type === "local_room" || activeView.type === "local_dm";
         let payload;
         if (isLocal) {
@@ -91,7 +96,19 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
             if (activeView.type === "dm") payload.cert_id = activeView.id;
             else payload.room_id = activeView.id;
         }
-        socket.send(JSON.stringify(payload));
+        const isDm = activeView.type === "dm" || activeView.type === "local_dm";
+        if (isDm && sealEdit) {
+            // Sealed send is async; a failure puts the old text back.
+            Promise.resolve().then(() => sealEdit(activeView, msgId, payload.content))
+                .then((sealed) => { socket.send(JSON.stringify(sealed ? { ...payload, ...sealed } : payload)); })
+                .catch(() => {
+                    const el = document.getElementById(`msg-${msgId}`)?.querySelector(".msg-text");
+                    if (el && original != null) el.innerText = original;
+                    if (onSealFailed) onSealFailed();
+                });
+        } else {
+            socket.send(JSON.stringify(payload));
+        }
         state.editingMsgId = null;
         // Immediately restore UI — server will confirm via message_edited event
         const msgEl = document.getElementById(`msg-${msgId}`);

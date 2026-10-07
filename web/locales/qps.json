@@ -49,6 +49,8 @@
   "voice.peerLeft": "⟦{peer} ĺéƒţ ţĥé ṽóíçé çĥáññéĺ áéíóúáéíó⟧",
   "file.notAccepted": "⟦Ƒíĺé ñóţ áççéρţéð áéíóúáé⟧",
   "file.transferFailed": "⟦Ţŕáñšƒéŕ óƒ {filename} ƒáíĺéð, {received}/{total} çĥúñķš ŕéçéíṽéð áéíóúáéíóúáéíóú⟧",
+  "file.decryptFailed": "⟦Çóúĺð ñóţ ðéçŕýρţ {filename} áéíóúáé⟧",
+  "e2e.secondarySendFailed": "⟦Çóúĺð ñóţ éñçŕýρţ ţĥíš çĥáñǧé, šó íţ ŵáš ñóţ šéñţ áéíóúáéíóúáéíóúáéíóú⟧",
   "file.declined": "⟦Ƒíĺé ðéçĺíñéð áéíóú⟧",
   "file.recipientOffline": "⟦Ŕéçíρíéñţ íš óƒƒĺíñé, ĺáŕǧé ƒíĺéš ñééð ḅóţĥ ρéóρĺé óñĺíñé áéíóúáéíóúáéíóúáéíóúáéí⟧",
   "file.offering": "⟦Óƒƒéŕíñǧ {filename}… áéíó⟧",

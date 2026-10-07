@@ -12,7 +12,13 @@ import { icon } from './icons.js';
 
 // resolveName(webid) -> display name or "" (the same resolver the typing
 // indicator uses); it names the reactors in each pill's tooltip.
-export function createReactions({ getSocket, getActiveView, getSelfWebId, getMessageReactions, getRoomEmojiMap, getMessageTs, getRemoteRoom, resolveName }) {
+//
+// DM reactions to a keyed peer are E2E-sealed (e2e-secondary.js):
+// sealReaction(view, messageId, emoji) returns the fields to send (an opaque
+// token in `emoji` plus the sealed header), null when no sealing applies, or
+// throws (nothing is sent, onSealFailed() is called). wireEmoji(messageId,
+// emoji) names our own reaction for remove_reaction (its token, if sealed).
+export function createReactions({ getSocket, getActiveView, getSelfWebId, getMessageReactions, getRoomEmojiMap, getMessageTs, getRemoteRoom, resolveName, sealReaction, wireEmoji, onSealFailed }) {
     const state = { lastEmojiMsgId: null };
 
     // R60A: a reaction key like ":name:" refers to the room's custom emoji.
@@ -230,9 +236,15 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
             message_id: mid,
             emoji: emoji
         };
-        if (activeView.type === "dm" || activeView.type === "local_dm") payload.cert_id = activeView.id;
+        const isDm = activeView.type === "dm" || activeView.type === "local_dm";
+        if (isDm) payload.cert_id = activeView.id;
         else payload.room_id = activeView.id;
 
+        if (isDm && sealReaction) {
+            return Promise.resolve().then(() => sealReaction(activeView, mid, emoji))
+                .then((sealed) => { _safeSend(sealed ? { ...payload, ...sealed } : payload); })
+                .catch(() => { if (onSealFailed) onSealFailed(); });
+        }
         _safeSend(payload);
     }
 
@@ -252,8 +264,10 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         const activeView = getActiveView();
         if (!activeView) return;
         const payload = { cmd: "remove_reaction", message_id: msgId, emoji: emoji };
-        if (activeView.type === "dm" || activeView.type === "local_dm")
+        if (activeView.type === "dm" || activeView.type === "local_dm") {
             payload.cert_id = activeView.id;
+            if (wireEmoji) payload.emoji = wireEmoji(msgId, emoji);
+        }
         else
             payload.room_id = activeView.id;
         _safeSend(payload);

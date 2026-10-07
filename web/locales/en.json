@@ -48,6 +48,8 @@
   "voice.peerLeft": "{peer} left the voice channel",
   "file.notAccepted": "File not accepted",
   "file.transferFailed": "Transfer of {filename} failed, {received}/{total} chunks received",
+  "file.decryptFailed": "Could not decrypt {filename}",
+  "e2e.secondarySendFailed": "Could not encrypt this change, so it was not sent",
   "file.declined": "File declined",
   "file.recipientOffline": "Recipient is offline, large files need both people online",
   "file.offering": "Offering {filename}…",

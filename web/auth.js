@@ -127,7 +127,8 @@ export async function solidLogout() {
     // user's re-login. (Per-account isolation of the identity key across a switch
     // WITHOUT a logout is a separate change that needs a live multi-account test.)
     try {
-        const _e2ePrefixes = ['proxion_e2e_state_', 'proxion_e2e_peer_pub_', 'proxion_e2e_verified_', 'proxion_verified_'];
+        const _e2ePrefixes = ['proxion_e2e_state_', 'proxion_e2e_peer_pub_', 'proxion_e2e_verified_', 'proxion_verified_',
+            'proxion_e2e_react_tokens'];
         for (let i = localStorage.length - 1; i >= 0; i--) {
             const k = localStorage.key(i);
             if (k && _e2ePrefixes.some((p) => k.startsWith(p))) localStorage.removeItem(k);

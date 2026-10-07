@@ -27,6 +27,8 @@ let _openName = null;
 // beyond the cap are evicted on write so a long-lived device can't grow without
 // bound. High enough that normal history is fully retained.
 const MAX_PER_THREAD = 2000;
+// Earlier versions kept per message for the edit-history view.
+const MAX_EDITS = 50;
 
 // User switch: "save DM history on this device". Default on; when off,
 // dmHistorySave no-ops (nothing new is cached) but existing history still loads
@@ -82,6 +84,8 @@ export async function dmHistorySave(msg) {
                 content: msg.content != null ? String(msg.content) : '',
                 timestamp: msg.timestamp || new Date().toISOString(),
                 reply_to_id: msg.reply_to_id || null,
+                ...(msg.edited_at ? { edited_at: msg.edited_at } : {}),
+                ...(Array.isArray(msg.edits) && msg.edits.length ? { edits: msg.edits.slice(-MAX_EDITS) } : {}),
             });
             tx.oncomplete = resolve;
             tx.onerror = () => reject(tx.error);
@@ -268,8 +272,38 @@ export async function dmHistoryImport(records) {
     return n;
 }
 
+// Pure: apply an edit to a stored record. With `meta` ({edited_at,
+// edited_by}) the previous text is kept in rec.edits for the edit-history view,
+// which for an E2E DM cannot come from the gateway (it holds ciphertext).
+export function applyEditToRecord(rec, newContent, meta) {
+    const next = String(newContent);
+    if (meta && rec.content !== next) {
+        const edits = Array.isArray(rec.edits) ? rec.edits.slice() : [];
+        edits.push({ prev_content: rec.content, edited_at: meta.edited_at || new Date().toISOString(), edited_by: meta.edited_by || '' });
+        rec.edits = edits.slice(-MAX_EDITS);
+        rec.edited_at = meta.edited_at || new Date().toISOString();
+    }
+    rec.content = next;
+    return rec;
+}
+
+// Earlier versions of one message, oldest first ([] when none are cached).
+export async function dmHistoryGetEdits(messageId) {
+    if (!messageId) return [];
+    try {
+        const db = await _open();
+        const rec = await new Promise((resolve) => {
+            const tx = db.transaction(STORE, 'readonly');
+            const g = tx.objectStore(STORE).get(messageId);
+            g.onsuccess = () => resolve(g.result || null);
+            g.onerror = () => resolve(null);
+        });
+        return rec && Array.isArray(rec.edits) ? rec.edits : [];
+    } catch (_) { return []; }
+}
+
 // Update stored content (on edit).
-export async function dmHistoryUpdateContent(messageId, newContent) {
+export async function dmHistoryUpdateContent(messageId, newContent, meta = null) {
     if (!messageId) return;
     try {
         const db = await _open();
@@ -279,7 +313,7 @@ export async function dmHistoryUpdateContent(messageId, newContent) {
             const g = os.get(messageId);
             g.onsuccess = () => {
                 const rec = g.result;
-                if (rec) { rec.content = String(newContent); os.put(rec); }
+                if (rec) { os.put(applyEditToRecord(rec, newContent, meta)); }
                 resolve();
             };
             g.onerror = resolve;

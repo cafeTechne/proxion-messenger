@@ -25,6 +25,7 @@ const SHELL = [
   "locales/ar.json",
   "util.js",
   "filetransfer.js",
+  "e2e-secondary.js",
   "voice.js",
   "notifications.js",
   "onboarding.js",

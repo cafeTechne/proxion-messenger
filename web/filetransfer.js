@@ -6,6 +6,7 @@
 
 import { t } from './i18n.js';
 import { u8ToB64, b64ToU8 } from './util.js';
+import { FILE_TAG_BYTES, SEALED_FILE_NAME, SEALED_FILE_MIME, openFileBytes } from './e2e-secondary.js';
 
 const CHUNK_BYTES = 64 * 1024;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -85,19 +86,27 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         }, TRANSFER_IDLE_TIMEOUT_MS);
     }
 
-    async function sendFileChunked(file, toWebid) {
+    // opts.seal(bytes, meta) -> {hdr, ct}: for a DM peer with a key, encrypts
+    // the file and seals its key (e2e-secondary.js). The chunks then carry only
+    // ciphertext and the offer only the sealed header; a throw aborts the send.
+    async function sendFileChunked(file, toWebid, opts = {}) {
         const fileId = (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)).replace(/-/g, "").slice(0, 16);
-        const buf = new Uint8Array(await file.arrayBuffer());
+        let buf = new Uint8Array(await file.arrayBuffer());
+        let offer = {
+            filename: file.name, mime_type: file.type || "application/octet-stream", size_bytes: buf.length,
+        };
+        if (opts.seal) {
+            const sealed = await opts.seal(buf, { name: file.name, mime: file.type || "application/octet-stream", size: buf.length });
+            if (!sealed) throw new Error("seal_failed");
+            buf = sealed.ct;
+            offer = { filename: SEALED_FILE_NAME, mime_type: SEALED_FILE_MIME, size_bytes: buf.length, ...sealed.hdr };
+        }
         const total = Math.ceil(buf.length / CHUNK_BYTES) || 1;
         const acceptP = new Promise((resolve, reject) => {
             _outgoingFiles[fileId] = { resolve, reject };
             setTimeout(() => reject(new Error("accept_timeout")), 30000);
         });
-        sendCmd("file_offer", {
-            to_webid: toWebid, file_id: fileId, filename: file.name,
-            mime_type: file.type || "application/octet-stream",
-            size_bytes: buf.length, total_chunks: total,
-        });
+        sendCmd("file_offer", { to_webid: toWebid, file_id: fileId, ...offer, total_chunks: total });
         showToast(t('file.offering', { filename: file.name }));
         try { await acceptP; } catch (e) { delete _outgoingFiles[fileId]; _clearTransferProgress(fileId); showToast(t('file.notAccepted')); return; }
         for (let seq = 0; seq < total; seq++) {
@@ -112,14 +121,21 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         showToast(t('file.sent', { filename: file.name }));
     }
 
+    // A sealed offer arrives already opened by the caller (_sealedFile holds
+    // the real metadata and file key) or marked _sealedBad.
     function handleFileOffer(event) {
-        if (event.size_bytes > MAX_FILE_BYTES) {
+        if (event._sealedBad) {
+            sendCmd("file_reject", { to_webid: event.from_webid, file_id: event.file_id, reason: "bad_offer" });
+            return;
+        }
+        const sealed = event._sealedFile || null;
+        if (event.size_bytes > MAX_FILE_BYTES + (sealed ? FILE_TAG_BYTES : 0)) {
             sendCmd("file_reject", { to_webid: event.from_webid, file_id: event.file_id, reason: "too_large" });
             return;
         }
         // total_chunks is attacker-controlled — reject nonsensical counts before
         // allocating an array from it (new Array(huge) / mismatched size).
-        const _maxChunks = Math.ceil(MAX_FILE_BYTES / CHUNK_BYTES) + 1;
+        const _maxChunks = Math.ceil((MAX_FILE_BYTES + FILE_TAG_BYTES) / CHUNK_BYTES) + 1;
         const _tc = event.total_chunks;
         if (!Number.isInteger(_tc) || _tc <= 0 || _tc > _maxChunks) {
             sendCmd("file_reject", { to_webid: event.from_webid, file_id: event.file_id, reason: "bad_offer" });
@@ -135,7 +151,7 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         _incomingFiles[event.file_id] = {
             meta: { filename: event.filename, mime_type: event.mime_type, size: event.size_bytes },
             chunks: new Array(event.total_chunks), received: 0, total: event.total_chunks,
-            fromWebid: event.from_webid,
+            fromWebid: event.from_webid, sealed,
         };
         _armIdleTimeout(event.file_id);
         sendCmd("file_accept", { to_webid: event.from_webid, file_id: event.file_id });
@@ -179,18 +195,23 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         const full = new Uint8Array(totalLen);
         let off = 0;
         for (const p of parts) { full.set(p, off); off += p.length; }
-        const dataB64 = u8ToB64(full);
         const fromWebid = rec.fromWebid;
         delete _incomingFiles[event.file_id];
         const av = getActiveView();
         const threadId = (av && av.peerWebid === fromWebid) ? av.id : fromWebid;
-        renderMessage({
+        const render = (bytes, extra = {}) => renderMessage({
             type: "message", source: "relay", thread_id: threadId,
             from_webid: fromWebid, from_display_name: (fromWebid || "").slice(0, 12),
             content: `📎 ${rec.meta.filename}`, timestamp: new Date().toISOString(),
             message_id: "file-" + event.file_id, local: true,
-            file: { filename: rec.meta.filename, mime_type: rec.meta.mime_type, size: rec.meta.size, data_b64: dataB64 },
+            file: { filename: rec.meta.filename, mime_type: rec.meta.mime_type, size: bytes.length, data_b64: u8ToB64(bytes), ...extra },
         });
+        if (!rec.sealed) { render(full, { size: rec.meta.size }); return; }
+        const s = rec.sealed;
+        const dims = s.width ? { width: s.width, height: s.height } : {};
+        return openFileBytes(full, s)
+            .then((bytes) => render(bytes, { spoiler: s.spoiler === true, ...dims }))
+            .catch(() => showToast(t('file.decryptFailed', { filename: rec.meta.filename }), "error"));
     }
     function handleFileAccept(event) {
         const rec = _outgoingFiles[event.file_id];

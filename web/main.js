@@ -41,6 +41,7 @@ import {
     composerEnterAction, isCoarsePointer, supportsFieldSizing, canShareLinks, shareLink,
 } from './util.js';
 import { createFileTransfer } from './filetransfer.js';
+import { createSecondaryCrypto, createReactionTokens, isSealedPlain, sealedState, SEALED_FIELDS, SEALED_FILE_NAME, SEALED_FILE_MIME, FILE_TAG_BYTES } from './e2e-secondary.js';
 import { createVoice, CallState, audioLevel } from './voice.js';
 import { mapDevices, preferredDeviceId, mediaConstraints } from './devices.js';
 import { createNotifications } from './notifications.js';
@@ -98,7 +99,7 @@ import { makeListNavigable, announce } from './a11y.js';
 import { buildPageTitle, viewLabel, createFaviconBadge, jumpToMessage } from './wayfinding.js';
 import { openMenu, closeMenu, refreshMenu, isMenuOpen } from './menu.js';
 import { showConfirm, showPromptModal, installDialogDismiss, installFieldErrorSync, setFieldError } from './dialogs.js';
-import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport } from './dmhistory.js';
+import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryGetEdits, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport } from './dmhistory.js';
 import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } from './i18n.js';
 import { createIdentityResolver } from './identity.js';
 import { initThemePicker } from './theme.js';
@@ -245,9 +246,9 @@ import { initThemePicker } from './theme.js';
         const CMD_ALLOWED_KEYS = {
             connect_css:      new Set(["cmd","css_url","email","password"]),
             create_webhook:   new Set(["cmd","thread_id","direction","url","bot_name"]),
-            send_file:        new Set(["cmd","cert_id","room_id","filename","mime_type","data_b64","spoiler","width","height"]),
+            send_file:        new Set(["cmd","cert_id","room_id","filename","mime_type","data_b64","spoiler","width","height", ...SEALED_FIELDS]),
             schedule_message: new Set(["cmd","thread_id","content","send_at"]),
-            file_offer:       new Set(["cmd","to_webid","file_id","filename","mime_type","size_bytes","total_chunks"]),
+            file_offer:       new Set(["cmd","to_webid","file_id","filename","mime_type","size_bytes","total_chunks", ...SEALED_FIELDS]),
             file_accept:      new Set(["cmd","to_webid","file_id"]),
             file_reject:      new Set(["cmd","to_webid","file_id","reason"]),
             file_chunk:       new Set(["cmd","to_webid","file_id","seq","data"]),
@@ -566,6 +567,14 @@ import { initThemePicker } from './theme.js';
         } = createOnboarding({
             getSocket: () => socket, setPodBanner, showToast, showCopyModal, showConfirm,
         });
+        // DM edits, reactions and files to a keyed peer are sealed with the
+        // ratchet like message text (e2e-secondary.js, docs/E2E_ENCRYPTION.md).
+        const secondary = createSecondaryCrypto({
+            encrypt: ratchetEncrypt, decrypt: ratchetDecrypt, isKeyed: isE2EEnabled,
+            isSelf: (id) => !!id && (id === selfWebId || id === clientDid || id === accountDid),
+            tokens: createReactionTokens({ storage: localStorage, key: () => e2eScopedKey('proxion_e2e_react_tokens') }),
+        });
+        const _onSealFailed = () => showToast(t('e2e.secondarySendFailed'), 'error');
         // Reactions / emoji picker: destructured into same-named bindings.
         // messageReactions stays host-owned (the message loader populates it);
         // it is injected by reference and mutated in place, never reassigned.
@@ -583,6 +592,9 @@ import { initThemePicker } from './theme.js';
                 // { container } so the reaction mirror targets the right pod.
                 getRemoteRoom: (id) => _remoteRooms[id],
                 resolveName: (w) => resolvePeerName(w),
+                sealReaction: (view, mid, emoji) => secondary.sealReaction(view, mid, emoji),
+                wireEmoji: (mid, emoji) => secondary.reactionWireEmoji(mid, emoji),
+                onSealFailed: _onSealFailed,
             });
         // Standalone modals (forward / schedule / integrations / search results).
         const {
@@ -733,6 +745,8 @@ import { initThemePicker } from './theme.js';
         const edit = createEdit({
             getSocket: () => socket, getActiveView: () => activeView,
             getClientDid: () => clientDid, getMessageMap: () => messageMap,
+            sealEdit: (view, mid, text) => secondary.sealEdit(view, mid, text),
+            onSealFailed: _onSealFailed,
         });
         const { startEdit, commitEdit, cancelEdit, handleMessageEdited } = edit;
         // Mute: mutedThreads is a host-owned Set (read by renderer/dispatch),
@@ -1420,6 +1434,20 @@ import { initThemePicker } from './theme.js';
             if (!fromPod && event.x25519_pub && event.from_webid) {
                 cachePeerPub(event.from_webid, event.x25519_pub);
             }
+            // Sealed DM edits, reactions and files (e2e-secondary.js). Opened here,
+            // before dispatch, like message text; null means drop the event.
+            if (event.type === "message_edited") {
+                event = await secondary.openEdit(event);
+                if (!event) return;
+            } else if (event.type === "reaction_added" || event.type === "reaction_removed") {
+                event = await secondary.openReaction(event, event.type === "reaction_added" ? "add" : "remove");
+                if (!event) return;
+            } else if (event.type === "message" && event.file && sealedState(event) !== "legacy") {
+                event = await secondary.openFileMessage(event);
+                if (!event || (event._sealedFailed && accountDid)) return;
+            } else if (event.type === "file_offer") {
+                event = await secondary.openFileOffer(event);
+            }
             // Decrypt E2E messages before rendering
             if (event.type === "message" && event.e2e && event.nonce) {
                 const peerId = event.from_webid;
@@ -1429,6 +1457,8 @@ import { initThemePicker } from './theme.js';
                             peerId, event.content, event.nonce,
                             event.msg_num ?? 0, event.ratchet_pub ?? null,
                             event.pn ?? 0);
+                        // A sealed edit/reaction/file payload is never message text.
+                        if (isSealedPlain(event.content)) throw new E2EDecryptError('sealed payload');
                         event.e2e = false; // mark decrypted
                         event._persistDm = true; // decrypted E2E DM → cache plaintext for history
                     } catch (err) {
@@ -1464,6 +1494,7 @@ import { initThemePicker } from './theme.js';
                     try {
                         text = await ratchetDecrypt(pid, p.content, p.nonce,
                             p.msg_num ?? 0, p.ratchet_pub ?? null, p.pn ?? 0);
+                        if (isSealedPlain(text)) text = '[could not decrypt]';
                     } catch (err) {
                         text = err instanceof E2EDecryptError ? '[could not decrypt]' : '[decryption error]';
                     }
@@ -1802,7 +1833,10 @@ import { initThemePicker } from './theme.js';
                     const _editedTs = messageMap[event.message_id]?.pod_ts || messageMap[event.message_id]?.timestamp;
                     handleMessageEdited(event);
                     if (event.message_id && event.new_content != null) {
-                        dmHistoryUpdateContent(event.message_id, event.new_content);
+                        dmHistoryUpdateContent(event.message_id, event.new_content, {
+                            edited_at: event.edited_at || new Date().toISOString(),
+                            edited_by: event.from_webid || '',
+                        });
                     }
                     // Mirror the edit into the room's Long Chat so other Solid apps
                     // see the latest text. Rooms only; DMs are E2E, never mirrored.
@@ -2343,10 +2377,14 @@ import { initThemePicker } from './theme.js';
                     // Apply persisted reactions
                     if (event.reactions && event.reactions.length > 0) {
                         event.reactions.forEach(r => {
+                            // A sealed DM reaction is stored as a token; show the
+                            // emoji this device learned for it, or nothing.
+                            const emoji = secondary.translateReaction(r.emoji);
+                            if (emoji == null) return;
                             if (!messageReactions[r.message_id]) messageReactions[r.message_id] = {};
-                            if (!messageReactions[r.message_id][r.emoji]) messageReactions[r.message_id][r.emoji] = [];
-                            if (!messageReactions[r.message_id][r.emoji].includes(r.sender_webid)) {
-                                messageReactions[r.message_id][r.emoji].push(r.sender_webid);
+                            if (!messageReactions[r.message_id][emoji]) messageReactions[r.message_id][emoji] = [];
+                            if (!messageReactions[r.message_id][emoji].includes(r.sender_webid)) {
+                                messageReactions[r.message_id][emoji].push(r.sender_webid);
                             }
                         });
                         const seen = new Set();
@@ -4165,12 +4203,18 @@ import { initThemePicker } from './theme.js';
                     showToast(t('file.reduced'));
                 } catch (_) { /* fall through to the existing size toasts */ }
             }
-            if (file.size > 524288) {
-                const isDm = activeView.type === "dm" || activeView.type === "local_dm";
-                const peerWebid = activeView.peerWebid || "";
-                if (file.size > 25 * 1024 * 1024) { showToast(t('file.tooLarge')); return; }
+            // DM to a keyed peer: the file is encrypted end to end, which adds
+            // the AES-GCM tag to what the inline cap has to hold.
+            const view = activeView;
+            const sealFile = secondary.mustSeal(view);
+            const inlineMax = sealFile ? 524288 - FILE_TAG_BYTES : 524288;
+            if (file.size > inlineMax) {
+                const isDm = view.type === "dm" || view.type === "local_dm";
+                const peerWebid = view.peerWebid || "";
+                if (file.size > 25 * 1024 * 1024 - (sealFile ? FILE_TAG_BYTES : 0)) { showToast(t('file.tooLarge')); return; }
                 if (!isDm || !peerWebid) { showToast(t('file.largeDmOnly')); return; }
-                fileTransfer.sendFileChunked(file, peerWebid).catch(err => {
+                const xferOpts = sealFile ? { seal: (u8, meta) => secondary.sealFile(view, u8, meta, { echo: false }) } : {};
+                fileTransfer.sendFileChunked(file, peerWebid, xferOpts).catch(err => {
                     console.warn("chunked send failed", err);
                     showToast(t('file.sendFailed'));
                 });
@@ -4178,6 +4222,25 @@ import { initThemePicker } from './theme.js';
             }
             // Natural size travels with the file so receivers reserve the box.
             const dims = await measureMedia(file);
+            if (sealFile) {
+                if (!socket || socket.readyState !== WebSocket.OPEN) { showToast(t('file.notConnected')); return; }
+                let sealed;
+                try {
+                    const u8 = new Uint8Array(await file.arrayBuffer());
+                    sealed = await secondary.sealFile(view, u8, {
+                        name: file.name, mime: file.type || "application/octet-stream", size: u8.length,
+                        width: dims?.width, height: dims?.height, spoiler: opts.spoiler === true,
+                    });
+                } catch (err) { sealed = null; console.warn('[e2e] file seal failed; not sending:', err); }
+                if (!sealed) { showToast(t('file.sendFailed')); return; }
+                // Name, type, size, dimensions and the spoiler flag are inside the
+                // sealed header; the gateway sees only ciphertext.
+                sendCmd("send_file", {
+                    cert_id: view.id, filename: SEALED_FILE_NAME, mime_type: SEALED_FILE_MIME,
+                    data_b64: _u8ToB64(sealed.ct), ...sealed.hdr,
+                });
+                return;
+            }
             const reader = new FileReader();
             reader.onload = () => {
                 const base64 = reader.result.split(',')[1];
@@ -6084,8 +6147,11 @@ import { initThemePicker } from './theme.js';
                     popover.innerHTML = inlineNotice(t('common.loadingEllipsis'), "loading");
                     badge.style.position = "relative";
                     badge.appendChild(popover);
-                    fetch(`/message-edits?message_id=${encodeURIComponent(msgId)}`)
-                        .then(r => r.json())
+                    // DM history comes from this device's cache: the gateway holds
+                    // an E2E DM's earlier versions only as ciphertext.
+                    const _dmView = activeView && (activeView.type === 'dm' || activeView.type === 'local_dm');
+                    (_dmView ? dmHistoryGetEdits(msgId)
+                        : fetch(`/message-edits?message_id=${encodeURIComponent(msgId)}`).then(r => r.json()))
                         .then(edits => {
                             if (!edits.length) { popover.innerHTML = inlineNotice(t('edit.noHistory')); return; }
                             popover.innerHTML = edits.map(ed =>
