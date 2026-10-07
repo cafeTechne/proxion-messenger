@@ -572,7 +572,7 @@ Being honest about the boundary matters more than a tidy story:
   pod at all.
 - **Private keys.** Your Ed25519 identity key and message keys never leave the
   device except through the explicit, passphrase-protected recovery kit. DM
-  ratchet state is written to `proxion/e2e/<peer>/state.enc`, encrypted under a
+  ratchet state is written to `proxion/e2e/<peer>/state-<device>.enc`, encrypted under a
   per-device key that stays in the browser; only the device that wrote it can
   read it. See [E2E_ENCRYPTION.md](E2E_ENCRYPTION.md).
 
