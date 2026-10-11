@@ -34,7 +34,7 @@ describe('updateMyAddressBar', () => {
     const addr = createAddress({ showToast() {}, showCopyModal() {} });
     addr.updateMyAddressBar('did:key:z6MkExampleLongIdentifier@https://gw.example');
     expect(els['my-address-bar'].style.display).toBe('flex');
-    expect(els['my-address-short'].textContent).toContain('@https://gw.example');
+    expect(els['my-address-short'].textContent).toMatch(/…@gw\.example$/);
     expect(els['my-address-short'].title).toBe('did:key:z6MkExampleLongIdentifier@https://gw.example');
   });
   it('is a no-op with an empty address', () => {

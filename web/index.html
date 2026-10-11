@@ -346,15 +346,15 @@
                     <span id="username">Connecting…</span>
                 </div>
                 <div id="my-address-bar"
-                     style="display:none; padding:2px var(--space-3) var(--space-2); font-size:var(--text-2xs); color:var(--slate-600);
-                            overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                  <span id="my-address-short" style="cursor:pointer; user-select:all;"
+                     style="display:none; align-items:center; padding:2px var(--space-3) var(--space-2); font-size:var(--text-2xs); color:var(--slate-600);
+                            white-space:nowrap;">
+                  <span id="my-address-short" style="cursor:pointer; user-select:all; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;"
                         title="Click to copy your Proxion address" data-i18n-attr="title:ui.clickCopyProxionAddress"></span>
                   <button id="copy-addr-btn" aria-label="Copy your address" title="Copy your address"
                           data-i18n-attr="aria-label:ui.copyAddress;title:ui.copyAddress"
-                          style="background:transparent; border:none; color:var(--slate-600); cursor:pointer;
-                                 padding:0 0 0 var(--space-1);"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75"/></svg></button>
-                  <button id="share-invite-btn" aria-label="Share invite link" title="Share invite link" style="background:transparent;border:none;color:var(--slate-600);cursor:pointer;padding:2px var(--space-2);" data-i18n-attr="aria-label:ui.shareInviteLink;title:ui.shareInviteLink"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg></button>
+                          style="background:transparent; border:none; color:var(--slate-600); cursor:pointer; flex-shrink:0;
+                                 display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; padding:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75"/></svg></button>
+                  <button id="share-invite-btn" aria-label="Share invite link" title="Share invite link" style="flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;background:transparent;border:none;color:var(--slate-600);cursor:pointer;" data-i18n-attr="aria-label:ui.shareInviteLink;title:ui.shareInviteLink"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg></button>
                 </div>
             </div>
             <nav aria-label="Conversations" data-i18n-attr="aria-label:ui.conversations">
@@ -439,7 +439,7 @@
             </div>
         </aside>
 
-        <main style="flex:1; display:flex; flex-direction:column; overflow:hidden; position:relative;">
+        <main class="no-view" style="flex:1; display:flex; flex-direction:column; overflow:hidden; position:relative;">
             <!-- Solid conversation view: overlays the normal feed when a shared
                  Solid chat is open. Distinct from E2E DMs and rooms, plaintext. -->
             <section id="solidchat-panel" aria-label="Solid conversation" data-i18n-attr="aria-label:solidchat.conversation"
@@ -487,6 +487,11 @@
                 <div class="room-options">
                 <button id="room-options-btn" class="room-options-btn" aria-label="Room options" title="Room options" aria-haspopup="menu" aria-expanded="false" aria-controls="room-options-menu" style="display:none;" data-i18n-attr="title:ui.roomOptions;aria-label:ui.roomOptions"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"/></svg></button>
                 <div id="room-options-menu" class="ctx-menu room-options-menu" role="menu" aria-label="Room options" data-i18n-attr="aria-label:ui.roomOptions" style="display:none;">
+                <!-- Phones: the header has no room for these, so they move in here
+                     (main.js keeps each one hidden unless its header button applies). -->
+                <button id="room-opt-invite" role="menuitem" data-proxy-for="invite-btn" hidden data-i18n="ui.copyRoomInviteLink">Copy room invite link</button>
+                <button id="room-opt-pins" role="menuitem" data-proxy-for="pin-panel-btn" hidden data-i18n="ui.pinnedMessages">Pinned messages</button>
+                <button id="room-opt-saved" role="menuitem" data-proxy-for="saved-panel-btn" hidden data-i18n="ui.savedMessages">Saved messages</button>
                 <button id="leave-room-btn" role="menuitem" style="display:none;" data-i18n="ui.leaveRoom">Leave room</button>
                 <button id="delete-room-btn" role="menuitem" class="danger" style="display:none;" data-i18n="ui.deleteRoom">Delete room</button>
                 </div>
@@ -567,7 +572,7 @@
                 <input type="file" id="file-input" tabindex="-1" aria-hidden="true">
                 <button type="button" id="composer-emoji-btn" class="composer-icon-btn" aria-expanded="false" aria-label="Insert emoji" title="Insert emoji" data-i18n-attr="aria-label:ui.insertEmoji;title:ui.insertEmoji"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="20" height="20" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M15.182 15.182a4.5 4.5 0 0 1-6.364 0M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM9.75 9.75c0 .414-.168.75-.375.75S9 10.164 9 9.75 9.168 9 9.375 9s.375.336.375.75Zm-.375 0h.008v.015h-.008V9.75Zm5.625 0c0 .414-.168.75-.375.75s-.375-.336-.375-.75.168-.75.375-.75.375.336.375.75Zm-.375 0h.008v.015h-.008V9.75Z"/></svg></button>
                 <button type="button" id="poll-btn" class="composer-icon-btn" aria-label="Create a poll" title="Create a poll" data-i18n-attr="aria-label:ui.createPoll;title:ui.createPoll"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="20" height="20" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"/></svg></button>
-                <button type="button" id="gif-tray-btn" class="gif-tray-btn" aria-expanded="false" aria-label="GIF tray" title="GIF tray" data-i18n-attr="aria-label:ui.gifTray;title:ui.gifTray">GIF</button>
+                <button type="button" id="gif-tray-btn" class="gif-tray-btn" aria-expanded="false" aria-label="GIF tray" title="GIF tray" data-i18n-attr="aria-label:ui.gifTray;title:ui.gifTray"><span class="gif-glyph" aria-hidden="true">GIF</span></button>
                 </div>
                 <label for="message-input" class="sr-only" data-i18n="label.message">Message</label>
                 <textarea id="message-input" enterkeyhint="send" dir="auto" placeholder="Type a message… (Shift+Enter for newline)" rows="1" autocomplete="off" data-i18n-attr="placeholder:ui.typeMessageShiftEnter"></textarea>

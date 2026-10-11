@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
-  didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown,
+  didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, markdownToPlain,
   expireLabel, timeAgo, u8ToB64, b64ToU8, b64attr, scrollBehavior,
   composerEnterAction, isCoarsePointer, supportsFieldSizing, canShareLinks, shareLink,
 } from './util.js';
@@ -157,6 +157,19 @@ describe('webidColor', () => {
   it('handles empty/undefined without throwing', () => {
     expect(webidColor('')).toMatch(/^hsl\(/);
     expect(webidColor(undefined)).toMatch(/^hsl\(/);
+  });
+});
+
+describe('markdownToPlain', () => {
+  it('drops formatting markers and folds lines', () => {
+    expect(markdownToPlain('**bold**, _italic_, `code`\nand ~~old~~'))
+      .toBe('bold, italic, code and old');
+  });
+  it('leaves snake_case alone and masks spoilers', () => {
+    expect(markdownToPlain('see my_var_name ||the ending||')).toBe('see my_var_name •••');
+  });
+  it('handles empty input', () => {
+    expect(markdownToPlain(undefined)).toBe('');
   });
 });
 

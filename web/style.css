@@ -405,10 +405,16 @@ body {
     flex-direction: column;
 }
 
+/* One compact brand row at every width (the phone drawer used to keep the
+   h1's default margins and a 24px pad, nearly twice the desktop height). */
 #sidebar header {
-    padding: var(--space-5);
+    min-height: var(--header-h);
+    display: flex;
+    align-items: center;
+    padding: 0 var(--space-4);
     border-bottom: 1px solid var(--border);
 }
+#sidebar header > div { flex: 1; min-width: 0; }
 /* Presence and address sit just below the brand row, so the brand row can match
    the chat header's height on desktop. */
 .sidebar-identity {
@@ -447,7 +453,7 @@ nav section + section { margin-top: var(--space-4); }
 @layer components {
 /* Sidebar brand: h1 for a valid single top-level heading; sized to match the
    previous h2 exactly so the visual is unchanged. */
-.app-title { font-size: var(--text-xl); font-weight: var(--weight-bold); margin: 0.83em 0; }
+.app-title { font-size: var(--text-xl); font-weight: var(--weight-bold); margin: 0; }
 
 /* Sidebar section titles (Rooms / DMs / …) are h2s for a clean heading order
    (h1 brand → h2 sections → h2 chat title). Styling unchanged from the old h3. */
@@ -576,6 +582,7 @@ main { background: var(--surface-0); }
 }
 /* Room options ("⋯") button; its dropdown is a .ctx-menu opened by menu.js. */
 .room-options { display: inline-flex; }
+.room-options-menu button[hidden] { display: none; }
 #room-options-btn {
     background: transparent; border: none; color: var(--text-secondary);
     cursor: pointer; padding: 0; min-width: 32px; height: 32px;
@@ -597,17 +604,14 @@ main { background: var(--surface-0); }
 }
 
 @media (min-width: 769px) {
-    /* Both headers share one height so their bottom borders line up. */
-    #sidebar header,
+    /* The chat header matches the sidebar brand row's height, so their
+       bottom borders line up. */
     #chat-header {
         min-height: var(--header-h);
         display: flex;
         align-items: center;
     }
-    #sidebar header { padding: 0 var(--space-4); }
-    #sidebar header > div { flex: 1; min-width: 0; }
     #chat-header { padding-block: var(--space-2); }
-    .app-title { margin: 0; }
 }
 } /* components */
 
@@ -926,6 +930,11 @@ main { background: var(--surface-0); }
     background: var(--surface-0);
 }
 } /* layout */
+@layer utilities {
+/* No conversation open: there is nowhere to send to and nothing to pin, so the
+   composer and the pins button stay out of the way of the welcome actions. */
+main.no-view :is(#message-form, #pin-panel-btn, #typing-indicator) { display: none; }
+} /* utilities */
 
 @layer components {
 .paperclip {
@@ -1016,22 +1025,23 @@ main { background: var(--surface-0); }
     resize: none;
     line-height: 1.4;
 }
-/* The composer sets outline: none, so it repeats the focus ring here.
-   Text fields match :focus-visible on any focus. */
-#message-input:focus-visible { outline: var(--focus-ring); outline-offset: 0; }
+/* The composer is focused most of the time, so an accent ring would sit on
+   screen permanently and read as an error. Focus thickens the border to the
+   secondary text color instead (well above 3:1 on the field in both themes).
+   Forced colors drop box-shadow, so the system ring comes back there. */
+#message-input:focus-visible {
+    border-color: var(--text-secondary);
+    box-shadow: 0 0 0 1px var(--text-secondary);
+}
+@media (forced-colors: active) {
+    #message-input:focus-visible { outline: var(--focus-ring); outline-offset: 0; }
+}
 /* The global button rule has no height, so Send collapsed to a 15px strip. */
 #message-form button[type="submit"] {
     height: 36px;
     padding: 0 var(--space-4);
     border-radius: var(--radius-sm);
     flex-shrink: 0;
-}
-/* Nothing to send yet: Send steps back to a quiet neutral (still 4.5:1, it
-   is not disabled, and sendMessage() ignores an empty composer anyway). */
-#message-form:has(#message-input:placeholder-shown) button[type="submit"] {
-    background: var(--surface-2);
-    color: var(--text-secondary);
-    cursor: default;
 }
 
 #menu-toggle {
@@ -1123,6 +1133,11 @@ button {
    double-tap-to-zoom on controls, so two quick taps on a reaction or a
    button are two taps, not a zoom. Page zoom stays available. */
 :where(button, [role="button"], a[href], label, summary, select, .reaction) { touch-action: manipulation; }
+/* At phone width these three live in the room options menu (main.js keys the
+   menu items to the same width), so the room name keeps most of the header. */
+@media (max-width: 768px) {
+    #chat-header-actions :is(#invite-btn, #pin-panel-btn, #saved-panel-btn) { display: none !important; }
+}
 @media (pointer: coarse) {
     #room-options-btn { min-width: 44px; min-height: 44px; }
     /* Touch targets (WCAG 2.5.5/2.5.8), keyed to the input, not the width:
@@ -1983,13 +1998,21 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         .emoji-picker button:hover,
         .emoji-picker button:focus-visible { background: var(--tint-active); }
         /* R58: GIF tray — composer popover of starred images */
+        /* Sized and colored like the icon buttons beside it; only the small
+           outlined "GIF" glyph inside carries a border. */
         .gif-tray-btn {
-            background: transparent; border: 1px solid var(--slate-600);
-            color: var(--text-secondary); border-radius: 4px; cursor: pointer;
-            font-size: var(--text-2xs); font-weight: var(--weight-bold); letter-spacing: 0.03em;
-            padding: var(--space-1) var(--space-2); min-width: 36px; min-height: 36px; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            width: 36px; height: 36px; padding: 0; flex-shrink: 0;
+            background: transparent; border: none; border-radius: 4px; cursor: pointer;
+            color: var(--text-secondary);
+            transition: color var(--transition-fast), background var(--transition-fast);
         }
-        .gif-tray-btn:hover, .gif-tray-btn:focus-visible { color: var(--slate-50); border-color: var(--slate-500); background: var(--tint-hover); }
+        .gif-glyph {
+            border: 1.5px solid currentColor; border-radius: 4px;
+            padding: 0 var(--space-1); line-height: 1.3;
+            font-size: var(--text-2xs); font-weight: var(--weight-bold); letter-spacing: 0.03em;
+        }
+        .gif-tray-btn:hover, .gif-tray-btn[aria-expanded="true"] { color: var(--text-primary); background: var(--tint-hover); }
         #gif-tray {
             position: absolute; bottom: 62px; left: 8px; right: 8px;
             max-width: 420px; max-height: 300px; overflow-y: auto;
@@ -2545,34 +2568,6 @@ button:is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; opacity: 0.5
     background: var(--slate-900); color: var(--slate-50);
     border: 1px solid var(--slate-700); border-radius: var(--radius-sm);
 }
-/* Language and theme pickers: where the customizable select is supported the
-   open list is drawn in the app's own surface, radius and focus colors instead
-   of the OS menu (a white Windows list over the dark theme). Elsewhere the
-   native select above is unchanged. */
-@supports (appearance: base-select) {
-    select.settings-input,
-    select.settings-input::picker(select) { appearance: base-select; }
-    select.settings-input {
-        display: flex; align-items: center; justify-content: space-between;
-        gap: var(--space-2); cursor: pointer;
-    }
-    select.settings-input::picker-icon { color: var(--text-secondary); transition: rotate var(--dur-2) var(--ease-out); }
-    select.settings-input:open::picker-icon { rotate: 180deg; }
-    select.settings-input::picker(select) {
-        margin-block: var(--space-1); padding: var(--space-1);
-        max-block-size: 50dvh;
-        background: var(--surface-2); color: var(--text-primary);
-        border: 1px solid var(--border); border-radius: var(--radius-md);
-        box-shadow: var(--shadow-md);
-    }
-    select.settings-input option {
-        padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm);
-        font-size: var(--text-base);
-    }
-    select.settings-input option:is(:hover, :focus-visible) { background: var(--tint-hover); }
-    select.settings-input option:checked { font-weight: var(--weight-semibold); }
-    select.settings-input option::checkmark { color: var(--accent-text); }
-}
 .settings-inline { display: flex; gap: var(--space-2); align-items: flex-start; }
 .settings-inline > .settings-input { flex: 1; min-width: 0; }
 .settings-inline > .btn { flex-shrink: 0; white-space: nowrap; height: 36px; padding-block: 0; font-size: var(--text-md); }
@@ -2688,11 +2683,10 @@ button:is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; opacity: 0.5
 
 /* Scroll containers keep the scrollbar's space reserved, so content does not
    shift sideways when a list grows past one screen. Overlay scrollbars (most
-   phones, macOS default) take no space, so this is a no-op there. */
-#message-feed,
-nav,
+   phones, macOS default) take no space, so this is a no-op there. The
+   sidebar, settings nav and message feed are left out: their rows run edge
+   to edge, and an empty reserved gutter there shows as a dead strip. */
 .settings-content,
-.settings-nav,
 #members-panel,
 #pin-panel,
 #saved-panel,
@@ -2976,6 +2970,9 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
     font-size: var(--text-md); line-height: 1.5;
 }
 .banner__text { flex: 1; min-width: 0; }
+/* The NAT banner expands into several lines of steps; its close button stays
+   with the first line. */
+#nat-warning-banner { align-items: flex-start; }
 .banner--warning { background: var(--color-warning-bg); color: var(--color-warning-text); }
 .banner--info { background: var(--color-info-bg); color: var(--color-info-text); }
 .banner--danger { background: var(--color-danger-bg); color: var(--color-on-status); }

@@ -68,6 +68,7 @@ function make() {
     updateDisappearBanner: spy('updateDisappearBanner'), requestRoomMembers: spy('requestRoomMembers'),
     renderMembersPanel: spy('renderMembersPanel'), updateVoiceChannels: spy('updateVoiceChannels'),
     openSidebarCtx: spy('openSidebarCtx'), resetDateDivider: spy('resetDateDivider'),
+    getActiveView: () => host.activeView,
   });
 }
 
@@ -168,6 +169,16 @@ describe('populateSidebar + its click', () => {
     expect(host.activeView).toMatchObject({ type: 'room', id: 'r9', name: 'Nine' });
     expect(sent).toContainEqual({ cmd: 'read_room', room_id: 'r9' });
     expect(calls.updateVoiceChannels[0]).toEqual(['r9']);
+  });
+
+  it('keeps the open room marked when the list is rebuilt under it', () => {
+    const v = make();
+    host.activeView = { type: 'room', id: 'r2', name: 'Two' };
+    v.populateSidebar('room-list', [{ id: 'r1', name: 'One' }, { id: 'r2', name: 'Two' }], 'room');
+    const [one, two] = els['room-list']._children;
+    expect(one.classList.contains('active')).toBe(false);
+    expect(two.classList.contains('active')).toBe(true);
+    expect(two.dataset['aria-current']).toBe('true');
   });
 
   it('renders an actionable CTA when the list is empty (G3/G4)', () => {

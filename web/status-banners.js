@@ -156,7 +156,7 @@ export function createStatusBanners() {
                 guide = `<strong>${t('nat.title')}</strong>
                     ${t('nat.subtitle')}
                     <details style="margin-top:6px;cursor:pointer;">
-                      <summary><strong>${t('nat.howToFix')} <span aria-hidden="true">▾</span></strong></summary>
+                      <summary><strong>${t('nat.howToFix')}</strong></summary>
                       <div style="margin-top:8px;line-height:1.9;padding:0 4px;">
                         <strong>${t('nat.opt1Title')}</strong> ${t('nat.opt1Note')}<br>
                         ${t('nat.opt1Body', { port: code(port), ip: code(localIp), env: code(envLine) })}
@@ -169,10 +169,10 @@ export function createStatusBanners() {
             } else {
                 guide = t('nat.simpleGuide');
             }
-            banner.innerHTML = `<div style="flex:1;display:flex;gap:12px;align-items:flex-start;max-width:900px;margin:0 auto;">
-                <span class="banner__text">${guide}</span>
-                <button type="button" class="banner__close" aria-label="${t('common.dismiss')}" title="${t('common.dismiss')}">${icon('x-mark', { size: 14 })}</button>
-            </div>`;
+            // Same layout as the other banners: text from the start edge, the
+            // close button at the end.
+            banner.innerHTML = `<span class="banner__text">${guide}</span>
+                <button type="button" class="banner__close" aria-label="${t('common.dismiss')}" title="${t('common.dismiss')}">${icon('x-mark', { size: 14 })}</button>`;
             banner.querySelector("button").onclick = () => {
                 banner.remove();
                 sessionStorage.setItem("proxion_nat_dismissed", "1");

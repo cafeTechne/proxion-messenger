@@ -75,7 +75,9 @@ export function createAddress({ showToast, showCopyModal }) {
         if (!addr || !bar || !short) return;
         const atIdx = addr.lastIndexOf("@");
         const truncDid = addr.slice(0, 20) + "…";
-        const domain = atIdx > -1 ? addr.slice(atIdx) : "";
+        // The scheme is left off the short form so host and port fit the
+        // sidebar; the tooltip and the copy action keep the full address.
+        const domain = atIdx > -1 ? "@" + addr.slice(atIdx + 1).replace(/^[a-z]+:\/\//i, "") : "";
         short.textContent = truncDid + domain;
         short.title = addr;
         bar.style.display = "flex";

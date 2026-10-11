@@ -178,6 +178,23 @@ export function renderMarkdown(text) {
     return s.replace(/(\d+)/g, (_, i) => tokens[Number(i)]);
 }
 
+// One-line plain text for sidebar previews: drops the Markdown markers that
+// renderMarkdown would turn into formatting, masks spoilers (a preview must
+// not reveal them) and folds line breaks into spaces.
+export function markdownToPlain(text) {
+    return String(text || "")
+        .replace(/```([\s\S]*?)```/g, (_, code) => code.trim())
+        .replace(/`([^`\n]+)`/g, "$1")
+        .replace(/\|\|[^|\n]+\|\|/g, "•••")
+        .replace(/\*\*(.+?)\*\*/g, "$1")
+        .replace(/(?<!\w)__(?=\S)(.+?)(?<=\S)__(?!\w)/g, "$1")
+        .replace(/\*([^*\n]+)\*/g, "$1")
+        .replace(/(?<!\w)_(?=\S)([^_\n]+?)(?<=\S)_(?!\w)/g, "$1")
+        .replace(/~~(.+?)~~/g, "$1")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
 export function expireLabel(msRemaining) {
     if (msRemaining <= 0) return "expired";
     const s = Math.floor(msRemaining / 1000);

@@ -36,7 +36,7 @@ import { verifyDeviceCert } from './device-cert.js';
 import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
 import { buildRoomDescriptor, withMembers, descriptorSigningBytes } from './roomdesc.js';
 import {
-    didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, timeAgo,
+    didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, markdownToPlain, timeAgo,
     expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8, scrollBehavior,
     composerEnterAction, isCoarsePointer, supportsFieldSizing, canShareLinks, shareLink,
 } from './util.js';
@@ -846,6 +846,7 @@ import { initThemePicker } from './theme.js';
             updateVoiceChannels: (id) => voice.updateVoiceChannels(id),
             openSidebarCtx, resetDateDivider: () => { rendering.state._lastRenderedDate = null; rendering.resetUnread(); },
             onViewOpened: () => _onViewOpened(),
+            getActiveView: () => activeView,
         });
         // Invite-link carry-through (A4): capture now (survives reload/first-run),
         // consume on the "registered" event via the deep-link confirm modal.
@@ -1633,7 +1634,7 @@ import { initThemePicker } from './theme.js';
                     // Track last message for DM/room preview
                     if (msg.local && (msg.source === "local_dm" || msg.source === "relay")) {
                         dmLastMessages[id] = {
-                            snippet: (msg.content || "").slice(0, 40),
+                            snippet: markdownToPlain(msg.content).slice(0, 40),
                             timestamp: msg.timestamp || new Date().toISOString(),
                         };
                         if (hiddenDms.has(id)) { hiddenDms.delete(id); localStorage.setItem("proxion_hidden_dms", JSON.stringify([...hiddenDms])); }
@@ -1641,7 +1642,7 @@ import { initThemePicker } from './theme.js';
                     }
                     if (msg.local && msg.source === "room") {
                         roomLastMessages[id] = {
-                            snippet: (msg.content || "").slice(0, 40),
+                            snippet: markdownToPlain(msg.content).slice(0, 40),
                             senderName: msg.from_display_name || (msg.from_webid || "").slice(0, 8),
                             timestamp: msg.timestamp || new Date().toISOString(),
                         };
@@ -3346,6 +3347,7 @@ import { initThemePicker } from './theme.js';
         function updatePageTitle() {
             const total = Object.values(unreadCounts).reduce((a, b) => a + b, 0);
             document.title = buildPageTitle(total, activeView);
+            document.querySelector("main")?.classList.toggle("no-view", !activeView);
             if (!_faviconBadge) {
                 _faviconBadge = createFaviconBadge();
                 document.addEventListener('visibilitychange', updatePageTitle);
@@ -3845,14 +3847,23 @@ import { initThemePicker } from './theme.js';
 
         // Room options overflow menu ("⋯"): holds Leave room and Delete room.
         // The view code still shows/hides those two buttons by id; the "⋯"
-        // button follows them, visible whenever either item is.
+        // button follows them, visible whenever either item is. On phones the
+        // header also hands its invite, pins and saved buttons to this menu
+        // (CSS hides them in the header), so those items mirror the header
+        // buttons there and stay hidden on wider screens.
+        const _phoneQuery = window.matchMedia("(max-width: 768px)");
         function _syncRoomOptionsBtn() {
             const btn = document.getElementById("room-options-btn");
             if (!btn) return;
+            const viewOpen = !document.querySelector("main")?.classList.contains("no-view");
+            for (const item of document.querySelectorAll("#room-options-menu [data-proxy-for]")) {
+                const target = document.getElementById(item.dataset.proxyFor);
+                item.hidden = !(_phoneQuery.matches && viewOpen && target && target.style.display !== "none");
+            }
             const any = ["leave-room-btn", "delete-room-btn"].some(id => {
                 const b = document.getElementById(id);
                 return b && b.style.display && b.style.display !== "none";
-            });
+            }) || !!document.querySelector("#room-options-menu [data-proxy-for]:not([hidden])");
             btn.style.display = any ? "" : "none";
             if (!any) _closeRoomOptionsMenu();
         }
@@ -3891,9 +3902,16 @@ import { initThemePicker } from './theme.js';
                     if (isMenuOpen(_roMenu) && !_roMenu.contains(e.target) && !_roBtn.contains(e.target)) _closeRoomOptionsMenu();
                 });
                 const _obs = new MutationObserver(_syncRoomOptionsBtn);
-                ["leave-room-btn", "delete-room-btn"].forEach(id => {
+                ["leave-room-btn", "delete-room-btn", "invite-btn"].forEach(id => {
                     const b = document.getElementById(id);
                     if (b) _obs.observe(b, { attributes: true, attributeFilter: ["style"] });
+                });
+                const _main = document.querySelector("main");
+                if (_main) _obs.observe(_main, { attributes: true, attributeFilter: ["class"] });
+                _phoneQuery.addEventListener("change", _syncRoomOptionsBtn);
+                _roMenu.addEventListener("click", (e) => {
+                    const item = e.target.closest("[data-proxy-for]");
+                    if (item) document.getElementById(item.dataset.proxyFor)?.click();
                 });
                 _syncRoomOptionsBtn();
             }

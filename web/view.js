@@ -76,7 +76,16 @@ export function createView({
     openSidebarCtx, resetDateDivider,
     // Called after a conversation opens (composer placeholder, header subtitle).
     onViewOpened = () => {},
+    getActiveView = () => null,
 }) {
+    // A row rebuilt while its conversation is open keeps the current-row marker
+    // (the rooms snapshot can arrive after the user has already opened a room).
+    function _markIfOpen(li, id) {
+        if (getActiveView()?.id !== id) return;
+        li.classList.add("active");
+        li.setAttribute("aria-current", "true");
+    }
+
     function renderContacts(contacts) {
         const peerDidToCertId = getPeerDidToCertId();
         const _threadNames = getThreadNames();
@@ -225,6 +234,7 @@ export function createView({
         const li = document.createElement("li");
         li.id = `nav-${roomId}`;
         li.setAttribute("data-name", name);
+        _markIfOpen(li, roomId);
         li.style.display = "flex";
         li.style.alignItems = "center";
         li.style.gap = "6px";
@@ -297,6 +307,7 @@ export function createView({
             const li = document.createElement("li");
             li.id = `nav-${id}`;
             li.setAttribute("data-name", name);
+            _markIfOpen(li, id);
             li.style.display = "flex";
             li.style.alignItems = "center";
             li.style.justifyContent = "space-between";
