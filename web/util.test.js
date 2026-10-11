@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
-  didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, markdownToPlain,
+  didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, markdownToPlain, didIdTag,
   expireLabel, timeAgo, u8ToB64, b64ToU8, b64attr, scrollBehavior,
   composerEnterAction, isCoarsePointer, supportsFieldSizing, canShareLinks, shareLink,
 } from './util.js';
@@ -157,6 +157,20 @@ describe('webidColor', () => {
   it('handles empty/undefined without throwing', () => {
     expect(webidColor('')).toMatch(/^hsl\(/);
     expect(webidColor(undefined)).toMatch(/^hsl\(/);
+  });
+});
+
+describe('didIdTag', () => {
+  it('takes the last ten characters, past the shared z6Mk prefix', () => {
+    expect(didIdTag('did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK')).toBe('nnEGta2doK');
+  });
+  it('ends with the message-header suffix so rows match their messages', () => {
+    const id = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK';
+    expect(didIdTag(id).endsWith(didSuffix(id))).toBe(true);
+  });
+  it('is empty for a missing or short id', () => {
+    expect(didIdTag('')).toBe('');
+    expect(didIdTag(undefined)).toBe('');
   });
 });
 

@@ -5,6 +5,16 @@
 // i18n.js. This import is cycle-free: i18n.js imports nothing from the app.
 import { getLocale, t } from './i18n.js';
 
+// Inline id shown beside a peer-chosen display name in member, contact and DM
+// rows, so a copied name cannot pass for someone else. Ten base58 characters
+// (~58 bits) from the end: the start of every did:key is the same "z6Mk", and
+// the 5-character message-header suffix is too short to resist a ground key.
+// It ends with that suffix, so a row still visibly matches its messages.
+export function didIdTag(id) {
+    if (!id || id.length < 10) return "";
+    return id.slice(-10);
+}
+
 export function didSuffix(id) {
     if (!id || id.length < 5) return "";
     return id.slice(-5);

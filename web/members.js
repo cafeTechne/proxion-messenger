@@ -5,7 +5,7 @@
 // the reassignable host activeView; requestRoomMembers asks the gateway for the
 // current roster (lives in rooms.js).
 
-import { escHtml, webidColor, avatarInitial, didSuffix } from './util.js';
+import { escHtml, webidColor, avatarInitial, didIdTag } from './util.js';
 import { tn } from './i18n.js';
 
 export function createMembers({ getActiveView, requestRoomMembers }) {
@@ -34,10 +34,9 @@ export function createMembers({ getActiveView, requestRoomMembers }) {
             : "";
         // Member display names are peer-chosen and can collide. When a name is
         // shown, append the stable short id inline so same-named members stay
-        // distinguishable without relying on hover (title=). It is the same
-        // short id the message headers show, so a member matches their messages.
-        const idTag = m.display_name && didSuffix(m.webid)
-            ? `<span class="member-id-suffix id-suffix">·${escHtml(didSuffix(m.webid))}</span>`
+        // distinguishable without relying on hover (title=).
+        const idTag = m.display_name && didIdTag(m.webid)
+            ? `<span class="member-id-suffix id-suffix">·${escHtml(didIdTag(m.webid))}</span>`
             : "";
         return `<div class="member-item" role="button" tabindex="-1" data-msg-action="profile" data-webid="${escHtml(m.webid)}" data-name="${escHtml(displayName)}">
                 <div style="position:relative;display:inline-block;margin-inline-end:8px;">

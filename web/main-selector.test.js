@@ -55,7 +55,7 @@ describe('main.js DM sidebar surfaces a stable id, not just the peer-chosen name
     expect(src).toContain('class="dm-item-id id-suffix"');
     // The tag is gated on a display name and built from the peer webid/thread id.
     expect(src).toMatch(/idTag = peer\.display_name/);
-    expect(src).toMatch(/peer\.peer_webid \|\| id \|\| ""\)\.slice\(8, 22\)/);
+    expect(src).toMatch(/didIdTag\(peer\.peer_webid \|\| id\)/);
     // The dm-item-name line actually interpolates the tag next to the escaped name.
     expect(src).toMatch(/dm-item-name[^`]*\$\{escHtml\(name\)\}\$\{idTag\}/);
   });

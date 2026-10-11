@@ -36,7 +36,7 @@ import { verifyDeviceCert } from './device-cert.js';
 import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
 import { buildRoomDescriptor, withMembers, descriptorSigningBytes } from './roomdesc.js';
 import {
-    didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, markdownToPlain, timeAgo,
+    didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, markdownToPlain, didIdTag, timeAgo,
     expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8, scrollBehavior,
     composerEnterAction, isCoarsePointer, supportsFieldSizing, canShareLinks, shareLink,
 } from './util.js';
@@ -1012,8 +1012,8 @@ import { initThemePicker } from './theme.js';
                 // The first inbound DM stores the sender's self-chosen display name
                 // as the sidebar identity. That name can copy a trusted contact's,
                 // so when one is shown, surface the stable short id inline too.
-                const idTag = peer.display_name
-                    ? `<span class="dm-item-id id-suffix">${escHtml((peer.peer_webid || id || "").slice(8, 22) + "…")}</span>`
+                const idTag = peer.display_name && didIdTag(peer.peer_webid || id)
+                    ? `<span class="dm-item-id id-suffix">·${escHtml(didIdTag(peer.peer_webid || id))}</span>`
                     : "";
                 const li = document.createElement("li");
                 li.id = `nav-${id}`;
