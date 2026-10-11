@@ -17,6 +17,7 @@ function make(over = {}) {
   const pins = createPins({
     getSocket: () => (over.socket === undefined ? socket : over.socket),
     getActiveView: () => (over.activeView === undefined ? { type: 'local_room', id: 'room-1' } : over.activeView),
+    getMessages: () => over.messages || [],
   });
   return { pins, sent };
 }
@@ -73,17 +74,26 @@ describe('renderPins', () => {
     ]);
     expect(appended).toHaveLength(2);
   });
-  it('escapes a malicious pinned_by so no element is injected', () => {
+  it('names the pinned message author (escaped), not the raw pinner id', () => {
+    const { pins } = make({ messages: [
+      { message_id: 'm1', from_webid: 'did:key:z6MkAAAAAbcdef', from_display_name: '<b>Sam</b>' },
+    ] });
+    const appended = [];
+    document.getElementById('pin-list').appendChild = (el) => appended.push(el);
+    pins.renderPins([{ message_id: 'm1', pinned_by: 'did:key:z6MkPINNER', content: 'ok' }]);
+    const html = appended[0].innerHTML;
+    expect(html).toContain('&lt;b&gt;Sam&lt;/b&gt;');
+    expect(html).not.toContain('<b>Sam');
+    expect(html).not.toContain('z6MkPINNER');
+  });
+  it('omits the author line when the message is not loaded', () => {
     const { pins } = make();
     const appended = [];
     document.getElementById('pin-list').appendChild = (el) => appended.push(el);
-    pins.renderPins([
-      { message_id: 'm1', pinned_by: '<svg/onload=alert(1)>', content: 'ok' },
-    ]);
+    pins.renderPins([{ message_id: 'm9', pinned_by: '<svg/onload=alert(1)>', content: 'ok' }]);
     const html = appended[0].innerHTML;
-    // pinned_by is capped at 20 chars (the trailing '>' is sliced off) then escaped.
-    expect(html).not.toContain('<svg/onload=alert(1)');
-    expect(html).toContain('&lt;svg/onload=alert(1)');
+    expect(html).not.toContain('ref-row__meta');
+    expect(html).not.toContain('<svg');
   });
   it('escapes a malicious pin content preview', () => {
     const { pins } = make();

@@ -608,7 +608,7 @@ import { initThemePicker } from './theme.js';
             });
         // Pinned messages: destructured into same-named bindings.
         const { pinMsg, showPinPanel, renderPins, unpinMsg, jumpToMsg } =
-            createPins({ getSocket: () => socket, getActiveView: () => activeView });
+            createPins({ getSocket: () => socket, getActiveView: () => activeView, getMessages: () => allMessages });
         // Profile / presence: userPresence and messageMap stay host-owned (the
         // dispatch and renderer also touch them) and are injected by reference.
         const {

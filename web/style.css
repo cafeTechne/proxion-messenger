@@ -1266,11 +1266,12 @@ button {
            over the shadow layers whenever that edge is fully in view; the two
            shadow layers stay pinned to the viewport (scroll). Both edges are
            handled, so it is correct in LTR and RTL without a mirror. Covers use
-           the header's own --bg-primary so a non-overflowing strip looks
-           unchanged. */
+           the header's own --bg-primary and stay solid across the 16px shadow
+           before fading, so a non-overflowing strip looks unchanged (a cover
+           that fades from its edge lets the shadow show through as a strip). */
         background:
-            linear-gradient(to right, var(--bg-primary), transparent) left center,
-            linear-gradient(to left,  var(--bg-primary), transparent) right center,
+            linear-gradient(to right, var(--bg-primary) 16px, transparent) left center,
+            linear-gradient(to left,  var(--bg-primary) 16px, transparent) right center,
             linear-gradient(to right, var(--edge-shade), transparent) left center,
             linear-gradient(to left,  var(--edge-shade), transparent) right center;
         background-repeat: no-repeat;
@@ -2785,8 +2786,8 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
            max-width: 768px block): covers scroll with the content, shadows
            stay put, so a shadow shows only on an edge that has more. */
         background:
-            linear-gradient(to right, var(--bg-primary), transparent) left center,
-            linear-gradient(to left,  var(--bg-primary), transparent) right center,
+            linear-gradient(to right, var(--bg-primary) 16px, transparent) left center,
+            linear-gradient(to left,  var(--bg-primary) 16px, transparent) right center,
             linear-gradient(to right, var(--edge-shade), transparent) left center,
             linear-gradient(to left,  var(--edge-shade), transparent) right center;
         background-repeat: no-repeat;

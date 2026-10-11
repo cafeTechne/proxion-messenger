@@ -6,10 +6,10 @@
 // working unchanged.
 import { inlineNotice } from './states.js';
 import { t } from './i18n.js';
-import { escHtml, scrollBehavior } from './util.js';
+import { escHtml, scrollBehavior, didSuffix } from './util.js';
 import { jumpToMessage } from './wayfinding.js';
 
-export function createPins({ getSocket, getActiveView }) {
+export function createPins({ getSocket, getActiveView, getMessages = () => [] }) {
 
     function pinMsg(msgId) {
         const socket = getSocket();
@@ -42,12 +42,17 @@ export function createPins({ getSocket, getActiveView }) {
         pins.forEach(pin => {
             const div = document.createElement("div");
             div.className = "ref-row";
-            const pinner = escHtml((pin.pinned_by || "").slice(0, 20)) || "unknown";
+            // Pins only record who pinned, so the author comes from the loaded
+            // message; without it the row shows the text alone.
+            const orig = getMessages().find(m => m.message_id === pin.message_id);
+            const author = orig
+                ? orig.from_display_name || (orig.from_webid ? "·" + didSuffix(orig.from_webid) : "")
+                : "";
             const preview = escHtml((pin.content || "").slice(0, 80));
             // message_id is client-supplied and stored verbatim, so escape it before
             // it lands in these innerHTML attributes (stored XSS otherwise).
             const msgIdEsc = escHtml(pin.message_id);
-            div.innerHTML = `<div class="ref-row__meta">${pinner}</div>
+            div.innerHTML = `${author ? `<div class="ref-row__meta">${escHtml(author)}</div>` : ""}
                 <div class="ref-row__body">${preview}</div>
                 <div class="ref-row__actions">
                     <button data-pin-action="jump" data-msg-id="${msgIdEsc}"
