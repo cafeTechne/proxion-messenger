@@ -152,6 +152,23 @@ def test_default_allowed_origins_tracks_http_port(monkeypatch):
     assert "http://localhost:9191" in origins
 
 
+def test_default_allowed_origins_include_tls_page(monkeypatch):
+    """With PROXION_SSL_CERT set the page is served over https on the same port,
+    so its Origin must pass both the WS handshake and the HTTP trust check."""
+    monkeypatch.delenv("PROXION_ALLOWED_ORIGINS", raising=False)
+    agent = AgentState.generate()
+    gw = ProxionGateway(
+        agent=agent, dm_clients=[], room_memberships=[],
+        config=GatewayConfig(port=_free_port(), http_port=9191), read_state=ReadState(),
+    )
+    origins = gw._allowed_ws_origins()
+    assert "https://127.0.0.1:9191" in origins
+    assert "https://localhost:9191" in origins
+    assert "https://localhost:9192" not in origins
+    assert ProxionGateway._is_trusted_origin(b"https://localhost:9191", 9191, "127.0.0.1")
+    assert not ProxionGateway._is_trusted_origin(b"https://evil.com", 9191, "127.0.0.1")
+
+
 def test_explicit_allowed_origins_still_permits_federation(monkeypatch):
     """An operator override is honored but None is appended so no-Origin
     federation peers still connect."""

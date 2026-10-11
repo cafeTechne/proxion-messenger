@@ -2011,13 +2011,23 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if not origin:
             return peer_ip in ("", "127.0.0.1", "::1")
         o = origin.decode("utf-8", errors="replace").lower().rstrip("/")
-        trusted = {
+        return o in ProxionGateway._local_origins(http_port)
+
+    @staticmethod
+    def _local_origins(http_port: int) -> list:
+        """Browser Origins of the gateway's own page and the desktop webview.
+
+        Both schemes are listed: with PROXION_SSL_CERT set the page is served
+        over https on the same loopback port, and only this process can serve it.
+        """
+        return [
             f"http://127.0.0.1:{http_port}",
             f"http://localhost:{http_port}",
+            f"https://127.0.0.1:{http_port}",
+            f"https://localhost:{http_port}",
             "tauri://localhost",
             "https://tauri.localhost",
-        }
-        return o in trusted
+        ]
 
     def _has_authenticated_client_ip(self, peer_ip: str) -> bool:
         """Whether an authenticated WS client is connected from *peer_ip*.
@@ -2114,13 +2124,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         explicit = [o.strip() for o in env.split(",") if o.strip()]
         if explicit:
             return explicit + [None]
-        return [
-            f"http://127.0.0.1:{http_port}",
-            f"http://localhost:{http_port}",
-            "tauri://localhost",
-            "https://tauri.localhost",
-            None,
-        ]
+        return self._local_origins(http_port) + [None]
 
     @staticmethod
     def _redact_dict(data: dict, keys: set = None) -> dict:
