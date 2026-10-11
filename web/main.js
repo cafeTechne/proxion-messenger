@@ -1587,8 +1587,12 @@ import { initThemePicker } from './theme.js';
                         }
                     }
 
-                    // Auto-add unknown relay sender to DM sidebar
-                    if (msg.source === "relay" && !document.getElementById("nav-" + id)) {
+                    // Auto-add an unknown sender to the DM sidebar: a cross-gateway
+                    // relay, or a same-gateway DM whose thread the gateway only
+                    // lists (local_dms) at the next connect.
+                    const _newLocalDm = msg.source === "local_dm" && !msg.own
+                        && msg.from_webid && msg.from_webid !== selfWebId;
+                    if ((msg.source === "relay" || _newLocalDm) && !document.getElementById("nav-" + id)) {
                         const label = msg.from_display_name || (msg.from_webid || "").slice(8, 22) + "…";
                         localDmPeers[id] = { display_name: label, peer_webid: msg.from_webid || id };
                         renderDmSidebar();

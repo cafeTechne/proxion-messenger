@@ -129,6 +129,13 @@ describe('renderMessage (buffer tracking)', () => {
     r.renderMessage({ message_id: 'm2', thread_id: 'other-room', from_webid: 'x' });
     expect(host.allMessages).toHaveLength(0);
   });
+  it('skips thread messages while no thread is open (the welcome stays clean)', () => {
+    els['message-feed'] = mkEl();
+    const r = make();
+    view = null;
+    r.renderMessage({ message_id: 'm3', thread_id: 'dm-1', from_webid: 'x', content: 'hi' });
+    expect(host.allMessages).toHaveLength(0);
+  });
 });
 
 describe('avatar XSS hardening', () => {

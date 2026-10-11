@@ -318,8 +318,10 @@ export function createRendering({
         const activeView = getActiveView();
         const allMessages = getAllMessages();
         const messageMap = getMessageMap();
-        // Skip DOM work for messages that don't belong to the active thread
-        if (activeView && msg.thread_id && msg.thread_id !== activeView.id) return;
+        // Skip DOM work for messages that don't belong to the active thread.
+        // With no thread open the feed holds the welcome actions, so a thread
+        // message has nowhere to go (it used to land under the welcome).
+        if (msg.thread_id && msg.thread_id !== activeView?.id) return;
         // Push to allMessages array (virtual scroll buffer)
         if (!allMessages.find(m => m.message_id === msg.message_id)) {
             allMessages.push(msg);
