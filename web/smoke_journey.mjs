@@ -113,14 +113,15 @@ try {
   page.on('console', (m) => { if (m.type() === 'error') fatal.push('console.error: ' + m.text()); });
 
   step = 'load';
-  await page.goto(URL, { waitUntil: 'load', timeout: 20000 });
-
-  step = 'dismiss-onboarding';
-  // Fresh data dir → first-run onboarding modal would intercept clicks. Skip it.
-  await page.evaluate(() => {
-    const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none';
+  // Fresh data dir → first-run onboarding would open and its focus trap would
+  // swallow the typing. Seed a returning user (a name, pod setup skipped) before
+  // any script runs: hiding the modal after load is not enough, because the app
+  // reopens onboarding on connect while no display name is stored.
+  await page.evaluateOnNewDocument(() => {
+    localStorage.setItem('proxion_display_name', 'Journey');
     localStorage.setItem('proxion_pod_setup_skipped', '1');
   });
+  await page.goto(URL, { waitUntil: 'load', timeout: 20000 });
 
   step = 'connect';
   await page.waitForFunction(() => document.querySelector('.dot')?.classList.contains('online'),
