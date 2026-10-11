@@ -143,8 +143,8 @@ export function createView({
         onViewOpened();
         // A cert contact is a DM: reveal the call controls (this path previously left
         // them hidden, so calling a federated contact was impossible). R82 V3.
-        const _cb = document.getElementById("start-call-btn"); if (_cb) _cb.style.display = "block";
-        const _vcb = document.getElementById("start-video-call-btn"); if (_vcb) _vcb.style.display = "block";
+        const _cb = document.getElementById("start-call-btn"); if (_cb) _cb.style.display = "inline-flex";
+        const _vcb = document.getElementById("start-video-call-btn"); if (_vcb) _vcb.style.display = "inline-flex";
         const _inv = document.getElementById("invite-btn"); if (_inv) _inv.style.display = "none";
         updateE2EStatus(contact.peer_did);
         updateIdentityFingerprint(contact.peer_did);
@@ -194,8 +194,8 @@ export function createView({
         document.getElementById("members-panel").classList.remove("mobile-open");
         // Calls may be gated (e.g. the gateway-less web build); don't re-reveal them.
         const _callsOk = !window.proxionTransport || window.proxionTransport.supports("calls");
-        document.getElementById("start-call-btn").style.display = _callsOk ? "block" : "none";
-        { const _vb = document.getElementById("start-video-call-btn"); if (_vb) _vb.style.display = _callsOk ? "block" : "none"; }
+        document.getElementById("start-call-btn").style.display = _callsOk ? "inline-flex" : "none";
+        { const _vb = document.getElementById("start-video-call-btn"); if (_vb) _vb.style.display = _callsOk ? "inline-flex" : "none"; }
         document.getElementById("invite-btn").style.display = "none";
         document.querySelectorAll("nav li").forEach(el => el.classList.remove("active"));
         const li = document.getElementById(`nav-${id}`);
@@ -333,8 +333,8 @@ export function createView({
                 }));
                 if (window.innerWidth <= 768) toggleSidebar();
 
-                document.getElementById("start-call-btn").style.display = type === "dm" ? "block" : "none";
-                { const _vb = document.getElementById("start-video-call-btn"); if (_vb) _vb.style.display = type === "dm" ? "block" : "none"; }
+                document.getElementById("start-call-btn").style.display = type === "dm" ? "inline-flex" : "none";
+                { const _vb = document.getElementById("start-video-call-btn"); if (_vb) _vb.style.display = type === "dm" ? "inline-flex" : "none"; }
                 document.getElementById("invite-btn").style.display =
                     (type === "room" && roomInviteUrls[id]) ? "inline-block" : "none";
                 const dtSel = document.getElementById("disappear-timer-select");

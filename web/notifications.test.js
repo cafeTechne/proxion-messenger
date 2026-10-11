@@ -68,6 +68,24 @@ describe('showToast', () => {
     expect(msgOf(container.children[0]).textContent).toBe('hello');
   });
 
+  it('sits just above the topmost visible part of the composer', () => {
+    const form = { getBoundingClientRect: () => ({ top: 740, height: 60 }) };
+    const reply = { getBoundingClientRect: () => ({ top: 700, height: 40 }) };
+    const hidden = { getBoundingClientRect: () => ({ top: 0, height: 0 }) };
+    const byId = { 'toast-container': container, 'message-form': form, 'reply-bar': reply, 'voice-recording-bar': hidden };
+    global.document.getElementById = (id) => byId[id] || null;
+    global.window = { innerHeight: 800 };
+    make().showToast('pinned');
+    expect(container.style.bottom).toBe('108px');
+  });
+
+  it('falls back to the CSS offset when no composer is showing', () => {
+    container.style.bottom = '300px';
+    global.window = { innerHeight: 800 };
+    make().showToast('saved');
+    expect(container.style.bottom).toBe('');
+  });
+
   it('is a no-op when the container is missing', () => {
     global.document.getElementById = () => null;
     const { showToast } = make();

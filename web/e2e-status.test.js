@@ -13,7 +13,7 @@ import { createE2EStatus } from './e2e-status.js';
 
 let els, store;
 function mkEl(over = {}) {
-  return { style: {}, textContent: '', innerHTML: '', title: '', value: '', disabled: false, ...over };
+  return { style: {}, dataset: {}, textContent: '', innerHTML: '', title: '', value: '', disabled: false, ...over };
 }
 beforeEach(() => {
   els = {};
@@ -36,11 +36,14 @@ describe('_updateE2EStatus', () => {
     expect(els['dm-e2e-status'].style.display).toBe('inline');
     expect(els['dm-e2e-status'].innerHTML).toContain('E2E');
     expect(els['dm-e2e-verify-btn'].style.display).toBe('inline');
+    expect(els['dm-e2e-status'].dataset.state).toBe('encrypted');
   });
   it('shows "No E2E" when supported but key not exchanged', () => {
     els['dm-e2e-status'] = mkEl();
     createE2EStatus()._updateE2EStatus('did:key:zBob');
     expect(els['dm-e2e-status'].textContent).toBe('e2e.none');
+    // Styled neutral, not with the encrypted state's green.
+    expect(els['dm-e2e-status'].dataset.state).toBe('none');
   });
   it('hides the badge entirely with no peer', () => {
     els['dm-e2e-status'] = mkEl({ style: { display: 'inline' } });

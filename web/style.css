@@ -591,6 +591,22 @@ main { background: var(--surface-0); }
 }
 #room-options-btn:hover,
 #room-options-btn[aria-expanded="true"] { background: var(--tint-active); color: var(--text-primary); }
+/* Keyboard shortcuts: a key combination stays on one line ("Shift+F10 / ≣"
+   used to wrap its last key onto a row of its own); descriptions wrap. */
+#shortcut-modal td { vertical-align: top; padding-block: var(--space-1); }
+#shortcut-modal td:first-child { white-space: nowrap; padding-inline-end: var(--space-4); }
+/* DM encryption badge: green only once the conversation is encrypted. */
+#dm-e2e-status { background: var(--color-success-tint); color: var(--color-success-soft); }
+#dm-e2e-status[data-state="none"] { background: var(--surface-2); color: var(--text-secondary); }
+/* Call and Video carry a text label beside the icon, so they get their own
+   padding and a gap (the shared rule below zeroes padding for icon buttons). */
+#chat-header-actions > :is(#start-call-btn, #start-video-call-btn) {
+    gap: var(--space-1);
+    padding-inline: var(--space-2) var(--space-3);
+    margin-inline-start: var(--space-1);
+    font-size: var(--text-md);
+    font-weight: var(--weight-semibold);
+}
 /* One hit box for every header icon button. Buttons with a visible label keep
    their own inline padding, so the label still fits. */
 #chat-header-actions > button,
@@ -2906,17 +2922,19 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 } /* tokens */
 
 @layer components {
-/* ── Toasts. Top-right on desktop, under the header on phones, so a toast
-   never covers the composer's Send and mic buttons. ── */
+/* ── Toasts stack just above the composer (notifications.js measures it, so
+   they never cover Send or the mic). Header menus and the side drawers open
+   from the top right, so a toast there covered the menu or panel the user had
+   just opened (pin a message, then open Pinned). ── */
 #toast-container {
     position: fixed; z-index: var(--z-toast);
-    top: calc(var(--header-h) + var(--space-2));
+    bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
     inset-inline: var(--space-3);
     display: flex; flex-direction: column; gap: var(--space-2);
     pointer-events: none;
 }
 @media (min-width: 769px) {
-    #toast-container { inset-inline-start: auto; inset-inline-end: var(--space-4); width: 340px; }
+    #toast-container { inset-inline: 0; width: 340px; margin-inline: auto; }
 }
 .toast {
     display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
@@ -2927,11 +2945,11 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
     pointer-events: auto; cursor: pointer;
     transition: opacity var(--dur-2) var(--ease-out), transform var(--dur-3) var(--ease-spring);
 }
-/* Arrives from just above, since the stack hangs from the top of the screen.
+/* Arrives from just below, since the stack sits on the composer.
    Leaving is quicker than the 300ms removal timer in notifications.js. */
-@starting-style { .toast { opacity: 0; transform: translateY(-8px); } }
+@starting-style { .toast { opacity: 0; transform: translateY(8px); } }
 .toast--leaving {
-    opacity: 0; transform: translateY(-4px);
+    opacity: 0; transform: translateY(4px);
     transition-duration: var(--dur-2); transition-timing-function: var(--ease-in);
 }
 .toast--success { background: var(--color-success-bg); color: var(--color-on-status); }
