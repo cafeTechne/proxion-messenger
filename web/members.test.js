@@ -74,3 +74,20 @@ describe('renderMembersPanel', () => {
     expect(html).toContain('FakeAlice'.slice(0, 6));
   });
 });
+
+describe('member names', () => {
+  it('treats a DID sent as the display name as no name', () => {
+    els['members-list'] = mkEl();
+    const webid = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK';
+    make().renderMembersPanel([{ webid, display_name: webid, status: 'offline' }]);
+    const html = els['members-list'].innerHTML;
+    expect(html).toContain('members.unnamed');
+    expect(html).toContain('·nnEGta2doK');
+  });
+  it('treats a truncated DID as no name too', () => {
+    els['members-list'] = mkEl();
+    const webid = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK';
+    make().renderMembersPanel([{ webid, display_name: 'did:key:z6Mk', status: 'offline' }]);
+    expect(els['members-list'].innerHTML).toContain('members.unnamed');
+  });
+});

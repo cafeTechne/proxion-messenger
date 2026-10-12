@@ -6,7 +6,7 @@
 // current roster (lives in rooms.js).
 
 import { escHtml, webidColor, avatarInitial, didIdTag } from './util.js';
-import { tn } from './i18n.js';
+import { t, tn } from './i18n.js';
 
 export function createMembers({ getActiveView, requestRoomMembers }) {
     function toggleMembersPanel() {
@@ -26,7 +26,11 @@ export function createMembers({ getActiveView, requestRoomMembers }) {
 
     function memberHtml(m) {
         const color = webidColor(m.webid);
-        const displayName = m.display_name || m.webid || "?";
+        // With no name known the gateway sends the DID, or its start, as the name.
+        // Anything DID-shaped is shown as the DID fallback instead (which also
+        // keeps a peer from picking a name that mimics it).
+        const name = m.display_name && !m.display_name.startsWith("did:") ? m.display_name : "";
+        const displayName = name || m.webid || "?";
         const initial = escHtml(avatarInitial(displayName));
         const presenceClass = m.status === "online" ? "online" : m.status === "away" ? "away" : m.status === "busy" ? "busy" : "";
         const fedBadge = m.federated
@@ -35,7 +39,9 @@ export function createMembers({ getActiveView, requestRoomMembers }) {
         // Member display names are peer-chosen and can collide. When a name is
         // shown, append the stable short id inline so same-named members stay
         // distinguishable without relying on hover (title=).
-        const idTag = m.display_name && didIdTag(m.webid)
+        // An unnamed member shows "Unnamed" with the same id line, so the
+        // distinguishing end of the DID is never the part that gets cut off.
+        const idTag = didIdTag(m.webid)
             ? `<span class="member-id-suffix id-suffix">·${escHtml(didIdTag(m.webid))}</span>`
             : "";
         return `<div class="member-item" role="button" tabindex="-1" data-msg-action="profile" data-webid="${escHtml(m.webid)}" data-name="${escHtml(displayName)}">
@@ -43,7 +49,7 @@ export function createMembers({ getActiveView, requestRoomMembers }) {
                     <div class="avatar placeholder" style="background:${color};color:var(--avatar-initial);width:28px;height:28px;line-height:28px;font-size:12px;font-weight:bold;text-align:center;">${initial}</div>
                     <div class="avatar-presence ${presenceClass}" title="${escHtml(m.status || '')}"></div>
                 </div>
-                <span class="member-label" dir="auto"><span class="member-name">${escHtml(m.display_name || m.webid.slice(0, 12))}</span>${idTag}${fedBadge}</span>
+                <span class="member-label" dir="auto"><span class="member-line"><span class="member-name${name ? "" : " member-name--unnamed"}">${escHtml(name || t('members.unnamed'))}</span>${fedBadge}</span>${idTag}</span>
                 <span class="sr-only">, ${escHtml(m.status || "offline")}${m.federated ? ", federated" : ""}</span>
             </div>`;
     }

@@ -456,6 +456,7 @@
   "time.justNow": "Just now",
   "members.online.one": "Online, {count}",
   "members.online.other": "Online, {count}",
+  "members.unnamed": "Unnamed",
   "members.offline.one": "Offline, {count}",
   "members.offline.other": "Offline, {count}",
   "label.language": "Language",

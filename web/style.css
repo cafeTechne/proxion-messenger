@@ -583,6 +583,7 @@ main { background: var(--surface-0); }
 /* Room options ("⋯") button; its dropdown is a .ctx-menu opened by menu.js. */
 .room-options { display: inline-flex; }
 .room-options-menu button[hidden] { display: none; }
+#contact-profile-panel [hidden], .profile-popover [hidden] { display: none; }
 #room-options-btn {
     background: transparent; border: none; color: var(--text-secondary);
     cursor: pointer; padding: 0; min-width: 32px; height: 32px;
@@ -2776,9 +2777,13 @@ nav { overscroll-behavior-y: contain; }
     padding: var(--space-2) var(--space-4) var(--space-1);
     font-size: var(--text-xs); color: var(--text-secondary);
 }
-.member-label { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--space-1); }
+.member-label { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* The panel is narrow: the id goes under the name rather than squeezing it. */
+.member-line { display: flex; align-items: center; min-width: 0; }
 .member-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.member-label > :not(.member-name) { flex-shrink: 0; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-line > :not(.member-name) { flex-shrink: 0; }
+.member-name--unnamed { color: var(--text-secondary); font-style: italic; }
+.member-label > .id-suffix { margin-inline-start: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Contact profile drawer: names, DIDs and URLs wrap inside the drawer. */
 #contact-profile-panel { overflow-wrap: anywhere; }

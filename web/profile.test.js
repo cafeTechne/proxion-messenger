@@ -85,3 +85,56 @@ describe('profileCardOpenDM', () => {
     expect(sent).toContainEqual({ cmd: 'resolve_did', did: 'did:key:zCarol' });
   });
 });
+
+describe('contact profile panel', () => {
+  const DID = 'did:key:z6MkovEzDthDmJ395QGQkkykpLwcBHVMX9vyKEF5AGLXN6TH';
+  function mk(opts = {}) {
+    global.fetch = vi.fn(() => Promise.resolve({ ok: false }));
+    return createProfile({
+      getSocket: () => null, showToast: () => {},
+      getUserPresence: () => opts.presence ?? {}, getMessageMap: () => ({}),
+      isSelf: (w) => w === opts.self, isContact: (w) => w === opts.contact,
+    });
+  }
+  it('uses the name the caller shows and live presence, not the DID', () => {
+    mk({ presence: { [DID]: { status: 'online' } } }).showContactProfile(DID, 'Sam Okafor');
+    expect(els['contact-profile-name'].textContent).toBe('Sam Okafor');
+    expect(els['contact-profile-avatar'].textContent).toBe('S');
+    expect(els['contact-profile-status'].innerHTML).toContain('online');
+  });
+  it('falls back to the distinguishing end of the DID', () => {
+    mk().showContactProfile(DID);
+    expect(els['contact-profile-name'].textContent).toBe('did:key:…' + DID.slice(-10));
+  });
+  it('hides empty gateway and fingerprint rows', () => {
+    mk().showContactProfile(DID, 'Sam');
+    expect(els['contact-profile-gateway'].hidden).toBe(true);
+    expect(els['contact-profile-gateway-label'].hidden).toBe(true);
+    expect(els['contact-profile-fingerprint-label'].hidden).toBe(true);
+  });
+  it('offers no DM or removal on your own profile', () => {
+    mk({ self: DID, contact: DID }).showContactProfile(DID, 'Me');
+    expect(els['contact-profile-dm-btn'].hidden).toBe(true);
+    expect(els['contact-profile-remove-btn'].hidden).toBe(true);
+  });
+  it('offers removal only for an actual contact', () => {
+    mk({ contact: 'did:key:zOther' }).showContactProfile(DID, 'Stranger');
+    expect(els['contact-profile-dm-btn'].hidden).toBe(false);
+    expect(els['contact-profile-remove-btn'].hidden).toBe(true);
+    mk({ contact: DID }).showContactProfile(DID, 'Friend');
+    expect(els['contact-profile-remove-btn'].hidden).toBe(false);
+  });
+});
+
+describe('profile popover on your own card', () => {
+  it('hides Send DM and Block', () => {
+    const actions = mkEl(), divider = mkEl();
+    els['profile-card'] = mkEl({ querySelector: (s) => (s === '.profile-actions' ? actions : s === '.profile-divider' ? divider : null) });
+    const p = createProfile({ getSocket: () => null, showToast() {}, getUserPresence: () => ({}), getMessageMap: () => ({}), isSelf: (w) => w === 'did:key:zMe' });
+    p.showProfileCard('did:key:zMe', 'Me', 10, 10);
+    expect(actions.hidden).toBe(true);
+    p.showProfileCard('did:key:zYou', 'You', 10, 10);
+    expect(actions.hidden).toBe(false);
+    expect(divider.hidden).toBe(false);
+  });
+});

@@ -618,6 +618,8 @@ import { initThemePicker } from './theme.js';
             getSocket: () => socket, showToast,
             getUserPresence: () => userPresence, getMessageMap: () => messageMap,
             isBlocked: (webid) => blocks.isBlocked(webid),
+            isSelf: (webid) => !!webid && (webid === selfWebId || webid === clientDid),
+            isContact: (webid) => !!peerDidToCertId[webid],
         });
         // R66: optimistic-send failure tracking (mark unconfirmed messages failed + retry).
         const sendStatus = createSendStatus({
@@ -3801,6 +3803,9 @@ import { initThemePicker } from './theme.js';
                 if (closeTopmostDialog()) return;
                 if (closeSearch({ focusInput: true })) return;
                 document.getElementById("pin-panel").style.display = "none";
+                const _cp = document.getElementById("contact-profile-panel");
+                if (_cp) _cp.style.display = "none";
+                hideProfileCard();
                 cancelReply();
                 _closeRoomOptionsMenu();
                 if (edit.state.editingMsgId) {
@@ -5751,8 +5756,9 @@ import { initThemePicker } from './theme.js';
                     case 'reply':        setReply(msgId); break;
                     case 'pin':          pinMsg(msgId); break;
                     case 'profile':
+                        // The popover is the quick look; the side panel (contacts
+                        // list) is where a contact is managed. Not both at once.
                         showProfileCard(webid, name, e.clientX, e.clientY);
-                        showContactProfile(webid);
                         break;
                     case 'scroll-reply': jumpToMessage(document.getElementById(`msg-${replyId}`), scrollBehavior()); break;
                     case 'bookmark':
@@ -5805,7 +5811,7 @@ import { initThemePicker } from './theme.js';
                 const item = e.target.closest('[data-msg-action="profile"]');
                 if (item) {
                     showProfileCard(item.dataset.webid, item.dataset.name, e.clientX, e.clientY);
-                    showContactProfile(item.dataset.webid);
+                    showContactProfile(item.dataset.webid, item.dataset.name);
                 }
             });
 

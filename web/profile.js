@@ -8,9 +8,9 @@
 // webidColor is imported. Returned functions are destructured into same-named
 // bindings in main.js so the dispatch and listener wiring keep working.
 import { t } from './i18n.js';
-import { webidColor, timeAgo, escHtml, avatarInitial } from './util.js';
+import { webidColor, timeAgo, escHtml, avatarInitial, dmFallbackName } from './util.js';
 
-export function createProfile({ getSocket, showToast, getUserPresence, getMessageMap, isBlocked }) {
+export function createProfile({ getSocket, showToast, getUserPresence, getMessageMap, isBlocked, isSelf, isContact }) {
     const state = { profileCardActive: null };
 
     function handlePresenceUpdate(event) {
@@ -92,6 +92,12 @@ export function createProfile({ getSocket, showToast, getUserPresence, getMessag
 
         // Position popover near click point
         const card = document.getElementById("profile-card");
+        // Your own card: nothing to DM or block.
+        const self = !!isSelf?.(webid);
+        for (const sel of [".profile-actions", ".profile-divider"]) {
+            const el = card.querySelector?.(sel);
+            if (el) el.hidden = self;
+        }
         card.classList.add("show");
         card.style.left = Math.min(x, window.innerWidth - 310) + "px";
         card.style.top = Math.min(y, window.innerHeight - 250) + "px";
@@ -129,15 +135,19 @@ export function createProfile({ getSocket, showToast, getUserPresence, getMessag
         state.profileCardActive = null;
     }
 
-    function showContactProfile(webid) {
+    // displayName is what the caller already shows for this person (the
+    // message author, the member row); the gateway profile, when it has one,
+    // fills in the rest. Live presence wins over the profile's stored status.
+    function showContactProfile(webid, displayName = '') {
         if (!webid) return;
         const panel = document.getElementById("contact-profile-panel");
         if (!panel) return;
+        const live = getUserPresence?.()[webid] || {};
         const cached = {
             did: webid,
-            display_name: '',
-            status: 'offline',
-            status_message: '',
+            display_name: displayName,
+            status: live.status || 'offline',
+            status_message: live.status_message || '',
             gateway_url: '',
             fingerprint: '',
         };
@@ -145,17 +155,32 @@ export function createProfile({ getSocket, showToast, getUserPresence, getMessag
         panel.style.display = '';
         fetch(`/profile/${encodeURIComponent(webid)}`)
             .then(r => r.ok ? r.json() : null)
-            .then(d => { if (d) _renderContactProfile(d); })
+            .then(d => {
+                if (!d || state._contactProfileDid !== webid) return;
+                _renderContactProfile({ ...cached, ...d,
+                    display_name: d.display_name || displayName,
+                    status: live.status || d.status || 'offline' });
+            })
             .catch(() => {});
     }
 
     function _renderContactProfile(d) {
+        state._contactProfileDid = d.did || null;
         const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val || ''; };
-        setText('contact-profile-name', d.display_name || d.did?.slice(-12) || '');
+        // A row with nothing to say (no known gateway, no fingerprint) is hidden
+        // with its label rather than shown empty or as a placeholder.
+        const setRow = (id, val) => {
+            setText(id, val);
+            for (const el of [document.getElementById(id), document.getElementById(id + '-label')]) {
+                if (el) el.hidden = !val;
+            }
+        };
+        const name = d.display_name || dmFallbackName(d.did || '');
+        setText('contact-profile-name', name);
         setText('contact-profile-did', d.did || '');
-        setText('contact-profile-gateway', d.gateway_url || '(unknown gateway)');
-        setText('contact-profile-fingerprint', d.fingerprint || '');
-        setText('contact-profile-status-msg', d.status_message || '');
+        setRow('contact-profile-gateway', d.gateway_url || '');
+        setRow('contact-profile-fingerprint', d.fingerprint || '');
+        setRow('contact-profile-status-msg', d.status_message || '');
         const statusEl = document.getElementById('contact-profile-status');
         if (statusEl) {
             const colors = { online: 'var(--color-success-soft)', away: 'var(--color-warning-soft)', busy: 'var(--color-danger-soft)', offline: 'var(--slate-600)' };
@@ -164,11 +189,17 @@ export function createProfile({ getSocket, showToast, getUserPresence, getMessag
         }
         const avatarEl = document.getElementById('contact-profile-avatar');
         if (avatarEl) {
-            const initials = (d.display_name || d.did || '?').slice(0, 2).toUpperCase();
-            avatarEl.textContent = initials;
+            // Same initial and colour as this person's message avatar.
+            avatarEl.textContent = avatarInitial(name || '?');
+            if (d.did) avatarEl.style.background = webidColor(d.did);
+            avatarEl.style.color = 'var(--avatar-initial)';
         }
+        // No "Send DM" to yourself, and "Remove contact" only for a contact.
+        const self = !!isSelf?.(d.did);
         const dmBtn = document.getElementById('contact-profile-dm-btn');
-        if (dmBtn) dmBtn.dataset.webid = d.did || '';
+        if (dmBtn) { dmBtn.dataset.webid = d.did || ''; dmBtn.hidden = self; }
+        const rmBtn = document.getElementById('contact-profile-remove-btn');
+        if (rmBtn) rmBtn.hidden = self || !(isContact?.(d.did) ?? true);
         const didEl = document.getElementById('contact-profile-did');
         if (didEl) {
             didEl.onclick = () => navigator.clipboard.writeText(d.did || '').then(() => showToast(t('profile.didCopied')));
