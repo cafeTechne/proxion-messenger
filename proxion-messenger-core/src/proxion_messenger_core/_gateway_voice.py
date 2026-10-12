@@ -17,6 +17,18 @@ _voice_invite_ts: dict = {}  # (caller_webid, target_webid) -> float
 
 class VoiceHandlerMixin:
 
+    def _voice_session_binds(self, session_id, a, b) -> bool:
+        """True when this gateway's 1:1 session `session_id` is between a and b.
+
+        Two accounts on one gateway may have no stored relationship with each
+        other, so answer/ICE addressed by webid must also route on the session.
+        """
+        sess = self._voice_sessions.get(session_id) if session_id else None
+        if not sess or not a or not b or a == b:
+            return False
+        parties = {sess.get("caller_webid"), sess.get("target_webid")}
+        return a in parties and b in parties
+
     async def _cleanup_voice_sessions(self, websocket) -> None:
         """Notify the other party and remove any voice sessions the socket was in."""
         for sid, sess in list(self._voice_sessions.items()):
@@ -210,6 +222,11 @@ class VoiceHandlerMixin:
         import secrets as _secrets
         import time as _time
         session_id = data.get("session_id") or _secrets.token_hex(16)
+        if session_id in self._voice_sessions:
+            # A caller-chosen id must be fresh; reusing a live one would replace
+            # that session's endpoints.
+            await websocket.send(json.dumps({"type": "error", "message": "voice_session_exists"}))
+            return
         sdp_offer = data.get("sdp_offer", "")
         target_webid = data.get("target_webid")
         cert_id = data.get("cert_id")
@@ -278,9 +295,12 @@ class VoiceHandlerMixin:
             "caller_webid": caller_webid,
             "target_webid": target_webid,
         }
-        asyncio.get_event_loop().call_later(
-            60.0, lambda: self._voice_sessions.pop(session_id, None)
-        )
+        # Ring timeout: drop the session if nobody answered within a minute. An
+        # answered session lives until hangup or disconnect.
+        def _expire_unanswered(sid=session_id):
+            if not self._voice_sessions.get(sid, {}).get("answered", True):
+                self._voice_sessions.pop(sid, None)
+        asyncio.get_event_loop().call_later(60.0, _expire_unanswered)
         # R79: identity-bound DTLS fingerprint signature travels with the SDP so the
         # callee can detect a gateway that tampered with the media channel. Opaque to
         # the gateway; forwarded verbatim.
@@ -384,8 +404,14 @@ class VoiceHandlerMixin:
                 for ch in self._voice_channels.values()
             )
             _related = bool(self._store and self._store.get_relationship_by_did(target_webid))
-            if not (_shares_channel or _related):
+            _in_session = self._voice_session_binds(session_id, sender_wid, target_webid)
+            if not (_shares_channel or _related or _in_session):
                 return
+            if _in_session:
+                _s = self._voice_sessions[session_id]
+                _s["answered"] = True
+                if _s.get("callee_ws") is None:
+                    _s["callee_ws"] = websocket
             answer_event = {
                 "type": "voice_answer",
                 "from_webid": sender_wid,
@@ -487,7 +513,8 @@ class VoiceHandlerMixin:
                 for ch in self._voice_channels.values()
             )
             _related = bool(self._store and self._store.get_relationship_by_did(target_webid))
-            if not (_shares_channel or _related):
+            _in_session = self._voice_session_binds(session_id, sender_wid, target_webid)
+            if not (_shares_channel or _related or _in_session):
                 return
             event["from_webid"] = sender_wid
             target_ws = self._any_socket(target_webid)

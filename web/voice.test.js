@@ -172,6 +172,16 @@ describe('ICE-failure handling (silent-drop regressions)', () => {
     global.WebSocket = { OPEN: 1 };
   }
 
+  it('the caller names the session it invites with', async () => {
+    installRTC();
+    const { voice, sent } = makeVoice();
+    voice.state.localStream = { getTracks: () => [{ stop() {} }] };
+    await voice.initWebRTC('cert1', null, true);
+    const invite = sent.find((m) => m.cmd === 'voice_invite');
+    expect(invite.session_id).toMatch(/^[0-9a-f]{32}$/);
+    expect(voice.state.currentCallSessionId).toBe(invite.session_id);
+  });
+
   it('1:1 call: ICE "failed" surfaces a toast and hangs up (was fully silent)', async () => {
     installRTC();
     const toasts = [];

@@ -12,6 +12,13 @@ import { buildIceServers, probeIceCandidates, classifyConnectivity } from './con
 const _dev = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
 
 export const CALL_TIMEOUT_MS = 30000;
+
+// 128 random bits as hex: unguessable, since a same-gateway peer proves itself
+// by quoting it.
+export function newCallSessionId() {
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    return Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+}
 export const CallState = Object.freeze({
     IDLE: 'idle',
     CALLING: 'calling',
@@ -894,6 +901,10 @@ export function createVoice(deps) {
         }
 
         async function initWebRTC(certId, sessionId, isCaller = false, sdpOffer = null, withVideo = false) {
+            // The caller names the session, so its own hangup and the peer's
+            // answer can be matched to it (the gateway used to mint one the
+            // caller never learned).
+            if (isCaller && !sessionId) sessionId = newCallSessionId();
             const iceServers = await _getIceServers();
             state.pc = new RTCPeerConnection({ iceServers: iceServers });
             state._pendingCandidates = [];

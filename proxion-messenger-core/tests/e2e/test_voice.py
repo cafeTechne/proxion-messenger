@@ -214,3 +214,56 @@ async def test_voice_hangup(alice_session, bob_session, voice_room):
 
     hangup = await bob_session.recv_type("voice_hangup", timeout=5.0)
     assert hangup.get("session_id") == session_id
+
+
+@pytest.mark.asyncio
+async def test_same_gateway_answer_and_ice_by_webid(alice_session, bob_session, voice_room):
+    """The web client addresses answer and ICE to the caller's webid. Two accounts
+    on one gateway have no stored relationship, so these must route on the live
+    session instead of being dropped (the caller sat on "Calling…" forever)."""
+    import secrets
+    session_id = secrets.token_hex(16)
+    await alice_session.send(cmd="voice_invite", target_webid=bob_session.did,
+                             session_id=session_id, sdp_offer="v=0\r\n")
+    await bob_session.recv_type("voice_invite", timeout=5.0)
+
+    await bob_session.send(cmd="voice_answer", session_id=session_id,
+                           target_webid=alice_session.did, sdp_answer="v=0\r\n")
+    answer = await alice_session.recv_type("voice_answer", timeout=5.0)
+    assert answer.get("session_id") == session_id
+    assert answer.get("from_webid") == bob_session.did
+
+    await bob_session.send(cmd="ice_candidate", session_id=session_id,
+                           target_webid=alice_session.did,
+                           candidate="candidate:1 1 UDP 2130706431 10.0.0.2 50000 typ host",
+                           sdp_mid="0", sdp_mline_index=0)
+    ice = await alice_session.recv_type("ice_candidate", timeout=5.0)
+    assert ice.get("from_webid") == bob_session.did
+
+    # The answered session still routes the hangup.
+    await alice_session.send(cmd="voice_hangup", session_id=session_id)
+    hangup = await bob_session.recv_type("voice_hangup", timeout=5.0)
+    assert hangup.get("session_id") == session_id
+
+
+@pytest.mark.asyncio
+async def test_webid_answer_needs_the_session(alice_session, bob_session, voice_room):
+    """Quoting a session id that does not bind the two accounts routes nothing."""
+    await bob_session.send(cmd="voice_answer", session_id="0" * 32,
+                           target_webid=alice_session.did, sdp_answer="v=0\r\n")
+    with pytest.raises((TimeoutError, asyncio.TimeoutError)):
+        await alice_session.recv_type("voice_answer", timeout=1.5)
+
+
+@pytest.mark.asyncio
+async def test_voice_invite_rejects_a_live_session_id(alice_session, bob_session, voice_room):
+    """A caller-chosen session id must be fresh; reusing one would hijack it."""
+    import secrets
+    session_id = secrets.token_hex(16)
+    await alice_session.send(cmd="voice_invite", target_webid=bob_session.did,
+                             session_id=session_id, sdp_offer="v=0\r\n")
+    await bob_session.recv_type("voice_invite", timeout=5.0)
+    await bob_session.send(cmd="voice_invite", target_webid=alice_session.did,
+                           session_id=session_id, sdp_offer="v=0\r\n")
+    err = await bob_session.recv_type("error", timeout=5.0)
+    assert err.get("message") == "voice_session_exists"
