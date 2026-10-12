@@ -35,6 +35,13 @@ function focusableWithin(modal) {
         .filter(el => isVisible(el) && el.getAttribute('aria-hidden') !== 'true');
 }
 
+// Where focus lands when a dialog opens: a visible control marked
+// data-autofocus (a confirm's primary button, so Enter does the expected
+// thing), else the first focusable control.
+export function initialFocusTarget(items) {
+    return items.find(el => el.hasAttribute('data-autofocus')) || items[0] || null;
+}
+
 // ---- Inert background ----
 //
 // aria-modal alone is not honoured by every screen reader, and it does nothing
@@ -133,7 +140,7 @@ export function installFocusTrap() {
         _stack.push({ modal, opener: document.activeElement });
         syncBackgroundInert(document.body, modal);
         const items = focusableWithin(modal);
-        const target = items[0] || modal;
+        const target = initialFocusTarget(items) || modal;
         // Give a container tabindex so it can hold focus if it has no controls.
         if (target === modal && !modal.hasAttribute('tabindex')) modal.tabIndex = -1;
         // Defer to let any open-time innerHTML settle before focusing.

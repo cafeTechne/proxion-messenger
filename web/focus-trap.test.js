@@ -1,5 +1,18 @@
 import { describe, it, expect, vi } from 'vitest';
-import { topmostDialog, closeTopmostDialog, syncBackgroundInert, closeDialog } from './focus-trap.js';
+import { topmostDialog, closeTopmostDialog, syncBackgroundInert, closeDialog, initialFocusTarget } from './focus-trap.js';
+
+describe('initialFocusTarget', () => {
+  const ctl = (attrs = {}) => ({ hasAttribute: (k) => k in attrs });
+  it('prefers a control marked data-autofocus over the first one', () => {
+    const first = ctl(), primary = ctl({ 'data-autofocus': '' });
+    expect(initialFocusTarget([first, ctl(), primary])).toBe(primary);
+  });
+  it('falls back to the first control, or null when there is none', () => {
+    const first = ctl();
+    expect(initialFocusTarget([first, ctl()])).toBe(first);
+    expect(initialFocusTarget([])).toBe(null);
+  });
+});
 
 // Minimal fake DOM: each node has style.display / style.zIndex, a parent
 // chain, attributes, and children. getStyle reads the inline style, which is

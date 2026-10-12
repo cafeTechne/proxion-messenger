@@ -498,8 +498,11 @@ export function createRendering({
             // exactly like the avatar/voice-note paths, or a crafted data_b64 breaks
             // out of the attribute. The truthiness guards below keep the raw field.
             const _b64 = b64attr(msg.file.data_b64 || '');
+            // The message text above already names the file ("📎 name"), so the
+            // link reads "Download"; the accessible name keeps the filename.
             const _dlLink = `<a href="data:application/octet-stream;base64,${_b64}" download="${safeFilename}"
-                       style="color:var(--accent-text);font-size:0.8em;display:block;margin-top:3px;">${t('file.downloadNamed', { filename: safeFilename })}</a>`;
+                       aria-label="${escHtml(t('file.downloadNamed', { filename: _rawFilename }))}"
+                       style="color:var(--accent-text);font-size:0.8em;display:block;margin-top:3px;">${t('file.download')}</a>`;
             if (_kind === 'image' && msg.file.data_b64) {
                 // R13.7: inline image preview (+R60C: sender-marked spoiler
                 // renders blurred under a reveal cover — one-way, like text
