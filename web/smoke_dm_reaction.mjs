@@ -228,7 +228,7 @@ try {
   await bob.evaluate((id) => document.querySelector(`[data-msg-action="react"][data-msg-id="${id}"]`)?.click(), mid);
   await sleep(300);
   const pickerShown = await bob.evaluate(() => { const p = document.getElementById('emoji-picker'); return p ? getComputedStyle(p).display : 'no-picker'; });
-  await bob.evaluate(() => document.querySelector('#emoji-picker span[data-emoji="🔥"]')?.click());
+  await bob.evaluate(() => document.querySelector('#emoji-picker [data-emoji="🔥"]')?.click());
   await sleep(500);
 
   // Bob should see his own reaction immediately (local echo).
