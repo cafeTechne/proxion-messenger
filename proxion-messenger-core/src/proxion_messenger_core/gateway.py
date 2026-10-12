@@ -1636,7 +1636,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
         # Save pending invite if store is available
         if self._store:
-            self._store.save_pending_invite(invite.to_dict(), target_did)
+            self._store.save_pending_invite(invite.to_dict(), target_did,
+                                            sender_webid=sender_webid)
 
         await websocket.send(json.dumps({
             "type": "friend_request_sent",
@@ -1724,7 +1725,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         cert.sign(self.agent.identity_key)
 
         # Persist to SQLite and pod
-        self._store.save_relationship(cert.to_dict(), peer_did=alice_did)
+        self._store.save_relationship(cert.to_dict(), peer_did=alice_did,
+                                      owner_webid=self._client_webids.get(websocket, ""))
         # Store the requester's browser E2E key (from the invite) so we can encrypt
         # the first DM to the right key even if we message before receiving one.
         _alice_e2e = invite.issuer.get("e2e_key")

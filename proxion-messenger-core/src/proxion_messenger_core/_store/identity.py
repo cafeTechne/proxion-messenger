@@ -191,6 +191,14 @@ class IdentityStoreMixin(object):
             ).fetchall()
         return [{"device_id": r["device_id"], "pub_b64u": r["pub_b64u"]} for r in rows]
 
+    def list_device_key_accounts(self) -> list[str]:
+        """The distinct accounts that have device E2E keys on this gateway."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT account_did FROM device_e2e_keys"
+            ).fetchall()
+        return [r["account_did"] for r in rows]
+
     def list_all_device_e2e_keys(self) -> list[dict]:
         """Every device E2E key regardless of account — the one-gateway-per-user
         fallback for the /devices roster when a request addresses the GATEWAY
@@ -262,14 +270,17 @@ class IdentityStoreMixin(object):
             # certificate_id (a fresh cert with a new id starts unrevoked, so
             # re-establishing a relationship after revocation still works; the
             # revocations tombstone table remains the cross-cert enforcement).
+            # Likewise keep a known owner when a re-save does not name one.
             _revoked = 0
             try:
                 _rr = conn.execute(
-                    "SELECT revoked FROM relationships WHERE certificate_id=?",
+                    "SELECT revoked, owner_webid FROM relationships WHERE certificate_id=?",
                     (certificate_id,),
                 ).fetchone()
                 if _rr and _rr[0]:
                     _revoked = 1
+                if _rr and not owner_webid:
+                    owner_webid = _rr[1] or ""
             except Exception:
                 _revoked = 0
 

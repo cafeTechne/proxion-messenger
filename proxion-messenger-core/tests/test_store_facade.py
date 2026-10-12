@@ -47,4 +47,4 @@ def test_schema_version_intact():
     import sqlite3
     s = _store()
     v = sqlite3.connect(s.db_path).execute("SELECT version FROM schema_version").fetchone()[0]
-    assert v == 58   # bump whenever a migration is added (58 = dm_prekeys composite (owner_webid, prekey_id) key)
+    assert v == 59   # bump whenever a migration is added (59 = pending_invites.sender_webid)

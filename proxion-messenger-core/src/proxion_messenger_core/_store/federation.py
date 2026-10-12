@@ -148,15 +148,16 @@ class FederationStoreMixin(object):
         with self._conn() as conn:
             cur = conn.execute("DELETE FROM relay_mailbox WHERE expires_at <= ?", (_t.time(),))
             return cur.rowcount or 0
-    def save_pending_invite(self, invite_dict: dict, target_did: str) -> None:
-        """Save a pending invite."""
+    def save_pending_invite(self, invite_dict: dict, target_did: str,
+                            sender_webid: str = "") -> None:
+        """Save a pending invite. sender_webid is the local account that sent it."""
         with self._conn() as conn:
             invitation_id = invite_dict.get("invitation_id") or invite_dict.get("id", str(int(time.time() * 1000)))
             conn.execute(
                 """
                 INSERT OR REPLACE INTO pending_invites
-                    (invitation_id, invite_json, target_did, created_at, status)
-                VALUES (?, ?, ?, ?, ?)
+                    (invitation_id, invite_json, target_did, created_at, status, sender_webid)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     invitation_id,
@@ -164,8 +165,17 @@ class FederationStoreMixin(object):
                     target_did,
                     int(time.time()),
                     "pending",
+                    sender_webid or "",
                 ),
             )
+    def get_pending_invite_sender(self, invitation_id: str) -> str:
+        """The local account that sent this invite, or '' when unknown."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT sender_webid FROM pending_invites WHERE invitation_id = ?",
+                (invitation_id,),
+            ).fetchone()
+        return (row["sender_webid"] or "") if row else ""
     def get_pending_invite(self, invitation_id: str) -> Optional[dict]:
         """Returns invite_json parsed as dict, or None."""
         with self._conn() as conn:

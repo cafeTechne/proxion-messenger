@@ -102,11 +102,44 @@ async def test_devices_endpoint_owner_unresolved_returns_empty(tmp_path):
     _seed_relationship(gw, req_did, owner="")  # no owner recorded
     gw._store.save_device_e2e_key("did:key:zUser", "did:key:zUser", "P1")
     gw._store.save_device_e2e_key("did:key:zUser", "did:key:zDev2", "P2")
+    gw._store.save_device_e2e_key("did:key:zOther", "did:key:zOther", "P3")
 
     body = json.dumps(_sign_devices_request(req_key, req_did, own_did)).encode()
     status, resp = await gw._handle_devices_post(body)
     assert status.startswith("200")
     assert json.loads(resp)["devices"] == []
+
+
+@pytest.mark.asyncio
+async def test_devices_endpoint_owner_unresolved_single_account(tmp_path):
+    """With device keys for only one account there is nothing else to leak, so an
+    owner-less (pre-migration) relationship still gets that account's roster."""
+    gw = _gw(tmp_path, "a")
+    own_did = pub_key_to_did(gw.agent.identity_pub_bytes)
+    req_key = Ed25519PrivateKey.generate()
+    req_did = _did(req_key)
+    _seed_relationship(gw, req_did, owner="")
+    gw._store.save_device_e2e_key("did:key:zUser", "did:key:zUser", "P1")
+    gw._store.save_device_e2e_key("did:key:zUser", "did:key:zDev2", "P2")
+
+    body = json.dumps(_sign_devices_request(req_key, req_did, own_did)).encode()
+    status, resp = await gw._handle_devices_post(body)
+    assert status.startswith("200")
+    assert {d["device_id"] for d in json.loads(resp)["devices"]} == {"did:key:zUser", "did:key:zDev2"}
+
+
+def test_friend_request_records_the_owning_account(tmp_path):
+    """The account that sent an invite is stored with it, and a re-save of the
+    relationship without an owner keeps the one already recorded."""
+    gw = _gw(tmp_path, "a")
+    gw._store.save_pending_invite({"invitation_id": "inv-1"}, "did:key:zPeer",
+                                  sender_webid="did:key:zLocalUser")
+    assert gw._store.get_pending_invite_sender("inv-1") == "did:key:zLocalUser"
+    assert gw._store.get_pending_invite_sender("missing") == ""
+
+    _seed_relationship(gw, "did:key:zPeer", owner="did:key:zLocalUser")
+    _seed_relationship(gw, "did:key:zPeer", owner="")
+    assert gw._store.get_relationship_owner("did:key:zPeer") == "did:key:zLocalUser"
 
 
 @pytest.mark.asyncio

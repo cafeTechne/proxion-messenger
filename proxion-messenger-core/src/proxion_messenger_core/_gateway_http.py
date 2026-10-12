@@ -416,7 +416,9 @@ class HttpEndpointsMixin:
         cert.sign(self.agent.identity_key)
 
         if self._store:
-            self._store.save_relationship(cert.to_dict(), peer_did=acceptor_did)
+            _owner = self._store.get_pending_invite_sender(invitation_id) if invitation_id else ""
+            self._store.save_relationship(cert.to_dict(), peer_did=acceptor_did,
+                                          owner_webid=_owner)
             asyncio.create_task(self._sync_cert_to_pod(cert.to_dict()))
             if invitation_id:
                 self._store.mark_invite_status(invitation_id, "accepted")
@@ -526,10 +528,14 @@ class HttpEndpointsMixin:
             return "403 Forbidden", '{"error":"not_related"}'
         # Roster: only the account that owns the relationship with the requester may
         # expose its device keys. When the owner cannot be resolved (legacy rows saved
-        # without an owner) return an empty roster rather than the union of every
-        # account's device keys, which would let one contact enumerate other accounts
-        # on a multi-account gateway.
+        # without an owner) never return the union of every account's device keys,
+        # which would let one contact enumerate other accounts on a multi-account
+        # gateway. A gateway holding device keys for exactly one account has no
+        # other account to leak, so that account is the owner.
         owner = self._store.get_relationship_owner(requester)
+        if not owner:
+            _accounts = self._store.list_device_key_accounts()
+            owner = _accounts[0] if len(_accounts) == 1 else ""
         devices = self._store.list_device_e2e_keys(owner) if owner else []
         return "200 OK", json.dumps({"devices": devices[:16]})
 

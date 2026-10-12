@@ -79,7 +79,7 @@ class _StoreBase(object):
         """Flush the WAL to the main database file (call before shutdown)."""
         with self._conn() as conn:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    _SCHEMA_VERSION = 58
+    _SCHEMA_VERSION = 59
     _integrity_ok: bool = True
     def _init_db(self) -> None:
         with self._conn() as conn:
@@ -1279,6 +1279,12 @@ class _StoreBase(object):
                        ON dm_prekeys(owner_webid, used)""",
                 ],
             },
+            # 59: the local account that sent an outgoing friend request, so the
+            # relationship saved when it is accepted records its owner (the
+            # /devices roster is scoped to that owner).
+            [
+                "ALTER TABLE pending_invites ADD COLUMN sender_webid TEXT NOT NULL DEFAULT ''",
+            ],
         ]
 
         for version, migration in enumerate(migrations, start=1):
