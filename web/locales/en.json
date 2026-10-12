@@ -72,6 +72,7 @@
   "common.updateFailed": "Update failed, try again",
   "common.loadingEllipsis": "Loading…",
   "common.unknownError": "unknown error",
+  "dm.encryptedPreview": "Encrypted message",
   "dm.historyCleared": "DM history cleared on this device",
   "members.loading": "Loading members…",
   "members.muted": "Member muted",

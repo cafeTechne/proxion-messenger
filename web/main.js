@@ -1505,6 +1505,13 @@ import { initThemePicker } from './theme.js';
                             : '[decryption error]';
                         event.e2e = false;
                     }
+                } else if (event.message_id && messageMap[event.message_id]
+                        && !messageMap[event.message_id].e2e) {
+                    // The echo of our own E2E message is sealed to the peer and we
+                    // can't open it. Keep the plaintext we sent, or the echo would
+                    // replace it with ciphertext (reply, forward, edit, preview).
+                    event.content = messageMap[event.message_id].content;
+                    event.e2e = false;
                 }
             }
             // Multi-device DM fanout: the gateway relays one envelope per device.
@@ -1680,9 +1687,11 @@ import { initThemePicker } from './theme.js';
                     }
                     // Track last message for DM/room preview
                     if (msg.local && (msg.source === "local_dm" || msg.source === "relay")) {
+                        // A message still sealed here (our own, sent from another
+                        // device) has no plaintext to preview.
                         dmLastMessages[id] = {
                             message_id: msg.message_id,
-                            snippet: markdownToPlain(msg.content).slice(0, 40),
+                            snippet: msg.e2e ? t('dm.encryptedPreview') : markdownToPlain(msg.content).slice(0, 40),
                             timestamp: msg.timestamp || new Date().toISOString(),
                         };
                         if (hiddenDms.has(id)) { hiddenDms.delete(id); localStorage.setItem("proxion_hidden_dms", JSON.stringify([...hiddenDms])); }
