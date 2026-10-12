@@ -105,7 +105,7 @@ describe('multi-line inline editor', () => {
     const ta = created.find(e => e.tag === 'textarea');
     const restore = (n) => { current = n; };
     ta.replaceWith = restore;
-    return { ...h, ta, textEl, current: () => current };
+    return { ...h, ta, textEl, created, current: () => current };
   }
   const key = (over) => ({ key: 'Enter', shiftKey: false, isComposing: false, preventDefault: vi.fn(), stopPropagation: vi.fn(), ...over });
 
@@ -145,5 +145,18 @@ describe('multi-line inline editor', () => {
     edit.cancelEdit('m1', 'line one');
     expect(current()).toBe(textEl);
     expect(edit.state.editingMsgId).toBe(null);
+  });
+  it('shows Save and Cancel buttons that commit and cancel', () => {
+    const { created, edit, textEl, current, sent } = open();
+    const cancel = created.find(e => e.className === 'edit-cancel-btn');
+    const save = created.find(e => e.className === 'edit-confirm-btn');
+    expect(cancel.textContent).toBe('btn.cancel');
+    expect(save.textContent).toBe('btn.save');
+    cancel.onclick();
+    expect(current()).toBe(textEl);
+    expect(edit.state.editingMsgId).toBe(null);
+    edit.startEdit('m1');
+    created.filter(e => e.className === 'edit-confirm-btn').pop().onclick();
+    expect(sent[0]).toMatchObject({ cmd: 'edit_local_message', content: 'line one' });
   });
 });

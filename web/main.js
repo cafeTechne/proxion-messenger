@@ -1361,9 +1361,36 @@ import { initThemePicker } from './theme.js';
             if (!li) return;
             const preview = roomLastMessages[roomId];
             const previewEl = li.querySelector(".room-item-preview");
-            if (previewEl && preview) {
-                previewEl.textContent = (preview.senderName ? preview.senderName + ": " : "") + preview.snippet;
+            if (previewEl) {
+                previewEl.textContent = preview ? (preview.senderName ? preview.senderName + ": " : "") + preview.snippet : "";
                 previewEl.title = previewEl.textContent;
+            }
+        }
+
+        // A sidebar preview quotes its thread's latest message, so an edit or a
+        // delete of that message has to reach it. On delete, fall back to the
+        // message before it when the thread is open, else clear the preview.
+        function _syncPreviewAfterChange(messageId, newContent) {
+            if (!messageId) return;
+            for (const [map, isRoom] of [[roomLastMessages, true], [dmLastMessages, false]]) {
+                for (const [tid, last] of Object.entries(map)) {
+                    if (last.message_id !== messageId) continue;
+                    if (newContent != null) {
+                        last.snippet = markdownToPlain(newContent).slice(0, 40);
+                    } else {
+                        const prev = activeView?.id === tid ? allMessages[allMessages.length - 1] : null;
+                        // messageMap holds the edited text; allMessages keeps the original.
+                        const prevText = prev && (messageMap[prev.message_id]?.content ?? prev.content);
+                        if (prevText) {
+                            map[tid] = { ...last, message_id: prev.message_id,
+                                snippet: markdownToPlain(prevText).slice(0, 40),
+                                senderName: prev.from_display_name || last.senderName };
+                        } else {
+                            delete map[tid];
+                        }
+                    }
+                    if (isRoom) updateRoomPreview(tid); else renderDmSidebar();
+                }
             }
         }
 
@@ -1652,6 +1679,7 @@ import { initThemePicker } from './theme.js';
                     // Track last message for DM/room preview
                     if (msg.local && (msg.source === "local_dm" || msg.source === "relay")) {
                         dmLastMessages[id] = {
+                            message_id: msg.message_id,
                             snippet: markdownToPlain(msg.content).slice(0, 40),
                             timestamp: msg.timestamp || new Date().toISOString(),
                         };
@@ -1660,6 +1688,7 @@ import { initThemePicker } from './theme.js';
                     }
                     if (msg.local && msg.source === "room") {
                         roomLastMessages[id] = {
+                            message_id: msg.message_id,
                             snippet: markdownToPlain(msg.content).slice(0, 40),
                             senderName: msg.from_display_name || (msg.from_webid || "").slice(0, 8),
                             timestamp: msg.timestamp || new Date().toISOString(),
@@ -1851,6 +1880,7 @@ import { initThemePicker } from './theme.js';
                     // so we know which UTC day file the Long Chat copy lives in.
                     const _editedTs = messageMap[event.message_id]?.pod_ts || messageMap[event.message_id]?.timestamp;
                     handleMessageEdited(event);
+                    if (event.new_content != null) _syncPreviewAfterChange(event.message_id, event.new_content);
                     if (event.message_id && event.new_content != null) {
                         dmHistoryUpdateContent(event.message_id, event.new_content, {
                             edited_at: event.edited_at || new Date().toISOString(),
@@ -2423,6 +2453,7 @@ import { initThemePicker } from './theme.js';
                     // tombstone in messageMap for replies that quote it.
                     rendering.removeMessage(event.message_id);
                     allMessages = allMessages.filter(m => m.message_id !== event.message_id);
+                    _syncPreviewAfterChange(event.message_id, null);
                     dmHistoryDelete(event.message_id);
                     if (event.message_id && event.thread_id) {
                         const _isRoom = !!(activeView && activeView.type === 'local_room');

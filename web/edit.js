@@ -51,12 +51,27 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
         inp.value = original;
         inp.setAttribute("dir", "auto");
         inp.setAttribute("aria-label", t('msg.editLabel'));
+        // Visible Save and Cancel under the editor, plus the key hint: the keys
+        // were the only way out before, and a touch keyboard has no Escape.
+        const actions = document.createElement("div");
+        actions.className = "edit-actions";
+        const hint = document.createElement("span");
+        hint.className = "edit-hint";
+        hint.textContent = t('msg.editHint');
+        const cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.className = "edit-cancel-btn";
+        cancelBtn.textContent = t('btn.cancel');
+        cancelBtn.onclick = () => cancelEdit(msgId);
         const confirmBtn = document.createElement("button");
-        confirmBtn.innerText = "✓";
+        confirmBtn.type = "button";
         confirmBtn.className = "edit-confirm-btn";
+        confirmBtn.textContent = t('btn.save');
         confirmBtn.setAttribute("aria-label", t('msg.saveEdit'));
-        confirmBtn.style.cssText = "background:transparent;border:none;cursor:pointer;font-size:1em;margin-inline-start:4px;";
         confirmBtn.onclick = () => commitEdit(msgId, inp.value);
+        actions.appendChild(hint);
+        actions.appendChild(cancelBtn);
+        actions.appendChild(confirmBtn);
         inp.onkeydown = (e) => {
             // Keys typed here belong to the editor: the feed's list navigation
             // (arrows, Space, Enter open the message menu) must not see them.
@@ -76,7 +91,7 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
         state._origTextEl = textEl;
         state._original = original;
         textEl.replaceWith(inp);
-        (inp.closest(".msg-body") || msgEl).appendChild(confirmBtn);
+        inp.after(actions);
         _autoGrow(inp);
         inp.focus();
         if (typeof inp.setSelectionRange === "function") inp.setSelectionRange(inp.value.length, inp.value.length);
@@ -122,8 +137,7 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
                 span.innerText = newContent.trim();
                 inp.replaceWith(span);
             }
-            const btn = msgEl.querySelector(".edit-confirm-btn");
-            if (btn) btn.remove();
+            msgEl.querySelector(".edit-actions")?.remove();
         }
         state._origTextEl = null;
     }
@@ -144,8 +158,7 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
                 }
                 inp.replaceWith(restore);
             }
-            const confirmBtn = msgEl.querySelector(".edit-confirm-btn");
-            if (confirmBtn) confirmBtn.remove();
+            msgEl.querySelector(".edit-actions")?.remove();
         }
         state._origTextEl = null;
         state.editingMsgId = null;
