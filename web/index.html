@@ -406,12 +406,12 @@
                 </section>
             </nav>
             <!-- Voice widget — shown only during a call -->
-            <div id="voice-widget" style="display:none;flex-direction:column;padding:var(--space-3) var(--space-3);border-top:1px solid var(--border);background:var(--surface-0);flex-shrink:0;">
-                <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2);overflow:hidden;">
+            <div id="voice-widget" style="display:none;">
+                <div style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) var(--space-2);margin-bottom:var(--space-2);overflow:hidden;">
                     <span class="dot online" style="flex-shrink:0;"></span>
                     <div style="display:flex;flex-direction:column;gap:1px;overflow:hidden;min-width:0;">
                         <span id="vw-peer-name" style="font-size:var(--text-sm);font-weight:var(--weight-semibold);color:var(--slate-50);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
-                        <span id="vw-status" style="font-size:var(--text-xs);color:var(--color-success-soft);">In call</span>
+                        <span id="vw-status" style="font-size:var(--text-xs);color:var(--color-success-soft);white-space:nowrap;">In call</span>
                     </div>
                     <span id="vw-conn" class="status-dot" role="status" aria-live="polite" title="" style="display:none;margin-inline-start:auto;flex-shrink:0;font-size:var(--text-2xs);"></span>
                     <span id="vw-verified" role="status" aria-live="polite" title="" style="display:none;flex-shrink:0;font-size:var(--text-2xs);padding:1px var(--space-2);border-radius:10px;background:var(--slate-800);color:var(--slate-200);"></span>

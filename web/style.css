@@ -390,6 +390,14 @@ body {
 } /* base */
 
 @layer layout {
+#voice-widget {
+    flex-direction: column;
+    flex-shrink: 0;
+    padding: var(--space-3);
+    border-top: 1px solid var(--border);
+    background: var(--surface-0);
+}
+
 #app {
     display: flex;
     width: 100%;
@@ -1121,6 +1129,12 @@ button {
        drawer's containing block and clip its overflow, so the parked drawer is
        hidden and animates in from the clip region on .mobile-open. */
     #app { position: relative; overflow-x: hidden; }
+    /* In-call widget, moved to the top of the conversation on phones. */
+    main > #voice-widget {
+        border-top: none;
+        border-bottom: 1px solid var(--border);
+        padding: var(--space-2) var(--space-3);
+    }
     #members-panel {
         display: block !important;
         position: absolute;

@@ -3950,6 +3950,18 @@ import { initThemePicker } from './theme.js';
             btn.style.display = any ? "" : "none";
             if (!any) _closeRoomOptionsMenu();
         }
+        // The call widget lives at the foot of the sidebar, which is an
+        // off-canvas drawer on phones: mid-call there was no visible way to mute
+        // or hang up. On phones it sits at the top of the conversation instead.
+        const _vwHome = document.getElementById("voice-widget")?.parentElement || null;
+        function _placeVoiceWidget() {
+            const vw = document.getElementById("voice-widget");
+            const main = document.querySelector("main");
+            if (!vw || !main || !_vwHome) return;
+            const target = _phoneQuery.matches ? main : _vwHome;
+            if (vw.parentElement === target) return;
+            if (target === main) main.prepend(vw); else _vwHome.appendChild(vw);
+        }
         // Keyboard (arrows, Home/End, Escape/Tab back to the button) and roles
         // come from menu.js, like the other popup menus.
         function _closeRoomOptionsMenu(restoreFocus) {
@@ -3992,6 +4004,8 @@ import { initThemePicker } from './theme.js';
                 const _main = document.querySelector("main");
                 if (_main) _obs.observe(_main, { attributes: true, attributeFilter: ["class"] });
                 _phoneQuery.addEventListener("change", _syncRoomOptionsBtn);
+                _phoneQuery.addEventListener("change", _placeVoiceWidget);
+                _placeVoiceWidget();
                 _roMenu.addEventListener("click", (e) => {
                     const item = e.target.closest("[data-proxy-for]");
                     if (item) document.getElementById(item.dataset.proxyFor)?.click();
