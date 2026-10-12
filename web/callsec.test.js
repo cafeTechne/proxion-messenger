@@ -267,6 +267,21 @@ describe('recipient-bound fingerprint signatures (FIND-10)', () => {
         })).toBe(true);
     });
 
+    it('accepts a signature bound to any of the recipient identities given', async () => {
+        // Cross-gateway the caller binds to our gateway did; we pass every identity we
+        // are known by, and an unrelated recipient still fails.
+        const me = await identity();
+        const sig = await signFingerprint({ fingerprint: FP, role: 'offer', privKey: me.priv, recipientDid: 'did:key:zBobGateway' });
+        expect(await verifyFingerprint({
+            fingerprint: FP, role: 'offer', signatureB64: sig, signerDid: me.did,
+            recipientDid: ['did:key:zBobBrowser', 'did:key:zBobGateway'],
+        })).toBe(true);
+        expect(await verifyFingerprint({
+            fingerprint: FP, role: 'offer', signatureB64: sig, signerDid: me.did,
+            recipientDid: ['did:key:zBobBrowser', 'did:key:zCarol'],
+        })).toBe(false);
+    });
+
     it('a tampered fingerprint still fails even with recipient binding (verdict not softened)', async () => {
         const me = await identity();
         const bob = 'did:key:zBob';

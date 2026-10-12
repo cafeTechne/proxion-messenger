@@ -120,7 +120,11 @@ export async function signFingerprint({ fingerprint, role, privKey, recipientDid
     return _b64std(sig);
 }
 
-/** Verify a fingerprint signature against a signer's did:key. Never throws. */
+/**
+ * Verify a fingerprint signature against a signer's did:key. Never throws.
+ * `recipientDid` may be a list: everything we are known by (our own WebID, and
+ * cross-gateway the gateway identity our federated contacts address us as).
+ */
 export async function verifyFingerprint({ fingerprint, role, signatureB64, signerDid, recipientDid }) {
     try {
         if (!fingerprint || !signatureB64 || !signerDid) return false;
@@ -130,9 +134,9 @@ export async function verifyFingerprint({ fingerprint, role, signatureB64, signe
         // into a call to a different peer); fall back to the legacy unbound form so a
         // signer that predates recipient binding still validates. A tampered fingerprint
         // matches neither form, so this never softens a mismatch.
-        if (recipientDid) {
+        for (const r of [].concat(recipientDid || []).filter(Boolean)) {
             const bound = await crypto.subtle.verify('Ed25519', pub, sig,
-                _canonical([DOMAIN, fingerprint, role || '', recipientDid]));
+                _canonical([DOMAIN, fingerprint, role || '', r]));
             if (bound) return true;
         }
         return await crypto.subtle.verify('Ed25519', pub, sig,

@@ -323,6 +323,16 @@ export function createVoice(deps) {
             } catch { return {}; }
         }
 
+        // Every identity a peer may have bound its signature to: our WebID, plus,
+        // cross-gateway, our gateway's did. A federated caller only knows us by the
+        // gateway did (its DM peer), so its offer is bound to that, not our WebID.
+        function _ownRecipientDids() {
+            const out = [getSelfWebId?.() || ''];
+            const cert = getDeviceCert?.();
+            if (cert && cert.device_did && cert.device_did === getClientDid?.()) out.push(cert.account_did || '');
+            return out.filter(Boolean);
+        }
+
         // Verify a received offer/answer SDP against the expected contact identity.
         // Returns true to proceed, false if the call must be refused (MitM).
         async function _verifyPeerSdp(sdp, role, event) {
@@ -338,9 +348,10 @@ export function createVoice(deps) {
                 // Whether this contact is known to bind calls (R86): if so, a call with
                 // no binding proof is a downgrade, not a legacy client.
                 peerBindsCalls: getPeerBindsCalls?.(_exp) || false,
-                // We are the intended recipient; accept a signature bound to our WebID
-                // (verifyFingerprint falls back to the legacy unbound form) (R110 FIND-10).
-                recipientDid: getSelfWebId?.() || '',
+                // We are the intended recipient; accept a signature bound to any identity
+                // we are known by (verifyFingerprint falls back to the legacy unbound
+                // form) (R110 FIND-10).
+                recipientDid: _ownRecipientDids(),
             });
             if (verdict === 'mismatch' || verdict === 'downgrade') {
                 // Both refuse. 'mismatch' is a tampered media channel (a swapped DTLS
@@ -731,9 +742,9 @@ export function createVoice(deps) {
                 expectedDid,
                 deviceCert: event?.fp_cert || null,
                 peerBindsCalls: getPeerBindsCalls?.(expectedDid) || false,
-                // We are the intended recipient; a signature bound to our WebID verifies,
-                // with a legacy unbound fallback (R110 FIND-10).
-                recipientDid: getSelfWebId?.() || '',
+                // We are the intended recipient; a signature bound to any identity we
+                // are known by verifies, with a legacy unbound fallback (R110 FIND-10).
+                recipientDid: _ownRecipientDids(),
             });
             const refuse = verdict === 'mismatch' || verdict === 'downgrade';
             // Per-peer, so one tile can read Verified while another reads Unverified.
