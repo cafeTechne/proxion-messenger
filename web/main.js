@@ -1,6 +1,6 @@
 import { solidSession, initSolidAuth, solidLogin, solidLogout, podStorageRoot, discoverStorageRoot } from './auth.js';
 import {
-    initE2E, e2eSupported, isE2EEnabled, myX25519PubB64u, cachePeerPub,
+    initE2E, e2eSupported, isE2EEnabled, myX25519PubB64u, cachePeerPub, onPeerPubChanged,
     ratchetEncrypt, ratchetDecrypt, fetchAndCachePeerPub, E2EDecryptError, safetyNumber,
     e2eScopedKey,
 } from './e2e.js';
@@ -6030,6 +6030,11 @@ import { initThemePicker } from './theme.js';
             // Wire up E2E verify modal buttons
             document.getElementById('dm-e2e-verify-btn')?.addEventListener('click', () => {
                 if (activeView?.peerWebid) _openVerifyModal(activeView.peerWebid);
+            });
+            // The badge is set when a DM opens; a peer key that arrives while it is
+            // open (their first reply) must flip it to E2E without a reopen.
+            onPeerPubChanged((peerId) => {
+                if (activeView?.peerWebid === peerId) _updateE2EStatus(peerId);
             });
             document.getElementById('e2e-modal-cancel')?.addEventListener('click', () => {
                 document.getElementById('e2e-verify-modal').style.display = 'none';

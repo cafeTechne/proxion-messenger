@@ -392,7 +392,13 @@ export function cachePeerPub(peerId, pubB64u) {
         console.warn('[e2e] peer key changed for', peerId, '- verification cleared');
     }
     localStorage.setItem(e2eScopedKey('proxion_e2e_peer_pub_' + peerId), pubB64u);
+    if (prev !== pubB64u) _peerPubListeners.forEach(fn => { try { fn(peerId); } catch { /* ignore */ } });
 }
+
+// Notified with the peer id whenever a peer's key is first learned or changes,
+// so an open DM can refresh its encryption badge without being reopened.
+const _peerPubListeners = new Set();
+export function onPeerPubChanged(fn) { _peerPubListeners.add(fn); }
 
 function _peerPub(peerId) {
     return localStorage.getItem(e2eScopedKey('proxion_e2e_peer_pub_' + peerId)) || null;

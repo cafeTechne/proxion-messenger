@@ -38,6 +38,7 @@ import {
     initE2E,
     myX25519PubB64u,
     cachePeerPub,
+    onPeerPubChanged,
     isE2EEnabled,
     ratchetEncrypt,
     ratchetDecrypt,
@@ -175,6 +176,17 @@ describe('safetyNumber', () => {
 });
 
 // ── Module init ───────────────────────────────────────────────────────────────
+
+describe('onPeerPubChanged', () => {
+    it('fires when a peer key is first learned or changes, not on a repeat', () => {
+        const seen = [];
+        onPeerPubChanged((id) => seen.push(id));
+        cachePeerPub('notify-peer', 'keyA');
+        cachePeerPub('notify-peer', 'keyA');
+        cachePeerPub('notify-peer', 'keyB');
+        expect(seen).toEqual(['notify-peer', 'notify-peer']);
+    });
+});
 
 describe('initE2E', () => {
     beforeEach(() => {
