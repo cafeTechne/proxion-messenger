@@ -79,7 +79,13 @@ export function createModals({ getSocket, getActiveView, sendCmd, showToast, get
     // -- Round 69: Schedule picker --
     function openSchedulePicker() {
         const p = document.getElementById('schedule-picker');
-        if (p) p.style.display = (p.style.display === 'none' || !p.style.display) ? 'flex' : 'none';
+        if (!p) return;
+        const open = p.style.display === 'none' || !p.style.display;
+        p.style.display = open ? 'flex' : 'none';
+        if (!open) return;
+        document.getElementById('schedule-datetime-input')?.focus();
+        const socket = getSocket();
+        if (socket && socket.readyState === 1) socket.send(JSON.stringify({ cmd: 'list_scheduled' }));
     }
 
     // -- Round 70: Integrations panel --

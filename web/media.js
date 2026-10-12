@@ -17,36 +17,79 @@ export function createMedia({ getSocket, getActiveView, showToast, getVoiceState
         recordingChunks: [],
         recordingTimerInterval: null,
         recordingSeconds: 0,
+        recordingStartedAt: 0,
+        durationMs: 0,
+        pending: null,
+        pressAt: 0,
         screenStream: null,
         isSharing: false,
     };
 
+    // The mic button works two ways: hold it (release sends) or tap it (starts
+    // recording; tap again to send). pressMic/releaseMic tell them apart by how
+    // long the press lasted. getUserMedia is async, so a release can arrive
+    // before the recorder exists; `pending` carries that intent across.
+    const TAP_MS = 400;
+    const MIN_MS = 500;
+
+    function _setRecordingUi(on) {
+        document.getElementById('voice-recording-bar')?.classList.toggle('active', on);
+        document.getElementById('voice-record-btn')?.classList.toggle('recording', on);
+    }
+
     function startVoiceRecording() {
+        if (state.pending || (state.mediaRecorder && state.mediaRecorder.state !== 'inactive')) return;
+        const pending = state.pending = { stop: null };
         navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-            state.recordingChunks = []; state.recordingSeconds = 0;
-            state.mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-            state.mediaRecorder.ondataavailable = e => { if (e.data.size > 0) state.recordingChunks.push(e.data); };
-            state.mediaRecorder.onstop = sendVoiceMessage;
-            state.mediaRecorder.start();
-            document.getElementById('voice-recording-bar')?.classList.add('active');
-            document.getElementById('voice-record-btn')?.classList.add('recording');
+            state.pending = null;
+            if (pending.stop === false) { stream.getTracks().forEach(tr => tr.stop()); return; }
+            state.recordingChunks = []; state.recordingSeconds = 0; state.durationMs = 0;
+            const rec = state.mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+            rec.ondataavailable = e => { if (e.data.size > 0) state.recordingChunks.push(e.data); };
+            rec.onstop = () => { stream.getTracks().forEach(tr => tr.stop()); sendVoiceMessage(); };
+            rec.start();
+            state.recordingStartedAt = Date.now();
+            _setRecordingUi(true);
             state.recordingTimerInterval = setInterval(() => {
                 state.recordingSeconds++;
                 const timerEl = document.getElementById('recording-timer');
                 if (timerEl) timerEl.textContent = Math.floor(state.recordingSeconds / 60) + ':' + String(state.recordingSeconds % 60).padStart(2, '0');
-                if (state.recordingSeconds >= 60) stopVoiceRecording(false);
+                if (state.recordingSeconds >= 60) stopVoiceRecording(true);
             }, 1000);
-        }).catch(() => showToast(t('media.micDenied'), 'error'));
+            if (pending.stop === true) stopVoiceRecording(true);
+        }).catch(() => { state.pending = null; showToast(t('media.micDenied'), 'error'); });
     }
 
     function stopVoiceRecording(send = true) {
+        if (state.pending) { state.pending.stop = send; return; }
         clearInterval(state.recordingTimerInterval);
-        document.getElementById('voice-recording-bar')?.classList.remove('active');
-        document.getElementById('voice-record-btn')?.classList.remove('recording');
+        _setRecordingUi(false);
+        const timerEl = document.getElementById('recording-timer');
+        if (timerEl) timerEl.textContent = '0:00';
         if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') {
-            state.mediaRecorder._sendOnStop = send;
+            state.durationMs = Math.min(60_000, Date.now() - (state.recordingStartedAt || Date.now()));
+            const tooShort = send && state.durationMs < MIN_MS;
+            if (tooShort) showToast(t('voiceMsg.tooShort'));
+            state.mediaRecorder._sendOnStop = send && !tooShort;
             state.mediaRecorder.stop();
         }
+    }
+
+    function _recording() {
+        return !!(state.pending || (state.mediaRecorder && state.mediaRecorder.state !== 'inactive'));
+    }
+
+    function pressMic() {
+        if (_recording()) { state.pressAt = 0; stopVoiceRecording(true); return; }
+        state.pressAt = Date.now();
+        startVoiceRecording();
+    }
+
+    function releaseMic() {
+        if (!state.pressAt) return;
+        const held = Date.now() - state.pressAt;
+        state.pressAt = 0;
+        if (held >= TAP_MS) stopVoiceRecording(true);
     }
 
     function sendVoiceMessage() {
@@ -59,7 +102,7 @@ export function createMedia({ getSocket, getActiveView, showToast, getVoiceState
         reader2.onloadend = () => {
             socket.send(JSON.stringify({
                 cmd: 'send_voice_message', thread_id: activeView.id,
-                audio_b64: reader2.result.split(',')[1], duration_ms: state.recordingSeconds * 1000,
+                audio_b64: reader2.result.split(',')[1], duration_ms: state.durationMs,
                 message_id: voiceMsgId,
             }));
             if (activeView.type === 'local_room') {
@@ -125,5 +168,5 @@ export function createMedia({ getSocket, getActiveView, showToast, getVoiceState
         if (socket && voiceState.currentCall) socket.send(JSON.stringify({ cmd: 'screenshare_stopped', session_id: voiceState.currentCall.session_id || '' }));
     }
 
-    return { startVoiceRecording, stopVoiceRecording, sendVoiceMessage, startScreenShare, stopScreenShare, state };
+    return { startVoiceRecording, stopVoiceRecording, pressMic, releaseMic, sendVoiceMessage, startScreenShare, stopScreenShare, state };
 }

@@ -2466,7 +2466,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
 
         /* Round 62: Voice Messages */
         .voice-record-btn.recording { color: var(--accent); }
-        .voice-recording-bar { display: none; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); background: var(--bg-secondary); flex: 1; color: var(--text-primary); }
+        .voice-recording-bar { display: none; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); background: var(--bg-secondary); flex-shrink: 0; color: var(--text-primary); }
         .voice-recording-bar.active { display: flex; }
         .recording-dot { color: var(--accent); font-size: var(--text-lg); animation: pulse 0.8s infinite; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }

@@ -337,9 +337,7 @@ export function createView({
                 { const _vb = document.getElementById("start-video-call-btn"); if (_vb) _vb.style.display = type === "dm" ? "inline-flex" : "none"; }
                 document.getElementById("invite-btn").style.display =
                     (type === "room" && roomInviteUrls[id]) ? "inline-block" : "none";
-                const dtSel = document.getElementById("disappear-timer-select");
                 const intBtn = document.getElementById("integrations-btn");
-                if (dtSel) dtSel.style.display = type === "room" ? "inline-block" : "none";
                 if (intBtn) intBtn.style.display = type === "room" ? "inline-block" : "none";
                 if (type === "room" && socket) {
                     socket.send(JSON.stringify({cmd:"get_disappear_timer", room_id:id}));

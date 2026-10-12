@@ -474,7 +474,7 @@ import { initThemePicker } from './theme.js';
             showToast, getVoiceState: () => voice.state,
             getVoice: () => voice,   // R81: recap senders when screen share changes the profile
         });
-        const { startVoiceRecording, stopVoiceRecording, sendVoiceMessage, startScreenShare, stopScreenShare } = media;
+        const { pressMic, releaseMic, stopVoiceRecording, sendVoiceMessage, startScreenShare, stopScreenShare } = media;
         // Message rendering (core slice 2). Created before voice/modals because they
         // consume renderMessage. messageMap/allMessages are read via fresh getters
         // (view-switching reassigns them) and mutated in place. renderReactions is a
@@ -2890,6 +2890,7 @@ import { initThemePicker } from './theme.js';
                     break;
                 }
                 case "disappear_timer": {
+                    if (activeView && event.room_id && event.room_id !== activeView.id) break;
                     const ms2 = event.ms || 0;
                     updateDisappearBanner(ms2);
                     const sel2 = document.getElementById("disappear-timer-select");
@@ -2908,13 +2909,20 @@ import { initThemePicker } from './theme.js';
                 case "room_roles":
                     break;
                 case "scheduled_list": {
+                    // The gateway lists every pending message of ours; the
+                    // picker shows the ones for this conversation.
                     const sp = document.getElementById("scheduled-msgs-list");
                     if (!sp) break;
-                    if (!event.scheduled || !event.scheduled.length) { sp.innerHTML = inlineNotice(t('empty.scheduled'), 'empty'); break; }
-                    sp.innerHTML = event.scheduled.map(s => `<div class="list-row">
-                        <span class="list-row__main">${escHtml((s.content||'').slice(0,40))} <em class="list-row__meta">(${new Date(s.send_at*1000).toLocaleString(getLocale())})</em></span>
-                        <button data-cancel-sched="${s.id}" class="btn btn--sm btn--slate">Cancel</button>
-                    </div>`).join('');
+                    const items = (event.items || []).filter(s => !activeView || s.thread_id === activeView.id);
+                    sp.hidden = !items.length;
+                    sp.innerHTML = items.map(s => {
+                        const at = new Date(typeof s.send_at === 'number' ? s.send_at * 1000 : s.send_at);
+                        const when = isNaN(at) ? '' : at.toLocaleString(getLocale(), { dateStyle: 'medium', timeStyle: 'short' });
+                        return `<div class="list-row">
+                        <span class="list-row__main">${escHtml((s.content_preview || '').slice(0, 40))} <em class="list-row__meta">${escHtml(when)}</em></span>
+                        <button type="button" data-cancel-sched="${escHtml(s.id)}" class="btn btn--sm btn--slate">${escHtml(t('schedule.unschedule'))}</button>
+                    </div>`;
+                    }).join('');
                     sp.querySelectorAll('[data-cancel-sched]').forEach(btn => {
                         btn.addEventListener('click', () => socket && socket.send(JSON.stringify({cmd:'cancel_scheduled',id:btn.dataset.cancelSched})));
                     });
@@ -2926,10 +2934,12 @@ import { initThemePicker } from './theme.js';
                     if (event.id && event.thread_id) {
                         podWriteScheduled(event.id, event.thread_id, event.send_at || '', event.content_preview || '').catch(() => {});
                     }
+                    socket?.send(JSON.stringify({ cmd: 'list_scheduled' }));
                     break;
                 case "scheduled_cancelled":
                     showToast(t('schedule.cancelled'));
                     if (event.id) podDeleteScheduled(event.id).catch(() => {});
+                    socket?.send(JSON.stringify({ cmd: 'list_scheduled' }));
                     break;
                 case "devices": {
                     const container = document.getElementById("settings-devices-list");
@@ -3808,6 +3818,9 @@ import { initThemePicker } from './theme.js';
                 hideProfileCard();
                 cancelReply();
                 _closeRoomOptionsMenu();
+                const _sp = document.getElementById("schedule-picker");
+                if (_sp) _sp.style.display = "none";
+                stopVoiceRecording(false);
                 if (edit.state.editingMsgId) {
                     const eid = edit.state.editingMsgId;
                     const msgEl = document.getElementById(`msg-${eid}`);
@@ -3869,11 +3882,27 @@ import { initThemePicker } from './theme.js';
             if (hdr) hdr.title = hdr.textContent || "";
             _updateHeaderSubtitle();
             _closeRoomOptionsMenu();
+            _syncDisappearOption();
             if (isSearchOpen()) closeSearch();
             // A view switch is a page change the browser does not announce.
             updatePageTitle();
             const _label = viewLabel(activeView);
             if (_label) announce(t('a11y.openedView', { name: _label }));
+        }
+
+        // Disappearing messages: a room's owner or either side of a DM may set
+        // it. The current value drives the banner, so load it on every open.
+        function _syncDisappearOption() {
+            const item = document.getElementById("room-opt-disappear");
+            const type = activeView?.type;
+            const canSet = type === "local_dm" || type === "dm" ||
+                ((type === "local_room" || type === "room") && roomCreatorOf.has(activeView.id));
+            if (item) item.hidden = !canSet;
+            updateDisappearBanner(0);
+            if (activeView?.id && socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ cmd: "get_disappear_timer", room_id: activeView.id }));
+            }
+            _syncRoomOptionsBtn();
         }
 
         // Muted line under the conversation name: member count for rooms,
@@ -3917,7 +3946,7 @@ import { initThemePicker } from './theme.js';
             const any = ["leave-room-btn", "delete-room-btn"].some(id => {
                 const b = document.getElementById(id);
                 return b && b.style.display && b.style.display !== "none";
-            }) || !!document.querySelector("#room-options-menu [data-proxy-for]:not([hidden])");
+            }) || !!document.querySelector("#room-options-menu [data-proxy-for]:not([hidden]), #room-opt-disappear:not([hidden])");
             btn.style.display = any ? "" : "none";
             if (!any) _closeRoomOptionsMenu();
         }
@@ -5183,28 +5212,40 @@ import { initThemePicker } from './theme.js';
             });
 
             // Round 62: Voice recording button
-            attachListener('#voice-record-btn', 'mousedown', () => startVoiceRecording());
-            attachListener('#voice-record-btn', 'mouseup', () => stopVoiceRecording(true));
-            attachListener('#voice-record-btn', 'touchstart', e => { e.preventDefault(); startVoiceRecording(); }, {passive:false});
-            attachListener('#voice-record-btn', 'touchend', () => stopVoiceRecording(true));
-            // Keyboard: mirror the "hold to record" gesture on Space/Enter (keydown
-            // starts, keyup stops), so the mic is operable without a pointer.
+            // Hold to record (release sends), or tap to start and tap again to send.
+            attachListener('#voice-record-btn', 'mousedown', () => pressMic());
+            attachListener('#voice-record-btn', 'mouseup', () => releaseMic());
+            attachListener('#voice-record-btn', 'touchstart', e => { e.preventDefault(); pressMic(); }, {passive:false});
+            attachListener('#voice-record-btn', 'touchend', () => releaseMic());
+            // Keyboard: Space/Enter behave like the pointer (hold or tap).
             attachListener('#voice-record-btn', 'keydown', (e) => {
                 if ((e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') && !e.repeat) {
-                    e.preventDefault(); startVoiceRecording();
+                    e.preventDefault(); pressMic();
                 }
             });
             attachListener('#voice-record-btn', 'keyup', (e) => {
                 if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
-                    e.preventDefault(); stopVoiceRecording(true);
+                    e.preventDefault(); releaseMic();
                 }
             });
             attachListener('#voice-record-cancel', 'click', () => stopVoiceRecording(false));
 
-            // Round 65: Disappear timer select
-            attachListener('#disappear-timer-select', 'change', e => {
+            // Round 65: Disappearing messages, set from the options menu
+            attachListener('#room-opt-disappear', 'click', () => {
+                const sel = document.getElementById('disappear-timer-select');
+                if (sel) sel.value = String(currentDisappearMs || 0);
+                document.getElementById('disappear-modal').style.display = 'flex';
+            });
+            attachListener('#disappear-form', 'submit', e => {
+                e.preventDefault();
+                document.getElementById('disappear-modal').style.display = 'none';
                 if (!activeView || !socket) return;
-                socket.send(JSON.stringify({cmd:'set_disappear_timer', room_id:activeView.id, ms:parseInt(e.target.value)}));
+                const ms = parseInt(document.getElementById('disappear-timer-select').value, 10) || 0;
+                if (ms === (currentDisappearMs || 0)) return;
+                socket.send(JSON.stringify({cmd:'set_disappear_timer', room_id:activeView.id, ms}));
+            });
+            attachListener('#disappear-cancel', 'click', () => {
+                document.getElementById('disappear-modal').style.display = 'none';
             });
 
             // Round 67: Screenshare button
@@ -5220,8 +5261,12 @@ import { initThemePicker } from './theme.js';
             attachListener('#schedule-confirm-btn', 'click', () => {
                 const dt = document.getElementById('schedule-datetime-input').value;
                 const content = document.getElementById('message-input').value.trim();
-                if (!dt || !content || !activeView || !socket) return;
-                const sendAt = Math.floor(new Date(dt).getTime() / 1000);
+                if (!content) { showToast(t('schedule.needText')); return; }
+                if (!dt) { showToast(t('schedule.needTime')); return; }
+                if (!activeView || !socket) return;
+                const when = new Date(dt);
+                if (isNaN(when) || when.getTime() <= Date.now()) { showToast(t('schedule.needFuture')); return; }
+                const sendAt = when.toISOString().replace('Z', '+00:00');
                 sendCmd('schedule_message', {thread_id:activeView.id, content, send_at:sendAt});
                 document.getElementById('message-input').value = '';
                 document.getElementById('schedule-picker').style.display = 'none';

@@ -1,6 +1,7 @@
 """E2E tests for advanced messaging: edit, history, search, pins, scheduling, read receipts."""
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 import pytest
 
 from proxion_messenger_core.persist import AgentState
@@ -156,12 +157,16 @@ async def test_unpin_message(live_gateway, alice_agent, bob_agent):
 # Scheduled messages
 # ---------------------------------------------------------------------------
 
+def _in_days(days: int) -> str:
+    """An ISO send_at that stays inside the gateway's one-year window."""
+    return (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+
+
 @pytest.mark.asyncio
 async def test_schedule_message(alice_session, bob_session):
     """Alice schedules a message; gets message_scheduled with a scheduled id."""
     bob_did = bob_session.did
-    # Must be within 1 year from now
-    send_at = "2026-12-01T12:00:00+00:00"
+    send_at = _in_days(30)
 
     await alice_session.send(
         cmd="schedule_message",
@@ -184,7 +189,7 @@ async def test_list_and_cancel_scheduled(alice_session, bob_session):
         cmd="schedule_message",
         thread_id=bob_did,
         content="Cancel me",
-        send_at="2026-11-01T10:00:00+00:00",
+        send_at=_in_days(20),
     )
     scheduled = await alice_session.recv_type("message_scheduled", timeout=5.0)
     sched_id = scheduled["id"]
@@ -197,6 +202,7 @@ async def test_list_and_cancel_scheduled(alice_session, bob_session):
     await alice_session.send(cmd="cancel_scheduled", id=sched_id)
     cancelled = await alice_session.recv_type("scheduled_cancelled", timeout=5.0)
     assert cancelled.get("id") == sched_id
+
 
 
 # ---------------------------------------------------------------------------

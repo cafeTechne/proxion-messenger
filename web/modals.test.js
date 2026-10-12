@@ -26,7 +26,7 @@ function mkEl(over = {}) {
     style: {}, innerHTML: '', textContent: '', className: '', id: '',
     dataset: {}, _children: children,
     appendChild: (c) => children.push(c),
-    addEventListener() {}, remove() {}, setAttribute() {},
+    addEventListener() {}, remove() {}, setAttribute() {}, focus() {},
     querySelector: () => mkEl(), querySelectorAll: () => [],
     ...over,
   };
@@ -77,6 +77,12 @@ describe('openSchedulePicker', () => {
     expect(els['schedule-picker'].style.display).toBe('flex');
     modals.openSchedulePicker();
     expect(els['schedule-picker'].style.display).toBe('none');
+  });
+  it('asks for the pending scheduled messages on open', () => {
+    const { modals, sent } = make();
+    els['schedule-picker'] = mkEl({ style: { display: 'none' } });
+    modals.openSchedulePicker();
+    expect(sent).toContainEqual({ cmd: 'list_scheduled' });
   });
 });
 
