@@ -95,6 +95,11 @@ async function openClient(ctx, url, label) {
   page._console = [];
   page.on('console', m => page._console.push(`${m.type()}: ${m.text()}`));
   page.on('pageerror', e => { page._console.push('PAGEERR: ' + e.message); console.error(`  [${label}] pageerror: ${e.message}`); });
+  // Start as an onboarded user. Hiding the onboarding dialog is not enough:
+  // the app reopens it on connect, and the page behind an open dialog is inert.
+  await page.evaluateOnNewDocument((n) => {
+    try { localStorage.setItem('proxion_display_name', n); localStorage.setItem('proxion_pod_setup_skipped', '1'); } catch { /* storage off */ }
+  }, label);
   await page.goto(url, { waitUntil: 'load', timeout: 20000 });
   await page.evaluate(() => { const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none'; });
   await online(page);
