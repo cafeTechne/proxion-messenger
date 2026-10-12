@@ -1,6 +1,6 @@
 // polls.js — R59F: format/parse round-trip and malformed-input handling.
 import { describe, it, expect } from 'vitest';
-import { formatPoll, parsePoll, POLL_EMOJI, MAX_POLL_OPTIONS } from './polls.js';
+import { formatPoll, parsePoll, pollVoteChange, POLL_EMOJI, MAX_POLL_OPTIONS } from './polls.js';
 
 describe('formatPoll', () => {
     it('formats question + options with keycap prefixes', () => {
@@ -40,5 +40,21 @@ describe('parsePoll', () => {
     });
     it('a message merely mentioning 📊 mid-text is not a poll', () => {
         expect(parsePoll('check the 📊 chart')).toBeNull();
+    });
+});
+
+describe('pollVoteChange', () => {
+    const [A, B] = POLL_EMOJI;
+    it('casts a first vote', () => {
+        expect(pollVoteChange({}, A, 'me')).toEqual({ add: A, remove: [] });
+    });
+    it('moves an existing vote to the new option', () => {
+        expect(pollVoteChange({ [A]: ['me', 'x'] }, B, 'me')).toEqual({ add: B, remove: [A] });
+    });
+    it('clears the vote when the same option is picked again', () => {
+        expect(pollVoteChange({ [A]: ['me'] }, A, 'me')).toEqual({ add: null, remove: [A] });
+    });
+    it("ignores other people's votes and non-poll reactions", () => {
+        expect(pollVoteChange({ [A]: ['x'], '👍': ['me'] }, B, 'me')).toEqual({ add: B, remove: [] });
     });
 });

@@ -1,8 +1,8 @@
 // polls.js — R59F: lightweight polls with ZERO backend changes. A poll is a
 // structured plain-text message (readable as-is on any client, upgraded or
-// not, local or federated); votes are ordinary keycap-emoji reactions that
-// the creator auto-seeds, so voters just tap a pill and the existing
-// reaction pipeline carries counts, live updates, and federation for free.
+// not, local or federated); votes are ordinary keycap-emoji reactions, so the
+// existing reaction pipeline carries counts, live updates, and federation for
+// free. The poll card's option buttons cast them (one vote per person).
 //
 // Format (parse + format are pure and round-trip):
 //   📊 <question>
@@ -21,6 +21,15 @@ export function formatPoll(question, options) {
     const opts = (options || []).map(o => (o || '').trim()).filter(Boolean).slice(0, MAX_POLL_OPTIONS);
     if (!q || opts.length < 2) return null;
     return `${POLL_MARKER} ${q}\n` + opts.map((o, i) => `${POLL_EMOJI[i]} ${o}`).join('\n');
+}
+
+// Single-choice voting on top of reactions: picking an option you already
+// chose clears it; picking another moves your vote. reacts is the message's
+// {emoji: [webid…]} map. Returns {add: emoji|null, remove: [emoji…]}.
+export function pollVoteChange(reacts, emoji, self) {
+    const mine = POLL_EMOJI.filter(e => (reacts?.[e] || []).includes(self));
+    if (mine.includes(emoji)) return { add: null, remove: [emoji] };
+    return { add: emoji, remove: mine };
 }
 
 // {question, options: [{emoji, text}]} for a well-formed poll, else null.
@@ -42,7 +51,7 @@ export function parsePoll(content) {
     return options.length >= 2 ? { question, options } : null;
 }
 
-export function createPolls({ showToast, addEmoji, getAllMessages }) {
+export function createPolls({ showToast }) {
 
     function openPollModal() {
         const modal = document.getElementById('poll-modal');
@@ -79,22 +88,6 @@ export function createPolls({ showToast, addEmoji, getAllMessages }) {
         document.getElementById('message-form')?.dispatchEvent(
             new Event('submit', { bubbles: true, cancelable: true }));
 
-        // Auto-seed one reaction per option so voters just tap. The optimistic
-        // render lands the message (client-minted id) shortly after submit —
-        // poll for it briefly, then react in order.
-        const parsed = parsePoll(content);
-        const started = Date.now();
-        const seed = () => {
-            const msgs = getAllMessages() || [];
-            const mine = [...msgs].reverse().find(m => m.content === content);
-            if (mine) {
-                parsed.options.forEach((o, i) =>
-                    setTimeout(() => addEmoji(o.emoji, mine.message_id), 200 * (i + 1)));
-                return;
-            }
-            if (Date.now() - started < 3000) setTimeout(seed, 150);
-        };
-        seed();
     }
 
     function wirePolls() {

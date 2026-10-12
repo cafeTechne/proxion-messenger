@@ -635,13 +635,13 @@ export function createRendering({
             body.innerHTML += `<div class="audio-message"><audio controls aria-label="${_audioLabel}" src="data:audio/webm;base64,${b64attr(msg.audio_b64)}"></audio>${dur}${receiptHtml}</div>`;
         } else if (_poll) {
             // R59F: poll card — plain text on the wire, upgraded rendering here.
-            // The tally IS the reaction row below (auto-seeded keycaps), so
-            // counts live-update through the existing reaction pipeline.
+            // Each option is a vote button; renderReactions fills in the
+            // counts from the keycap reactions, so they live-update.
             const rows = _poll.options.map(o =>
-                `<div class="poll-opt">${o.emoji} ${escHtml(o.text)}</div>`).join('');
+                `<button type="button" class="poll-opt" data-msg-action="poll-vote" data-msg-id="${msgIdEsc}" data-emoji="${o.emoji}" aria-pressed="false"><span class="poll-opt-bar" aria-hidden="true"></span><span class="poll-opt-text">${o.emoji} ${escHtml(o.text)}</span><span class="poll-opt-count"></span></button>`).join('');
             body.innerHTML += `<div class="msg-content"><div class="poll-card" dir="auto">
                 <div class="poll-q">${escHtml(_poll.question)}</div>${rows}
-                <div class="poll-hint">${t('poll.voteHint')}</div></div>${editedHtml}${receiptHtml}</div>`;
+                <div class="poll-foot"><span class="poll-hint">${t('poll.voteHint')}</span>${editedHtml}${receiptHtml}</div></div></div>`;
         } else {
             body.innerHTML += `<div class="msg-content"><span class="msg-text" dir="auto">${renderedText}</span>${editedHtml}${receiptHtml}</div>`;
         }

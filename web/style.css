@@ -1514,8 +1514,38 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
     max-width: min(420px, 100%);
 }
 .poll-q { font-weight: var(--weight-semibold); margin-bottom: var(--space-2); }
-.poll-opt { padding: 2px 0; }
-.poll-hint { margin-top: var(--space-2); font-size: var(--text-xs); color: var(--text-secondary); }
+.poll-opt {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    margin-top: var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+    overflow: hidden;
+}
+.poll-opt:hover { border-color: var(--slate-500); }
+.poll-opt[aria-pressed="true"] { border-color: var(--accent); }
+.poll-opt-bar {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    width: 0;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    transition: width 0.2s ease;
+}
+.poll-opt-text { position: relative; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.poll-opt-count { position: relative; font-variant-numeric: tabular-nums; color: var(--text-secondary); font-size: var(--text-sm); }
+@media (prefers-reduced-motion: reduce) { .poll-opt-bar { transition: none; } }
+.poll-foot { margin-top: var(--space-2); }
+.poll-hint { font-size: var(--text-xs); color: var(--text-secondary); }
 /* R60C: media spoiler — blurred image under a reveal cover, one-way */
 .media-spoiler { position: relative; display: inline-block; cursor: pointer; }
 .media-spoiler:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset); border-radius: 6px; }

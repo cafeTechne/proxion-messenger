@@ -578,7 +578,7 @@ import { initThemePicker } from './theme.js';
         // Reactions / emoji picker: destructured into same-named bindings.
         // messageReactions stays host-owned (the message loader populates it);
         // it is injected by reference and mutated in place, never reassigned.
-        const { handleReactionEvent, renderReactions, togglePicker, addEmoji, removeReaction } =
+        const { handleReactionEvent, renderReactions, togglePicker, addEmoji, removeReaction, votePoll } =
             createReactions({
                 getSocket: () => socket, getActiveView: () => activeView,
                 getSelfWebId: () => selfWebId, getMessageReactions: () => messageReactions,
@@ -4628,8 +4628,8 @@ import { initThemePicker } from './theme.js';
         // R59E: saved messages (private bookmarks)
         const savedMsgs = createSaved({ showToast, jumpToMsg });
         savedMsgs.wireSaved();
-        // R59F: polls (plain-text message + auto-seeded keycap reactions)
-        const polls = createPolls({ showToast, addEmoji, getAllMessages: () => allMessages });
+        // R59F: polls (plain-text message; votes are keycap reactions)
+        const polls = createPolls({ showToast });
         polls.wirePolls();
         // R60B: meme generator (GIF-tray button + image-message caption action)
         const meme = createMeme({ showToast, sendAttachmentFile });
@@ -5753,6 +5753,7 @@ import { initThemePicker } from './theme.js';
                     }
                     case 'forward':      openForwardModal(msgId); break;
                     case 'react':        togglePicker(msgId, e.clientX, e.clientY); break;
+                    case 'poll-vote':    votePoll(msgId, el.dataset.emoji); break;
                     case 'reply':        setReply(msgId); break;
                     case 'pin':          pinMsg(msgId); break;
                     case 'profile':

@@ -7,7 +7,8 @@
 // lastEmojiMsgId is owned entirely by this cluster, so it lives in `state`.
 // The returned functions are destructured into same-named bindings in main.js.
 import { podWriteReactions, podWriteReactionAction, podWriteReactionActionAt } from './pod.js';
-import { t } from './i18n.js';
+import { t, tn } from './i18n.js';
+import { pollVoteChange } from './polls.js';
 import { icon } from './icons.js';
 
 // resolveName(webid) -> display name or "" (the same resolver the typing
@@ -84,10 +85,12 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         const selfWebId = getSelfWebId();
         const reacts = messageReactions[mid] || {};
         container.innerHTML = "";
+        // A poll's votes are shown on its own option buttons, not as pills.
+        const pollKeys = _renderPollCounts(container, reacts, selfWebId);
         let shown = 0;
         Object.keys(reacts).forEach(emoji => {
             const count = reacts[emoji].length;
-            if (count === 0) return;
+            if (count === 0 || pollKeys.has(emoji)) return;
             const alreadyReacted = !!(selfWebId && reacts[emoji].includes(selfWebId));
             const span = document.createElement("span");
             span.className = "reaction" + (alreadyReacted ? " active" : "") +
@@ -149,6 +152,37 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
             };
             container.appendChild(add);
         }
+    }
+
+    // Fills in the poll card next to `container` (if any): per-option count,
+    // a proportional bar, aria-pressed for your own vote, and the total.
+    // Returns the set of emoji keys that are poll options.
+    function _renderPollCounts(container, reacts, selfWebId) {
+        const card = typeof container.parentElement?.querySelector === "function"
+            ? container.parentElement.querySelector(".poll-card") : null;
+        if (!card) return new Set();
+        const btns = [...card.querySelectorAll(".poll-opt[data-emoji]")];
+        const counts = btns.map(b => (reacts[b.dataset.emoji] || []).length);
+        const total = counts.reduce((a, b) => a + b, 0);
+        btns.forEach((b, i) => {
+            const voters = reacts[b.dataset.emoji] || [];
+            b.setAttribute("aria-pressed", selfWebId && voters.includes(selfWebId) ? "true" : "false");
+            b.querySelector(".poll-opt-count").textContent = counts[i] ? String(counts[i]) : "";
+            b.querySelector(".poll-opt-bar").style.width = total ? `${Math.round(100 * counts[i] / total)}%` : "0";
+            b.title = voters.length ? reactorNames(voters) : "";
+        });
+        const hint = card.querySelector(".poll-hint");
+        if (hint) hint.textContent = total ? tn('poll.votes', total) : t('poll.voteHint');
+        return new Set(btns.map(b => b.dataset.emoji));
+    }
+
+    // One vote per person: moves or clears your keycap reaction.
+    function votePoll(msgId, emoji) {
+        if (!msgId || !emoji) return;
+        const reacts = getMessageReactions()[msgId] || {};
+        const { add, remove } = pollVoteChange(reacts, emoji, getSelfWebId());
+        remove.forEach(e => removeReaction(e, msgId));
+        if (add) addEmoji(add, msgId);
     }
 
     function togglePicker(msgId, x, y) {
@@ -273,5 +307,5 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         _safeSend(payload);
     }
 
-    return { handleReactionEvent, renderReactions, togglePicker, addEmoji, removeReaction, state };
+    return { handleReactionEvent, renderReactions, togglePicker, addEmoji, removeReaction, votePoll, state };
 }
