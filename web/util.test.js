@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
-  didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, markdownToPlain, didIdTag,
+  didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, markdownToPlain, didIdTag, dmFallbackName,
   expireLabel, timeAgo, u8ToB64, b64ToU8, b64attr, scrollBehavior,
   composerEnterAction, isCoarsePointer, supportsFieldSizing, canShareLinks, shareLink,
 } from './util.js';
@@ -157,6 +157,17 @@ describe('webidColor', () => {
   it('handles empty/undefined without throwing', () => {
     expect(webidColor('')).toMatch(/^hsl\(/);
     expect(webidColor(undefined)).toMatch(/^hsl\(/);
+  });
+});
+
+describe('dmFallbackName', () => {
+  it('shows the distinguishing tail of a did:key', () => {
+    expect(dmFallbackName('did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK')).toBe('did:key:…nnEGta2doK');
+  });
+  it('keeps a short id whole and clips a long non-did one', () => {
+    expect(dmFallbackName('peer-1')).toBe('peer-1');
+    expect(dmFallbackName('https://alice.example/profile/card#me')).toBe('https://alice.example/p…');
+    expect(dmFallbackName('')).toBe('');
   });
 });
 

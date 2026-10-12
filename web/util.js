@@ -15,6 +15,14 @@ export function didIdTag(id) {
     return id.slice(-10);
 }
 
+// Label for a DM whose peer has not told us a name yet. "did:key:z6Mk…" says
+// nothing (every did:key starts that way), so show the distinguishing tail.
+export function dmFallbackName(id) {
+    if (!id) return "";
+    if (id.startsWith("did:key:") && didIdTag(id)) return "did:key:…" + didIdTag(id);
+    return id.length > 24 ? id.slice(0, 23) + "…" : id;
+}
+
 export function didSuffix(id) {
     if (!id || id.length < 5) return "";
     return id.slice(-5);

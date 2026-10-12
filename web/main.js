@@ -36,7 +36,7 @@ import { verifyDeviceCert } from './device-cert.js';
 import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
 import { buildRoomDescriptor, withMembers, descriptorSigningBytes } from './roomdesc.js';
 import {
-    didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, markdownToPlain, didIdTag, timeAgo,
+    didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, markdownToPlain, didIdTag, dmFallbackName, timeAgo,
     expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8, scrollBehavior,
     composerEnterAction, isCoarsePointer, supportsFieldSizing, canShareLinks, shareLink,
 } from './util.js';
@@ -1007,7 +1007,7 @@ import { initThemePicker } from './theme.js';
             entries.forEach(([id, peer]) => {
                 if (hiddenDms.has(id)) return;
                 dmCount++;
-                const name = peer.display_name || (peer.peer_webid || id).slice(0, 12);
+                const name = peer.display_name || dmFallbackName(peer.peer_webid || id);
                 const last = dmLastMessages[id];
                 // The first inbound DM stores the sender's self-chosen display name
                 // as the sidebar identity. That name can copy a trusted contact's,
@@ -1593,9 +1593,23 @@ import { initThemePicker } from './theme.js';
                     const _newLocalDm = msg.source === "local_dm" && !msg.own
                         && msg.from_webid && msg.from_webid !== selfWebId;
                     if ((msg.source === "relay" || _newLocalDm) && !document.getElementById("nav-" + id)) {
-                        const label = msg.from_display_name || (msg.from_webid || "").slice(8, 22) + "…";
-                        localDmPeers[id] = { display_name: label, peer_webid: msg.from_webid || id };
+                        localDmPeers[id] = { display_name: msg.from_display_name || null, peer_webid: msg.from_webid || id };
                         renderDmSidebar();
+                    } else if (!msg.own && msg.from_display_name && localDmPeers[id]
+                        && !localDmPeers[id].display_name && localDmPeers[id].peer_webid === msg.from_webid) {
+                        // A thread we opened by address had no name yet; take the one the
+                        // peer sent. The row shows the id tag beside it, as for any
+                        // peer-chosen name.
+                        localDmPeers[id].display_name = msg.from_display_name;
+                        renderDmSidebar();
+                        if (activeView?.id === id) {
+                            activeView.name = msg.from_display_name;
+                            const hdr = document.getElementById("chat-header-name");
+                            if (hdr) { hdr.textContent = "@ " + msg.from_display_name; hdr.title = hdr.textContent; }
+                            const inp = document.getElementById("message-input");
+                            if (inp && !inp.disabled) inp.placeholder = t('composer.placeholderDm', { name: msg.from_display_name });
+                            updatePageTitle();
+                        }
                     }
 
                     renderMessage(msg, { live: true });
@@ -2159,10 +2173,10 @@ import { initThemePicker } from './theme.js';
                     break;
                 case "did_resolved": {
                     const peerDid = event.did;
-                    const shortLabel = peerDid.slice(0, 16) + "…";
+                    const shortLabel = dmFallbackName(peerDid);
                     const navId = "local-" + peerDid.replace(/[^a-zA-Z0-9]/g, "-");
                     if (!localDmPeers[navId]) {
-                        localDmPeers[navId] = { display_name: shortLabel, peer_webid: peerDid };
+                        localDmPeers[navId] = { display_name: null, peer_webid: peerDid };
                         renderDmSidebar();
                     }
                     if (solidSession.info.isLoggedIn && selfWebId) {
@@ -4797,7 +4811,7 @@ import { initThemePicker } from './theme.js';
                 const threadIds = await podReadDmIndex();
                 for (const tid of threadIds) {
                     if (!localDmPeers[tid]) {
-                        localDmPeers[tid] = { display_name: tid.slice(0, 12) + '…', peer_webid: tid };
+                        localDmPeers[tid] = { display_name: null, peer_webid: tid };
                     }
                 }
                 if (threadIds.length) renderDmSidebar();
