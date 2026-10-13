@@ -28,8 +28,30 @@ fn kentry(key: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new("dev.proxion.app", key).map_err(|e| e.to_string())
 }
 
+fn kread(key: &str) -> Option<String> {
+    kentry(key).ok().and_then(|e| e.get_password().ok())
+}
+
+// The gateway starts with these at every launch, so a script in the webview
+// must not be able to repoint them silently: a new pod or account needs a
+// native yes from the user. Async so the blocking dialog is off the main thread.
 #[tauri::command]
-fn store_pod_credentials(css_url: String, email: String, password: String) -> Result<(), String> {
+async fn store_pod_credentials(
+    window: tauri::Window,
+    css_url: String,
+    email: String,
+    password: String,
+) -> Result<(), String> {
+    let same = kread("pod_css_url").as_deref() == Some(css_url.as_str())
+        && kread("pod_email").as_deref() == Some(email.as_str());
+    if !same {
+        let msg = format!(
+            "Save the sign-in for {email} on {css_url}? Proxion will connect to this pod each time it starts."
+        );
+        if !tauri::api::dialog::blocking::ask(Some(&window), "Save pod sign-in", msg) {
+            return Err("declined".into());
+        }
+    }
     kentry("pod_css_url")?.set_password(&css_url).map_err(|e| e.to_string())?;
     kentry("pod_email")?.set_password(&email).map_err(|e| e.to_string())?;
     kentry("pod_password")?.set_password(&password).map_err(|e| e.to_string())?;
@@ -248,9 +270,9 @@ fn main() {
             }
 
             // Load pod credentials from keychain to inject into gateway env
-            let pod_css = kentry("pod_css_url").ok().and_then(|e| e.get_password().ok());
-            let pod_email = kentry("pod_email").ok().and_then(|e| e.get_password().ok());
-            let pod_pw = kentry("pod_password").ok().and_then(|e| e.get_password().ok());
+            let pod_css = kread("pod_css_url");
+            let pod_email = kread("pod_email");
+            let pod_pw = kread("pod_password");
 
             let app_handle = app.handle();
 
