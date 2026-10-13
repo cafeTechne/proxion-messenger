@@ -1144,7 +1144,6 @@ class HttpEndpointsMixin:
             "backup":   5,   # /backup, /restore, /import: 5/min
             "turn":    30,   # /turn-credentials: 30/min
             "profile": 60,   # /profile/<did>: 60/min
-            "fingerprint": 60,  # /fingerprint/<did>: 60/min
             "webhook": 60,   # /webhook/<token>: 60/min
         }
         # (ip, group) buckets accumulate one slot per distinct source IP and were
@@ -1389,59 +1388,6 @@ class HttpEndpointsMixin:
                         + b"Cache-Control: no-store\r\n"
                         b"Content-Length: " + str(len(_turn_body)).encode() + b"\r\n\r\n" + _turn_body
                     )
-                    await writer.drain()
-                    return
-
-                # ── GET /fingerprint/<did> — R11.2.1: safety number endpoint ──
-                if method == "GET" and path.startswith("/fingerprint/"):
-                    if _check_http_rate(peer_ip, "fingerprint"):
-                        await _write_429(writer)
-                        await writer.drain()
-                        return
-                    raw_did = path[len("/fingerprint/"):]
-                    try:
-                        import urllib.parse as _up
-                        did_param = _up.unquote(raw_did)
-                        from .didkey import (
-                            did_to_pub_key as _d2pk,
-                            fingerprint_words as _fw,
-                            pub_key_to_did as _p2d,
-                        )
-                        from .pop import fingerprint as _fp
-                        from .safety_numbers import (
-                            compute_safety_numbers as _csn,
-                            format_safety_numbers as _fsn,
-                        )
-                        pub = _d2pk(did_param)
-                        fp = _fp(pub)
-                        words = _fw(pub)
-                        # Strong safety number: SHA-512 fold over BOTH identities
-                        # (~199 bits, defeats the ~2^60 grind against the 6-word
-                        # fingerprint). did:key strings are the stable ids: they
-                        # are deterministic from each identity key and identical
-                        # on both gateways, so the two peers compute the same
-                        # value out-of-band.
-                        my_pub = self.agent.identity_pub_bytes
-                        my_did = _p2d(my_pub)
-                        safety_number = _csn(my_did, my_pub, did_param, pub)
-                        fp_body = json.dumps({
-                            "did": did_param,
-                            "fingerprint": fp,
-                            "safety_words": words,
-                            "safety_number": safety_number,
-                            "safety_number_groups": _fsn(safety_number),
-                        }).encode()
-                        writer.write(
-                            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                            b"Access-Control-Allow-Origin: *\r\n"
-                            b"Content-Length: " + str(len(fp_body)).encode() + b"\r\n\r\n" + fp_body
-                        )
-                    except Exception:
-                        err = b'{"error":"invalid_did"}'
-                        writer.write(
-                            b"HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\n"
-                            b"Content-Length: " + str(len(err)).encode() + b"\r\n\r\n" + err
-                        )
                     await writer.drain()
                     return
 

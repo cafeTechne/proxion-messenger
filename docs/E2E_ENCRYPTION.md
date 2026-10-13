@@ -769,9 +769,6 @@ key is still the cached one, and `cachePeerPub` also clears the mark when the ke
 changes (4.3), so a new key always reads unverified. The mark drives the header
 badge, the bar, and the unverified indicator on the contact's messages.
 
-The gateway's `GET /fingerprint/<did>` endpoint (`safety_numbers.py`, SHA-512 over
-the two `did:key` identities) is still served but no longer shown by the web client.
-
 The safety number does not cover per-device X25519 keys used for fan-out.
 
 ## 11. State storage

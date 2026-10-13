@@ -178,7 +178,7 @@ def test_connectivity_minimal_for_anonymous_when_auth_enforced(tmp_path):
     assert set(data.keys()) <= {"relay_capable"}
 
 
-# ── F10: rate limiting on /fingerprint, /profile, /webhook ────────────────────
+# ── F10: rate limiting on /profile, /webhook ────────────────────
 
 def _post(http_port, path):
     conn = http.client.HTTPConnection("127.0.0.1", http_port, timeout=10)
@@ -187,20 +187,6 @@ def _post(http_port, path):
     resp.read()
     conn.close()
     return resp.status
-
-
-def test_fingerprint_rate_limited(tmp_path):
-    ws_port, http_port = free_port(), free_port()
-    gw = _make_gateway(tmp_path, ws_port, http_port)
-    start_gateway(gw, ws_port, http_port)
-    did = pub_key_to_did(gw.agent.identity_pub_bytes)
-    saw_429 = False
-    for _ in range(65):
-        status, _ = _get(http_port, "/fingerprint/" + did)
-        if status == 429:
-            saw_429 = True
-            break
-    assert saw_429
 
 
 def test_profile_rate_limited(tmp_path):

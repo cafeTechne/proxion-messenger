@@ -18,7 +18,7 @@ from proxion_messenger_core.persist import AgentState
 from proxion_messenger_core.gateway import ProxionGateway, GatewayConfig
 from proxion_messenger_core.local_store import LocalStore
 from proxion_messenger_core.readstate import ReadState
-from proxion_messenger_core.didkey import fingerprint_words, pub_key_to_did, did_to_pub_key
+from proxion_messenger_core.didkey import fingerprint_words, did_to_pub_key
 from gwharness import start_gateway as _serve_gw
 
 
@@ -136,65 +136,6 @@ def test_fingerprint_words_determinism():
     # Different input → different words (probabilistically certain)
     other_words = fingerprint_words(b"\xff" * 32)
     assert words1 != other_words, "Different keys produced same fingerprint words"
-
-
-# ── 11.6.3 — GET /fingerprint/<did> returns correct JSON ─────────────────────
-
-@pytest.mark.asyncio
-async def test_fingerprint_endpoint(tmp_path):
-    """R11.6.3: GET /fingerprint/<did> returns fingerprint + 6 safety words; unknown DID → 404."""
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-    import hashlib
-    import base64
-
-    gw, _, http_port, ready = _start_gateway(tmp_path)
-    assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.15)
-
-    key = Ed25519PrivateKey.generate()
-    pub_bytes = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-    did = pub_key_to_did(pub_bytes)
-    encoded_did = did.replace(":", "%3A")
-
-    # Valid DID
-    reader, writer = await asyncio.open_connection("127.0.0.1", http_port)
-    writer.write(f"GET /fingerprint/{encoded_did} HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n".encode())
-    await writer.drain()
-    response = await asyncio.wait_for(reader.read(4096), timeout=5.0)
-    writer.close()
-
-    lines = response.split(b"\r\n")
-    status = lines[0].decode()
-    assert "200" in status, f"Expected 200, got: {status!r}"
-    body_start = response.find(b"\r\n\r\n")
-    body = json.loads(response[body_start + 4:])
-    assert body["did"] == did
-    assert len(body["safety_words"]) == 6, f"Expected 6 safety_words: {body}"
-    # pop.fingerprint strips base64 padding — match that
-    expected_fp = base64.urlsafe_b64encode(hashlib.sha256(pub_bytes).digest()).decode().rstrip("=")
-    assert body["fingerprint"] == expected_fp, f"Fingerprint mismatch: {body}"
-
-    # Strong safety number: 60 digits, folds both identities, and matches
-    # compute_safety_numbers over (gateway did, peer did).
-    from proxion_messenger_core.safety_numbers import (
-        compute_safety_numbers,
-        format_safety_numbers,
-    )
-    my_pub = gw.agent.identity_pub_bytes
-    my_did = pub_key_to_did(my_pub)
-    expected_sn = compute_safety_numbers(my_did, my_pub, did, pub_bytes)
-    assert body["safety_number"] == expected_sn, f"Safety number mismatch: {body}"
-    assert len(body["safety_number"]) == 60 and body["safety_number"].isdigit()
-    assert body["safety_number_groups"] == format_safety_numbers(expected_sn)
-
-    # Invalid DID → 404
-    reader2, writer2 = await asyncio.open_connection("127.0.0.1", http_port)
-    writer2.write(b"GET /fingerprint/did%3Akey%3AINVALID HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
-    await writer2.drain()
-    response2 = await asyncio.wait_for(reader2.read(1024), timeout=5.0)
-    writer2.close()
-    assert b"404" in response2.split(b"\r\n")[0], f"Expected 404 for invalid DID: {response2[:200]}"
 
 
 # ── 11.6.4 — logout_all_devices closes other sessions ───────────────────────
