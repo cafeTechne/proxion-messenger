@@ -413,7 +413,6 @@
   "onboarding.podTwoStep": "Przetestuj połączenie, a następnie zaloguj się u dostawcy poda. To logowanie w przeglądarce odblokowuje czat między aplikacjami, a potem od razu wrócisz tutaj.",
   "onboarding.redirecting": "Przekierowanie do dostawcy poda w celu zalogowania, a potem z powrotem do Proxion…",
   "empty.selectConversation": "Wybierz rozmowę, aby zacząć czatować.",
-  "e2e.loading": "ładowanie…",
   "e2e.verified": "Zweryfikowany",
   "e2e.markVerified": "Oznacz jako zweryfikowany",
   "msg.forward": "Przekaż",
@@ -880,5 +879,9 @@
   "poll.votes.few": "{count} głosy",
   "poll.votes.many": "{count} głosów",
   "poll.votes.other": "{count} głosu",
-  "ui.disappearingMessagesEllipsis": "Znikające wiadomości…"
+  "ui.disappearingMessagesEllipsis": "Znikające wiadomości…",
+  "e2e.safetyNumber": "Numer bezpieczeństwa",
+  "e2e.verifyHint": "Porównaj ten numer z kontaktem osobiście lub podczas rozmowy. Jeśli zgadza się na obu ekranach, oznacz kontakt jako zweryfikowany. To ten sam numer, który widać pod nagłówkiem czatu.",
+  "e2e.yourKey": "Twój klucz",
+  "e2e.theirKey": "Klucz kontaktu"
 }

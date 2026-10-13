@@ -409,7 +409,6 @@
   "onboarding.podTwoStep": "연결을 테스트한 다음 pod 제공자를 통해 로그인하세요. 이 브라우저 로그인으로 앱 간 채팅이 활성화되며, 로그인 후 바로 이곳으로 돌아옵니다.",
   "onboarding.redirecting": "로그인을 위해 pod 제공자로 이동한 후 Proxion으로 돌아옵니다…",
   "empty.selectConversation": "대화를 선택해 채팅을 시작하세요.",
-  "e2e.loading": "불러오는 중…",
   "e2e.verified": "확인됨",
   "e2e.markVerified": "확인됨으로 표시",
   "msg.forward": "전달",
@@ -870,5 +869,9 @@
   "voiceMsg.tooShort": "너무 짧아 보낼 수 없습니다. 마이크를 탭해 시작하고 다시 탭해 보내세요.",
   "poll.votes.one": "{count}표",
   "poll.votes.other": "{count}표",
-  "ui.disappearingMessagesEllipsis": "사라지는 메시지…"
+  "ui.disappearingMessagesEllipsis": "사라지는 메시지…",
+  "e2e.safetyNumber": "안전 번호",
+  "e2e.verifyHint": "이 번호를 상대와 직접 만나거나 통화로 비교하세요. 두 화면에서 일치하면 확인됨으로 표시하세요. 채팅 헤더 아래에 표시되는 번호와 같습니다.",
+  "e2e.yourKey": "내 키",
+  "e2e.theirKey": "상대 키"
 }

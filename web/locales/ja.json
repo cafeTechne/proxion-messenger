@@ -409,7 +409,6 @@
   "onboarding.podTwoStep": "接続をテストしてから、ポッドプロバイダーでサインインしてください。このブラウザでのサインインによってアプリ間のチャットが使えるようになり、終わるとすぐここに戻ります。",
   "onboarding.redirecting": "ポッドプロバイダーのサインイン画面に移動し、その後 Proxion に戻ります…",
   "empty.selectConversation": "会話を選んでチャットを始めましょう。",
-  "e2e.loading": "読み込み中…",
   "e2e.verified": "確認済み",
   "e2e.markVerified": "確認済みにする",
   "msg.forward": "転送",
@@ -870,5 +869,9 @@
   "voiceMsg.tooShort": "短すぎるため送信できません。マイクをタップして録音を始め、もう一度タップして送信します。",
   "poll.votes.one": "{count} 票",
   "poll.votes.other": "{count} 票",
-  "ui.disappearingMessagesEllipsis": "消えるメッセージ…"
+  "ui.disappearingMessagesEllipsis": "消えるメッセージ…",
+  "e2e.safetyNumber": "安全番号",
+  "e2e.verifyHint": "この番号を相手と直接または通話で照合してください。両方の画面で一致したら、確認済みにしてください。チャットのヘッダーの下に表示される番号と同じです。",
+  "e2e.yourKey": "あなたの鍵",
+  "e2e.theirKey": "相手の鍵"
 }

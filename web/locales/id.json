@@ -409,7 +409,6 @@
   "onboarding.podTwoStep": "Uji koneksinya, lalu masuk melalui penyedia pod Anda. Proses masuk di browser itulah yang membuka obrolan lintas aplikasi, dan Anda akan langsung kembali ke sini.",
   "onboarding.redirecting": "Membawa Anda ke penyedia pod untuk masuk, lalu kembali ke Proxion…",
   "empty.selectConversation": "Pilih percakapan untuk mulai mengobrol.",
-  "e2e.loading": "memuat…",
   "e2e.verified": "Terverifikasi",
   "e2e.markVerified": "Tandai sebagai terverifikasi",
   "msg.forward": "Teruskan",
@@ -870,5 +869,9 @@
   "voiceMsg.tooShort": "Terlalu pendek untuk dikirim. Ketuk mikrofon untuk mulai, ketuk lagi untuk mengirim.",
   "poll.votes.one": "{count} suara",
   "poll.votes.other": "{count} suara",
-  "ui.disappearingMessagesEllipsis": "Pesan sementara…"
+  "ui.disappearingMessagesEllipsis": "Pesan sementara…",
+  "e2e.safetyNumber": "Nomor keamanan",
+  "e2e.verifyHint": "Bandingkan nomor ini dengan kontak Anda secara langsung atau lewat panggilan. Jika sama di kedua layar, tandai sebagai terverifikasi. Ini nomor yang sama dengan yang tampil di bawah kepala obrolan.",
+  "e2e.yourKey": "Kunci Anda",
+  "e2e.theirKey": "Kunci mereka"
 }

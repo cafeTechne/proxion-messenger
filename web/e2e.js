@@ -408,6 +408,24 @@ export function isE2EEnabled(peerId) {
     return e2eSupported && !!_peerPub(peerId);
 }
 
+// One verification per contact, over the keys that actually encrypt the DM
+// (the safety number from safetyNumber()). It records the contact's key that
+// was compared, so if their key changes they read unverified again. A legacy
+// "1" was cleared on every key change (cachePeerPub), so it still holds.
+export function isPeerVerified(peerId) {
+    const pub = peerId ? _peerPub(peerId) : null;
+    if (!pub) return false;
+    const v = localStorage.getItem(e2eScopedKey('proxion_e2e_verified_' + peerId));
+    return v === pub || v === '1';
+}
+
+export function markPeerVerified(peerId) {
+    const pub = peerId ? _peerPub(peerId) : null;
+    if (!pub) return false;
+    localStorage.setItem(e2eScopedKey('proxion_e2e_verified_' + peerId), pub);
+    return true;
+}
+
 export async function fetchAndCachePeerPub(peerId, peerPodRoot) {
     if (!peerPodRoot || !solidSession?.info?.isLoggedIn) return false;
     if (!isPeerPodRootAllowed(peerPodRoot, podStorageRoot())) return false;   // SSRF gate, see ssrf.js

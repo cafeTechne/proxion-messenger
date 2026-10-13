@@ -40,6 +40,8 @@ import {
     cachePeerPub,
     onPeerPubChanged,
     isE2EEnabled,
+    isPeerVerified,
+    markPeerVerified,
     ratchetEncrypt,
     ratchetDecrypt,
     loadRatchetState,
@@ -185,6 +187,18 @@ describe('onPeerPubChanged', () => {
         cachePeerPub('notify-peer', 'keyA');
         cachePeerPub('notify-peer', 'keyB');
         expect(seen).toEqual(['notify-peer', 'notify-peer']);
+    });
+});
+
+describe('contact verification', () => {
+    it('verifies the current key, and a changed key reads unverified again', () => {
+        expect(isPeerVerified('v-peer')).toBe(false);
+        expect(markPeerVerified('v-peer')).toBe(false);      // no key to verify yet
+        cachePeerPub('v-peer', 'keyA');
+        expect(markPeerVerified('v-peer')).toBe(true);
+        expect(isPeerVerified('v-peer')).toBe(true);
+        cachePeerPub('v-peer', 'keyB');                       // their key changed
+        expect(isPeerVerified('v-peer')).toBe(false);
     });
 });
 

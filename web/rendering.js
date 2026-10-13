@@ -180,6 +180,8 @@ export function createRendering({
     // on a shared browser can't read the first's trust marks (see e2e.js). Falls
     // back to identity for callers/tests that don't supply it.
     e2eScopedKey = (k) => k,
+    // Whether the user verified this contact's safety number (e2e.js).
+    isPeerVerified = () => false,
     // Display name for a webid ("" when unknown), and the active room's member
     // names: used to match @mentions of multi-word / non-ASCII names.
     resolveName = () => "",
@@ -598,7 +600,7 @@ export function createRendering({
             const importedBadge = msg.imported ? `<span class="msg-badge-imported">Imported</span>` : "";
             // R11.2.3: unverified shield for DID contacts not yet verified
             const isVerified = !msg.from_webid || msg.from_webid === selfWebId ||
-                localStorage.getItem(e2eScopedKey("proxion_verified_" + msg.from_webid)) === "1";
+                isPeerVerified(msg.from_webid);
             const shieldHtml = (!isVerified && msg.from_webid && msg.from_webid.startsWith("did:key:"))
                 ? `<span title="${t('msg.identityUnverified')}" class="msg-trust-icon text-muted">&#x1F6E1;</span>`
                 : "";

@@ -1,6 +1,6 @@
 import { solidSession, initSolidAuth, solidLogin, solidLogout, podStorageRoot, discoverStorageRoot } from './auth.js';
 import {
-    initE2E, e2eSupported, isE2EEnabled, myX25519PubB64u, cachePeerPub, onPeerPubChanged,
+    initE2E, e2eSupported, isE2EEnabled, isPeerVerified, markPeerVerified, myX25519PubB64u, cachePeerPub, onPeerPubChanged,
     ratchetEncrypt, ratchetDecrypt, fetchAndCachePeerPub, E2EDecryptError, safetyNumber,
     e2eScopedKey,
 } from './e2e.js';
@@ -489,7 +489,7 @@ import { initThemePicker } from './theme.js';
             renderReactions: (id) => renderReactions(id),
             openCtxMenu, sendUpdateLastRead: _sendUpdateLastRead,
             getRoomCode: (id) => _roomCodes[id] || "",
-            e2eScopedKey,
+            e2eScopedKey, isPeerVerified,
             renderWindow: RENDER_WINDOW, scrollBatch: SCROLL_BATCH,
             resolveName: (w) => resolvePeerName(w),
             getMemberNames: () => currentRoomMembers.map(m => m && m.display_name).filter(Boolean),
@@ -6133,14 +6133,17 @@ import { initThemePicker } from './theme.js';
             if (!podWebId) selfWebId = accountDid || clientDid;
             await initE2E().catch(() => {});
 
-            // R11.2.2: Safety number bar "Mark as verified" button
+            // The safety-number bar and the Verify dialog show the same number and
+            // set the same mark (isPeerVerified), so both refresh together.
+            const _markVerified = (peerId) => {
+                if (!peerId || !markPeerVerified(peerId)) return;
+                _updateIdentityFingerprint(peerId);
+                _updateE2EStatus(peerId);
+                // In a DM every "unverified" shield in the feed is this contact's.
+                document.querySelectorAll('#message-feed .msg-trust-icon').forEach(el => el.remove());
+            };
             document.getElementById('fingerprint-verify-btn')?.addEventListener('click', () => {
-                const did = e2eStatus.state._fingerprintBarDid;
-                if (did) {
-                    const sn = e2eStatus.state._fingerprintBarSafetyNumber;
-                    localStorage.setItem(e2eScopedKey("proxion_verified_" + did), sn || "1");
-                    _updateIdentityFingerprint(did);
-                }
+                _markVerified(e2eStatus.state._fingerprintBarDid);
             });
 
             // R11.3.2: Logout all other devices button
@@ -6164,17 +6167,13 @@ import { initThemePicker } from './theme.js';
             // The badge is set when a DM opens; a peer key that arrives while it is
             // open (their first reply) must flip it to E2E without a reopen.
             onPeerPubChanged((peerId) => {
-                if (activeView?.peerWebid === peerId) _updateE2EStatus(peerId);
+                if (activeView?.peerWebid === peerId) { _updateE2EStatus(peerId); _updateIdentityFingerprint(peerId); }
             });
             document.getElementById('e2e-modal-cancel')?.addEventListener('click', () => {
                 document.getElementById('e2e-verify-modal').style.display = 'none';
             });
             document.getElementById('e2e-modal-verify')?.addEventListener('click', () => {
-                const peerId = document.getElementById('e2e-modal-current-peer')?.value;
-                if (peerId) {
-                    localStorage.setItem(e2eScopedKey('proxion_e2e_verified_' + peerId), '1');
-                    _updateE2EStatus(peerId);
-                }
+                _markVerified(document.getElementById('e2e-modal-current-peer')?.value);
                 document.getElementById('e2e-verify-modal').style.display = 'none';
             });
 

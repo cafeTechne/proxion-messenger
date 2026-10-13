@@ -416,7 +416,6 @@
   "onboarding.podTwoStep": "اختبر الاتصال، ثم سجّل الدخول عبر مزوّد البود الخاص بك. تسجيل الدخول هذا في المتصفح هو ما يفعّل الدردشة بين التطبيقات، وستعود إلى هنا مباشرة.",
   "onboarding.redirecting": "جارٍ نقلك إلى مزوّد البود لتسجيل الدخول، ثم العودة إلى Proxion…",
   "empty.selectConversation": "اختر محادثة لبدء الدردشة.",
-  "e2e.loading": "جارٍ التحميل…",
   "e2e.verified": "موثّق",
   "e2e.markVerified": "وضع علامة موثّق",
   "msg.forward": "إعادة توجيه",
@@ -895,5 +894,9 @@
   "poll.votes.few": "{count} أصوات",
   "poll.votes.many": "{count} صوتًا",
   "poll.votes.other": "{count} صوت",
-  "ui.disappearingMessagesEllipsis": "الرسائل المختفية…"
+  "ui.disappearingMessagesEllipsis": "الرسائل المختفية…",
+  "e2e.safetyNumber": "رقم الأمان",
+  "e2e.verifyHint": "قارن هذا الرقم مع جهة الاتصال شخصيًا أو خلال مكالمة. إذا تطابق على الشاشتين، فضع علامة تحقق عليها. إنه الرقم نفسه المعروض أسفل عنوان المحادثة.",
+  "e2e.yourKey": "مفتاحك",
+  "e2e.theirKey": "مفتاح جهة الاتصال"
 }

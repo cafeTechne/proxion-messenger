@@ -755,21 +755,24 @@ browser. Cross-gateway relays are signed by the sending gateway (8.3).
 
 ### 10.3 Safety numbers
 
-Two values are shown in the client:
+The client shows one safety number per DM contact (`e2e.js` `safetyNumber`), both in
+the bar under the chat header and in the Verify dialog (`e2e-status.js`). It is
+computed in the browser from the two X25519 public keys that encrypt the
+conversation: the base64url strings are sorted, joined with `|`, and hashed with
+SHA-256; the first 24 bytes are read as six big-endian 32-bit integers, each reduced
+modulo 100000 and printed as five digits. Both parties compute the same value, and the
+gateway takes no part in computing it.
 
-- **Encryption-key safety number** (`e2e.js` `safetyNumber`, shown by
-  `e2e-status.js` `_openVerifyModal`): the two X25519 public keys as base64url
-  strings are sorted, joined with `|`, and hashed with SHA-256; the first 24 bytes are
-  read as six big-endian 32-bit integers, each reduced modulo 100000 and printed as
-  five digits. Confirming it stores `proxion_e2e_verified_<peer>` = `1` locally; the
-  mark is cleared when the cached key changes (4.3).
-- **Identity safety number** (`GET /fingerprint/<did>` on the user's own gateway,
-  `safety_numbers.py`): SHA-512 over the two `did:key` strings and Ed25519 public keys
-  in sorted order, each id length-prefixed, folded into 12 groups of five digits. It is
-  computed by the user's gateway from the gateway's own identity key and the peer's
-  DID, and covers Ed25519 identities only.
+Marking a contact verified (`markPeerVerified`) stores the contact's key that was
+compared as `proxion_e2e_verified_<peer>`. `isPeerVerified` is true only while that
+key is still the cached one, and `cachePeerPub` also clears the mark when the key
+changes (4.3), so a new key always reads unverified. The mark drives the header
+badge, the bar, and the unverified indicator on the contact's messages.
 
-Neither value covers per-device X25519 keys used for fan-out.
+The gateway's `GET /fingerprint/<did>` endpoint (`safety_numbers.py`, SHA-512 over
+the two `did:key` identities) is still served but no longer shown by the web client.
+
+The safety number does not cover per-device X25519 keys used for fan-out.
 
 ## 11. State storage
 

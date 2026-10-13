@@ -409,7 +409,6 @@
   "onboarding.podTwoStep": "Teste a conexão e depois entre pelo seu provedor de pod. Esse login no navegador é o que libera o chat entre aplicativos, e você voltará direto para cá.",
   "onboarding.redirecting": "Levando você ao seu provedor de pod para entrar, depois de volta ao Proxion…",
   "empty.selectConversation": "Selecione uma conversa para começar a conversar.",
-  "e2e.loading": "carregando…",
   "e2e.verified": "Verificado",
   "e2e.markVerified": "Marcar como verificado",
   "msg.forward": "Encaminhar",
@@ -870,5 +869,9 @@
   "voiceMsg.tooShort": "Curto demais para enviar. Toque no microfone para começar e de novo para enviar.",
   "poll.votes.one": "{count} voto",
   "poll.votes.other": "{count} votos",
-  "ui.disappearingMessagesEllipsis": "Mensagens temporárias…"
+  "ui.disappearingMessagesEllipsis": "Mensagens temporárias…",
+  "e2e.safetyNumber": "Número de segurança",
+  "e2e.verifyHint": "Compare este número com seu contato pessoalmente ou em uma chamada. Se for igual nas duas telas, marque o contato como verificado. É o mesmo número mostrado abaixo do cabeçalho do chat.",
+  "e2e.yourKey": "Sua chave",
+  "e2e.theirKey": "Chave do contato"
 }

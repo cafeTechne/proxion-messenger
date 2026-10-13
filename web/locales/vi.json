@@ -409,7 +409,6 @@
   "onboarding.podTwoStep": "Kiểm tra kết nối, sau đó đăng nhập qua nhà cung cấp pod của bạn. Lần đăng nhập trên trình duyệt đó là thứ mở khóa trò chuyện giữa các ứng dụng, và bạn sẽ quay lại đây ngay.",
   "onboarding.redirecting": "Đang chuyển bạn đến nhà cung cấp pod để đăng nhập, sau đó quay lại Proxion…",
   "empty.selectConversation": "Chọn một cuộc trò chuyện để bắt đầu.",
-  "e2e.loading": "đang tải…",
   "e2e.verified": "Đã xác minh",
   "e2e.markVerified": "Đánh dấu là đã xác minh",
   "msg.forward": "Chuyển tiếp",
@@ -870,5 +869,9 @@
   "voiceMsg.tooShort": "Quá ngắn để gửi. Nhấn micrô để bắt đầu, nhấn lần nữa để gửi.",
   "poll.votes.one": "{count} phiếu",
   "poll.votes.other": "{count} phiếu",
-  "ui.disappearingMessagesEllipsis": "Tin nhắn tự hủy…"
+  "ui.disappearingMessagesEllipsis": "Tin nhắn tự hủy…",
+  "e2e.safetyNumber": "Mã số an toàn",
+  "e2e.verifyHint": "Hãy so sánh mã số này với người liên hệ trực tiếp hoặc qua cuộc gọi. Nếu hai màn hình giống nhau, hãy đánh dấu là đã xác minh. Đây cũng là mã số hiển thị bên dưới tiêu đề cuộc trò chuyện.",
+  "e2e.yourKey": "Khóa của bạn",
+  "e2e.theirKey": "Khóa của họ"
 }

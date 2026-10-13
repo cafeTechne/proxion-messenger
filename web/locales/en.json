@@ -418,7 +418,6 @@
   "onboarding.podTwoStep": "Test the connection, then sign in through your pod provider. That browser sign-in is what unlocks cross-app chat, and you will come right back here.",
   "onboarding.redirecting": "Taking you to your pod provider to sign in, then back to Proxion…",
   "empty.selectConversation": "Select a conversation to start chatting.",
-  "e2e.loading": "Loading…",
   "e2e.verified": "Verified",
   "e2e.markVerified": "Mark as verified",
   "msg.forward": "Forward",
@@ -870,5 +869,9 @@
   "empty.webhooks": "No webhooks yet.",
   "empty.devices": "No linked devices.",
   "empty.bans": "No banned members.",
-  "toast.podAuthExpired": "Your pod sign-in expired. Sign in again in Settings."
+  "toast.podAuthExpired": "Your pod sign-in expired. Sign in again in Settings.",
+  "e2e.safetyNumber": "Safety number",
+  "e2e.verifyHint": "Compare this number with your contact in person or on a call. If it matches on both screens, mark them as verified. It is the same number shown under the chat header.",
+  "e2e.yourKey": "Your key",
+  "e2e.theirKey": "Their key"
 }

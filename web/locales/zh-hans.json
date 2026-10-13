@@ -409,7 +409,6 @@
   "onboarding.podTwoStep": "先测试连接，然后通过你的 pod 提供商登录。正是这次浏览器登录开启了跨应用聊天，完成后你会立即回到这里。",
   "onboarding.redirecting": "正在前往你的 pod 提供商进行登录，然后返回 Proxion…",
   "empty.selectConversation": "选择一个会话开始聊天。",
-  "e2e.loading": "加载中…",
   "e2e.verified": "已验证",
   "e2e.markVerified": "标记为已验证",
   "msg.forward": "转发",
@@ -870,5 +869,9 @@
   "voiceMsg.tooShort": "太短，无法发送。点按麦克风开始录音，再点按一次发送。",
   "poll.votes.one": "{count} 票",
   "poll.votes.other": "{count} 票",
-  "ui.disappearingMessagesEllipsis": "阅后即焚消息…"
+  "ui.disappearingMessagesEllipsis": "阅后即焚消息…",
+  "e2e.safetyNumber": "安全码",
+  "e2e.verifyHint": "请当面或通话时与联系人核对此号码。如果两边屏幕上一致，就将对方标记为已验证。它与聊天标题下方显示的号码相同。",
+  "e2e.yourKey": "你的密钥",
+  "e2e.theirKey": "对方的密钥"
 }

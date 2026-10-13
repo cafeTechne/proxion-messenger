@@ -515,7 +515,7 @@
             </div>
             <!-- R11.2.2: Safety number bar (DM only) -->
             <div id="fingerprint-bar" style="display:none;padding:var(--space-2) var(--space-4);background:var(--slate-900);border-bottom:1px solid var(--slate-800);font-size:var(--text-xs);color:var(--slate-500);align-items:center;gap:var(--space-2);flex-wrap:wrap;">
-              <span style="color:var(--slate-600);font-size:var(--text-md);text-transform:uppercase;letter-spacing:0.05em;">Safety #</span>
+              <span style="color:var(--slate-600);font-size:var(--text-md);text-transform:uppercase;letter-spacing:0.05em;" data-i18n="e2e.safetyNumber">Safety number</span>
               <span id="fingerprint-words" style="font-family:monospace;letter-spacing:0.08em;color:var(--text-secondary);"></span>
               <button id="fingerprint-verify-btn" style="background:var(--color-success-tint);border:none;color:var(--color-success-soft);padding:2px var(--space-3);border-radius:3px;cursor:pointer;font-size:var(--text-md);margin-inline-start:auto;" data-i18n="btn.markAsVerified">Mark as verified</button>
             </div>
@@ -1373,11 +1373,11 @@
     <div id="e2e-verify-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="e2e-verify-title" style="display:none;">
       <div class="modal__panel modal__panel--sm">
         <h3 id="e2e-verify-title" class="modal__title" data-i18n="heading.verifyContact">Verify contact</h3>
-        <p class="modal__desc" style="margin-bottom:var(--space-4);">Compare this safety number with your contact out-of-band (voice call, in person). If it matches, tap <strong>Mark as verified</strong>.</p>
+        <p class="modal__desc" style="margin-bottom:var(--space-4);" data-i18n="e2e.verifyHint">Compare this number with your contact in person or on a call. If it matches on both screens, mark them as verified. It is the same number shown under the chat header.</p>
         <div id="e2e-modal-safety-number" style="font-family:monospace;font-size:1.25em;letter-spacing:.12em;text-align:center;padding:var(--space-4);background:var(--slate-900);border-radius:var(--radius-sm);margin-bottom:var(--space-4);">— — — —</div>
         <div style="font-size:var(--text-xs);color:var(--text-secondary);">
-          <div>You: <span id="e2e-modal-my-key" style="font-family:var(--font-mono);"></span></div>
-          <div>Them: <span id="e2e-modal-their-key" style="font-family:var(--font-mono);"></span></div>
+          <div><span data-i18n="e2e.yourKey">Your key</span>: <span id="e2e-modal-my-key" style="font-family:var(--font-mono);"></span></div>
+          <div><span data-i18n="e2e.theirKey">Their key</span>: <span id="e2e-modal-their-key" style="font-family:var(--font-mono);"></span></div>
         </div>
         <input type="hidden" id="e2e-modal-current-peer" value="">
         <div class="btn-row modal__footer">

@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-let e2eEnabled, supported;
+let e2eEnabled, supported, verifiedPeers;
 vi.mock('./e2e.js', () => ({
   get e2eSupported() { return supported; },
   isE2EEnabled: (id) => e2eEnabled.has(id),
+  isPeerVerified: (id) => verifiedPeers.has(id),
   myX25519PubB64u: () => 'MYPUBKEYbase64url0000',
   safetyNumber: async () => '12345 67890 11111',
   e2eScopedKey: (k) => k,
@@ -19,6 +20,7 @@ beforeEach(() => {
   els = {};
   store = {};
   e2eEnabled = new Set();
+  verifiedPeers = new Set();
   supported = true;
   global.document = { getElementById: (id) => (id in els ? els[id] : null) };
   global.localStorage = {
@@ -37,6 +39,16 @@ describe('_updateE2EStatus', () => {
     expect(els['dm-e2e-status'].innerHTML).toContain('E2E');
     expect(els['dm-e2e-verify-btn'].style.display).toBe('inline');
     expect(els['dm-e2e-status'].dataset.state).toBe('encrypted');
+  });
+  it('shows a verified contact as verified and drops the Verify button', () => {
+    e2eEnabled.add('did:key:zAlice');
+    verifiedPeers.add('did:key:zAlice');
+    els['dm-e2e-status'] = mkEl();
+    els['dm-e2e-verify-btn'] = mkEl();
+    createE2EStatus()._updateE2EStatus('did:key:zAlice');
+    expect(els['dm-e2e-status'].dataset.state).toBe('verified');
+    expect(els['dm-e2e-status'].title).toBe('e2e.tip.verified');
+    expect(els['dm-e2e-verify-btn'].style.display).toBe('none');
   });
   it('shows "No E2E" when supported but key not exchanged', () => {
     els['dm-e2e-status'] = mkEl();
@@ -58,56 +70,38 @@ describe('_updateIdentityFingerprint', () => {
     els['fingerprint-words'] = mkEl();
     els['fingerprint-verify-btn'] = mkEl();
   });
-  it('hides the bar and clears state for a non did:key peer', async () => {
+  it('hides the bar until both encryption keys are known', async () => {
     const e = createE2EStatus();
-    e.state._fingerprintBarDid = 'stale';
-    await e._updateIdentityFingerprint('not-a-did');
+    await e._updateIdentityFingerprint('did:key:zCarol');   // no peer key yet
+    expect(els['fingerprint-bar'].style.display).toBe('none');
+    await e._updateIdentityFingerprint(null);
     expect(els['fingerprint-bar'].style.display).toBe('none');
     expect(e.state._fingerprintBarDid).toBeNull();
   });
-  const STRONG_SN = '0'.repeat(60);
-  const STRONG_GROUPS = Array.from({ length: 12 }, () => '00000');
-  it('renders the strong safety number and records it + the shown DID', async () => {
-    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({
-      safety_number: STRONG_SN, safety_number_groups: STRONG_GROUPS,
-      safety_words: ['red','sun','tree','owl','blue','fish'],
-    }) }));
+  it('shows the same number the Verify dialog shows, computed from the two keys', async () => {
+    store['proxion_e2e_peer_pub_did:key:zCarol'] = 'CAROLPUB';
     const e = createE2EStatus();
     await e._updateIdentityFingerprint('did:key:zCarol');
     expect(els['fingerprint-bar'].style.display).toBe('flex');
-    expect(els['fingerprint-words'].textContent).toContain('00000 00000 00000');
-    // the strong number is shown, not the legacy words
-    expect(els['fingerprint-words'].textContent).not.toContain('red');
+    expect(els['fingerprint-words'].textContent).toBe('12345 67890 11111');   // safetyNumber()
     expect(e.state._fingerprintBarDid).toBe('did:key:zCarol');
-    expect(e.state._fingerprintBarSafetyNumber).toBe(STRONG_SN);
     expect(els['fingerprint-verify-btn'].disabled).toBe(false);
+    expect(els['fingerprint-verify-btn'].textContent).toContain('e2e.markVerified');
   });
-  it('marks the verify button done when the stored value matches the strong number', async () => {
-    store['proxion_verified_did:key:zCarol'] = STRONG_SN;
-    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({
-      safety_number: STRONG_SN, safety_number_groups: STRONG_GROUPS,
-    }) }));
+  it('marks the button done for a verified contact', async () => {
+    store['proxion_e2e_peer_pub_did:key:zCarol'] = 'CAROLPUB';
+    verifiedPeers.add('did:key:zCarol');
     const e = createE2EStatus();
     await e._updateIdentityFingerprint('did:key:zCarol');
     expect(els['fingerprint-verify-btn'].disabled).toBe(true);
     expect(els['fingerprint-verify-btn'].textContent).toContain('e2e.verified');
   });
-  it('treats a legacy "1" flag as unverified against the strong number', async () => {
+  it('ignores the old gateway-computed mark', async () => {
+    store['proxion_e2e_peer_pub_did:key:zCarol'] = 'CAROLPUB';
     store['proxion_verified_did:key:zCarol'] = '1';
-    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({
-      safety_number: STRONG_SN, safety_number_groups: STRONG_GROUPS,
-    }) }));
     const e = createE2EStatus();
     await e._updateIdentityFingerprint('did:key:zCarol');
     expect(els['fingerprint-verify-btn'].disabled).toBe(false);
-    expect(els['fingerprint-verify-btn'].textContent).toContain('e2e.markVerified');
-  });
-  it('falls back to legacy words when an older gateway omits the safety number', async () => {
-    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ safety_words: ['red','sun','tree','owl','blue','fish'] }) }));
-    const e = createE2EStatus();
-    await e._updateIdentityFingerprint('did:key:zCarol');
-    expect(els['fingerprint-words'].textContent).toContain('red sun tree');
-    expect(e.state._fingerprintBarSafetyNumber).toBeNull();
   });
 });
 
