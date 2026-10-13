@@ -592,6 +592,7 @@ main { background: var(--surface-0); }
 .room-options { display: inline-flex; }
 .room-options-menu button[hidden] { display: none; }
 #contact-profile-panel [hidden], .profile-popover [hidden] { display: none; }
+.settings-actions [hidden] { display: none; }
 #room-options-btn {
     background: transparent; border: none; color: var(--text-secondary);
     cursor: pointer; padding: 0; min-width: 32px; height: 32px;

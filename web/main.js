@@ -2792,6 +2792,9 @@ import { initThemePicker } from './theme.js';
                             </div>
                             ${!s.is_current ? `<button class="session-revoke-btn btn-danger" data-session-id="${escHtml(s.session_id)}">${t('confirm.revokeSession.verb')}</button>` : ''}
                         </div>`).join('') || inlineNotice(t('empty.sessions'), 'empty');
+                    // Only offer "log out all other devices" when there are others.
+                    const _logoutAll = document.getElementById("settings-logout-all-btn");
+                    if (_logoutAll) _logoutAll.hidden = !event.sessions.some(s => !s.is_current);
                     sl.querySelectorAll('.session-revoke-btn').forEach(btn => {
                         btn.addEventListener('click', () => {
                             showConfirm(t('confirm.revokeSession.body'), () => {
