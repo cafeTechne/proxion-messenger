@@ -78,6 +78,31 @@ jobs:
         # only (no bare `python`), unlike actions/setup-python.
         run: python3 -m pip install "pyinstaller==6.19.0" && python3 -m pip install -e "./proxion-messenger-core[gateway]" && python3 build_sidecar.py
 
+      # A sidecar can build and still die on launch (an unbundled dependency),
+      # so start it once before it ships.
+      - name: Check the sidecar starts
+        if: matrix.os != 'macos-15-intel'
+        run: python scripts/check_sidecar.py
+
+      - name: Check the sidecar starts (Catalina-compatible)
+        if: matrix.os == 'macos-15-intel'
+        run: python3 scripts/check_sidecar.py
+
+      # The release body (and the updater manifest's notes) come from this
+      # version's CHANGELOG.md section.
+      - name: Release notes from CHANGELOG.md
+        id: notes
+        shell: bash
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          {
+            echo "body<<NOTES_EOF"
+            tr -d '\r' < CHANGELOG.md | awk -v h="## $ver" '$0==h{f=1;next} /^## /{f=0} f' | sed -e '/./,$!d'
+            echo
+            echo "See the assets below to download and install."
+            echo "NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -113,7 +138,7 @@ jobs:
           projectPath: tauri-app
           tagName: ${{ github.ref_name }}
           releaseName: "Proxion ${{ github.ref_name }}"
-          releaseBody: "See the assets below to download and install. Auto-update applies on next launch once signing is configured."
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
           # tauri-action generates latest.json (the updater manifest) automatically

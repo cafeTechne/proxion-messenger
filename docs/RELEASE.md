@@ -70,14 +70,19 @@ Absent secrets are skipped, the release still builds.
 
 ## Cutting a release
 
+Add a `## X.Y.Z` section to `CHANGELOG.md`, bump `version.txt` and
+`tauri-app/src-tauri/tauri.conf.json`, commit, then:
+
 ```
 git tag vX.Y.Z
 git push origin vX.Y.Z      # (requires a configured GitHub remote)
 ```
-`.github/workflows/release.yml` builds Windows/macOS/Linux installers (after
-building the PyInstaller gateway sidecar), generates `latest.json` if the
-updater key is set, and creates a **draft** Release with the assets. Review
-and publish; the landing page picks it up automatically.
+`.github/workflows/release.yml` builds the PyInstaller gateway sidecar,
+starts it once (`scripts/check_sidecar.py`, the build fails if it does not
+serve the web app), builds Windows/macOS/Linux installers, generates
+`latest.json` if the updater key is set, and creates a **draft** Release whose
+notes are that `CHANGELOG.md` section. Review and publish; the landing page
+picks it up automatically.
 
 ## Homebrew tap (macOS)
 

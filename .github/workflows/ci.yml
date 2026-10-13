@@ -142,6 +142,9 @@ jobs:
         run: Get-ChildItem tauri-app\src-tauri\sidecar\proxion-gateway-*.exe
         shell: pwsh
 
+      - name: Check the sidecar starts
+        run: python scripts/check_sidecar.py
+
       - name: Upload sidecar artifact
         uses: actions/upload-artifact@v4
         with:
