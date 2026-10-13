@@ -159,10 +159,12 @@ try {
     // Members drawer must open from the inline-start (left, in RTL) side.
     await page.setViewport({ width: 360, height: 800 });
     await sleep(200);
+    await page.evaluate(() => document.getElementById('members-panel')?.classList.add('mobile-open'));
+    // Measure once the slide-in transition has finished, not mid-animation.
+    await sleep(800);
     const geo = await page.evaluate(() => {
       const el = document.getElementById('members-panel');
       if (!el) return null;
-      el.classList.add('mobile-open');
       const r = el.getBoundingClientRect();
       return { left: Math.round(r.left), right: Math.round(r.right), vw: window.innerWidth };
     });
