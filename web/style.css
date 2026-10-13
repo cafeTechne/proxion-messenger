@@ -608,6 +608,13 @@ main { background: var(--surface-0); }
 #dm-e2e-status { background: var(--color-success-tint); color: var(--color-success-soft); white-space: nowrap; flex-shrink: 0; }
 #dm-e2e-status svg { vertical-align: -2px; }
 #dm-e2e-status[data-state="none"] { background: var(--surface-2); color: var(--text-secondary); }
+@media (max-width: 768px) {
+    /* Lock only on phones; the words remain for screen readers. */
+    #dm-e2e-status[data-state="none"] .e2e-label {
+        position: absolute; width: 1px; height: 1px; overflow: hidden;
+        clip: rect(0,0,0,0); white-space: nowrap;
+    }
+}
 /* Call and Video carry a text label beside the icon, so they get their own
    padding and a gap (the shared rule below zeroes padding for icon buttons). */
 #chat-header-actions > :is(#start-call-btn, #start-video-call-btn) {

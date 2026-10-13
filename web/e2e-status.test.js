@@ -41,7 +41,7 @@ describe('_updateE2EStatus', () => {
   it('shows "No E2E" when supported but key not exchanged', () => {
     els['dm-e2e-status'] = mkEl();
     createE2EStatus()._updateE2EStatus('did:key:zBob');
-    expect(els['dm-e2e-status'].textContent).toBe('e2e.none');
+    expect(els['dm-e2e-status'].innerHTML).toContain('<span class="e2e-label">e2e.none</span>');
     // Styled neutral, not with the encrypted state's green.
     expect(els['dm-e2e-status'].dataset.state).toBe('none');
   });

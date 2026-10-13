@@ -28,7 +28,10 @@ export function createE2EStatus() {
             el.style.display = 'inline';
             if (btn) btn.style.display = 'inline';
         } else if (peerId && e2eSupported) {
-            el.textContent = t('e2e.none');
+            // Open lock plus the words; on phones CSS keeps only the lock visible
+            // (the words stay for screen readers) so the call buttons still fit.
+            const _esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+            el.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 10.5V6.75a4.5 4.5 0 1 1 9 0v3.75M3.75 21.75h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H3.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25z"/></svg> <span class="e2e-label">' + _esc(t('e2e.none')) + '</span>';
             el.title = t('e2e.tip.notExchanged');
             // Not encrypted yet: neutral, never the green the encrypted state uses.
             el.dataset.state = 'none';
