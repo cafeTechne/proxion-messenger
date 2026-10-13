@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.2.6
+
+Private where it counts, and easier on the eyes.
+
+- **More of a DM is end-to-end encrypted.** Edits, reactions and files in an encrypted DM now
+  go through the same ratchet as the messages, and the gateway forwards them without reading
+  them. Each linked device keeps its own ratchet state on your pod.
+- **One safety number per contact.** The bar under the chat header and the Verify dialog show
+  the same number, computed in your browser from the keys that encrypt the conversation. Both
+  people see the same digits, and a verification resets if the contact's key changes.
+  Contacts verified through the old bar need checking once more.
+- **Calls work in more places.** Calls between two accounts on the same gateway connect, and
+  phones get the full set of call controls.
+- **A redesigned interface.** A light theme alongside the dark one, two-pane settings that
+  save as you type, one style for every dialog and menu, a single icon set, and better phone
+  layouts. Polls, voice notes, scheduled messages and the disappearing timer were fixed along
+  the way, and every string is translated into all 15 languages.
+- **Accessibility.** Dialogs make the rest of the page inert, every flow works from the
+  keyboard, controls stay visible in forced-colors mode, and contrast is checked in both
+  themes.
+- **Hardened.** A round of security fixes across the gateway, federation and the web client,
+  including path traversal on pod writes, the API token served over the public link, block
+  and mute gaps on multi-device and room paths, and revocations that did not survive a
+  restart. The device pairing code is now 8 digits.
+- **For agents.** An MCP server lets AI agents take part in chats as their own signed
+  identities, under the same consent rules as people.
+- Browser tests covering DMs, reactions, linked devices and calls across two gateways now run
+  on every push.
+
 ## 0.2.5
 
 Plays well with the rest of the Solid world.
