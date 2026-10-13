@@ -1184,8 +1184,9 @@ button {
     /* Touch targets (WCAG 2.5.5/2.5.8), keyed to the input, not the width:
        phones and tablets get them in either layout, a narrow desktop
        window does not. The sidebar-header, chat-header and
-       compose icon buttons were ~26-36px on phones. Expand the HIT AREA to ~44px
-       via min-width/min-height with a centered icon; the glyphs themselves are
+       compose icon buttons were ~26-36px on phones, the sidebar section
+       buttons (Join, +) ~25px and the reply-bar and drawer closes under
+       20px. Expand the HIT AREA to ~44px via min-width/min-height with a centered icon; the glyphs themselves are
        untouched. #chat-header stays a single nowrap row (the phone block below
        trims its vertical padding), and the action strip scrolls internally rather than pushing
        the body, so no horizontal body scroll is introduced. */
@@ -1197,7 +1198,9 @@ button {
     #message-form .paperclip,
     #message-form .voice-record-btn,
     .compose-more-btn,
-    .compose-actions > button {
+    .compose-actions > button,
+    #join-room-btn, #create-room-btn, #add-peer-btn, #solidchat-new-btn,
+    #cancel-reply-btn, #pin-panel-close, #saved-panel-close, #contact-profile-close {
         min-width: 44px;
         min-height: 44px;
         display: inline-flex;
@@ -1215,7 +1218,9 @@ button {
     #message-form .paperclip svg,
     #message-form .voice-record-btn svg,
     .compose-more-btn svg,
-    .compose-actions > button svg {
+    .compose-actions > button svg,
+    :is(#create-room-btn, #add-peer-btn, #solidchat-new-btn, #cancel-reply-btn,
+        #pin-panel-close, #saved-panel-close, #contact-profile-close) svg {
         flex: 0 0 auto;
     }
 }
@@ -3207,6 +3212,9 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 .link-btn--info { color: var(--accent-text); padding-inline-start: 0; }
 .link-btn--danger { color: var(--color-danger-soft); }
 .link-btn--success { color: var(--color-success-soft); }
+/* Jump / Unpin sit side by side in the pins drawer: give each a finger-sized
+   hit area on touch screens. */
+@media (pointer: coarse) { #pin-list .link-btn { min-width: 44px; min-height: 44px; text-align: start; } }
 /* Settings / modal list rows (webhooks, scheduled, devices, bans). */
 .list-row {
     display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
