@@ -71,6 +71,18 @@ describe('wizard progress', () => {
     ob.obGoto(6);
     expect(els['ob-my-addr'].textContent).toBe('onboarding.addressPending');
   });
+  it('obGoto(6) asks the gateway for the address when none is known yet', () => {
+    const { ob, sent } = make();
+    ob.obGoto(6);
+    expect(sent).toContainEqual({ cmd: 'get_my_address' });
+  });
+  it('obGoto(6) does not ask again once the address is known', () => {
+    const { ob, sent } = make();
+    localStorage.setItem('proxion_my_address', 'alice@example.org');
+    ob.obGoto(6);
+    expect(els['ob-my-addr'].textContent).toBe('alice@example.org');
+    expect(sent).toEqual([]);
+  });
 });
 
 describe('obStep2', () => {

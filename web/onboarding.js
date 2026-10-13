@@ -86,6 +86,12 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
             if (obAddr) {
                 const addr = window.proxionAddress || localStorage.getItem("proxion_my_address") || "";
                 obAddr.textContent = addr || t('onboarding.addressPending');
+                // Without a pod nothing else asks for the address, so the
+                // placeholder would stay up for good; the my_address reply fills it.
+                const socket = getSocket();
+                if (!addr && socket?.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ cmd: "get_my_address" }));
+                }
             }
         }
     }
