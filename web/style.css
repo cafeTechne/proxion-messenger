@@ -2531,6 +2531,11 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         :is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) hr {
             border: none; border-top: 1px solid var(--slate-700); margin: var(--space-1) 0;
         }
+        /* 32px rows are fine for a mouse; a finger needs 44px (the room options
+           menu holds the header's actions on phones). */
+        @media (pointer: coarse) {
+            :is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) button { min-height: 44px; }
+        }
 
         /* Round 64: Role badges */
         .role-badge { font-size: var(--text-2xs); font-weight: var(--weight-bold); border-radius: 3px; padding: 1px var(--space-2); margin-inline-start: var(--space-1); letter-spacing: 0.04em; vertical-align: middle; }
