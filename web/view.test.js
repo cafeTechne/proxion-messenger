@@ -64,7 +64,7 @@ function make() {
     updateE2EStatus: spy('updateE2EStatus'),
     updateIdentityFingerprint: spy('updateIdentityFingerprint'), closeMentionDropdown: spy('closeMentionDropdown'),
     updateSidebarBadge: spy('updateSidebarBadge'), sendUpdateLastRead: spy('sendUpdateLastRead'),
-    loadRoomHistory: spy('loadRoomHistory'), toggleSidebar: spy('toggleSidebar'),
+    loadRoomHistory: spy('loadRoomHistory'), closeSidebar: spy('closeSidebar'),
     updateDisappearBanner: spy('updateDisappearBanner'), requestRoomMembers: spy('requestRoomMembers'),
     renderMembersPanel: spy('renderMembersPanel'), updateVoiceChannels: spy('updateVoiceChannels'),
     openSidebarCtx: spy('openSidebarCtx'), resetDateDivider: spy('resetDateDivider'),
@@ -86,6 +86,20 @@ describe('openContactThread', () => {
     ]);
     expect(host.unreadCounts['cert-9']).toBe(0);
     expect(calls.updateE2EStatus[0]).toEqual(['did:key:zBob']);
+  });
+});
+
+describe('opening a thread on a phone', () => {
+  it('closes the sidebar for every kind of thread, never toggles it', () => {
+    global.window = { innerWidth: 390 };
+    const v = make();
+    v.openContactThread({ certificate_id: 'cert-9', peer_did: 'did:key:zBob', display_name: 'Bob' });
+    v.openLocalDmThread('dm-1', 'Carol', 'did:key:zCarol');
+    expect(calls.closeSidebar).toHaveLength(2);
+  });
+  it('leaves the sidebar alone on a desktop', () => {
+    make().openContactThread({ certificate_id: 'cert-9', peer_did: 'did:key:zBob', display_name: 'Bob' });
+    expect(calls.closeSidebar).toBeUndefined();
   });
 });
 
@@ -243,7 +257,7 @@ describe('opening a conversation (chat conventions)', () => {
       getUnreadCounts: () => host.unreadCounts, getMutedThreads: () => host.mutedThreads,
       updateE2EStatus() {}, updateIdentityFingerprint() {}, closeMentionDropdown() {},
       updateSidebarBadge() {}, sendUpdateLastRead: () => sent.push({ cmd: 'update_last_read' }),
-      loadRoomHistory: (id) => sent.push({ cmd: 'load_history', id }), toggleSidebar() {},
+      loadRoomHistory: (id) => sent.push({ cmd: 'load_history', id }), closeSidebar() {},
       updateDisappearBanner() {}, requestRoomMembers() {}, renderMembersPanel() {},
       updateVoiceChannels() {}, openSidebarCtx() {}, resetDateDivider() {},
       onViewOpened,

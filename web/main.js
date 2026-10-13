@@ -844,7 +844,7 @@ import { initThemePicker } from './theme.js';
             updateE2EStatus: _updateE2EStatus,
             updateIdentityFingerprint: _updateIdentityFingerprint, closeMentionDropdown,
             updateSidebarBadge, sendUpdateLastRead: _sendUpdateLastRead, loadRoomHistory,
-            toggleSidebar, updateDisappearBanner, requestRoomMembers, renderMembersPanel,
+            closeSidebar, updateDisappearBanner, requestRoomMembers, renderMembersPanel,
             updateVoiceChannels: (id) => voice.updateVoiceChannels(id),
             openSidebarCtx, resetDateDivider: () => { rendering.state._lastRenderedDate = null; rendering.resetUnread(); },
             onViewOpened: () => _onViewOpened(),
@@ -3372,6 +3372,13 @@ import { initThemePicker } from './theme.js';
         function toggleSidebar() {
             document.getElementById("sidebar").classList.toggle("active");
             document.getElementById("overlay").classList.toggle("active");
+        }
+        // Opening a thread on a phone reveals the chat. Close, never toggle: a
+        // thread opened from outside the sidebar (a notification, search, an
+        // accepted request) would otherwise slide the sidebar open over it.
+        function closeSidebar() {
+            document.getElementById("sidebar").classList.remove("active");
+            document.getElementById("overlay").classList.remove("active");
         }
 
         document.getElementById("overlay").onclick = toggleSidebar;

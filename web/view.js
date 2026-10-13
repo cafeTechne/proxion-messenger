@@ -71,7 +71,7 @@ export function createView({
     getCertCapableContacts,
     getUnreadCounts, getMutedThreads,
     updateE2EStatus, updateIdentityFingerprint, closeMentionDropdown,
-    updateSidebarBadge, sendUpdateLastRead, loadRoomHistory, toggleSidebar,
+    updateSidebarBadge, sendUpdateLastRead, loadRoomHistory, closeSidebar,
     updateDisappearBanner, requestRoomMembers, renderMembersPanel, updateVoiceChannels,
     openSidebarCtx, resetDateDivider,
     // Called after a conversation opens (composer placeholder, header subtitle).
@@ -148,6 +148,7 @@ export function createView({
         const _inv = document.getElementById("invite-btn"); if (_inv) _inv.style.display = "none";
         updateE2EStatus(contact.peer_did);
         updateIdentityFingerprint(contact.peer_did);
+        if (window.innerWidth <= 768) closeSidebar();
         // Clear feed and reset message state
         const feed = document.getElementById("message-feed");
         if (feed) feed.innerHTML = "";
@@ -215,7 +216,7 @@ export function createView({
         // Pod: persist read state
         const _lastMsgForRead = getAllMessages().filter(m => m.thread_id === id).at(-1);
         if (_lastMsgForRead) podWriteReadState(id, _lastMsgForRead.message_id).catch(() => {});
-        if (window.innerWidth <= 768) toggleSidebar();
+        if (window.innerWidth <= 768) closeSidebar();
     }
 
     function addRoomToSidebar(roomId, name, inviteUrl) {
@@ -277,7 +278,7 @@ export function createView({
                 sendUpdateLastRead(roomId);
             }
             localStorage.setItem("proxion_seen_" + roomId, new Date().toISOString());
-            if (window.innerWidth <= 768) toggleSidebar();
+            if (window.innerWidth <= 768) closeSidebar();
             // Fetch members (history was requested above)
             requestRoomMembers(roomId);
             // Auto-show members panel if it was previously open
@@ -331,7 +332,7 @@ export function createView({
                     cmd: type === "dm" ? "read_dm" : "read_room",
                     [type === "dm" ? "cert_id" : "room_id"]: id
                 }));
-                if (window.innerWidth <= 768) toggleSidebar();
+                if (window.innerWidth <= 768) closeSidebar();
 
                 document.getElementById("start-call-btn").style.display = type === "dm" ? "inline-flex" : "none";
                 { const _vb = document.getElementById("start-video-call-btn"); if (_vb) _vb.style.display = type === "dm" ? "inline-flex" : "none"; }
