@@ -629,8 +629,10 @@ export function createRendering({
         const receiptHtml = isOwn ? `<span class="read-receipt" data-msg-id="${msgIdEsc}">${icon('check', { size: 12 })}<span class="sr-only">${t('receipt.sent')}</span></span>` : "";
         const _poll = parsePoll(rawText);
         if (msg.content_type === "audio" && msg.audio_b64) {
-            const _durSecs = msg.duration_ms ? Math.round(msg.duration_ms / 1000) : 0;
-            const dur = _durSecs ? `<span class="audio-duration">${_durSecs}s</span>` : "";
+            // Whole seconds, rounded down like the player and the recording timer,
+            // so a 2.6 s clip reads 0:02 everywhere rather than 3s next to 0:02.
+            const _durSecs = msg.duration_ms ? Math.max(1, Math.floor(msg.duration_ms / 1000)) : 0;
+            const dur = _durSecs ? `<span class="audio-duration">${Math.floor(_durSecs / 60)}:${String(_durSecs % 60).padStart(2, '0')}</span>` : "";
             const _audioLabel = escHtml(t('msg.voiceFrom', { name }) + (_durSecs ? t('msg.voiceDuration', { secs: _durSecs }) : ""));
             body.innerHTML += `<div class="audio-message"><audio controls aria-label="${_audioLabel}" src="data:audio/webm;base64,${b64attr(msg.audio_b64)}"></audio>${dur}${receiptHtml}</div>`;
         } else if (_poll) {

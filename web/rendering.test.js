@@ -164,6 +164,31 @@ describe('avatar XSS hardening', () => {
   });
 });
 
+describe('voice note duration', () => {
+  const durOf = (ms) => {
+    els['message-feed'] = mkEl({ scrollHeight: 500, clientHeight: 500 });
+    const created = [];
+    const orig = global.document.createElement;
+    global.document.createElement = () => { const el = mkEl(); created.push(el); return el; };
+    try {
+      make().renderMessage({
+        message_id: 'v' + ms, thread_id: 'room-1', from_webid: 'did:key:zBob', content: '',
+        content_type: 'audio', audio_b64: 'QUJD', duration_ms: ms, timestamp: new Date().toISOString(),
+      });
+      return (created.map(e => e.innerHTML).join('').match(/class="audio-duration">([^<]*)</) || [])[1];
+    } finally {
+      global.document.createElement = orig;
+    }
+  };
+  it('rounds down to whole seconds like the player, as m:ss', () => {
+    expect(durOf(2600)).toBe('0:02');
+    expect(durOf(65000)).toBe('1:05');
+  });
+  it('never shows 0:00 for a short clip', () => {
+    expect(durOf(500)).toBe('0:01');
+  });
+});
+
 describe('data-name attribute hardening', () => {
   it('escapes a malicious display name in the avatar data-name attribute', () => {
     els['message-feed'] = mkEl({ scrollHeight: 500, clientHeight: 500 });
