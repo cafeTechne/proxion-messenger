@@ -13,14 +13,15 @@
 // offer/answer/ICE signaling glue is covered by voice.js unit tests; a full
 // cross-gateway live call between two installs remains a brief manual check.
 //
-// Prereq: gateway running (python run_gateway.py). Chrome/Edge installed.
+// Starts a throwaway gateway unless PROXION_SMOKE_URL points at a running one.
+// Chrome/Edge installed.
 // Usage:  node web/smoke_webrtc.mjs   [PROXION_SMOKE_URL=... PROXION_CHROME=...]
 // Exit 0 = media connected over a real PeerConnection; 1 = failed.
 
 import { existsSync } from 'fs';
 import puppeteer from 'puppeteer-core';
+import { smokeGateway } from './scripts/gw-harness.mjs';
 
-const URL = process.env.PROXION_SMOKE_URL || 'https://localhost:8080/';
 const CHROME = [
   process.env.PROXION_CHROME,
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
@@ -114,6 +115,8 @@ async function loopback() {
   return result;
 }
 
+const gw = await smokeGateway();
+const URL = gw.url;
 let browser;
 try {
   browser = await puppeteer.launch({
@@ -156,4 +159,5 @@ try {
   process.exitCode = 1;
 } finally {
   if (browser) await browser.close();
+  await gw.stop();
 }

@@ -148,7 +148,9 @@ try {
     .then(() => ok('created a room, it appears in the sidebar'))
     .catch(() => fail('created room did not appear in the sidebar'));
 
-  // Open the room (make it the active view) so the composer sends into it.
+  // Close the "Room created" step (it shows the invite link) so the composer
+  // is reachable, then open the room so the composer sends into it.
+  await page.evaluate(() => document.getElementById('room-create-done-btn')?.click());
   await page.evaluate((n) => {
     const li = Array.from(document.querySelectorAll('#room-list li, nav li')).find((el) => el.textContent.includes(n));
     if (li) li.click();

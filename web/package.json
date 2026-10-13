@@ -28,7 +28,11 @@
     "smoke:multidevice": "node smoke_multidevice_dm.mjs",
     "smoke:a11y": "node smoke_a11y.mjs",
     "smoke:keyboard": "node smoke_keyboard.mjs",
-    "smoke:pseudo": "node smoke_pseudo.mjs"
+    "smoke:pseudo": "node smoke_pseudo.mjs",
+    "smoke:ui": "node scripts/run-smokes.mjs ui",
+    "smoke:cross-gateway": "node scripts/run-smokes.mjs cross-gateway",
+    "smoke:ci": "node scripts/run-smokes.mjs ui cross-gateway",
+    "smoke:all": "node scripts/run-smokes.mjs all"
   },
   "keywords": [],
   "author": "",

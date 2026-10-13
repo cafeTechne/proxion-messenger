@@ -9,7 +9,8 @@
 //   node web/smoke_visual.mjs            # compare against baselines (CI/verify)
 //   node web/smoke_visual.mjs --update   # (re)write baselines after an intended change
 //
-// Prereq: gateway running. Chrome/Edge installed. On failure, the actual + a diff
+// Starts a throwaway gateway unless PROXION_SMOKE_URL points at a running one.
+// Baselines depend on the machine's font rendering. Chrome/Edge installed. On failure, the actual + a diff
 // image are written to artifacts/ for inspection. Exit 0 = match, 1 = drift.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
@@ -17,8 +18,8 @@ import { dirname } from 'path';
 import puppeteer from 'puppeteer-core';
 import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
+import { smokeGateway } from './scripts/gw-harness.mjs';
 
-const URL = process.env.PROXION_SMOKE_URL || 'https://localhost:8080/';
 const UPDATE = process.argv.includes('--update');
 const BASELINE_DIR = 'visual-baseline';
 const ARTIFACT_DIR = '../artifacts';
@@ -41,6 +42,8 @@ const SCREENS = [
 
 function ensureDir(p) { mkdirSync(dirname(p), { recursive: true }); }
 
+const gw = await smokeGateway();
+const URL = gw.url;
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: 'new',
   args: ['--ignore-certificate-errors', '--no-sandbox', '--disable-gpu', '--force-color-profile=srgb'],
@@ -112,6 +115,7 @@ try {
   }
 } finally {
   await browser.close();
+  await gw.stop();
 }
 
 if (updated) console.log(`\nBaselines written: ${updated}. Re-run without --update to verify.`);

@@ -10,7 +10,7 @@
 // Used by pod-nogw.integration.test.js. Requires network access on first run
 // (npx downloads @solid/community-server); self-skips upstream if unavailable.
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createServer, connect as netConnect } from 'node:net';
 import { randomUUID, createHash } from 'node:crypto';
 import { SignJWT, exportJWK, generateKeyPair } from 'jose';
@@ -54,7 +54,8 @@ export async function startCss({ readyTimeoutMs = 120000, allowSelfSignedClientI
     if (allowSelfSignedClientId) env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
     const proc = spawn(
         'npx', ['-y', '@solid/community-server', '-p', String(port), '-l', 'warn'],
-        { shell: process.platform === 'win32', env },
+        // detached on POSIX puts CSS in its own process group so stop() can kill it.
+        { shell: process.platform === 'win32', env, detached: process.platform !== 'win32' },
     );
     let log = '';
     proc.stdout.on('data', (d) => { log += d; });
@@ -69,7 +70,16 @@ export async function startCss({ readyTimeoutMs = 120000, allowSelfSignedClientI
     return {
         url: `http://localhost:${port}`,
         port,
-        stop() { try { proc.kill(); } catch { /* already gone */ } },
+        // Kill the whole tree: npx runs CSS as a grandchild (under cmd.exe on
+        // Windows), and killing only the direct child left CSS running and the
+        // smoke unable to exit.
+        stop() {
+            try {
+                if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
+                else process.kill(-proc.pid, 'SIGTERM');
+            } catch { try { proc.kill(); } catch { /* already gone */ } }
+            proc.stdout?.destroy(); proc.stderr?.destroy();
+        },
         _log: () => log,
     };
 }

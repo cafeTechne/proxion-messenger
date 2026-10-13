@@ -5,8 +5,8 @@
 // linter, but throws at module-evaluation time (e.g. a function called outside
 // the scope it is defined in), aborting main.js before listeners are wired.
 //
-// Prereq: the gateway must already be running (python run_gateway.py).
-// Usage:   node web/smoke_browser.mjs            (defaults to https://localhost:8080)
+// Starts a throwaway gateway unless PROXION_SMOKE_URL points at a running one.
+// Usage:   node web/smoke_browser.mjs
 //          PROXION_SMOKE_URL=https://host:port node web/smoke_browser.mjs
 //          PROXION_CHROME=/path/to/chrome node web/smoke_browser.mjs
 //
@@ -14,8 +14,8 @@
 
 import { existsSync } from 'fs';
 import puppeteer from 'puppeteer-core';
+import { smokeGateway } from './scripts/gw-harness.mjs';
 
-const URL = process.env.PROXION_SMOKE_URL || 'https://localhost:8080/';
 const CHROME_CANDIDATES = [
   process.env.PROXION_CHROME,
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
@@ -36,6 +36,8 @@ const FATAL = /is not defined|is not a function|Unexpected (token|identifier)|Sy
 // WebSocket failures are environment-dependent (cert/port) and not a page-code bug.
 const IGNORE = /WebSocket|Gateway WebSocket error|Failed to load resource/;
 
+const gw = await smokeGateway();
+const URL = gw.url;
 const browser = await puppeteer.launch({
   executablePath: chrome, headless: 'new',
   args: ['--ignore-certificate-errors', '--no-sandbox', '--disable-gpu'],
@@ -125,4 +127,5 @@ try {
   }
 } finally {
   await browser.close();
+  await gw.stop();
 }
