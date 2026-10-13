@@ -3996,6 +3996,10 @@ import { initThemePicker } from './theme.js';
             openMenu(menu, { x: r.left, y: r.bottom + 4, opener: btn,
                 onClose: () => btn.setAttribute("aria-expanded", "false") });
             // End-align under the button (start-align in RTL), kept on screen.
+            // Measure from the left edge: placed under the button the fixed menu
+            // shrinks to the space left of the viewport edge, and the narrower
+            // width put its right edge flush against the screen on phones.
+            menu.style.left = "0px";
             const w = menu.offsetWidth || 160;
             const left = document.documentElement.dir === "rtl" ? r.left : r.right - w;
             menu.style.left = Math.max(8, Math.min(left, window.innerWidth - w - 8)) + "px";
