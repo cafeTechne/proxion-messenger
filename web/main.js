@@ -4013,7 +4013,7 @@ import { initThemePicker } from './theme.js';
                     if (isMenuOpen(_roMenu) && !_roMenu.contains(e.target) && !_roBtn.contains(e.target)) _closeRoomOptionsMenu();
                 });
                 const _obs = new MutationObserver(_syncRoomOptionsBtn);
-                ["leave-room-btn", "delete-room-btn", "invite-btn"].forEach(id => {
+                ["leave-room-btn", "delete-room-btn", "invite-btn", "dm-e2e-verify-btn"].forEach(id => {
                     const b = document.getElementById(id);
                     if (b) _obs.observe(b, { attributes: true, attributeFilter: ["style"] });
                 });

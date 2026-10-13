@@ -1165,10 +1165,11 @@ button {
    double-tap-to-zoom on controls, so two quick taps on a reaction or a
    button are two taps, not a zoom. Page zoom stays available. */
 :where(button, [role="button"], a[href], label, summary, select, .reaction) { touch-action: manipulation; }
-/* At phone width these three live in the room options menu (main.js keys the
-   menu items to the same width), so the room name keeps most of the header. */
+/* At phone width these live in the room options menu (main.js keys the
+   menu items to the same width), so the room name keeps most of the header
+   and a DM's call buttons still fit. */
 @media (max-width: 768px) {
-    #chat-header-actions :is(#invite-btn, #pin-panel-btn, #saved-panel-btn) { display: none !important; }
+    #chat-header-actions :is(#invite-btn, #pin-panel-btn, #saved-panel-btn, #dm-e2e-verify-btn) { display: none !important; }
 }
 @media (pointer: coarse) {
     #room-options-btn { min-width: 44px; min-height: 44px; }
