@@ -154,7 +154,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         from pathlib import Path
         stash_dir = Path(os.path.expanduser("~/.proxion/stash"))
         stash_dir.mkdir(parents=True, exist_ok=True)
-        from .cli import SimpleStash
+        from .stash import SimpleStash
         self.stash = SimpleStash(stash_dir)
 
         # Voice session tracking for direct WS relay

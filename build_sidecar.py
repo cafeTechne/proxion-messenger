@@ -209,6 +209,7 @@ def fetch_cloudflared(triple: str) -> Optional[Path]:
 # PyInstaller's static analysis misses lazy imports inside elif/try blocks.
 HIDDEN_IMPORTS = [
     "proxion_messenger_core.gateway",
+    "proxion_messenger_core.stash",
     "proxion_messenger_core.local_store",
     "proxion_messenger_core.persist",
     "proxion_messenger_core.readstate",
