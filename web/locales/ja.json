@@ -46,6 +46,7 @@
   "voice.peerPresent": "{peer} がボイスチャンネルにいます",
   "voice.peerJoined": "{peer} がボイスチャンネルに参加しました",
   "voice.peerLeft": "{peer} がボイスチャンネルから退出しました",
+  "voice.channel": "ボイスチャンネル",
   "file.notAccepted": "ファイルが受け入れられませんでした",
   "file.transferFailed": "{filename} の転送に失敗しました。{received}/{total} チャンクを受信しました",
   "file.declined": "ファイルが拒否されました",

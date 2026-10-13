@@ -46,6 +46,7 @@
   "voice.peerPresent": "{peer} đang ở trong kênh thoại",
   "voice.peerJoined": "{peer} đã tham gia kênh thoại",
   "voice.peerLeft": "{peer} đã rời kênh thoại",
+  "voice.channel": "Kênh thoại",
   "file.notAccepted": "Tệp không được chấp nhận",
   "file.transferFailed": "Truyền {filename} thất bại, đã nhận {received}/{total} khối",
   "file.declined": "Tệp bị từ chối",

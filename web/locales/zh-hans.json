@@ -46,6 +46,7 @@
   "voice.peerPresent": "{peer} 在语音频道中",
   "voice.peerJoined": "{peer} 加入了语音频道",
   "voice.peerLeft": "{peer} 离开了语音频道",
+  "voice.channel": "语音频道",
   "file.notAccepted": "文件未被接受",
   "file.transferFailed": "{filename} 传输失败，已接收 {received}/{total} 个分块",
   "file.declined": "文件已被拒绝",

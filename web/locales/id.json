@@ -46,6 +46,7 @@
   "voice.peerPresent": "{peer} ada di saluran suara",
   "voice.peerJoined": "{peer} bergabung ke saluran suara",
   "voice.peerLeft": "{peer} keluar dari saluran suara",
+  "voice.channel": "Saluran suara",
   "file.notAccepted": "Berkas tidak diterima",
   "file.transferFailed": "Transfer {filename} gagal, {received}/{total} bagian diterima",
   "file.declined": "Berkas ditolak",

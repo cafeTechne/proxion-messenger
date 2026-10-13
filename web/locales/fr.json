@@ -46,6 +46,7 @@
   "voice.peerPresent": "{peer} est dans le canal vocal",
   "voice.peerJoined": "{peer} a rejoint le canal vocal",
   "voice.peerLeft": "{peer} a quitté le canal vocal",
+  "voice.channel": "Canal vocal",
   "file.notAccepted": "Fichier non accepté",
   "file.transferFailed": "Le transfert de {filename} a échoué, {received}/{total} fragments reçus",
   "file.declined": "Fichier refusé",

@@ -46,6 +46,7 @@
   "voice.peerPresent": "{peer} ist im Sprachkanal",
   "voice.peerJoined": "{peer} ist dem Sprachkanal beigetreten",
   "voice.peerLeft": "{peer} hat den Sprachkanal verlassen",
+  "voice.channel": "Sprachkanal",
   "file.notAccepted": "Datei nicht angenommen",
   "file.transferFailed": "Übertragung von {filename} fehlgeschlagen, {received}/{total} Blöcke empfangen",
   "file.declined": "Datei abgelehnt",

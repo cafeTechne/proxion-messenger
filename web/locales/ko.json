@@ -46,6 +46,7 @@
   "voice.peerPresent": "{peer} 님이 음성 채널에 있습니다",
   "voice.peerJoined": "{peer} 님이 음성 채널에 참여했습니다",
   "voice.peerLeft": "{peer} 님이 음성 채널에서 나갔습니다",
+  "voice.channel": "음성 채널",
   "file.notAccepted": "파일이 수락되지 않았습니다",
   "file.transferFailed": "{filename} 전송 실패, {received}/{total} 청크 수신됨",
   "file.declined": "파일이 거절되었습니다",

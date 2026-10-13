@@ -46,6 +46,7 @@
   "voice.peerPresent": "{peer} 在語音頻道中",
   "voice.peerJoined": "{peer} 加入了語音頻道",
   "voice.peerLeft": "{peer} 離開了語音頻道",
+  "voice.channel": "語音頻道",
   "file.notAccepted": "檔案未被接受",
   "file.transferFailed": "{filename} 傳輸失敗，已接收 {received}/{total} 個區塊",
   "file.declined": "檔案已被拒絕",

@@ -46,6 +46,7 @@
   "voice.peerPresent": "{peer} в голосовом канале",
   "voice.peerJoined": "{peer} присоединился к голосовому каналу",
   "voice.peerLeft": "{peer} покинул голосовой канал",
+  "voice.channel": "Голосовой канал",
   "file.notAccepted": "Файл не принят",
   "file.transferFailed": "Передача {filename} не удалась, получено {received}/{total} фрагментов",
   "file.declined": "Файл отклонён",

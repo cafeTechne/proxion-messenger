@@ -47,6 +47,7 @@
   "voice.peerPresent": "⟦{peer} íš íñ ţĥé ṽóíçé çĥáññéĺ áéíóúáéíóú⟧",
   "voice.peerJoined": "⟦{peer} ĵóíñéð ţĥé ṽóíçé çĥáññéĺ áéíóúáéíóú⟧",
   "voice.peerLeft": "⟦{peer} ĺéƒţ ţĥé ṽóíçé çĥáññéĺ áéíóúáéíó⟧",
+  "voice.channel": "⟦Ṽóíçé çĥáññéĺ áéíóú⟧",
   "file.notAccepted": "⟦Ƒíĺé ñóţ áççéρţéð áéíóúáé⟧",
   "file.transferFailed": "⟦Ţŕáñšƒéŕ óƒ {filename} ƒáíĺéð, {received}/{total} çĥúñķš ŕéçéíṽéð áéíóúáéíóúáéíóú⟧",
   "file.decryptFailed": "⟦Çóúĺð ñóţ ðéçŕýρţ {filename} áéíóúáé⟧",

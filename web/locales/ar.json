@@ -47,6 +47,7 @@
   "voice.peerPresent": "{peer} موجود في القناة الصوتية",
   "voice.peerJoined": "انضم {peer} إلى القناة الصوتية",
   "voice.peerLeft": "غادر {peer} القناة الصوتية",
+  "voice.channel": "قناة صوتية",
   "file.notAccepted": "لم يُقبل الملف",
   "file.transferFailed": "فشل نقل {filename}, استُلم {received}/{total} من الأجزاء",
   "file.declined": "رُفض الملف",

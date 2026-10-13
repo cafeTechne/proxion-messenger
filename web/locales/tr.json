@@ -46,6 +46,7 @@
   "voice.peerPresent": "{peer} sesli kanalda",
   "voice.peerJoined": "{peer} sesli kanala katıldı",
   "voice.peerLeft": "{peer} sesli kanaldan ayrıldı",
+  "voice.channel": "Sesli kanal",
   "file.notAccepted": "Dosya kabul edilmedi",
   "file.transferFailed": "{filename} aktarımı başarısız oldu, {received}/{total} parça alındı",
   "file.declined": "Dosya reddedildi",

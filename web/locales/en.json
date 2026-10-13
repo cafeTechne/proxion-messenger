@@ -46,6 +46,7 @@
   "voice.peerPresent": "{peer} is in the voice channel",
   "voice.peerJoined": "{peer} joined the voice channel",
   "voice.peerLeft": "{peer} left the voice channel",
+  "voice.channel": "Voice channel",
   "file.notAccepted": "File not accepted",
   "file.transferFailed": "Transfer of {filename} failed, {received}/{total} chunks received",
   "file.decryptFailed": "Could not decrypt {filename}",
