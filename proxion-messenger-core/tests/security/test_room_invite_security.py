@@ -156,3 +156,21 @@ def test_expired_invite_not_consumed(tmp_path):
     store.save_room("r2", "Room2", "hash002", "", "none", "did:key:z2")
     store.create_room_invite("inv-2", "r2", "hash002", uses_left=5, expires_at=time.time() - 1)
     assert store.consume_room_invite("hash002") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("extra, prefix", [
+    ({"ssl_certfile": "c.pem", "ssl_keyfile": "k.pem"}, "https://127.0.0.1:8443/?join="),
+    ({"http_public_url": "https://gw.example.org/"}, "https://gw.example.org/?join="),
+])
+async def test_invite_url_uses_the_gateway_base(tmp_path, extra, prefix):
+    """The room invite link follows the gateway's scheme and public URL."""
+    gw = ProxionGateway(
+        agent=AgentState.generate(), dm_clients=[], room_memberships=[],
+        config=GatewayConfig(port=9977, http_port=8443, db_path=str(tmp_path / "i.db"), **extra),
+        read_state=ReadState(),
+    )
+    ws = _registered_ws(gw)
+    await gw._handle_chat_room_create(ws, {"name": "Link", "history_mode": "none"})
+    resp = json.loads(ws.send.call_args[0][0])
+    assert resp["invite_url"] == prefix + resp["code"]

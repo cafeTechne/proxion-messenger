@@ -1858,11 +1858,8 @@ class RoomHandlerMixin:
         raw_bytes = _secrets.token_bytes(16)
         code = _b64.b32encode(raw_bytes).rstrip(b"=").decode().lower()
         code_hash = self._hmac_invite_code(code)
-        if self.config.http_port:
-            host_display = self.config.host if self.config.host != "0.0.0.0" else "127.0.0.1"
-            invite_url = f"http://{host_display}:{self.config.http_port}/?join={code}"
-        else:
-            invite_url = code
+        _base = self._gateway_http_url()
+        invite_url = f"{_base}/?join={code}" if _base else code
         self._local_rooms[room_id] = {
             "name": room_name,
             "code": code_hash,   # store hash in-memory; only hash persisted
@@ -1996,11 +1993,8 @@ class RoomHandlerMixin:
         # Restore the invite code if the descriptor carried the plaintext one.
         code_plain = str(desc.get("code") or "")
         code_hash = self._hmac_invite_code(code_plain) if code_plain else ""
-        if self.config.http_port and code_plain:
-            host_display = self.config.host if self.config.host != "0.0.0.0" else "127.0.0.1"
-            invite_url = f"http://{host_display}:{self.config.http_port}/?join={code_plain}"
-        else:
-            invite_url = code_plain
+        _base = self._gateway_http_url()
+        invite_url = f"{_base}/?join={code_plain}" if (_base and code_plain) else code_plain
 
         self._local_rooms[room_id] = {
             "name": name,
