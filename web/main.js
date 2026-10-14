@@ -3917,6 +3917,11 @@ import { initThemePicker } from './theme.js';
             const canSet = type === "local_dm" || type === "dm" ||
                 ((type === "local_room" || type === "room") && roomCreatorOf.has(activeView.id));
             if (item) item.hidden = !canSet;
+            // Webhooks post into and fire from rooms hosted on this gateway, and
+            // only the owner may add them.
+            const intBtn = document.getElementById("integrations-btn");
+            if (intBtn) intBtn.style.display =
+                (type === "local_room" && roomCreatorOf.has(activeView.id)) ? "inline-block" : "none";
             updateDisappearBanner(0);
             if (activeView?.id && socket && socket.readyState === WebSocket.OPEN) {
                 socket.send(JSON.stringify({ cmd: "get_disappear_timer", room_id: activeView.id }));
