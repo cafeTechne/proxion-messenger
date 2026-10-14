@@ -877,5 +877,6 @@
   "e2e.safetyNumber": "안전 번호",
   "e2e.verifyHint": "이 번호를 상대와 직접 만나거나 통화로 비교하세요. 두 화면에서 일치하면 확인됨으로 표시하세요. 채팅 헤더 아래에 표시되는 번호와 같습니다.",
   "e2e.yourKey": "내 키",
-  "e2e.theirKey": "상대 키"
+  "e2e.theirKey": "상대 키",
+  "ui.closeMembers": "멤버 닫기"
 }

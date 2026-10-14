@@ -877,5 +877,6 @@
   "e2e.safetyNumber": "Numéro de sécurité",
   "e2e.verifyHint": "Comparez ce numéro avec votre contact en personne ou lors d'un appel. S'il est identique sur les deux écrans, marquez le contact comme vérifié. C'est le même numéro que celui affiché sous l'en-tête de la discussion.",
   "e2e.yourKey": "Votre clé",
-  "e2e.theirKey": "Sa clé"
+  "e2e.theirKey": "Sa clé",
+  "ui.closeMembers": "Fermer les membres"
 }

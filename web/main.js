@@ -2967,7 +2967,7 @@ import { initThemePicker } from './theme.js';
                             ? new Date(d.registered_at * 1000).toLocaleDateString(getLocale()) : "";
                         return `<div class="list-row">
                             <span class="list-row__main">${label}<br><span class="list-row__meta">${since}</span></span>
-                            <button data-device-id="${escHtml(d.device_id)}" class="link-btn link-btn--danger">Revoke</button>
+                            <button data-device-id="${escHtml(d.device_id)}" class="link-btn link-btn--danger">${escHtml(t('confirm.revokeDevice.verb'))}</button>
                         </div>`;
                     }).join("");
                     container.querySelectorAll("[data-device-id]").forEach(btn => {
@@ -3832,6 +3832,7 @@ import { initThemePicker } from './theme.js';
                 if (closeTopmostDialog()) return;
                 if (closeSearch({ focusInput: true })) return;
                 document.getElementById("pin-panel").style.display = "none";
+                document.getElementById("saved-panel").style.display = "none";
                 const _cp = document.getElementById("contact-profile-panel");
                 if (_cp) _cp.style.display = "none";
                 hideProfileCard();
@@ -5961,6 +5962,19 @@ import { initThemePicker } from './theme.js';
                 if (!panel || !panel.classList.contains('mobile-open')) return;
                 if (e.target.closest('#members-panel') || e.target.closest('#members-toggle')) return;
                 panel.classList.remove('mobile-open');
+            });
+
+            // The pinned and saved drawers float over the feed: a click anywhere
+            // else closes them. Their own buttons, and the room options menu
+            // that proxies those buttons, open them.
+            document.addEventListener('click', e => {
+                if (e.target.closest('#room-options-menu')) return;
+                for (const [id, btn] of [['pin-panel', '#pin-panel-btn'], ['saved-panel', '#saved-panel-btn']]) {
+                    const panel = document.getElementById(id);
+                    if (!panel || panel.style.display === 'none') continue;
+                    if (e.target.closest('#' + id) || e.target.closest(btn)) continue;
+                    panel.style.display = 'none';
+                }
             });
 
             document.getElementById('member-context-menu')?.addEventListener('click', e => {

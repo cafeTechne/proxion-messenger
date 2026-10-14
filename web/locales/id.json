@@ -877,5 +877,6 @@
   "e2e.safetyNumber": "Nomor keamanan",
   "e2e.verifyHint": "Bandingkan nomor ini dengan kontak Anda secara langsung atau lewat panggilan. Jika sama di kedua layar, tandai sebagai terverifikasi. Ini nomor yang sama dengan yang tampil di bawah kepala obrolan.",
   "e2e.yourKey": "Kunci Anda",
-  "e2e.theirKey": "Kunci mereka"
+  "e2e.theirKey": "Kunci mereka",
+  "ui.closeMembers": "Tutup anggota"
 }

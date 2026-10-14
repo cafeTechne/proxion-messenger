@@ -877,5 +877,6 @@
   "e2e.safetyNumber": "安全碼",
   "e2e.verifyHint": "請當面或通話時與聯絡人核對此號碼。如果兩邊螢幕上一致，就將對方標記為已驗證。它與聊天標題下方顯示的號碼相同。",
   "e2e.yourKey": "你的金鑰",
-  "e2e.theirKey": "對方的金鑰"
+  "e2e.theirKey": "對方的金鑰",
+  "ui.closeMembers": "關閉成員列表"
 }

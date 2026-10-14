@@ -877,5 +877,6 @@
   "e2e.safetyNumber": "Mã số an toàn",
   "e2e.verifyHint": "Hãy so sánh mã số này với người liên hệ trực tiếp hoặc qua cuộc gọi. Nếu hai màn hình giống nhau, hãy đánh dấu là đã xác minh. Đây cũng là mã số hiển thị bên dưới tiêu đề cuộc trò chuyện.",
   "e2e.yourKey": "Khóa của bạn",
-  "e2e.theirKey": "Khóa của họ"
+  "e2e.theirKey": "Khóa của họ",
+  "ui.closeMembers": "Đóng danh sách thành viên"
 }

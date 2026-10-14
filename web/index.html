@@ -604,7 +604,10 @@
 
         <!-- Members panel (right sidebar for room member list) -->
         <aside id="members-panel" style="display:none;width:220px;background:var(--slate-800);border-inline-start:1px solid var(--slate-700);overflow-y:auto;flex-shrink:0;">
-          <div style="padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--slate-700);font-size:var(--text-sm);color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;font-weight:var(--weight-semibold);" data-i18n="ui.members">Members</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--slate-700);">
+            <span style="font-size:var(--text-sm);color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;font-weight:var(--weight-semibold);" data-i18n="ui.members">Members</span>
+            <button id="members-panel-close" aria-label="Close members" title="Close members" style="background:transparent;border:none;color:var(--text-secondary);cursor:pointer;line-height:0;" data-i18n-attr="title:ui.closeMembers;aria-label:ui.closeMembers"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+          </div>
           <div id="members-list" style="padding:var(--space-2) 0;"></div>
         </aside>
     </div>

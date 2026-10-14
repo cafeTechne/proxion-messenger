@@ -877,5 +877,6 @@
   "e2e.safetyNumber": "Güvenlik numarası",
   "e2e.verifyHint": "Bu numarayı kişinizle yüz yüze veya bir aramada karşılaştırın. İki ekranda da aynıysa doğrulandı olarak işaretleyin. Sohbet başlığının altında gösterilen numarayla aynıdır.",
   "e2e.yourKey": "Sizin anahtarınız",
-  "e2e.theirKey": "Onların anahtarı"
+  "e2e.theirKey": "Onların anahtarı",
+  "ui.closeMembers": "Üyeleri kapat"
 }

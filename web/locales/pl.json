@@ -887,5 +887,6 @@
   "e2e.safetyNumber": "Numer bezpieczeństwa",
   "e2e.verifyHint": "Porównaj ten numer z kontaktem osobiście lub podczas rozmowy. Jeśli zgadza się na obu ekranach, oznacz kontakt jako zweryfikowany. To ten sam numer, który widać pod nagłówkiem czatu.",
   "e2e.yourKey": "Twój klucz",
-  "e2e.theirKey": "Klucz kontaktu"
+  "e2e.theirKey": "Klucz kontaktu",
+  "ui.closeMembers": "Zamknij listę członków"
 }

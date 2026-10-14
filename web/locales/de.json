@@ -877,5 +877,6 @@
   "e2e.safetyNumber": "Sicherheitsnummer",
   "e2e.verifyHint": "Vergleiche diese Nummer mit deinem Kontakt persönlich oder in einem Anruf. Wenn sie auf beiden Bildschirmen übereinstimmt, markiere den Kontakt als verifiziert. Es ist dieselbe Nummer wie unter der Chat-Kopfzeile.",
   "e2e.yourKey": "Dein Schlüssel",
-  "e2e.theirKey": "Schlüssel des Kontakts"
+  "e2e.theirKey": "Schlüssel des Kontakts",
+  "ui.closeMembers": "Mitglieder schließen"
 }
