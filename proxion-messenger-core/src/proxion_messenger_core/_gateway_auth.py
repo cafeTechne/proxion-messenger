@@ -455,9 +455,12 @@ class AuthHandlerMixin:
                 # has rooms (restored from pod at startup), adopt them all. This handles
                 # the case where the operator's DID changed (e.g. after an IDB wipe) or
                 # where SQLite was cold but the pod had the authoritative room list.
+                # Only the gateway's owner may do this: over the tunnel cloudflared
+                # makes every caller look like loopback, so a loopback check alone
+                # let any fresh identity join every room on the gateway.
                 if not restored_rooms and self._local_rooms:
                     _ip = (self._session_meta.get(websocket) or {}).get("ip_addr", "")
-                    if _ip in ("127.0.0.1", "::1", "localhost"):
+                    if _ip in ("127.0.0.1", "::1", "localhost") and self._is_tunnel_owner(websocket):
                         logger.info(
                             "DID rotation recovery: adopting %d local room(s) for %s from %s",
                             len(self._local_rooms), identity[:20], _ip,

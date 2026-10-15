@@ -323,3 +323,33 @@ async def test_forward_rejects_unreadable_source(gateway, noauth_env):
         ws_actor, {"message_id": "msg-secret", "target_thread_id": "target"})
     assert _err(ws_actor) is not None
     assert _err(ws_actor)["message"] == "Cannot read source message"
+
+
+# ---------------------------------------------------------------------------
+# DID-rotation recovery is for the gateway's owner only
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_stranger_over_the_tunnel_is_not_adopted_into_rooms(gateway, monkeypatch):
+    """Over the tunnel every caller arrives from loopback and auth is on. A fresh
+    identity that proves its own key used to be added to every room on the
+    gateway by the DID-rotation recovery."""
+    import base64
+    monkeypatch.setenv("PROXION_REQUIRE_AUTH", "1")
+    gateway._local_rooms["private"] = {
+        "creator_webid": "did:key:zOwner", "members": set(), "messages": [],
+        "history_mode": "all", "name": "Private", "code": "c",
+    }
+    stranger = Ed25519PrivateKey.generate()
+    ws = _mock_ws()
+    ws.remote_address = ("127.0.0.1", 40000)   # what cloudflared looks like
+    gateway.clients.add(ws)
+    await gateway.process_command(ws, {"cmd": "register", "did": _did(stranger), "display_name": "S"})
+    nonce = next(json.loads(c[0][0]) for c in ws.send.call_args_list
+                 if json.loads(c[0][0]).get("type") == "auth_challenge")["nonce"]
+    sig = base64.urlsafe_b64encode(stranger.sign(nonce.encode())).decode().rstrip("=")
+    await gateway.process_command(ws, {"cmd": "auth_response", "nonce": nonce, "signature": sig})
+
+    assert gateway._client_webids.get(ws) == _did(stranger)
+    assert ws not in gateway._local_rooms["private"]["members"]
+    assert _did(stranger) not in gateway._store.get_room_members("private")
