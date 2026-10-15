@@ -150,3 +150,29 @@ async def test_room_leave(live_gateway, alice_agent, bob_agent):
     await alice.ws.close()
     await bob.ws.close()
 
+
+@pytest.mark.asyncio
+async def test_room_transfer_ownership(live_gateway, alice_agent, bob_agent):
+    """Transfer ownership sent as the web client does (to_did) reaches the new
+    owner and completes on accept. The schema used to demand to_webid, so every
+    transfer from the member menu was rejected as an invalid payload."""
+    alice = await connect_and_register(live_gateway["url"], "Alice", alice_agent)
+    bob = await connect_and_register(live_gateway["url"], "Bob", bob_agent)
+
+    await alice.send(cmd="chat_room_create", name="Transfer Room")
+    room_evt = await alice.recv_type("room_created", timeout=5.0)
+    room_id = room_evt["room_id"]
+    await bob.send(cmd="join_room", code=room_evt["code"])
+    await bob.recv_type("room_joined", timeout=5.0)
+    await alice.recv_type("room_member_joined", timeout=5.0)
+
+    await alice.send(cmd="transfer_ownership", room_id=room_id, to_did=bob.did)
+    offer = await bob.recv_type("ownership_transfer_offer", timeout=5.0)
+    assert offer["room_id"] == room_id
+
+    await bob.send(cmd="accept_ownership", room_id=room_id)
+    done = await alice.recv_type("ownership_transferred", timeout=5.0)
+    assert done["new_owner_did"] == bob.did
+
+    await alice.ws.close()
+    await bob.ws.close()

@@ -78,7 +78,7 @@ _SCHEMA: dict[str, dict[str, tuple]] = {
     "add_reaction":     {"message_id": (str, _MAX_ID), "emoji": (str, _MAX_EMOJI)},
     "remove_reaction":  {"message_id": (str, _MAX_ID), "emoji": (str, _MAX_EMOJI)},
     "set_member_role":  {"room_id": (str, _MAX_ID), "webid": (str, _MAX_ID), "role": (str, 32, _is_valid_role)},
-    "transfer_ownership": {"room_id": (str, _MAX_ID), "to_webid": (str, _MAX_ID)},
+    "transfer_ownership": {"room_id": (str, _MAX_ID), "to_did": (str, _MAX_ID)},
     "revoke_session":   {"session_id": (str, _MAX_ID)},
     "create_webhook":   {"bot_name": (str, 32), "direction": (str, 16, _is_valid_direction)},
     "connect_css":      {"css_url": (str, 256, _is_https_url), "email": (str, 254)},
