@@ -6121,6 +6121,7 @@ import { initThemePicker } from './theme.js';
                     kickMember(_rid, targetWebid);
                 } else if (action === 'transfer') {
                     transferOwnership(_rid, targetWebid);
+                    showToast(t('room.transferOffered'));
                 } else if (action === 'ban') {
                     showConfirm(t('confirm.banMember'), () => {
                         socket.send(JSON.stringify({cmd: 'ban_member', room_id: _rid, webid: targetWebid, reason: ''}));

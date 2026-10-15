@@ -6,6 +6,11 @@ describe('gateway error mapping', () => {
     expect(knownErrorKey('room_full')).toBe('error.room_full');
     expect(knownErrorKey('Not registered')).toBe('error.not_registered');
   });
+  it('maps the room moderation errors a member or owner can hit', () => {
+    expect(knownErrorKey('you_are_muted')).toBe('error.you_are_muted');
+    expect(knownErrorKey('insufficient_permissions')).toBe('error.insufficient_permissions');
+    expect(knownErrorKey('That user is not in this room or is offline')).toBe('error.transfer_target_offline');
+  });
   it('maps the invite-not-found sentence by prefix, ignoring the code', () => {
     expect(knownErrorKey('No room found with invite code abc123')).toBe('error.inviteNotFound');
   });
