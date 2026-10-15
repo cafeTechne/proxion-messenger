@@ -2202,6 +2202,19 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             if from_webid in getattr(self, "_revoked_dids", set()) or self._is_blocked_for(to_webid, from_webid):
                 return "202 Accepted", '{"status":"ignored"}'
 
+        # A 1:1 call this gateway placed: track it from the far side's signals. The
+        # answer marks it connected (the redial throttle and the unanswered-ring
+        # expiry key off that) and a hangup ends it here too.
+        _sess = self._voice_sessions.get(session_id) if session_id else None
+        if _sess and from_webid and _sess.get("target_webid") == from_webid:
+            if signal_type == "answer":
+                _sess["answered"] = True
+            elif signal_type == "hangup":
+                self._voice_sessions.pop(session_id, None)
+                if _sess.get("answered"):
+                    from ._gateway_voice import _voice_invite_ts
+                    _voice_invite_ts.pop((_sess.get("caller_webid"), from_webid), None)
+
         target_sockets = self._sockets_for(to_webid)  # _sockets_for handles the own-identity fallback
         if not target_sockets:
             # A call offer for an offline callee on this gateway: push a missed-call

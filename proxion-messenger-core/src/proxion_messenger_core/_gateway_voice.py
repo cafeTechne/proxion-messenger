@@ -13,6 +13,7 @@ import logging
 logger = logging.getLogger("proxion_messenger_core.gateway")
 
 _voice_invite_ts: dict = {}  # (caller_webid, target_webid) -> float
+_HANGUP_REASONS = ("declined", "busy")
 
 
 class VoiceHandlerMixin:
@@ -577,8 +578,24 @@ class VoiceHandlerMixin:
     async def _handle_voice_hangup(self, websocket, data: dict) -> None:
         session_id = data.get("session_id", "")
         cert_id = data.get("cert_id")
+        # Why the call ended, so the other side can say "declined" or "busy"
+        # instead of ringing out. Fixed vocabulary; anything else is dropped.
+        reason = data.get("reason") if data.get("reason") in _HANGUP_REASONS else ""
         sess = self._voice_sessions.get(session_id)
         if not sess:
+            # Cross-gateway the callee's gateway holds no session (the offer came in
+            # by relay), so a callee's decline or hangup has to be routed by webid
+            # to the caller's gateway, or the caller keeps ringing / sits in a dead
+            # call. Same gate as webid-routed answer/ICE: a stored relationship.
+            target_webid = data.get("target_webid")
+            sender_wid = self._client_webids.get(websocket, "")
+            if (session_id and target_webid and sender_wid and target_webid != sender_wid
+                    and self._store and self._store.get_relationship_by_did(target_webid)
+                    and not self._any_socket(target_webid)):
+                sig = {"session_id": session_id}
+                if reason:
+                    sig["reason"] = reason
+                asyncio.create_task(self._relay_voice_signal(target_webid, "hangup", sig))
             return
         _sender_wid_hup = self._client_webids.get(websocket, "")
         _sess_caller_hup = sess.get("caller_webid", "")
@@ -587,15 +604,26 @@ class VoiceHandlerMixin:
             await websocket.send(json.dumps({"type": "error", "message": "unauthorized"}))
             return
         self._voice_sessions.pop(session_id, None)
+        if sess.get("answered"):
+            # The call connected, so calling back right away is not spam: lift the
+            # per-pair invite throttle, otherwise a dropped call can't be redialed
+            # for 30 seconds.
+            _voice_invite_ts.pop((sess.get("caller_webid"), sess.get("target_webid")), None)
+            _voice_invite_ts.pop((sess.get("target_webid"), sess.get("caller_webid")), None)
         event = {"type": "voice_hangup", "session_id": session_id}
+        if reason:
+            event["reason"] = reason
         other_ws = sess["callee_ws"] if websocket == sess["caller_ws"] else sess["caller_ws"]
         if other_ws and other_ws in self.clients:
             await other_ws.send(json.dumps(event))
         else:
             _target_hup = sess.get("target_webid") if websocket == sess.get("caller_ws") else sess.get("caller_webid")
             if _target_hup:
+                _sig = {"session_id": session_id}
+                if reason:
+                    _sig["reason"] = reason
                 asyncio.create_task(self._relay_voice_signal(
-                    _target_hup, "hangup", {"session_id": session_id}
+                    _target_hup, "hangup", _sig
                 ))
             else:
                 try:

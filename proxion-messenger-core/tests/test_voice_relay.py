@@ -165,3 +165,108 @@ async def test_voice_channel_join_relay_rejects_non_member(gateway):
     })
     assert status.startswith("403")
     assert "did:key:zOutsider" not in gateway._voice_channels.get(room_id, {}).get("members", {})
+
+
+# ── 1:1 call endings across gateways ────────────────────────────────────────────
+
+def _local_client(gateway, webid):
+    ws = _ws()
+    gateway.clients.add(ws)
+    gateway._client_webids[ws] = webid
+    gateway._webid_sockets[webid] = {ws}
+    return ws
+
+
+@pytest.mark.asyncio
+async def test_callee_hangup_without_local_session_relays_to_caller_gateway(gateway):
+    """Cross-gateway the callee's gateway holds no session (the offer arrived by
+    relay). Its decline/hangup must still be relayed to the caller, carrying the
+    reason, or the caller rings out or sits in a dead call."""
+    bob = _local_client(gateway, "did:key:zBob")
+    _seed_rel_voice(gateway, "did:key:zAliceGW")
+    with patch.object(gateway, "_relay_voice_signal", new_callable=AsyncMock, return_value=True) as relay:
+        await gateway.process_command(bob, {
+            "cmd": "voice_hangup", "session_id": "s-x", "target_webid": "did:key:zAliceGW",
+            "reason": "declined"})
+        await asyncio.sleep(0)
+    relay.assert_called_once_with("did:key:zAliceGW", "hangup", {"session_id": "s-x", "reason": "declined"})
+
+
+@pytest.mark.asyncio
+async def test_sessionless_hangup_to_a_stranger_is_not_relayed(gateway):
+    bob = _local_client(gateway, "did:key:zBob")
+    with patch.object(gateway, "_relay_voice_signal", new_callable=AsyncMock) as relay:
+        await gateway.process_command(bob, {
+            "cmd": "voice_hangup", "session_id": "s-x", "target_webid": "did:key:zStranger"})
+        await asyncio.sleep(0)
+    relay.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_hangup_reason_reaches_same_gateway_caller(gateway):
+    alice = _local_client(gateway, "did:key:zAlice")
+    bob = _local_client(gateway, "did:key:zBob")
+    gateway._voice_sessions["s-b"] = {"caller_ws": alice, "callee_ws": bob, "answered": False,
+                                      "caller_webid": "did:key:zAlice", "target_webid": "did:key:zBob"}
+    await gateway.process_command(bob, {"cmd": "voice_hangup", "session_id": "s-b", "reason": "busy"})
+    sent = [json.loads(c[0][0]) for c in alice.send.call_args_list]
+    assert {"type": "voice_hangup", "session_id": "s-b", "reason": "busy"} in sent
+    # Only the fixed vocabulary passes through.
+    gateway._voice_sessions["s-c"] = {"caller_ws": alice, "callee_ws": bob, "answered": False,
+                                      "caller_webid": "did:key:zAlice", "target_webid": "did:key:zBob"}
+    await gateway.process_command(bob, {"cmd": "voice_hangup", "session_id": "s-c", "reason": "<b>x"})
+    sent = [json.loads(c[0][0]) for c in alice.send.call_args_list]
+    assert {"type": "voice_hangup", "session_id": "s-c"} in sent
+
+
+@pytest.mark.asyncio
+async def test_redial_allowed_right_after_a_connected_call(gateway):
+    """The 30s per-pair invite throttle is for unanswered spam; once a call has
+    connected and ended, calling back immediately must work."""
+    import proxion_messenger_core._gateway_voice as _gv
+    _gv._voice_invite_ts.clear()
+    alice = _local_client(gateway, "did:key:zAlice")
+    bob = _local_client(gateway, "did:key:zBob")
+    _seed_rel_voice(gateway, "did:key:zBob")
+    await gateway.process_command(alice, {"cmd": "voice_invite", "session_id": "c1",
+                                          "target_webid": "did:key:zBob", "sdp_offer": "v=0"})
+    await gateway.process_command(bob, {"cmd": "voice_answer", "session_id": "c1",
+                                        "target_webid": "did:key:zAlice", "sdp_answer": "v=0"})
+    await gateway.process_command(bob, {"cmd": "voice_hangup", "session_id": "c1"})
+    alice.send.reset_mock()
+    await gateway.process_command(alice, {"cmd": "voice_invite", "session_id": "c2",
+                                          "target_webid": "did:key:zBob", "sdp_offer": "v=0"})
+    errs = [json.loads(c[0][0]) for c in alice.send.call_args_list]
+    assert not any(m.get("message") == "call_too_frequent" for m in errs)
+    assert "c2" in gateway._voice_sessions
+    # An unanswered ring that was hung up still throttles the redial.
+    await gateway.process_command(alice, {"cmd": "voice_hangup", "session_id": "c2"})
+    alice.send.reset_mock()
+    await gateway.process_command(alice, {"cmd": "voice_invite", "session_id": "c3",
+                                          "target_webid": "did:key:zBob", "sdp_offer": "v=0"})
+    errs = [json.loads(c[0][0]) for c in alice.send.call_args_list]
+    assert any(m.get("message") == "call_too_frequent" for m in errs)
+    _gv._voice_invite_ts.clear()
+
+
+@pytest.mark.asyncio
+async def test_relayed_answer_and_hangup_track_the_caller_session(gateway):
+    """The caller's gateway learns of the far side's answer and hangup only via
+    relay: mark the session answered (so it is not expired as an unanswered ring
+    and the redial throttle lifts) and drop it on hangup."""
+    alice = _local_client(gateway, "did:key:zAlice")
+    _seed_rel_voice(gateway, "did:key:zBobGW")
+    gateway._voice_sessions["s-r"] = {"caller_ws": alice, "callee_ws": None, "answered": False,
+                                      "caller_webid": "did:key:zAlice", "target_webid": "did:key:zBobGW"}
+    base = {"to_webid": "did:key:zAlice", "from_webid": "did:key:zBobGW", "session_id": "s-r"}
+    await gateway._handle_voice_signal_relay({**base, "signal_type": "answer", "signal_data": {"sdp_answer": "v=0"}})
+    assert gateway._voice_sessions["s-r"]["answered"] is True
+    await gateway._handle_voice_signal_relay({**base, "signal_type": "hangup", "signal_data": {}})
+    assert "s-r" not in gateway._voice_sessions
+    # A third gateway can't end someone else's session by naming its id.
+    gateway._voice_sessions["s-q"] = {"caller_ws": alice, "callee_ws": None, "answered": False,
+                                      "caller_webid": "did:key:zAlice", "target_webid": "did:key:zBobGW"}
+    _seed_rel_voice(gateway, "did:key:zEveGW")
+    await gateway._handle_voice_signal_relay({**base, "from_webid": "did:key:zEveGW", "session_id": "s-q",
+                                              "signal_type": "hangup", "signal_data": {}})
+    assert "s-q" in gateway._voice_sessions
