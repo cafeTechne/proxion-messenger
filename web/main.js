@@ -5200,11 +5200,9 @@ import { initThemePicker } from './theme.js';
                 if (webid) {
                     const p = document.getElementById('contact-profile-panel');
                     if (p) p.style.display = 'none';
-                    const addPeerInput = document.getElementById('add-peer-input');
-                    if (addPeerInput) {
-                        addPeerInput.value = webid;
-                        document.getElementById('add-peer-btn')?.click();
-                    }
+                    // Same path as the profile card's Send DM button.
+                    profileState.profileCardActive = webid;
+                    profileCardOpenDM();
                 }
             });
 
