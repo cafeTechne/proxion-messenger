@@ -31,18 +31,24 @@ class RoomStoreMixin(object):
     ) -> None:
         name = (name or "")[:64]
         with self._conn() as conn:
-            conn.execute(
+            # Saving a room again keeps its topic and other per-room settings.
+            cur = conn.execute(
                 """
-                INSERT INTO rooms
-                    (room_id, name, code, invite_url, history_mode, creator_webid, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(room_id) DO UPDATE SET
-                    name = excluded.name, code = excluded.code,
-                    invite_url = excluded.invite_url, history_mode = excluded.history_mode,
-                    creator_webid = excluded.creator_webid
+                UPDATE rooms SET name = ?, code = ?, invite_url = ?, history_mode = ?,
+                    creator_webid = ?
+                WHERE room_id = ?
                 """,
-                (room_id, name, code, invite_url, history_mode, creator_webid, time.time()),
+                (name, code, invite_url, history_mode, creator_webid, room_id),
             )
+            if cur.rowcount == 0:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO rooms
+                        (room_id, name, code, invite_url, history_mode, creator_webid, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (room_id, name, code, invite_url, history_mode, creator_webid, time.time()),
+                )
     def get_all_rooms(self) -> list[dict]:
         with self._conn() as conn:
             rows = conn.execute(
