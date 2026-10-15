@@ -2437,6 +2437,10 @@ class RoomHandlerMixin:
         or cross-gateway relay)."""
         if not pinner_webid or not thread_id or not message_id:
             return
+        # The client sends "dm:<id>"; key by the bare id so the peer lookup below
+        # finds the relationship and the pin is relayed, not kept local.
+        _raw_thread_id = thread_id
+        thread_id = self._strip_thread_prefix(thread_id)
         # Resolve the peer via the relationship (cert DM) or the thread id (local
         # did-keyed DM).
         peer = ""
@@ -2461,6 +2465,8 @@ class RoomHandlerMixin:
                     self._store.save_pin(thread_id, message_id, pinner_webid, _c)
                 else:
                     self._store.remove_pin(thread_id, message_id)
+                    if _raw_thread_id != thread_id:
+                        self._store.remove_pin(_raw_thread_id, message_id)
             except Exception:
                 pass
         event = json.dumps({
@@ -2499,9 +2505,14 @@ class RoomHandlerMixin:
                      "pinned_at": p["pinned_at"], "content": p.get("content", "")}
                     for p in stored]
         elif thread_id not in self.dm_clients and thread_id not in self.room_memberships and self._store:
-            # DM pins are persisted in the store keyed by thread_id (were never
-            # read back — get_pins for a DM returned []).
-            stored = self._store.get_pins(thread_id)
+            # DM pins are persisted in the store keyed by the bare thread id (were
+            # never read back — get_pins for a DM returned []). Older pins were
+            # saved under the client's "dm:" form, so read both.
+            stored = self._store.get_pins(room_id)
+            if room_id != thread_id:
+                _seen = {p["message_id"] for p in stored}
+                stored = stored + [p for p in self._store.get_pins(thread_id)
+                                   if p["message_id"] not in _seen]
             pins = [{"message_id": p["message_id"], "pinned_by": p["pinned_by"],
                      "pinned_at": p["pinned_at"], "content": p.get("content", "")}
                     for p in stored]

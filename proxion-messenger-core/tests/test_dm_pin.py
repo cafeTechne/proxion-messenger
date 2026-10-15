@@ -127,3 +127,41 @@ async def test_dm_pin_accepts_local_caller(tmp_path, noauth_env):
     await gw.process_command(ws, {"cmd": "pin_message", "message_id": "m", "thread_id": "cert-C"})
     assert not any("participant" in (e.get("message") or "").lower() for e in _events(ws, "error"))
     assert _events(ws, "message_pinned")
+
+
+@pytest.mark.asyncio
+async def test_dm_pin_with_client_prefix_relays_and_reloads(tmp_path, noauth_env, monkeypatch):
+    """The web client sends thread_id as "dm:<cert_id>" (pins.js). The prefix used
+    to defeat the peer lookup, so a pin in a friend DM never reached the friend."""
+    gw_a = _gw(tmp_path, "a3")
+    gw_b = _gw(tmp_path, "b3")
+    b_did = _did(Ed25519PrivateKey.generate())
+    a_did = _did(Ed25519PrivateKey.generate())
+    _seed_rel(gw_a, "cert-A", b_did, owner=a_did)
+    gw_a._peer_gateway_urls[b_did] = "http://gw-b.test"
+    _seed_rel(gw_b, "cert-B", pub_key_to_did(gw_a.agent.identity_pub_bytes), owner=b_did)
+    async def _fake_post(url, payload):
+        status, _ = await gw_b._handle_relay_post(json.dumps(payload).encode())
+        return status.startswith("200")
+    monkeypatch.setattr("proxion_messenger_core.relay.post_relay", _fake_post)
+    ws_b = _mock_ws()
+    await _register(gw_b, ws_b, b_did)
+    ws_a = _mock_ws()
+    await _register(gw_a, ws_a, a_did)
+    ws_b.send.reset_mock()
+    await gw_a.process_command(ws_a, {"cmd": "pin_message", "message_id": "m-7", "thread_id": "dm:cert-A"})
+    await asyncio.sleep(0.1)
+    ev = _events(ws_b, "message_pinned")
+    assert ev and ev[0]["message_id"] == "m-7" and ev[0]["thread_id"] == "cert-B"
+    # Both sides read it back through the client's prefixed form.
+    for gw, ws, tid in ((gw_a, ws_a, "dm:cert-A"), (gw_b, ws_b, "dm:cert-B")):
+        ws.send.reset_mock()
+        await gw.process_command(ws, {"cmd": "get_pins", "thread_id": tid})
+        assert any(p["message_id"] == "m-7" for p in _events(ws, "pins")[0]["pins"])
+    # Unpin with the prefix clears it, including a pin stored under the old key.
+    gw_a._store.save_pin("dm:cert-A", "m-old", a_did, "old")
+    await gw_a.process_command(ws_a, {"cmd": "unpin_message", "message_id": "m-old", "thread_id": "dm:cert-A"})
+    await gw_a.process_command(ws_a, {"cmd": "unpin_message", "message_id": "m-7", "thread_id": "dm:cert-A"})
+    ws_a.send.reset_mock()
+    await gw_a.process_command(ws_a, {"cmd": "get_pins", "thread_id": "dm:cert-A"})
+    assert not _events(ws_a, "pins")[0]["pins"]
