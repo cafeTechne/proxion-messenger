@@ -2947,17 +2947,11 @@ class HttpEndpointsMixin:
                     '.png':  b'image/png',
                     '.ico':  b'image/x-icon',
                 }
-                _CSP = (
-                    b"default-src 'self'; "
-                    b"script-src 'self' 'unsafe-inline'; "
-                    b"worker-src 'self'; "
-                    b"connect-src 'self' ws: wss: https:; "
-                    b"style-src 'self' 'unsafe-inline'; "
-                    b"img-src 'self' data: image/svg+xml; "
-                    b"frame-src 'self'; "
-                    b"frame-ancestors 'none'; "
-                    b"base-uri 'self';"
-                )
+                # The web client signs in to the user's Solid pod from the browser
+                # (OIDC discovery + token fetches, then pod reads/writes), so the
+                # pages it is served as must be allowed to connect to https origins.
+                _STATIC_SEC_HDR = _SEC_HDR.replace(
+                    b"connect-src 'self' ws: wss:;", b"connect-src 'self' ws: wss: https:;", 1)
                 fname = "index.html" if path in ("/", "/index.html") else path.lstrip("/")
                 if web_path is None:
                     body = b"Not found"
@@ -2999,7 +2993,7 @@ class HttpEndpointsMixin:
                 cc = b"no-cache" if fname == "sw.js" else b"no-store"
                 writer.write(
                     b"HTTP/1.1 200 OK\r\nContent-Type: " + ct + b"\r\n"
-                    + _SEC_HDR
+                    + _STATIC_SEC_HDR
                     + b"Content-Length: " + str(len(body)).encode()
                     + b"\r\nCache-Control: " + cc + b"\r\n\r\n" + body
                 )

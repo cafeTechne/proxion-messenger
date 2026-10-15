@@ -95,3 +95,16 @@ async def test_headers_present_on_error_responses(http_server):
     port = http_server
     _, headers, _ = await _http_get(port, "/this-does-not-exist.xyz")
     _assert_sec_headers(headers, "/404-path")
+
+
+@pytest.mark.asyncio
+async def test_static_csp_lets_the_client_reach_its_pod(http_server):
+    # Browser Solid sign-in fetches the issuer's openid-configuration and then
+    # talks to the pod; a connect-src without https: blocked both.
+    port = http_server
+    _, headers, _ = await _http_get(port, "/index.html")
+    csp = headers.get("content-security-policy", "")
+    connect = next(d for d in csp.split(";") if d.strip().startswith("connect-src"))
+    assert "https:" in connect.split()
+    assert "unsafe-inline" not in next(
+        (d for d in csp.split(";") if d.strip().startswith("script-src")), "")
