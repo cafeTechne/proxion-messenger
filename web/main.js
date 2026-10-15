@@ -1061,6 +1061,24 @@ import { initThemePicker } from './theme.js';
         function _showThreadClosed(title) {
             const feed = document.getElementById("message-feed");
             if (!feed) return;
+            // The conversation is gone: its name and room controls must not stay
+            // in the header (they would act on nothing, or on a room we left).
+            const hdr = document.getElementById("chat-header-name");
+            if (hdr) { hdr.textContent = t('heading.welcome'); hdr.title = ""; }
+            _updateHeaderSubtitle();
+            for (const id of ["invite-btn", "members-toggle", "integrations-btn", "leave-room-btn", "delete-room-btn",
+                "start-call-btn", "start-video-call-btn"]) {
+                const b = document.getElementById(id);
+                if (b) b.style.display = "none";
+            }
+            for (const id of ["room-opt-disappear", "room-opt-bans"]) {
+                const item = document.getElementById(id);
+                if (item) item.hidden = true;
+            }
+            updateDisappearBanner(0);
+            _syncRoomOptionsBtn();
+            const _mp = document.getElementById("members-panel");
+            if (_mp) { _mp.style.display = "none"; _mp.classList.remove("mobile-open"); }
             feed.innerHTML = "";
             feed.appendChild(feedEmptyState({
                 title,
@@ -2377,6 +2395,9 @@ import { initThemePicker } from './theme.js';
                         }
                         showToast(t('room.ownershipTransferred', { name: event.new_owner_name }));
                     }
+                    // Owner-only menu items (disappearing, banned members,
+                    // integrations) follow the new owner.
+                    if (activeView && activeView.id === event.room_id) _syncDisappearOption();
                     break;
                 }
                 case "ownership_transfer_offer": {

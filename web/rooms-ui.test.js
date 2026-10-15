@@ -24,3 +24,19 @@ describe('room member list stays current', () => {
     expect(body).toContain('memberWebIds?.delete(event.webid)');
   });
 });
+
+describe('a room that goes away leaves no stale header', () => {
+  const fn = src.slice(src.indexOf('function _showThreadClosed('));
+  const body = fn.slice(0, fn.indexOf('\n        }\n'));
+  it('resets the title and hides the room controls', () => {
+    expect(body).toContain("t('heading.welcome')");
+    for (const id of ['invite-btn', 'members-toggle', 'integrations-btn', 'leave-room-btn', 'delete-room-btn']) {
+      expect(body).toContain(`"${id}"`);
+    }
+    expect(body).toContain('"room-opt-disappear"');
+    expect(body).toContain('_syncRoomOptionsBtn()');
+  });
+  it('re-syncs owner-only items after an ownership transfer', () => {
+    expect(caseBody('ownership_transferred')).toContain('_syncDisappearOption()');
+  });
+});
