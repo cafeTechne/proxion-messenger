@@ -142,6 +142,11 @@ async def test_room_leave(live_gateway, alice_agent, bob_agent):
     await bob.send(cmd="leave_local_room", room_id=room_id)
     left_evt = await bob.recv_type("left_room", timeout=5.0)
     assert left_evt.get("room_id") == room_id
+    # The remaining members hear about it, so their member lists drop Bob.
+    gone = await alice.recv_type("room_member_left", timeout=5.0)
+    assert gone.get("room_id") == room_id
+    assert gone.get("webid") == bob.did
 
     await alice.ws.close()
     await bob.ws.close()
+

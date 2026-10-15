@@ -1234,6 +1234,17 @@ class RoomHandlerMixin:
             if caller_did and self._store:
                 self._store.remove_room_member(room_id, caller_did)
                 self._store.delete_room_role(room_id, caller_did)
+            # Tell whoever is still in the room, so their member lists drop
+            # the leaver (the counterpart of room_member_joined).
+            if caller_did:
+                _left_evt = json.dumps({
+                    "type": "room_member_left", "room_id": room_id, "webid": caller_did,
+                })
+                for ws in list(room["members"]):
+                    try:
+                        await ws.send(_left_evt)
+                    except Exception:
+                        pass
 
             if is_creator:
                 other_members = list(room["members"])
