@@ -3067,9 +3067,7 @@ import { initThemePicker } from './theme.js';
                             ${b.reason ? `<br><span class="list-row__meta">${escHtml(b.reason)}</span>` : ''}
                           </span>
                           <button data-unban-did="${escHtml(b.banned_did)}" data-room-id="${escHtml(event.room_id)}"
-                                  class="link-btn link-btn--success">
-                            Unban
-                          </button>
+                                  class="link-btn link-btn--success">${escHtml(t('btn.unban'))}</button>
                         </div>`).join("");
                     list.querySelectorAll("[data-unban-did]").forEach(btn => {
                         btn.addEventListener("click", () => {
@@ -3976,6 +3974,9 @@ import { initThemePicker } from './theme.js';
             const canSet = type === "local_dm" || type === "dm" ||
                 ((type === "local_room" || type === "room") && roomCreatorOf.has(activeView.id));
             if (item) item.hidden = !canSet;
+            // Unbanning lives in the Banned members dialog, opened from here.
+            const bansItem = document.getElementById("room-opt-bans");
+            if (bansItem) bansItem.hidden = !(type === "local_room" && roomCreatorOf.has(activeView.id));
             // Webhooks post into and fire from rooms hosted on this gateway, and
             // only the owner may add them.
             const intBtn = document.getElementById("integrations-btn");
@@ -4029,7 +4030,7 @@ import { initThemePicker } from './theme.js';
             const any = ["leave-room-btn", "delete-room-btn"].some(id => {
                 const b = document.getElementById(id);
                 return b && b.style.display && b.style.display !== "none";
-            }) || !!document.querySelector("#room-options-menu [data-proxy-for]:not([hidden]), #room-opt-disappear:not([hidden])");
+            }) || !!document.querySelector("#room-options-menu [data-proxy-for]:not([hidden]), #room-opt-disappear:not([hidden]), #room-opt-bans:not([hidden])");
             btn.style.display = any ? "" : "none";
             if (!any) _closeRoomOptionsMenu();
         }
@@ -5399,6 +5400,13 @@ import { initThemePicker } from './theme.js';
                 const sel = document.getElementById('disappear-timer-select');
                 if (sel) sel.value = String(currentDisappearMs || 0);
                 document.getElementById('disappear-modal').style.display = 'flex';
+            });
+            attachListener('#room-opt-bans', 'click', () => {
+                if (!activeView || !socket || socket.readyState !== WebSocket.OPEN) return;
+                const list = document.getElementById('room-bans-list');
+                if (list) list.innerHTML = inlineNotice(t('members.loading'), 'loading');
+                document.getElementById('room-bans-panel').style.display = 'flex';
+                socket.send(JSON.stringify({cmd: 'get_room_bans', room_id: activeView.id}));
             });
             attachListener('#disappear-form', 'submit', e => {
                 e.preventDefault();

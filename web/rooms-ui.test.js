@@ -40,3 +40,20 @@ describe('a room that goes away leaves no stale header', () => {
     expect(caseBody('ownership_transferred')).toContain('_syncDisappearOption()');
   });
 });
+
+describe('banned members can be listed and unbanned', () => {
+  const html = readFileSync(fileURLToPath(new URL('./index.html', import.meta.url)), 'utf8');
+  it('the room options menu has an owner-only Banned members item', () => {
+    expect(html).toMatch(/<button id="room-opt-bans" role="menuitem" hidden/);
+    const sync = src.slice(src.indexOf('function _syncDisappearOption('));
+    expect(sync.slice(0, sync.indexOf('\n        }\n'))).toContain('getElementById("room-opt-bans")');
+    expect(src).toContain('#room-opt-bans:not([hidden])');
+  });
+  it('the item opens the bans dialog and asks the gateway for the list', () => {
+    const i = src.indexOf("attachListener('#room-opt-bans', 'click'");
+    expect(i).toBeGreaterThan(-1);
+    const handler = src.slice(i, src.indexOf('});', i));
+    expect(handler).toContain("getElementById('room-bans-panel').style.display = 'flex'");
+    expect(handler).toContain("cmd: 'get_room_bans'");
+  });
+});
