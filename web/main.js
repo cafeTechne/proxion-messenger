@@ -2156,6 +2156,17 @@ import { initThemePicker } from './theme.js';
                         feed.appendChild(el);
                         feed.scrollTop = feed.scrollHeight;
                     }
+                    // Refresh the member list (panel, @-mentions, header count)
+                    // so the newcomer can be seen and moderated right away.
+                    if (activeView?.id === event.room_id || _membersRoomId === event.room_id) {
+                        requestRoomMembers(event.room_id);
+                    }
+                    break;
+                case "room_member_left":
+                    _local_rooms[event.room_id]?.memberWebIds?.delete(event.webid);
+                    if (activeView?.id === event.room_id || _membersRoomId === event.room_id) {
+                        requestRoomMembers(event.room_id);
+                    }
                     break;
                 case "dms":
                     populateSidebar("dm-list", event.dms, "dm");
