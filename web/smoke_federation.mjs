@@ -118,6 +118,27 @@ try {
   if (!bobAddr || !bobAddr.includes('@')) { fail(`could not read Bob's Proxion address (got: ${bobAddr})`); throw new Error('no bob addr'); }
   console.log(`  · Bob address: ${bobAddr.slice(0, 48)}…`);
 
+  // Wrong input stays in the dialog with a reason: a typo (no gateway lookup) and
+  // your own address (which used to arrive as a request from yourself).
+  step = 'bob-add-bad-addresses';
+  for (const [bad, want] of [['not an address', /valid invite link or address/i], [bobAddr, /your own address/i]]) {
+    await bob.evaluate(() => document.getElementById('add-peer-btn').click());
+    await bob.type('#add-peer-input', bad);
+    await bob.evaluate(() => document.getElementById('add-peer-submit-btn').click());
+    const got = await bob.waitForFunction((src) => {
+      const e = document.getElementById('add-peer-error');
+      return e && new RegExp(src, 'i').test(e.textContent) ? e.textContent : null;
+    }, { timeout: 15000 }, want.source).then(h => h.jsonValue()).catch(() => null);
+    const open = await bob.evaluate(() => getComputedStyle(document.getElementById('add-peer-modal')).display !== 'none');
+    if (!got || !open) fail(`adding "${bad.slice(0, 20)}" should keep the dialog open with an error (open=${open})`);
+    await sleep(3500);   // past the "Found" note's 3s clear: the error must survive it
+    if (!(await bob.evaluate((src) => new RegExp(src, 'i').test(document.getElementById('add-peer-error').textContent), want.source)))
+      fail(`the error for "${bad.slice(0, 20)}" was cleared`);
+    await bob.evaluate(() => { document.getElementById('add-peer-modal').style.display = 'none'; });
+  }
+  if (await bob.evaluate(() => !!document.querySelector('#friend-request-list li'))) fail('Bob got a friend request from himself');
+  if (process.exitCode) throw new Error('stop');
+
   step = 'alice-add-peer';
   await alice.evaluate(() => document.getElementById('add-peer-btn').click());
   await alice.waitForFunction(() => {
