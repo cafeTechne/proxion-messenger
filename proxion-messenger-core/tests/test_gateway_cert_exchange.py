@@ -163,6 +163,21 @@ class TestSendFriendRequest:
             assert response["type"] == "error"
             assert response["message"] == "delivery_failed"
 
+    @pytest.mark.asyncio
+    async def test_send_friend_request_to_own_address_is_refused(self, gateway, mock_websocket, mock_agent):
+        """Adding your own address used to POST the invite to yourself, so a
+        request "from" you showed up in your own friend-request list."""
+        from proxion_messenger_core.didkey import pub_key_to_did
+
+        own_did = pub_key_to_did(mock_agent.identity_pub_bytes)
+        with patch("proxion_messenger_core.network.async_safe_post", new_callable=AsyncMock, return_value=True) as mock_post:
+            data = {"cmd": "send_friend_request", "target_address": f"{own_did}@https://me.example.com"}
+            await gateway._handle_send_friend_request(mock_websocket, data)
+            mock_post.assert_not_called()
+        response = json.loads(mock_websocket.send.call_args[0][0])
+        assert response["type"] == "error"
+        assert response["message"] == "cannot_add_self"
+
 
 class TestAcceptFriendRequest:
     """Tests for accept_friend_request command."""

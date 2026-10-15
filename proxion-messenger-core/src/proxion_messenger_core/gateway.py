@@ -1604,7 +1604,16 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 "detail": f"Could not parse DID '{target_did}' — check the address and try again.",
             }))
             return
-        
+
+        # Our own address: the invite would land in our own request list as a
+        # request "from" ourselves.
+        if target_did == self._own_gateway_did():
+            await websocket.send(json.dumps({
+                "type": "error", "message": "cannot_add_self",
+                "detail": "That is your own address.",
+            }))
+            return
+
         # Build capabilities
         from .federation import Capability, call_binding_capability
         # R86: advertise that we bind our calls, so the acceptor knows this contact is
