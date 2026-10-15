@@ -1187,8 +1187,12 @@ import { initThemePicker } from './theme.js';
                     const toggle = document.getElementById('settings-autostart-toggle');
                     if (toggle) toggle.checked = !!enabled;
                 }).catch(() => {});
-                // Show app version from gateway well-known
-                fetch('http://127.0.0.1:8080/.well-known/proxion')
+            }
+            // About: the version from the gateway's well-known document, same
+            // origin when the gateway served the page (browser and desktop alike).
+            if (window.proxionTransport?.supports('federation')) {
+                const _wkBase = /^https?:$/.test(location.protocol) ? '' : 'http://127.0.0.1:8080';
+                fetch(_wkBase + '/.well-known/proxion')
                     .then(r => r.json())
                     .then(d => {
                         const el = document.getElementById('settings-app-version');

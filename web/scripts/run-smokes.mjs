@@ -12,9 +12,10 @@ import { fileURLToPath } from 'url';
 const WEB = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 const GROUPS = {
-  // Single gateway: page boots clean, media path, core journey, a11y, i18n.
+  // Single gateway: page boots clean, media path, core journey, a11y, i18n,
+  // first-run setup and settings.
   ui: ['smoke_browser.mjs', 'smoke_webrtc.mjs', 'smoke_journey.mjs', 'smoke_a11y.mjs',
-       'smoke_keyboard.mjs', 'smoke_pseudo.mjs'],
+       'smoke_keyboard.mjs', 'smoke_pseudo.mjs', 'smoke_firstrun.mjs'],
   // Two gateways talking to each other: friend requests, E2E DMs, reactions,
   // linked devices, calls.
   'cross-gateway': ['smoke_federation.mjs', 'smoke_dm_history.mjs', 'smoke_dm_reaction.mjs',
