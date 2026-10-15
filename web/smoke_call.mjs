@@ -85,6 +85,15 @@ async function openClient(browser, url, label) {
   await page.evaluateOnNewDocument((n) => {
     try { localStorage.setItem('proxion_display_name', n); localStorage.setItem('proxion_pod_setup_skipped', '1'); } catch { /* storage off */ }
   }, label);
+  // Keep every toast text, since toasts expire before a slow check reads them.
+  await page.evaluateOnNewDocument(() => {
+    window.__toasts = [];
+    new MutationObserver(() => {
+      document.querySelectorAll('#toast-container .toast__msg').forEach((el) => {
+        if (!el.__seen) { el.__seen = true; window.__toasts.push(el.textContent); }
+      });
+    }).observe(document, { childList: true, subtree: true });
+  });
   await page.goto(url, { waitUntil: 'load', timeout: 20000 });
   await page.evaluate(() => { const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none'; });
   await page.waitForFunction(() => document.querySelector('.dot')?.classList.contains('online'), { timeout: 15000 });
@@ -245,6 +254,45 @@ try {
     try { return localStorage.getItem('proxion_call_quality'); } catch { return null; }
   });
   if (q !== 'saver') fail(`quality selector did not persist (got ${q})`);
+
+  // Call lifecycle across gateways: every way a call ends must reach the other
+  // side promptly, never leave it ringing or sitting in a dead call.
+  const shown = (pg, id) => pg.evaluate((i) => { const e = document.getElementById(i); return !!e && getComputedStyle(e).display !== 'none'; }, id);
+  // Interval polling: the default rAF polling never fires in a background tab.
+  const until = (pg, fn, arg, ms = 8000) => pg.waitForFunction(fn, { timeout: ms, polling: 200 }, arg).then(() => true).catch(() => false);
+  const hidden = (pg, id, ms) => until(pg, (i) => { const e = document.getElementById(i); return !e || getComputedStyle(e).display === 'none'; }, id, ms);
+  const ringing = (pg, ms) => until(pg, () => { const b = document.getElementById('voice-banner'); return b && getComputedStyle(b).display !== 'none'; }, null, ms);
+  const toasted = (pg, re, ms = 5000) => until(pg, (src) => (window.__toasts || []).some((x) => new RegExp(src, 'i').test(x)), re, ms);
+  const click = (pg, id) => pg.evaluate((i) => document.getElementById(i).click(), id);
+
+  step = 'callee-hangs-up';
+  await click(bob, 'end-call');
+  if (!(await hidden(alice, 'voice-widget'))) fail('Bob hung up but Alice stayed in the call');
+  if (!(await toasted(alice, 'call ended'))) fail('Alice was not told the call ended');
+
+  step = 'redial-after-call';
+  // The call connected, so the redial is not throttled.
+  await click(alice, 'start-call-btn');
+  if (!(await ringing(bob, 15000))) fail('immediate redial after a connected call never rang');
+
+  step = 'caller-cancels';
+  await click(alice, 'end-call');
+  if (!(await hidden(bob, 'voice-banner'))) fail('Alice cancelled but Bob kept ringing');
+  if (!(await toasted(bob, 'missed call'))) fail('Bob got no missed-call notice for the cancelled ring');
+
+  step = 'throttled-redial';
+  // An unanswered ring IS throttled: the error must end "Calling...", not hang.
+  await click(alice, 'start-call-btn');
+  if (!(await toasted(alice, 'wait a moment'))) fail('throttled redial gave no message');
+  if (!(await hidden(alice, 'voice-widget', 3000))) fail('throttled redial left Alice stuck in "Calling..."');
+
+  step = 'callee-declines';
+  await click(bob, 'start-call-btn');
+  if (!(await ringing(alice, 15000))) fail('Bob\'s call never rang on Alice');
+  await click(alice, 'voice-decline');
+  if (!(await hidden(bob, 'voice-widget'))) fail('Alice declined but Bob kept ringing out');
+  if (!(await toasted(bob, 'declined'))) fail('Bob was not told the call was declined');
+  if (await shown(alice, 'voice-banner')) fail('Alice\'s banner stayed up after declining');
 
   step = 'done';
   if (!process.exitCode) {

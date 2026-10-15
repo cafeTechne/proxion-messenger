@@ -2769,6 +2769,7 @@ import { initThemePicker } from './theme.js';
                     // raw text goes to the console.
                     const _raw = event.message || "";
                     const _msg = t(friendlyErrorKey(_raw));
+                    voice.handleCallError(_raw);   // a refused invite ends "Calling..."
                     // The join modal stays open while a join is pending, so a
                     // failed join shows its error inline there, not as a toast.
                     const _joinBtn = document.getElementById("join-room-submit-btn");
@@ -3800,12 +3801,7 @@ import { initThemePicker } from './theme.js';
             document.getElementById("voice-banner").style.display = "none";
         };
 
-        document.getElementById("voice-decline").onclick = () => {
-            voice.stopRingTone();
-            document.getElementById("voice-banner").style.display = "none";
-            voice.state.currentCall = null;
-            voice.setCallState(CallState.IDLE);
-        };
+        document.getElementById("voice-decline").onclick = () => voice.declineCall();
 
 
         document.getElementById("end-call").onclick = () => {
@@ -3886,6 +3882,8 @@ import { initThemePicker } from './theme.js';
         window.addEventListener("beforeunload", () => {
             if (voice.state.currentCallSessionId && socket && socket.readyState === WebSocket.OPEN) {
                 socket.send(JSON.stringify({cmd: "voice_hangup", session_id: voice.state.currentCallSessionId, target_webid: voice.state._callPeerWebid || undefined}));
+            } else if (voice.state._callState === CallState.RINGING) {
+                voice.declineCall();   // closing the tab while it rings: don't leave the caller ringing out
             }
         });
 

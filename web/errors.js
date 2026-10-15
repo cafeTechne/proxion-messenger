@@ -22,6 +22,8 @@ const EXACT = {
     "call_too_frequent": "error.call_too_frequent",
     "voice_invite_not_allowed": "error.voice_invite_not_allowed",
     "voice_sessions_full": "error.voice_sessions_full",
+    "too_many_active_invites": "error.too_many_active_invites",
+    "voice_session_exists": "error.voice_session_exists",
     "voice_note_remote_unsupported": "error.voice_note_remote_unsupported",
     "reaction_limit_reached": "error.reaction_limit_reached",
     "contact_revoked": "error.contact_revoked",

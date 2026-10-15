@@ -226,7 +226,55 @@ export function createVoice(deps) {
             return false;
         }
 
+        // Where a hangup for this invite has to go: the caller's gateway did across
+        // gateways, else the caller's (locally routable) account did.
+        function _inviteRoute(invite) {
+            return (invite && (invite.caller_gateway || invite.caller_webid || invite.from_webid)) || '';
+        }
+
+        // Tell the caller we won't take this call, so they stop ringing at once
+        // instead of timing out. `reason` is 'declined' or 'busy'.
+        function _rejectInvite(invite, reason) {
+            const sock = getSocket();
+            if (!invite || !invite.session_id || !sock || sock.readyState !== WebSocket.OPEN) return;
+            sock.send(JSON.stringify({
+                cmd: "voice_hangup", session_id: invite.session_id,
+                target_webid: _inviteRoute(invite) || undefined, reason,
+            }));
+        }
+
+        // Decline the ringing call and let the caller know.
+        function declineCall() {
+            const invite = state.currentCall;
+            stopRingTone();
+            if (state._ringTimer) { clearTimeout(state._ringTimer); state._ringTimer = null; }
+            const banner = document.getElementById("voice-banner");
+            if (banner) banner.style.display = "none";
+            if (state._callState === CallState.RINGING) _rejectInvite(invite, 'declined');
+            state.currentCall = null;
+            setCallState(CallState.IDLE);
+        }
+
         function showVoiceBanner(invite) {
+            // Already in a call (or ringing, or calling someone): don't let a second
+            // invite overwrite the live call's state. Turn it away as busy, unless
+            // it is the person we are calling right now calling us back (glare).
+            if (state._callState !== CallState.IDLE || state.pc) {
+                const sameSid = invite.session_id && invite.session_id === (state.currentCall && state.currentCall.session_id);
+                if (sameSid) return;   // duplicate delivery of the call already ringing
+                const glare = state._callState === CallState.CALLING
+                    && state._callPeerWebid && _inviteRoute(invite) === state._callPeerWebid;
+                if (!glare) {
+                    _rejectInvite(invite, 'busy');
+                    showToast(t('voice.missedFrom', { peer: _callerDisplayName(invite.caller_webid || '') }));
+                    return;
+                }
+                // Both sides called at once and both see this. The call with the lower
+                // session id survives; its caller ignores the crossing invite and keeps
+                // ringing out, the other side drops its own call and rings for it.
+                if ((state.currentCallSessionId || '') < (invite.session_id || '')) return;
+                _doHangup();
+            }
             state.currentCall = invite;
             // Set the call peer now (refined in initWebRTC on answer) so a decline or
             // tab-close BEFORE answering can still route voice_hangup in web mode.
@@ -244,8 +292,12 @@ export function createVoice(deps) {
             try { document.getElementById("voice-answer")?.focus(); } catch (_) { /* ignore */ }
             playRingTone();
             const _ringCaller = invite.caller_webid;
-            setTimeout(() => {
-                if (state._callState === CallState.RINGING) {
+            // Bound to THIS invite: a leftover timer from an earlier ring must not
+            // cut off a newer call a few seconds in.
+            if (state._ringTimer) clearTimeout(state._ringTimer);
+            state._ringTimer = setTimeout(() => {
+                state._ringTimer = null;
+                if (state._callState === CallState.RINGING && state.currentCall === invite) {
                     banner.style.display = "none";
                     state.currentCall = null;
                     setCallState(CallState.IDLE);
@@ -1100,7 +1152,11 @@ export function createVoice(deps) {
         }
 
         function stopRingTone() {
-            if (state.ringOscillator) { try { state.ringOscillator.stop(); } catch(e) {} state.ringOscillator = null; }
+            if (state.ringOscillator) {
+                try { state.ringOscillator.stop(); } catch(e) {}
+                try { state.ringOscillator._ctx?.close(); } catch(e) {}   // one AudioContext per ring otherwise piles up
+                state.ringOscillator = null;
+            }
         }
 
         function playRingTone() {
@@ -1113,7 +1169,9 @@ export function createVoice(deps) {
                 osc.frequency.value = 440; gain.gain.value = 0.08;
                 osc.start();
                 state.ringOscillator = osc;
-                setTimeout(() => stopRingTone(), 30000); // auto-stop after 30s
+                osc._ctx = ctx;
+                // Auto-stop after 30s, but only this tone, not a newer ring.
+                setTimeout(() => { if (state.ringOscillator === osc) stopRingTone(); }, 30000);
             } catch(e) { console.warn("Ring tone failed", e); }
         }
 
@@ -1141,6 +1199,10 @@ export function createVoice(deps) {
             state._remoteDescSet = false;
             state.isMuted = false;
             state.currentCallSessionId = null;
+            if (state._ringTimer) { clearTimeout(state._ringTimer); state._ringTimer = null; }
+            state.currentCall = null;
+            const _banner = document.getElementById("voice-banner");
+            if (_banner) _banner.style.display = "none";
             setCallState(CallState.IDLE);
             const muteBtn = document.getElementById("mute-btn");
             if (muteBtn) muteBtn.classList.remove("vw-muted");
@@ -1167,16 +1229,46 @@ export function createVoice(deps) {
             //    session_id (a secret an outsider cannot read from a write-only inbox) and no
             //    webid. Require a matching session_id, so a hangup that proves nothing is
             //    rejected.
+            // While ringing (not yet answered) the call's session is the invite's: the
+            // caller cancelled, so stop ringing now rather than after the 30s timeout.
+            const ringingSid = state._callState === CallState.RINGING && state.currentCall
+                ? (state.currentCall.session_id || null) : null;
+            const activeSid = state.currentCallSessionId || ringingSid;
+            if (!activeSid) return;
             if (event._fromGateway) {
-                if (event.session_id && event.session_id !== state.currentCallSessionId) return;
+                if (event.session_id && event.session_id !== activeSid) return;
             } else if (event.from_webid) {
-                if (event.session_id !== state.currentCallSessionId) return;
+                if (event.session_id !== activeSid) return;
                 if (state._callPeerWebid && event.from_webid !== state._callPeerWebid) return;
             } else {
-                if (event.session_id !== state.currentCallSessionId) return;
+                if (event.session_id !== activeSid) return;
             }
+            const was = state._callState;
+            const peer = ringingSid && state.currentCall ? state.currentCall.caller_webid : '';
             if (state._callState !== CallState.IDLE) setCallState(CallState.ENDING);
             hangupCleanup();
+            // Say why the call ended, so a caller is not left guessing.
+            if (was === CallState.CALLING) {
+                showToast(event.reason === 'busy' ? t('voice.busy')
+                    : event.reason === 'peer_disconnected' ? t('voice.unavailable')
+                        : t('voice.declined'));
+            } else if (was === CallState.CONNECTED) {
+                showToast(t('voice.ended'));
+            } else if (was === CallState.RINGING) {
+                showToast(t('voice.missedFrom', { peer: _callerDisplayName(peer || '') }));
+            }
+        }
+
+        // The gateway refused our call invite (throttled, not a contact, full).
+        // The toast says why; this ends the "Calling..." state the invite left
+        // behind, which otherwise sat there for 30 seconds with the mic open.
+        const _INVITE_ERRORS = new Set(["call_too_frequent", "voice_invite_not_allowed",
+            "voice_sessions_full", "too_many_active_invites", "voice_session_exists"]);
+        function handleCallError(raw) {
+            if (!_INVITE_ERRORS.has(raw) || state._callState !== CallState.CALLING) return false;
+            setCallState(CallState.ENDING);
+            hangupCleanup();
+            return true;
         }
 
         function handleVoiceSignalRelay(event) {
@@ -1340,6 +1432,8 @@ export function createVoice(deps) {
         }
 
         function _doHangup() {
+            // End-call while still ringing is a decline: tell the caller.
+            if (state._callState === CallState.RINGING && !state.currentCallSessionId) _rejectInvite(state.currentCall, 'declined');
             setCallState(CallState.ENDING);
             if (state.currentCallSessionId && getSocket() && getSocket().readyState === WebSocket.OPEN) {
                 getSocket().send(JSON.stringify({cmd: "voice_hangup", session_id: state.currentCallSessionId, target_webid: state._callPeerWebid || undefined}));
@@ -1370,6 +1464,8 @@ export function createVoice(deps) {
         showVoiceBanner,
         handleVoiceUnavailable,
         handleVoiceHangup,
+        handleCallError,
+        declineCall,
         hangupCleanup,
         joinVoice,
         leaveVoiceChannel,

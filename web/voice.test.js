@@ -516,3 +516,128 @@ describe('cross-gateway fingerprint binding uses the account identity (CF1)', ()
     expect(voice.state._callPeerIdentity).toBe('did:key:zAlice');
   });
 });
+
+// Ringing / decline / busy / glare: every way a call ends reaches the other side,
+// and nothing leaves a stuck "Calling..." or a banner that rings on.
+describe('call lifecycle signaling', () => {
+  beforeEach(() => { global.WebSocket = { OPEN: 1 }; });
+  const banner = () => document.getElementById('voice-banner');
+  const invite = (over = {}) => ({ session_id: 'inv1', caller_webid: 'did:key:zAlice', ...over });
+
+  it('caller cancelling while it rings stops the callee banner and notes a missed call', () => {
+    const toasts = [];
+    const { voice } = makeVoice({ showToast: (m) => toasts.push(m) });
+    voice.showVoiceBanner(invite({ caller_gateway: 'did:key:zGW' }));
+    expect(banner().style.display).toBe('flex');
+    voice.handleVoiceHangup({ session_id: 'inv1', from_webid: 'did:key:zGW', _fromGateway: true });
+    expect(voice.state._callState).toBe(CallState.IDLE);
+    expect(voice.state.currentCall).toBe(null);
+    expect(banner().style.display).toBe('none');
+    expect(toasts.some((m) => /missed/i.test(m))).toBe(true);
+  });
+
+  it('a hangup for some other session does not stop the ring', () => {
+    const { voice } = makeVoice();
+    voice.showVoiceBanner(invite());
+    voice.handleVoiceHangup({ session_id: 'other', _fromGateway: true });
+    expect(voice.state._callState).toBe(CallState.RINGING);
+  });
+
+  it('declining tells the caller (routed to the caller gateway) and clears the banner', () => {
+    const { voice, sent } = makeVoice();
+    voice.showVoiceBanner(invite({ caller_gateway: 'did:key:zGW' }));
+    voice.declineCall();
+    expect(sent).toContainEqual(expect.objectContaining({
+      cmd: 'voice_hangup', session_id: 'inv1', target_webid: 'did:key:zGW', reason: 'declined' }));
+    expect(voice.state._callState).toBe(CallState.IDLE);
+    expect(banner().style.display).toBe('none');
+  });
+
+  it('end-call while ringing is a decline too', () => {
+    const { voice, sent } = makeVoice();
+    voice.showVoiceBanner(invite());
+    voice._doHangup();
+    expect(sent).toContainEqual(expect.objectContaining({ cmd: 'voice_hangup', session_id: 'inv1', reason: 'declined' }));
+  });
+
+  it('the caller is told why: declined, busy, or ended', () => {
+    for (const [reason, re] of [['declined', /declined/i], ['busy', /busy|another call/i], [undefined, /declined/i]]) {
+      const toasts = [];
+      const { voice } = makeVoice({ showToast: (m) => toasts.push(m) });
+      voice.state.currentCallSessionId = 's1';
+      voice.setCallState(CallState.CALLING);
+      voice.handleVoiceHangup({ session_id: 's1', reason });
+      expect(voice.state._callState).toBe(CallState.IDLE);
+      expect(toasts.some((m) => re.test(m))).toBe(true);
+    }
+    const toasts = [];
+    const { voice } = makeVoice({ showToast: (m) => toasts.push(m) });
+    voice.state.currentCallSessionId = 's1';
+    voice.setCallState(CallState.CALLING);
+    voice.setCallState(CallState.CONNECTED);
+    voice.handleVoiceHangup({ session_id: 's1' });
+    expect(toasts.some((m) => /ended/i.test(m))).toBe(true);
+  });
+
+  it('a second invite during a live call is turned away as busy, the call untouched', () => {
+    const { voice, sent } = makeVoice();
+    voice.state.currentCallSessionId = 'live';
+    voice.state._callPeerWebid = 'did:key:zBob';
+    voice.setCallState(CallState.CALLING);
+    voice.setCallState(CallState.CONNECTED);
+    voice.showVoiceBanner(invite({ session_id: 'inv2', caller_webid: 'did:key:zCarol' }));
+    expect(sent).toContainEqual(expect.objectContaining({ cmd: 'voice_hangup', session_id: 'inv2', reason: 'busy' }));
+    expect(voice.state._callState).toBe(CallState.CONNECTED);
+    expect(voice.state.currentCallSessionId).toBe('live');
+    expect(voice.state._callPeerWebid).toBe('did:key:zBob');
+    expect(voice.state.currentCall).toBe(null);
+  });
+
+  it('glare: both call each other, the lower session id survives on both sides', () => {
+    // This side's call has the LOWER id: keep calling, ignore the crossing invite.
+    const a = makeVoice();
+    a.voice.state.currentCallSessionId = 'aaa';
+    a.voice.state._callPeerWebid = 'did:key:zBob';
+    a.voice.setCallState(CallState.CALLING);
+    a.voice.showVoiceBanner(invite({ session_id: 'bbb', caller_webid: 'did:key:zBob' }));
+    expect(a.voice.state._callState).toBe(CallState.CALLING);
+    expect(a.voice.state.currentCallSessionId).toBe('aaa');
+    expect(a.sent.some((m) => m.cmd === 'voice_hangup')).toBe(false);
+    // This side's call has the HIGHER id: drop it and ring for the other one.
+    const b = makeVoice();
+    b.voice.state.currentCallSessionId = 'bbb';
+    b.voice.state._callPeerWebid = 'did:key:zAlice';
+    b.voice.setCallState(CallState.CALLING);
+    b.voice.showVoiceBanner(invite({ session_id: 'aaa', caller_webid: 'did:key:zAlice' }));
+    expect(b.sent).toContainEqual(expect.objectContaining({ cmd: 'voice_hangup', session_id: 'bbb' }));
+    expect(b.voice.state._callState).toBe(CallState.RINGING);
+    expect(b.voice.state.currentCall.session_id).toBe('aaa');
+  });
+
+  it('an old ring timeout does not cut off a newer call', () => {
+    vi.useFakeTimers();
+    try {
+      const { voice } = makeVoice();
+      voice.showVoiceBanner(invite({ session_id: 'one' }));
+      vi.advanceTimersByTime(20000);
+      voice.declineCall();
+      voice.showVoiceBanner(invite({ session_id: 'two' }));
+      vi.advanceTimersByTime(15000);   // past the first ring's 30s mark
+      expect(voice.state._callState).toBe(CallState.RINGING);
+      expect(voice.state.currentCall.session_id).toBe('two');
+      vi.advanceTimersByTime(16000);   // the second ring's own timeout
+      expect(voice.state._callState).toBe(CallState.IDLE);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('a refused invite (throttle, not a contact) ends "Calling..." at once', () => {
+    const { voice } = makeVoice();
+    voice.state.currentCallSessionId = 's1';
+    voice.setCallState(CallState.CALLING);
+    expect(voice.handleCallError('room_full')).toBe(false);
+    expect(voice.state._callState).toBe(CallState.CALLING);
+    expect(voice.handleCallError('call_too_frequent')).toBe(true);
+    expect(voice.state._callState).toBe(CallState.IDLE);
+    expect(voice.handleCallError('call_too_frequent')).toBe(false);   // idle: nothing to end
+  });
+});
