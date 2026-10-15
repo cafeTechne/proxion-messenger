@@ -145,6 +145,36 @@ describe('renderContacts', () => {
     const html = els['contacts-list']._children[0].innerHTML;
     expect(html).toMatch(/<span class="contact-item-label" dir="auto"><span class="contact-item-name">&lt;b&gt;Al&lt;\/b&gt;<\/span> <span class="dm-id-suffix id-suffix">/);
   });
+  it('opens contact details from a right-click or the context-menu key on the row', () => {
+    // The contact details panel (with Remove contact) had no way in from the list.
+    global.document.createElement = () => {
+      const el = mkEl();
+      el._ls = {};
+      el.addEventListener = (type, fn) => { (el._ls[type] = el._ls[type] || []).push(fn); };
+      return el;
+    };
+    const opened = [];
+    const v = createView({ getSocket: () => host.socket,
+      setActiveView: (x) => { host.activeView = x; }, setMessageMap: () => {}, setAllMessages: () => {},
+      setCurrentRoomMembers: () => {}, getAllMessages: () => [],
+      getPeerDidToCertId: () => host.peerDidToCertId, getThreadNames: () => host.threadNames,
+      getUnreadCounts: () => host.unreadCounts, getMutedThreads: () => host.mutedThreads,
+      updateE2EStatus() {}, updateIdentityFingerprint() {}, updateSidebarBadge() {},
+      onContactMenu: (c) => opened.push(c.peer_did) });
+    v.renderContacts([{ certificate_id: 'c1', peer_did: 'did:key:zA', display_name: 'A' }]);
+    const row = els['contacts-list']._children[0];
+    row._ls.contextmenu.forEach(fn => fn({ preventDefault() {} }));
+    row._ls.keydown.forEach(fn => fn({ key: 'ContextMenu', preventDefault() {} }));
+    row._ls.keydown.forEach(fn => fn({ key: 'a', preventDefault() {} }));
+    expect(opened).toEqual(['did:key:zA', 'did:key:zA']);
+  });
+  it('openContactByDid opens a listed contact and reports an unknown one', () => {
+    const v = make();
+    v.renderContacts([{ certificate_id: 'c1', peer_did: 'did:key:zA', display_name: 'A' }]);
+    expect(v.openContactByDid('did:key:zA')).toBe(true);
+    expect(host.activeView).toMatchObject({ type: 'dm', id: 'c1' });
+    expect(v.openContactByDid('did:key:zNobody')).toBe(false);
+  });
 });
 
 describe('addRoomToSidebar + its click', () => {

@@ -77,7 +77,12 @@ export function createView({
     // Called after a conversation opens (composer placeholder, header subtitle).
     onViewOpened = () => {},
     getActiveView = () => null,
+    // Right-click / context-menu key on a contact row (contact details + remove).
+    onContactMenu = null,
 }) {
+    // The contacts as last rendered, by peer did, for openContactByDid.
+    const _contactsByDid = new Map();
+
     // A row rebuilt while its conversation is open keeps the current-row marker
     // (the rooms snapshot can arrive after the user has already opened a room).
     function _markIfOpen(li, id) {
@@ -93,6 +98,7 @@ export function createView({
         const section = document.getElementById("contacts-section");
         if (!list || !section) return;
         list.innerHTML = "";
+        _contactsByDid.clear();
         if (!contacts || contacts.length === 0) { section.style.display = "none"; return; }
         section.style.display = "";
         for (const k in peerDidToCertId) delete peerDidToCertId[k]; // reset (mutate in place)
@@ -121,6 +127,16 @@ export function createView({
                 : "";
             li.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25z"/></svg><span class="contact-item-label" dir="auto"><span class="contact-item-name">' + escHtml(label) + '</span>' + idTag + '</span>';
             _makeRowOperable(li, () => openContactThread(c));
+            if (c.peer_did) _contactsByDid.set(c.peer_did, c);
+            if (onContactMenu) {
+                li.addEventListener("contextmenu", (e) => { e.preventDefault(); onContactMenu(c); });
+                li.addEventListener("keydown", (e) => {
+                    if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+                        e.preventDefault();
+                        onContactMenu(c);
+                    }
+                });
+            }
             list.appendChild(li);
         });
     }
@@ -378,8 +394,16 @@ export function createView({
         if (li) li.click();
     }
 
+    // Open the conversation with a listed contact; false when they are not one.
+    function openContactByDid(did) {
+        const c = did && _contactsByDid.get(did);
+        if (!c) return false;
+        openContactThread(c);
+        return true;
+    }
+
     return {
-        renderContacts, openContactThread, openLocalDmThread,
+        renderContacts, openContactThread, openContactByDid, openLocalDmThread,
         addRoomToSidebar, populateSidebar, _navigateToThread,
     };
 }

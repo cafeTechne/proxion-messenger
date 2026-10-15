@@ -829,7 +829,7 @@ import { initThemePicker } from './theme.js';
         // click. resetDateDivider pokes rendering.state. Instantiated after its
         // module deps (rooms/members/e2e-status/mentions/voice/rendering) exist.
         const {
-            renderContacts, openContactThread, openLocalDmThread,
+            renderContacts, openContactThread, openContactByDid, openLocalDmThread,
             addRoomToSidebar, populateSidebar, _navigateToThread,
         } = createView({
             getSocket: () => socket,
@@ -850,6 +850,7 @@ import { initThemePicker } from './theme.js';
             openSidebarCtx, resetDateDivider: () => { rendering.state._lastRenderedDate = null; rendering.resetUnread(); },
             onViewOpened: () => _onViewOpened(),
             getActiveView: () => activeView,
+            onContactMenu: (c) => showContactProfile(c.peer_did, c.display_name || ''),
         });
         // Invite-link carry-through (A4): capture now (survives reload/first-run),
         // consume on the "registered" event via the deep-link confirm modal.
@@ -2627,22 +2628,25 @@ import { initThemePicker } from './theme.js';
                     break;
                 }
                 case "contact_revoked":
-                    // R12.4.1+R12.4.2: Mark contact as revoked in sidebar
+                    // R12.4.1+R12.4.2: the contact is gone. Take them out of the
+                    // contacts list (refetched) and the DM list, and close their
+                    // conversation if it is open, instead of leaving a live-looking
+                    // chat that the gateway now refuses to send from.
                     (function() {
                         const certId = event.cert_id;
-                        const contactEl = document.querySelector(`[data-cert-id="${certId}"]`);
-                        if (contactEl) {
-                            const badge = document.createElement("span");
-                            badge.className = "revoked-badge";
-                            _setStatusBadge(badge, 'no-symbol', t('contact.revokedBadge'));
-                            badge.title = t('contact.revokedBadge');
-                            contactEl.appendChild(badge);
+                        if (certId && localDmPeers[certId]) {
+                            delete localDmPeers[certId];
+                            renderDmSidebar();
                         }
-                        // Disable message input if this contact is currently open
-                        if (window.currentThread === certId || window.currentCertId === certId) {
-                            const inp = document.getElementById("message-input") || document.getElementById("chat-input");
-                            if (inp) { inp.disabled = true; inp.placeholder = "This contact has been revoked."; }
+                        if (certId && activeView && activeView.id === certId) {
+                            activeView = null; updatePageTitle();
+                            _showThreadClosed(t('contact.removed'));
+                            for (const _id of ["start-call-btn", "start-video-call-btn"]) {
+                                const _b = document.getElementById(_id); if (_b) _b.style.display = "none";
+                            }
                         }
+                        if (socket?.readyState === WebSocket.OPEN)
+                            socket.send(JSON.stringify({ cmd: 'get_relationships' }));
                     })();
                     // Purge this contact's locally-cached plaintext DMs so they
                     // don't linger in IndexedDB after the relationship is severed.
@@ -5220,14 +5224,16 @@ import { initThemePicker } from './theme.js';
             });
 
             // Contact profile panel: Send DM button
+            // (It used to fill the Add contact dialog, whose opener clears the
+            // field, so "Send DM" showed an empty Add contact dialog.)
             attachListener('#contact-profile-dm-btn', 'click', () => {
                 const webid = document.getElementById('contact-profile-dm-btn')?.dataset.webid;
                 if (webid) {
                     const p = document.getElementById('contact-profile-panel');
                     if (p) p.style.display = 'none';
-                    // Same path as the profile card's Send DM button.
-                    profileState.profileCardActive = webid;
-                    profileCardOpenDM();
+                    if (!openContactByDid(webid) && socket?.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({ cmd: "resolve_did", did: webid }));
+                    }
                 }
             });
 
