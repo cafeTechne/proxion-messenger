@@ -200,7 +200,11 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         testBtn.disabled = true;
         statusEl.textContent = "";
         try {
-            const gwBase = (localStorage.getItem("proxion_gateway_http_url") || "http://127.0.0.1:8080").replace(/\/$/, "");
+            // Served by the gateway (the normal case): post same-origin. The
+            // stored URL only arrives later with my_address, and the 8080 guess
+            // is wrong for any other port and blocked by the page CSP.
+            const servedOverHttp = /^https?:$/.test(window.location?.protocol || "");
+            const gwBase = servedOverHttp ? "" : (localStorage.getItem("proxion_gateway_http_url") || "http://127.0.0.1:8080").replace(/\/$/, "");
             const resp = await fetch(`${gwBase}/setup/pod`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },

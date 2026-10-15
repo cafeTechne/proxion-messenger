@@ -190,3 +190,31 @@ describe('obSkipPod', () => {
     expect(until - Date.now()).toBeGreaterThan(6 * 24 * 60 * 60 * 1000);
   });
 });
+
+describe('obPodTestConnection', () => {
+  function fill(ob) {
+    ob.obSelectProvider('custom');
+    els['ob-pod-css-url'].value = 'https://pod.example';
+    els['ob-pod-email'].value = 'a@b.c';
+    els['ob-pod-password'].value = 'pw';
+  }
+  it('posts same-origin when the page is served by the gateway', async () => {
+    // First run: my_address has not arrived yet, so no stored gateway URL.
+    window.location = { protocol: 'https:' };
+    global.fetch = vi.fn(async () => ({ json: async () => ({ status: 'ok' }) }));
+    const { ob } = make();
+    fill(ob);
+    await ob.obPodTestConnection();
+    expect(global.fetch.mock.calls[0][0]).toBe('/setup/pod');
+    expect(els['ob-pod-continue-btn'].disabled).toBe(false);
+  });
+  it('falls back to the stored gateway URL off http (desktop shell)', async () => {
+    window.location = { protocol: 'tauri:' };
+    localStorage.setItem('proxion_gateway_http_url', 'http://127.0.0.1:9123/');
+    global.fetch = vi.fn(async () => ({ json: async () => ({ status: 'ok' }) }));
+    const { ob } = make();
+    fill(ob);
+    await ob.obPodTestConnection();
+    expect(global.fetch.mock.calls[0][0]).toBe('http://127.0.0.1:9123/setup/pod');
+  });
+});
