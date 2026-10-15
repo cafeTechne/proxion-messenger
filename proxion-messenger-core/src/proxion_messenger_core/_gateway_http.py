@@ -419,6 +419,9 @@ class HttpEndpointsMixin:
             _owner = self._store.get_pending_invite_sender(invitation_id) if invitation_id else ""
             self._store.save_relationship(cert.to_dict(), peer_did=acceptor_did,
                                           owner_webid=_owner)
+            # Our own request was accepted, so the owner chose to add this person
+            # again: lift a revocation left from removing them earlier.
+            self._lift_revocation_on_readd(acceptor_did)
             asyncio.create_task(self._sync_cert_to_pod(cert.to_dict()))
             if invitation_id:
                 self._store.mark_invite_status(invitation_id, "accepted")

@@ -618,9 +618,16 @@ class MiscHandlerMixin:
         rels = []
         caller_webid = self._client_webids.get(websocket, "")
         if self._store:
+            _seen_peers: set = set()
             for cert_dict in self._store.list_relationships(owner_webid=caller_webid):
                 cert_id = cert_dict.get("certificate_id") or cert_dict.get("id")
                 peer_did = cert_dict.get("peer_did") or ""
+                # Newest first: a person re-added after a removal on their side
+                # holds two live certs here; list them once, by the newest.
+                if peer_did:
+                    if peer_did in _seen_peers:
+                        continue
+                    _seen_peers.add(peer_did)
                 rels.append({
                     "certificate_id": cert_id,
                     "peer_did": peer_did,

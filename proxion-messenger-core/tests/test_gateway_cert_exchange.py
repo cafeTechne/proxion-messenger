@@ -278,6 +278,69 @@ class TestAcceptFriendRequest:
         ).hex()
         assert "signature" in cert
 
+    @pytest.mark.asyncio
+    async def test_readd_after_remove_restores_the_contact(self, gateway, mock_websocket, mock_agent):
+        """Remove a friend, then accept a new request from them. The revocation from
+        the removal used to stay in force, so the new friendship was listed but every
+        message to or from them was refused as "contact revoked"."""
+        from proxion_messenger_core.didkey import pub_key_to_did
+        other_identity = Ed25519PrivateKey.generate()
+        other_pub = other_identity.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        other_did = pub_key_to_did(other_pub)
+        other_store_pub = X25519PrivateKey.generate().public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+
+        async def _accept_new_invite():
+            invite = handshake.create_invite(other_identity, other_store_pub,
+                                             [Capability(with_="stash://dm/", can="crud/write")],
+                                             endpoint_hints=["ws://other.example.com"])
+            gateway._store.save_pending_invite(invite.to_dict(), other_did)
+            mock_websocket.send.reset_mock()
+            await gateway._handle_accept_friend_request(mock_websocket, {"invitation_id": invite.invitation_id})
+            resp = json.loads(mock_websocket.send.call_args[0][0])
+            assert resp["type"] == "friend_request_accepted"
+            return resp["certificate"]["certificate_id"]
+
+        first = await _accept_new_invite()
+        await gateway._handle_revoke_contact(mock_websocket, {"cert_id": first})
+        assert other_did in gateway._revoked_dids
+
+        second = await _accept_new_invite()
+        assert other_did not in gateway._revoked_dids
+        assert not gateway._store.is_revoked(other_did)
+        assert gateway._store.relationship_is_revoked(first), "the removed cert stays revoked"
+        assert gateway._store.get_relationship_by_did(other_did)["certificate_id"] == second
+
+    @pytest.mark.asyncio
+    async def test_accepting_a_revoked_device_keeps_it_revoked(self, gateway, mock_websocket, mock_agent):
+        """An unlinked device's DID stays revoked even if the owner accepts a friend
+        request from it; lifting it would let the device register as the account."""
+        from proxion_messenger_core.didkey import pub_key_to_did
+        dev_identity = Ed25519PrivateKey.generate()
+        dev_did = pub_key_to_did(dev_identity.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw))
+        gateway._store.mark_revoked(f"device:{dev_did}", dev_did)
+        gateway._revoked_dids.add(dev_did)
+
+        invite = handshake.create_invite(
+            dev_identity, X25519PrivateKey.generate().public_key().public_bytes(Encoding.Raw, PublicFormat.Raw),
+            [Capability(with_="stash://dm/", can="crud/write")], endpoint_hints=["ws://other.example.com"])
+        gateway._store.save_pending_invite(invite.to_dict(), dev_did)
+        await gateway._handle_accept_friend_request(mock_websocket, {"invitation_id": invite.invitation_id})
+
+        assert dev_did in gateway._revoked_dids
+        assert gateway._store.is_revoked(dev_did)
+
+    @pytest.mark.asyncio
+    async def test_get_relationships_lists_each_person_once(self, gateway, mock_websocket):
+        """Someone who re-added you after removing you on their side holds two live
+        certs with you; the contacts list showed them twice."""
+        for cert_id, created in (("cert-old", 100), ("cert-new", 200)):
+            gateway._store.save_relationship(
+                {"certificate_id": cert_id, "subject": "ab" * 32, "created_at": created,
+                 "expires_at": 2**31 - 1}, peer_did="did:key:zFriend")
+        await gateway._handle_get_relationships(mock_websocket, {})
+        contacts = json.loads(mock_websocket.send.call_args[0][0])["contacts"]
+        assert [c["certificate_id"] for c in contacts if c["peer_did"] == "did:key:zFriend"] == ["cert-new"]
+
 
 class TestListFriendRequests:
     """Tests for list_friend_requests command."""

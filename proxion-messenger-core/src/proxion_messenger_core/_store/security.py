@@ -160,6 +160,21 @@ class SecurityStoreMixin(object):
                 "INSERT OR REPLACE INTO revocations (cert_id, peer_did, revoked_at) VALUES (?,?,?)",
                 (cert_id, peer_did, time.time()),
             )
+    def clear_revocation_for_peer(self, peer_did: str) -> bool:
+        """Drop the contact revocation rows for peer_did. Only for an explicit
+        re-add by the owner (a new relationship they consented to); the old
+        certificates keep their own revoked flag. A device revocation
+        ("device:" row) is never lifted here. Returns True when no revocation
+        of any kind is left for peer_did."""
+        if not peer_did:
+            return False
+        with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM revocations WHERE peer_did = ? AND cert_id NOT LIKE 'device:%'",
+                (peer_did,))
+            left = conn.execute(
+                "SELECT 1 FROM revocations WHERE peer_did = ? LIMIT 1", (peer_did,)).fetchone()
+        return left is None
     def get_revoked_dids(self) -> set:
         """Return the set of all revoked peer DIDs."""
         with self._conn() as conn:

@@ -1759,6 +1759,9 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # Persist to SQLite and pod
         self._store.save_relationship(cert.to_dict(), peer_did=alice_did,
                                       owner_webid=self._client_webids.get(websocket, ""))
+        # Accepting is the owner re-adding this person: a revocation left from an
+        # earlier "Remove contact" would otherwise drop the new friendship's traffic.
+        self._lift_revocation_on_readd(alice_did)
         # Store the requester's browser E2E key (from the invite) so we can encrypt
         # the first DM to the right key even if we message before receiving one.
         _alice_e2e = invite.issuer.get("e2e_key")
@@ -1813,6 +1816,20 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             "certificate": cert.to_dict(),
             "peer_did": alice_did,
         }))
+
+    def _lift_revocation_on_readd(self, peer_did: str) -> None:
+        """Clear the peer-level revocation for a contact the owner explicitly added
+        again (they accepted a new request, or their own request was accepted).
+        Old certificates stay revoked; only the new one is live. A revoked linked
+        device stays revoked: accepting its friend request must not let it
+        register as the account again."""
+        if not peer_did or peer_did not in self._revoked_dids or not self._store:
+            return
+        try:
+            if self._store.clear_revocation_for_peer(peer_did):
+                self._revoked_dids.discard(peer_did)
+        except Exception:
+            logger.debug("clear_revocation_for_peer failed", exc_info=True)
 
     async def _post_invite_accept(self, url: str, payload: dict) -> None:
         """POST the acceptance notification to the requester's gateway via SSRF-safe transport."""
