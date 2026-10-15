@@ -2935,6 +2935,15 @@ import { initThemePicker } from './theme.js';
                 case "webhook_deleted":
                     showToast(t('webhook.deleted'));
                     if (event.id) podDeleteWebhook(event.id).catch(() => {});
+                    // Drop its row from the open integrations list, which
+                    // otherwise kept showing the deleted webhook.
+                    {
+                        const wl = document.getElementById("webhook-list-area");
+                        const row = event.id && wl && [...wl.querySelectorAll("[data-del-wh]")]
+                            .find(b => b.dataset.delWh === event.id)?.closest(".list-row");
+                        if (row) row.remove();
+                        if (wl && !wl.querySelector("[data-del-wh]")) wl.innerHTML = inlineNotice(t('empty.webhooks'), 'empty');
+                    }
                     break;
                 case "webhook_list": {
                     const wl = document.getElementById("webhook-list-area");

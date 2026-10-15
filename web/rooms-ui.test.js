@@ -41,6 +41,15 @@ describe('a room that goes away leaves no stale header', () => {
   });
 });
 
+describe('room integrations list', () => {
+  it('drops a deleted webhook from the open list', () => {
+    const body = caseBody('webhook_deleted');
+    expect(body).toContain('getElementById("webhook-list-area")');
+    expect(body).toContain('row.remove()');
+    expect(body).toContain("t('empty.webhooks')");
+  });
+});
+
 describe('banned members can be listed and unbanned', () => {
   const html = readFileSync(fileURLToPath(new URL('./index.html', import.meta.url)), 'utf8');
   it('the room options menu has an owner-only Banned members item', () => {
