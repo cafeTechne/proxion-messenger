@@ -89,10 +89,12 @@ async function openClient(browser, url, label) {
   await page.evaluateOnNewDocument(() => {
     window.__toasts = [];
     new MutationObserver(() => {
+      // A repeat of a visible toast only bumps its counter, so count that too.
       document.querySelectorAll('#toast-container .toast__msg').forEach((el) => {
-        if (!el.__seen) { el.__seen = true; window.__toasts.push(el.textContent); }
+        const n = el.parentElement?.querySelector('.toast__count')?.textContent || '';
+        if (el.__seen !== n) { el.__seen = n; window.__toasts.push(el.textContent); }
       });
-    }).observe(document, { childList: true, subtree: true });
+    }).observe(document, { childList: true, subtree: true, characterData: true });
   });
   await page.goto(url, { waitUntil: 'load', timeout: 20000 });
   await page.evaluate(() => { const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none'; });
@@ -265,6 +267,35 @@ try {
   const toasted = (pg, re, ms = 5000) => until(pg, (src) => (window.__toasts || []).some((x) => new RegExp(src, 'i').test(x)), re, ms);
   const click = (pg, id) => pg.evaluate((i) => document.getElementById(i).click(), id);
 
+  const pressed = (pg, id) => pg.evaluate((i) => document.getElementById(i)?.getAttribute('aria-pressed'), id);
+  // Back to a fresh page with the DM open, as after a reload.
+  const reopen = async (pg, url, who) => {
+    await pg.goto(url, { waitUntil: 'load', timeout: 20000 });
+    await pg.evaluate(() => { const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none'; });
+    const ok = await until(pg, () => document.querySelector('.dot')?.classList.contains('online')
+      && document.querySelector('#dm-list li, #contacts-list li'), null, 20000);
+    if (!ok) { fail(`${who} did not come back online with the contact`); throw new Error('stop'); }
+    await pg.evaluate(() => document.querySelector('#dm-list li, #contacts-list li').click());
+    if (!(await until(pg, () => { const b = document.getElementById('start-call-btn'); return b && b.offsetParent !== null; }, null, 8000))) {
+      fail(`${who} could not reopen the DM`); throw new Error('stop');
+    }
+  };
+
+  step = 'in-call-controls';
+  await click(alice, 'mute-btn');
+  if ((await pressed(alice, 'mute-btn')) !== 'true') fail('mute button did not mute');
+  await click(alice, 'mute-btn');
+  if ((await pressed(alice, 'mute-btn')) !== 'false') fail('mute button did not unmute');
+  await click(bob, 'camera-btn');   // Bob's camera was on: turn it off
+  if (!(await until(bob, () => document.getElementById('camera-btn')?.getAttribute('aria-pressed') === 'false', null, 3000))) fail('camera button did not turn the camera off');
+  await click(alice, 'screenshare-btn');
+  if (!(await until(alice, () => document.getElementById('screenshare-btn')?.getAttribute('aria-pressed') === 'true', null, 5000))) fail('screen share did not start');
+  else {
+    if (!(await until(bob, () => { const v = document.getElementById('vw-remote-video'); return v && getComputedStyle(v).display !== 'none'; }, null, 10000))) fail('Bob never saw Alice\'s shared screen');
+    await click(alice, 'screenshare-btn');
+    if (!(await until(alice, () => document.getElementById('screenshare-btn')?.getAttribute('aria-pressed') === 'false', null, 3000))) fail('screen share did not stop');
+  }
+
   step = 'callee-hangs-up';
   await click(bob, 'end-call');
   if (!(await hidden(alice, 'voice-widget'))) fail('Bob hung up but Alice stayed in the call');
@@ -274,8 +305,31 @@ try {
   // The call connected, so the redial is not throttled.
   await click(alice, 'start-call-btn');
   if (!(await ringing(bob, 15000))) fail('immediate redial after a connected call never rang');
+  await click(bob, 'voice-answer');
+  if (!(await until(alice, () => /\d\d:\d\d/.test(document.getElementById('vw-status')?.textContent || ''), null, 15000))) fail('redialed call never connected');
+
+  step = 'peer-reloads';
+  await alice.evaluate(() => { window.__toasts = []; });
+  await bob.reload({ waitUntil: 'load' });
+  if (!(await hidden(alice, 'voice-widget'))) fail('Bob reloaded mid-call but Alice stayed in the call');
+  if (!(await toasted(alice, 'call ended'))) fail(`Alice was not told the call ended when Bob reloaded (${await alice.evaluate(() => window.__toasts.join(' | '))})`);
+  await reopen(bob, B.url, 'bob');
+
+  step = 'peer-offline';
+  await bob.goto('about:blank');
+  await sleep(1000);
+  await click(alice, 'start-call-btn');
+  if (!(await toasted(alice, 'unavailable', 8000))) fail('calling an offline contact gave no "unavailable" message');
+  if (!(await hidden(alice, 'voice-widget', 3000))) fail('calling an offline contact left Alice stuck in "Calling..."');
+  await reopen(bob, B.url, 'bob');
 
   step = 'caller-cancels';
+  // Each call sends ~20 ICE candidates as separate commands; let the gateway's
+  // 60-per-10s command window roll over before more calls.
+  await sleep(10500);
+  // Not throttled: the offline attempt rang nobody.
+  await click(alice, 'start-call-btn');
+  if (!(await ringing(bob, 15000))) fail('call after the contact came back online never rang');
   await click(alice, 'end-call');
   if (!(await hidden(bob, 'voice-banner'))) fail('Alice cancelled but Bob kept ringing');
   if (!(await toasted(bob, 'missed call'))) fail('Bob got no missed-call notice for the cancelled ring');
@@ -283,7 +337,7 @@ try {
   step = 'throttled-redial';
   // An unanswered ring IS throttled: the error must end "Calling...", not hang.
   await click(alice, 'start-call-btn');
-  if (!(await toasted(alice, 'wait a moment'))) fail('throttled redial gave no message');
+  if (!(await toasted(alice, 'wait a moment'))) fail(`throttled redial gave no message (${await alice.evaluate(() => window.__toasts.join(' | '))})`);
   if (!(await hidden(alice, 'voice-widget', 3000))) fail('throttled redial left Alice stuck in "Calling..."');
 
   step = 'callee-declines';

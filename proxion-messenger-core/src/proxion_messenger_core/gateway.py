@@ -2225,6 +2225,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                         None, self._push_missed_call, to_webid, from_webid)
                 except Exception:
                     pass
+                # Not 2xx, so the caller's gateway says "unavailable" right away
+                # instead of letting the caller ring out for 30 seconds. Only a
+                # contact gets this far (strangers got the 202 above).
+                return "404 Not Found", '{"status":"offline"}'
             return "202 Accepted", '{"status":"offline"}'
 
         event = json.dumps({

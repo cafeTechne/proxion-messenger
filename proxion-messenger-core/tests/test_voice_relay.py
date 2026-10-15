@@ -121,6 +121,24 @@ async def test_voice_signal_relay_offline_returns_202(gateway):
     assert "offline" in body
 
 @pytest.mark.asyncio
+async def test_call_offer_to_offline_contact_is_not_2xx(gateway):
+    """A call offer for a callee with no open app must fail the caller gateway's
+    POST, so the caller hears "unavailable" now rather than ringing out."""
+    _seed_rel_voice(gateway, "did:key:zBob")
+    status, body = await gateway._handle_voice_signal_relay({
+        "to_webid": "did:key:zOffline", "from_webid": "did:key:zBob",
+        "signal_type": "offer", "session_id": "sess-3", "signal_data": {"sdp_offer": "v=0"},
+    })
+    assert not status.startswith("2")
+    assert "offline" in body
+    # A stranger still can't probe presence: it gets the same 202 as always.
+    status, _ = await gateway._handle_voice_signal_relay({
+        "to_webid": "did:key:zOffline", "from_webid": "did:key:zStranger",
+        "signal_type": "offer", "session_id": "sess-4", "signal_data": {},
+    })
+    assert status == "202 Accepted"
+
+@pytest.mark.asyncio
 async def test_voice_signal_not_added_to_relay_queue(gateway):
     """Voice signals are never stored in the relay queue."""
     # Simulate a relay POST with content_type=voice_signal - it goes through
@@ -246,6 +264,25 @@ async def test_redial_allowed_right_after_a_connected_call(gateway):
                                           "target_webid": "did:key:zBob", "sdp_offer": "v=0"})
     errs = [json.loads(c[0][0]) for c in alice.send.call_args_list]
     assert any(m.get("message") == "call_too_frequent" for m in errs)
+    _gv._voice_invite_ts.clear()
+
+
+@pytest.mark.asyncio
+async def test_unavailable_callee_does_not_throttle_the_next_try(gateway):
+    """Calling a contact whose app is closed says "unavailable"; once they are back
+    the caller must be able to ring them, not wait out the 30s throttle."""
+    import proxion_messenger_core._gateway_voice as _gv
+    _gv._voice_invite_ts.clear()
+    alice = _local_client(gateway, "did:key:zAlice")
+    _seed_rel_voice(gateway, "did:key:zBob")
+    for sid in ("u1", "u2"):
+        alice.send.reset_mock()
+        await gateway.process_command(alice, {"cmd": "voice_invite", "session_id": sid,
+                                              "target_webid": "did:key:zBob", "sdp_offer": "v=0"})
+        sent = [json.loads(c[0][0]) for c in alice.send.call_args_list]
+        assert any(m.get("type") == "voice_unavailable" for m in sent), sent
+        assert not any(m.get("message") == "call_too_frequent" for m in sent)
+        assert sid not in gateway._voice_sessions
     _gv._voice_invite_ts.clear()
 
 

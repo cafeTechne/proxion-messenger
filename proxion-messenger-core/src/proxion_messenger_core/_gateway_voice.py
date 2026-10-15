@@ -370,6 +370,10 @@ class VoiceHandlerMixin:
             # (so the UI stops ringing into the void) and try a local missed-call push
             # in case the callee is a known local user who is simply offline (R82 W1/W2).
             if not _relayed and target_webid:
+                # Nothing rang, so this was no spam: let the caller try again as
+                # soon as the callee comes online, and drop the dead session.
+                _voice_invite_ts.pop(_key, None)
+                self._voice_sessions.pop(session_id, None)
                 try:
                     await websocket.send(json.dumps({
                         "type": "voice_unavailable", "session_id": session_id,
