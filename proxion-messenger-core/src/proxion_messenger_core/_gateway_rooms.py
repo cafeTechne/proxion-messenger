@@ -3141,8 +3141,12 @@ class RoomHandlerMixin:
             self._store.create_webhook(wh)
         response = {"type": "webhook_created", "id": wh_id, "direction": direction, "bot_name": bot_name}
         if direction == "incoming":
-            http_base = (self.config.public_url or "http://localhost:8080") \
-                .replace("wss://", "https://").replace("ws://", "http://")
+            # /webhook/ is served by the HTTP server. A ws(s):// public_url names
+            # the websocket port, so only an http(s) one (a tunnel) is used here.
+            _pub = (self.config.public_url or "").rstrip("/")
+            if self.config.http_public_url or not _pub.startswith(("https://", "http://")):
+                _pub = ""
+            http_base = _pub or self._gateway_http_url() or "http://localhost:8080"
             response["webhook_url"] = f"{http_base}/webhook/{wh_token}"
             response["token"] = wh_token
         else:

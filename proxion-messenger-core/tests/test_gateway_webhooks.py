@@ -70,6 +70,30 @@ async def test_incoming_webhook_creates_url(gateway_with_store):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("extra, prefix", [
+    ({}, "http://127.0.0.1:8443/webhook/"),
+    ({"ssl_certfile": "c.pem", "ssl_keyfile": "k.pem"}, "https://127.0.0.1:8443/webhook/"),
+    ({"http_public_url": "https://gw.example.org/", "public_url": "wss://gw.example.org:8765"},
+     "https://gw.example.org/webhook/"),
+    ({"public_url": "wss://gw.example.org:8765"}, "http://127.0.0.1:8443/webhook/"),
+    ({"public_url": "https://abc.trycloudflare.com"}, "https://abc.trycloudflare.com/webhook/"),
+])
+async def test_incoming_webhook_url_uses_the_http_address(agent, tmp_path, extra, prefix):
+    """The webhook URL points at the HTTP server that serves /webhook/, not a
+    hardcoded localhost:8080 or the websocket's public URL."""
+    cfg = GatewayConfig(host="127.0.0.1", http_port=8443, db_path=str(tmp_path / "w.db"), **extra)
+    gw = ProxionGateway(agent=agent, dm_clients={}, room_memberships={}, config=cfg)
+    ws = _mock_ws()
+    await _register(gw, ws)
+    _setup_room(gw, ws)
+    await gw.process_command(ws, {
+        "cmd": "create_webhook", "thread_id": "room-wh", "direction": "incoming", "bot_name": "B",
+    })
+    resp = json.loads(ws.send.call_args[0][0])
+    assert resp["webhook_url"] == prefix + resp["token"]
+
+
+@pytest.mark.asyncio
 async def test_post_to_webhook_delivers_to_room(gateway_with_store):
     """HTTP POST to /webhook/{token} broadcasts message event to room members."""
     ws = _mock_ws()
