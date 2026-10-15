@@ -34,6 +34,29 @@ from .command_validation import validate_command_payload, SchemaError, AUTH_RATE
 from .security_policy import get_policy
 
 logger = logging.getLogger(__name__)
+
+
+def _read_version_txt() -> str:
+    """The release version from version.txt: the PyInstaller bundle root in a
+    native build (build_sidecar adds it there), the repo root in a checkout."""
+    import pathlib as _pl
+    import sys as _sys
+    here = _pl.Path(__file__).resolve().parent
+    candidates = []
+    meipass = getattr(_sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(_pl.Path(meipass) / "version.txt")
+    candidates += [here.parents[2] / "version.txt", here.parents[1] / "version.txt",
+                   here / "version.txt"]
+    for p in candidates:
+        try:
+            if p.is_file():
+                v = p.read_text().strip()
+                if v:
+                    return v
+        except OSError:
+            continue
+    return "0.1.0"
 # Suppress noisy "opening handshake failed" logs from zero-byte TCP probes
 # (browser health checks, OS port scans) that are harmless but clutter the terminal.
 logging.getLogger("websockets.server").setLevel(logging.CRITICAL)
@@ -1932,10 +1955,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         from .didkey import pub_key_to_did as _p2d
         from .pop import fingerprint as _fp
         gw_did = _p2d(self.agent.identity_pub_bytes)
-        _vpath = _pl.Path(__file__).parent.parent.parent / "version.txt"
-        if not _vpath.exists():
-            _vpath = _pl.Path(__file__).parent / "version.txt"
-        _gw_version = _vpath.read_text().strip() if _vpath.exists() else "0.1.0"
+        _gw_version = _read_version_txt()
         _env_auth = os.environ.get("PROXION_REQUIRE_AUTH", "")
         _loopback_or_wildcard = self.config.host in (
             "127.0.0.1", "localhost", "::1", "", "0.0.0.0", "::")

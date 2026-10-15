@@ -154,6 +154,25 @@ async def test_well_known_includes_gateway_version(tmp_path):
     assert data["gateway_version"]
 
 
+def test_gateway_version_reads_repo_version_txt(monkeypatch):
+    """The About panel shows gateway_version; it must be the real release, not
+    the 0.1.0 fallback, both from a checkout and from a PyInstaller bundle."""
+    import sys
+    from pathlib import Path
+    from proxion_messenger_core.gateway import _read_version_txt
+    monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+    repo_version = (Path(__file__).resolve().parents[2] / "version.txt").read_text().strip()
+    assert _read_version_txt() == repo_version
+
+
+def test_gateway_version_prefers_bundle_copy(monkeypatch, tmp_path):
+    import sys
+    from proxion_messenger_core.gateway import _read_version_txt
+    (tmp_path / "version.txt").write_text("9.8.7\n")
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+    assert _read_version_txt() == "9.8.7"
+
+
 # ── R18.4.3: /i/<token> is stable across two requests in the same session ────
 
 
