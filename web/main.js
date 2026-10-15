@@ -915,11 +915,17 @@ import { initThemePicker } from './theme.js';
         const _SVG_DESKTOP_SLASH = icon('desktop-slash', { size: 20 });
         let soundEnabled = localStorage.getItem("soundEnabled") === "true";
         const soundBtn = document.getElementById("sound-toggle");
-        soundBtn.innerHTML = soundEnabled ? _SVG_SOUND_ON : _SVG_SOUND_OFF;
+        // aria-pressed carries the on/off state the icon shows, like the
+        // desktop-notification toggle next to it.
+        const _renderSoundBtn = () => {
+            soundBtn.innerHTML = soundEnabled ? _SVG_SOUND_ON : _SVG_SOUND_OFF;
+            soundBtn.setAttribute("aria-pressed", String(soundEnabled));
+        };
+        _renderSoundBtn();
         soundBtn.onclick = () => {
             soundEnabled = !soundEnabled;
             localStorage.setItem("soundEnabled", soundEnabled);
-            soundBtn.innerHTML = soundEnabled ? _SVG_SOUND_ON : _SVG_SOUND_OFF;
+            _renderSoundBtn();
         };
 
         // Desktop/OS notifications are INDEPENDENT of the sound chime (was

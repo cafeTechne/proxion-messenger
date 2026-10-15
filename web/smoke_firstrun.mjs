@@ -94,6 +94,10 @@ try {
   check(await display(page, 'onboarding-modal') === 'none', 'Open Proxion closes the wizard');
 
   console.log('settings');
+  const soundBefore = await page.$eval('#sound-toggle', (e) => e.getAttribute('aria-pressed'));
+  await page.click('#sound-toggle');
+  const soundAfter = await page.$eval('#sound-toggle', (e) => e.getAttribute('aria-pressed'));
+  check(soundBefore === 'false' && soundAfter === 'true', 'the sound toggle exposes its on/off state');
   await page.click('#settings-btn');
   await page.waitForSelector('#settings-modal', { visible: true });
   const navTargets = await page.$$eval('.settings-nav-item', (ns) => ns.map((n) => n.dataset.settingsTarget));
@@ -125,8 +129,9 @@ try {
     receipts: document.getElementById('settings-receipts-toggle').checked,
     previews: document.getElementById('settings-link-previews-toggle').checked,
     name: document.getElementById('settings-display-name').value,
+    sound: document.getElementById('sound-toggle').getAttribute('aria-pressed'),
   }));
-  check(kept.theme === 'light' && !kept.receipts && kept.previews && kept.name === 'Alice Two',
+  check(kept.theme === 'light' && !kept.receipts && kept.previews && kept.name === 'Alice Two' && kept.sound === 'true',
     `settings survive a reload (${JSON.stringify(kept)})`);
   await page.keyboard.press('Escape');
 
