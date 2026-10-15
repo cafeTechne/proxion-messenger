@@ -5668,12 +5668,15 @@ import { initThemePicker } from './theme.js';
             });
 
             // Settings: OIDC sign-in buttons
-            attachListener('#settings-solid-solidcommunity', 'click', () => solidLogin('https://solidcommunity.net'));
-            attachListener('#settings-solid-inrupt', 'click', () => solidLogin('https://inrupt.net'));
+            // An unreachable issuer rejects; say so instead of doing nothing.
+            const _settingsLogin = (url) => Promise.resolve(solidLogin(url))
+                .catch(() => showToast(t('web.signin.failed'), 'error'));
+            attachListener('#settings-solid-solidcommunity', 'click', () => _settingsLogin('https://solidcommunity.net'));
+            attachListener('#settings-solid-inrupt', 'click', () => _settingsLogin('https://inrupt.net'));
             attachListener('#settings-solid-custom-btn', 'click', () => {
                 const url = (document.getElementById('settings-solid-custom-url')?.value || '').trim();
                 if (!url.startsWith('https://')) { showToast(t('pod.urlMustHttps'), 'error'); return; }
-                solidLogin(url);
+                _settingsLogin(url);
             });
             // Disconnect from the CSS/Solid pod without touching the local identity key or
             // room/message history. The user's DID, display name, and all rooms are preserved.
