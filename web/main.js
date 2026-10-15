@@ -5559,7 +5559,7 @@ import { initThemePicker } from './theme.js';
                         const from = u.searchParams.get('from');
                         if (from) address = decodeURIComponent(from);
                     } catch (_) {}
-                    const peerInput = document.getElementById('peer-address');
+                    const peerInput = document.getElementById('add-peer-input');
                     if (peerInput) {
                         peerInput.value = address;
                         peerInput.focus();
@@ -5839,7 +5839,7 @@ import { initThemePicker } from './theme.js';
                 const address = modal.dataset.pendingAddress || '';
                 modal.style.display = 'none';
                 const addModal = document.getElementById('add-peer-modal');
-                const input = document.getElementById('peer-address');
+                const input = document.getElementById('add-peer-input');
                 if (addModal && input && address) {
                     input.value = address;
                     addModal.style.display = 'flex';
@@ -6131,7 +6131,7 @@ import { initThemePicker } from './theme.js';
                     } else {
                         // Fallback if modal not in DOM
                         const modal = document.getElementById('add-peer-modal');
-                        const input = document.getElementById('peer-address');
+                        const input = document.getElementById('add-peer-input');
                         if (modal && input) { input.value = address; modal.style.display = 'flex'; input.focus(); }
                     }
                 }
