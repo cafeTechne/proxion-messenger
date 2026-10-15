@@ -1767,6 +1767,9 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         _alice_e2e = invite.issuer.get("e2e_key")
         if _alice_e2e and alice_did:
             self._store.save_e2e_key(alice_did, _alice_e2e)
+        # Name the new contact by the name their request carried (shown with its
+        # id tag in the contacts list), unless we already know them by one.
+        self._save_peer_name_if_unknown(alice_did, invite.issuer.get("display_name"))
         asyncio.create_task(self._sync_cert_to_pod(cert.to_dict()))
 
         # Register Alice's endpoint so relay routing works immediately — validate
@@ -1804,6 +1807,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                     # carry the acceptor's client x25519 so the requester can encrypt the
                     # first DM to the right key. See federation-status memory.
                     "from_e2e_key": self._store.get_peer_browser_e2e_key(self._client_webids.get(websocket, "")) or "",
+                    # So the requester's contacts list can name us.
+                    "from_display_name": (self._display_names.get(websocket)
+                                          or self._store.get_display_name(self._client_webids.get(websocket, ""))
+                                          or ""),
                 }
                 asyncio.create_task(self._post_invite_accept(accept_url, accept_payload))
             else:
@@ -1816,6 +1823,20 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             "certificate": cert.to_dict(),
             "peer_did": alice_did,
         }))
+
+    def _save_peer_name_if_unknown(self, peer_did: str, name) -> None:
+        """Remember a new contact's self-chosen display name, never replacing one
+        we already have for that did."""
+        if not self._store or not peer_did or not isinstance(name, str):
+            return
+        name = name.strip()[:100]
+        if not name or peer_did == self._own_gateway_did():
+            return
+        try:
+            if not self._store.get_display_name(peer_did):
+                self._store.save_display_name(peer_did, name)
+        except Exception:
+            logger.debug("saving contact display name failed", exc_info=True)
 
     def _lift_revocation_on_readd(self, peer_did: str) -> None:
         """Clear the peer-level revocation for a contact the owner explicitly added

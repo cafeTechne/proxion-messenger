@@ -330,6 +330,50 @@ class TestAcceptFriendRequest:
         assert gateway._store.is_revoked(dev_did)
 
     @pytest.mark.asyncio
+    async def test_accepting_names_the_new_contact(self, gateway, mock_websocket):
+        """The contacts list showed a new friend as a did fragment ("z6Mk…") because
+        the name their request carried was never kept."""
+        from proxion_messenger_core.didkey import pub_key_to_did
+        other = Ed25519PrivateKey.generate()
+        other_did = pub_key_to_did(other.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw))
+        store_pub = X25519PrivateKey.generate().public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        invite = handshake.create_invite(other, store_pub, [Capability(with_="stash://dm/", can="crud/write")],
+                                         endpoint_hints=["ws://other.example.com"], display_name="Alice")
+        gateway._store.save_pending_invite(invite.to_dict(), other_did)
+        await gateway._handle_accept_friend_request(mock_websocket, {"invitation_id": invite.invitation_id})
+        mock_websocket.send.reset_mock()
+        await gateway._handle_get_relationships(mock_websocket, {})
+        contacts = json.loads(mock_websocket.send.call_args[0][0])["contacts"]
+        assert [c["display_name"] for c in contacts if c["peer_did"] == other_did] == ["Alice"]
+
+    @pytest.mark.asyncio
+    async def test_our_accepted_request_names_and_restores_the_contact(self, gateway, mock_agent):
+        """Requester side: the acceptance names the acceptor, and (re-adding someone
+        we removed before) lifts the old revocation."""
+        from proxion_messenger_core.didkey import pub_key_to_did
+        from proxion_messenger_core.federation import RelationshipCertificate
+        acceptor = Ed25519PrivateKey.generate()
+        acc_pub = acceptor.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        acc_did = pub_key_to_did(acc_pub)
+        store_pub = X25519PrivateKey.generate().public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        invite = handshake.create_invite(mock_agent.identity_key, store_pub,
+                                         [Capability(with_="stash://dm/", can="crud/write")],
+                                         endpoint_hints=["https://me.example.com"])
+        gateway._store.save_pending_invite(invite.to_dict(), acc_did)
+        gateway._store.mark_revoked("cert-from-before", acc_did)
+        gateway._revoked_dids.add(acc_did)
+        cert = RelationshipCertificate(issuer=acc_pub.hex(), subject=mock_agent.identity_pub_bytes.hex(),
+                                       capabilities=[Capability(with_="stash://dm/", can="crud/write")])
+        cert.sign(acceptor)
+        body = json.dumps({"@type": "InviteAcceptance", "invitation_id": invite.invitation_id,
+                           "certificate": cert.to_dict(), "from_did": acc_did,
+                           "from_pub_hex": acc_pub.hex(), "from_display_name": "Bob"}).encode()
+        status, _ = await gateway._handle_invite_accept_post(body)
+        assert status.startswith("200")
+        assert gateway._store.get_display_name(acc_did) == "Bob"
+        assert acc_did not in gateway._revoked_dids and not gateway._store.is_revoked(acc_did)
+
+    @pytest.mark.asyncio
     async def test_get_relationships_lists_each_person_once(self, gateway, mock_websocket):
         """Someone who re-added you after removing you on their side holds two live
         certs with you; the contacts list showed them twice."""

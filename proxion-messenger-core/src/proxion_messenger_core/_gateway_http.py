@@ -422,6 +422,7 @@ class HttpEndpointsMixin:
             # Our own request was accepted, so the owner chose to add this person
             # again: lift a revocation left from removing them earlier.
             self._lift_revocation_on_readd(acceptor_did)
+            self._save_peer_name_if_unknown(acceptor_did, data.get("from_display_name"))
             asyncio.create_task(self._sync_cert_to_pod(cert.to_dict()))
             if invitation_id:
                 self._store.mark_invite_status(invitation_id, "accepted")
