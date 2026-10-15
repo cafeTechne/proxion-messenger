@@ -95,11 +95,27 @@ describe('CallState enum', () => {
 });
 
 describe('joinVoice / leaveVoiceChannel', () => {
-  it('joinVoice sends the join command and records the channel', () => {
+  it('joinVoice sends the join command and records the channel', async () => {
     const { voice, sent } = makeVoice();
-    voice.joinVoice('room-1');
+    voice.state.localStream = { getTracks: () => [{ stop() {} }] };  // skip getUserMedia
+    await voice.joinVoice('room-1');
     expect(sent).toContainEqual({ cmd: 'join_voice_channel', room_id: 'room-1' });
     expect(voice.state._inVoiceChannel).toBe('room-1');
+  });
+  it('joinVoice does not join without a microphone, and says why', async () => {
+    const toasts = [];
+    const { voice, sent } = makeVoice({ showToast: (m) => toasts.push(m) });
+    const md = global.navigator?.mediaDevices;
+    Object.defineProperty(global, 'navigator', { configurable: true, value: {
+      ...(global.navigator || {}), mediaDevices: { getUserMedia: () => Promise.reject(new Error('denied')) } } });
+    try {
+      await voice.joinVoice('room-1');
+    } finally {
+      Object.defineProperty(global, 'navigator', { configurable: true, value: { ...(global.navigator || {}), mediaDevices: md } });
+    }
+    expect(sent).toHaveLength(0);
+    expect(voice.state._inVoiceChannel).toBeFalsy();
+    expect(toasts).toContain('voice.micRequired');
   });
   it('leaveVoiceChannel sends leave, clears channel, closes peers', () => {
     const { voice, sent } = makeVoice();

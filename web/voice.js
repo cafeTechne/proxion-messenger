@@ -75,8 +75,10 @@ export function createVoice(deps) {
     // Peers currently sending us live video (R83): bounds how many share at once.
     function _activeRemoteVideoCount() {
         let n = 0;
+        // Every peer has a live video receiver track from the up-front transceiver;
+        // it is muted until they actually send, so count only unmuted ones.
         for (const s of Object.values(state._peerRemoteStreams || {})) {
-            if (s && s.getVideoTracks && s.getVideoTracks().some(tr => tr.readyState === 'live')) n++;
+            if (s && s.getVideoTracks && s.getVideoTracks().some(tr => tr.readyState === 'live' && !tr.muted)) n++;
         }
         return n;
     }
@@ -155,16 +157,64 @@ export function createVoice(deps) {
         recapSenders();
     }
 
+        // Who is in each room's voice channel (voice_channel_state), for the
+        // header's Join voice button and the room rows in the sidebar.
+        const _channelState = new Map();
+        function setVoiceChannelState(roomId, participants) {
+            if (!roomId) return;
+            const list = Array.isArray(participants) ? participants : [];
+            if (list.length) _channelState.set(roomId, list); else _channelState.delete(roomId);
+            const row = document.getElementById(`nav-${roomId}`);
+            if (row) {
+                let badge = row.querySelector('.room-item-voice');
+                if (list.length) {
+                    if (!badge) {
+                        badge = document.createElement('span');
+                        badge.className = 'room-item-voice';
+                        const body = row.querySelector('.room-item-body');
+                        if (body) body.after(badge); else row.appendChild(badge);
+                    }
+                    badge.textContent = '\u{1F50A} ' + list.length;
+                    badge.title = t('voice.inChannel', { count: list.length });
+                } else if (badge) {
+                    badge.remove();
+                }
+            }
+            const view = getActiveView();
+            if (view && view.id === roomId) updateVoiceChannels(roomId);
+        }
+
+        // Show Join voice in a room's header (hidden while we are in a channel,
+        // where Leave channel takes its place), with how many are already in it.
         function updateVoiceChannels(roomId) {
-            // Voice channels not yet implemented — keep section hidden
+            const btn = document.getElementById("join-voice-btn");
+            if (!btn) return;
+            const view = getActiveView();
+            const isRoom = view && view.id === roomId && (view.type === "local_room" || view.type === "room");
+            btn.style.display = isRoom && !state._inVoiceChannel ? "inline-flex" : "none";
+            const n = (_channelState.get(roomId) || []).length;
+            const count = document.getElementById("join-voice-count");
+            if (count) { count.textContent = n ? String(n) : ''; count.hidden = !n; }
+            btn.title = n ? t('voice.inChannel', { count: n }) : t('ui.joinVoiceTitle');
         }
 
         async function joinVoice(roomId) {
-            getSocket().send(JSON.stringify({cmd: "join_voice_channel", room_id: roomId}));
+            if (state._inVoiceChannel) return;
+            const sock = getSocket();
+            if (!sock || sock.readyState !== 1) return;  // 1 = WebSocket.OPEN
+            // Ask for the microphone now, so a refusal is explained here rather
+            // than leaving the user in a channel nobody can hear.
+            state._mediaDenied = false;
+            if (!(await getMedia())) {
+                showToast(t('voice.micRequired'), "error");
+                return;
+            }
+            sock.send(JSON.stringify({cmd: "join_voice_channel", room_id: roomId}));
             state._inVoiceChannel = roomId;
             _startStatsMonitor();
             const leaveBtn = document.getElementById("leave-voice-channel-btn");
             if (leaveBtn) leaveBtn.style.display = "";
+            updateVoiceChannels(roomId);
             _showChannelPanel();
             _renderChannelPanel();
         }
@@ -204,6 +254,8 @@ export function createVoice(deps) {
             _stopStatsMonitor();
             _speaking.stopAll();
             _hideChannelPanel();
+            const view = getActiveView();
+            if (view) updateVoiceChannels(view.id);
             showToast(t('voice.left'));
         }
 
@@ -836,11 +888,28 @@ export function createVoice(deps) {
             }
             el.srcObject = stream || null;
             el.play?.().catch(() => {});
-            grid.style.display = Object.keys(state.peerVideoElements).length ? 'flex' : 'none';
+            // The element also plays the peer's audio, so it stays in the grid; the
+            // tile only shows while their camera or screen is actually sending.
+            for (const tr of (stream ? stream.getVideoTracks() : [])) {
+                tr.onmute = tr.onunmute = tr.onended = () => _syncPeerTiles();
+            }
+            _syncPeerTiles();
+        }
+
+        function _syncPeerTiles() {
+            const grid = document.getElementById('voice-channel-videos');
+            let anyShown = false;
+            for (const el of Object.values(state.peerVideoElements)) {
+                const s = el.srcObject;
+                const sending = !!s && s.getVideoTracks?.().some(tr => tr.readyState === 'live' && !tr.muted);
+                el.style.display = sending ? '' : 'none';
+                if (sending) anyShown = true;
+            }
+            if (grid) grid.style.display = (anyShown || (state._inVoiceChannel && state.videoEnabled)) ? 'flex' : 'none';
         }
 
         function _addChannelParticipant(webid) {
-            state._channelParticipants[webid] = { name: webid.slice(-12), state: "connecting" };
+            state._channelParticipants[webid] = { name: _callerDisplayName(webid), state: "connecting" };
             _showChannelPanel();
             _renderChannelPanel();
         }
@@ -1312,12 +1381,11 @@ export function createVoice(deps) {
         }
 
         function handleVoicePeerPresent(event) {
-            showToast(t('voice.peerPresent', { peer: event.peer_webid.slice(0, 20) }), "info");
             _addChannelParticipant(event.peer_webid);
         }
 
         function handleVoicePeerJoined(event) {
-            showToast(t('voice.peerJoined', { peer: event.peer_webid.slice(0, 20) }), "info");
+            showToast(t('voice.peerJoined', { peer: _callerDisplayName(event.peer_webid) }), "info");
             _addChannelParticipant(event.peer_webid);
             // We are an existing member; call the new joiner (one offer per pair).
             initWebRTCForPeer(event.peer_webid, null, true).catch(console.warn);
@@ -1325,7 +1393,7 @@ export function createVoice(deps) {
         }
 
         function handleVoicePeerLeft(event) {
-            showToast(t('voice.peerLeft', { peer: event.peer_webid.slice(0, 20) }), "info");
+            showToast(t('voice.peerLeft', { peer: _callerDisplayName(event.peer_webid) }), "info");
             const peerPc = state.peerConnections[event.peer_webid];
             if (peerPc) { try { peerPc.close(); } catch (_) {} delete state.peerConnections[event.peer_webid]; }
             const audio = state.peerAudioElements[event.peer_webid];
@@ -1485,6 +1553,7 @@ export function createVoice(deps) {
         _callerDisplayName,
         _setRemoteAndDrainCandidates,
         updateVoiceChannels,
+        setVoiceChannelState,
         _doHangup,
         _updateCallUI,
     };

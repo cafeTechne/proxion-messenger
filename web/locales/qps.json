@@ -6,7 +6,6 @@
     "source": "en.json"
   },
   "sidebar.rooms": "⟦Ŕóóɱš áé⟧",
-  "sidebar.voiceChannels": "⟦Ṽóíçé çĥáññéĺš áéíóúá⟧",
   "sidebar.friendRequests": "⟦Ƒŕíéñð ŕéǫúéšţš áéíóúá⟧",
   "sidebar.contacts": "⟦Çóñţáçţš áéí⟧",
   "sidebar.dms": "⟦ÐṀš á⟧",
@@ -190,6 +189,9 @@
   "roomEdit.saved": "⟦Ŕóóɱ úρðáţéð. áéíóú⟧",
   "error.invalid_room_name": "⟦Ǧíṽé ţĥé ŕóóɱ á ñáɱé. áéíóúáéí⟧",
   "error.room_topic_too_long": "⟦Ţĥé ţóρíç çáñ ḅé áţ ɱóšţ 300 çĥáŕáçţéŕš. áéíóúáéíóúáéíóúá⟧",
+  "ui.joinVoice": "⟦Ĵóíñ ṽóíçé áéíó⟧",
+  "ui.joinVoiceTitle": "⟦Ĵóíñ ţĥíš ŕóóɱ'š ṽóíçé çĥáññéĺ áéíóúáéíóúáé⟧",
+  "voice.inChannel": "⟦{count} íñ ţĥé ṽóíçé çĥáññéĺ áéíóúáéí⟧",
   "error.join_rate_limited": "⟦Ţóó ɱáñý ĵóíñ áţţéɱρţš. Ŵáíţ á ɱíñúţé áñð ţŕý áǧáíñ. áéíóúáéíóúáéíóúáéíóúá⟧",
   "error.rate_limited": "⟦Ýóú'ŕé ðóíñǧ ţĥáţ ţóó ƒášţ. Ŵáíţ á ƒéŵ šéçóñðš áñð ţŕý áǧáíñ. áéíóúáéíóúáéíóúáéíóúáéíó⟧",
   "error.content_too_large": "⟦Ṁéššáǧé íš ţóó ĺóñǧ. áéíóúáéí⟧",

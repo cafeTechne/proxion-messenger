@@ -19,6 +19,7 @@
     "smoke:visual": "node smoke_visual.mjs",
     "smoke:journey": "node smoke_journey.mjs",
     "smoke:rooms": "node smoke_rooms.mjs",
+    "smoke:voice-channel": "node smoke_voice_channel.mjs",
     "smoke:web": "node smoke_web_nogw.mjs",
     "smoke:web-signedin": "node smoke_web_signedin.mjs",
     "smoke:web-join": "node smoke_web_join.mjs",

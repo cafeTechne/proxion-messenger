@@ -5,7 +5,6 @@
     "canonical": true
   },
   "sidebar.rooms": "Rooms",
-  "sidebar.voiceChannels": "Voice channels",
   "sidebar.friendRequests": "Friend requests",
   "sidebar.contacts": "Contacts",
   "sidebar.dms": "DMs",
@@ -189,6 +188,9 @@
   "roomEdit.saved": "Room updated.",
   "error.invalid_room_name": "Give the room a name.",
   "error.room_topic_too_long": "The topic can be at most 300 characters.",
+  "ui.joinVoice": "Join voice",
+  "ui.joinVoiceTitle": "Join this room's voice channel",
+  "voice.inChannel": "{count} in the voice channel",
   "error.join_rate_limited": "Too many join attempts. Wait a minute and try again.",
   "error.rate_limited": "You're doing that too fast. Wait a few seconds and try again.",
   "error.content_too_large": "Message is too long.",

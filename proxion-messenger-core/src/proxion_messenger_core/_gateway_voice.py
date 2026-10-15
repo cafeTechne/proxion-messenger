@@ -71,6 +71,38 @@ class VoiceHandlerMixin:
                                 pass
                     if not ch.get("members"):
                         self._voice_channels.pop(ch_id, None)
+                    asyncio.create_task(self._broadcast_voice_channel_state(ch_id))
+
+    def _voice_channel_participants(self, channel_id: str) -> list:
+        ch = self._voice_channels.get(channel_id) or {}
+        return sorted(ch.get("members", {}).keys())
+
+    async def _broadcast_voice_channel_state(self, channel_id: str) -> None:
+        """Tell every connected member of a local room who is in its voice
+        channel, so members outside the call can see it and join."""
+        room = self._local_rooms.get(channel_id)
+        if not room:
+            return
+        event = json.dumps({
+            "type": "voice_channel_state", "room_id": channel_id,
+            "participants": self._voice_channel_participants(channel_id),
+        })
+        for ws in list(room.get("members", set())):
+            try:
+                await ws.send(event)
+            except Exception:
+                pass
+
+    async def _handle_get_voice_channel_state(self, websocket, data: dict) -> None:
+        """Who is in a room's voice channel. Room members only."""
+        room_id = data.get("room_id", "")
+        room = self._local_rooms.get(room_id)
+        if not room or not self._check_room_permission(websocket, room_id, role="member"):
+            return
+        await websocket.send(json.dumps({
+            "type": "voice_channel_state", "room_id": room_id,
+            "participants": self._voice_channel_participants(room_id),
+        }))
 
     def _voice_channel_peer_gateway(self, target_webid: str) -> "str | None":
         """Channel-scoped gateway lookup: find target's gateway_url from any voice
@@ -758,6 +790,7 @@ class VoiceHandlerMixin:
                 }))
             except Exception:
                 pass
+        await self._broadcast_voice_channel_state(channel_id)
 
     async def _handle_voice_channel_join_relay(self, data: dict) -> tuple[str, str]:
         """Inbound relay: a user on another gateway joins our local voice channel."""
@@ -814,6 +847,7 @@ class VoiceHandlerMixin:
                 "peer_gateway_url": member_gw,
             }))
 
+        await self._broadcast_voice_channel_state(channel_id)
         return "200 OK", '{"status":"ok"}'
 
     async def _handle_voice_channel_leave_relay(self, data: dict) -> tuple[str, str]:
@@ -841,6 +875,7 @@ class VoiceHandlerMixin:
                     pass
         if not channel["members"]:
             self._voice_channels.pop(channel_id, None)
+        await self._broadcast_voice_channel_state(channel_id)
         return "200 OK", '{"status":"ok"}'
 
     async def _handle_voice_channel_peer_joined_relay(self, data: dict) -> tuple[str, str]:
@@ -970,3 +1005,4 @@ class VoiceHandlerMixin:
 
         if not channel["members"]:
             self._voice_channels.pop(channel_id, None)
+        await self._broadcast_voice_channel_state(channel_id)

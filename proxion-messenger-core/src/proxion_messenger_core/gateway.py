@@ -1255,6 +1255,9 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             elif cmd == "leave_voice_channel":
                 await self._handle_leave_voice_channel(websocket, data)
 
+            elif cmd == "get_voice_channel_state":
+                await self._handle_get_voice_channel_state(websocket, data)
+
             elif cmd == "get_presence":
                 await self._handle_get_presence(websocket, data)
             elif cmd == "get_all_presence":

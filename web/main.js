@@ -2250,6 +2250,9 @@ import { initThemePicker } from './theme.js';
                 case "voice_channel_peer_present":
                     voice.handleVoicePeerPresent(event);
                     break;
+                case "voice_channel_state":
+                    voice.setVoiceChannelState(event.room_id, event.participants);
+                    break;
                 // R39: chunked file transfer
                 case "file_offer":    fileTransfer.handleFileOffer(event); break;
                 case "file_accept":   fileTransfer.handleFileAccept(event); break;
@@ -3826,9 +3829,10 @@ import { initThemePicker } from './theme.js';
         });
         // R80 C2: group video controls in the voice-channel panel.
         document.getElementById("voice-channel-camera-btn")?.addEventListener("click", async (e) => {
+            const btn = e.currentTarget;  // null again once the await below returns
             const on = await voice.toggleCamera();
-            e.currentTarget.setAttribute("aria-pressed", on ? "true" : "false");
-            e.currentTarget.classList.toggle("vw-active", !!on);
+            btn.setAttribute("aria-pressed", on ? "true" : "false");
+            btn.classList.toggle("vw-active", !!on);
         });
         document.getElementById("voice-channel-screenshare-btn")?.addEventListener("click", () => {
             media.state.isSharing ? stopScreenShare() : startScreenShare();
@@ -4009,6 +4013,11 @@ import { initThemePicker } from './theme.js';
             if (bansItem) bansItem.hidden = !(type === "local_room" && roomCreatorOf.has(activeView.id));
             const editItem = document.getElementById("room-opt-edit");
             if (editItem) editItem.hidden = !(type === "local_room" && roomCreatorOf.has(activeView.id));
+            // Voice channel: the Join voice button and who is already in it.
+            voice.updateVoiceChannels(activeView?.id);
+            if (type === "local_room" && socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ cmd: "get_voice_channel_state", room_id: activeView.id }));
+            }
             // Webhooks post into and fire from rooms hosted on this gateway, and
             // only the owner may add them.
             const intBtn = document.getElementById("integrations-btn");
@@ -5595,6 +5604,9 @@ import { initThemePicker } from './theme.js';
             attachListener('#delete-room-btn', 'click', deleteRoom);
             attachListener('#leave-room-btn', 'click', leaveRoom);
             attachListener('#leave-voice-channel-btn', 'click', voice.leaveVoiceChannel);
+            attachListener('#join-voice-btn', 'click', () => {
+                if (activeView) voice.joinVoice(activeView.id);
+            });
             attachListener('#voice-channel-mute-btn', 'click', () => {
                 voice.state.isMuted = !voice.state.isMuted;
                 // Toggle the local audio track on every peer connection in the channel

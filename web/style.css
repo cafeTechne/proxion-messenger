@@ -618,13 +618,18 @@ main { background: var(--surface-0); }
 }
 /* Call and Video carry a text label beside the icon, so they get their own
    padding and a gap (the shared rule below zeroes padding for icon buttons). */
-#chat-header-actions > :is(#start-call-btn, #start-video-call-btn) {
+#chat-header-actions > :is(#start-call-btn, #start-video-call-btn, #join-voice-btn) {
     gap: var(--space-1);
     padding-inline: var(--space-2) var(--space-3);
     margin-inline-start: var(--space-1);
     font-size: var(--text-md);
     font-weight: var(--weight-semibold);
 }
+/* People already in the room's voice channel, beside Join voice and on the
+   room's sidebar row. */
+.voice-count { color: var(--color-success-soft); font-variant-numeric: tabular-nums; }
+.room-item-voice { flex-shrink: 0; color: var(--color-success-soft); font-size: var(--text-xs); display: inline-flex; align-items: center; gap: 2px; }
+
 /* One hit box for every header icon button. Buttons with a visible label keep
    their own inline padding, so the label still fits. */
 #chat-header-actions > button,
