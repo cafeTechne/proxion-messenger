@@ -2911,6 +2911,12 @@ class RoomHandlerMixin:
                         break
             if not peer_webid and str(cert_id).startswith("did:key:"):
                 peer_webid = cert_id
+            # A friend's DM is keyed by our relationship cert_id, which has no
+            # dm_threads row until this side has sent a message in it.
+            if not peer_webid and self._store:
+                _rel = self._store.get_relationship_by_cert_id(cert_id)
+                if _rel:
+                    peer_webid = _rel.get("peer_did", "") or ""
             if peer_webid:
                 # Authz: only deliver DM typing when the sender is a party to this
                 # DM thread (or holds a relationship with the peer). The cross-gateway
@@ -2934,9 +2940,11 @@ class RoomHandlerMixin:
                     # Peer is on a different gateway — relay ephemeral typing event
                     peer_gw = self._resolve_peer_gateway(peer_webid)
                     if peer_gw:
+                        # The peer's relationship keys us by the gateway did, not
+                        # this browser's session did (same as the dm_reaction relay).
                         asyncio.create_task(self._relay_ephemeral(peer_gw, {
                             "content_type": "typing",
-                            "from_webid": typing_event["from_webid"],
+                            "from_webid": self._own_gateway_did(),
                             "cert_id": cert_id,
                         }))
         # no room_id and no cert_id — drop silently

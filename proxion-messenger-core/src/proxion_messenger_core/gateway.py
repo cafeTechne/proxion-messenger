@@ -2897,8 +2897,18 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # so a gateway can't inject "X is typing" for arbitrary webids. Unknown,
         # revoked, or blocked senders are ignored (200, no reveal). Same authorization
         # reduction as the secondary-op relays. (Delivery logic below unchanged.)
-        if not self._authorized_relationship(from_webid):
+        rel = self._authorized_relationship(from_webid)
+        if not rel:
             return "200 OK", '{"status":"received"}'
+        # A friend's DM: the carried cert_id is the sender's; the local browser has
+        # this conversation open under OUR cert_id, so deliver it under that id to
+        # the local account that holds the relationship.
+        _our_cert_id = rel[1]
+        if _our_cert_id and self._store:
+            _owner = self._store.get_relationship_owner(from_webid) or self._own_gateway_did()
+            await self._send_to_identity(_owner, json.dumps(
+                {"type": "typing", "from_webid": from_webid, "cert_id": _our_cert_id}))
+            return "200 OK", '{"status":"ok"}'
         # Find the local user who is in this DM thread. (Was get_dm_threads() with
         # no owner → always empty, so cross-gateway typing never delivered.)
         if self._store and cert_id:
