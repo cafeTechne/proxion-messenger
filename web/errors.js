@@ -22,6 +22,7 @@ const EXACT = {
     "room_full": "error.room_full",
     "invite_expired_or_exhausted": "error.invite_expired_or_exhausted",
     "join_rate_limited": "error.join_rate_limited",
+    "rate_limited": "error.rate_limited",
     "call_too_frequent": "error.call_too_frequent",
     "voice_invite_not_allowed": "error.voice_invite_not_allowed",
     "voice_sessions_full": "error.voice_sessions_full",

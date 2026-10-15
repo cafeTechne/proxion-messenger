@@ -191,3 +191,39 @@ async def test_rate_counters_cleared_on_disconnect(gateway):
     assert ws not in gateway._rate_counters
     assert ws not in gateway._rate_auth_counters
     assert ws not in gateway._rate_heavy_counters
+
+
+# ---------------------------------------------------------------------------
+# Call signaling has its own budget
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_ice_candidates_do_not_use_the_general_budget(gateway):
+    """A call's ICE candidates used to eat the 60/10s budget, so a few calls in a
+    row had their next invite or hangup refused."""
+    ws = _registered_ws(gateway)
+    for _ in range(80):
+        await gateway.process_command(ws, {"cmd": "ice_candidate", "session_id": "s", "candidate": {}})
+    assert gateway._rate_counters.get(ws, [0])[0] == 0
+    for _ in range(60):
+        assert gateway._check_ws_rate_limit(ws) is True
+
+
+@pytest.mark.asyncio
+async def test_hangup_goes_through_when_the_general_budget_is_spent(gateway):
+    ws = _registered_ws(gateway)
+    for _ in range(60):
+        gateway._check_ws_rate_limit(ws)
+    ws.send.reset_mock()
+    await gateway.process_command(ws, {"cmd": "voice_hangup", "session_id": "s"})
+    for call in ws.send.call_args_list:
+        assert json.loads(call[0][0]).get("code") != "E_RATE"
+
+
+def test_signal_rate_limit_still_caps_a_flood(gateway):
+    ws = MagicMock()
+    for _ in range(gateway._SIGNAL_RATE_LIMIT):
+        assert gateway._check_signal_rate_limit(ws) is True
+    assert gateway._check_signal_rate_limit(ws) is False
+    gateway._rate_signal_counters[ws][1] -= 11.0
+    assert gateway._check_signal_rate_limit(ws) is True

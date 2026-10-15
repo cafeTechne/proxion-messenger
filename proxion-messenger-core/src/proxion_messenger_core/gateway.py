@@ -159,6 +159,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         self._rate_counters = {}       # websocket -> [count, window_start]  (global 30/10s)
         self._rate_auth_counters = {}  # websocket -> [count, window_start]  (auth 5/min)
         self._rate_heavy_counters = {} # websocket -> [count, window_start]  (heavy 10/min)
+        self._rate_signal_counters = {} # websocket -> [count, window_start]  (call signaling)
         self._rate_lock = asyncio.Lock()
         self._ip_connection_counts: dict = {}  # remote_ip -> active connection count
         self._revoked_sessions: set = set()  # websockets awaiting close after revocation
@@ -893,6 +894,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             self._rate_counters.pop(websocket, None)
             self._rate_auth_counters.pop(websocket, None)
             self._rate_heavy_counters.pop(websocket, None)
+            self._rate_signal_counters.pop(websocket, None)
             self._display_names.pop(websocket, None)
             self._revoked_sessions.discard(websocket)
             if webid:
@@ -945,6 +947,25 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             self._rate_counters[websocket] = [1, now]
             return True
         if count >= 60:
+            return False
+        entry[0] += 1
+        return True
+
+    # Call signaling has its own budget: one call sends a few dozen ICE
+    # candidates, which used to eat the general 60/10s budget so the next call's
+    # invite or hangup was refused, leaving a call that could not be ended.
+    _SIGNAL_RATE_COMMANDS = frozenset({"ice_candidate", "voice_invite", "voice_answer", "voice_hangup"})
+    _SIGNAL_RATE_LIMIT = 300
+
+    def _check_signal_rate_limit(self, websocket) -> bool:
+        """Return True if a call-signaling command is allowed (300 per 10s per socket)."""
+        import time as _time
+        now = _time.monotonic()
+        entry = self._rate_signal_counters.get(websocket)
+        if entry is None or now - entry[1] >= 10.0:
+            self._rate_signal_counters[websocket] = [1, now]
+            return True
+        if entry[0] >= self._SIGNAL_RATE_LIMIT:
             return False
         entry[0] += 1
         return True
@@ -1004,8 +1025,13 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if not cmd:
             return
 
-        # Global rate limit: 30 cmd/10s burst 60
-        if cmd not in _RATE_EXEMPT and not self._check_ws_rate_limit(websocket):
+        # Call signaling: its own budget (see _check_signal_rate_limit).
+        if cmd in self._SIGNAL_RATE_COMMANDS:
+            if not self._check_signal_rate_limit(websocket):
+                await websocket.send(json.dumps({"type": "error", "code": "E_RATE", "message": "rate_limited"}))
+                return
+        # Global rate limit: 60 cmd per 10s
+        elif cmd not in _RATE_EXEMPT and not self._check_ws_rate_limit(websocket):
             await websocket.send(json.dumps({"type": "error", "code": "E_RATE", "message": "rate_limited"}))
             return
         # Auth-specific limit: 5/min

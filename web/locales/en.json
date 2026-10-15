@@ -182,6 +182,7 @@
   "error.room_full": "That room is full.",
   "error.invite_expired_or_exhausted": "That invite has expired or has already been used.",
   "error.join_rate_limited": "Too many join attempts. Wait a minute and try again.",
+  "error.rate_limited": "You're doing that too fast. Wait a few seconds and try again.",
   "error.content_too_large": "Message is too long.",
   "error.invalid_sequence": "Message rejected, please try again.",
   "error.file_too_large": "File is too large.",

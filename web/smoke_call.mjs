@@ -324,9 +324,6 @@ try {
   await reopen(bob, B.url, 'bob');
 
   step = 'caller-cancels';
-  // Each call sends ~20 ICE candidates as separate commands; let the gateway's
-  // 60-per-10s command window roll over before more calls.
-  await sleep(10500);
   // Not throttled: the offline attempt rang nobody.
   await click(alice, 'start-call-btn');
   if (!(await ringing(bob, 15000))) fail('call after the contact came back online never rang');
