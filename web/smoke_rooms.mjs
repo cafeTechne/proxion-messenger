@@ -144,7 +144,27 @@ try {
   await click(bob, '#room-options-btn');
   await sleep(200);
   check(!(await shown(bob, '#room-opt-bans')), 'a plain member sees Banned members');
+  check(!(await shown(bob, '#room-opt-edit')), 'a plain member sees Name and topic');
   await bob.keyboard.press('Escape');
+
+  step = 'rename-and-topic';
+  // The new name keeps ROOM as a prefix so the later steps still find the row.
+  await click(alice, '#room-options-btn');
+  await sleep(200);
+  check(await shown(alice, '#room-opt-edit'), 'owner has no Name and topic item');
+  await click(alice, '#room-opt-edit');
+  check(await until(alice, () => getComputedStyle(document.getElementById('room-edit-modal')).display !== 'none'),
+    'Name and topic dialog never opened');
+  await alice.evaluate((n) => {
+    document.getElementById('room-edit-name').value = n;
+    document.getElementById('room-edit-topic').value = 'Plans for the weekend';
+  }, ROOM + '-renamed');
+  await click(alice, '#room-edit-save');
+  check(await until(bob, (n) => document.getElementById('chat-header-name').textContent.includes(n), ROOM + '-renamed'),
+    "member's header kept the old name");
+  check(await until(bob, () => document.getElementById('chat-header-subtitle').textContent.includes('Plans for the weekend')),
+    "member never saw the new topic");
+  check(await inList(bob, ROOM + '-renamed'), "member's sidebar kept the old name");
 
   step = 'transfer-ownership';
   await sleep(500);

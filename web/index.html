@@ -485,6 +485,7 @@
                 <button id="room-opt-saved" role="menuitem" data-proxy-for="saved-panel-btn" hidden data-i18n="ui.savedMessages">Saved messages</button>
                 <button id="room-opt-verify" role="menuitem" data-proxy-for="dm-e2e-verify-btn" hidden data-i18n="ui.verifyContactIdentity">Verify contact identity</button>
                 <button id="room-opt-disappear" role="menuitem" hidden data-i18n="ui.disappearingMessagesEllipsis">Disappearing messages…</button>
+                <button id="room-opt-edit" role="menuitem" hidden data-i18n="ui.roomNameTopicEllipsis">Name and topic…</button>
                 <button id="room-opt-bans" role="menuitem" hidden data-i18n="ui.bannedMembersEllipsis">Banned members…</button>
                 <button id="leave-room-btn" role="menuitem" style="display:none;" data-i18n="ui.leaveRoom">Leave room</button>
                 <button id="delete-room-btn" role="menuitem" class="danger" style="display:none;" data-i18n="ui.deleteRoom">Delete room</button>
@@ -935,6 +936,23 @@
         <div class="btn-row modal__footer">
           <button type="button" id="disappear-cancel" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
           <button type="submit" id="disappear-save" class="btn btn--accent btn--lg" data-i18n="btn.save">Save</button>
+        </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="room-edit-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="room-edit-title" style="display:none;">
+      <div class="modal__panel modal__panel--sm">
+        <form id="room-edit-form" novalidate>
+        <h3 id="room-edit-title" class="modal__title" data-i18n="roomEdit.title">Room name and topic</h3>
+        <label for="room-edit-name" class="field-label" data-i18n="roomEdit.name">Name</label>
+        <input id="room-edit-name" class="input" type="text" maxlength="64" autocomplete="off" required>
+        <label for="room-edit-topic" class="field-label" data-i18n="roomEdit.topic">Topic</label>
+        <textarea id="room-edit-topic" class="input" rows="3" maxlength="300" data-i18n-attr="placeholder:roomEdit.topicPlaceholder" placeholder="What this room is for (optional)"></textarea>
+        <p id="room-edit-error" class="field-error" role="alert" hidden></p>
+        <div class="btn-row modal__footer">
+          <button type="button" id="room-edit-cancel" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
+          <button type="submit" id="room-edit-save" class="btn btn--accent btn--lg" data-i18n="btn.save">Save</button>
         </div>
         </form>
       </div>

@@ -670,6 +670,7 @@ class RoomHandlerMixin:
                 "invite_url": room.get("invite_url", ""),
                 "history_mode": room.get("history_mode", "none"),
                 "creator_webid": room.get("creator_webid", ""),
+                "topic": room.get("topic", ""),
                 "local": True,
             })
         await websocket.send(json.dumps({"type": "rooms", "rooms": rooms}))
@@ -2105,6 +2106,7 @@ class RoomHandlerMixin:
                 "type": "room_joined",
                 "room_id": room_id,
                 "name": room["name"],
+                "topic": room.get("topic", ""),
                 "code": code,
                 "invite_url": room.get("invite_url", ""),
             }))
@@ -2570,6 +2572,54 @@ class RoomHandlerMixin:
                     pass
         else:
             await websocket.send(json.dumps(event))
+
+    _ROOM_TOPIC_MAX = 300
+
+    async def _handle_update_room(self, websocket, data: dict) -> None:
+        """Rename a room and/or set its topic. Owner or admin; local rooms only.
+        Every member is sent the new name and topic."""
+        room_id = data.get("room_id", "")
+        room = self._local_rooms.get(room_id)
+        if not room:
+            await websocket.send(json.dumps({"type": "error", "message": "room_not_found"}))
+            return
+        if not self._check_room_permission(websocket, room_id, role="admin"):
+            await websocket.send(json.dumps({"type": "error", "message": "insufficient_permissions"}))
+            return
+        name = room["name"]
+        topic = room.get("topic", "")
+        if "name" in data:
+            _n = data.get("name")
+            _n = _n.strip() if isinstance(_n, str) else ""
+            if not _n or len(_n) > 64:
+                await websocket.send(json.dumps({"type": "error", "message": "invalid_room_name"}))
+                return
+            name = _n
+        if "topic" in data:
+            _t = data.get("topic")
+            _t = _t.strip() if isinstance(_t, str) else ""
+            if len(_t) > self._ROOM_TOPIC_MAX:
+                await websocket.send(json.dumps({"type": "error", "message": "room_topic_too_long"}))
+                return
+            topic = _t
+        room["name"] = name
+        room["topic"] = topic
+        if self._store:
+            self._store.update_room_info(room_id, name, topic)
+        event = json.dumps({
+            "type": "room_updated", "room_id": room_id, "name": name, "topic": topic,
+            "by": self._client_webids.get(websocket, ""),
+        })
+        _targets = set(room.get("members", set()))
+        if self._store:
+            for _wid in self._store.get_room_members(room_id):
+                _targets.update(self._sockets_for(_wid))
+        _targets.add(websocket)
+        for ws in list(_targets):
+            try:
+                await ws.send(event)
+            except Exception:
+                pass
 
     async def _handle_set_disappear_timer(self, websocket, data: dict) -> None:
         # thread_id is a room_id for rooms, or a DM cert_id for DMs — the client

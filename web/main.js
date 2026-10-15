@@ -434,6 +434,7 @@ import { initThemePicker } from './theme.js';
         let replyingTo = null; // { id, name, content }
         let messageMap = {}; // id -> msg object
         let currentRoomMembers = []; // [{ webid, display_name, status }] for @mention autocomplete
+        const roomTopics = new Map(); // room_id -> topic, shown under the room name
         let mutedThreads = new Set(JSON.parse(localStorage.getItem("proxion_muted_threads") || "[]"));
         let currentDisappearMs = 0; // R11.1.3: active timer for current thread
         let selfWebId = clientDid; // set from localStorage immediately; updated after generateOrLoadIdentity
@@ -830,7 +831,7 @@ import { initThemePicker } from './theme.js';
         // module deps (rooms/members/e2e-status/mentions/voice/rendering) exist.
         const {
             renderContacts, openContactThread, openContactByDid, openLocalDmThread,
-            addRoomToSidebar, populateSidebar, _navigateToThread,
+            addRoomToSidebar, renameRoomInSidebar, populateSidebar, _navigateToThread,
         } = createView({
             getSocket: () => socket,
             setActiveView: (v) => { activeView = v; },
@@ -2008,6 +2009,7 @@ import { initThemePicker } from './theme.js';
                     populateSidebar("room-list", event.rooms.filter(r => !r.local), "room");
                     event.rooms.filter(r => r.local).forEach(r => {
                         addRoomToSidebar(r.id, r.name, r.invite_url);
+                        roomTopics.set(r.id, r.topic || '');
                         if (r.creator_webid && r.creator_webid === selfWebId) {
                             roomCreatorOf.add(r.id);
                         }
@@ -2102,6 +2104,7 @@ import { initThemePicker } from './theme.js';
                         }
                     }
                     addRoomToSidebar(event.room_id, event.name, event.invite_url);
+                    if (event.topic != null) roomTopics.set(event.room_id, event.topic);
                     _podUpdateRoomIndex(event.room_id, true).catch(() => {});
                     setTimeout(() => {
                         const li = document.getElementById(`nav-${event.room_id}`);
@@ -2378,6 +2381,22 @@ import { initThemePicker } from './theme.js';
                         document.getElementById("leave-room-btn").style.display = "none";
                         document.getElementById("delete-room-btn").style.display = "none";
                         document.getElementById("members-panel").style.display = "none";
+                    }
+                    break;
+                }
+                case "room_updated": {
+                    // Renamed or new topic (owner or an admin), sent to every member.
+                    renameRoomInSidebar(event.room_id, event.name);
+                    roomTopics.set(event.room_id, event.topic || '');
+                    if (activeView && activeView.id === event.room_id) _updateHeaderSubtitle();
+                    if (event.by && event.by === selfWebId) showToast(t('roomEdit.saved'));
+                    // The owner's pod holds the room descriptor: keep its title current.
+                    if (roomCreatorOf.has(event.room_id) && solidSession.info.isLoggedIn) {
+                        podReadRoomDescriptor(event.room_id).then((desc) => {
+                            if (!desc) return;
+                            return signRoomDescriptor({ ...desc, title: event.name, name: event.name })
+                                .then((signed) => podWriteRoomDescriptor(signed));
+                        }).catch(() => {});
                     }
                     break;
                 }
@@ -3988,6 +4007,8 @@ import { initThemePicker } from './theme.js';
             // Unbanning lives in the Banned members dialog, opened from here.
             const bansItem = document.getElementById("room-opt-bans");
             if (bansItem) bansItem.hidden = !(type === "local_room" && roomCreatorOf.has(activeView.id));
+            const editItem = document.getElementById("room-opt-edit");
+            if (editItem) editItem.hidden = !(type === "local_room" && roomCreatorOf.has(activeView.id));
             // Webhooks post into and fire from rooms hosted on this gateway, and
             // only the owner may add them.
             const intBtn = document.getElementById("integrations-btn");
@@ -4009,7 +4030,11 @@ import { initThemePicker } from './theme.js';
             if (activeView) {
                 const isRoom = activeView.type === "room" || activeView.type === "local_room";
                 if (isRoom) {
-                    if (currentRoomMembers.length) text = tn('header.members', currentRoomMembers.length);
+                    const parts = [];
+                    if (currentRoomMembers.length) parts.push(tn('header.members', currentRoomMembers.length));
+                    const topic = roomTopics.get(activeView.id);
+                    if (topic) parts.push(topic);
+                    text = parts.join(' · ');
                 } else {
                     const peer = activeView.peerWebid || activeView.peerDid;
                     const st = peer && userPresence[peer] && userPresence[peer].status;
@@ -4041,7 +4066,7 @@ import { initThemePicker } from './theme.js';
             const any = ["leave-room-btn", "delete-room-btn"].some(id => {
                 const b = document.getElementById(id);
                 return b && b.style.display && b.style.display !== "none";
-            }) || !!document.querySelector("#room-options-menu [data-proxy-for]:not([hidden]), #room-opt-disappear:not([hidden]), #room-opt-bans:not([hidden])");
+            }) || !!document.querySelector("#room-options-menu [data-proxy-for]:not([hidden]), #room-opt-disappear:not([hidden]), #room-opt-bans:not([hidden]), #room-opt-edit:not([hidden])");
             btn.style.display = any ? "" : "none";
             if (!any) _closeRoomOptionsMenu();
         }
@@ -5427,6 +5452,34 @@ import { initThemePicker } from './theme.js';
                 if (list) list.innerHTML = inlineNotice(t('members.loading'), 'loading');
                 document.getElementById('room-bans-panel').style.display = 'flex';
                 socket.send(JSON.stringify({cmd: 'get_room_bans', room_id: activeView.id}));
+            });
+            attachListener('#room-opt-edit', 'click', () => {
+                if (!activeView) return;
+                document.getElementById('room-edit-name').value = activeView.name || '';
+                document.getElementById('room-edit-topic').value = roomTopics.get(activeView.id) || '';
+                const err = document.getElementById('room-edit-error');
+                err.hidden = true; err.textContent = '';
+                document.getElementById('room-edit-modal').style.display = 'flex';
+                document.getElementById('room-edit-name').focus();
+            });
+            attachListener('#room-edit-form', 'submit', e => {
+                e.preventDefault();
+                if (!activeView || !socket || socket.readyState !== WebSocket.OPEN) return;
+                const name = document.getElementById('room-edit-name').value.trim();
+                const topic = document.getElementById('room-edit-topic').value.trim();
+                const err = document.getElementById('room-edit-error');
+                if (!name) {
+                    err.textContent = t('error.invalid_room_name');
+                    err.hidden = false;
+                    document.getElementById('room-edit-name').focus();
+                    return;
+                }
+                document.getElementById('room-edit-modal').style.display = 'none';
+                if (name === activeView.name && topic === (roomTopics.get(activeView.id) || '')) return;
+                socket.send(JSON.stringify({ cmd: 'update_room', room_id: activeView.id, name, topic }));
+            });
+            attachListener('#room-edit-cancel', 'click', () => {
+                document.getElementById('room-edit-modal').style.display = 'none';
             });
             attachListener('#disappear-form', 'submit', e => {
                 e.preventDefault();

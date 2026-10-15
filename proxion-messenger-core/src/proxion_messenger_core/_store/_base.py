@@ -79,7 +79,7 @@ class _StoreBase(object):
         """Flush the WAL to the main database file (call before shutdown)."""
         with self._conn() as conn:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    _SCHEMA_VERSION = 59
+    _SCHEMA_VERSION = 60
     _integrity_ok: bool = True
     def _init_db(self) -> None:
         with self._conn() as conn:
@@ -1284,6 +1284,10 @@ class _StoreBase(object):
             # /devices roster is scoped to that owner).
             [
                 "ALTER TABLE pending_invites ADD COLUMN sender_webid TEXT NOT NULL DEFAULT ''",
+            ],
+            # 60: a room topic, set by the owner or an admin.
+            [
+                "ALTER TABLE rooms ADD COLUMN topic TEXT NOT NULL DEFAULT ''",
             ],
         ]
 

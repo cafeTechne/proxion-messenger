@@ -18,7 +18,7 @@ _HTTPS_URL_RE = _re.compile(r"^https?://")
 _VALID_DIRECTIONS = frozenset({"incoming", "outgoing"})
 _VALID_ROLES = frozenset({"owner", "admin", "mod", "member"})
 
-_TEXT_FIELDS = frozenset({"display_name", "room_name", "name", "status_message", "bot_name"})
+_TEXT_FIELDS = frozenset({"display_name", "room_name", "name", "status_message", "bot_name", "topic"})
 _CONTROL_CHAR_RE = _re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
 
 def normalize_text_field(value: str) -> str:
@@ -79,6 +79,8 @@ _SCHEMA: dict[str, dict[str, tuple]] = {
     "remove_reaction":  {"message_id": (str, _MAX_ID), "emoji": (str, _MAX_EMOJI)},
     "set_member_role":  {"room_id": (str, _MAX_ID), "webid": (str, _MAX_ID), "role": (str, 32, _is_valid_role)},
     "transfer_ownership": {"room_id": (str, _MAX_ID), "to_did": (str, _MAX_ID)},
+    # update_room: name and topic are optional; the handler checks their length.
+    "update_room":      {"room_id": (str, _MAX_ID)},
     "revoke_session":   {"session_id": (str, _MAX_ID)},
     "create_webhook":   {"bot_name": (str, 32), "direction": (str, 16, _is_valid_direction)},
     "connect_css":      {"css_url": (str, 256, _is_https_url), "email": (str, 254)},
@@ -107,7 +109,7 @@ MUTATING_COMMANDS: frozenset[str] = frozenset({
     "send_dm", "send_room", "local_dm", "edit_message", "send_file",
     "schedule_message", "delete_local_message", "forward_message",
     "add_reaction", "remove_reaction", "pin_message", "unpin_message",
-    "kick_member", "delete_room", "set_member_role", "transfer_ownership",
+    "kick_member", "delete_room", "set_member_role", "transfer_ownership", "update_room",
     "block", "unblock", "set_disappear_timer", "send_voice_message",
     "request_hole_punch", "hole_punch_complete_notify",
 })

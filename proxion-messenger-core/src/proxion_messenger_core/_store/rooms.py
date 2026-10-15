@@ -33,9 +33,13 @@ class RoomStoreMixin(object):
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO rooms
+                INSERT INTO rooms
                     (room_id, name, code, invite_url, history_mode, creator_webid, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(room_id) DO UPDATE SET
+                    name = excluded.name, code = excluded.code,
+                    invite_url = excluded.invite_url, history_mode = excluded.history_mode,
+                    creator_webid = excluded.creator_webid
                 """,
                 (room_id, name, code, invite_url, history_mode, creator_webid, time.time()),
             )
@@ -219,6 +223,12 @@ class RoomStoreMixin(object):
             conn.execute(
                 "DELETE FROM room_members WHERE room_id = ? AND webid = ?",
                 (room_id, webid),
+            )
+    def update_room_info(self, room_id: str, name: str, topic: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE rooms SET name = ?, topic = ? WHERE room_id = ?",
+                ((name or "")[:64], (topic or "")[:300], room_id),
             )
     def update_room_creator(self, room_id: str, new_creator_webid: str) -> None:
         with self._conn() as conn:

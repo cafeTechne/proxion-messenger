@@ -16,6 +16,8 @@ const EXACT = {
     "banned_from_room": "error.banned_from_room",
     "you_are_muted": "error.you_are_muted",
     "insufficient_permissions": "error.insufficient_permissions",
+    "invalid_room_name": "error.invalid_room_name",
+    "room_topic_too_long": "error.room_topic_too_long",
     "That user is not in this room or is offline": "error.transfer_target_offline",
     "invalid_code": "error.invalid_code",
     "room_not_found": "error.room_not_found",

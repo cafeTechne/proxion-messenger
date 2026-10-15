@@ -388,6 +388,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 "invite_url": room.get("invite_url", ""),
                 "history_mode": room["history_mode"],
                 "creator_webid": room.get("creator_webid", ""),
+                "topic": room.get("topic", "") or "",
                 "members": set(),   # repopulated as clients reconnect
                 "messages": [],     # served from DB on demand
             }
@@ -1476,6 +1477,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_cancel_scheduled(websocket, data)
             elif cmd == "set_disappear_timer":
                 await self._handle_set_disappear_timer(websocket, data)
+            elif cmd == "update_room":
+                await self._handle_update_room(websocket, data)
             elif cmd == "get_disappear_timer":
                 await self._handle_get_disappear_timer(websocket, data)
             elif cmd == "send_voice_message":

@@ -235,6 +235,23 @@ export function createView({
         if (window.innerWidth <= 768) closeSidebar();
     }
 
+    // A room was renamed: update its sidebar row, and the header when it is open.
+    function renameRoomInSidebar(roomId, name) {
+        if (!name) return;
+        getThreadNames()[roomId] = name;
+        const li = document.getElementById(`nav-${roomId}`);
+        if (li) {
+            li.setAttribute("data-name", name);
+            const el = li.querySelector(".room-item-name");
+            if (el) { el.textContent = name; el.title = name; }
+        }
+        const view = getActiveView();
+        if (view && view.id === roomId) {
+            view.name = name;
+            document.getElementById("chat-header-name").innerText = "# " + name;
+        }
+    }
+
     function addRoomToSidebar(roomId, name, inviteUrl) {
         const roomInviteUrls = getRoomInviteUrls();
         const _threadNames = getThreadNames();
@@ -266,8 +283,9 @@ export function createView({
             const socket = getSocket();
             const unreadCounts = getUnreadCounts();
             const roomCreatorOf = getRoomCreatorOf();
-                setActiveView({type: "local_room", id: roomId, name: name, local: true});
-            document.getElementById("chat-header-name").innerText = "# " + name;
+            const _name = getThreadNames()[roomId] || name;
+                setActiveView({type: "local_room", id: roomId, name: _name, local: true});
+            document.getElementById("chat-header-name").innerText = "# " + _name;
             onViewOpened();
             updateIdentityFingerprint(null); // hide fingerprint bar in room views
             document.getElementById("message-feed").innerHTML = "";
@@ -404,6 +422,6 @@ export function createView({
 
     return {
         renderContacts, openContactThread, openContactByDid, openLocalDmThread,
-        addRoomToSidebar, populateSidebar, _navigateToThread,
+        addRoomToSidebar, renameRoomInSidebar, populateSidebar, _navigateToThread,
     };
 }
