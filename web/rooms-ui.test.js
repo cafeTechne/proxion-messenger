@@ -41,6 +41,21 @@ describe('a room that goes away leaves no stale header', () => {
   });
 });
 
+describe('moderation notes', () => {
+  it('ban / mute lines are translated and only shown in their own room', () => {
+    for (const [ev, key] of [['member_banned', 'room.memberBanned'], ['member_unbanned', 'room.memberUnbanned'],
+      ['member_muted', 'room.memberMuted'], ['member_unmuted', 'room.memberUnmuted']]) {
+      const body = caseBody(ev);
+      expect(body).toContain(`'${key}`);
+      expect(body).not.toContain('_appendSystemMsg(`');
+    }
+    const fn = src.slice(src.indexOf('function _moderationNote('));
+    const body = fn.slice(0, fn.indexOf('\n        }\n'));
+    expect(body).toContain('activeView.id !== event.room_id');
+    expect(body).toContain('currentRoomMembers.find');
+  });
+});
+
 describe('room integrations list', () => {
   it('drops a deleted webhook from the open list', () => {
     const body = caseBody('webhook_deleted');

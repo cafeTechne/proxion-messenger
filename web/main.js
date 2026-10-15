@@ -2977,7 +2977,8 @@ import { initThemePicker } from './theme.js';
                 }
                 case "member_role_updated": {
                     if (event.room_id && event.webid) {
-                        showToast(t('room.roleUpdated', { webid: escHtml(event.webid.slice(0,20)), role: event.role }));
+                        const _rm = currentRoomMembers.find(x => x.webid === event.webid);
+                        showToast(t('room.roleUpdated', { webid: _rm?.display_name || event.webid.slice(-12), role: event.role }));
                         if (activeView && activeView.id === event.room_id) {
                             socket && socket.send(JSON.stringify({cmd:"get_room_members", room_id: event.room_id}));
                         }
@@ -3048,18 +3049,19 @@ import { initThemePicker } from './theme.js';
                     break;
                 }
                 case "member_banned":
-                    _appendSystemMsg(`${event.display_name || event.webid.slice(-12)} was banned${event.reason ? ' (' + escHtml(event.reason) + ')' : ''}`);
+                    _moderationNote(event, event.reason ? 'room.memberBannedReason' : 'room.memberBanned', { reason: event.reason || '' });
                     if (_membersRoomId === event.room_id) showRoomMembers(event.room_id);
                     break;
                 case "member_unbanned":
-                    _appendSystemMsg(`${event.webid.slice(-12)} was unbanned`);
+                    _moderationNote(event, 'room.memberUnbanned');
                     break;
                 case "member_muted":
-                    _appendSystemMsg(`${event.webid.slice(-12)} was muted` +
-                        (event.expires_at ? ` until ${new Date(event.expires_at * 1000).toLocaleTimeString(getLocale())}` : ''));
+                    _moderationNote(event, event.expires_at ? 'room.memberMutedUntil' : 'room.memberMuted', {
+                        time: event.expires_at ? new Date(event.expires_at * 1000).toLocaleTimeString(getLocale()) : '',
+                    });
                     break;
                 case "member_unmuted":
-                    _appendSystemMsg(`${event.webid.slice(-12)} was unmuted`);
+                    _moderationNote(event, 'room.memberUnmuted');
                     break;
                 case "room_bans": {
                     const list = document.getElementById("room-bans-list");
@@ -4613,6 +4615,15 @@ import { initThemePicker } from './theme.js';
         }
 
         // --------------- System messages ---------------
+        // A moderation line (ban / mute ...) in the room it happened in, naming
+        // the member as the member list does rather than by a key fragment.
+        function _moderationNote(event, key, vars = {}) {
+            if (!activeView || activeView.id !== event.room_id) return;
+            const m = currentRoomMembers.find(x => x.webid === event.webid);
+            const name = event.display_name || m?.display_name || String(event.webid || '').slice(-12);
+            _appendSystemMsg(t(key, { name, ...vars }));
+        }
+
         function _appendSystemMsg(text) {
             const feed = document.getElementById("message-feed");
             if (!feed) return;
