@@ -184,7 +184,9 @@ export function createStatusBanners() {
             banner.id = "nat-warning-banner";
             banner.className = "banner banner--warning";
             banner.setAttribute?.("role", "status");
-            banner.innerHTML = `<span class="banner__text">${t('nat.fallback', { env: '<code>PROXION_PUBLIC_URL</code>', file: '<code>.env</code>' })}</span><button type="button" class="banner__close" onclick="this.closest('#nat-warning-banner').remove()" aria-label="${t('common.dismiss')}" title="${t('common.dismiss')}">${icon('x-mark', { size: 14 })}</button>`;
+            banner.innerHTML = `<span class="banner__text">${t('nat.fallback', { env: '<code>PROXION_PUBLIC_URL</code>', file: '<code>.env</code>' })}</span><button type="button" class="banner__close" aria-label="${t('common.dismiss')}" title="${t('common.dismiss')}">${icon('x-mark', { size: 14 })}</button>`;
+            // No inline onclick: the gateway CSP (script-src 'self') blocks it.
+            banner.querySelector("button").onclick = () => banner.remove();
             (document.getElementById("banner-slot") || document.body).prepend(banner);
         });
     }

@@ -3067,13 +3067,17 @@ import { initThemePicker } from './theme.js';
             const card = document.createElement("div");
             card.className = "link-preview";
             card.innerHTML = `
-                ${preview.image ? `<img src="${escHtml(preview.image)}" onerror="this.style.display='none'">` : ''}
+                ${preview.image ? `<img src="${escHtml(preview.image)}">` : ''}
                 <div class="preview-info">
                     <div class="preview-url">${escHtml(safeUrl ? new URL(safeUrl).hostname : "")}</div>
                     <div class="preview-title">${safeUrl ? `<a href="${escHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${escHtml(preview.title || safeUrl)}</a>` : escHtml(preview.title || "")}</div>
                     ${preview.description ? `<div class="preview-desc">${escHtml(preview.description)}</div>` : ""}
                 </div>
             `;
+            // Hide an image that fails to load. Not an inline onerror: the
+            // gateway CSP (script-src 'self') blocks inline handlers.
+            const _img = card.querySelector('img');
+            if (_img) _img.onerror = () => { _img.style.display = 'none'; };
             // .message is a flex row (avatar | body), so the card belongs inside
             // the body column, above the reactions, not beside it.
             const body = msgEl.querySelector('.msg-body');
