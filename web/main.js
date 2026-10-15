@@ -2761,6 +2761,7 @@ import { initThemePicker } from './theme.js';
                         const _sb2 = document.getElementById("add-peer-submit-btn");
                         if (_sb2) { _sb2.disabled = false; _sb2.textContent = t('contact.sendRequest'); }
                         const _errEl = document.getElementById("add-peer-error");
+                        if (_errEl) _errEl.style.color = "";
                         if (_errEl) _errEl.textContent = _friendRequestErrors[event.message] ? t(_friendRequestErrors[event.message]) : (event.detail || event.message);
                         break;
                     }
@@ -4599,6 +4600,7 @@ import { initThemePicker } from './theme.js';
             "expired": "error.fr.expired",
             "invite_not_found": "error.fr.invite_not_found",
             "contact_revoked": "error.fr.contact_revoked",
+            "cannot_add_self": "error.fr.cannot_add_self",
         };
 
         async function submitAddPeer() {
@@ -4637,6 +4639,13 @@ import { initThemePicker } from './theme.js';
                 } catch (_) {}
             }
             errEl.textContent = "";
+            errEl.style.color = "";
+            // Neither an address (did@gateway) nor a bare did:key: say so here
+            // rather than closing the dialog on a generic error toast.
+            if (!raw.includes("@") && !raw.startsWith("did:key:")) {
+                errEl.textContent = t('error.fr.invalid_address');
+                return;
+            }
 
             // If address looks like a cross-gateway Proxion address, discover peer first
             if (raw.includes("@") && (raw.includes("http") || raw.startsWith("did:"))) {
@@ -4653,8 +4662,12 @@ import { initThemePicker } from './theme.js';
                 }
                 // Show discovered info briefly, then send friend request
                 errEl.style.color = "var(--color-success-soft)";
-                errEl.textContent = t('contact.found', { name: discovered.display_name || discovered.did.slice(0, 20), fingerprint: discovered.fingerprint || "" });
-                setTimeout(() => { errEl.textContent = ""; errEl.style.color = ""; }, 3000);
+                const _foundText = t('contact.found', { name: discovered.display_name || discovered.did.slice(0, 20), fingerprint: discovered.fingerprint || "" });
+                errEl.textContent = _foundText;
+                // Clear only the "Found" note: an error that replaced it must stay.
+                setTimeout(() => {
+                    if (errEl.textContent === _foundText) { errEl.textContent = ""; errEl.style.color = ""; }
+                }, 3000);
             }
 
             if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = t('contact.sending'); }
