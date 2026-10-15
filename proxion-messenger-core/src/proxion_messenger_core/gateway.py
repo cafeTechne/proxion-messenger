@@ -2426,6 +2426,14 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             try:
                 if self._store.is_blocked_by(recipient_owner, canonical):
                     return True
+                # A federated peer addresses us by this gateway's did, but the local
+                # account that holds the relationship (and set the block) can be
+                # registered under its own session did. Check that owner too.
+                if recipient_owner == self._own_gateway_did():
+                    _rel_owner = self._store.get_relationship_owner(canonical) or ""
+                    if (_rel_owner and _rel_owner != recipient_owner
+                            and self._store.is_blocked_by(_rel_owner, canonical)):
+                        return True
             except Exception:
                 pass
         # Legacy union file (owner-less) + raw form, so both stored representations match.

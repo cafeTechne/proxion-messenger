@@ -167,3 +167,50 @@ async def test_list_blocks_returns_owner_blocklist(gateway, monkeypatch):
     payloads = [json.loads(c.args[0]) for c in ws.send.call_args_list]
     blocks_msg = next(p for p in payloads if p.get("type") == "blocks")
     assert set(blocks_msg["webids"]) == {"did:key:zSpam"}
+
+
+async def _relay_dm(gw, sender_key, to_did, msg_id, content):
+    import json
+    from datetime import datetime, timezone
+    from proxion_messenger_core.relay import sign_relay_message
+    sender_did = pub_key_to_did(sender_key.public_key().public_bytes_raw())
+    ts = datetime.now(timezone.utc).isoformat()
+    sig = sign_relay_message(sender_key, sender_did, to_did, msg_id, content, ts)
+    body = json.dumps({"from_webid": sender_did, "to_webid": to_did, "message_id": msg_id,
+                       "content": content, "timestamp": ts, "signature": sig}).encode()
+    return await gw._handle_relay_post(body)
+
+
+@pytest.mark.asyncio
+async def test_block_stops_a_federated_contacts_relayed_dms(gateway, monkeypatch, tmp_path):
+    """A friend on another gateway addresses us by the gateway did, while the local
+    browser (auth off) registers and blocks under its own session did. The block was
+    checked against the gateway did only, so the blocked friend's DMs kept arriving."""
+    import json
+    from proxion_messenger_core.blocklist import Blocklist
+    monkeypatch.setenv("PROXION_REQUIRE_AUTH", "0")
+    gateway.blocklist = Blocklist(str(tmp_path / "bl.json"))
+    peer_key = Ed25519PrivateKey.generate()
+    peer_did = _did(peer_key)
+    session_did = _did(Ed25519PrivateKey.generate())
+    gw_did = gateway._own_gateway_did()
+    gateway._store.save_relationship(
+        {"certificate_id": "cert-P", "subject": peer_key.public_key().public_bytes_raw().hex(),
+         "created_at": 0, "expires_at": 2**31 - 1}, peer_did=peer_did, owner_webid=session_did)
+    ws = _mock_ws()
+    await _register(gateway, ws, session_did)
+
+    def _got(content):
+        return any(json.loads(c[0][0]).get("content") == content for c in ws.send.call_args_list)
+
+    status, _ = await _relay_dm(gateway, peer_key, gw_did, "m-before", "before block")
+    assert status.startswith("200") and _got("before block"), "sanity: delivered before the block"
+
+    await gateway.process_command(ws, {"cmd": "block", "webid": peer_did})
+    status, _ = await _relay_dm(gateway, peer_key, gw_did, "m-after", "after block")
+    assert status.startswith("200")
+    assert not _got("after block"), "a blocked contact's relayed DM must not be delivered"
+
+    await gateway.process_command(ws, {"cmd": "unblock", "webid": peer_did})
+    await _relay_dm(gateway, peer_key, gw_did, "m-unblocked", "after unblock")
+    assert _got("after unblock")
