@@ -62,7 +62,7 @@ import { createMembers } from './members.js';
 import { createFriendRequests } from './friend-requests.js';
 import { createE2EStatus } from './e2e-status.js';
 import { createStatusBanners } from './status-banners.js';
-import { createConnection } from './connection.js';
+import { createConnection, normalizeGatewayUrl } from './connection.js';
 import { createTransport, detectMode, applyTransportGating } from './transport.js';
 import { createPodSocket } from './podtransport.js';
 import { createRendering, replyQuoteHtml } from './rendering.js';
@@ -78,7 +78,7 @@ import { createWebCalls } from './webcalls.js';
 import { createWebJoin, makeInvite, parseInvite } from './webjoin.js';
 import { chatRootUrl } from './longchat.js';
 import { createPairing } from './pairing.js';
-import { createRecovery } from './recovery.js';
+import { createRecovery, importErrorKey } from './recovery.js';
 import { createGifTray, saveFavorite, pushAllGifsToPod } from './gifs.js';
 import { needsDownscale, downscaleImage, measureMedia } from './media-resize.js';
 import { attachGifMotion } from './gifmotion.js';
@@ -884,6 +884,9 @@ import { initThemePicker } from './theme.js';
             importHistoryBundle: (records) => dmHistoryImport(records),
         });
         let roomCreatorOf = new Set(); // room_ids this user owns
+        // room_ids where the owner made this user an admin (room_roles).
+        const roomAdminOf = new Set();
+        const _canAdminRoom = (id) => roomCreatorOf.has(id) || roomAdminOf.has(id);
         // Render-cursor state (date divider, scroll-unread counter, older-history
         // in-flight flag): moved to rendering.js (createRendering state). External
         // view-switchers reset the date-divider cursor by writing rendering.state.
@@ -1124,10 +1127,20 @@ import { initThemePicker } from './theme.js';
 
         // Settings modal
         document.getElementById("settings-btn").onclick = () => {
-            document.getElementById("settings-gw-url").value =
-                localStorage.getItem("proxion_gateway_url") || "ws://127.0.0.1:7474";
+            const _gwInput = document.getElementById("settings-gw-url");
+            _gwInput.value = localStorage.getItem("proxion_gateway_url") || "ws://127.0.0.1:7474";
+            setFieldError(_gwInput, '');
+            // A page served by a gateway always connects back to it (the
+            // x-gateway-url meta wins over the saved value), so editing the
+            // address there would silently do nothing.
+            const _servedByGw = !!document.querySelector('meta[name="x-gateway-url"]');
+            _gwInput.readOnly = _servedByGw;
+            document.getElementById("settings-gw-apply-btn").hidden = _servedByGw;
+            const _gwHint = document.getElementById("settings-gw-hint");
+            if (_gwHint) _gwHint.hidden = !_servedByGw;
             document.getElementById("settings-display-name").value =
                 localStorage.getItem("proxion_display_name") || "";
+            setFieldError(document.getElementById("settings-display-name"), '');
             document.getElementById("settings-status-message").value =
                 localStorage.getItem("proxion_status_message") || "";
             _renderSettingsDid();
@@ -1241,7 +1254,10 @@ import { initThemePicker } from './theme.js';
             _profileSavedTimer = setTimeout(() => _setProfileSaveStatus(""), 2000);
         }
         function _saveDisplayName() {
-            const displayName = document.getElementById("settings-display-name").value.trim();
+            const nameInput = document.getElementById("settings-display-name");
+            const displayName = nameInput.value.trim();
+            // Say why a cleared name is not saved, rather than dropping it silently.
+            setFieldError(nameInput, displayName ? '' : t('settings.nameRequired'));
             if (!displayName || displayName === (localStorage.getItem("proxion_display_name") || "")) return;
             localStorage.setItem("proxion_display_name", displayName);
             document.getElementById("username").innerText = displayName;
@@ -1282,13 +1298,21 @@ import { initThemePicker } from './theme.js';
             return localStorage.getItem("proxion_gateway_url") || "ws://127.0.0.1:7474";
         }
         function _syncGwApplyBtn() {
-            const v = document.getElementById("settings-gw-url").value.trim();
+            const input = document.getElementById("settings-gw-url");
+            const v = input.value.trim();
             document.getElementById("settings-gw-apply-btn").disabled = !v || v === _savedGwUrl();
+            setFieldError(input, '');
         }
         document.getElementById("settings-gw-url").addEventListener("input", _syncGwApplyBtn);
         document.getElementById("settings-gw-apply-btn").onclick = () => {
-            const newGwUrl = document.getElementById("settings-gw-url").value.trim();
-            if (!newGwUrl || newGwUrl === _savedGwUrl()) return;
+            const input = document.getElementById("settings-gw-url");
+            const newGwUrl = normalizeGatewayUrl(input.value);
+            if (!newGwUrl) {
+                setFieldError(input, t('settings.gatewayUrlInvalid'));
+                input.focus();
+                return;
+            }
+            if (newGwUrl === _savedGwUrl()) return;
             _closeSettings();
             localStorage.setItem("proxion_gateway_url", newGwUrl);
             if (socket) socket.close();
@@ -2998,6 +3022,11 @@ import { initThemePicker } from './theme.js';
                     break;
                 }
                 case "member_role_updated": {
+                    if (event.room_id && event.webid === selfWebId) {
+                        if (event.role === "admin") roomAdminOf.add(event.room_id);
+                        else roomAdminOf.delete(event.room_id);
+                        if (activeView?.id === event.room_id) _syncDisappearOption();
+                    }
                     if (event.room_id && event.webid) {
                         const _rm = currentRoomMembers.find(x => x.webid === event.webid);
                         showToast(t('room.roleUpdated', { webid: _rm?.display_name || event.webid.slice(-12), role: event.role }));
@@ -3007,8 +3036,15 @@ import { initThemePicker } from './theme.js';
                     }
                     break;
                 }
-                case "room_roles":
+                case "room_roles": {
+                    if (!event.room_id) break;
+                    const _wasAdmin = roomAdminOf.has(event.room_id);
+                    if ((event.roles || {})[selfWebId] === "admin") roomAdminOf.add(event.room_id);
+                    else roomAdminOf.delete(event.room_id);
+                    // Re-sync the menu only on a change, since the sync asks for roles again.
+                    if (_wasAdmin !== roomAdminOf.has(event.room_id) && activeView?.id === event.room_id) _syncDisappearOption();
                     break;
+                }
                 case "scheduled_list": {
                     // The gateway lists every pending message of ours; the
                     // picker shows the ones for this conversation.
@@ -4009,10 +4045,14 @@ import { initThemePicker } from './theme.js';
                 ((type === "local_room" || type === "room") && roomCreatorOf.has(activeView.id));
             if (item) item.hidden = !canSet;
             // Unbanning lives in the Banned members dialog, opened from here.
+            // Banned members and Name and topic are open to admins too, as on the gateway.
             const bansItem = document.getElementById("room-opt-bans");
-            if (bansItem) bansItem.hidden = !(type === "local_room" && roomCreatorOf.has(activeView.id));
+            if (bansItem) bansItem.hidden = !(type === "local_room" && _canAdminRoom(activeView.id));
             const editItem = document.getElementById("room-opt-edit");
-            if (editItem) editItem.hidden = !(type === "local_room" && roomCreatorOf.has(activeView.id));
+            if (editItem) editItem.hidden = !(type === "local_room" && _canAdminRoom(activeView.id));
+            if (type === "local_room" && socket && socket.readyState === WebSocket.OPEN && !roomCreatorOf.has(activeView.id)) {
+                socket.send(JSON.stringify({ cmd: "get_room_roles", room_id: activeView.id }));
+            }
             // Voice channel: the Join voice button and who is already in it.
             voice.updateVoiceChannels(activeView?.id);
             if (type === "local_room" && socket && socket.readyState === WebSocket.OPEN) {
@@ -5933,12 +5973,19 @@ import { initThemePicker } from './theme.js';
                 const file = e.target.files[0];
                 if (!file) return;
                 showToast(t('import.importing'));
-                const text = await file.text();
-                const resp = await fetch('/import', { method: 'POST', body: text, headers: {'Content-Type':'application/json'} });
-                const result = await resp.json();
-                if (result.status === 'ok') showToast(t('import.complete', { count: result.counts?.messages || 0 }));
-                else showToast(t('import.failed', { error: result.error || t('common.unknownError') }));
                 importInput.value = '';
+                const headers = { 'Content-Type': 'application/json' };
+                const apiToken = document.querySelector('meta[name="x-api-token"]')?.content || '';
+                if (apiToken) headers['Authorization'] = 'Bearer ' + apiToken;
+                let resp = null, result = {};
+                try {
+                    resp = await fetch('/import', { method: 'POST', body: await file.text(), headers });
+                    result = await resp.json().catch(() => ({}));
+                } catch (err) {
+                    console.warn('[Proxion] import failed:', err);
+                }
+                if (resp?.ok && result.status === 'ok') showToast(t('import.complete', { count: result.counts?.messages || 0 }));
+                else showToast(t(importErrorKey(resp ? resp.status : null, result.error)), 'error');
             };
 
             initPodSettingsPanel();

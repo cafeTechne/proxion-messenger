@@ -4,7 +4,7 @@ vi.mock('./e2e.js', () => ({
   myX25519PubB64u: () => 'MYX25519PUB',
 }));
 
-import { createConnection } from './connection.js';
+import { createConnection, normalizeGatewayUrl } from './connection.js';
 
 let els, store, made, hostSocket;
 function mkEl(over = {}) {
@@ -192,5 +192,25 @@ describe('forceReconnect', () => {
     c.forceReconnect();
     expect(made).toHaveLength(1); // a new socket
     expect(hostSocket).toBe(made[0]);
+  });
+});
+
+describe('normalizeGatewayUrl', () => {
+  it('keeps ws and wss addresses', () => {
+    expect(normalizeGatewayUrl('ws://127.0.0.1:7474')).toBe('ws://127.0.0.1:7474');
+    expect(normalizeGatewayUrl(' wss://chat.example.com ')).toBe('wss://chat.example.com');
+    expect(normalizeGatewayUrl('wss://chat.example.com/ws')).toBe('wss://chat.example.com/ws');
+  });
+  it('turns a pasted browser address into its WebSocket form', () => {
+    expect(normalizeGatewayUrl('https://chat.example.com/')).toBe('wss://chat.example.com');
+    expect(normalizeGatewayUrl('http://192.168.1.5:7474')).toBe('ws://192.168.1.5:7474');
+    expect(normalizeGatewayUrl('192.168.1.5:7474')).toBe('ws://192.168.1.5:7474');
+    expect(normalizeGatewayUrl('ws://[::1]:7474')).toBe('ws://[::1]:7474');
+    expect(normalizeGatewayUrl('ws://localhost:7474')).toBe('ws://localhost:7474');
+  });
+  it('refuses anything that is not a gateway address', () => {
+    for (const bad of ['', '   ', 'not a url', 'ftp://x.example', 'javascript:alert(1)', 'ws://user:pw@host', 'ws://not%20a%20url', 'ws://a..b']) {
+      expect(normalizeGatewayUrl(bad)).toBeNull();
+    }
   });
 });

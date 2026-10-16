@@ -17,6 +17,25 @@ import { myX25519PubB64u } from './e2e.js';
 import { announce } from './a11y.js';
 import { t } from './i18n.js';
 
+// A gateway address typed in Settings, as the ws:// or wss:// URL to connect
+// to, or null when it is not one. http(s) becomes ws(s), since people paste
+// the address they open in the browser.
+export function normalizeGatewayUrl(raw) {
+    let s = String(raw || '').trim();
+    if (!s) return null;
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) s = 'ws://' + s;
+    let u;
+    try { u = new URL(s); } catch { return null; }
+    const scheme = { 'ws:': 'ws:', 'wss:': 'wss:', 'http:': 'ws:', 'https:': 'wss:' }[u.protocol];
+    if (!scheme || u.username || u.password) return null;
+    // Chrome percent-encodes junk like spaces into a ws:// host instead of
+    // throwing, so check the host is a name or an IP address.
+    if (!/^(\[[0-9a-f:.]+\]|[a-z0-9-]+(\.[a-z0-9-]+)*)$/i.test(u.hostname)) return null;
+    u.protocol = scheme;
+    const out = u.toString();
+    return u.pathname === '/' && !u.search && !u.hash ? out.replace(/\/$/, '') : out;
+}
+
 export function createConnection({
     wsUrl, getSocket, setSocket, getClientDid, generateOrLoadIdentity, handleEventAsync,
 }) {

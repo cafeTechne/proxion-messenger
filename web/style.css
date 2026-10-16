@@ -2680,6 +2680,7 @@ button:is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; opacity: 0.5
 .settings-muted { color: var(--slate-500); }
 .settings-hint { display: block; margin: 2px 0 0; font-size: var(--text-xs); color: var(--slate-500); line-height: 1.5; }
 .settings-hint--block { margin: 0 0 var(--space-2); }
+.settings-hint[hidden], .settings-inline [hidden] { display: none; }
 .settings-save-status { min-height: 1.2em; margin: calc(-1 * var(--space-2)) 0 var(--space-2); font-size: var(--text-xs); color: var(--color-success-soft); }
 .settings-status-line { margin: 0 0 var(--space-2); font-size: var(--text-md); color: var(--slate-500); }
 .settings-status-line--ok { color: var(--color-success-soft); }

@@ -673,7 +673,7 @@
             <section id="settings-sec-profile" class="settings-section" aria-labelledby="settings-h-profile" tabindex="-1">
               <h4 id="settings-h-profile" class="section-label" data-i18n="section.profile">Profile</h4>
               <label for="settings-display-name" class="settings-field-label" data-i18n="label.displayName">Display name</label>
-              <input id="settings-display-name" enterkeyhint="done" class="settings-input" type="text" placeholder="Your name" data-i18n-attr="placeholder:ui.name">
+              <input id="settings-display-name" enterkeyhint="done" class="settings-input" type="text" maxlength="64" placeholder="Your name" data-i18n-attr="placeholder:ui.name">
               <label for="settings-status-message" class="settings-field-label" data-i18n="label.customStatusMax100">Custom status (max 100 characters)</label>
               <input id="settings-status-message" enterkeyhint="done" class="settings-input" type="text" placeholder="What are you doing?" maxlength="100" data-i18n-attr="placeholder:ui.whatAreDoing">
               <p id="settings-profile-status" class="settings-save-status" role="status" aria-live="polite"></p>
@@ -830,6 +830,7 @@
                   <input id="settings-gw-url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" class="settings-input" type="text" placeholder="ws://127.0.0.1:7474" data-i18n-attr="placeholder:ui.ws12700">
                   <button type="button" id="settings-gw-apply-btn" class="btn btn--slate" disabled data-i18n="btn.applyReconnect">Apply and reconnect</button>
                 </div>
+                <p id="settings-gw-hint" class="settings-hint" hidden data-i18n="settings.gatewayUrlServed">This page comes from your gateway, so it always connects to it. To use another gateway, open that gateway's address instead.</p>
                 <!-- R28: Federation health status -->
                 <div id="settings-federation-section">
                   <h5 class="settings-subhead" data-i18n="section.federation">Federation</h5>
@@ -1169,7 +1170,7 @@
         <div id="ob-step-2" style="display:none">
           <h2 data-i18n="heading.whatSName">What's your name?</h2>
           <label for="ob-name" class="field-label" data-i18n="ui.displayName">Display name</label>
-          <input id="ob-name" enterkeyhint="next" class="input" placeholder="Display name" autocomplete="nickname" aria-describedby="ob-name-error" data-i18n-attr="placeholder:ui.displayName">
+          <input id="ob-name" enterkeyhint="next" class="input" maxlength="64" placeholder="Display name" autocomplete="nickname" aria-describedby="ob-name-error" data-i18n-attr="placeholder:ui.displayName">
           <p id="ob-name-error" class="field-error" role="alert"></p>
           <button id="ob-step2-btn" class="btn btn--accent" style="padding:var(--space-3) var(--space-5);border-radius:4px;cursor:pointer;font-size:1em;" data-i18n="btn.continue">Continue</button>
         </div>
