@@ -622,6 +622,8 @@ import { initThemePicker } from './theme.js';
             isBlocked: (webid) => blocks.isBlocked(webid),
             isSelf: (webid) => !!webid && (webid === selfWebId || webid === clientDid),
             isContact: (webid) => !!peerDidToCertId[webid],
+            // createView runs later; this is only called from a click.
+            openContactByDid: (did) => openContactByDid(did),
         });
         // R66: optimistic-send failure tracking (mark unconfirmed messages failed + retry).
         const sendStatus = createSendStatus({

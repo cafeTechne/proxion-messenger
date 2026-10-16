@@ -35,6 +35,7 @@ function make(over = {}) {
     showToast: () => {},
     getUserPresence: () => userPresence,
     getMessageMap: () => messageMap,
+    openContactByDid: over.openContactByDid,
   });
   return { profile, sent, userPresence, messageMap };
 }
@@ -77,6 +78,17 @@ describe('profileCardOpenDM', () => {
     els[navId] = mkEl({ click });
     profile.profileCardOpenDM();
     expect(click).toHaveBeenCalled();
+  });
+  it("opens a friend's contact thread instead of a second chat", () => {
+    const openContactByDid = vi.fn(() => true);
+    const click = vi.fn();
+    const { profile, sent } = make({ openContactByDid });
+    profile.state.profileCardActive = 'did:key:zBob';
+    els['nav-local-did-key-zBob'] = mkEl({ click });
+    profile.profileCardOpenDM();
+    expect(openContactByDid).toHaveBeenCalledWith('did:key:zBob');
+    expect(click).not.toHaveBeenCalled();
+    expect(sent).toEqual([]);
   });
   it('sends resolve_did when no DM entry exists', () => {
     const { profile, sent } = make();

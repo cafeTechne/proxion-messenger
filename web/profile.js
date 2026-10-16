@@ -10,7 +10,7 @@
 import { t } from './i18n.js';
 import { webidColor, timeAgo, escHtml, avatarInitial, dmFallbackName } from './util.js';
 
-export function createProfile({ getSocket, showToast, getUserPresence, getMessageMap, isBlocked, isSelf, isContact }) {
+export function createProfile({ getSocket, showToast, getUserPresence, getMessageMap, isBlocked, isSelf, isContact, openContactByDid }) {
     const state = { profileCardActive: null };
 
     function handlePresenceUpdate(event) {
@@ -107,6 +107,10 @@ export function createProfile({ getSocket, showToast, getUserPresence, getMessag
         const webid = state.profileCardActive;
         if (!webid) return;
         hideProfileCard();
+
+        // A friend's chat is their contact thread; a second thread keyed by their
+        // id would split the conversation.
+        if (openContactByDid && openContactByDid(webid)) return;
 
         // Check if a DM thread already exists with this webid
         const navId = "local-" + webid.replace(/[^a-zA-Z0-9]/g, "-");

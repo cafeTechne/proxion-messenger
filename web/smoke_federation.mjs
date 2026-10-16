@@ -224,6 +224,43 @@ try {
         : `cross-gateway DM "${MSG}" did not arrive/render on Bob`);
     });
 
+  // The profile card's Send DM opens the friend's existing chat, not a second
+  // thread keyed by their id.
+  step = 'bob-profile-send-dm';
+  const openAliceCard = async () => {
+    const av = await bob.$('#message-feed [data-msg-action="profile"][data-webid]');
+    if (!av) throw new Error("no avatar on Alice's message");
+    await av.click();
+    await bob.waitForFunction(() => getComputedStyle(document.getElementById('profile-card')).display !== 'none',
+      { timeout: 5000 });
+  };
+  const header = await bob.evaluate(() => document.getElementById('chat-header-name').textContent);
+  await openAliceCard();
+  await bob.evaluate(() => document.getElementById('profile-dm-btn').click());
+  await sleep(800);
+  if (await bob.evaluate(() => !!document.querySelector('[id^="nav-local-"]'))) {
+    fail("Send DM on the profile card opened a second chat instead of the friend's thread");
+  }
+  if ((await bob.evaluate(() => document.getElementById('chat-header-name').textContent)) !== header) {
+    fail("Send DM on the profile card left the friend's chat");
+  }
+
+  // Blocking stops Bob's own messages to Alice across gateways.
+  step = 'bob-blocks-alice';
+  await openAliceCard();
+  await bob.evaluate(() => document.getElementById('profile-block-btn').click());
+  await sleep(800);
+  const BLOCKED_MSG = 'after-block-' + Math.random().toString(36).slice(2, 7);
+  await bob.focus('#message-input');
+  await bob.type('#message-input', BLOCKED_MSG);
+  await bob.keyboard.press('Enter');
+  if (!(await bob.waitForFunction(() => /blocked this person/i.test(document.body.textContent), { timeout: 5000 })
+    .then(() => true, () => false))) fail('Bob was not told the message was not sent because of the block');
+  await sleep(2500);
+  if (await alice.evaluate((m) => document.body.textContent.includes(m), BLOCKED_MSG)) {
+    fail('a message Bob sent after blocking Alice still reached her');
+  }
+
   step = 'done';
   if (!process.exitCode) {
     console.log('  ✓ federation OK — discover → friend request → accept → cert exchange → DM thread on both sides,');
