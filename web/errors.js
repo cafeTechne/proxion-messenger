@@ -33,6 +33,7 @@ const EXACT = {
     "voice_note_remote_unsupported": "error.voice_note_remote_unsupported",
     "reaction_limit_reached": "error.reaction_limit_reached",
     "contact_revoked": "error.contact_revoked",
+    "Recipient is blocked": "error.recipient_blocked",
     "Not registered": "error.not_registered",
     "send_at must be in the future": "error.send_at_future",
     "Cannot delete another user's message": "error.cannot_delete_others",

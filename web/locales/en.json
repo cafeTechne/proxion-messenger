@@ -211,6 +211,7 @@
   "error.voice_session_exists": "That call is already in progress.",
   "error.voice_note_remote_unsupported": "Voice notes can't be sent to contacts on other gateways yet.",
   "error.reaction_limit_reached": "Reaction limit reached for this message.",
+  "error.recipient_blocked": "You blocked this person. Unblock them to send a message.",
   "error.contact_revoked": "This contact has been revoked.",
   "error.not_registered": "Not connected yet, give it a second and retry.",
   "error.send_at_future": "Pick a time in the future.",

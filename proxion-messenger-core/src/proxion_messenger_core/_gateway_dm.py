@@ -540,6 +540,11 @@ class DmHandlerMixin:
                 "detail": "This contact has been revoked. You can no longer send messages.",
             }))
             return
+        # The sender blocked this person: nothing goes out. send_dm checks this
+        # only for pod contacts, and relayed (cross-gateway) DMs land here.
+        if target_webid and self._is_blocked_for(sender_webid, target_webid):
+            await websocket.send(json.dumps({"type": "error", "message": "Recipient is blocked"}))
+            return
         content = data.get("content", "")
         if not content or not str(content).strip():
             await websocket.send(json.dumps({"type": "error", "code": "E_SCHEMA", "message": "empty_content"}))
