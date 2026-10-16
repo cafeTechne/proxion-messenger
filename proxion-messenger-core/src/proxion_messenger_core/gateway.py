@@ -1879,10 +1879,21 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if not peer_did or peer_did not in self._revoked_dids or not self._store:
             return
         try:
+            cert_ids = self._store.contact_revocation_cert_ids(peer_did)
             if self._store.clear_revocation_for_peer(peer_did):
                 self._revoked_dids.discard(peer_did)
         except Exception:
             logger.debug("clear_revocation_for_peer failed", exc_info=True)
+            return
+        # The pod tombstones go too, or the next cold start restores them and
+        # revokes the re-added friend again.
+        if cert_ids:
+            try:
+                asyncio.get_running_loop().create_task(
+                    self._delete_revocation_tombstones_from_pod(cert_ids))
+            except RuntimeError:
+                for cid in cert_ids:
+                    self._store.record_pending_pod_op(f"stash://pod/revocations/{cid}.json", "delete")
 
     async def _post_invite_accept(self, url: str, payload: dict) -> None:
         """POST the acceptance notification to the requester's gateway via SSRF-safe transport."""

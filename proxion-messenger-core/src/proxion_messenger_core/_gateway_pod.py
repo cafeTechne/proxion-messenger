@@ -1316,6 +1316,37 @@ class PodSyncMixin:
                 if self._store:
                     self._store.record_pending_pod_op(uri, "put", body)
 
+    async def _delete_revocation_tombstones_from_pod(self, cert_ids: list) -> None:
+        """Remove contact revocation tombstones after the owner re-added the
+        contact. A delete that cannot land now is queued and retried, and
+        _restore_revocations_from_pod skips a tombstone with a queued delete."""
+        client = self._pod_client()
+        for cert_id in cert_ids:
+            if not cert_id or cert_id.startswith("device:"):
+                continue
+            uri = f"stash://pod/revocations/{cert_id}.json"
+            if not client:
+                if self._store:
+                    self._store.record_pending_pod_op(uri, "delete")
+                continue
+            async with self._pod_sync_sem:
+                try:
+                    loop = asyncio.get_event_loop()
+                    from .solid_client import SolidError
+                    def _del(u=uri):
+                        try:
+                            client.delete(u)
+                        except SolidError as e:
+                            if e.status_code != 404:
+                                raise
+                    await loop.run_in_executor(None, _del)
+                    if self._store:
+                        self._store.clear_pending_pod_op(uri)
+                except Exception as exc:
+                    logger.debug("_delete_revocation_tombstones_from_pod failed [%s]: %s", cert_id[:8], exc)
+                    if self._store:
+                        self._store.record_pending_pod_op(uri, "delete")
+
     async def _restore_revocations_from_pod(self) -> None:
         """Pull revocation tombstones from the pod into the local revocations
         table + relationships.revoked column + in-memory set BEFORE relationships
@@ -1335,9 +1366,14 @@ class PodSyncMixin:
         except Exception as exc:
             logger.debug("_restore_revocations_from_pod: list failed: %s", exc)
             return
+        # A tombstone with a queued delete belongs to a contact the owner re-added.
+        pending_delete_uris = {
+            op.get("uri", "") for op in self._store.list_pending_pod_ops()
+            if op.get("op") == "delete"
+        }
         restored = 0
         for uri in member_uris:
-            if not uri.endswith(".json"):
+            if not uri.endswith(".json") or uri in pending_delete_uris:
                 continue
             try:
                 raw = await loop.run_in_executor(None, client.get, uri)

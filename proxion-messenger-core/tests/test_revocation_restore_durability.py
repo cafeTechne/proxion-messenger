@@ -167,3 +167,54 @@ async def test_sync_revocation_writes_tombstone(restore_gateway):
     uri = mock_client.put.call_args[0][0]
     assert uri == "stash://pod/revocations/cert-ok.json"
     assert gw._store.list_pending_pod_ops() == []
+
+
+async def _settle():
+    import asyncio
+    for _ in range(5):
+        await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_readd_removes_the_pod_tombstone(restore_gateway):
+    """Re-adding a removed friend deletes their contact tombstone from the pod
+    (else the next cold start revokes them again); a device tombstone stays."""
+    gw = restore_gateway
+    mock_client = _mock_pod_client(gw)
+    peer = "did:key:zReadd"
+    gw._store.mark_revoked("cert-old", peer)
+    gw._store.mark_revoked("device:zReadd", peer)
+    gw._revoked_dids.add(peer)
+
+    gw._lift_revocation_on_readd(peer)
+    await _settle()
+
+    deleted = [c[0][0] for c in mock_client.delete.call_args_list]
+    assert deleted == ["stash://pod/revocations/cert-old.json"]
+    assert gw._store.list_pending_pod_ops() == []
+
+
+@pytest.mark.asyncio
+async def test_readd_while_pod_is_down_survives_a_cold_start(restore_gateway):
+    """The tombstone delete is queued when the pod is unreachable, and a restore
+    before it lands does not revoke the re-added friend."""
+    gw = restore_gateway  # no pod client yet
+    peer = "did:key:zReaddLater"
+    gw._store.mark_revoked("cert-later", peer)
+    gw._revoked_dids.add(peer)
+
+    gw._lift_revocation_on_readd(peer)
+    await _settle()
+    assert any(op["uri"] == "stash://pod/revocations/cert-later.json" and op["op"] == "delete"
+               for op in gw._store.list_pending_pod_ops())
+
+    rec = {"cert_id": "cert-later", "peer_did": peer, "revoked_at": time.time()}
+    mock_client = MagicMock()
+    mock_client.list = MagicMock(return_value=["stash://pod/revocations/cert-later.json"])
+    mock_client.get = MagicMock(return_value=json.dumps(rec).encode())
+    gw._pod_webid = "https://pod.example/profile/card#me"
+    gw.own_pod_clients[gw._pod_webid] = (MagicMock(), mock_client)
+    await gw._restore_revocations_from_pod()
+
+    assert gw._store.is_revoked(peer) is False
+    assert peer not in gw._revoked_dids

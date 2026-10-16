@@ -160,6 +160,16 @@ class SecurityStoreMixin(object):
                 "INSERT OR REPLACE INTO revocations (cert_id, peer_did, revoked_at) VALUES (?,?,?)",
                 (cert_id, peer_did, time.time()),
             )
+    def contact_revocation_cert_ids(self, peer_did: str) -> list:
+        """The cert_ids of peer_did's contact revocations (never "device:" rows),
+        i.e. the pod tombstones a re-add has to remove."""
+        if not peer_did:
+            return []
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT cert_id FROM revocations WHERE peer_did = ? AND cert_id NOT LIKE 'device:%'",
+                (peer_did,)).fetchall()
+        return [r["cert_id"] for r in rows if r["cert_id"]]
     def clear_revocation_for_peer(self, peer_did: str) -> bool:
         """Drop the contact revocation rows for peer_did. Only for an explicit
         re-add by the owner (a new relationship they consented to); the old
