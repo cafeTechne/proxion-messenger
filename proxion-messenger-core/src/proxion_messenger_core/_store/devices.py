@@ -204,8 +204,25 @@ class DeviceStoreMixin(object):
         endpoint: str,
         p256dh_b64: str,
         auth_b64: str,
-    ) -> None:
+    ) -> list:
+        """Save a subscription. Returns the ids of this owner's older rows for the
+        same endpoint, which it replaces (a browser has one endpoint, so a fresh
+        id per reconnect would otherwise pile up duplicates that each get every
+        push). An id that belongs to another owner is never overwritten."""
         with self._conn() as conn:
+            other = conn.execute(
+                "SELECT owner_webid FROM push_subscriptions WHERE subscription_id=?",
+                (subscription_id,)).fetchone()
+            if other and other["owner_webid"] != owner_webid:
+                return []
+            replaced = [r["subscription_id"] for r in conn.execute(
+                "SELECT subscription_id FROM push_subscriptions "
+                "WHERE owner_webid=? AND endpoint=? AND subscription_id<>?",
+                (owner_webid, endpoint, subscription_id)).fetchall()]
+            if replaced:
+                conn.execute(
+                    "DELETE FROM push_subscriptions WHERE owner_webid=? AND endpoint=? AND subscription_id<>?",
+                    (owner_webid, endpoint, subscription_id))
             conn.execute(
                 """INSERT OR REPLACE INTO push_subscriptions
                    (subscription_id, owner_webid, endpoint, p256dh_b64, auth_b64, created_at)
@@ -227,6 +244,7 @@ class DeviceStoreMixin(object):
                 )
             except Exception:
                 pass
+        return replaced
     def get_push_subscriptions(self, owner_webid: str) -> list[dict]:
         with self._conn() as conn:
             try:

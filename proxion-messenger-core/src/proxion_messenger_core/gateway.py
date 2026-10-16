@@ -1516,6 +1516,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_get_security_events(websocket, data)
             elif cmd == "get_runtime_security_state":
                 await self._handle_get_runtime_security_state(websocket, data)
+            elif cmd == "get_security_summary":
+                await self._handle_get_security_summary(websocket, data)
             elif cmd == "get_degraded_mode_state":
                 await self._handle_get_degraded_mode_state(websocket, data)
             elif cmd == "get_realtime_abuse_signals":
@@ -3065,7 +3067,11 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 for webid in list(self._webid_sockets.keys()):
                     if not webid:
                         continue
-                    # One-time prekey low-count check
+                    # One-time prekey low-count check, only for clients that use
+                    # gateway prekeys at all (the web client never uploads any, so
+                    # it was told to replenish every 15 minutes for nothing).
+                    if not self._store.get_signed_prekey(webid):
+                        continue
                     count = self._store.count_unused_one_time_prekeys(webid)
                     if count < _THRESHOLD:
                         for ws in self._sockets_for(webid):

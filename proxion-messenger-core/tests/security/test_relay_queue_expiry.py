@@ -46,3 +46,28 @@ def test_relay_marked_failed_after_max_attempts(store):
     pending = store.get_pending_relays()
     ids = [r["id"] for r in pending]
     assert "relay-maxed" not in ids, "Max-attempt relay should not be returned"
+
+
+@pytest.mark.asyncio
+async def test_expired_relay_is_failed_and_the_sender_told(tmp_path):
+    """A relay still queued past expires_at used to stay 'pending' forever (the
+    retry query skips it), so the sender's message showed as queued for good."""
+    import json as _json
+    from unittest.mock import AsyncMock
+    from proxion_messenger_core.gateway import ProxionGateway, GatewayConfig
+    from proxion_messenger_core.persist import AgentState
+    gw = ProxionGateway(AgentState.generate(), {}, {},
+                        GatewayConfig(host="127.0.0.1", db_path=str(tmp_path / "x.db")))
+    gw._store.enqueue_relay("relay-stale", "did:key:bob", "wss://bob.example.com",
+                            {"from_webid": "did:key:alice", "to_webid": "did:key:bob"})
+    with gw._store._conn() as conn:
+        conn.execute("UPDATE pending_relays SET expires_at = ? WHERE id = ?",
+                     (time.time() - 10, "relay-stale"))
+    gw._send_to_identity = AsyncMock()
+    await gw._expire_stale_relays()
+    gw._send_to_identity.assert_awaited_once()
+    who, raw = gw._send_to_identity.await_args.args
+    assert who == "did:key:alice"
+    assert _json.loads(raw) == {"type": "relay_expired", "message_id": "relay-stale"}
+    await gw._expire_stale_relays()
+    gw._send_to_identity.assert_awaited_once()  # told once, not every pass

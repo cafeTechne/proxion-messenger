@@ -12,6 +12,7 @@ Requires on self: _client_webids, _user_presence, _display_names, _store,
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 from datetime import datetime, timezone
@@ -1692,9 +1693,11 @@ class MiscHandlerMixin:
         if not owner_webid or not self._store:
             await websocket.send(json.dumps({"type": "error", "message": "not_registered"}))
             return
-        import secrets as _sec
-        subscription_id = data.get("subscription_id") or _sec.token_hex(12)
         endpoint = data.get("endpoint", "")
+        # No id given: derive one from owner + endpoint, so the same browser
+        # re-subscribing on every connect updates its row instead of adding one.
+        subscription_id = data.get("subscription_id") or hashlib.sha256(
+            f"{owner_webid}|{endpoint}".encode()).hexdigest()[:24]
         p256dh_b64 = data.get("p256dh_b64", "")
         auth_b64 = data.get("auth_b64", "")
         if not endpoint or not p256dh_b64 or not auth_b64:
@@ -1706,7 +1709,8 @@ class MiscHandlerMixin:
         if not is_safe_push_endpoint(endpoint):
             await websocket.send(json.dumps({"type": "error", "message": "invalid_push_endpoint"}))
             return
-        self._store.save_push_subscription(subscription_id, owner_webid, endpoint, p256dh_b64, auth_b64)
+        for _old in self._store.save_push_subscription(subscription_id, owner_webid, endpoint, p256dh_b64, auth_b64) or []:
+            asyncio.create_task(self._delete_push_subscription_from_pod(_old))
         asyncio.create_task(self._sync_push_subscription_to_pod(subscription_id, owner_webid, endpoint, p256dh_b64, auth_b64))
         await websocket.send(json.dumps({
             "type": "push_subscribed",

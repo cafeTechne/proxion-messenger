@@ -569,6 +569,24 @@ class PodSyncMixin:
             return f"{scheme}://{host}:{self.config.http_port}"
         return ""
 
+    async def _expire_stale_relays(self) -> None:
+        """Fail relays that passed their expiry while still queued and tell each
+        sender (relay_expired), so their message stops showing as queued."""
+        for relay in self._store.take_expired_relays():
+            logger.warning("Relay %s expired before delivery", relay["id"])
+            try:
+                payload_dict = json.loads(relay["payload_json"])
+                self._store.append_relay_delivery_event(
+                    relay["id"], payload_dict.get("to_webid", "") or "", "expired")
+                sender_webid = payload_dict.get("from_webid", "")
+                if sender_webid:
+                    await self._send_to_identity(sender_webid, json.dumps({
+                        "type": "relay_expired",
+                        "message_id": relay["id"],
+                    }))
+            except Exception:
+                pass
+
     async def _relay_retry_loop(self) -> None:
         """Background task: retry pending outbound relays with exponential backoff.
 
@@ -584,6 +602,7 @@ class PodSyncMixin:
         SEVEN_DAYS = 7 * 24 * 3600
         while True:
             await asyncio.sleep(30)
+            await self._expire_stale_relays()
             pending = self._store.get_pending_relays(limit=50)
             now = time.time()
             for relay in pending:

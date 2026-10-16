@@ -266,6 +266,23 @@ class FederationStoreMixin(object):
                 (time.time(), limit),
             ).fetchall()
             return [dict(r) for r in rows]
+    def take_expired_relays(self, limit: int = 50) -> list[dict]:
+        """Still-pending relays past expires_at, marked failed and returned so the
+        sender can be told. get_pending_relays skips them, so without this sweep
+        they stayed 'pending' (and the sender's message stayed "queued") forever."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM pending_relays
+                WHERE status = 'pending' AND expires_at > 0 AND expires_at <= ?
+                ORDER BY created_at ASC
+                LIMIT ?
+                """,
+                (time.time(), limit),
+            ).fetchall()
+            for r in rows:
+                conn.execute("UPDATE pending_relays SET status = 'failed' WHERE id = ?", (r["id"],))
+            return [dict(r) for r in rows]
     def mark_relay_delivered(self, relay_id: str) -> None:
         with self._conn() as conn:
             conn.execute(
