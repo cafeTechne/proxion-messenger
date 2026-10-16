@@ -100,5 +100,30 @@ export function createPush({ getSocket }) {
         }
     }
 
-    return { enablePush, _urlB64ToUint8Array };
+    // The gateway's id for this browser's subscription (push_subscribed), so
+    // turning notifications off can remove it there too.
+    const SUB_ID_KEY = "proxion_push_sub_id";
+    function rememberSubscription(id) {
+        try { if (id) localStorage.setItem(SUB_ID_KEY, id); } catch { /* storage blocked */ }
+    }
+
+    // Stop closed-app pushes: drop the gateway's copy and the browser's own
+    // subscription. Before this, turning notifications off left both in place.
+    async function disablePush() {
+        let id = null;
+        try { id = localStorage.getItem(SUB_ID_KEY); localStorage.removeItem(SUB_ID_KEY); } catch { /* ignore */ }
+        const socket = getSocket();
+        if (id && socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ cmd: "unsubscribe_push", subscription_id: id }));
+        }
+        try {
+            if ("serviceWorker" in navigator) {
+                const reg = await navigator.serviceWorker.ready;
+                const sub = await reg.pushManager?.getSubscription();
+                if (sub) await sub.unsubscribe();
+            }
+        } catch { /* nothing to undo */ }
+    }
+
+    return { enablePush, disablePush, rememberSubscription, _urlB64ToUint8Array };
 }

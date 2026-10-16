@@ -34,6 +34,8 @@ const EXACT = {
     "reaction_limit_reached": "error.reaction_limit_reached",
     "contact_revoked": "error.contact_revoked",
     "Recipient is blocked": "error.recipient_blocked",
+    "device_not_found": "error.device_not_found",
+    "cannot_revoke_primary": "error.cannot_revoke_primary",
     "Not registered": "error.not_registered",
     "send_at must be in the future": "error.send_at_future",
     "Cannot delete another user's message": "error.cannot_delete_others",

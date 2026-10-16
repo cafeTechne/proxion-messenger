@@ -303,6 +303,31 @@ try {
       : `A-primary: DM "${MSG}" missing from history after reload`);
   }
 
+  // ── Revoke A-device from Settings > Linked devices: it must be signed out,
+  // not just dropped from the list (it used to stay connected and reappear).
+  step = 'revoke-device';
+  await ap.evaluate(() => document.getElementById('settings-btn').click());
+  const revokeSel = `#settings-devices-list [data-device-id="${adDid}"]`;
+  await ap.waitForFunction((sel) => !!document.querySelector(sel), { timeout: 10000 }, revokeSel)
+    .catch(() => fail('A-device is not listed under Linked devices'));
+  if (process.exitCode) throw new Error('stop');
+  await ap.evaluate((sel) => document.querySelector(sel).click(), revokeSel);
+  await ap.waitForFunction(() => getComputedStyle(document.getElementById('confirm-modal')).display !== 'none', { timeout: 5000 });
+  await ap.evaluate(() => document.getElementById('confirm-ok').click());
+  await ad.waitForFunction(() => /revoked from another device/i.test(document.body.textContent), { timeout: 10000 })
+    .catch(() => fail('A-device was never told it was revoked'));
+  await ap.waitForFunction((sel) => !document.querySelector(sel), { timeout: 10000 }, revokeSel)
+    .catch(() => fail('A-device is still listed after Revoke'));
+  await sleep(6000);   // past the device's reconnect attempt
+  if (await ad.evaluate(() => document.querySelector('.dot')?.classList.contains('online'))) {
+    fail('A-device reconnected as the account after it was revoked');
+  }
+  await ap.evaluate(() => document.getElementById('settings-btn').click());
+  await sleep(1500);
+  if (await ap.evaluate((sel) => !!document.querySelector(sel), revokeSel)) {
+    fail('A-device came back in Linked devices after it was revoked');
+  }
+
   step = 'done';
   if (!process.exitCode) {
     console.log(`  ✓ multi-device DM OK — A-device paired to account A; B's cross-gateway E2E DM`);

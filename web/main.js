@@ -888,6 +888,8 @@ import { initThemePicker } from './theme.js';
         let roomCreatorOf = new Set(); // room_ids this user owns
         // room_ids where the owner made this user an admin (room_roles).
         const roomAdminOf = new Set();
+        // Resolves when the gateway confirms pod sign-out (pod_disconnected).
+        let _podDisconnectWaiter = null;
         const _canAdminRoom = (id) => roomCreatorOf.has(id) || roomAdminOf.has(id);
         // Render-cursor state (date divider, scroll-unread counter, older-history
         // in-flight flag): moved to rendering.js (createRendering state). External
@@ -954,6 +956,8 @@ import { initThemePicker } from './theme.js';
                     requestNotifPermission().then((perm) => {
                         if (perm === "granted") push.enablePush().then(updatePushStatus);
                     });
+                } else {
+                    push.disablePush().then(updatePushStatus);
                 }
             };
         }
@@ -1796,6 +1800,7 @@ import { initThemePicker } from './theme.js';
                     }
                     break;
                 }
+                case "relay_expired":   // queued past its expiry: same as out of retries
                 case "relay_failed": {
                     // R94: retries exhausted. Flip the pending badge to a failed
                     // state and, when we know how long the destination gateway has
@@ -1908,7 +1913,7 @@ import { initThemePicker } from './theme.js';
                             // D4: subscribe to WebPush so messages arrive with the
                             // window closed (idempotent; no-op until permission is
                             // granted, which is asked for in context, not here).
-                            push.enablePush();
+                            if (desktopNotifEnabled) push.enablePush();
                             // A4: if we arrived via an invite link, add the inviter now
                             // that the socket is registered (routes via confirm modal).
                             invite.consumePendingInvite();
@@ -3092,22 +3097,60 @@ import { initThemePicker } from './theme.js';
                         const label = escHtml(d.display_name || d.device_id.slice(0, 16));
                         const since = d.registered_at
                             ? new Date(d.registered_at * 1000).toLocaleDateString(getLocale()) : "";
+                        // The account's own identity is not a linked device and cannot be revoked.
+                        const btn = d.device_id === selfWebId ? "" :
+                            `<button data-device-id="${escHtml(d.device_id)}" class="link-btn link-btn--danger">${escHtml(t('confirm.revokeDevice.verb'))}</button>`;
                         return `<div class="list-row">
                             <span class="list-row__main">${label}<br><span class="list-row__meta">${since}</span></span>
-                            <button data-device-id="${escHtml(d.device_id)}" class="link-btn link-btn--danger">${escHtml(t('confirm.revokeDevice.verb'))}</button>
+                            ${btn}
                         </div>`;
                     }).join("");
                     container.querySelectorAll("[data-device-id]").forEach(btn => {
                         btn.addEventListener("click", () => {
                             const id = btn.dataset.deviceId;
                             showConfirm(t('confirm.revokeDevice', { id: id.slice(0, 16) }), () => {
-                                socket.send(JSON.stringify({cmd: "unregister_device", device_id: id}));
-                                btn.closest("div").remove();
+                                // revoke_device_and_rekey, not unregister_device: removing
+                                // the row alone left the device signed in, still sent DM
+                                // copies, and re-registered it on its next connect.
+                                setButtonBusy(btn);
+                                socket.send(JSON.stringify({cmd: "revoke_device_and_rekey", device_id: id}));
+                                // An error reply (shown as a toast) leaves the row; free the button.
+                                setTimeout(() => { if (btn.isConnected) clearButtonBusy(btn); }, 8000);
                             }, null, { title: t('confirm.revokeDevice.title'), confirmLabel: t('confirm.revokeDevice.verb'), danger: true });
                         });
                     });
                     break;
                 }
+                case "identity_restored":
+                    // The gateway's identity was restored from a backup. The cached
+                    // key that marks our own messages, the TURN credentials and the
+                    // call certificate all belong to the old one, so start fresh.
+                    showToast(t('identity.restoredReload'));
+                    setTimeout(() => location.reload(), 1500);
+                    break;
+                case "pod_disconnected":
+                    _podDisconnectWaiter?.(true);
+                    break;
+                case "push_subscribed":
+                    push.rememberSubscription(event.subscription_id);
+                    break;
+                case "push_unsubscribed":
+                    break;
+                case "device_revoked_ack":
+                    showToast(t('device.revoked'));
+                    if (socket) {
+                        socket.send(JSON.stringify({ cmd: "list_devices" }));
+                        socket.send(JSON.stringify({ cmd: 'get_peer_device_keys', peer_webid: selfWebId }));
+                    }
+                    break;
+                case "device_revoked":
+                    // Another of our sessions revoked a device: refresh the list and
+                    // stop fanning DM copies out to it.
+                    if (socket) {
+                        socket.send(JSON.stringify({ cmd: "list_devices" }));
+                        socket.send(JSON.stringify({ cmd: 'get_peer_device_keys', peer_webid: selfWebId }));
+                    }
+                    break;
                 case "member_banned":
                     _moderationNote(event, event.reason ? 'room.memberBannedReason' : 'room.memberBanned', { reason: event.reason || '' });
                     if (_membersRoomId === event.room_id) showRoomMembers(event.room_id);
@@ -5272,7 +5315,7 @@ import { initThemePicker } from './theme.js';
         async function setupInboxPush() {
             if (_inboxWebhookSubscribed) return;
             try {
-                const pushOn = await push.enablePush();
+                const pushOn = desktopNotifEnabled && await push.enablePush();
                 updatePushStatus();                        // reflect permission outcome honestly
                 if (!pushOn) return;                       // no permission → no point subscribing
                 const inbox = await solidChat.ensureInbox();
@@ -5878,10 +5921,23 @@ import { initThemePicker } from './theme.js';
                 if (window.__TAURI__?.invoke) {
                     window.__TAURI__.invoke('clear_pod_credentials').catch(() => {});
                 }
-                // Tell gateway to drop pod credentials (HTTP endpoint — no WS auth needed)
-                try { await fetch('/api/pod-disconnect', { method: 'POST' }); } catch (_) {
-                    if (socket && socket.readyState === WebSocket.OPEN)
+                // Tell the gateway to drop the pod credentials. Over a shared link
+                // the HTTP endpoint answers 403 (it does not throw), so fall back to
+                // the owner's WebSocket command and wait for pod_disconnected;
+                // otherwise sign-out looked done while the gateway kept syncing.
+                let _dropped = false;
+                try { _dropped = (await fetch('/api/pod-disconnect', { method: 'POST' })).ok; } catch (_) { /* offline */ }
+                if (!_dropped && socket && socket.readyState === WebSocket.OPEN) {
+                    _dropped = await new Promise((resolve) => {
+                        _podDisconnectWaiter = resolve;
                         socket.send(JSON.stringify({ cmd: 'disconnect_pod' }));
+                        setTimeout(() => resolve(false), 5000);
+                    });
+                    _podDisconnectWaiter = null;
+                }
+                if (!_dropped) {
+                    showToast(t('pod.signOutFailed'), 'error');
+                    return;
                 }
                 // Clear Solid OIDC browser session (if any) with timeout
                 try {

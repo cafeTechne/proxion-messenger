@@ -1,6 +1,6 @@
 // push.test.js — closed-app push reachability status (R78 L1). Pure helpers.
-import { describe, it, expect } from 'vitest';
-import { isPrivateHost, closedAppPushStatus } from './push.js';
+import { describe, it, expect, vi } from 'vitest';
+import { isPrivateHost, closedAppPushStatus, createPush } from './push.js';
 
 describe('isPrivateHost', () => {
     it('treats loopback, private, and mDNS hosts as unreachable', () => {
@@ -30,5 +30,27 @@ describe('closedAppPushStatus', () => {
     });
     it('is off when the origin is unparseable', () => {
         expect(closedAppPushStatus({ origin: 'not a url', permission: 'granted' })).toBe('off');
+    });
+});
+
+describe('disablePush', () => {
+    it('removes the gateway subscription it was given and the browser one', async () => {
+        const store = { proxion_push_sub_id: 'sub-1' };
+        globalThis.localStorage = {
+            getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); },
+            removeItem: (k) => { delete store[k]; },
+        };
+        globalThis.WebSocket = { OPEN: 1 };
+        const unsubscribe = vi.fn(async () => true);
+        globalThis.navigator = { serviceWorker: { ready: Promise.resolve({
+            pushManager: { getSubscription: async () => ({ unsubscribe }) } }) } };
+        const sent = [];
+        const push = createPush({ getSocket: () => ({ readyState: 1, send: (m) => sent.push(JSON.parse(m)) }) });
+        await push.disablePush();
+        expect(sent).toEqual([{ cmd: 'unsubscribe_push', subscription_id: 'sub-1' }]);
+        expect(unsubscribe).toHaveBeenCalled();
+        expect(store.proxion_push_sub_id).toBeUndefined();
+        push.rememberSubscription('sub-2');
+        expect(store.proxion_push_sub_id).toBe('sub-2');
     });
 });
