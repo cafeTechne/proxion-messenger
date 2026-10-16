@@ -77,6 +77,15 @@ export function recoveryErrorKey(op, status) {
     return 'restore.failedGeneric';
 }
 
+// Friendly copy for a failed /import, by HTTP status (null for a network
+// error) and the gateway's error code.
+export function importErrorKey(status, code) {
+    if (status === 429) return 'recovery.tooManyAttempts';
+    if (status === 403) return 'import.localOnly';
+    if (code === 'invalid_import_file') return 'import.notAnExport';
+    return 'import.failedGeneric';
+}
+
 export function createRecovery({ showToast, showPromptModal, showConfirm }) {
     let _code = null;
 

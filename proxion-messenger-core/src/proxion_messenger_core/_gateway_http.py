@@ -2589,8 +2589,11 @@ class HttpEndpointsMixin:
                                 b"Content-Length: " + str(len(resp_bytes)).encode() + b"\r\n\r\n" + resp_bytes
                             )
                     except Exception as exc:
-                        err = json.dumps({"error": str(exc)}).encode()
-                        writer.write(b"HTTP/1.1 400 Bad Request\r\nContent-Length: " +
+                        # A stable code, not the exception text: "Expecting value:
+                        # line 1 column 1" means nothing to the user.
+                        logger.warning("Import rejected: %s", exc)
+                        err = json.dumps({"error": "invalid_import_file"}).encode()
+                        writer.write(b"HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: " +
                                      str(len(err)).encode() + b"\r\n\r\n" + err)
                     await writer.drain()
                     return

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
     CODE_ALPHABET, generateRecoveryCode, normalizeRecoveryCode,
-    passphraseFromInput, createRecovery, recoveryErrorKey,
+    passphraseFromInput, createRecovery, recoveryErrorKey, importErrorKey,
 } from './recovery.js';
 
 describe('generateRecoveryCode', () => {
@@ -199,5 +199,15 @@ describe('backup / restore error copy', () => {
         const file = { arrayBuffer: async () => new ArrayBuffer(4) };
         await els['settings-restore-input'].handlers['change']({ target: { files: [file], value: '' } });
         expect(toasts).toEqual([['recovery.tooManyAttempts', 'error']]);
+    });
+});
+
+describe('importErrorKey', () => {
+    it('never passes the server text through', () => {
+        expect(importErrorKey(400, 'invalid_import_file')).toBe('import.notAnExport');
+        expect(importErrorKey(403, 'recovery_forbidden_over_tunnel')).toBe('import.localOnly');
+        expect(importErrorKey(429, 'rate_limited')).toBe('recovery.tooManyAttempts');
+        expect(importErrorKey(null, undefined)).toBe('import.failedGeneric');
+        expect(importErrorKey(500, 'Expecting value: line 1 column 1 (char 0)')).toBe('import.failedGeneric');
     });
 });

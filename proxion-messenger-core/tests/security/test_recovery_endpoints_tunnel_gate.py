@@ -174,3 +174,21 @@ async def test_backup_refused_over_tunnel_with_wrong_token(tmp_path, monkeypatch
         b"Authorization: Bearer WRONG\r\nX-Proxion-Passphrase: testpass\r\n\r\n")
     assert b"403" in resp, resp[:200]
     assert b"recovery_forbidden_over_tunnel" in resp, resp[:200]
+
+
+@pytest.mark.asyncio
+async def test_import_of_a_non_export_file_returns_a_stable_code(tmp_path):
+    # The client turns the code into "That file isn't a Proxion export"; the raw
+    # parser message ("Expecting value: line 1 column 1") must not reach it.
+    gw, http_port, ready = _start_gateway(tmp_path)
+    assert ready.wait(timeout=5)
+    await asyncio.sleep(0.1)
+    _set_tunnel_active(gw, False)
+    body = b"this is not json"
+    resp = await _http(http_port,
+        b"POST /import HTTP/1.0\r\nHost: 127.0.0.1\r\n"
+        b"Content-Type: application/json\r\nContent-Length: " + str(len(body)).encode()
+        + b"\r\n\r\n" + body)
+    assert b"400" in resp.split(b"\r\n", 1)[0], resp[:200]
+    assert b'"invalid_import_file"' in resp, resp[:300]
+    assert b"Expecting value" not in resp
