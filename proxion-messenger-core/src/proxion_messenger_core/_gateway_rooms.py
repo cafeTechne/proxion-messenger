@@ -2602,24 +2602,67 @@ class RoomHandlerMixin:
                 await websocket.send(json.dumps({"type": "error", "message": "room_topic_too_long"}))
                 return
             topic = _t
+        caller = self._client_webids.get(websocket, "")
+        await self._apply_room_update(room_id, name, topic, caller, extra_ws=websocket)
+        # Members on other gateways see the change too (the receiver re-checks
+        # that the caller is the owner or an admin).
+        if self._store:
+            _seen: set = set()
+            for _fm in (self._store.get_federated_room_members(room_id) or []):
+                _gw = _fm.get("gateway_url", "")
+                if not _gw or _gw in _seen:
+                    continue
+                _seen.add(_gw)
+                asyncio.create_task(self._relay_ephemeral(_gw, {
+                    "content_type": "room_update", "room_id": room_id,
+                    "name": name, "topic": topic, "from_webid": caller,
+                }))
+
+    async def _apply_room_update(self, room_id: str, name: str, topic: str, by: str,
+                                 extra_ws=None) -> None:
+        """Store a room's new name and topic and tell every local member."""
+        room = self._local_rooms.get(room_id)
+        if not room:
+            return
         room["name"] = name
         room["topic"] = topic
         if self._store:
             self._store.update_room_info(room_id, name, topic)
         event = json.dumps({
             "type": "room_updated", "room_id": room_id, "name": name, "topic": topic,
-            "by": self._client_webids.get(websocket, ""),
+            "by": by,
         })
         _targets = set(room.get("members", set()))
         if self._store:
             for _wid in self._store.get_room_members(room_id):
                 _targets.update(self._sockets_for(_wid))
-        _targets.add(websocket)
+        if extra_ws is not None:
+            _targets.add(extra_ws)
         for ws in list(_targets):
             try:
                 await ws.send(event)
             except Exception:
                 pass
+
+    async def _handle_room_update_relay(self, data: dict) -> tuple[str, str]:
+        """A room rename/topic change from a member gateway. Re-checks on this
+        side that the sender is the room's owner or an admin, and the limits."""
+        room_id = data.get("room_id", "")
+        caller = data.get("from_webid", "")
+        room = self._local_rooms.get(room_id)
+        if not room or not caller or not self._store:
+            return "404 Not Found", '{"error":"room_not_found"}'
+        _is_admin = self._store.get_room_role(room_id, caller) == "admin"
+        if caller != room.get("creator_webid") and not _is_admin:
+            return "403 Forbidden", '{"error":"not_authorized_for_room_update"}'
+        name = data.get("name")
+        topic = data.get("topic", "")
+        name = name.strip() if isinstance(name, str) else ""
+        topic = topic.strip() if isinstance(topic, str) else ""
+        if not name or len(name) > 64 or len(topic) > self._ROOM_TOPIC_MAX:
+            return "400 Bad Request", '{"error":"invalid_room_update"}'
+        await self._apply_room_update(room_id, name, topic, caller)
+        return "200 OK", '{"status":"ok"}'
 
     async def _handle_set_disappear_timer(self, websocket, data: dict) -> None:
         # thread_id is a room_id for rooms, or a DM cert_id for DMs — the client

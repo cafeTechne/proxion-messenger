@@ -647,6 +647,8 @@ class HttpEndpointsMixin:
             # BEFORE production this time: handler-level unit tests bypass this
             # allowlist entirely.
             "name", "mime", "data_b64",
+            # room rename/topic (room_update)
+            "topic",
             # ephemeral relay envelope signature (R55): full-payload Ed25519 sig by
             # the relaying gateway, verified against relay_sig_did over relay_ts.
             "relay_sig_did", "relay_ts",
@@ -680,7 +682,7 @@ class HttpEndpointsMixin:
             "voice_signal")
         _MEMBER_SIGNED_TYPES = (
             "room_message", "room_reaction", "room_edit", "room_delete", "room_moderation",
-            "room_emoji",
+            "room_emoji", "room_update",
             "file_offer", "file_accept", "file_reject", "file_chunk", "file_complete",
             "voice_channel_join", "voice_channel_leave",
             # presence/typing carry a CONTACT's from_webid (≠ the signing gateway),
@@ -707,7 +709,7 @@ class HttpEndpointsMixin:
                 # authorized by a first-use TOFU binding — that lets an attacker
                 # grab the owner's never-inbound-relayed identity. Require the
                 # signer binding to already be established by prior normal traffic.
-                _privileged = _ct in ("room_moderation", "room_emoji")
+                _privileged = _ct in ("room_moderation", "room_emoji", "room_update")
                 # room_edit/room_delete keep TOFU for the author branch (a member
                 # editing their OWN message on first contact), but their
                 # owner-authority branch (rewrite/delete ANY message as the room
@@ -791,6 +793,8 @@ class HttpEndpointsMixin:
             return await self._handle_room_moderation_relay(data)
         if data.get("content_type") == "room_emoji":
             return await self._handle_room_emoji_relay(data)
+        if data.get("content_type") == "room_update":
+            return await self._handle_room_update_relay(data)
 
         # ── Voice channel relay (cross-gateway group voice) ──
         if data.get("content_type") == "voice_channel_join":
