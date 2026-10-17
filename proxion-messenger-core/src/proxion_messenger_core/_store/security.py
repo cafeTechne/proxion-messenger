@@ -875,6 +875,15 @@ class SecurityStoreMixin(object):
                     dict(r) for r in conn.execute("SELECT * FROM display_names").fetchall()
                     if r["webid"] in people
                 ]
+            # Removed contacts and blocks travel with the backup, or importing it
+            # would authorize people the owner had removed or blocked.
+            revocations = [dict(r) for r in conn.execute(
+                "SELECT cert_id, peer_did, revoked_at FROM revocations"
+            ).fetchall()]
+            blocks = [dict(r) for r in conn.execute(
+                "SELECT owner_webid, blocked_webid, created_at FROM blocks"
+            ).fetchall()
+                if owner_webid is None or r["owner_webid"] == owner_webid]
 
         if minimize:
             _REDACTED = "[redacted]"
@@ -901,6 +910,8 @@ class SecurityStoreMixin(object):
             "dm_threads": dm_threads,
             "scheduled": scheduled,
             "display_names": display_names,
+            "revocations": revocations,
+            "blocks": blocks,
         }
     def import_data(
         self, data: dict, owner_pub_hex: str = "", owner_webid: str = ""
@@ -927,7 +938,11 @@ class SecurityStoreMixin(object):
         _MAX_IMPORT_DM_THREADS = 2000
         _MAX_IMPORT_DISPLAY_NAMES = 5000
         _MAX_CONTENT_BYTES = 16 * 1024  # 16 KiB per message
-        counts = {"messages": 0, "relationships": 0, "dm_threads": 0, "display_names": 0}
+        _MAX_IMPORT_REVOCATIONS = 5000
+        _MAX_IMPORT_BLOCKS = 5000
+        from .identity import stored_cert_expiry
+        counts = {"messages": 0, "relationships": 0, "dm_threads": 0, "display_names": 0,
+                  "revocations": 0, "blocks": 0, "relationships_skipped_revoked": 0}
         _touched_threads: set = set()
         # A row keeps the account it belongs to when that account is one of
         # this gateway's (a per-account export restored here); any other value
@@ -974,6 +989,53 @@ class SecurityStoreMixin(object):
                         _import_owners.add(_dm_owner)
                 except Exception:
                     pass
+            # Revocations and blocks before relationships, so a contact the owner
+            # removed is not authorized again by restoring a backup. These rows
+            # only take authorization away, so a hostile file gains nothing here.
+            def _ok_id(v):
+                return isinstance(v, str) and 0 < len(v) <= 1024
+            _rev_seen = 0
+            for rv in data.get("revocations", []) or []:
+                if _rev_seen >= _MAX_IMPORT_REVOCATIONS:
+                    break
+                _rev_seen += 1
+                if not isinstance(rv, dict):
+                    continue
+                _cid, _pdid = rv.get("cert_id"), rv.get("peer_did")
+                if not (_ok_id(_cid) and _ok_id(_pdid)):
+                    continue
+                _rat = rv.get("revoked_at")
+                if not isinstance(_rat, (int, float)):
+                    _rat = time.time()
+                conn.execute(
+                    "INSERT OR IGNORE INTO revocations (cert_id, peer_did, revoked_at) VALUES (?,?,?)",
+                    (_cid, _pdid, _rat),
+                )
+                counts["revocations"] += conn.execute("SELECT changes()").fetchone()[0]
+                conn.execute("UPDATE relationships SET revoked=1 WHERE certificate_id=?", (_cid,))
+                if not _cid.startswith("device:"):
+                    conn.execute("UPDATE relationships SET revoked=1 WHERE peer_did=?", (_pdid,))
+            _blk_seen = 0
+            for bk in data.get("blocks", []) or []:
+                if _blk_seen >= _MAX_IMPORT_BLOCKS:
+                    break
+                _blk_seen += 1
+                if not isinstance(bk, dict):
+                    continue
+                _bo, _bb = _row_owner(bk), bk.get("blocked_webid")
+                if not (_ok_id(_bo) and _ok_id(_bb)):
+                    continue
+                _bat = bk.get("created_at")
+                conn.execute(
+                    "INSERT OR IGNORE INTO blocks (owner_webid, blocked_webid, created_at) VALUES (?,?,?)",
+                    (_bo, _bb, int(_bat) if isinstance(_bat, (int, float)) else int(time.time())),
+                )
+                counts["blocks"] += conn.execute("SELECT changes()").fetchone()[0]
+            _revoked_peers = {r["peer_did"] for r in conn.execute(
+                "SELECT peer_did FROM revocations").fetchall()}
+            _revoked_certs = {r["cert_id"] for r in conn.execute(
+                "SELECT cert_id FROM revocations").fetchall()}
+
             _rel_seen = 0
             for rel in data.get("relationships", []):
                 if _rel_seen >= _MAX_IMPORT_RELATIONSHIPS:
@@ -1009,12 +1071,23 @@ class SecurityStoreMixin(object):
                         peer_did = pub_key_to_did(bytes.fromhex(peer_key_hex))
                     except Exception:
                         continue
+                    # A removed contact stays removed: skip a cert that was revoked
+                    # when exported, or whose cert or peer is revoked here.
+                    if (rel.get("revoked") or cert.certificate_id in _revoked_certs
+                            or peer_did in _revoked_peers):
+                        if rel.get("revoked"):
+                            conn.execute(
+                                "UPDATE relationships SET revoked=1 WHERE certificate_id=?",
+                                (cert.certificate_id,))
+                        counts["relationships_skipped_revoked"] += 1
+                        continue
                     conn.execute(
                         "INSERT OR IGNORE INTO relationships "
                         "(certificate_id, peer_pub_hex, peer_did, cert_json, created_at, expires_at, owner_webid) "
                         "VALUES (?,?,?,?,?,?,?)",
                         (cert.certificate_id, cert.subject, peer_did,
-                         json.dumps(cert.to_dict()), cert.created_at, cert.expires_at,
+                         json.dumps(cert.to_dict()), cert.created_at,
+                         stored_cert_expiry(cert.created_at, cert.expires_at),
                          _row_owner(rel)),
                     )
                     counts["relationships"] += conn.execute("SELECT changes()").fetchone()[0]

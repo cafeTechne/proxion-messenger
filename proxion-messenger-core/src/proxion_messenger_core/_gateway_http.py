@@ -2687,6 +2687,8 @@ class HttpEndpointsMixin:
                                 owner_pub_hex=self.agent.identity_pub_bytes.hex(),
                                 owner_webid=_import_owner,
                             )
+                            # Imported revocations take effect now, not on restart.
+                            self._revoked_dids |= self._store.get_revoked_dids()
                             await self.broadcast({"type": "import_complete", "counts": counts})
                             # R7: Save import provenance
                             if self._store:
