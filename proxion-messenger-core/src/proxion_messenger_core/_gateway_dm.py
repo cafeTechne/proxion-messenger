@@ -574,6 +574,19 @@ class DmHandlerMixin:
                     }))
                     return
         thread_id = data.get("thread_id") or target_webid
+        # The client picks the thread id from the peer alone, so a second account
+        # here DMing the same peer names the first account's thread. Store each
+        # account's conversation under an id that belongs to this pair.
+        client_thread_id = thread_id
+        if self._store and target_webid and sender_webid:
+            _reserved = thread_id in self._local_rooms or bool(self._store.get_room_members(thread_id))
+            thread_id = self._store.resolve_local_dm_thread(
+                sender_webid, target_webid, thread_id, reserved=_reserved)
+            if not thread_id:
+                await websocket.send(json.dumps({
+                    "type": "error", "code": "E_SCHEMA", "message": "thread_conflict",
+                }))
+                return
         import uuid as _uuid_local
         # message_id is client-supplied and is embedded verbatim in the pod
         # write-through path (local_dms/<thread_key>/<message_id>.json). Reject a
@@ -597,8 +610,7 @@ class DmHandlerMixin:
         if _provided_seq is not None:
             _seq_int = int(_provided_seq)
             if _seq_int > 0 and self._store:
-                _dm_thread_id = data.get("thread_id") or data.get("cert_id") or ""
-                _max_seq = self._store.get_max_seq_num(_dm_thread_id)
+                _max_seq = self._store.get_max_seq_num(thread_id)
                 if _seq_int <= _max_seq:
                     await websocket.send(json.dumps({
                         "type": "error", "message": "invalid_sequence",
@@ -685,7 +697,9 @@ class DmHandlerMixin:
             )
 
         # Echo to sender with own=True (all sender's tabs)
-        own_echo = json.dumps({**event, "own": True})
+        # client_thread_id tells the sender's client its thread moved to thread_id.
+        own_echo = json.dumps({**event, "own": True, **(
+            {"client_thread_id": client_thread_id} if thread_id != client_thread_id else {})})
         try:
             await websocket.send(own_echo)
         except Exception:

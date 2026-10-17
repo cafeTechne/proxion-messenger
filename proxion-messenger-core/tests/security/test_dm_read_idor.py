@@ -124,12 +124,17 @@ async def test_local_history_stranger_gets_empty(gateway, store):
 
 
 @pytest.mark.asyncio
-async def test_local_history_loopback_stranger_still_gets_data(loopback_gateway, store):
+async def test_local_history_loopback_stranger_gets_empty_for_dm_thread(loopback_gateway, store):
+    # Another account on the same gateway is a stranger even without auth
+    # enforcement: a same-gateway DM thread is readable by its two parties only.
     _seed_dm(store)
     ws = _ws(loopback_gateway, STRANGER)
     await loopback_gateway._handle_get_local_history(ws, {"thread_id": DM_THREAD})
     sent = _last(ws)
-    assert [m["message_id"] for m in sent["messages"]] == ["m-1"]
+    assert sent["messages"] == []
+    ws = _ws(loopback_gateway, PEER)
+    await loopback_gateway._handle_get_local_history(ws, {"thread_id": DM_THREAD})
+    assert [m["message_id"] for m in _last(ws)["messages"]] == ["m-1"]
 
 
 # ── get_pins ─────────────────────────────────────────────────────────────────

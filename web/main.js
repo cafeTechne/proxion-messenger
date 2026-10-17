@@ -1066,6 +1066,34 @@ import { initThemePicker } from './theme.js';
             if (!dmCount) appendSidebarEmpty(list, "dm-list");
         }
 
+        // The gateway keeps each account's DM with a peer under an id of its own;
+        // when it files a send under a different id than ours, move the sidebar
+        // entry and the open view to that id so later sends and history agree.
+        function adoptDmThreadId(oldId, newId) {
+            if (!oldId || !newId || oldId === newId) return;
+            if (localDmPeers[oldId]) {
+                if (!localDmPeers[newId]) localDmPeers[newId] = localDmPeers[oldId];
+                delete localDmPeers[oldId];
+            }
+            if (activeView && activeView.id === oldId) activeView.id = newId;
+            renderDmSidebar();
+        }
+
+        function downloadExport(ticket) {
+            const a = document.createElement('a');
+            a.href = ticket ? '/export?ticket=' + encodeURIComponent(ticket) : '/export';
+            a.download = `proxion-export-${new Date().toISOString().slice(0,10)}.json`;
+            a.click();
+        }
+
+        // An existing DM thread with this peer, if the sidebar already has one.
+        function dmThreadIdForPeer(peerDid) {
+            for (const [id, peer] of Object.entries(localDmPeers)) {
+                if (id.startsWith("local-") && peer && peer.peer_webid === peerDid) return id;
+            }
+            return null;
+        }
+
         // The conversation on screen went away (left, removed, deleted, hidden):
         // say what happened and offer the same first actions as the welcome pane.
         function _showThreadClosed(title) {
@@ -1655,6 +1683,11 @@ import { initThemePicker } from './theme.js';
                 case "message": {
                     const msg = normalizeRelayThreadId(event);
                     const id = msg.thread_id;
+                    // The gateway stored our DM under another id (another account
+                    // here already uses the one we picked): follow it there.
+                    if (msg.own && msg.client_thread_id && msg.client_thread_id !== id) {
+                        adoptDmThreadId(msg.client_thread_id, id);
+                    }
 
                     // Cache decrypted E2E DM plaintext locally so DM history survives
                     // reopen — the server keeps only ciphertext, which the forward
@@ -2297,10 +2330,14 @@ import { initThemePicker } from './theme.js';
                 case "typing":
                     handleTyping(event);
                     break;
+                case "export_ticket":
+                    if (event.ticket) downloadExport(event.ticket);
+                    break;
                 case "did_resolved": {
                     const peerDid = event.did;
                     const shortLabel = dmFallbackName(peerDid);
-                    const navId = "local-" + peerDid.replace(/[^a-zA-Z0-9]/g, "-");
+                    const navId = dmThreadIdForPeer(peerDid)
+                        || "local-" + peerDid.replace(/[^a-zA-Z0-9]/g, "-");
                     if (!localDmPeers[navId]) {
                         localDmPeers[navId] = { display_name: null, peer_webid: peerDid };
                         renderDmSidebar();
@@ -6012,11 +6049,15 @@ import { initThemePicker } from './theme.js';
 
             // R14.3: Export/Import
             const exportBtn = document.getElementById('export-data-btn');
+            // The export is this account's data only: ask the gateway for a
+            // one-time ticket over our socket, then download with it (the
+            // "export_ticket" event below).
             if (exportBtn) exportBtn.onclick = () => {
-                const a = document.createElement('a');
-                a.href = '/export';
-                a.download = `proxion-export-${new Date().toISOString().slice(0,10)}.json`;
-                a.click();
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ cmd: "export_ticket" }));
+                } else {
+                    downloadExport('');
+                }
             };
             const importInput = document.getElementById('import-file-input');
             // Import Data is now a real button (was a <label>, which isn't

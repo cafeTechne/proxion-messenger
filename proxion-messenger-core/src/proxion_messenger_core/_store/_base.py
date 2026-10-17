@@ -134,7 +134,7 @@ class _StoreBase(object):
         """Flush the WAL to the main database file (call before shutdown)."""
         with self._conn() as conn:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    _SCHEMA_VERSION = 60
+    _SCHEMA_VERSION = 61
     _integrity_ok: bool = True
     def _init_db(self) -> None:
         with self._conn() as conn:
@@ -1344,6 +1344,32 @@ class _StoreBase(object):
             [
                 "ALTER TABLE rooms ADD COLUMN topic TEXT NOT NULL DEFAULT ''",
             ],
+            # 61: dm_threads keyed by (owner_webid, thread_id). With thread_id
+            # alone, the second account on a gateway to use a thread id lost its
+            # row (INSERT OR IGNORE), and both parties of a same-gateway DM could
+            # not each own the thread. Existing rows keep their ids.
+            {
+                "rebuild": "dm_threads",
+                "temp": "dm_threads_v61",
+                "pre": [
+                    "DROP TABLE IF EXISTS dm_threads_v61",
+                    """CREATE TABLE dm_threads_v61 (
+                        thread_id    TEXT NOT NULL,
+                        peer_webid   TEXT NOT NULL,
+                        display_name TEXT,
+                        owner_webid  TEXT NOT NULL DEFAULT '',
+                        created_at   REAL NOT NULL,
+                        PRIMARY KEY (owner_webid, thread_id)
+                    )""",
+                ],
+                "copy": """INSERT OR IGNORE INTO dm_threads_v61
+                           (thread_id, peer_webid, display_name, owner_webid, created_at)
+                           SELECT thread_id, peer_webid, display_name, owner_webid, created_at
+                           FROM dm_threads""",
+                "post": [
+                    "CREATE INDEX IF NOT EXISTS idx_dm_threads_thread ON dm_threads(thread_id)",
+                ],
+            },
         ]
 
         for version, migration in enumerate(migrations, start=1):

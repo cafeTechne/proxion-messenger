@@ -796,30 +796,85 @@ class SecurityStoreMixin(object):
             "db_integrity_events": db_integrity_events,
             "relay_failed": relay_failed,
         }
-    def export_all(self, minimize: bool = True) -> dict:
+    def local_account_owners(self) -> set:
+        """Accounts that own data here (dm_threads / relationships owners)."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT owner_webid FROM dm_threads WHERE owner_webid != '' "
+                "UNION SELECT owner_webid FROM relationships WHERE owner_webid != ''"
+            ).fetchall()
+        return {r[0] for r in rows}
+
+    def export_all(self, minimize: bool = True, owner_webid: Optional[str] = None) -> dict:
         """Return a JSON-serializable export of all store data (R14.1).
 
         When minimize=True (default): redacts webhook tokens, truncates message
         content to 4 KiB, and strips security event detail payloads over 512 chars.
+
+        With *owner_webid*, export only that account's data: its DM threads and
+        contacts, messages in threads it is party to (or wrote), its scheduled
+        messages, and the display names of those people. Other local accounts'
+        conversations are left out.
         """
         from datetime import datetime, timezone
         _4KiB = 4096
         with self._conn() as conn:
-            messages = [dict(r) for r in conn.execute(
-                "SELECT * FROM messages ORDER BY timestamp"
-            ).fetchall()]
-            relationships = [dict(r) for r in conn.execute(
-                "SELECT * FROM relationships"
-            ).fetchall()]
-            dm_threads = [dict(r) for r in conn.execute(
-                "SELECT * FROM dm_threads"
-            ).fetchall()]
-            scheduled = [dict(r) for r in conn.execute(
-                "SELECT * FROM scheduled_messages WHERE cancelled = 0"
-            ).fetchall()]
-            display_names = [dict(r) for r in conn.execute(
-                "SELECT * FROM display_names"
-            ).fetchall()]
+            if owner_webid is None:
+                messages = [dict(r) for r in conn.execute(
+                    "SELECT * FROM messages ORDER BY timestamp"
+                ).fetchall()]
+                relationships = [dict(r) for r in conn.execute(
+                    "SELECT * FROM relationships"
+                ).fetchall()]
+                dm_threads = [dict(r) for r in conn.execute(
+                    "SELECT * FROM dm_threads"
+                ).fetchall()]
+                scheduled = [dict(r) for r in conn.execute(
+                    "SELECT * FROM scheduled_messages WHERE cancelled = 0"
+                ).fetchall()]
+                display_names = [dict(r) for r in conn.execute(
+                    "SELECT * FROM display_names"
+                ).fetchall()]
+            else:
+                dm_threads = [dict(r) for r in conn.execute(
+                    "SELECT * FROM dm_threads WHERE owner_webid = ?", (owner_webid,)
+                ).fetchall()]
+                # Owner-less relationships are legacy single-account rows, shown
+                # to any account (list_relationships default), so export them too.
+                relationships = [dict(r) for r in conn.execute(
+                    "SELECT * FROM relationships WHERE owner_webid = ? OR owner_webid = ''",
+                    (owner_webid,),
+                ).fetchall()]
+                threads = {t["thread_id"] for t in dm_threads}
+                # Threads another local account opened with this one.
+                threads.update(r[0] for r in conn.execute(
+                    "SELECT thread_id FROM dm_threads WHERE peer_webid = ?", (owner_webid,)
+                ).fetchall())
+                for rel in relationships:
+                    for k in ("certificate_id", "peer_did"):
+                        if rel.get(k):
+                            threads.add(rel[k])
+                threads.update(r[0] for r in conn.execute(
+                    "SELECT room_id FROM room_members WHERE webid = ?", (owner_webid,)
+                ).fetchall())
+                messages = [
+                    dict(r) for r in conn.execute(
+                        "SELECT * FROM messages ORDER BY timestamp"
+                    ).fetchall()
+                    if r["thread_id"] in threads or r["from_webid"] == owner_webid
+                ]
+                scheduled = [dict(r) for r in conn.execute(
+                    "SELECT * FROM scheduled_messages WHERE cancelled = 0 AND from_webid = ?",
+                    (owner_webid,),
+                ).fetchall()]
+                people = {owner_webid}
+                people.update(t["peer_webid"] for t in dm_threads if t.get("peer_webid"))
+                people.update(r["peer_did"] for r in relationships if r.get("peer_did"))
+                people.update(m["from_webid"] for m in messages if m.get("from_webid"))
+                display_names = [
+                    dict(r) for r in conn.execute("SELECT * FROM display_names").fetchall()
+                    if r["webid"] in people
+                ]
 
         if minimize:
             _REDACTED = "[redacted]"
@@ -862,10 +917,10 @@ class SecurityStoreMixin(object):
         issuer nor subject are skipped to prevent injection of third-party
         contacts.
 
-        dm_threads and relationships are stamped with ``owner_webid`` (the
-        importing account) rather than the embedded value, messages are only
-        restored for threads the importer participates in, and display names are
-        limited to the importer and its contacts.
+        dm_threads and relationships keep their embedded owner only when it is
+        an account that already owns data on this gateway; otherwise they are
+        stamped with ``owner_webid`` (the importing account). Display names are
+        limited to those owners and their contacts.
         """
         _MAX_IMPORT_MESSAGES = 10000
         _MAX_IMPORT_RELATIONSHIPS = 2000
@@ -874,25 +929,49 @@ class SecurityStoreMixin(object):
         _MAX_CONTENT_BYTES = 16 * 1024  # 16 KiB per message
         counts = {"messages": 0, "relationships": 0, "dm_threads": 0, "display_names": 0}
         _touched_threads: set = set()
+        # A row keeps the account it belongs to when that account is one of
+        # this gateway's (a per-account export restored here); any other value
+        # is replaced by the importing owner, so a backup cannot create rows
+        # under an account that does not exist here.
+        _local_owners = self.local_account_owners()
+        if owner_webid:
+            _local_owners.add(owner_webid)
+
+        def _row_owner(row: dict) -> str:
+            _o = row.get("owner_webid") or ""
+            return _o if _o in _local_owners else owner_webid
+
+        _import_owners = {owner_webid} if owner_webid else set()
+
+        from .dms import _rows_fit_pair
         with self._conn() as conn:
-            # dm_threads first so imported messages can be scoped against them,
-            # and stamp the importing account as owner (never the file value) so
-            # a hostile backup cannot create threads under someone else's account.
+            # dm_threads first so imported messages can be scoped against them.
             _dm_seen = 0
             for dm in data.get("dm_threads", []):
                 if _dm_seen >= _MAX_IMPORT_DM_THREADS:
                     break
                 _dm_seen += 1
                 try:
+                    _dm_owner = _row_owner(dm)
+                    _dm_peer = dm.get("peer_webid", "")
+                    # Never file a thread under an id another pair's DM uses.
+                    _existing = conn.execute(
+                        "SELECT owner_webid, peer_webid FROM dm_threads WHERE thread_id = ?",
+                        (dm.get("thread_id"),),
+                    ).fetchall()
+                    if _dm_owner and not _rows_fit_pair(_existing, _dm_owner, _dm_peer):
+                        continue
                     conn.execute(
                         "INSERT OR IGNORE INTO dm_threads "
                         "(thread_id, peer_webid, display_name, owner_webid, created_at) "
                         "VALUES (?,?,?,?,?)",
-                        (dm.get("thread_id"), dm.get("peer_webid", ""),
-                         dm.get("display_name"), owner_webid,
+                        (dm.get("thread_id"), _dm_peer,
+                         dm.get("display_name"), _dm_owner,
                          dm.get("created_at", 0)),
                     )
                     counts["dm_threads"] += conn.execute("SELECT changes()").fetchone()[0]
+                    if _dm_owner:
+                        _import_owners.add(_dm_owner)
                 except Exception:
                     pass
             _rel_seen = 0
@@ -936,9 +1015,11 @@ class SecurityStoreMixin(object):
                         "VALUES (?,?,?,?,?,?,?)",
                         (cert.certificate_id, cert.subject, peer_did,
                          json.dumps(cert.to_dict()), cert.created_at, cert.expires_at,
-                         owner_webid),
+                         _row_owner(rel)),
                     )
                     counts["relationships"] += conn.execute("SELECT changes()").fetchone()[0]
+                    if _row_owner(rel):
+                        _import_owners.add(_row_owner(rel))
                 except Exception:
                     pass
             _total_msg_imported = 0
@@ -990,16 +1071,20 @@ class SecurityStoreMixin(object):
                     # (DM peers and relationship peers); skip unrelated webids.
                     if owner_webid:
                         if _allowed_dn is None:
-                            _allowed_dn = {owner_webid}
+                            # The importer, plus any local account whose rows
+                            # this file restored, and their contacts.
+                            _allowed_dn = set(_import_owners)
+                            _ph = ",".join("?" * len(_import_owners))
+                            _ow = tuple(_import_owners)
                             for r in conn.execute(
-                                "SELECT peer_webid FROM dm_threads WHERE owner_webid = ?",
-                                (owner_webid,),
+                                f"SELECT peer_webid FROM dm_threads WHERE owner_webid IN ({_ph})",
+                                _ow,
                             ).fetchall():
                                 if r["peer_webid"]:
                                     _allowed_dn.add(r["peer_webid"])
                             for r in conn.execute(
-                                "SELECT peer_did FROM relationships WHERE owner_webid = ?",
-                                (owner_webid,),
+                                f"SELECT peer_did FROM relationships WHERE owner_webid IN ({_ph})",
+                                _ow,
                             ).fetchall():
                                 if r["peer_did"]:
                                     _allowed_dn.add(r["peer_did"])

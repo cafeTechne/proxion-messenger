@@ -742,6 +742,15 @@ class RoomHandlerMixin:
                     "type": "local_history", "thread_id": thread_id, "messages": [],
                 }))
                 return
+        # A same-gateway DM thread is readable only by the two accounts in it,
+        # with or without auth enforcement (other local accounts are strangers).
+        if thread_id and thread_id not in self._local_rooms and self._store:
+            _parties = self._store.dm_thread_parties(thread_id)
+            if _parties and self._client_webids.get(websocket) not in _parties:
+                await websocket.send(json.dumps({
+                    "type": "local_history", "thread_id": thread_id, "messages": [],
+                }))
+                return
         after_ts = data.get("after_timestamp")
         before_ts = data.get("before_timestamp")
         try:
@@ -1076,6 +1085,11 @@ class RoomHandlerMixin:
         for t in self._store.get_dm_threads(owner_webid=actor):
             if t.get("thread_id") == thread_id:
                 return True
+        # ...or is the peer another local account opened the thread with (the
+        # gateway keeps a thread id to one pair, see resolve_local_dm_thread).
+        _parties = self._store.dm_thread_parties(thread_id)
+        if _parties and actor in _parties:
+            return True
         # explicit participant binding (thread_participant_bindings)
         if self._store.is_thread_participant_binding(thread_id, actor):
             return True

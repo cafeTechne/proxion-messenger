@@ -81,6 +81,34 @@ class HttpEndpointsMixin:
             return bool(_req) and _hmac_rec.compare_digest(_req, _api_token)
         return False
 
+    # /export is a plain download link, so the account it is for rides in a
+    # short-lived single-use ticket minted over the caller's authenticated socket.
+    _EXPORT_TICKET_TTL = 120.0
+
+    async def _handle_export_ticket(self, websocket) -> None:
+        webid = self._client_webids.get(websocket)
+        if not webid:
+            await websocket.send(json.dumps({"type": "error", "message": "Not registered"}))
+            return
+        import secrets as _secrets
+        tickets = getattr(self, "_export_tickets", None)
+        if tickets is None:
+            tickets = self._export_tickets = {}
+        now = time.monotonic()
+        for k in [k for k, (_w, exp) in tickets.items() if exp <= now]:
+            tickets.pop(k, None)
+        ticket = _secrets.token_urlsafe(24)
+        tickets[ticket] = (webid, now + self._EXPORT_TICKET_TTL)
+        await websocket.send(json.dumps({"type": "export_ticket", "ticket": ticket}))
+
+    def _take_export_ticket(self, ticket: str):
+        """The account a valid /export ticket was minted for (consumed), else None."""
+        tickets = getattr(self, "_export_tickets", None) or {}
+        entry = tickets.pop(ticket, None) if ticket else None
+        if not entry or entry[1] <= time.monotonic():
+            return None
+        return entry[0]
+
     def _recovery_endpoint_allowed(self, headers_raw: dict) -> bool:
         """Whether an identity recovery/backup endpoint (/backup, /restore, /export,
         /import, /security-snapshot) may run for this request.
@@ -1862,7 +1890,25 @@ class HttpEndpointsMixin:
                         # R8: default to minimized export; require full=1 query param for full payload
                         _qs_exp = parts[1].split("?", 1)[1] if (len(parts) > 1 and "?" in parts[1]) else ""
                         _full_export = "full=1" in _qs_exp
-                        export_data = self._store.export_all(minimize=not _full_export)
+                        # Scope to the account that asked (ticket from its socket).
+                        # Without one, a gateway holding several accounts' data
+                        # exports in full only for the operator's token.
+                        from urllib.parse import parse_qs as _pqs_exp
+                        _ticket = (_pqs_exp(_qs_exp).get("ticket") or [""])[0]
+                        _export_owner = None
+                        if _ticket:
+                            _export_owner = self._take_export_ticket(_ticket)
+                            if not _export_owner:
+                                await _write_json(writer, 403, {"error": "export_ticket_invalid"})
+                                await writer.drain()
+                                return
+                        elif (len(self._store.local_account_owners() - {self._own_gateway_did()}) > 1
+                              and not self._recovery_token_ok(headers_raw)):
+                            await _write_json(writer, 403, {"error": "export_needs_account"})
+                            await writer.drain()
+                            return
+                        export_data = self._store.export_all(
+                            minimize=not _full_export, owner_webid=_export_owner)
                         resp_bytes = json.dumps(export_data).encode()
                         # R14.1.3: chunked transfer encoding — avoids holding Content-Length
                         CHUNK = 65536

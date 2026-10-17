@@ -19,6 +19,31 @@ logger = logging.getLogger(__name__)
 
 
 
+def derive_local_dm_thread_id(owner_webid: str, peer_webid: str, attempt: int = 0) -> str:
+    """Thread id for owner's DM with peer when the plain ``local-<peer>`` id the
+    web client picks is already taken by another account's conversation."""
+    import hashlib
+    import re
+    base = "local-" + re.sub(r"[^a-zA-Z0-9]", "-", peer_webid or "")
+    tag = hashlib.sha256((owner_webid or "").encode("utf-8")).hexdigest()[:12]
+    tid = f"{base}-{tag}"
+    return tid if not attempt else f"{tid}-{attempt + 1}"
+
+
+def _rows_fit_pair(rows, a: str, b: str) -> bool:
+    """True when every dm_threads row is a conversation between a and b. A
+    legacy row with no owner only has to name one of them as its peer."""
+    pair = {a, b}
+    for r in rows:
+        owner, peer = r["owner_webid"] or "", r["peer_webid"] or ""
+        if not owner:
+            if peer not in pair:
+                return False
+        elif {owner, peer} != pair:
+            return False
+    return True
+
+
 class DmStoreMixin(object):
     def save_dm_thread(
         self,
@@ -38,9 +63,54 @@ class DmStoreMixin(object):
             )
             if display_name:
                 conn.execute(
-                    "UPDATE dm_threads SET display_name = ? WHERE thread_id = ?",
-                    (display_name, thread_id),
+                    "UPDATE dm_threads SET display_name = ? WHERE thread_id = ? AND owner_webid = ?",
+                    (display_name, thread_id, owner_webid),
                 )
+
+    def get_dm_thread_rows(self, thread_id: str) -> list[dict]:
+        """Every account's dm_threads row for *thread_id* (one per owner)."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM dm_threads WHERE thread_id = ?", (thread_id,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def dm_thread_parties(self, thread_id: str) -> Optional[set]:
+        """The identities a DM thread is between, or None when no dm_threads
+        row exists or a legacy owner-less row leaves the owner unknown."""
+        rows = self.get_dm_thread_rows(thread_id)
+        if not rows or any(not r["owner_webid"] for r in rows):
+            return None
+        parties = set()
+        for r in rows:
+            parties.add(r["owner_webid"])
+            if r["peer_webid"]:
+                parties.add(r["peer_webid"])
+        return parties
+
+    def resolve_local_dm_thread(
+        self, owner_webid: str, peer_webid: str, thread_id: str, reserved: bool = False,
+    ) -> Optional[str]:
+        """The thread id owner's DM with peer is stored under.
+
+        The client names the thread (``local-<peer>``), so two accounts on one
+        gateway DMing the same peer pick the same id. Keep the client's id when
+        it is free or already this pair's conversation; otherwise use owner's
+        existing thread with peer, or a per-owner id. *reserved* marks an id
+        that is not a DM at all (a room). Returns None if no id is usable."""
+        if not reserved and _rows_fit_pair(self.get_dm_thread_rows(thread_id), owner_webid, peer_webid):
+            return thread_id
+        for t in self.get_dm_threads(owner_webid=owner_webid):
+            tid = t["thread_id"]
+            if (t["peer_webid"] == peer_webid and tid != thread_id
+                    and _rows_fit_pair(self.get_dm_thread_rows(tid), owner_webid, peer_webid)):
+                return tid
+        for attempt in range(5):
+            tid = derive_local_dm_thread_id(owner_webid, peer_webid, attempt)
+            if _rows_fit_pair(self.get_dm_thread_rows(tid), owner_webid, peer_webid):
+                return tid
+        return None
+
     def get_dm_threads(self, owner_webid: str = '') -> list[dict]:
         with self._conn() as conn:
             rows = conn.execute(

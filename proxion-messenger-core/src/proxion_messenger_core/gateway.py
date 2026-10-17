@@ -1277,6 +1277,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_local_dm(websocket, data)
             elif cmd == "get_local_history":
                 await self._handle_get_local_history(websocket, data)
+            elif cmd == "export_ticket":
+                await self._handle_export_ticket(websocket)
             elif cmd == "delete_local_message":
                 await self._handle_delete_local_message(websocket, data)
             elif cmd == "edit_local_message":
