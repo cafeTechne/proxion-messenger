@@ -70,22 +70,26 @@ def _count(store, thread_id):
         ).fetchone()[0]
 
 
-def test_voice_message_refused_past_thread_count_cap(store):
-    # Seed the thread up to the 5000-message ceiling.
+def test_voice_message_past_thread_ceiling_prunes_oldest(store, monkeypatch):
+    # A full thread keeps the newest message; retention drops the oldest.
+    from proxion_messenger_core._store import messages as msgmod
+    monkeypatch.setattr(msgmod, "THREAD_RETENTION_MESSAGES", 50)
+    monkeypatch.setattr(msgmod, "THREAD_RETENTION_CHECK_EVERY", 1)
     with store._conn() as conn:
         conn.executemany(
             "INSERT INTO messages (message_id, thread_id, thread_type, from_webid, content, timestamp) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             [(f"m{i}", "capthread", "dm", "did:key:a", "x", "2026-01-01T00:00:00+00:00")
-             for i in range(5000)],
+             for i in range(50)],
         )
-    assert _count(store, "capthread") == 5000
 
     store.save_voice_message(
         "v-over", "capthread", "dm", "did:key:a", "Alice",
         base64.b64encode(b"audio").decode(), 1000, "2026-01-01T00:00:01+00:00",
     )
-    assert _count(store, "capthread") == 5000, "voice message must be refused over the count cap"
+    assert store.get_message("v-over") is not None
+    assert store.get_message("m0") is None
+    assert _count(store, "capthread") == 50
 
 
 def test_normal_voice_message_still_stored(store):

@@ -370,46 +370,37 @@ async def test_scheduler_null_ws_identity(gw, tmp_path):
 # 8. LocalStore save_message quota enforcement
 # ---------------------------------------------------------------------------
 
-def test_save_message_quota_enforced(tmp_path):
-    """save_message must raise ValueError once a thread reaches 5000 messages."""
+def test_save_message_quota_enforced(tmp_path, monkeypatch):
+    """A thread never grows past the retention ceiling, and a new message is
+    never dropped: the oldest is pruned instead."""
     from proxion_messenger_core.local_store import LocalStore
+    from proxion_messenger_core._store import messages as msgmod
     import uuid
 
-    db_path = str(tmp_path / "quota_test.db")
-    store = LocalStore(db_path)
-
+    monkeypatch.setattr(msgmod, "THREAD_RETENTION_MESSAGES", 100)
+    monkeypatch.setattr(msgmod, "THREAD_RETENTION_CHECK_EVERY", 1)
+    store = LocalStore(str(tmp_path / "quota_test.db"))
     thread_id = "thread_quota_test"
-
-    # Insert messages up to the limit
-    for i in range(5000):
+    for i in range(100):
         store.save_message(
-            message_id=str(uuid.uuid4()),
-            thread_id=thread_id,
-            thread_type="room",
-            from_webid="did:key:alice",
-            from_display_name="Alice",
-            content=f"msg {i}",
-            timestamp=f"2026-01-01T00:00:{i // 60:02d}Z",
+            message_id=f"old-{i}", thread_id=thread_id, thread_type="room",
+            from_webid="did:key:alice", from_display_name="Alice",
+            content=f"msg {i}", timestamp=f"2026-01-01T00:00:{i // 60:02d}Z",
         )
-
-    # The 5001st message must be silently dropped (quota exhausted)
     overflow_id = str(uuid.uuid4())
     store.save_message(
-        message_id=overflow_id,
-        thread_id=thread_id,
-        thread_type="room",
-        from_webid="did:key:alice",
-        from_display_name="Alice",
-        content="one too many",
-        timestamp="2026-01-01T01:24:00Z",
+        message_id=overflow_id, thread_id=thread_id, thread_type="room",
+        from_webid="did:key:alice", from_display_name="Alice",
+        content="one more", timestamp="2026-01-01T01:24:00Z",
     )
-    # Verify the overflow message was NOT persisted
-    from proxion_messenger_core.local_store import LocalStore as _LS
-    with _LS(db_path)._conn() as conn:
-        row = conn.execute(
+    with store._conn() as conn:
+        assert conn.execute(
             "SELECT 1 FROM messages WHERE message_id = ?", (overflow_id,)
-        ).fetchone()
-    assert row is None, "Overflow message should not be stored when quota is reached"
+        ).fetchone() is not None
+        assert conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE thread_id = ?", (thread_id,)
+        ).fetchone()[0] == 100
+    assert store.get_message("old-0") is None
 
 
 def test_save_message_quota_separate_threads(tmp_path):

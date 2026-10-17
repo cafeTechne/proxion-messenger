@@ -245,48 +245,31 @@ async def test_replay_nonce_same_sender_deduplicated(tmp_path):
 # 4. Import quota bypass prevention
 # ---------------------------------------------------------------------------
 
-def test_import_data_respects_message_count_quota(tmp_path):
-    """import_data must skip messages that would exceed the per-thread count limit."""
-    db_path = str(tmp_path / "import_quota.db")
-    store = LocalStore(db_path)
+def test_import_data_respects_message_count_quota(tmp_path, monkeypatch):
+    """An import cannot grow a thread past the retention ceiling: the thread is
+    pruned back to it, oldest first."""
+    from proxion_messenger_core._store import messages as msgmod
+    monkeypatch.setattr(msgmod, "THREAD_RETENTION_MESSAGES", 100)
+    store = LocalStore(str(tmp_path / "import_quota.db"))
     thread_id = "thread_import_test"
-
-    # Fill the thread to the limit via normal save_message
-    for i in range(5000):
+    for i in range(100):
         store.save_message(
-            message_id=str(uuid.uuid4()),
-            thread_id=thread_id,
-            thread_type="room",
-            from_webid="did:key:alice",
-            from_display_name="Alice",
-            content=f"msg {i}",
-            timestamp="2026-01-01T00:00:00Z",
+            message_id=f"old-{i}", thread_id=thread_id, thread_type="room",
+            from_webid="did:key:alice", from_display_name="Alice",
+            content=f"msg {i}", timestamp="2026-01-01T00:00:00Z",
         )
-
-    # Attempt to import more messages into the same thread
-    overflow_id = str(uuid.uuid4())
-    counts = store.import_data({
+    store.import_data({
         "messages": [
-            {
-                "message_id": overflow_id,
-                "thread_id": thread_id,
-                "thread_type": "room",
-                "from_webid": "did:key:alice",
-                "content": "smuggled message",
-                "timestamp": "2026-01-01T01:00:00Z",
-            }
+            {"message_id": f"imp-{i}", "thread_id": thread_id, "thread_type": "room",
+             "from_webid": "did:key:alice", "content": "imported",
+             "timestamp": "2026-01-01T01:00:00Z"}
+            for i in range(20)
         ]
     })
-
-    # The overflow message must have been skipped (count 0)
-    assert counts["messages"] == 0, f"Expected 0 imported, got {counts['messages']}"
-
-    # Verify it's not in the database
     with store._conn() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM messages WHERE message_id = ?", (overflow_id,)
-        ).fetchone()
-    assert row is None, "import_data must not insert messages beyond the quota"
+        assert conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE thread_id = ?", (thread_id,)
+        ).fetchone()[0] == 100
 
 
 def test_import_data_respects_byte_quota(tmp_path):
