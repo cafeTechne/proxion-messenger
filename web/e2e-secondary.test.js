@@ -231,7 +231,12 @@ describe('chunked files', () => {
         for (let i = 0; i < plain.length; i++) plain[i] = (i * 7) & 0xff;
         plain.set(_enc.encode('%PDF-1.7 board minutes'), 0);
         const sent = [];
-        const ftA = createFileTransfer({ sendCmd: (cmd, p) => sent.push({ cmd, ...p }), showToast() {}, renderMessage() {}, getActiveView: () => viewAtAlice });
+        // Stand in for the gateway (chunk acks) and Bob (the final receipt).
+        const ftA = createFileTransfer({ sendCmd: (cmd, p) => {
+            sent.push({ cmd, ...p });
+            if (cmd === 'file_chunk') queueMicrotask(() => ftA.handleFileChunkAck({ file_id: p.file_id, seq: p.seq }));
+            if (cmd === 'file_complete') queueMicrotask(() => ftA.handleFileReceived({ file_id: p.file_id }));
+        }, showToast() {}, renderMessage() {}, getActiveView: () => viewAtAlice });
         const file = { name: 'minutes.pdf', type: 'application/pdf', arrayBuffer: async () => plain.buffer };
         const p = ftA.sendFileChunked(file, 'bob', { seal: (u8, meta) => a.sealFile(viewAtAlice, u8, meta, { echo: false }) });
         for (let i = 0; i < 200 && !sent.some(s => s.cmd === 'file_offer'); i++) await new Promise(r => setTimeout(r, 5));

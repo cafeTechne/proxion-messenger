@@ -160,6 +160,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         self._rate_auth_counters = {}  # websocket -> [count, window_start]  (auth 5/min)
         self._rate_heavy_counters = {} # websocket -> [count, window_start]  (heavy 10/min)
         self._rate_signal_counters = {} # websocket -> [count, window_start]  (call signaling)
+        self._rate_file_counters = {}   # websocket -> [count, window_start]  (file chunks)
         self._rate_lock = asyncio.Lock()
         self._ip_connection_counts: dict = {}  # remote_ip -> active connection count
         self._revoked_sessions: set = set()  # websockets awaiting close after revocation
@@ -980,6 +981,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             self._rate_auth_counters.pop(websocket, None)
             self._rate_heavy_counters.pop(websocket, None)
             self._rate_signal_counters.pop(websocket, None)
+            self._rate_file_counters.pop(websocket, None)
             self._display_names.pop(websocket, None)
             self._revoked_sessions.discard(websocket)
             if webid:
@@ -1055,6 +1057,24 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         entry[0] += 1
         return True
 
+    # A max-size file is ~400 chunks, far past the general 60/10s budget, so
+    # chunks get their own. The sender keeps a small window of unacked chunks,
+    # so in practice the relay round trip paces it well under this.
+    _FILE_CHUNK_RATE_LIMIT = 512
+
+    def _check_file_chunk_rate_limit(self, websocket) -> bool:
+        """Return True if a file_chunk is allowed (512 per 10s per socket)."""
+        import time as _time
+        now = _time.monotonic()
+        entry = self._rate_file_counters.get(websocket)
+        if entry is None or now - entry[1] >= 10.0:
+            self._rate_file_counters[websocket] = [1, now]
+            return True
+        if entry[0] >= self._FILE_CHUNK_RATE_LIMIT:
+            return False
+        entry[0] += 1
+        return True
+
     def _check_auth_rate_limit(self, websocket) -> bool:
         """Return True if auth command is allowed (5 per minute per socket)."""
         webid = self._client_webids.get(websocket, "")
@@ -1114,6 +1134,11 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if cmd in self._SIGNAL_RATE_COMMANDS:
             if not self._check_signal_rate_limit(websocket):
                 await websocket.send(json.dumps({"type": "error", "code": "E_RATE", "message": "rate_limited"}))
+                return
+        elif cmd == "file_chunk":
+            if not self._check_file_chunk_rate_limit(websocket):
+                await websocket.send(json.dumps({"type": "file_send_failed", "file_id": data.get("file_id", ""),
+                                                 "reason": "rate_limited"}))
                 return
         # Global rate limit: 60 cmd per 10s
         elif cmd not in _RATE_EXEMPT and not self._check_ws_rate_limit(websocket):
@@ -1288,6 +1313,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_file_chunk(websocket, data)
             elif cmd == "file_complete":
                 await self._handle_file_complete(websocket, data)
+            elif cmd == "file_received":
+                await self._handle_file_received(websocket, data)
             elif cmd == "auth_response":
                 await self._handle_auth_response(websocket, data)
             elif cmd == "register":

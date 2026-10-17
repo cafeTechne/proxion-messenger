@@ -141,6 +141,7 @@
   "file.tooLarge": "File too large, max 25 MB",
   "file.largeDmOnly": "Large files can only be sent in direct messages",
   "file.sendFailed": "File send failed",
+  "file.deliveryFailed": "{filename} did not reach the recipient, try sending it again",
   "invite.shortLinkCopied": "Short link copied!",
   "app.gatewayCrashed": "Gateway crashed - please restart the app",
   "backup.downloaded": "Identity backup downloaded.",

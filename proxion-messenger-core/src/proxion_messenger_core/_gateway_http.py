@@ -51,6 +51,19 @@ async def _read_http_body(reader, n: int, timeout: float = 10.0) -> bytes:
 
 _INVITE_DOWNLOAD_URL = "https://github.com/cafeTechne/proxion-messenger"
 
+# /relay budget for chunked file transfer. One max-size (25 MB) file is ~400
+# chunks and ~35 MB of base64; allow a few per minute from one gateway.
+FILE_RELAY_CHUNKS_PER_MIN = 1200
+FILE_RELAY_BYTES_PER_MIN = 128 * 1024 * 1024
+
+
+def _relay_body_is_file_chunk(body: bytes) -> bool:
+    try:
+        d = json.loads(body)
+    except Exception:
+        return False
+    return isinstance(d, dict) and d.get("content_type") == "file_chunk"
+
 
 class HttpEndpointsMixin:
 
@@ -130,6 +143,21 @@ class HttpEndpointsMixin:
                 and not self._public_deployment()):
             return True
         return self._recovery_token_ok(headers_raw)
+
+    def _file_relay_bytes_ok(self, signer: str, chunk, now: float) -> bool:
+        """Charge a relayed file chunk to its signing gateway's byte budget.
+
+        Bounded by the number of gateways that pass envelope verification and
+        relationship binding, so the map cannot be grown by strangers."""
+        n = len(chunk) if isinstance(chunk, str) else 0
+        buckets = self.__dict__.setdefault("_file_relay_bytes", {})
+        b = buckets.setdefault(signer, deque())
+        while b and (now - b[0][0]) >= 60:
+            b.popleft()
+        if sum(x[1] for x in b) + n > FILE_RELAY_BYTES_PER_MIN:
+            return False
+        b.append((now, n))
+        return True
 
     def _prune_relay_rate_limiter(self, now: float) -> None:
         buckets = getattr(self, "_relay_rate_limiter", None)
@@ -652,10 +680,15 @@ class HttpEndpointsMixin:
 
         now = time.time()
         self._prune_relay_rate_limiter(now)
-        bucket = self._relay_rate_limiter.setdefault(client_ip, deque())
+        # File chunks count against their own per-IP bucket (a max-size file is
+        # ~400 of them) plus a per-gateway byte budget once the signer is known.
+        _is_chunk = isinstance(data, dict) and data.get("content_type") == "file_chunk"
+        _rl_key, _rl_cap = ((client_ip + "|file", FILE_RELAY_CHUNKS_PER_MIN) if _is_chunk
+                            else (client_ip, 60))
+        bucket = self._relay_rate_limiter.setdefault(_rl_key, deque())
         while bucket and (now - bucket[0]) >= 60:
             bucket.popleft()
-        if len(bucket) >= 60:
+        if len(bucket) >= _rl_cap:
             return "429 Too Many Requests", '{"error":"rate limit exceeded"}'
         bucket.append(now)
 
@@ -733,6 +766,7 @@ class HttpEndpointsMixin:
             "room_message", "room_reaction", "room_edit", "room_delete", "room_moderation",
             "room_emoji", "room_update",
             "file_offer", "file_accept", "file_reject", "file_chunk", "file_complete",
+            "file_received",
             "voice_channel_join", "voice_channel_leave",
             # presence/typing carry a CONTACT's from_webid (≠ the signing gateway),
             # so bind from_webid→signer like the other member ephemerals; the seed is
@@ -814,6 +848,8 @@ class HttpEndpointsMixin:
             # A verified relay from this gateway means it is up: send it whatever
             # we queued for it while it was down.
             self._note_peer_contact(_signer, data.get("origin_gateway_url", ""))
+            if _ct == "file_chunk" and not self._file_relay_bytes_ok(_signer, data.get("data"), now):
+                return "429 Too Many Requests", '{"error":"rate limit exceeded"}'
 
         # ── Voice signal relay — ephemeral, delivered immediately, not queued ──
         if data.get("content_type") == "voice_signal":
@@ -875,7 +911,8 @@ class HttpEndpointsMixin:
 
         # ── Chunked file transfer relay (cross-gateway) ──
         if data.get("content_type") in (
-            "file_offer", "file_accept", "file_reject", "file_chunk", "file_complete"
+            "file_offer", "file_accept", "file_reject", "file_chunk", "file_complete",
+            "file_received",
         ):
             return await self._handle_file_relay(data)
 
@@ -1230,6 +1267,9 @@ class HttpEndpointsMixin:
         _http_ip_rate: dict = {}
         _HTTP_RATE_LIMITS = {
             "relay":   60,   # /relay: 60/min
+            # /relay file_chunk: a 25 MB file is ~400 chunks, so chunks get their
+            # own count; _handle_relay_post also caps bytes per signing gateway.
+            "relay_file": FILE_RELAY_CHUNKS_PER_MIN,
             "invite":  20,   # /invite, /invite/accept: 20/min
             "backup":   5,   # /backup, /restore, /import: 5/min
             "turn":    30,   # /turn-credentials: 30/min
@@ -1398,13 +1438,18 @@ class HttpEndpointsMixin:
 
                 # ── POST /relay — cross-gateway message delivery ──
                 if method == "POST" and path == "/relay":
-                    if _check_http_rate(peer_ip, "relay"):
+                    # content_length is already capped at the /relay limit above.
+                    # Reading only 64 KiB truncated every file chunk (~88 KB of
+                    # base64), so chunked files never arrived cross-gateway.
+                    body = b""
+                    if content_length > 0:
+                        body = await _read_http_body(
+                            reader, min(content_length, _ENDPOINT_SIZE_LIMITS["/relay"]), 10.0)
+                    _rl_group = "relay_file" if _relay_body_is_file_chunk(body) else "relay"
+                    if _check_http_rate(peer_ip, _rl_group):
                         await _write_429(writer)
                         await writer.drain()
                         return
-                    body = b""
-                    if content_length > 0:
-                        body = await _read_http_body(reader, min(content_length, 65536), 10.0)
                     peer = writer.get_extra_info("peername")
                     client_ip = peer[0] if isinstance(peer, tuple) and peer else "unknown"
                     status, response = await self._handle_relay_post(body, client_ip=client_ip)

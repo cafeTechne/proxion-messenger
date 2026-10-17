@@ -1,9 +1,11 @@
 """FileTransferMixin — chunked large-file transfer (R39).
 
-Lifts the 512 KB inline limit. Gateways act as pure forwarders: the sending
+Lifts the 512 KB inline limit. Gateways act as forwarders: the sending
 browser splits the file into 64 KB chunks (base64 ≈ 88 KB, under the 128 KB
-relay cap) and the receiving browser reassembles. No server-side buffering,
-so gateway memory is bounded regardless of file size.
+/relay body cap) and the receiving browser reassembles. Each chunk is acked
+back to the sender once delivered (cross-gateway: once the peer gateway took
+it), the sender keeps only a small window unacked, and the receiver confirms
+the whole file with file_received. Gateway memory stays bounded by that window.
 
 The recipient must be online — transfer is real-time, like a voice call.
 Small files continue to use the inline store-and-forward path in
@@ -69,7 +71,98 @@ def sanitize_file_dims(file_obj):
     return clean
 
 
+# Cross-gateway delivery of one transfer's signals. They are relayed one at a
+# time in the order the browser sent them, so file_complete can never overtake a
+# chunk, and each relay is retried before the transfer is failed. The sender
+# keeps a small window of unacked chunks, so a well-behaved client never queues
+# more than a few; a client that ignores acks is cut off at the cap.
+FILE_RELAY_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0, 8.0)
+FILE_RELAY_MAX_QUEUED = 32
+_FILE_RELAY_FAILED_MAX = 1024
+
+
 class FileTransferMixin:
+
+    async def _send_file_ack(self, websocket, data: dict) -> None:
+        """Tell the sending browser a chunk has been handed to the recipient (or
+        their gateway), so it can release the next one from its window."""
+        try:
+            await websocket.send(json.dumps({
+                "type": "file_chunk_ack", "file_id": data.get("file_id", ""), "seq": data.get("seq"),
+            }))
+        except Exception:
+            pass
+
+    def _queue_file_relay(self, websocket, peer_gw: str, payload: dict) -> None:
+        """Relay a file signal to a peer gateway in order with the transfer's
+        earlier signals, without blocking this socket's other commands."""
+        chains = self.__dict__.setdefault("_file_relay_chains", {})
+        failed = self.__dict__.setdefault("_file_relay_failed", {})
+        key = (id(websocket), str(payload.get("file_id", "")))
+        if key in failed:
+            # Already failed: later signals of the same transfer would only
+            # arrive out of sequence. The sender was told once.
+            if payload.get("content_type") in ("file_complete", "file_reject", "file_received"):
+                failed.pop(key, None)
+            return
+        prev, depth = chains.get(key, (None, 0))
+        if depth >= FILE_RELAY_MAX_QUEUED:
+            self._mark_file_relay_failed(key)
+            asyncio.create_task(self._notify_file_send_failed(websocket, payload, "backpressure"))
+            return
+        task = asyncio.create_task(self._relay_file_in_order(prev, key, websocket, peer_gw, payload))
+        chains[key] = (task, depth + 1)
+
+    def _mark_file_relay_failed(self, key) -> None:
+        failed = self.__dict__.setdefault("_file_relay_failed", {})
+        if len(failed) >= _FILE_RELAY_FAILED_MAX:
+            failed.pop(next(iter(failed)), None)
+        failed[key] = True
+
+    async def _notify_file_send_failed(self, websocket, payload: dict, reason: str) -> None:
+        try:
+            await websocket.send(json.dumps({
+                "type": "file_send_failed", "file_id": payload.get("file_id", ""), "reason": reason,
+            }))
+        except Exception:
+            pass
+
+    async def _relay_file_in_order(self, prev, key, websocket, peer_gw: str, payload: dict) -> None:
+        chains = self.__dict__.setdefault("_file_relay_chains", {})
+        failed = self.__dict__.setdefault("_file_relay_failed", {})
+        try:
+            if prev is not None:
+                try:
+                    await prev
+                except Exception:
+                    pass
+            ct = payload.get("content_type")
+            if key in failed:
+                if ct in ("file_complete", "file_reject", "file_received"):
+                    failed.pop(key, None)
+                return
+            ok = await self._relay_ephemeral(peer_gw, payload)
+            for delay in FILE_RELAY_RETRY_DELAYS:
+                if ok:
+                    break
+                await asyncio.sleep(delay)
+                ok = await self._relay_ephemeral(peer_gw, payload)
+            if not ok:
+                logger.info("file relay %s to %s failed after retries", ct, peer_gw)
+                if ct not in ("file_complete", "file_reject", "file_received"):
+                    self._mark_file_relay_failed(key)
+                await self._notify_file_send_failed(websocket, payload, "relay_failed")
+                return
+            if ct == "file_chunk":
+                await self._send_file_ack(websocket, payload)
+        finally:
+            cur = chains.get(key)
+            if cur is not None:
+                task, depth = cur
+                if task is asyncio.current_task():
+                    chains.pop(key, None)
+                else:
+                    chains[key] = (task, max(depth - 1, 0))
 
     def _file_delivery_allowed(self, recipient_webid: str, sender_webid: str) -> bool:
         """Whether a LOCAL file-transfer signal may be delivered to recipient_webid.
@@ -150,6 +243,8 @@ class FileTransferMixin:
                     await s.send(payload)
                 except Exception:
                     pass
+            if content_type == "file_chunk":
+                await self._send_file_ack(websocket, data)
             return
 
         peer_gw = self._resolve_peer_gateway(to_webid)
@@ -164,7 +259,7 @@ class FileTransferMixin:
             for f in fields:
                 if f in data:
                     relay_payload[f] = data[f]
-            asyncio.create_task(self._relay_ephemeral(peer_gw, relay_payload))
+            self._queue_file_relay(websocket, peer_gw, relay_payload)
         else:
             await websocket.send(json.dumps({
                 "type": "file_unreachable", "file_id": data.get("file_id", ""),
@@ -232,6 +327,11 @@ class FileTransferMixin:
 
     async def _handle_file_complete(self, websocket, data: dict) -> None:
         await self._forward_file_signal(websocket, data, "file_complete", _ID_FIELDS)
+
+    async def _handle_file_received(self, websocket, data: dict) -> None:
+        # The receiver reassembled (and, if sealed, decrypted) the file. The
+        # sender only reports "Sent" once this arrives.
+        await self._forward_file_signal(websocket, data, "file_received", _ID_FIELDS)
 
     async def _handle_file_relay(self, data: dict) -> tuple[str, str]:
         """Inbound relayed file-transfer message → deliver to the local target."""

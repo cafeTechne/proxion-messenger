@@ -2780,10 +2780,11 @@ class PodSyncMixin:
                 logger.warning("Could not queue %s relay for retry", ct, exc_info=True)
         return False
 
-    async def _relay_ephemeral(self, gateway_url: str, payload: dict) -> None:
+    async def _relay_ephemeral(self, gateway_url: str, payload: dict) -> bool:
         """POST a content_type event to a peer gateway. Presence, typing and voice
         are fire-and-forget; edits, deletes, reactions, pins, timers and room
         changes are queued for retry when the peer is down (_DURABLE_RELAY_TYPES).
+        Returns True when the peer gateway took it.
 
         Signs the payload with this gateway's identity key (envelope signature over
         every field) so the receiver can prove which gateway originated it. Without
@@ -2801,4 +2802,4 @@ class PodSyncMixin:
                 payload["signature"] = sign_relay_envelope(self.agent.identity_key, payload)
         except Exception:
             logger.debug("relay envelope signing failed", exc_info=True)
-        await self._post_or_queue_relay(gateway_url, payload)
+        return await self._post_or_queue_relay(gateway_url, payload)

@@ -41,7 +41,7 @@ import {
     composerEnterAction, isCoarsePointer, supportsFieldSizing, canShareLinks, shareLink,
 } from './util.js';
 import { createFileTransfer } from './filetransfer.js';
-import { createSecondaryCrypto, createReactionTokens, isSealedPlain, sealedState, UNDECRYPTABLE, isUndecryptable, SEALED_FIELDS, SEALED_FILE_NAME, SEALED_FILE_MIME, FILE_TAG_BYTES } from './e2e-secondary.js';
+import { createSecondaryCrypto, createReactionTokens, isSealedPlain, sealedState, UNDECRYPTABLE, isUndecryptable, SEALED_FIELDS, SEALED_FILE_NAME, SEALED_FILE_MIME, FILE_TAG_BYTES, FILE_MIMES } from './e2e-secondary.js';
 import { createVoice, CallState, audioLevel } from './voice.js';
 import { mapDevices, preferredDeviceId, mediaConstraints } from './devices.js';
 import { createNotifications } from './notifications.js';
@@ -255,6 +255,7 @@ import { initThemePicker } from './theme.js';
             file_reject:      new Set(["cmd","to_webid","file_id","reason"]),
             file_chunk:       new Set(["cmd","to_webid","file_id","seq","data"]),
             file_complete:    new Set(["cmd","to_webid","file_id"]),
+            file_received:    new Set(["cmd","to_webid","file_id"]),
         };
 
         function sendCmd(cmd, payload) {
@@ -2360,6 +2361,9 @@ import { initThemePicker } from './theme.js';
                 case "file_chunk":    fileTransfer.handleFileChunk(event); break;
                 case "file_complete": fileTransfer.handleFileComplete(event); break;
                 case "file_unreachable": fileTransfer.handleFileUnreachable(event); break;
+                case "file_chunk_ack":   fileTransfer.handleFileChunkAck(event); break;
+                case "file_send_failed": fileTransfer.handleFileSendFailed(event); break;
+                case "file_received":    fileTransfer.handleFileReceived(event); break;
                 case "peer_discovered":
                     handlePeerDiscovered(event);
                     break;
@@ -4666,7 +4670,35 @@ import { initThemePicker } from './theme.js';
         const fileTransfer = createFileTransfer({
             sendCmd, showToast, renderMessage,
             getActiveView: () => activeView,
+            // A chunked file names its sender by did (cross-gateway: the peer's
+            // gateway did, which is what the contact is keyed by).
+            resolveSender: (webid) => {
+                const certId = peerDidToCertId[webid];
+                const peer = Object.values(localDmPeers).find(p => p && p.peer_webid === webid);
+                const contactName = certId && _threadNames[certId] && !_threadNames[certId].endsWith('…') ? _threadNames[certId] : '';
+                return { threadId: certId || '', name: contactName || peer?.display_name || '' };
+            },
         });
+
+        // Size and destination limits, checked before the confirm dialog so the
+        // user is not asked to confirm a file that is then refused.
+        function attachmentBlockReason(file) {
+            const view = activeView;
+            if (!file || !view || needsDownscale(file, view.type)) return null;
+            const sealFile = secondary.mustSeal(view);
+            // The receiver refuses a type outside the allowlist, which used to
+            // surface only as "File declined" after the whole confirm. An untyped
+            // file is sniffed by the gateway on the plain path, but a sealed one
+            // goes out as application/octet-stream, which is not allowed.
+            const mime = (file.type || '').toLowerCase().split(';')[0].trim();
+            if ((mime || sealFile) && !FILE_MIMES.has(mime)) return 'error.file_type_not_allowed';
+            const inlineMax = sealFile ? 524288 - FILE_TAG_BYTES : 524288;
+            if (file.size <= inlineMax) return null;
+            if (file.size > 25 * 1024 * 1024 - (sealFile ? FILE_TAG_BYTES : 0)) return 'file.tooLarge';
+            const isDm = view.type === "dm" || view.type === "local_dm";
+            if (!isDm || !view.peerWebid) return 'file.largeDmOnly';
+            return null;
+        }
 
         // Single attachment entry point — used by the file picker, clipboard
         // paste, drag-drop, and the GIF tray (R58). Routes small files inline
@@ -4774,6 +4806,8 @@ import { initThemePicker } from './theme.js';
         }
 
         async function confirmAndSend(file, batch = null) {
+            const blocked = attachmentBlockReason(file);
+            if (blocked) { showToast(t(blocked)); return; }
             const { ok, spoiler } = await confirmAttachment(file, batch);
             if (ok) await sendAttachmentFile(file, { spoiler });
         }

@@ -5,11 +5,20 @@
 // current view) are injected so this module stays decoupled from main.js.
 
 import { t } from './i18n.js';
-import { u8ToB64, b64ToU8 } from './util.js';
+import { u8ToB64, b64ToU8, dmFallbackName } from './util.js';
 import { FILE_TAG_BYTES, SEALED_FILE_NAME, SEALED_FILE_MIME, openFileBytes } from './e2e-secondary.js';
 
+// 64 KiB of file is ~88 KB of base64, which leaves ~40 KB of headroom under
+// the gateway's 128 KiB /relay body cap for the signed envelope.
 const CHUNK_BYTES = 64 * 1024;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
+// Send side flow control. Each chunk is acked by our gateway once it reached
+// the recipient (or their gateway); at most CHUNK_WINDOW stay unacked, so
+// chunks are paced by the real relay instead of flooding it. The transfer only
+// counts as sent once the receiver confirms it reassembled the whole file.
+const CHUNK_WINDOW = 8;
+const CHUNK_ACK_TIMEOUT_MS = 45 * 1000;
+const RECEIPT_TIMEOUT_MS = 60 * 1000;
 // Receive-side resource bounds. Offers are auto-accepted, so without these a
 // malicious or buggy contact could open many transfers (or start one and never
 // finish) and grow browser memory without limit. Cap concurrent incoming
@@ -27,8 +36,8 @@ const TRANSFER_IDLE_TIMEOUT_MS = 60 * 1000;
  */
 import { announce } from './a11y.js';
 
-export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiveView }) {
-    const _outgoingFiles = {};   // file_id -> {resolve, reject}
+export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiveView, resolveSender }) {
+    const _outgoingFiles = {};   // file_id -> {resolve, reject, onAck, onFail, onReceived}
     const _incomingFiles = {};   // file_id -> {meta, chunks[], received, total, fromWebid}
 
     // `verb` is a discriminator ('sending' | 'receiving'), not display text, so the
@@ -79,6 +88,7 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         if (rec._idleTimer) clearTimeout(rec._idleTimer);
         rec._idleTimer = setTimeout(() => {
             if (!_incomingFiles[fileId]) return;
+            sendCmd("file_reject", { to_webid: rec.fromWebid, file_id: fileId, reason: "incomplete" });
             showToast(t('file.transferFailed', {
                 filename: rec.meta.filename, received: rec.received, total: rec.total,
             }), "error");
@@ -102,23 +112,57 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
             offer = { filename: SEALED_FILE_NAME, mime_type: SEALED_FILE_MIME, size_bytes: buf.length, ...sealed.hdr };
         }
         const total = Math.ceil(buf.length / CHUNK_BYTES) || 1;
+        const rec = { stage: "offer" };
+        _outgoingFiles[fileId] = rec;
         const acceptP = new Promise((resolve, reject) => {
-            _outgoingFiles[fileId] = { resolve, reject };
+            rec.resolve = resolve; rec.reject = reject;
             setTimeout(() => reject(new Error("accept_timeout")), 30000);
         });
         sendCmd("file_offer", { to_webid: toWebid, file_id: fileId, ...offer, total_chunks: total });
         showToast(t('file.offering', { filename: file.name }));
-        try { await acceptP; } catch (e) { delete _outgoingFiles[fileId]; _clearTransferProgress(fileId); showToast(t('file.notAccepted')); return; }
+        try { await acceptP; } catch (e) { delete _outgoingFiles[fileId]; _clearTransferProgress(fileId); showToast(t('file.notAccepted')); return false; }
+
+        // Chunks, paced by acks. `wake` is resolved by every ack or failure.
+        rec.stage = "sending";
+        const acked = new Set();
+        let failure = null, wake = null;
+        const poke = () => { if (wake) { const w = wake; wake = null; w(); } };
+        rec.onAck = (seq) => { if (Number.isInteger(seq) && seq >= 0 && seq < total) acked.add(seq); poke(); };
+        rec.onFail = (reason) => { failure = failure || reason || "failed"; poke(); };
+        const waitForProgress = () => new Promise((resolve) => {
+            const timer = setTimeout(() => { failure = failure || "ack_timeout"; resolve(); }, CHUNK_ACK_TIMEOUT_MS);
+            wake = () => { clearTimeout(timer); resolve(); };
+        });
+        const fail = () => {
+            delete _outgoingFiles[fileId];
+            _clearTransferProgress(fileId);
+            showToast(t('file.deliveryFailed', { filename: file.name }), "error");
+            return false;
+        };
         for (let seq = 0; seq < total; seq++) {
+            while (!failure && seq - acked.size >= CHUNK_WINDOW) await waitForProgress();
+            if (failure) return fail();
             const slice = buf.subarray(seq * CHUNK_BYTES, (seq + 1) * CHUNK_BYTES);
             sendCmd("file_chunk", { to_webid: toWebid, file_id: fileId, seq, data: u8ToB64(slice) });
             _showTransferProgress(fileId, file.name, Math.round(((seq + 1) / total) * 100), "sending");
-            if (seq % 8 === 7) await new Promise(r => setTimeout(r, 0)); // yield to UI
         }
+        while (!failure && acked.size < total) await waitForProgress();
+        if (failure) return fail();
+
+        // Every chunk is through; wait for the receiver to confirm the file.
+        rec.stage = "complete";
+        const receiptP = new Promise((resolve) => {
+            const timer = setTimeout(() => resolve(false), RECEIPT_TIMEOUT_MS);
+            rec.onReceived = (ok) => { clearTimeout(timer); resolve(ok); };
+            rec.onFail = () => { clearTimeout(timer); resolve(false); };
+        });
         sendCmd("file_complete", { to_webid: toWebid, file_id: fileId });
+        const ok = await receiptP;
+        if (!ok) return fail();
         _clearTransferProgress(fileId);
         delete _outgoingFiles[fileId];
         showToast(t('file.sent', { filename: file.name }));
+        return true;
     }
 
     // A sealed offer arrives already opened by the caller (_sealedFile holds
@@ -186,6 +230,7 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         // producing a corrupt file the user can't tell apart from a good one.
         if (rec.received < rec.total) {
             delete _incomingFiles[event.file_id];
+            sendCmd("file_reject", { to_webid: rec.fromWebid, file_id: event.file_id, reason: "incomplete" });
             showToast(t('file.transferFailed', { filename: rec.meta.filename, received: rec.received, total: rec.total }), "error");
             return;
         }
@@ -198,36 +243,62 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         const fromWebid = rec.fromWebid;
         delete _incomingFiles[event.file_id];
         const av = getActiveView();
-        const threadId = (av && av.peerWebid === fromWebid) ? av.id : fromWebid;
-        const render = (bytes, extra = {}) => renderMessage({
-            type: "message", source: "relay", thread_id: threadId,
-            from_webid: fromWebid, from_display_name: (fromWebid || "").slice(0, 12),
-            content: `📎 ${rec.meta.filename}`, timestamp: new Date().toISOString(),
-            message_id: "file-" + event.file_id, local: true,
-            file: { filename: rec.meta.filename, mime_type: rec.meta.mime_type, size: bytes.length, data_b64: u8ToB64(bytes), ...extra },
-        });
+        // Cross-gateway, fromWebid is the peer's gateway did: label the message
+        // with the contact's name (and thread) rather than a slice of that key.
+        const who = (resolveSender && resolveSender(fromWebid)) || {};
+        const threadId = (av && av.peerWebid === fromWebid) ? av.id : (who.threadId || fromWebid);
+        const render = (bytes, extra = {}) => {
+            renderMessage({
+                type: "message", source: "relay", thread_id: threadId,
+                from_webid: fromWebid, from_display_name: who.name || dmFallbackName(fromWebid),
+                content: `📎 ${rec.meta.filename}`, timestamp: new Date().toISOString(),
+                message_id: "file-" + event.file_id, local: true,
+                file: { filename: rec.meta.filename, mime_type: rec.meta.mime_type, size: bytes.length, data_b64: u8ToB64(bytes), ...extra },
+            });
+            sendCmd("file_received", { to_webid: fromWebid, file_id: event.file_id });
+        };
         if (!rec.sealed) { render(full, { size: rec.meta.size }); return; }
         const s = rec.sealed;
         const dims = s.width ? { width: s.width, height: s.height } : {};
         return openFileBytes(full, s)
             .then((bytes) => render(bytes, { spoiler: s.spoiler === true, ...dims }))
-            .catch(() => showToast(t('file.decryptFailed', { filename: rec.meta.filename }), "error"));
+            .catch(() => {
+                sendCmd("file_reject", { to_webid: fromWebid, file_id: event.file_id, reason: "decrypt_failed" });
+                showToast(t('file.decryptFailed', { filename: rec.meta.filename }), "error");
+            });
     }
     function handleFileAccept(event) {
         const rec = _outgoingFiles[event.file_id];
         if (rec && rec.resolve) rec.resolve();
     }
+    // Once accepted, a reject means the receiver could not assemble or open
+    // the file; the sending loop reports that as a failed delivery.
     function handleFileReject(event) {
         const rec = _outgoingFiles[event.file_id];
-        if (rec && rec.reject) rec.reject(new Error(event.reason || "rejected"));
+        if (!rec) return;
+        if (rec.stage !== "offer") { rec.onFail?.(event.reason || "rejected"); return; }
+        rec.reject(new Error(event.reason || "rejected"));
+        delete _outgoingFiles[event.file_id];
         _clearTransferProgress(event.file_id);
         showToast(t('file.declined'));
     }
     function handleFileUnreachable(event) {
         const rec = _outgoingFiles[event.file_id];
-        if (rec && rec.reject) rec.reject(new Error("unreachable"));
+        if (!rec) return;
+        if (rec.stage !== "offer") { rec.onFail?.("unreachable"); return; }
+        rec.reject(new Error("unreachable"));
+        delete _outgoingFiles[event.file_id];
         _clearTransferProgress(event.file_id);
         showToast(t('file.recipientOffline'));
+    }
+    function handleFileChunkAck(event) {
+        _outgoingFiles[event.file_id]?.onAck?.(event.seq);
+    }
+    function handleFileSendFailed(event) {
+        _outgoingFiles[event.file_id]?.onFail?.(event.reason || "relay_failed");
+    }
+    function handleFileReceived(event) {
+        _outgoingFiles[event.file_id]?.onReceived?.(true);
     }
 
     return {
@@ -235,6 +306,7 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         sendFileChunked,
         handleFileOffer, handleFileChunk, handleFileComplete,
         handleFileAccept, handleFileReject, handleFileUnreachable,
+        handleFileChunkAck, handleFileSendFailed, handleFileReceived,
         // Exposed for tests: how many incoming transfers are buffered right now.
         _incomingCount: () => Object.keys(_incomingFiles).length,
     };
