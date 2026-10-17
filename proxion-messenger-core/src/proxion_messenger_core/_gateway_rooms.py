@@ -2719,6 +2719,13 @@ class RoomHandlerMixin:
         _is_admin = self._store.get_room_role(room_id, caller) == "admin"
         if caller != room.get("creator_webid") and not _is_admin:
             return "403 Forbidden", '{"error":"not_authorized_for_room_update"}'
+        # An admin role only counts while its holder is still in the room (a stale
+        # role row must not outlive a leave or a removal).
+        if caller != room.get("creator_webid"):
+            _members = set(self._store.get_room_members(room_id))
+            _members |= {m.get("member_did") for m in self._store.get_federated_room_members(room_id)}
+            if caller not in _members or self._store.is_room_banned(room_id, caller):
+                return "403 Forbidden", '{"error":"not_authorized_for_room_update"}'
         name = data.get("name")
         topic = data.get("topic", "")
         name = name.strip() if isinstance(name, str) else ""
@@ -3220,6 +3227,14 @@ class RoomHandlerMixin:
             await websocket.send(json.dumps({"type": "error", "message": "Only admins can set roles"}))
             return
         if self._store:
+            # Roles are only for people in the room: a role row for an outsider
+            # would be honored later (e.g. a relayed room_update) without them
+            # ever having joined.
+            _members = set(self._store.get_room_members(room_id))
+            _members |= {m.get("member_did") for m in self._store.get_federated_room_members(room_id)}
+            if target_webid not in _members or self._store.is_room_banned(room_id, target_webid):
+                await websocket.send(json.dumps({"type": "error", "message": "Not a member of this room"}))
+                return
             self._store.set_room_role(room_id, target_webid, role)
         for ws in list(room.get("members", set())):
             try:

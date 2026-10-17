@@ -804,6 +804,8 @@ class VoiceHandlerMixin:
         # from a room member — otherwise anyone who knows the channel/room id
         # could join the call, join the ICE mesh, and see who's present. The
         # LOCAL join path checks this (e913357); the relay path didn't.
+        if self._store and self._store.is_room_banned(channel_id, from_webid):
+            return "403 Forbidden", '{"error":"banned_from_room"}'
         if channel_id in self._local_rooms and self._store:
             _members = set(self._store.get_room_members(channel_id))
             _members |= {m.get("member_did") for m in self._store.get_federated_room_members(channel_id)}

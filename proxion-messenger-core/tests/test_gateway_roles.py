@@ -177,6 +177,9 @@ async def test_set_member_role_persists_to_store(gateway):
     }
     mock_store = MagicMock()
     mock_store.get_room_role.return_value = "admin"
+    mock_store.get_room_members.return_value = ["https://bob.pod/profile/card#me"]
+    mock_store.get_federated_room_members.return_value = []
+    mock_store.is_room_banned.return_value = False
     gateway._store = mock_store
     await gateway.process_command(ws, {
         "cmd": "set_member_role",

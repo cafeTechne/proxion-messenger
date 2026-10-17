@@ -114,7 +114,11 @@ class RoomStoreMixin(object):
     def get_federated_room_members(self, room_id: str) -> list:
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT member_did, gateway_url FROM room_federated_members WHERE room_id=?",
+                # Banned members never count: every room fanout and membership
+                # check reads this list, so a ban takes effect everywhere at once.
+                "SELECT f.member_did, f.gateway_url FROM room_federated_members f "
+                "WHERE f.room_id=? AND NOT EXISTS (SELECT 1 FROM room_bans b "
+                "WHERE b.room_id=f.room_id AND b.banned_did=f.member_did)",
                 (room_id,),
             ).fetchall()
         return [{"member_did": r[0], "gateway_url": r[1]} for r in rows]
@@ -231,6 +235,12 @@ class RoomStoreMixin(object):
                 "DELETE FROM room_members WHERE room_id = ? AND webid = ?",
                 (room_id, webid),
             )
+            # A member who leaves, is kicked or is banned also stops being a
+            # cross-gateway member, or every later relay still reaches their gateway.
+            conn.execute(
+                "DELETE FROM room_federated_members WHERE room_id=? AND member_did=?",
+                (room_id, webid),
+            )
     def update_room_info(self, room_id: str, name: str, topic: str) -> None:
         with self._conn() as conn:
             conn.execute(
@@ -256,6 +266,10 @@ class RoomStoreMixin(object):
             conn.execute(
                 "INSERT OR REPLACE INTO room_bans (room_id, banned_did, banned_by, reason) VALUES (?,?,?,?)",
                 (room_id, banned_did, banned_by, reason),
+            )
+            conn.execute(
+                "DELETE FROM room_federated_members WHERE room_id=? AND member_did=?",
+                (room_id, banned_did),
             )
     def unban_room_member(self, room_id: str, banned_did: str) -> None:
         with self._conn() as conn:

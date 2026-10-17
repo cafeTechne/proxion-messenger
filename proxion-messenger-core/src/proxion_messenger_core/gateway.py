@@ -484,7 +484,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
     def _relay_sender_gateway_ok(self, from_webid: str, relay_sig_did: str,
                                  require_established: bool = False,
-                                 may_seed: bool = True) -> bool:
+                                 may_seed: bool = True,
+                                 room_id: str = "") -> bool:
         """TOFU continuity binding for ephemeral room/voice/file relays.
 
         The envelope signature only proves *some* gateway (relay_sig_did) signed the
@@ -511,6 +512,12 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             return False
         if from_webid == relay_sig_did:
             return True
+        # An identity that lives on THIS gateway is never relayed in from another
+        # gateway, so no peer may hold (or create) a relaygw binding for it. Without
+        # this a federated member's gateway could claim the room owner, a local
+        # member or our own gateway DID on first use and then act as them.
+        if self._relay_identity_is_local(from_webid, room_id):
+            return False
         try:
             from .didkey import did_to_pub_key
             gw_pub_hex = did_to_pub_key(relay_sig_did).hex()
@@ -540,6 +547,57 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         except Exception:
             return False
         return False
+
+    def _relay_identity_is_local(self, did: str, room_id: str = "") -> bool:
+        """Whether *did* is an identity that lives on this gateway.
+
+        Local means: our own gateway DID, an identity with a live session here, or
+        (for *room_id*) the room creator or a stored room member. A federated
+        member of *room_id* is never local: their relays legitimately arrive from
+        their home gateway even if they also once connected here to join.
+        """
+        if not did:
+            return False
+        if did == self._own_gateway_did():
+            return True
+        if room_id and self._store:
+            try:
+                if any(m.get("member_did") == did
+                       for m in self._store.get_federated_room_members(room_id)):
+                    return False
+            except Exception:
+                pass
+        if did in self._webid_sockets or did in set(self._client_webids.values()):
+            return True
+        if did in set(self._session_signing_did.values()):
+            return True
+        room = self._local_rooms.get(room_id) if room_id else None
+        if room is not None:
+            if did == room.get("creator_webid"):
+                return True
+            if self._store and did in set(self._store.get_room_members(room_id)):
+                return True
+        return False
+
+    def _relay_signer_is_member_gateway(self, room_id: str, member_did: str,
+                                        signer_did: str) -> bool:
+        """Whether *member_did* is a federated member of *room_id* whose recorded
+        home gateway is the one that signed the relay. When we know the signer's
+        URL it must match the recorded gateway_url; when we do not, the recorded
+        federated membership alone is the authorization (first-use)."""
+        if not room_id or room_id not in self._local_rooms or not self._store:
+            return False
+        rows = [m for m in self._store.get_federated_room_members(room_id)
+                if m.get("member_did") == member_did]
+        if not rows:
+            return False
+        known = self._resolve_peer_gateway(signer_did) if signer_did else None
+        if not known:
+            return True
+
+        def _norm(u: str) -> str:
+            return (u or "").replace("wss://", "https://").replace("ws://", "http://").rstrip("/")
+        return any(_norm(r.get("gateway_url", "")) == _norm(known) for r in rows)
 
     def _relay_from_is_room_member(self, room_id: str, from_webid: str) -> bool:
         """Whether *from_webid* is a known member (local or federated) of the local
@@ -573,10 +631,16 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 return False
         except Exception:
             return False
+        # Room/voice: only a FEDERATED member may be first-seen over a relay, and
+        # only from the gateway recorded for them. Local members and the owner
+        # never arrive inbound, so they can never be seeded.
+        _signer = data.get("relay_sig_did", "")
         if content_type.startswith("room_"):
-            return self._relay_from_is_room_member(data.get("room_id", ""), from_webid)
+            return self._relay_signer_is_member_gateway(
+                data.get("room_id", ""), from_webid, _signer)
         if content_type.startswith("voice_channel_"):
-            return self._relay_from_is_room_member(data.get("channel_id", ""), from_webid)
+            return self._relay_signer_is_member_gateway(
+                data.get("channel_id", ""), from_webid, _signer)
         if content_type.startswith("file_"):
             return self._store.get_relationship_by_did(from_webid) is not None
         # Presence/typing are contact-scoped ephemerals: from_webid must be a peer

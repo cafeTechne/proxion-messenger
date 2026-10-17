@@ -723,9 +723,11 @@ class HttpEndpointsMixin:
                 # creator) must not be honored off a first-use seed. Capture whether
                 # the signer binding was ALREADY established, BEFORE the seed below
                 # can create it, and hand it to the handler.
+                _scope = data.get("room_id", "") or data.get("channel_id", "")
                 if _ct in ("room_edit", "room_delete"):
                     data["_relay_sender_established"] = self._relay_sender_gateway_ok(
-                        _from, _signer, require_established=True, may_seed=False)
+                        _from, _signer, require_established=True, may_seed=False,
+                        room_id=_scope)
                 # Seed a NEW binding only when from_webid is authorized for the
                 # relay target it names (a member of the local room, or a DM peer
                 # for file transfers). A stranger's validly-signed POST must not
@@ -733,7 +735,8 @@ class HttpEndpointsMixin:
                 # registered (federated) member still seeds and delivers.
                 _may_seed = self._relay_seed_authorized(data, _ct, _from)
                 _bound = self._relay_sender_gateway_ok(
-                    _from, _signer, require_established=_privileged, may_seed=_may_seed)
+                    _from, _signer, require_established=_privileged, may_seed=_may_seed,
+                    room_id=_scope)
             else:  # _CHANNEL_SIGNED_TYPES — bind the signer to a channel participant
                 _bound = self._voice_channel_gateway_ok(data.get("channel_id", ""), _signer)
             if not _bound:

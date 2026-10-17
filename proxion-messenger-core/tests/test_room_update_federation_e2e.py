@@ -108,6 +108,7 @@ async def test_room_update_relay_from_a_plain_member_is_refused(tmp_path):
     assert gw._local_rooms["r1"]["name"] == "Keep"
 
     gw._store.set_room_role("r1", "did:key:zAdmin", "admin")
+    gw._store.add_room_member("r1", "did:key:zAdmin")
     status, _ = await gw._handle_room_update_relay({
         "room_id": "r1", "from_webid": "did:key:zAdmin", "name": "x" * 65, "topic": ""})
     assert status.startswith("400")
