@@ -194,6 +194,38 @@ class FederationStoreMixin(object):
                 (status,),
             ).fetchall()
             return [json.loads(r["invite_json"]) for r in rows]
+    def get_pending_invite_row(self, invitation_id: str) -> Optional[dict]:
+        """The pending_invites row (invite, target_did, status, created_at) or None."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT invite_json, target_did, status, created_at FROM pending_invites "
+                "WHERE invitation_id = ?",
+                (invitation_id,),
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            invite = json.loads(row["invite_json"])
+        except Exception:
+            invite = {}
+        return {"invite": invite, "target_did": row["target_did"] or "",
+                "status": row["status"] or "", "created_at": row["created_at"] or 0}
+    def cancel_pending_invites_for_peer(self, peer_did: str,
+                                        created_before: Optional[float] = None) -> int:
+        """Mark the still-pending invites to or from peer_did as 'revoked', so an
+        acceptance of a request sent before the contact was removed cannot
+        re-add them. Only invites created before ``created_before`` when given."""
+        if not peer_did:
+            return 0
+        sql = ("UPDATE pending_invites SET status = 'revoked' "
+               "WHERE target_did = ? AND status = 'pending'")
+        args: list = [peer_did]
+        if created_before is not None:
+            sql += " AND created_at <= ?"
+            args.append(created_before)
+        with self._conn() as conn:
+            cur = conn.execute(sql, args)
+            return cur.rowcount or 0
     def mark_invite_status(self, invitation_id: str, status: str) -> None:
         """UPDATE status."""
         with self._conn() as conn:

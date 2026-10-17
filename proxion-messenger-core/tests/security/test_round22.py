@@ -1,6 +1,7 @@
 """Round 22 security tests: SSRF closure across acp/profile/oidc/messaging,
 receipt delivery uses safe helper, invite/accept cert signature verification."""
 import json
+import time
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch, AsyncMock
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -47,6 +48,9 @@ def _save_invite(gw, invitation_id, acceptor_did):
                 "to_did": acceptor_did,
                 "from_did": _owner_did(gw),
                 "code": "code-test",
+                # /invite/accept only honours a live request this gateway sent.
+                "issuer": {"public_key": gw.agent.identity_pub_bytes.hex()},
+                "expires_at": int(time.time()) + 3600,
             },
             acceptor_did,
         )

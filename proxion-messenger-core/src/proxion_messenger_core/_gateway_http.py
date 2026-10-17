@@ -374,8 +374,29 @@ class HttpEndpointsMixin:
         # Verify a pending invite actually exists for this invitation_id
         if not self._store:
             return "503 Service Unavailable", '{"error":"no store"}'
-        if not self._store.get_pending_invite(invitation_id):
+        _inv_row = self._store.get_pending_invite_row(invitation_id)
+        if not _inv_row:
             return "400 Bad Request", '{"error":"no matching pending invite"}'
+        # Only a request this gateway sent can be accepted, and only once while it
+        # is live. An accepted, expired or revoked (contact removed since) invite
+        # must not re-add the peer: replaying an old acceptance after the nonce
+        # window would otherwise re-friend a removed contact without consent.
+        _inv = _inv_row["invite"] if isinstance(_inv_row["invite"], dict) else {}
+        _inv_issuer = _inv.get("issuer") if isinstance(_inv.get("issuer"), dict) else {}
+        if _inv_issuer.get("public_key") != self.agent.identity_pub_bytes.hex():
+            return "400 Bad Request", '{"error":"no matching pending invite"}'
+        if _inv_row["status"] != "pending":
+            self._store.save_security_event(
+                "invite_accept_not_pending", "warning",
+                details=f"status={_inv_row['status']} acceptor_did={acceptor_did}",
+            )
+            return "409 Conflict", '{"error":"invite_not_pending"}'
+        try:
+            _inv_exp = float(_inv.get("expires_at") or 0)
+        except (TypeError, ValueError):
+            _inv_exp = 0.0
+        if _inv_exp <= time.time():
+            return "410 Gone", '{"error":"invite_expired"}'
 
         # Bind the acceptance to the DID the invite was actually issued to. Without
         # this, the pending invite is confirmed for anyone who learns the
@@ -383,15 +404,7 @@ class HttpEndpointsMixin:
         # and inject a relationship (the stored row IS the authorization). The
         # target DID was recorded by save_pending_invite; a blank/legacy target
         # ("" or "unknown") is treated as unbound and skipped.
-        try:
-            with self._store._conn() as _conn:
-                _row = _conn.execute(
-                    "SELECT target_did FROM pending_invites WHERE invitation_id = ?",
-                    (invitation_id,),
-                ).fetchone()
-            _recorded_target = (_row["target_did"] if _row else "") or ""
-        except Exception:
-            _recorded_target = ""
+        _recorded_target = _inv_row["target_did"]
         if _recorded_target and _recorded_target not in ("unknown",):
             if expected_did != _recorded_target:
                 self._store.save_security_event(
@@ -454,8 +467,9 @@ class HttpEndpointsMixin:
             _owner = self._store.get_pending_invite_sender(invitation_id) if invitation_id else ""
             self._store.save_relationship(cert.to_dict(), peer_did=acceptor_did,
                                           owner_webid=_owner)
-            # Our own request was accepted, so the owner chose to add this person
-            # again: lift a revocation left from removing them earlier.
+            # Our own live request was accepted. Removing a contact cancels the
+            # requests pending to them, so this one was sent after the removal:
+            # the owner chose to add this person again, so lift the revocation.
             self._lift_revocation_on_readd(acceptor_did)
             self._save_peer_name_if_unknown(acceptor_did, data.get("from_display_name"))
             asyncio.create_task(self._sync_cert_to_pod(cert.to_dict()))
@@ -2146,6 +2160,8 @@ class HttpEndpointsMixin:
                     if cert_id and not peer_did:
                         row = self._store.get_relationship_by_cert_id(cert_id)
                         peer_did = row.get("peer_did", "") if row else ""
+                    if peer_did:
+                        self._store.cancel_pending_invites_for_peer(peer_did)
                     if peer_did not in self._revoked_dids:
                         self._store.mark_revoked(cert_id or "", peer_did)
                         self._revoked_dids.add(peer_did)

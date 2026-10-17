@@ -2084,6 +2084,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         peer_did = cert_dict.get("peer_did", "")
         self._store.mark_revoked(cert_id, peer_did)
         self._revoked_dids.add(peer_did)
+        # A request sent to them earlier must not re-add them when accepted later.
+        self._store.cancel_pending_invites_for_peer(peer_did)
         # Also set the relationships.revoked column so the cert-lookup helpers
         # (which filter revoked=0) stop returning it and relationship_is_revoked
         # reports it revoked. mark_revoked + _revoked_dids alone left the column

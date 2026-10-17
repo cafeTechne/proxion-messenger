@@ -10,6 +10,7 @@ consent before writing one:
 """
 import json
 import asyncio
+import time
 import pytest
 from unittest.mock import AsyncMock, patch
 
@@ -110,7 +111,8 @@ class TestInviteAcceptTargetBind:
         gw._store.save_pending_invite(
             {"@type": "FederationInvite", "invitation_id": invitation_id,
              "issuer": {"public_key": gw.agent.identity_pub_bytes.hex(),
-                        "did": gw._own_gateway_did()}},
+                        "did": gw._own_gateway_did()},
+             "expires_at": int(time.time()) + 3600},
             target_did,
         )
 

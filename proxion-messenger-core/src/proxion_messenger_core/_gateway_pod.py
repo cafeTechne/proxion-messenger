@@ -1406,6 +1406,10 @@ class PodSyncMixin:
                     self._store.revoke_relationship(cert_id)
                 if peer_did:
                     self._store.revoke_relationships_for_peer(peer_did)
+                    _rev_at = rec.get("revoked_at")
+                    if isinstance(_rev_at, (int, float)):
+                        self._store.cancel_pending_invites_for_peer(
+                            peer_did, created_before=_rev_at)
                     self._revoked_dids.add(peer_did)
                 restored += 1
             except Exception as exc:
