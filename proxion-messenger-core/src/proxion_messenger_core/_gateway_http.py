@@ -2347,26 +2347,54 @@ class HttpEndpointsMixin:
                                 return
                         self._store.consume_recovery_operation(_recovery_op_id_r)
 
-                    # Extract passphrase: prefer X-Proxion-Passphrase header, fall back to query string
-                    _pp_r = headers_raw.get(b"x-proxion-passphrase", b"").decode("utf-8", errors="replace")
-                    if not _pp_r:
-                        import urllib.parse as _urlparse_r
-                        _qs_r = parts[1].split("?", 1)[1] if (len(parts) > 1 and "?" in parts[1]) else ""
-                        for _kv_r in _qs_r.split("&"):
-                            if _kv_r.startswith("passphrase="):
-                                _pp_r = _urlparse_r.unquote_plus(_kv_r[len("passphrase="):])
-                    if not _pp_r:
-                        err = b'{"error":"passphrase required"}'
-                        writer.write(b"HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n"
-                                     b"Content-Length: " + str(len(err)).encode() + b"\r\n\r\n" + err)
-                        await writer.drain()
-                        return
+                    # A kit is either passphrase-encrypted (the default) or sealed to an
+                    # escrow X25519 key (/backup?mode=recipient_key). Read the mode from
+                    # the kit so each asks for the secret it actually needs.
+                    try:
+                        _kit_mode_r = json.loads(body.decode("utf-8")).get("backup_mode", "passphrase")
+                    except Exception:
+                        _kit_mode_r = "passphrase"  # import_backup reports the parse error
+                    _pp_r = ""
+                    _rk_priv_r = None
+                    if _kit_mode_r == "recipient_key":
+                        _rk_hex_r = headers_raw.get(b"x-proxion-recipient-privkey", b"").decode(
+                            "utf-8", errors="replace").strip()
+                        try:
+                            from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey as _XPK_r
+                            _rk_raw_r = bytes.fromhex(_rk_hex_r)
+                            if len(_rk_raw_r) != 32:
+                                raise ValueError("must be 32 bytes")
+                            _rk_priv_r = _XPK_r.from_private_bytes(_rk_raw_r)
+                        except Exception:
+                            await _write_json(writer, 400, {
+                                "error": "recipient key required",
+                                "detail": "send the escrow X25519 private key as 32-byte hex in X-Proxion-Recipient-Privkey",
+                            })
+                            await writer.drain()
+                            return
+                    else:
+                        # Extract passphrase: prefer X-Proxion-Passphrase header, fall back to query string
+                        _pp_r = headers_raw.get(b"x-proxion-passphrase", b"").decode("utf-8", errors="replace")
+                        if not _pp_r:
+                            import urllib.parse as _urlparse_r
+                            _qs_r = parts[1].split("?", 1)[1] if (len(parts) > 1 and "?" in parts[1]) else ""
+                            for _kv_r in _qs_r.split("&"):
+                                if _kv_r.startswith("passphrase="):
+                                    _pp_r = _urlparse_r.unquote_plus(_kv_r[len("passphrase="):])
+                        if not _pp_r:
+                            err = b'{"error":"passphrase required"}'
+                            writer.write(b"HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n"
+                                         b"Content-Length: " + str(len(err)).encode() + b"\r\n\r\n" + err)
+                            await writer.drain()
+                            return
                     # Check for dry_run query parameter (Round 6)
                     _dry_run_r = "dry_run=1" in parts[1] if len(parts) > 1 else False
                     try:
                         from .persist import AgentState as _AS
-                        _pp_bytes = _pp_r.encode("utf-8")
-                        new_agent = _AS.import_backup(body, _pp_bytes)
+                        if _rk_priv_r is not None:
+                            new_agent = _AS.import_backup(body, recipient_privkey=_rk_priv_r)
+                        else:
+                            new_agent = _AS.import_backup(body, _pp_r.encode("utf-8"))
                         if _dry_run_r:
                             # Dry-run mode: validate but don't persist
                             dry_resp = json.dumps({"dry_run": True, "valid": True}).encode()
@@ -2374,13 +2402,18 @@ class HttpEndpointsMixin:
                                          + _NO_STORE_HDR
                                          + b"Content-Length: " + str(len(dry_resp)).encode() + b"\r\n\r\n" + dry_resp)
                         else:
-                            self.agent = new_agent
-                            # R13.3: always persist agent.json, creating it if needed
+                            # Persist first, as the raw identity.key/store.key the launcher
+                            # (run_gateway.py, the Tauri sidecar) loads, and move the
+                            # LocalStore secrets to the new identity's wrap key. Only then
+                            # switch the live identity, so a failure leaves the gateway on
+                            # its old identity rather than half-restored.
                             if self.config.db_path:
                                 from pathlib import Path as _P
-                                _agent_path = _P(self.config.db_path).parent / "agent.json"
-                                _agent_path.parent.mkdir(parents=True, exist_ok=True)
-                                new_agent.save(str(_agent_path), _pp_bytes)
+                                from .keyfiles import persist_restored_keys
+                                persist_restored_keys(_P(self.config.db_path).parent, new_agent, self._store)
+                            elif self._store is not None:
+                                self._store.rewrap_secrets(new_agent.db_wrap_key())
+                            self.agent = new_agent
                             await self.broadcast({"type": "identity_restored"})
                             # R7: Save restore provenance
                             if self._store:

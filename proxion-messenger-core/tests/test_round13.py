@@ -247,8 +247,8 @@ def test_request_id_context_var():
 # ── 13.3 — POST /restore path hardening ──────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_restore_creates_agent_json(tmp_path):
-    """POST /restore with a valid backup creates agent.json in db parent dir."""
+async def test_restore_writes_launcher_key_files(tmp_path):
+    """POST /restore writes identity.key and store.key next to the db."""
     gw, _, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
     await asyncio.sleep(0.15)
@@ -271,9 +271,13 @@ async def test_restore_creates_agent_json(tmp_path):
     status_line = response.split(b"\r\n")[0].decode()
     assert "200" in status_line, f"Expected 200, got: {status_line!r}"
 
-    # agent.json should now exist
-    agent_json = tmp_path / "agent.json"
-    assert agent_json.exists(), "agent.json should be created by /restore"
+    # The keys are written where run_gateway.py loads them. agent.json is not
+    # read by any launcher, so /restore no longer writes it.
+    from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat
+    raw = lambda k: k.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+    assert (tmp_path / "identity.key").read_bytes() == raw(gw.agent.identity_key)
+    assert (tmp_path / "store.key").read_bytes() == raw(gw.agent.store_key)
+    assert not (tmp_path / "agent.json").exists()
 
 
 # ── 13.2 — solid_client delete retry ─────────────────────────────────────────

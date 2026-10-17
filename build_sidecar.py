@@ -212,6 +212,7 @@ HIDDEN_IMPORTS = [
     "proxion_messenger_core.stash",
     "proxion_messenger_core.local_store",
     "proxion_messenger_core.persist",
+    "proxion_messenger_core.keyfiles",
     "proxion_messenger_core.readstate",
     "proxion_messenger_core.didkey",
     "proxion_messenger_core.relay",

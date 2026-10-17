@@ -16,6 +16,17 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# Every (table, column) whose value goes through _wrap_secret. Keep in sync
+# with the mixins: rewrap_secrets and the restore recovery check read it.
+WRAPPED_SECRET_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("dm_sessions", "root_key_b64"),
+    ("dm_sessions", "send_chain_key_b64"),
+    ("dm_sessions", "recv_chain_key_b64"),
+    ("dm_prekeys", "priv_wrapped_b64"),
+    ("sender_keys", "chain_key_b64"),
+    ("wg_local_identity", "priv_wrapped_b64"),
+)
+
 
 
 
@@ -70,6 +81,50 @@ class _StoreBase(object):
                     return None
             return stored
         return stored
+
+    def rewrap_secrets(self, new_key: "bytes | None") -> int:
+        """Re-encrypt every wrapped secret under ``new_key`` and adopt it.
+
+        Used when the identity (and so the derived wrap key) changes, e.g. on
+        an identity restore. Runs as one transaction: either every row moves to
+        the new key or none does. Legacy raw rows are wrapped on the way.
+        Rows that no longer open under the current key are left untouched.
+        Returns the number of values rewritten.
+        """
+        if not new_key:
+            raise ValueError("rewrap_secrets needs a wrap key")
+        from ..key_envelope import encrypt_key_bundle
+
+        changed = 0
+        conn = self._conn()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            for table, column in WRAPPED_SECRET_COLUMNS:
+                try:
+                    rows = conn.execute(
+                        f"SELECT rowid, {column} FROM {table} WHERE {column} IS NOT NULL AND {column} != ''"
+                    ).fetchall()
+                except sqlite3.OperationalError:
+                    continue  # table absent in this schema
+                for row in rows:
+                    stored = row[1]
+                    raw = self._unwrap_secret(stored)
+                    if raw is None or (raw == stored and stored.startswith("{")):
+                        # Unreadable under the current key (or not an
+                        # envelope at all): nothing that can be moved.
+                        continue
+                    new_val = json.dumps(encrypt_key_bundle({"k": raw}, new_key))
+                    conn.execute(f"UPDATE {table} SET {column}=? WHERE rowid=?", (new_val, row[0]))
+                    changed += 1
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        self._db_wrap_key = new_key
+        return changed
+
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row

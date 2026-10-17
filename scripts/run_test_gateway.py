@@ -23,22 +23,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "proxion-messenger-core" / "src"))
 
 
-def _load_or_create_raw_key(key_path: Path, key_cls, generate_fn):
-    from cryptography.hazmat.primitives.serialization import (
-        Encoding, PrivateFormat, NoEncryption,
-    )
-    if key_path.exists():
-        return key_cls.from_private_bytes(key_path.read_bytes())
-    key = generate_fn()
-    key_path.parent.mkdir(parents=True, exist_ok=True)
-    key_path.write_bytes(key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption()))
-    return key
-
-
 async def main():
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
     from proxion_messenger_core.gateway import ProxionGateway, GatewayConfig
+    from proxion_messenger_core.keyfiles import load_or_create_agent_keys
     from proxion_messenger_core.persist import AgentState
     from proxion_messenger_core.readstate import ReadState
 
@@ -48,10 +35,7 @@ async def main():
     import logging
     logging.basicConfig(level=os.environ.get("PROXION_LOG_LEVEL", "INFO"),
                         format="%(levelname)s %(name)s %(message)s")
-    identity_key = _load_or_create_raw_key(
-        data_dir / "identity.key", Ed25519PrivateKey, Ed25519PrivateKey.generate)
-    store_key = _load_or_create_raw_key(
-        data_dir / "store.key", X25519PrivateKey, X25519PrivateKey.generate)
+    identity_key, store_key = load_or_create_agent_keys(data_dir, data_dir / "proxion.db")
     agent = AgentState(identity_key=identity_key, store_key=store_key)
 
     config = GatewayConfig(
