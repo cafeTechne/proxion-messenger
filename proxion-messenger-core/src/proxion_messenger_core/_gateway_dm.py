@@ -473,7 +473,8 @@ class DmHandlerMixin:
                             http_base = peer_gw.replace("wss://", "https://").replace("ws://", "http://")
                             delivered = await post_relay(http_base.rstrip("/") + "/relay", relay_payload)
                             if not delivered and self._store:
-                                self._store.enqueue_relay(message_id, peer_webid, http_base, relay_payload)
+                                self._store.enqueue_relay(message_id, peer_webid, http_base,
+                                                          {**relay_payload, "_q_sender": sender_webid})
                                 await websocket.send(json.dumps({
                                     "type": "relay_pending",
                                     "message_id": message_id,
@@ -789,6 +790,10 @@ class DmHandlerMixin:
                         if _k in data:
                             inner_payload[_k] = data[_k]
                     # Attempt sealed relay if peer's x25519 pub is known
+                    # What gets queued if the peer is down: the unsealed signed
+                    # payload (re-signed and re-sealed on each retry, see
+                    # _prepare_queued_relay) and the local sender to notify.
+                    _queued = {**inner_payload, "_q_sender": sender_webid}
                     _peer_x25519 = self._resolve_peer_x25519_pub(target_webid)
                     if _peer_x25519:
                         try:
@@ -804,6 +809,7 @@ class DmHandlerMixin:
                                 "content_type": "sealed_dm",
                                 "sealed_payload": _sealed,
                             }
+                            _queued["_q_seal"] = True
                         except Exception as _se:
                             logger.debug("seal_relay_payload failed, sending plaintext: %s", _se)
                             payload = inner_payload
@@ -815,10 +821,11 @@ class DmHandlerMixin:
                     delivered = await post_relay(relay_url, payload)
                     if delivered:
                         logger.info(f"Relayed DM to {target_webid} via {peer_gw}")
+                        self._note_peer_contact(target_webid, http_base)
                     else:
                         # Enqueue for retry; tell sender delivery is pending
                         if self._store:
-                            self._store.enqueue_relay(message_id, target_webid, http_base, payload)
+                            self._store.enqueue_relay(message_id, target_webid, http_base, _queued)
                         await websocket.send(json.dumps({
                             "type": "relay_pending",
                             "message_id": message_id,
@@ -1236,10 +1243,12 @@ class DmHandlerMixin:
             # the receiving gateway can unseal (it re-dispatches the inner
             # dm_fanout after unsealing). Fall back to the signed-plaintext
             # relay when the seal key is unknown.
+            _queued = {**relay_payload}
             _peer_seal_pub = self._resolve_peer_x25519_pub(to_webid)
             if _peer_seal_pub:
                 try:
                     from .sealed_relay import seal_relay_payload as _seal
+                    _queued["_q_seal"] = True
                     relay_payload = {
                         "content_type": "sealed_dm",
                         "to_webid": to_webid,
@@ -1253,7 +1262,9 @@ class DmHandlerMixin:
             http_base = peer_gw.replace("wss://", "https://").replace("ws://", "http://")
             delivered = await post_relay(http_base.rstrip("/") + "/relay", relay_payload)
             if not delivered and self._store:
-                self._store.enqueue_relay(transport_id, to_webid, http_base, relay_payload)
+                self._store.enqueue_relay(transport_id, to_webid, http_base, _queued)
+            elif delivered:
+                self._note_peer_contact(to_webid, http_base)
         except Exception as exc:
             logger.warning("dm_fanout cross-gateway relay failed: %s", exc)
 
@@ -1280,6 +1291,7 @@ class DmHandlerMixin:
         if not verify_relay_message(
             from_webid, to_webid, transport_id, content, timestamp, signature,
             relay_nonce, message_scope="dm-fanout",
+            relay_ts=str(data.get("relay_ts") or ""),
         ):
             return "400 Bad Request", '{"error":"invalid signature"}'
         # Blocked sender: silently accept but don't deliver (no block-reveal),
@@ -1288,8 +1300,9 @@ class DmHandlerMixin:
             return "200 OK", '{"status":"received"}'
         # Dedup per transport id (one per device-envelope).
         if self._store:
+            from .relay import RELAY_ID_DEDUP_TTL_SECONDS as _ID_TTL
             _key = f"{from_webid}:{transport_id}"
-            if self._store.has_seen_relay_id(_key, ttl_seconds=600):
+            if self._store.has_seen_relay_id(_key, ttl_seconds=_ID_TTL):
                 return "200 OK", '{"status":"duplicate"}'
             self._store.record_relay_id(_key)
         try:

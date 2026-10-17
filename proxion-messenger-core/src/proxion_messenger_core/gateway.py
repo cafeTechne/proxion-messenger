@@ -451,6 +451,26 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 return ws
         return None
 
+    async def _supervised(self, loop_fn) -> None:
+        """Run a background loop, restarting it (with backoff) if it raises.
+
+        run() stops the whole gateway when a main task ends with an exception,
+        so an unexpected error in a housekeeping loop (one sqlite "database is
+        locked") used to take the server down with it."""
+        name = getattr(loop_fn, "__name__", "background loop")
+        failures = 0
+        while True:
+            try:
+                await loop_fn()
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                failures += 1
+                delay = min(5 * (2 ** min(failures, 6)), 300)
+                logger.exception("%s crashed, restarting in %ss", name, delay)
+                await asyncio.sleep(delay)
+
     def _own_gateway_did(self) -> str:
         """This gateway's own identity DID (the DID half of its Proxion address). Cached."""
         d = getattr(self, "_own_gateway_did_cache", None)
@@ -3706,34 +3726,34 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
             # 1. Start core loops (polling + flushing)
             main_tasks = [
-                asyncio.create_task(self.poll_loop()),
-                asyncio.create_task(self.flush_loop()),
-                asyncio.create_task(self._presence_loop()),
-                asyncio.create_task(self._scheduler_loop()),
-                asyncio.create_task(self._pod_watchdog()),
-                asyncio.create_task(self._relay_retry_loop()),
-                asyncio.create_task(self._expire_messages_loop()),
-                asyncio.create_task(self._retention_purge_loop()),
-                asyncio.create_task(self._checksum_maintenance_loop()),
-                asyncio.create_task(self._prekey_replenishment_loop()),
-                asyncio.create_task(self._read_position_flush_loop()),
+                asyncio.create_task(self._supervised(self.poll_loop)),
+                asyncio.create_task(self._supervised(self.flush_loop)),
+                asyncio.create_task(self._supervised(self._presence_loop)),
+                asyncio.create_task(self._supervised(self._scheduler_loop)),
+                asyncio.create_task(self._supervised(self._pod_watchdog)),
+                asyncio.create_task(self._supervised(self._relay_retry_loop)),
+                asyncio.create_task(self._supervised(self._expire_messages_loop)),
+                asyncio.create_task(self._supervised(self._retention_purge_loop)),
+                asyncio.create_task(self._supervised(self._checksum_maintenance_loop)),
+                asyncio.create_task(self._supervised(self._prekey_replenishment_loop)),
+                asyncio.create_task(self._supervised(self._read_position_flush_loop)),
             ]
 
             # R16: Continuous assurance loop
             if self._assurance_loop_instance is not None:
-                main_tasks.append(asyncio.create_task(self._continuous_assurance_loop()))
+                main_tasks.append(asyncio.create_task(self._supervised(self._continuous_assurance_loop)))
 
             # R78 (L2): outbound inbox poll so chat invitations push even when the
             # gateway is not publicly reachable (behind NAT). Outbound-only; needs the
             # user to have granted the gateway's WebID read on their inbox.
-            main_tasks.append(asyncio.create_task(self.inbox_poll_loop()))
+            main_tasks.append(asyncio.create_task(self._supervised(self.inbox_poll_loop)))
 
             # R38: drain our sealed mailbox from the relay node (if configured)
             if relay_fallback_url():
-                main_tasks.append(asyncio.create_task(self._mailbox_drain_loop()))
+                main_tasks.append(asyncio.create_task(self._supervised(self._mailbox_drain_loop)))
             # R38: relay node — periodically purge expired mailbox blobs
             if relay_node_enabled():
-                main_tasks.append(asyncio.create_task(self._mailbox_purge_loop()))
+                main_tasks.append(asyncio.create_task(self._supervised(self._mailbox_purge_loop)))
 
             # 1b. Optional HTTP server for serving the web UI
             if self.config.http_port and self.config.web_dir:

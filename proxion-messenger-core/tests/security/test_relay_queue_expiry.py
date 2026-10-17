@@ -34,18 +34,17 @@ def test_retry_loop_skips_expired_relays(store):
     assert "relay-expired" not in ids, "Expired relay should not be returned"
 
 
-def test_relay_marked_failed_after_max_attempts(store):
-    """get_pending_relays excludes rows with attempt_count >= 10."""
-    store.enqueue_relay("relay-maxed", "did:key:bob", "wss://bob.example.com", {"msg": "retry"})
-    # Set attempt_count to 10
+def test_relay_kept_until_expiry_regardless_of_attempts(store):
+    """A relay is retried until expires_at, not dropped after a fixed number of
+    attempts (10 attempts with the backoff cap gave up after about 3 hours)."""
+    store.enqueue_relay("relay-many", "did:key:bob", "wss://bob.example.com", {"msg": "retry"})
     with store._conn() as conn:
         conn.execute(
-            "UPDATE pending_relays SET attempt_count = 10 WHERE id = ?",
-            ("relay-maxed",),
+            "UPDATE pending_relays SET attempt_count = 25 WHERE id = ?",
+            ("relay-many",),
         )
-    pending = store.get_pending_relays()
-    ids = [r["id"] for r in pending]
-    assert "relay-maxed" not in ids, "Max-attempt relay should not be returned"
+    ids = [r["id"] for r in store.get_pending_relays()]
+    assert "relay-many" in ids
 
 
 @pytest.mark.asyncio

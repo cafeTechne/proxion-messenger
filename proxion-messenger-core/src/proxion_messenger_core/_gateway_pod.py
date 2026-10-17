@@ -24,6 +24,27 @@ from .msgcrypto import decrypt_message, derive_message_key, is_encrypted
 
 logger = logging.getLogger("proxion_messenger_core.gateway")
 
+# A queued relay whose signature is older than this is re-signed before a retry
+# (receivers accept signatures within +-5 minutes).
+_RESIGN_AFTER_SECONDS = 240
+# At most one queue flush per peer per this many seconds after it makes contact.
+_PEER_FLUSH_MIN_INTERVAL = 10.0
+# Relays that change stored state on the peer. When the peer gateway is down
+# these are queued and retried like DMs; presence, typing and voice signalling
+# stay fire-and-forget (stale by the time the peer is back).
+_DURABLE_RELAY_TYPES = frozenset({
+    "dm_edit", "dm_delete", "dm_reaction", "dm_pin", "dm_disappear_timer",
+    "room_message", "room_edit", "room_delete", "room_reaction",
+    "room_moderation", "room_emoji", "room_update",
+})
+
+
+def _norm_gateway_url(url: str) -> str:
+    url = (url or "").strip()
+    url = url.replace("wss://", "https://", 1) if url.startswith("wss://") else url
+    url = url.replace("ws://", "http://", 1) if url.startswith("ws://") else url
+    return url.rstrip("/")
+
 
 def _derive_cred_key(identity_key) -> bytes:
     """Derive a 32-byte Fernet key from the agent's Ed25519 private key via HKDF."""
@@ -569,170 +590,294 @@ class PodSyncMixin:
             return f"{scheme}://{host}:{self.config.http_port}"
         return ""
 
+    # ── Outbound relay queue ─────────────────────────────────────────────────
+    #
+    # A relay that could not be delivered is stored in pending_relays and retried
+    # until its expires_at. Each retry re-signs it with a fresh transport
+    # timestamp and nonce (the receiver only accepts signatures made in the last
+    # few minutes) and keeps the original message timestamp as data. Queue-only
+    # bookkeeping rides in the stored payload under "_q_" keys and is stripped
+    # before sending: _q_sender is the local account to tell about the outcome,
+    # _q_seal asks for the payload to be sealed to the peer gateway at send time.
+
+    def _relay_queue_lock(self) -> asyncio.Lock:
+        lock = self.__dict__.get("_relay_q_lock")
+        if lock is None:
+            lock = asyncio.Lock()
+            self.__dict__["_relay_q_lock"] = lock
+        return lock
+
+    def _queued_relay_sender(self, payload: dict) -> str:
+        """The local identity to notify about a queued relay's outcome."""
+        if "_q_sender" in payload:
+            return str(payload.get("_q_sender") or "")
+        # Rows queued before the sender was stored. A from_webid equal to our own
+        # gateway did would reach every local socket (_sockets_for fallback), so
+        # only a distinct identity is notified.
+        sender = payload.get("from_webid", "") or ""
+        try:
+            if sender and sender == self._own_gateway_did():
+                return ""
+        except Exception:
+            pass
+        return sender
+
+    def _resign_queued_relay(self, p: dict) -> dict:
+        """Re-sign a queued relay this gateway signed, so it verifies now."""
+        from .relay import sign_relay_envelope, sign_relay_message
+        import secrets as _sec
+        own = self._own_gateway_did()
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        if p.get("relay_sig_did"):
+            # Envelope-signed (DM/room secondary ops, room messages): relay_ts is
+            # the transport timestamp already, so a fresh one is compatible with
+            # every receiver.
+            if p["relay_sig_did"] != own:
+                return p
+            p.pop("signature", None)
+            p["relay_ts"] = now_iso
+            p["relay_nonce"] = _sec.token_hex(8)
+            p["signature"] = sign_relay_envelope(self.agent.identity_key, p)
+            return p
+        if not (p.get("signature") and p.get("from_webid") == own and p.get("timestamp")):
+            return p
+        try:
+            signed_at = datetime.fromisoformat(
+                str(p.get("relay_ts") or p["timestamp"]).replace("Z", "+00:00"))
+            age = (now - signed_at).total_seconds()
+        except Exception:
+            age = float("inf")
+        if 0 <= age < _RESIGN_AFTER_SECONDS:
+            # Still inside the receiver's window: send it as first signed, which
+            # older receivers (no relay_ts support) also accept.
+            return p
+        nonce = _sec.token_hex(8)
+        p["relay_nonce"] = nonce
+        p["relay_ts"] = now_iso
+        p["signature"] = sign_relay_message(
+            self.agent.identity_key, own, p.get("to_webid", ""), p.get("message_id", ""),
+            p.get("content", ""), p["timestamp"], nonce,
+            sender_webid=p.get("sender_webid", ""),
+            message_scope=p.get("message_scope", ""),
+            relay_ts=now_iso,
+        )
+        return p
+
+    def _prepare_queued_relay(self, stored: dict) -> dict:
+        """The wire payload for a stored relay: re-signed, sealed if asked."""
+        p = {k: v for k, v in stored.items() if not k.startswith("_q_")}
+        try:
+            p = self._resign_queued_relay(p)
+        except Exception:
+            logger.debug("re-signing queued relay failed", exc_info=True)
+        if stored.get("_q_seal"):
+            peer = p.get("to_webid", "")
+            pub = self._resolve_peer_x25519_pub(peer) if peer else None
+            if pub:
+                try:
+                    from .sealed_relay import seal_relay_payload as _seal
+                    p = {
+                        "content_type": "sealed_dm",
+                        "to_webid": peer,
+                        "message_id": p.get("message_id", ""),
+                        "timestamp": p.get("timestamp", ""),
+                        "relay_nonce": p.get("relay_nonce", ""),
+                        "sealed_payload": _seal(p, pub),
+                    }
+                except Exception as _se:
+                    logger.debug("sealing queued relay failed, sending signed plaintext: %s", _se)
+        return p
+
+    async def _fail_queued_relay(self, relay: dict, why: str) -> None:
+        """Mark a queued relay failed for good and tell its sender (relay_expired)."""
+        self._store.mark_relay_permanently_failed(relay["id"])
+        logger.warning("Relay %s expired before delivery (%s)", relay["id"], why)
+        try:
+            stored = json.loads(relay["payload_json"])
+            self._store.append_relay_delivery_event(
+                relay["id"], stored.get("to_webid", "") or "", "expired")
+            sender = self._queued_relay_sender(stored)
+            if sender:
+                await self._send_to_identity(sender, json.dumps({
+                    "type": "relay_expired",
+                    "message_id": relay["id"],
+                }))
+        except Exception:
+            pass
+
     async def _expire_stale_relays(self) -> None:
         """Fail relays that passed their expiry while still queued and tell each
         sender (relay_expired), so their message stops showing as queued."""
         for relay in self._store.take_expired_relays():
             logger.warning("Relay %s expired before delivery", relay["id"])
             try:
-                payload_dict = json.loads(relay["payload_json"])
+                stored = json.loads(relay["payload_json"])
                 self._store.append_relay_delivery_event(
-                    relay["id"], payload_dict.get("to_webid", "") or "", "expired")
-                sender_webid = payload_dict.get("from_webid", "")
-                if sender_webid:
-                    await self._send_to_identity(sender_webid, json.dumps({
+                    relay["id"], stored.get("to_webid", "") or "", "expired")
+                sender = self._queued_relay_sender(stored)
+                if sender:
+                    await self._send_to_identity(sender, json.dumps({
                         "type": "relay_expired",
                         "message_id": relay["id"],
                     }))
             except Exception:
                 pass
 
-    async def _relay_retry_loop(self) -> None:
-        """Background task: retry pending outbound relays with exponential backoff.
+    async def _attempt_pending_relay(self, relay: dict) -> bool:
+        """Try one queued relay now. Returns True when it was delivered."""
+        try:
+            stored = json.loads(relay["payload_json"])
+        except Exception:
+            stored = {}
+        sender = self._queued_relay_sender(stored)
+        peer_did = stored.get("to_webid", "") or ""
+        payload: dict = {}
+        try:
+            payload = self._prepare_queued_relay(stored)
+            relay_url = relay["to_gateway_url"].rstrip("/") + "/relay"
+            from .relay import post_relay as _post_relay
+            delivered = await _post_relay(relay_url, payload)
+        except Exception:
+            delivered = False
 
-        R9.3.1: Cap backoff at 3600s (1 hour, was 600s/10min).
-        R9.3.2: Expire messages older than 7 days.
-        R9.3.3: Emit relay_expired to sender sockets on discard.
-        R9.4.1: Emit relay_delivered to sender sockets on success.
-        R3: Check expires_at column and drop after 10 attempts with jitter.
-        """
-        if not self._store:
-            return
+        # R94: peer-gateway health reflects DIRECT reachability. Record it
+        # from the direct-relay result, before the mailbox fallback runs — a
+        # message saved by the fallback still means the destination gateway
+        # itself is unreachable, and "offline since ..." should say so.
+        try:
+            if delivered:
+                self._store.record_peer_gateway_success(relay["to_gateway_url"])
+            else:
+                self._store.record_peer_gateway_failure(relay["to_gateway_url"], "relay_post_failed")
+        except Exception:
+            pass
+
+        # R38: if direct delivery failed, try the sealed relay-node mailbox
+        # (works when the recipient gateway is unreachable / behind CGNAT).
+        if not delivered and peer_did and payload:
+            try:
+                from ._gateway_mailbox import relay_fallback_url as _rfu
+                if _rfu() and hasattr(self, "_send_via_mailbox"):
+                    if await self._send_via_mailbox(peer_did, payload):
+                        delivered = True
+                        logger.info("Pending relay %s delivered via mailbox fallback", relay["id"])
+            except Exception as _mb_exc:
+                logger.debug("mailbox fallback failed: %s", _mb_exc)
+
+        if delivered:
+            self._store.mark_relay_delivered(relay["id"])
+            try:
+                self._store.append_relay_delivery_event(relay["id"], peer_did, "delivered")
+            except Exception:
+                pass
+            logger.info("Pending relay %s delivered on retry", relay["id"])
+            # R9.4.1: notify the sender (only their sockets) of delivery
+            if sender:
+                try:
+                    await self._send_to_identity(sender, json.dumps({
+                        "type": "relay_delivered",
+                        "message_id": relay["id"],
+                    }))
+                except Exception:
+                    pass
+        else:
+            try:
+                self._store.append_relay_delivery_event(relay["id"], peer_did, "failed")
+            except Exception:
+                pass
+            self._store.increment_relay_attempt(relay["id"])
+        return delivered
+
+    async def _relay_retry_pass(self) -> None:
+        """One pass over the outbound relay queue."""
         import random as _random
         SEVEN_DAYS = 7 * 24 * 3600
-        while True:
-            await asyncio.sleep(30)
+        async with self._relay_queue_lock():
             await self._expire_stale_relays()
             pending = self._store.get_pending_relays(limit=50)
             now = time.time()
+            reachable: set = set()
             for relay in pending:
-                attempt = relay["attempt_count"]
-                last = relay["last_attempt_at"] or 0.0
-                created = relay.get("created_at", now)
-                expires_at = relay.get("expires_at", 0)
-
-                # R3: Check expires_at (if set and non-zero)
-                if expires_at > 0 and now > expires_at:
-                    self._store.mark_relay_permanently_failed(relay["id"])
-                    logger.warning("Relay %s expired (expires_at check)", relay["id"])
-                    try:
-                        payload_dict = json.loads(relay["payload_json"])
-                        peer_did_exp = payload_dict.get("to_webid", "") or ""
-                        self._store.append_relay_delivery_event(relay["id"], peer_did_exp, "expired")
-                        sender_webid = payload_dict.get("from_webid", "")
-                        if sender_webid:
-                            await self._send_to_identity(sender_webid, json.dumps({
-                                "type": "relay_expired",
-                                "message_id": relay["id"],
-                            }))
-                    except Exception:
-                        pass
+                # Rows from before expires_at existed (0) still expire after 7 days.
+                if not relay.get("expires_at") and now - relay.get("created_at", now) > SEVEN_DAYS:
+                    await self._fail_queued_relay(relay, "7 days")
                     continue
-
-                # R9.3.2: 7-day expiry
-                if now - created > SEVEN_DAYS:
-                    self._store.mark_relay_permanently_failed(relay["id"])
-                    logger.warning("Relay %s expired after 7 days", relay["id"])
-                    # R9.3.3: notify sender
-                    try:
-                        payload_dict = json.loads(relay["payload_json"])
-                        peer_did_7d = payload_dict.get("to_webid", "") or ""
-                        self._store.append_relay_delivery_event(relay["id"], peer_did_7d, "expired")
-                        sender_webid = payload_dict.get("from_webid", "")
-                        if sender_webid:
-                            await self._send_to_identity(sender_webid, json.dumps({
-                                "type": "relay_expired",
-                                "message_id": relay["id"],
-                            }))
-                    except Exception:
-                        pass
-                    continue
-
-                # R9.3.1: exponential backoff, cap at 3600s (1 hour), add jitter
-                next_delay = min(30 * (2 ** attempt), 3600)
-                next_delay *= _random.uniform(0.75, 1.25)
-                if (now - last) < next_delay:
-                    continue
-
+                url = relay["to_gateway_url"]
+                if url not in reachable:
+                    # R9.3.1: exponential backoff, capped at 1 hour, with jitter.
+                    # Retries continue until expires_at; a peer that comes back is
+                    # flushed promptly through _note_peer_contact.
+                    attempt = relay["attempt_count"]
+                    last = relay["last_attempt_at"] or 0.0
+                    next_delay = min(30 * (2 ** min(attempt, 10)), 3600)
+                    next_delay *= _random.uniform(0.75, 1.25)
+                    if (now - last) < next_delay:
+                        continue
                 try:
-                    payload = json.loads(relay["payload_json"])
-                    relay_url = relay["to_gateway_url"].rstrip("/") + "/relay"
-                    from .relay import post_relay as _post_relay
-                    delivered = await _post_relay(relay_url, payload)
+                    if await self._attempt_pending_relay(relay):
+                        # Peer is back: the rest of its queue goes now, not after
+                        # each row's own backoff.
+                        reachable.add(url)
                 except Exception:
-                    delivered = False
-                    payload = {}
+                    logger.warning("Retrying relay %s failed", relay.get("id"), exc_info=True)
 
-                _peer_did_chain = payload.get("to_webid", "") or ""
+    async def _relay_retry_loop(self) -> None:
+        """Background task: retry pending outbound relays with exponential backoff.
 
-                # R94: peer-gateway health reflects DIRECT reachability. Record it
-                # from the direct-relay result, before the mailbox fallback runs — a
-                # message saved by the fallback still means the destination gateway
-                # itself is unreachable, and "offline since ..." should say so.
-                try:
-                    if delivered:
-                        self._store.record_peer_gateway_success(relay["to_gateway_url"])
-                    else:
-                        self._store.record_peer_gateway_failure(relay["to_gateway_url"], "relay_post_failed")
-                except Exception:
-                    pass
+        Relays are retried until their expires_at (then relay_expired goes to the
+        sender), not for a fixed number of attempts. A failing pass (for example
+        "database is locked") is logged and retried; it must not end the task,
+        since the gateway shuts down when a background task dies.
+        """
+        if not self._store:
+            return
+        failures = 0
+        while True:
+            await asyncio.sleep(30)
+            try:
+                await self._relay_retry_pass()
+                failures = 0
+            except Exception as exc:
+                failures += 1
+                logger.warning("Relay retry pass failed (%s), will retry", exc)
+                await asyncio.sleep(min(30 * (2 ** min(failures, 5)), 600))
 
-                # R38: if direct delivery failed, try the sealed relay-node mailbox
-                # (works when the recipient gateway is unreachable / behind CGNAT).
-                if not delivered and _peer_did_chain:
-                    try:
-                        from ._gateway_mailbox import relay_fallback_url as _rfu
-                        if _rfu() and hasattr(self, "_send_via_mailbox"):
-                            if await self._send_via_mailbox(_peer_did_chain, payload):
-                                delivered = True
-                                logger.info("Pending relay %s delivered via mailbox fallback", relay["id"])
-                    except Exception as _mb_exc:
-                        logger.debug("mailbox fallback failed: %s", _mb_exc)
+    def _note_peer_contact(self, did: str = "", gateway_url: str = "") -> None:
+        """A peer gateway answered or sent us a verified relay: deliver anything
+        queued for it now instead of waiting out each row's backoff."""
+        if not getattr(self, "_store", None):
+            return
+        url = _norm_gateway_url(gateway_url)
+        key = f"{did}|{url}"
+        if key == "|":
+            return
+        kicks = self.__dict__.setdefault("_relay_kick_at", {})
+        now = time.monotonic()
+        if now - kicks.get(key, -1e9) < _PEER_FLUSH_MIN_INTERVAL:
+            return
+        if len(kicks) > 1024:
+            kicks.clear()
+        kicks[key] = now
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self._flush_relays_to_peer(did, url))
 
-                if delivered:
-                    self._store.mark_relay_delivered(relay["id"])
-                    try:
-                        self._store.append_relay_delivery_event(relay["id"], _peer_did_chain, "delivered")
-                    except Exception:
-                        pass
-                    logger.info("Pending relay %s delivered on retry", relay["id"])
-                    # R9.4.1: notify sender of delivery
-                    try:
-                        sender_webid = payload.get("from_webid", "")
-                        if sender_webid:
-                            await self._send_to_identity(sender_webid, json.dumps({
-                                "type": "relay_delivered",
-                                "message_id": relay["id"],
-                            }))
-                    except Exception:
-                        pass
-                elif attempt >= 9:
-                    self._store.mark_relay_permanently_failed(relay["id"])
-                    try:
-                        self._store.append_relay_delivery_event(relay["id"], _peer_did_chain, "failed")
-                    except Exception:
-                        pass
-                    logger.warning("Pending relay %s permanently failed after 10 attempts", relay["id"])
-                    # R94: tell the sender how long the destination has been down.
-                    try:
-                        _health = self._store.get_peer_gateway_health(relay["to_gateway_url"]) or {}
-                        sender_webid = payload.get("from_webid", "")
-                        if sender_webid:
-                            await self._send_to_identity(sender_webid, json.dumps({
-                                "type": "relay_failed",
-                                "message_id": relay["id"],
-                                "to_webid": _peer_did_chain,
-                                "down_since": _health.get("down_since"),
-                                "consecutive_failures": _health.get("consecutive_failures"),
-                            }))
-                    except Exception:
-                        pass
-                else:
-                    try:
-                        self._store.append_relay_delivery_event(relay["id"], _peer_did_chain, "failed")
-                    except Exception:
-                        pass
-                    self._store.increment_relay_attempt(relay["id"])
+    async def _flush_relays_to_peer(self, did: str, url: str) -> None:
+        try:
+            async with self._relay_queue_lock():
+                rows = [
+                    r for r in self._store.get_pending_relays(limit=200)
+                    if (did and r.get("to_webid") == did)
+                    or (url and _norm_gateway_url(r.get("to_gateway_url", "")) == url)
+                ]
+                for relay in rows:
+                    if not await self._attempt_pending_relay(relay):
+                        break  # gone again; the retry loop takes over
+        except Exception as exc:
+            logger.warning("Flushing queued relays to %s failed: %s", url or did, exc)
 
     # ── Polling ──────────────────────────────────────────────────────────────
 
@@ -1040,26 +1185,33 @@ class PodSyncMixin:
     async def flush_loop(self):
         """Periodically try to send queued messages."""
         while not self._stop_event.is_set():
-            items = self.outbox.get_items()
-            if items:
-                logger.info(f"Flush loop: {len(items)} items pending")
-                for item in items:
-                    client = None
-                    if item.target_cert_id and item.target_cert_id in self.dm_clients:
-                        _, client = self.dm_clients[item.target_cert_id]
-                    elif item.room_id and item.room_id in self.room_memberships:
-                        _, client = self.room_memberships[item.room_id]
-
-                    if client:
-                        try:
-                            from .messaging import send as msend
-                            msend(item.message, client)
-                            self.outbox.remove(item.item_id)
-                            logger.info(f"Flushed message {item.item_id}")
-                        except Exception as e:
-                            logger.debug(f"Flush failed for {item.item_id}: {e}")
-
+            try:
+                self._flush_outbox_once()
+            except Exception as exc:
+                # One bad pass (e.g. "database is locked") must not end the task:
+                # the gateway shuts down when a background task dies.
+                logger.warning("flush_loop pass failed (%s), will retry", exc)
             await asyncio.sleep(60.0)
+
+    def _flush_outbox_once(self) -> None:
+        items = self.outbox.get_items()
+        if items:
+            logger.info(f"Flush loop: {len(items)} items pending")
+            for item in items:
+                client = None
+                if item.target_cert_id and item.target_cert_id in self.dm_clients:
+                    _, client = self.dm_clients[item.target_cert_id]
+                elif item.room_id and item.room_id in self.room_memberships:
+                    _, client = self.room_memberships[item.room_id]
+
+                if client:
+                    try:
+                        from .messaging import send as msend
+                        msend(item.message, client)
+                        self.outbox.remove(item.item_id)
+                        logger.info(f"Flushed message {item.item_id}")
+                    except Exception as e:
+                        logger.debug(f"Flush failed for {item.item_id}: {e}")
 
     # ── Pod room helpers ─────────────────────────────────────────────────────
 
@@ -2602,14 +2754,36 @@ class PodSyncMixin:
             "origin_gateway_url": self._gateway_http_url(),
         }
         payload["signature"] = sign_relay_envelope(self.agent.identity_key, payload)
+        await self._post_or_queue_relay(gateway_url, payload)
+
+    async def _post_or_queue_relay(self, gateway_url: str, payload: dict) -> bool:
+        """POST a signed relay; queue it for retry if it changes stored state on
+        the peer (_DURABLE_RELAY_TYPES) and the peer gateway did not take it."""
+        from .relay import post_relay
         http_base = gateway_url.replace("wss://", "https://").replace("ws://", "http://")
         try:
-            await post_relay(http_base.rstrip("/") + "/relay", payload)
+            delivered = await post_relay(http_base.rstrip("/") + "/relay", payload)
         except Exception as exc:
-            logger.debug("room relay to %s failed: %s", gateway_url, exc)
+            logger.debug("relay to %s failed: %s", gateway_url, exc)
+            delivered = False
+        if delivered:
+            self._note_peer_contact(payload.get("to_webid", "") or "", http_base)
+            return True
+        ct = payload.get("content_type", "")
+        if ct in _DURABLE_RELAY_TYPES and getattr(self, "_store", None):
+            import secrets as _sec
+            relay_id = f"{ct}:{payload.get('relay_nonce') or _sec.token_hex(8)}"[:128]
+            try:
+                self._store.enqueue_relay(relay_id, payload.get("to_webid", "") or "",
+                                          http_base, payload)
+            except Exception:
+                logger.warning("Could not queue %s relay for retry", ct, exc_info=True)
+        return False
 
     async def _relay_ephemeral(self, gateway_url: str, payload: dict) -> None:
-        """POST an ephemeral content_type event to a peer gateway, fire-and-forget.
+        """POST a content_type event to a peer gateway. Presence, typing and voice
+        are fire-and-forget; edits, deletes, reactions, pins, timers and room
+        changes are queued for retry when the peer is down (_DURABLE_RELAY_TYPES).
 
         Signs the payload with this gateway's identity key (envelope signature over
         every field) so the receiver can prove which gateway originated it. Without
@@ -2617,7 +2791,7 @@ class PodSyncMixin:
         unsigned ephemeral relays (the membership/relationship checks stop non-member
         injection but don't cryptographically bind the sender). Idempotent: skips
         re-signing if a ``signature`` is already present (e.g. relay retry)."""
-        from .relay import post_relay, sign_relay_envelope
+        from .relay import sign_relay_envelope
         try:
             if "signature" not in payload and getattr(self, "agent", None) is not None:
                 import secrets as _sec
@@ -2627,8 +2801,4 @@ class PodSyncMixin:
                 payload["signature"] = sign_relay_envelope(self.agent.identity_key, payload)
         except Exception:
             logger.debug("relay envelope signing failed", exc_info=True)
-        http_base = gateway_url.replace("wss://", "https://").replace("ws://", "http://")
-        try:
-            await post_relay(http_base.rstrip("/") + "/relay", payload)
-        except Exception:
-            pass
+        await self._post_or_queue_relay(gateway_url, payload)

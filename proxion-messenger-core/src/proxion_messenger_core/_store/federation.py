@@ -291,7 +291,6 @@ class FederationStoreMixin(object):
                 SELECT * FROM pending_relays
                 WHERE status = 'pending'
                   AND (expires_at = 0 OR expires_at > ?)
-                  AND attempt_count < 10
                 ORDER BY created_at ASC
                 LIMIT ?
                 """,

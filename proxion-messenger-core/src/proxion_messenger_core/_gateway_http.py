@@ -799,6 +799,21 @@ class HttpEndpointsMixin:
             if self._store:
                 self._store.record_relay_nonce(_ek)
             self._seen_relay_nonces.append(_ek)
+            # A queued room message is re-signed (fresh nonce) on every retry, so
+            # the nonce alone cannot catch a retry of one that already landed.
+            if _ct == "room_message" and data.get("message_id") and data.get("room_id"):
+                from .relay import RELAY_ID_DEDUP_TTL_SECONDS as _RM_TTL
+                _rk = f"room:{data['room_id']}:{_from}:{data['message_id']}"
+                if self._store and self._store.has_seen_relay_id(_rk, ttl_seconds=_RM_TTL):
+                    return "200 OK", '{"status":"duplicate"}'
+                if _rk in self._seen_relay_ids:
+                    return "200 OK", '{"status":"duplicate"}'
+                if self._store:
+                    self._store.record_relay_id(_rk)
+                self._seen_relay_ids.append(_rk)
+            # A verified relay from this gateway means it is up: send it whatever
+            # we queued for it while it was down.
+            self._note_peer_contact(_signer, data.get("origin_gateway_url", ""))
 
         # ── Voice signal relay — ephemeral, delivered immediately, not queued ──
         if data.get("content_type") == "voice_signal":
@@ -933,17 +948,41 @@ class HttpEndpointsMixin:
             except (ValueError, TypeError):
                 return "400 Bad Request", '{"error":"invalid_relay_fields"}'
 
-        # R9.1.1 — deduplicate: drop if recently seen.
+        if not all([from_webid, to_webid, message_id, content, timestamp, signature]):
+            return "400 Bad Request", '{"error":"missing fields"}'
+
+        # Verify Ed25519 signature (include message_scope if present in payload)
+        _message_scope = data.get("message_scope", "")
+        from .relay import verify_relay_message
+        if not verify_relay_message(
+            from_webid, to_webid, message_id, content, timestamp, signature,
+            relay_nonce, message_scope=_message_scope,
+            relay_ts=str(data.get("relay_ts") or ""),
+        ):
+            return "400 Bad Request", '{"error":"invalid signature"}'
+        try:
+            from .didkey import did_to_pub_key, pub_key_to_did
+            expected = pub_key_to_did(did_to_pub_key(from_webid))
+            if expected != from_webid:
+                return "401 Unauthorized", '{"error":"from_webid mismatch"}'
+        except Exception:
+            return "401 Unauthorized", '{"error":"from_webid mismatch"}'
+
+        # R9.1.1 — deduplicate: drop if recently seen. Checked only after the
+        # signature verifies, so a forged POST cannot burn a real message id.
+        # Remembered for the whole retry life of a queued relay: a retry is
+        # re-signed with a fresh nonce, so the message id is what catches it.
+        from .relay import RELAY_ID_DEDUP_TTL_SECONDS as _ID_TTL
         # Use SQLite when available; in-memory deque as fallback.
         _relay_dedup_key = f"{from_webid}:{message_id}" if from_webid else message_id
         if message_id:
-            if self._store and self._store.has_seen_relay_id(_relay_dedup_key, ttl_seconds=600):
+            if self._store and self._store.has_seen_relay_id(_relay_dedup_key, ttl_seconds=_ID_TTL):
                 return "200 OK", '{"status":"duplicate"}'
             if _relay_dedup_key in self._seen_relay_ids:
                 return "200 OK", '{"status":"duplicate"}'
             if self._store:
                 self._store.record_relay_id(_relay_dedup_key)
-                self._store.prune_seen_relay_ids(time.time() - 600)
+                self._store.prune_seen_relay_ids(time.time() - _ID_TTL)
             self._seen_relay_ids.append(_relay_dedup_key)
 
         # R10.4.1 — relay_nonce dedup (replay attack prevention).
@@ -965,24 +1004,8 @@ class HttpEndpointsMixin:
                 self._store.prune_relay_nonces(time.time() - 600)
             self._seen_relay_nonces.append(_nonce_key)
 
-        if not all([from_webid, to_webid, message_id, content, timestamp, signature]):
-            return "400 Bad Request", '{"error":"missing fields"}'
-
-        # Verify Ed25519 signature (include message_scope if present in payload)
-        _message_scope = data.get("message_scope", "")
-        from .relay import verify_relay_message
-        if not verify_relay_message(
-            from_webid, to_webid, message_id, content, timestamp, signature,
-            relay_nonce, message_scope=_message_scope,
-        ):
-            return "400 Bad Request", '{"error":"invalid signature"}'
-        try:
-            from .didkey import did_to_pub_key, pub_key_to_did
-            expected = pub_key_to_did(did_to_pub_key(from_webid))
-            if expected != from_webid:
-                return "401 Unauthorized", '{"error":"from_webid mismatch"}'
-        except Exception:
-            return "401 Unauthorized", '{"error":"from_webid mismatch"}'
+        # A verified relay from this gateway means it is up.
+        self._note_peer_contact(from_webid, origin_gateway)
 
         # R12.1.1 — reject relay from revoked senders
         if from_webid in self._revoked_dids:

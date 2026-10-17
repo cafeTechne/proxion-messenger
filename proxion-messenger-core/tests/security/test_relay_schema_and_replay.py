@@ -96,54 +96,49 @@ async def test_relay_rejects_oversized_file_attachment():
     assert "file_too_large_for_relay" in data.get("error", "")
 
 
+def _own_signed(agent, to_did, nonce, message_id):
+    from proxion_messenger_core.didkey import pub_key_to_did
+    from_did = pub_key_to_did(agent.identity_pub_bytes)
+    payload = _signed_payload(agent, from_did, to_did, relay_nonce=nonce, message_id=message_id)
+    payload["relay_nonce"] = nonce
+    return payload
+
+
 @pytest.mark.asyncio
 async def test_relay_nonce_replay_blocked_in_memory():
-    """Same nonce replayed twice → second is rejected (in-memory dedup)."""
+    """A replayed relay is answered as a duplicate (in-memory dedup)."""
     gw, agent = _make_gateway()
-    from_did = "did:key:z6MktestreplayA"
-    to_did = "did:key:z6Mktarget"
-    nonce = "aabbccdd11223344"
+    payload = _own_signed(agent, "did:key:z6Mktarget", "aabbccdd11223344", "msg-1")
+    status, _ = await gw._handle_relay_post(json.dumps(payload).encode())
+    assert status.startswith("202")
+    status, resp = await gw._handle_relay_post(json.dumps(payload).encode())
+    assert json.loads(resp).get("status") == "duplicate"
 
-    # First submission (will fail signature but nonce is recorded in in-memory)
-    payload = {
-        "from_webid": from_did, "to_webid": to_did,
-        "message_id": "msg-1", "content": "hello",
-        "timestamp": "2030-01-01T00:00:00Z", "signature": "AAAA",
-        "relay_nonce": nonce,
-    }
-    await gw._handle_relay_post(json.dumps(payload).encode())
-    # Second submission with same nonce → duplicate
-    payload2 = dict(payload)
-    payload2["message_id"] = "msg-2"
-    status, resp = await gw._handle_relay_post(json.dumps(payload2).encode())
-    data = json.loads(resp)
-    assert data.get("status") == "duplicate"
+
+@pytest.mark.asyncio
+async def test_forged_relay_does_not_burn_the_real_message_id():
+    """Dedup is recorded only after the signature verifies: a forged POST that
+    reuses a message id and nonce must not make the real relay a 'duplicate'."""
+    gw, agent = _make_gateway()
+    real = _own_signed(agent, "did:key:z6Mktarget", "aabbccdd11223344", "msg-1")
+    forged = {**real, "signature": "AAAA"}
+    status, _ = await gw._handle_relay_post(json.dumps(forged).encode())
+    assert status.startswith("400")
+    status, resp = await gw._handle_relay_post(json.dumps(real).encode())
+    assert status.startswith("202"), resp
 
 
 @pytest.mark.asyncio
 async def test_relay_nonce_replay_blocked_across_restart_with_store(tmp_path):
-    """Nonce seen before store restart is rejected after restart (SQLite dedup)."""
+    """A relay seen before a restart is still a duplicate after it (SQLite dedup)."""
     db_path = str(tmp_path / "relay.db")
     gw1, agent = _make_gateway(db_path=db_path)
+    payload = _own_signed(agent, "did:key:ztarget", "deadbeef12345678", "msg-persist")
+    status, _ = await gw1._handle_relay_post(json.dumps(payload).encode())
+    assert status.startswith("202")
 
-    from_did = "did:key:z6MktestreplayB"
-    nonce = "deadbeef12345678"
-
-    # Record the nonce through the first gateway instance
-    gw1._store.record_relay_nonce(
-        __import__("hashlib").sha256(f"{from_did}:{nonce}".encode()).hexdigest()
-    )
-
-    # Create a new gateway instance with the same DB — nonce should be seen
     gw2, _ = _make_gateway(db_path=db_path)
-    gw2.agent = agent  # same agent
-
-    payload = {
-        "from_webid": from_did, "to_webid": "did:key:ztarget",
-        "message_id": "msg-persist", "content": "hi",
-        "timestamp": "2030-01-01T00:00:00Z", "signature": "AAAA",
-        "relay_nonce": nonce,
-    }
+    gw2._seen_relay_ids.clear()
+    gw2._seen_relay_nonces.clear()
     status, resp = await gw2._handle_relay_post(json.dumps(payload).encode())
-    data = json.loads(resp)
-    assert data.get("status") == "duplicate"
+    assert json.loads(resp).get("status") == "duplicate"

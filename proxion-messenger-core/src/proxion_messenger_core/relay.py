@@ -48,7 +48,23 @@ def _canonical(payload: dict) -> str:
         parts.append(message_scope)
     if sig_key_version is not None:
         parts.append(str(int(sig_key_version)))
+    relay_ts = payload.get("relay_ts", "")
+    if relay_ts:
+        # Transport timestamp of a re-signed queued relay. Tagged so it cannot
+        # be confused with any of the optional fields above.
+        parts.append("relay_ts=" + str(relay_ts))
     return "\n".join(parts)
+
+
+# A queued relay keeps its original message timestamp and is re-signed with a
+# fresh transport timestamp (relay_ts) each time it is retried. The receiver
+# checks freshness on relay_ts and only bounds the message timestamp by this
+# age, so a message held while the peer was down still verifies when it lands.
+QUEUED_RELAY_MAX_AGE = timedelta(days=2)
+# How long a receiver remembers a relayed message id for dedup. Covers the
+# whole retry life of a queued relay, so a retry of a message that did land
+# (the sender just never saw the 200) is not delivered twice.
+RELAY_ID_DEDUP_TTL_SECONDS = int(QUEUED_RELAY_MAX_AGE.total_seconds())
 
 
 # ── Signing ───────────────────────────────────────────────────────────────────
@@ -64,6 +80,7 @@ def sign_relay_message(
     sender_webid: str = "",
     message_scope: str = "",
     sig_key_version: Optional[int] = None,
+    relay_ts: str = "",
 ) -> str:
     """Sign a relay message. Returns base64url-encoded Ed25519 signature.
 
@@ -90,6 +107,8 @@ def sign_relay_message(
         if not isinstance(sig_key_version, int) or sig_key_version < 1:
             raise ValueError("sig_key_version must be a positive integer")
         payload["sig_key_version"] = sig_key_version
+    if relay_ts:
+        payload["relay_ts"] = relay_ts
     msg = _canonical(payload).encode()
     raw_sig = identity_key.sign(msg)
     return base64.urlsafe_b64encode(raw_sig).rstrip(b"=").decode()
@@ -110,6 +129,7 @@ def verify_relay_message(
     message_scope: str = "",
     sig_key_version: Optional[int] = None,
     store=None,
+    relay_ts: str = "",
 ) -> bool:
     """
     Verify a relay message signature.
@@ -135,6 +155,11 @@ def verify_relay_message(
         Optional signing key version for rotation tracking.
     store:
         Optional LocalStore for R10 identity continuity checks.
+    relay_ts:
+        Transport timestamp of a re-signed queued relay. When present it is
+        bound into the signature and the clock-skew window applies to it; the
+        message ``timestamp`` must then only be no later than the window and no
+        older than ``QUEUED_RELAY_MAX_AGE``.
     """
     try:
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -221,6 +246,8 @@ def verify_relay_message(
             if not isinstance(sig_key_version, int) or sig_key_version < 1 or sig_key_version > 2**31 - 1:
                 return False
             payload["sig_key_version"] = sig_key_version
+        if relay_ts:
+            payload["relay_ts"] = relay_ts
         msg = _canonical(payload).encode()
         pub_key.verify(raw_sig, msg)
 
@@ -230,14 +257,20 @@ def verify_relay_message(
         _MAX_ALLOWED_WINDOW = timedelta(minutes=15)
         if _window > _MAX_ALLOWED_WINDOW:
             _window = _MAX_ALLOWED_WINDOW
+        def _parse(ts):
+            parsed = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                raise ValueError("timezone required")
+            return parsed
         try:
-            msg_ts = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            msg_ts = _parse(timestamp)
+            fresh_ts = _parse(relay_ts) if relay_ts else msg_ts
         except Exception:
-            return False  # malformed timestamp → fail closed
-        if msg_ts.tzinfo is None:
-            return False  # timezone required
+            return False  # malformed or naive timestamp → fail closed
         now = datetime.now(timezone.utc)
-        if abs(now - msg_ts) > _window:
+        if abs(now - fresh_ts) > _window:
+            return False
+        if relay_ts and (msg_ts - now > _window or now - msg_ts > QUEUED_RELAY_MAX_AGE):
             return False
 
         return True
