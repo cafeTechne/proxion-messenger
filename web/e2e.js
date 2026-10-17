@@ -53,6 +53,16 @@ function _serialize(peerId, fn) {
     return run;                                    // caller gets fn's real result/rejection
 }
 
+// Resolves once every ratchet operation queued so far has finished and saved
+// its state, so another tab can take over without loading a stale session.
+export async function ratchetIdle() {
+    for (;;) {
+        const tails = Object.values(_peerQueues);
+        await Promise.all(tails);
+        if (Object.values(_peerQueues).every((q, i) => q === tails[i]) && Object.keys(_peerQueues).length === tails.length) return;
+    }
+}
+
 // ── Key store (R110): non-extractable identity + state key in IndexedDB ───────
 // CryptoKeys stored here are structured-cloned and non-extractable, so an XSS
 // cannot exfiltrate the X25519 private scalar the way it could from the old

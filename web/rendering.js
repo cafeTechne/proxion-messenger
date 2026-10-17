@@ -26,6 +26,7 @@ import { applyRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { t, tn, getLocale } from './i18n.js';
 import { icon } from './icons.js';
 import { normalizeMediaDims } from './media-resize.js';
+import { isUndecryptable } from './e2e-secondary.js';
 import { isAnimatedImage, initialGifState, gifToggleHtml } from './gifmotion.js';
 
 // R59A: attachment kind by mime — pure, exported for tests. Video/audio get
@@ -587,6 +588,10 @@ export function createRendering({
 
         // Render text with Markdown and mention highlighting
         let rawText = msg.snippet || msg.content || "";
+        // A DM this device could not open: a localized notice, never the
+        // ciphertext (still sealed) or the internal placeholder string.
+        const undecryptable = !!msg.e2e || isUndecryptable(rawText);
+        if (undecryptable) rawText = "";
         const selfDisplayName = localStorage.getItem("proxion_display_name") || "";
         const mentionsMe = (msg.mentions && selfWebId && msg.mentions.includes(selfWebId)) ||
             (selfDisplayName && rawText.toLowerCase().includes("@" + selfDisplayName.toLowerCase()));
@@ -596,7 +601,9 @@ export function createRendering({
         // highlight in full.
         const _mentionNames = [selfDisplayName, ...getMemberNames(),
             ...(Array.isArray(msg.mentions) ? msg.mentions.map(w => resolveName(w)) : [])];
-        let renderedText = highlightMentions(renderMarkdown(rawText), _mentionNames, selfDisplayName);
+        let renderedText = undecryptable
+            ? `<span class="msg-undecryptable">${escHtml(t('e2e.undecryptable'))}</span>`
+            : highlightMentions(renderMarkdown(rawText), _mentionNames, selfDisplayName);
         // R59G: replace :name: tokens with this room's custom emoji (post-escape,
         // map-driven — unknown names pass through untouched).
         renderedText = applyRoomEmoji(renderedText, getRoomEmoji(msg.thread_id || activeView?.id || ''));

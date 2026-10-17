@@ -1,7 +1,7 @@
 import { solidSession, initSolidAuth, solidLogin, solidLogout, podStorageRoot, discoverStorageRoot } from './auth.js';
 import {
     initE2E, e2eSupported, isE2EEnabled, isPeerVerified, markPeerVerified, myX25519PubB64u, cachePeerPub, onPeerPubChanged,
-    ratchetEncrypt, ratchetDecrypt, fetchAndCachePeerPub, E2EDecryptError, safetyNumber, hasRatchetSession,
+    ratchetEncrypt, ratchetDecrypt, ratchetIdle, fetchAndCachePeerPub, E2EDecryptError, safetyNumber, hasRatchetSession,
     e2eScopedKey,
 } from './e2e.js';
 import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetContainerAcl,
@@ -41,7 +41,7 @@ import {
     composerEnterAction, isCoarsePointer, supportsFieldSizing, canShareLinks, shareLink,
 } from './util.js';
 import { createFileTransfer } from './filetransfer.js';
-import { createSecondaryCrypto, createReactionTokens, isSealedPlain, sealedState, SEALED_FIELDS, SEALED_FILE_NAME, SEALED_FILE_MIME, FILE_TAG_BYTES } from './e2e-secondary.js';
+import { createSecondaryCrypto, createReactionTokens, isSealedPlain, sealedState, UNDECRYPTABLE, isUndecryptable, SEALED_FIELDS, SEALED_FILE_NAME, SEALED_FILE_MIME, FILE_TAG_BYTES } from './e2e-secondary.js';
 import { createVoice, CallState, audioLevel } from './voice.js';
 import { mapDevices, preferredDeviceId, mediaConstraints } from './devices.js';
 import { createNotifications } from './notifications.js';
@@ -63,6 +63,7 @@ import { createFriendRequests } from './friend-requests.js';
 import { createE2EStatus } from './e2e-status.js';
 import { createStatusBanners } from './status-banners.js';
 import { createConnection, normalizeGatewayUrl } from './connection.js';
+import { createTabLock, showTabNotice, hideTabNotice } from './tablock.js';
 import { createTransport, detectMode, applyTransportGating } from './transport.js';
 import { createPodSocket } from './podtransport.js';
 import { createRendering, replyQuoteHtml } from './rendering.js';
@@ -806,12 +807,26 @@ import { initThemePicker } from './theme.js';
         // WebSocket connection lifecycle (first core slice). Reassigns socket via
         // setSocket; _handleEventAsync (dispatch) + generateOrLoadIdentity stay in
         // main.js and are injected. Reconnect state is cluster-owned.
-        const { socketSendOrQueue, forceReconnect, connect, flushPending } = createConnection({
+        // One active tab per browser profile (tablock.js): only the leader
+        // connects and runs the DM ratchet, or two tabs would fork it.
+        const tabLock = createTabLock();
+        const { socketSendOrQueue, forceReconnect, connect, flushPending, shutdown: stopConnection } = createConnection({
             wsUrl: WS_URL,
             getSocket: () => socket, setSocket: (s) => { socket = s; },
             getClientDid: () => clientDid,
             generateOrLoadIdentity, handleEventAsync: _handleEventAsync,
+            isActive: () => tabLock.isLeader(),
         });
+        // Another tab took over: stop the socket, let in-flight ratchet work save
+        // its state, hand the unsent commands to the new tab, then reload into
+        // the "open in another tab" notice so no timer or watcher keeps running.
+        tabLock.onStepDown(async () => {
+            const queued = stopConnection();
+            await ratchetIdle().catch(() => {});
+            await new Promise((r) => setTimeout(r, 0));   // a just-encrypted send queues itself
+            return [...queued, ...stopConnection()];
+        });
+        tabLock.onSteppedDown(() => { window.location.reload(); });
         // Transport seam (R102): the desktop/self-host build talks to a gateway
         // (GatewayTransport, a faithful wrapper of the connection above); the
         // gateway-less browser build (PROXION_MODE=web) talks to the pod directly.
@@ -1597,12 +1612,17 @@ import { initThemePicker } from './theme.js';
                             : '[decryption error]';
                         event.e2e = false;
                     }
-                } else if (event.message_id && messageMap[event.message_id]
-                        && !messageMap[event.message_id].e2e) {
+                } else {
                     // The echo of our own E2E message is sealed to the peer and we
                     // can't open it. Keep the plaintext we sent, or the echo would
                     // replace it with ciphertext (reply, forward, edit, preview).
-                    event.content = messageMap[event.message_id].content;
+                    // One this tab did not send (another tab, before tablock.js, or
+                    // a cleared feed) comes from the local plaintext cache, else
+                    // shows as undecryptable: never as raw ciphertext.
+                    const known = event.message_id && messageMap[event.message_id];
+                    event.content = (known && !known.e2e)
+                        ? known.content
+                        : ((await _cachedDmPlaintext(event.thread_id, event.message_id)) ?? UNDECRYPTABLE);
                     event.e2e = false;
                 }
             }
@@ -1658,6 +1678,15 @@ import { initThemePicker } from './theme.js';
                 return;
             }
             handleEvent(event);
+        }
+
+        // Plaintext this device cached for one of its own DM messages, or null.
+        async function _cachedDmPlaintext(threadId, messageId) {
+            if (!threadId || !messageId) return null;
+            try {
+                const rec = (await dmHistoryLoad(threadId)).find((m) => m.message_id === messageId);
+                return rec ? rec.content : null;
+            } catch (_) { return null; }
         }
 
         function normalizeRelayThreadId(event) {
@@ -1797,7 +1826,9 @@ import { initThemePicker } from './theme.js';
                         // device) has no plaintext to preview.
                         dmLastMessages[id] = {
                             message_id: msg.message_id,
-                            snippet: msg.e2e ? t('dm.encryptedPreview') : markdownToPlain(msg.content).slice(0, 40),
+                            snippet: msg.e2e ? t('dm.encryptedPreview')
+                                : isUndecryptable(msg.content) ? t('e2e.undecryptable')
+                                : markdownToPlain(msg.content).slice(0, 40),
                             timestamp: msg.timestamp || new Date().toISOString(),
                         };
                         if (hiddenDms.has(id)) { hiddenDms.delete(id); localStorage.setItem("proxion_hidden_dms", JSON.stringify([...hiddenDms])); }
@@ -6528,6 +6559,12 @@ import { initThemePicker } from './theme.js';
             }).catch(() => {});
         }
         (async () => {
+            // Wait here while another tab is the active one; nothing below
+            // (pod sign-in, E2E init, the gateway socket) runs in a waiting tab.
+            await tabLock.claim({
+                onFollower: () => showTabNotice({ t, onUseHere: () => { tabLock.takeover(); } }),
+            });
+            hideTabNotice();
             const podWebId = await initSolidAuth();
             if (podWebId) await onPodLoggedIn(podWebId);
             else initPodSettingsPanel(); // re-sync now that auth state is known
@@ -6884,5 +6921,7 @@ import { initThemePicker } from './theme.js';
             } else {
                 // Gateway mode: open the WS.
                 transport.connect();
+                // Commands the tab we took over from had not sent yet.
+                tabLock.onHandoff((payload) => socketSendOrQueue(payload));
             }
         })();

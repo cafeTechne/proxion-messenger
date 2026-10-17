@@ -58,6 +58,7 @@ const SHELL = [
   "invite.js",
   "focus-trap.js",
   "wayfinding.js",
+  "tablock.js",
   "settings-panel.js",
   "a11y.js",
   "device-cert.js",

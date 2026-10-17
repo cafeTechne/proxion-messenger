@@ -11,6 +11,7 @@
 //   getClientDid,           // identity DID (reassigned only in generateOrLoadIdentity)
 //   generateOrLoadIdentity, // idempotent identity bootstrap (stays in main.js)
 //   handleEventAsync,       // dispatch entrypoint (stays in main.js)
+//   isActive,               // false while another tab is the active one (tablock.js)
 // })
 
 import { myX25519PubB64u } from './e2e.js';
@@ -38,6 +39,7 @@ export function normalizeGatewayUrl(raw) {
 
 export function createConnection({
     wsUrl, getSocket, setSocket, getClientDid, generateOrLoadIdentity, handleEventAsync,
+    isActive = () => true,
 }) {
     const state = {
         _reconnectTimer: null,  // "Server unreachable" banner escalation
@@ -46,6 +48,7 @@ export function createConnection({
         _wasConnected: false,   // for one-shot SR announcements on state change
         _retryTimeout: null,    // the scheduled backoff connect(), cancelled by "Retry now"
         _failures: 0,           // consecutive failed connects; reset on open
+        _stopped: false,        // set by shutdown(): this tab handed over to another
     };
 
     // After this many failed attempts in a row the banner also asks whether the
@@ -123,6 +126,9 @@ export function createConnection({
     }
 
     function connect() {
+        // Only the active tab talks to the gateway (tablock.js): a second socket
+        // for the same account would fork the DM ratchet.
+        if (state._stopped || !isActive()) return;
         // Each call captures its own ws reference so stale onclose/onopen events
         // from a superseded socket cannot overwrite state or schedule extra reconnects.
         _wireRetry();
@@ -263,5 +269,20 @@ export function createConnection({
         });
     }
 
-    return { socketSendOrQueue, forceReconnect, connect, flushPending, state };
+    // Another tab is taking over: stop for good and return the commands that
+    // never reached the gateway so the new tab can send them. The socket is
+    // disowned before it closes so its onclose schedules no reconnect.
+    function shutdown() {
+        state._stopped = true;
+        if (state._reconnectTimer) { clearInterval(state._reconnectTimer); state._reconnectTimer = null; }
+        if (state._retryTimeout) { clearTimeout(state._retryTimeout); state._retryTimeout = null; }
+        const socket = getSocket();
+        setSocket(null);
+        if (socket) { try { socket.close(); } catch (_) { /* already closed */ } }
+        const pending = state._pendingOnConnect.splice(0);
+        pending.forEach(({ nudgeTimer }) => clearTimeout(nudgeTimer));
+        return pending.map(({ payload }) => payload);
+    }
+
+    return { socketSendOrQueue, forceReconnect, connect, flushPending, shutdown, state };
 }

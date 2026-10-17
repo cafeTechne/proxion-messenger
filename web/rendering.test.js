@@ -164,6 +164,34 @@ describe('avatar XSS hardening', () => {
   });
 });
 
+describe('undecryptable DMs', () => {
+  const htmlOf = (msg) => {
+    els['message-feed'] = mkEl({ scrollHeight: 500, clientHeight: 500 });
+    view = { type: 'dm', id: 'dm-1' };
+    const created = [];
+    const orig = global.document.createElement;
+    global.document.createElement = () => { const el = mkEl(); created.push(el); return el; };
+    try {
+      make().renderMessage({ thread_id: 'dm-1', from_webid: 'did:key:zBob', timestamp: new Date().toISOString(), ...msg });
+      return created.map(e => e.innerHTML).join('');
+    } finally {
+      global.document.createElement = orig;
+    }
+  };
+  it('a still-sealed DM shows a notice, never the ciphertext', () => {
+    const html = htmlOf({ message_id: 'u1', content: 'q1ZXcGhlcnRleHRCYXNlNjQ', e2e: true, nonce: 'n' });
+    expect(html).not.toContain('q1ZXcGhlcnRleHRCYXNlNjQ');
+    expect(html).toContain('class="msg-undecryptable"');
+  });
+  it('the internal placeholder strings are replaced by the notice', () => {
+    for (const s of ['[could not decrypt]', '[decryption error]']) {
+      const html = htmlOf({ message_id: 'u' + s.length, content: s });
+      expect(html).not.toContain(s);
+      expect(html).toContain('class="msg-undecryptable"');
+    }
+  });
+});
+
 describe('voice note duration', () => {
   const durOf = (ms) => {
     els['message-feed'] = mkEl({ scrollHeight: 500, clientHeight: 500 });

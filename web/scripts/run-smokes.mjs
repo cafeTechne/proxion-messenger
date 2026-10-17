@@ -17,9 +17,9 @@ const GROUPS = {
   ui: ['smoke_browser.mjs', 'smoke_webrtc.mjs', 'smoke_journey.mjs', 'smoke_rooms.mjs', 'smoke_voice_channel.mjs', 'smoke_a11y.mjs',
        'smoke_keyboard.mjs', 'smoke_pseudo.mjs', 'smoke_firstrun.mjs'],
   // Two gateways talking to each other: friend requests, E2E DMs, reactions,
-  // linked devices, calls.
+  // linked devices, calls, two tabs of one account.
   'cross-gateway': ['smoke_federation.mjs', 'smoke_dm_history.mjs', 'smoke_dm_reaction.mjs',
-                    'smoke_multidevice_dm.mjs', 'smoke_call.mjs', 'smoke_pairing.mjs'],
+                    'smoke_multidevice_dm.mjs', 'smoke_call.mjs', 'smoke_pairing.mjs', 'smoke_tabs.mjs'],
   // The gateway-less web build against a local Solid server (fetched with npx).
   pod: ['smoke_web_nogw.mjs', 'smoke_web_signedin.mjs', 'smoke_web_join.mjs'],
   // Pixel baselines depend on the machine's font rendering, so local only.

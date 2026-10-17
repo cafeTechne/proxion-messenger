@@ -3095,6 +3095,9 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 }
 .modal--stacked { z-index: var(--z-modal-stacked); }
 .modal--gate { z-index: var(--z-modal-gate); }
+/* "Open in another tab" (tablock.js): above every other gate, onboarding included. */
+.modal.tab-notice { display: flex; z-index: calc(var(--z-modal-gate) + 10); }
+.msg-undecryptable { font-style: italic; color: var(--text-secondary); }
 .modal__panel {
     box-sizing: border-box; width: 100%; max-width: 480px;
     max-height: 90vh; max-height: 90dvh; overflow-y: auto;

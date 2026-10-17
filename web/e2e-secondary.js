@@ -303,6 +303,13 @@ function b64ToU8(b64) {
 // Text shown for a sealed event this device cannot open (the string the
 // message path uses, so the history cache never stores it).
 export const UNDECRYPTABLE = '[could not decrypt]';
+export const DECRYPT_ERROR = '[decryption error]';
+
+// True for the placeholder strings above. The feed shows a localized notice in
+// their place (rendering.js); they stay internal markers, never message text.
+export function isUndecryptable(text) {
+    return text === UNDECRYPTABLE || text === DECRYPT_ERROR;
+}
 
 // ── Send and receive glue ────────────────────────────────────────────────────
 //
