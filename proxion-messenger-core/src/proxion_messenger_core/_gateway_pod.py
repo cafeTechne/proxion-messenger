@@ -1905,16 +1905,24 @@ class PodSyncMixin:
             logger.warning("_restore_rooms_from_pod: failed to list rooms: %s", exc)
             return
 
+        # A room deleted while its tombstone write is still queued must not be
+        # restored from the stale room.json (the queue flushes after restore).
+        queued_tombstones = {
+            op.get("uri", "") for op in self._store.list_pending_pod_ops()
+            if op.get("op") == "put" and '"deleted": true' in (op.get("body") or "")
+        }
         restored = 0
         for room_id in room_ids:
             if room_id in self._local_rooms:
                 continue
             try:
+                if f"stash://pod/rooms/{room_id}/room.json" in queued_tombstones:
+                    continue
                 meta = await loop.run_in_executor(None, store.read_room_meta, room_id)
             except Exception as exc:
                 logger.debug("_restore_rooms_from_pod: failed to read meta for %s: %s", room_id, exc)
                 continue
-            if not meta:
+            if not meta or meta.get("deleted"):
                 continue
             name = meta.get("name", room_id)
             code = meta.get("code", "")

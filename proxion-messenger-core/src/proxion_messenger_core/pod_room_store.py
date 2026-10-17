@@ -201,6 +201,39 @@ class PodRoomStore:
                 return None
             raise
 
+    @staticmethod
+    def tombstone_meta(room_id: str, deleted_at: str) -> dict:
+        """room.json body that marks a room as deleted.
+
+        Deleting the whole container tree is not atomic over LDP, so a deleted
+        room keeps a room.json that says so and carries no name or invite code.
+        Restore skips it, which is what stops a deleted room coming back."""
+        return {"room_id": room_id, "deleted": True, "deleted_at": deleted_at}
+
+    def purge_room_contents(self, room_id: str) -> int:
+        """Best-effort DELETE of every message and pin file of a room.
+        Returns how many files were removed."""
+        room_id = _safe_segment(room_id, "room_id")
+        removed = 0
+        for container in (f"stash://pod/rooms/{room_id}/messages/",
+                          f"stash://pod/rooms/{room_id}/pins/"):
+            try:
+                members = self._client.list(container)
+            except Exception:
+                continue
+            for uri in members:
+                if not uri.endswith(".json"):
+                    continue
+                try:
+                    self._client.delete(uri)
+                    removed += 1
+                except SolidError as exc:
+                    if exc.status_code != 404:
+                        logger.debug("purge_room_contents: delete %s failed: %s", uri, exc)
+                except Exception as exc:
+                    logger.debug("purge_room_contents: delete %s failed: %s", uri, exc)
+        return removed
+
     # ------------------------------------------------------------------
     # Messages
     # ------------------------------------------------------------------

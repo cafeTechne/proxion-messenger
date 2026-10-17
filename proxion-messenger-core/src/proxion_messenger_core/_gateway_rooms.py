@@ -113,6 +113,49 @@ class RoomHandlerMixin:
             except Exception as exc:
                 logger.debug(f"_init_room_on_pod failed [{room_id}]: {exc}")
 
+    def _forget_room_on_pod(self, room_id: str) -> None:
+        """Mark a deleted room as deleted on the pod so the next start does not
+        restore it (with its invite code still live).
+
+        The tombstone is queued as a pending pod op before anything is
+        attempted, so a pod that is down or not yet connected still gets it on
+        the next flush, and _restore_rooms_from_pod skips a room whose
+        tombstone is still queued."""
+        if not self._store:
+            return
+        try:
+            from .pod_room_store import PodRoomStore
+            uri = PodRoomStore(None)._room_meta_uri(room_id)
+        except ValueError:
+            return
+        body = json.dumps(PodRoomStore.tombstone_meta(
+            room_id, datetime.now(timezone.utc).isoformat()))
+        self._store.record_pending_pod_op(uri, "put", body)
+        if self._pod_client():
+            asyncio.create_task(self._tombstone_room_on_pod(room_id, uri, body))
+
+    async def _tombstone_room_on_pod(self, room_id: str, uri: str, body: str) -> None:
+        client = self._pod_client()
+        if not client:
+            return
+        from .pod_room_store import PodRoomStore
+        loop = asyncio.get_event_loop()
+        async with self._pod_sync_sem:
+            try:
+                await loop.run_in_executor(
+                    None,
+                    lambda: client.put(uri, body.encode("utf-8"), content_type="application/json"),
+                )
+                self._store.clear_pending_pod_op(uri)
+            except Exception as exc:
+                logger.debug("room tombstone write failed [%s]: %s", room_id, exc)
+                self._store.bump_pending_pod_op_attempt(uri)
+                return
+        try:
+            await loop.run_in_executor(None, PodRoomStore(client).purge_room_contents, room_id)
+        except Exception as exc:
+            logger.debug("room pod purge failed [%s]: %s", room_id, exc)
+
     async def _grant_pod_room_read(self, room_id: str, joiner_webid: str) -> None:
         """Update the room container ACL to include *joiner_webid* as a Read member."""
         client = self._pod_client()
@@ -1283,6 +1326,7 @@ class RoomHandlerMixin:
                     del self._local_rooms[room_id]
                     if self._store:
                         self._store.delete_room(room_id)
+                    self._forget_room_on_pod(room_id)
                     await websocket.send(json.dumps({
                         "type": "left_room", "room_id": room_id,
                         "deleted": True,
@@ -1329,6 +1373,7 @@ class RoomHandlerMixin:
                 del self._local_rooms[room_id]
                 if self._store:
                     self._store.delete_room(room_id)
+                self._forget_room_on_pod(room_id)
 
     async def _handle_transfer_ownership(self, websocket, data: dict) -> None:
         room_id = data.get("room_id", "")
