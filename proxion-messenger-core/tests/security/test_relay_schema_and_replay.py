@@ -142,3 +142,20 @@ async def test_relay_nonce_replay_blocked_across_restart_with_store(tmp_path):
     gw2._seen_relay_nonces.clear()
     status, resp = await gw2._handle_relay_post(json.dumps(payload).encode())
     assert json.loads(resp).get("status") == "duplicate"
+
+
+@pytest.mark.asyncio
+async def test_relay_refused_for_full_queue_is_accepted_on_retry(tmp_path):
+    """A 507 (offline queue full) must not record the message id, or the
+    sender's later retry is answered 'duplicate' and never delivered."""
+    gw, agent = _make_gateway(db_path=str(tmp_path / "relay.db"))
+    for i in range(500):
+        gw._relay_queue[f"did:key:zfull{i}"] = [{}]
+    first = _own_signed(agent, "did:key:z6Mktarget", "1111222233334444", "msg-full")
+    status, _ = await gw._handle_relay_post(json.dumps(first).encode())
+    assert status.startswith("507")
+
+    gw._relay_queue.clear()
+    retry = _own_signed(agent, "did:key:z6Mktarget", "5555666677778888", "msg-full")
+    status, resp = await gw._handle_relay_post(json.dumps(retry).encode())
+    assert status.startswith("202"), resp

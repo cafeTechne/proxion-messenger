@@ -1141,10 +1141,17 @@ class HttpEndpointsMixin:
         # Target not connected — queue + store for when they reconnect.
         # Two-level budget: max 500 unique recipients AND max 5000 total messages
         # globally. Both limits bound worst-case memory even when messages are large.
-        if to_webid not in self._relay_queue and len(self._relay_queue) >= 500:
-            return "507 Insufficient Storage", '{"error":"relay queue full"}'
+        # A refused relay must not count as seen, or the sender's retry is
+        # dropped as a duplicate and the message is never delivered.
         _total_queued = sum(len(q) for q in self._relay_queue.values())
-        if _total_queued >= 5000:
+        if ((to_webid not in self._relay_queue and len(self._relay_queue) >= 500)
+                or _total_queued >= 5000):
+            try:
+                self._seen_relay_ids.remove(_relay_dedup_key)
+            except ValueError:
+                pass
+            if self._store:
+                self._store.forget_relay_id(_relay_dedup_key)
             return "507 Insufficient Storage", '{"error":"relay queue full"}'
         queue = self._relay_queue.setdefault(to_webid, [])
         if len(queue) >= 100:

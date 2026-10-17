@@ -73,6 +73,12 @@ class FederationStoreMixin(object):
                 )
             except Exception:
                 pass
+
+    def forget_relay_id(self, dedup_key: str) -> None:
+        """Drop *dedup_key* so a relay we turned away can be accepted on retry."""
+        with self._conn() as conn:
+            conn.execute("DELETE FROM relay_seen_ids WHERE dedup_key = ?", (dedup_key,))
+
     def prune_seen_relay_ids(self, cutoff_ts: float) -> None:
         """Delete dedup entries older than *cutoff_ts* (Unix timestamp)."""
         with self._conn() as conn:
