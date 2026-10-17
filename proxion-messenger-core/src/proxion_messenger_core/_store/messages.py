@@ -81,6 +81,7 @@ class MessageStoreMixin(object):
                 conn.execute(f"DELETE FROM reactions WHERE message_id IN ({marks})", chunk)
                 conn.execute(f"DELETE FROM message_edits WHERE message_id IN ({marks})", chunk)
                 conn.execute(f"DELETE FROM message_receipts WHERE message_id IN ({marks})", chunk)
+                conn.execute(f"DELETE FROM message_files WHERE message_id IN ({marks})", chunk)
         if victims:
             logger.info("Pruned %d oldest messages from thread %s", len(victims), thread_id)
         return len(victims)

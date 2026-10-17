@@ -89,3 +89,17 @@ def test_import_not_capped_at_5000(tmp_path):
     }]})
     assert res["messages"] == 1
     assert st.get_message("imp-1") is not None
+
+
+def test_retention_prunes_stored_room_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(msgmod, "THREAD_RETENTION_MESSAGES", 2)
+    monkeypatch.setattr(msgmod, "THREAD_RETENTION_CHECK_EVERY", 1)
+    st = LocalStore(str(tmp_path / "s.db"))
+    st.save_message("f0", "room-x", "room", "did:key:a", "A", "📎 a.png",
+                    "2026-01-01T00:00:00+00:00")
+    assert st.save_message_file("f0", "room-x", "a.png", "image/png", b"\x89PNG")
+    for i in range(1, 3):
+        st.save_message(f"m{i}", "room-x", "room", "did:key:a", "A", "x",
+                        f"2026-01-01T00:00:0{i}+00:00")
+    assert st.get_message("f0") is None
+    assert st.get_message_file("f0") is None
