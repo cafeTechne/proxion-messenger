@@ -1217,6 +1217,35 @@ class RoomHandlerMixin:
             "members": members,
         }))
 
+    def _pick_successor_owner(self, room: dict, room_id: str, leaver_did: str) -> str:
+        """Choose who inherits a room when its owner leaves.
+
+        Membership is the stored member list, not the live sockets: a member
+        who has the app closed is still a member and must not lose the room.
+        Admins win over mods over members; ties go to the longest-standing
+        member (join order). Live members missing from the store come next and
+        federated members are the last resort. Returns "" when nobody is left.
+        """
+        stored = [w for w in (self._store.get_room_members(room_id) if self._store else [])
+                  if w and w != leaver_did]
+        live = []
+        for ws in list(room.get("members", ())):
+            d = self._client_webids.get(ws, "")
+            if d and d != leaver_did and d not in stored and d not in live:
+                live.append(d)
+        candidates = stored + live
+        if candidates:
+            _role_priority = {"admin": 0, "mod": 1, "member": 2}
+            _roles = self._store.get_all_room_roles(room_id) if self._store else {}
+            order = {d: i for i, d in enumerate(candidates)}
+            candidates.sort(key=lambda d: (_role_priority.get(_roles.get(d, "member"), 2), order[d]))
+            return candidates[0]
+        if self._store:
+            for fm in self._store.get_federated_room_members(room_id):
+                if fm.get("member_did") and fm["member_did"] != leaver_did:
+                    return fm["member_did"]
+        return ""
+
     async def _handle_leave_local_room(self, websocket, data: dict) -> None:
         room_id = data.get("room_id", "")
         if room_id not in self._local_rooms:
@@ -1248,8 +1277,8 @@ class RoomHandlerMixin:
                         pass
 
             if is_creator:
-                other_members = list(room["members"])
-                if not other_members:
+                new_owner_did = self._pick_successor_owner(room, room_id, caller_did)
+                if not new_owner_did:
                     self._room_codes.pop(room.get("code"), None)
                     del self._local_rooms[room_id]
                     if self._store:
@@ -1260,19 +1289,9 @@ class RoomHandlerMixin:
                         "reason": "Room deleted — no remaining members.",
                     }))
                 else:
-                    # Prefer admins > mods > regular members when transferring ownership
-                    _role_priority = {"admin": 0, "mod": 1, "member": 2}
-                    _roles = self._store.get_all_room_roles(room_id) if self._store else {}
-                    other_members.sort(
-                        key=lambda ws: _role_priority.get(
-                            _roles.get(self._client_webids.get(ws, ""), "member"), 2
-                        )
-                    )
-                    new_owner_ws = other_members[0]
-                    new_owner_did = self._client_webids.get(new_owner_ws, "")
-                    new_owner_name = self._name_for(new_owner_ws, new_owner_did)
+                    new_owner_name = self._name_for(self._any_socket(new_owner_did), new_owner_did)
                     room["creator_webid"] = new_owner_did
-                    if self._store and new_owner_did:
+                    if self._store:
                         self._store.update_room_creator(room_id, new_owner_did)
                     for ws in list(room["members"]):
                         try:

@@ -64,7 +64,8 @@ class RoomStoreMixin(object):
     def get_room_members(self, room_id: str) -> list[str]:
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT webid FROM room_members WHERE room_id = ?", (room_id,)
+                "SELECT webid FROM room_members WHERE room_id = ? ORDER BY rowid",
+                (room_id,),
             ).fetchall()
             return [r["webid"] for r in rows]
     def add_federated_room_member(
