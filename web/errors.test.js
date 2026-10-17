@@ -35,3 +35,11 @@ describe('gateway error mapping', () => {
     warn.mockRestore();
   });
 });
+
+describe('gate errors', () => {
+  it('maps the scheduled-DM refusal and the revoked / safe-mode gates', () => {
+    expect(knownErrorKey('schedule_dm_encrypted')).toBe('error.schedule_dm_encrypted');
+    expect(knownErrorKey('identity_revoked')).toBe('error.identity_revoked');
+    expect(knownErrorKey('safe_mode_enabled')).toBe('error.safe_mode_enabled');
+  });
+});

@@ -172,6 +172,7 @@ async def test_schedule_message(alice_session, bob_session):
         cmd="schedule_message",
         thread_id=bob_did,
         content="Future message",
+        plaintext_ok=True,
         send_at=send_at,
     )
 
@@ -189,6 +190,7 @@ async def test_list_and_cancel_scheduled(alice_session, bob_session):
         cmd="schedule_message",
         thread_id=bob_did,
         content="Cancel me",
+        plaintext_ok=True,
         send_at=_in_days(20),
     )
     scheduled = await alice_session.recv_type("message_scheduled", timeout=5.0)

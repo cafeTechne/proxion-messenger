@@ -11,7 +11,7 @@ vi.mock('./e2e.js', () => ({ e2eScopedKey: (k) => k }));
 
 import {
     resolveDmSendMode, isPlaintextOptedIn, setPlaintextOptIn, primaryKeyFromDevices,
-    createDeviceKeyWaiter, DmKeyMissingError,
+    createDeviceKeyWaiter, DmKeyMissingError, canScheduleInView,
 } from './dmkey.js';
 
 beforeEach(() => { for (const k in _ls) delete _ls[k]; });
@@ -105,5 +105,27 @@ describe('main.js send path', () => {
     });
     it('no longer documents a plaintext fallback for the first message', () => {
         expect(body).not.toMatch(/fall back to plaintext because isE2EEnabled/);
+    });
+});
+
+describe('canScheduleInView', () => {
+    const noKey = { hasKey: () => false, optedIn: () => false };
+    it('allows rooms', () => {
+        expect(canScheduleInView({ type: 'local_room', id: 'r' }, noKey)).toBe(true);
+    });
+    it('refuses an encrypted DM, even when the peer was opted in earlier', () => {
+        const v = { type: 'local_dm', id: 'did:key:zB', peerWebid: 'did:key:zB' };
+        expect(canScheduleInView(v, { hasKey: () => true, optedIn: () => true })).toBe(false);
+    });
+    it('refuses a DM with no key and no opt-in', () => {
+        expect(canScheduleInView({ type: 'dm', id: 'cert-1', peerDid: 'did:key:zB' }, noKey)).toBe(false);
+    });
+    it('refuses a multi-device peer (fan-out is encrypted)', () => {
+        const v = { type: 'dm', id: 'cert-1', peerDid: 'did:key:zB' };
+        expect(canScheduleInView(v, { hasKey: () => false, optedIn: () => true, multiDevice: () => true })).toBe(false);
+    });
+    it('allows a DM the user opted in to unencrypted messages', () => {
+        const v = { type: 'local_dm', id: 'did:key:zB', peerWebid: 'did:key:zB' };
+        expect(canScheduleInView(v, { hasKey: () => false, optedIn: (id) => id === 'did:key:zB' })).toBe(true);
     });
 });

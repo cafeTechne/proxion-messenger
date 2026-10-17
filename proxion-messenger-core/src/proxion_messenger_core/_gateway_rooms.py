@@ -256,6 +256,15 @@ class RoomHandlerMixin:
                     return {"cmd": "local_dm", "target_webid": _t["peer_webid"], "content": content}
         return None
 
+    def _is_scheduled_dm_thread(self, thread_id: str, actor: str) -> bool:
+        """True when *thread_id* is a DM (cert or local) rather than a local room.
+        Local DM threads are keyed by the peer identity, so a did: id is a DM."""
+        if not thread_id or thread_id in self._local_rooms:
+            return False
+        if thread_id in self.dm_clients or thread_id.startswith("did:"):
+            return True
+        return self._actor_participates_in_dm(actor, thread_id)
+
     async def _scheduler_loop(self):
         """Poll for due scheduled messages every 10 seconds."""
         _consecutive_failures = 0
@@ -3161,6 +3170,14 @@ class RoomHandlerMixin:
             return
         if send_at > time.time() + 365 * 86400:
             await websocket.send(json.dumps({"type": "error", "message": "Cannot schedule more than 1 year ahead"}))
+            return
+        # The gateway sends a scheduled message itself, as plaintext. DMs are
+        # end-to-end encrypted, so only schedule into one when the client says
+        # the user opted this conversation in to unencrypted messages.
+        if self._is_scheduled_dm_thread(thread_id, actor) and data.get("plaintext_ok") is not True:
+            await websocket.send(json.dumps({
+                "type": "error", "code": "E_SCHEDULE_E2E", "message": "schedule_dm_encrypted",
+            }))
             return
         _MAX_PENDING_SCHEDULED = 100
         if self._store and self._store.count_pending_scheduled(actor) >= _MAX_PENDING_SCHEDULED:

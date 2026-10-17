@@ -40,6 +40,19 @@ export async function resolveDmSendMode(peerId, { hasKey, obtainKey, optedIn = i
     return optedIn(peerId) ? 'plaintext' : 'refuse';
 }
 
+// Whether the composer may schedule a message in this view. The gateway sends a
+// scheduled message itself, as plaintext, so an end-to-end encrypted DM can't
+// be scheduled: only rooms, and DMs that would go out unencrypted anyway (no
+// key, no multi-device fan-out, and the user opted the peer in).
+export function canScheduleInView(view, { hasKey, optedIn = isPlaintextOptedIn, multiDevice = () => false }) {
+    if (!view) return false;
+    if (view.type !== 'dm' && view.type !== 'local_dm') return true;
+    const peerId = view.peerWebid || view.peerDid || '';
+    const optInId = peerId || view.id;
+    if (peerId && (hasKey(peerId) || multiDevice(peerId))) return false;
+    return !!optedIn(optInId);
+}
+
 // The account-level (primary device) key in a gateway device roster. The gateway
 // records the primary device under the account id itself (_gateway_auth.py).
 export function primaryKeyFromDevices(peerId, devices) {

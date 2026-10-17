@@ -72,7 +72,7 @@ import { createPush, closedAppPushStatus } from './push.js';
 import { subscribeWebhook, watchResource } from './notify.js';
 import { isPeerPodRootAllowed } from './ssrf.js';
 import { createWebDm, createSenderVerifier, peerPodRootFromWebId } from './webdm.js';
-import { resolveDmSendMode, primaryKeyFromDevices, createDeviceKeyWaiter, isPlaintextOptedIn, setPlaintextOptIn, DmKeyMissingError } from './dmkey.js';
+import { resolveDmSendMode, canScheduleInView, primaryKeyFromDevices, createDeviceKeyWaiter, isPlaintextOptedIn, setPlaintextOptIn, DmKeyMissingError } from './dmkey.js';
 import { createWebPresence } from './webpresence.js';
 import { createWebCalls } from './webcalls.js';
 import { createWebJoin, makeInvite, parseInvite } from './webjoin.js';
@@ -248,7 +248,7 @@ import { initThemePicker } from './theme.js';
             connect_css:      new Set(["cmd","css_url","email","password"]),
             create_webhook:   new Set(["cmd","thread_id","direction","url","bot_name"]),
             send_file:        new Set(["cmd","cert_id","room_id","filename","mime_type","data_b64","spoiler","width","height", ...SEALED_FIELDS]),
-            schedule_message: new Set(["cmd","thread_id","content","send_at"]),
+            schedule_message: new Set(["cmd","thread_id","content","send_at","plaintext_ok"]),
             file_offer:       new Set(["cmd","to_webid","file_id","filename","mime_type","size_bytes","total_chunks", ...SEALED_FIELDS]),
             file_accept:      new Set(["cmd","to_webid","file_id"]),
             file_reject:      new Set(["cmd","to_webid","file_id","reason"]),
@@ -4117,11 +4117,31 @@ import { initThemePicker } from './theme.js';
             _updateHeaderSubtitle();
             _closeRoomOptionsMenu();
             _syncDisappearOption();
+            _syncScheduleBtn();
             if (isSearchOpen()) closeSearch();
             // A view switch is a page change the browser does not announce.
             updatePageTitle();
             const _label = viewLabel(activeView);
             if (_label) announce(t('a11y.openedView', { name: _label }));
+        }
+
+        // Scheduled messages go out from the gateway unencrypted, so the
+        // schedule button is off in end-to-end encrypted DMs (dmkey.js).
+        function _scheduleAllowed() {
+            return canScheduleInView(activeView, {
+                hasKey: (id) => isE2EEnabled(id),
+                multiDevice: (id) => identity.devicesForPeer(id).length >= 2,
+            });
+        }
+        function _syncScheduleBtn() {
+            const btn = document.getElementById("schedule-btn");
+            if (!btn) return;
+            const ok = !activeView || _scheduleAllowed();
+            const label = ok ? t('ui.scheduleMessage') : t('schedule.e2eUnavailable');
+            if (ok) btn.removeAttribute("aria-disabled"); else btn.setAttribute("aria-disabled", "true");
+            btn.title = label;
+            btn.setAttribute("aria-label", label);
+            if (!ok) { const p = document.getElementById("schedule-picker"); if (p) p.style.display = "none"; }
         }
 
         // Disappearing messages: a room's owner or either side of a DM may set
@@ -5639,7 +5659,10 @@ import { initThemePicker } from './theme.js';
             });
 
             // Round 69: Schedule button and picker
-            attachListener('#schedule-btn', 'click', openSchedulePicker);
+            attachListener('#schedule-btn', 'click', () => {
+                if (activeView && !_scheduleAllowed()) { showToast(t('schedule.e2eUnavailable')); return; }
+                openSchedulePicker();
+            });
             attachListener('#schedule-confirm-btn', 'click', () => {
                 const dt = document.getElementById('schedule-datetime-input').value;
                 const content = document.getElementById('message-input').value.trim();
@@ -5649,7 +5672,9 @@ import { initThemePicker } from './theme.js';
                 const when = new Date(dt);
                 if (isNaN(when) || when.getTime() <= Date.now()) { showToast(t('schedule.needFuture')); return; }
                 const sendAt = when.toISOString().replace('Z', '+00:00');
-                sendCmd('schedule_message', {thread_id:activeView.id, content, send_at:sendAt});
+                if (!_scheduleAllowed()) { showToast(t('schedule.e2eUnavailable')); return; }
+                const _isDm = activeView.type === 'dm' || activeView.type === 'local_dm';
+                sendCmd('schedule_message', {thread_id:activeView.id, content, send_at:sendAt, ...(_isDm ? { plaintext_ok: true } : {})});
                 document.getElementById('message-input').value = '';
                 document.getElementById('schedule-picker').style.display = 'none';
             });
