@@ -202,14 +202,11 @@ def _free_port():
         return s.getsockname()[1]
 
 
-async def _post(port, path, body):
-    reader, writer = await asyncio.open_connection("127.0.0.1", port)
-    writer.write(f"POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
-                 f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
-    await writer.drain()
-    resp = await asyncio.wait_for(reader.read(65536), timeout=5.0)
-    writer.close()
-    return resp.split(b"\r\n", 1)[0].decode()
+def _post(port, path, body):
+    # Synchronous, so the test never resets the main thread's event loop.
+    import httpx
+    return httpx.post(f"http://127.0.0.1:{port}{path}", content=body,
+                      headers={"Content-Type": "application/json"}, timeout=10).status_code
 
 
 def test_http_replay_after_removal_is_refused(tmp_path):
@@ -225,15 +222,13 @@ def test_http_replay_after_removal_is_refused(tmp_path):
     def on_loop(coro):
         return asyncio.run_coroutine_threadsafe(coro, handle.loop).result(timeout=10)
 
-    first = asyncio.run(_post(http_port, "/invite/accept", _accept_body(gw, inv, bob)))
-    assert " 200 " in first + " ", first
+    assert _post(http_port, "/invite/accept", _accept_body(gw, inv, bob)) == 200
     assert gw._store.get_relationship_by_did(bob_did)
 
     on_loop(_remove(gw, bob_did))
     assert bob_did in gw._revoked_dids
     gw._store.prune_invite_nonces(time.time() + 10)
 
-    replay = asyncio.run(_post(http_port, "/invite/accept", _accept_body(gw, inv, bob)))
-    assert " 409 " in replay + " ", replay
+    assert _post(http_port, "/invite/accept", _accept_body(gw, inv, bob)) == 409
     assert bob_did in gw._revoked_dids
     assert gw._store.get_relationship_by_did(bob_did) is None
