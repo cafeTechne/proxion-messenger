@@ -117,6 +117,7 @@ MUTATING_COMMANDS: frozenset[str] = frozenset({
     "send_dm", "send_room", "local_dm", "sealed_dm", "send_dm_fanout",
     "edit_message", "edit_local_message", "delete_local_message", "forward_message",
     "send_file", "file_offer", "file_accept", "file_reject", "file_chunk", "file_complete",
+    "file_received",
     "send_voice_message", "schedule_message", "cancel_scheduled",
     "add_reaction", "remove_reaction", "pin_message", "unpin_message",
     "set_disappear_timer",
