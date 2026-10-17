@@ -59,6 +59,58 @@ function _open() {
     return _dbPromise;
 }
 
+// A DM file's decrypted bytes are kept here, on this device only: the gateway
+// stores no DM file content (an E2E DM file is ciphertext it cannot read, and
+// its history row is just "📎"). Larger files keep only their metadata and
+// render as "not available on this device" after a reload.
+export const MAX_FILE_B64 = 8 * 1024 * 1024;
+
+// The file fields worth keeping for a history record (pure).
+export function fileForRecord(file) {
+    if (!file || typeof file !== 'object') return null;
+    const out = {
+        filename: String(file.filename || 'file'),
+        mime_type: String(file.mime_type || 'application/octet-stream'),
+        size: Number(file.size) || 0,
+    };
+    if (Number.isInteger(file.width) && Number.isInteger(file.height)) { out.width = file.width; out.height = file.height; }
+    if (file.spoiler === true) out.spoiler = true;
+    if (typeof file.data_b64 === 'string' && file.data_b64 && file.data_b64.length <= MAX_FILE_B64) {
+        out.data_b64 = file.data_b64;
+    } else {
+        out.unavailable = true;
+    }
+    return out;
+}
+
+// A record without its file bytes (pure), for the pairing hand-off.
+export function stripFileBytes(rec) {
+    if (!rec || !rec.file) return rec;
+    const { data_b64: _drop, ...meta } = rec.file;
+    return { ...rec, file: { ...meta, unavailable: true } };
+}
+
+// Apply this device's cached copy of a DM message onto the copy the gateway
+// returned in history (pure; mutates `existing`). Returns true when it changed.
+export function applyLocalRecord(existing, rec) {
+    if (!existing || !rec) return false;
+    let changed = false;
+    if (existing.content !== rec.content) {
+        // Local plaintext is authoritative: the server copy of an E2E DM
+        // is ciphertext (stored as a plain string with no e2e flag), so
+        // it can't be distinguished from plaintext — always prefer ours.
+        existing.content = rec.content;
+        existing.e2e = false;
+        changed = true;
+    }
+    // The gateway has no DM file bytes; show the copy this device kept.
+    if (rec.file && !existing.file?.data_b64 && (rec.file.data_b64 || !existing.file)) {
+        existing.file = rec.file;
+        changed = true;
+    }
+    return changed;
+}
+
 // Persist one DM message's PLAINTEXT. `msg` must have message_id, thread_id,
 // content (plaintext), from_webid, timestamp; reply_to_id/from_display_name
 // optional. Silently no-ops if the record isn't a usable DM message or IDB fails.
@@ -86,6 +138,7 @@ export async function dmHistorySave(msg) {
                 reply_to_id: msg.reply_to_id || null,
                 ...(msg.edited_at ? { edited_at: msg.edited_at } : {}),
                 ...(Array.isArray(msg.edits) && msg.edits.length ? { edits: msg.edits.slice(-MAX_EDITS) } : {}),
+                ...(msg.file ? { file: fileForRecord(msg.file) } : {}),
             });
             tx.oncomplete = resolve;
             tx.onerror = () => reject(tx.error);
@@ -252,7 +305,9 @@ export async function dmHistoryExportRecent(maxPerThread = 40, maxTotal = 400) {
             picked = picked.concat(arr.slice(-maxPerThread));  // newest per thread
         }
         picked.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
-        return picked.slice(-maxTotal);  // newest overall if still over budget
+        // File bytes would blow the one-message budget: the new device gets the
+        // file's name and an explicit "not available on this device" state.
+        return picked.slice(-maxTotal).map(stripFileBytes);  // newest overall if still over budget
     } catch (_) {
         return [];
     }

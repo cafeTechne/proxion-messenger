@@ -375,6 +375,26 @@ class _StoreBase(object):
                     revoked_at REAL NOT NULL
                 );
 
+                -- Room file attachments, keyed by the file message they belong
+                -- to, so a file outlives the live event (history, reload, late
+                -- joiners). Rooms only: E2E DM files are never stored here.
+                -- Rows go with their message (delete, disappearing expiry, room
+                -- delete). Created here rather than in a migration: there is no
+                -- data to carry over and CREATE IF NOT EXISTS runs on every open.
+                CREATE TABLE IF NOT EXISTS message_files (
+                    message_id TEXT PRIMARY KEY,
+                    thread_id  TEXT NOT NULL,
+                    filename   TEXT NOT NULL,
+                    mime_type  TEXT NOT NULL,
+                    size       INTEGER NOT NULL,
+                    width      INTEGER,
+                    height     INTEGER,
+                    spoiler    INTEGER NOT NULL DEFAULT 0,
+                    data       BLOB NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_message_files_thread
+                    ON message_files(thread_id);
+
                 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
                 USING fts5(
                     message_id UNINDEXED,

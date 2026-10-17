@@ -88,6 +88,11 @@ class MessageStoreMixin(object):
     def delete_messages_before(self, thread_id: str, cutoff_iso: str) -> int:
         """Delete messages older than cutoff_iso from a thread. Returns count deleted."""
         with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM message_files WHERE message_id IN ("
+                "SELECT message_id FROM messages WHERE thread_id = ? AND timestamp < ?)",
+                (thread_id, cutoff_iso),
+            )
             cur = conn.execute(
                 "DELETE FROM messages WHERE thread_id = ? AND timestamp < ?",
                 (thread_id, cutoff_iso)
@@ -208,6 +213,82 @@ class MessageStoreMixin(object):
             conn.execute("DELETE FROM pins WHERE message_id = ?", (message_id,))
             conn.execute("DELETE FROM message_edits WHERE message_id = ?", (message_id,))
             conn.execute("DELETE FROM message_receipts WHERE message_id = ?", (message_id,))
+            conn.execute("DELETE FROM message_files WHERE message_id = ?", (message_id,))
+
+    # Room file attachments (the message_files table). The per-file cap is the
+    # inline send limit; the per-thread cap matches the message byte quota.
+    MAX_MESSAGE_FILE_BYTES = 512 * 1024
+    MAX_THREAD_FILE_BYTES = 50 * 1024 * 1024
+
+    def save_message_file(
+        self, message_id: str, thread_id: str, filename: str, mime_type: str,
+        data: bytes, width: Optional[int] = None, height: Optional[int] = None,
+        spoiler: bool = False,
+    ) -> bool:
+        """Keep a room file's bytes with its message. False when refused (too
+        large, thread over quota, or no such message in that thread)."""
+        if not data or len(data) > self.MAX_MESSAGE_FILE_BYTES:
+            return False
+        with self._conn() as conn:
+            if not conn.execute(
+                "SELECT 1 FROM messages WHERE message_id = ? AND thread_id = ?",
+                (message_id, thread_id),
+            ).fetchone():
+                return False
+            used = conn.execute(
+                "SELECT COALESCE(SUM(size), 0) FROM message_files WHERE thread_id = ?",
+                (thread_id,),
+            ).fetchone()[0]
+            if used + len(data) > self.MAX_THREAD_FILE_BYTES:
+                logger.warning("File quota exceeded for thread %s", thread_id)
+                return False
+            conn.execute(
+                "INSERT OR IGNORE INTO message_files (message_id, thread_id, filename,"
+                " mime_type, size, width, height, spoiler, data)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (message_id, thread_id, filename, mime_type, len(data),
+                 width, height, 1 if spoiler else 0, sqlite3.Binary(data)),
+            )
+        return True
+
+    @staticmethod
+    def _file_meta(row) -> dict:
+        meta = {"filename": row["filename"], "mime_type": row["mime_type"],
+                "size": row["size"]}
+        if row["width"] and row["height"]:
+            meta["width"], meta["height"] = row["width"], row["height"]
+        if row["spoiler"]:
+            meta["spoiler"] = True
+        return meta
+
+    def get_message_file_meta(self, thread_id: str, message_ids: list) -> dict:
+        """{message_id: metadata} for the stored files among *message_ids* (no bytes)."""
+        ids = [m for m in message_ids if m]
+        out: dict = {}
+        with self._conn() as conn:
+            for i in range(0, len(ids), 500):
+                chunk = ids[i:i + 500]
+                rows = conn.execute(
+                    "SELECT message_id, filename, mime_type, size, width, height, spoiler"
+                    " FROM message_files WHERE thread_id = ? AND message_id IN"
+                    f" ({','.join('?' * len(chunk))})",
+                    [thread_id, *chunk],
+                ).fetchall()
+                for r in rows:
+                    out[r["message_id"]] = self._file_meta(r)
+        return out
+
+    def get_message_file(self, message_id: str) -> Optional[dict]:
+        """Stored file for a message: metadata plus thread_id and the raw bytes."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM message_files WHERE message_id = ?", (message_id,)
+            ).fetchone()
+        if not row:
+            return None
+        return {**self._file_meta(row), "thread_id": row["thread_id"],
+                "data": bytes(row["data"])}
+
     def update_message(
         self, message_id: str, new_content: str, edited_at: Optional[str] = None,
         editor_webid: str = "",

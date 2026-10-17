@@ -61,6 +61,8 @@
   "file.progressReceiving": "⟦Ŕéçéíṽíñǧ {name}, {pct}% áéíóú⟧",
   "file.download": "⟦Ðóŵñĺóáð áéí⟧",
   "file.downloadNamed": "⟦Ðóŵñĺóáð {filename} áéíó⟧",
+  "file.loading": "⟦Ĺóáðíñǧ ƒíĺé… áéíóú⟧",
+  "file.unavailable": "⟦Ƒíĺé ñóţ áṽáíĺáḅĺé óñ ţĥíš ðéṽíçé áéíóúáéíóúáéí⟧",
   "media.micDenied": "⟦Ṁíçŕóρĥóñé áççéšš ðéñíéð áéíóúáéíóú⟧",
   "media.screenShareCancelled": "⟦Šçŕééñ šĥáŕé çáñçéĺĺéð áéíóúáéíó⟧",
   "address.copied": "⟦Áððŕéšš çóρíéð! áéíóúá⟧",

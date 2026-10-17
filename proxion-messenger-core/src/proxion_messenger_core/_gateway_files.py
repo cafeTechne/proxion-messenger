@@ -273,3 +273,58 @@ class FileTransferMixin:
             except Exception:
                 pass
         return ("200 OK", '{"status":"delivered"}') if delivered else ("202 Accepted", '{"status":"offline"}')
+
+    # ── Stored room files (history) ──────────────────────────────────────────
+    # A room file message keeps its bytes in the store (message_files). History
+    # carries only the metadata so it stays small; the browser then asks for the
+    # bytes with get_files, which is checked against room membership. E2E DM
+    # files are never stored: their history entry is marked unavailable and the
+    # browser fills it from its own local copy.
+
+    MAX_GET_FILES = 20
+
+    def _attach_history_files(self, thread_id: str, msgs: list, is_room: bool) -> None:
+        if not self._store or not msgs:
+            return
+        metas = {}
+        if is_room:
+            metas = self._store.get_message_file_meta(
+                thread_id, [m.get("message_id", "") for m in msgs])
+        for m in msgs:
+            mid = m.get("message_id", "")
+            if mid in metas:
+                m["file"] = {**metas[mid], "stored": True}
+            elif mid.startswith("file-") and str(m.get("content", "")).startswith("📎"):
+                name = str(m["content"])[len("📎"):].strip()
+                m["file"] = {"filename": name, "unavailable": True}
+
+    def _may_read_room_file(self, websocket, thread_id: str) -> bool:
+        room = self._local_rooms.get(thread_id)
+        if room is None:
+            return False
+        if websocket in room.get("members", set()):
+            return True
+        caller = self._client_webids.get(websocket)
+        return bool(caller and self._store and caller in self._store.get_room_members(thread_id))
+
+    async def _handle_get_files(self, websocket, data: dict) -> None:
+        ids = data.get("message_ids")
+        if not isinstance(ids, list):
+            await websocket.send(json.dumps({"type": "error", "code": "E_SCHEMA", "message": "message_ids"}))
+            return
+        for mid in ids[:self.MAX_GET_FILES]:
+            if not isinstance(mid, str) or not mid or len(mid) > 128:
+                continue
+            rec = self._store.get_message_file(mid) if self._store else None
+            # Unknown id and not-a-member answer the same, so the reply does not
+            # reveal that a file exists in a room the caller is not in.
+            if not rec or not self._may_read_room_file(websocket, rec["thread_id"]):
+                await websocket.send(json.dumps({
+                    "type": "file_data", "message_id": mid, "available": False}))
+                continue
+            data_b64 = base64.b64encode(rec.pop("data")).decode()
+            thread_id = rec.pop("thread_id")
+            await websocket.send(json.dumps({
+                "type": "file_data", "message_id": mid, "thread_id": thread_id,
+                "available": True, "file": {**rec, "data_b64": data_b64},
+            }))

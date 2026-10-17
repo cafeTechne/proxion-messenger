@@ -502,6 +502,13 @@ class DmHandlerMixin:
             }
             if self._store:
                 self._store.save_message(message_id, room_id, "room", sender_webid, sender_name, f"📎 {filename}", ts)
+                # Keep the bytes with the message so history, reloads and later
+                # joiners get the file, not just its name (fetched via get_files).
+                self._store.save_message_file(
+                    message_id, room_id, filename, mime_type, file_bytes,
+                    width=_dims.get("width"), height=_dims.get("height"),
+                    spoiler=_spoiler is True,
+                )
             room = self._local_rooms[room_id]
             for ws in list(room["members"]):
                 try:

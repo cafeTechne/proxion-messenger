@@ -134,6 +134,85 @@ export function mediaSizeAttrs(file) {
     return d ? ` width="${d.width}" height="${d.height}" style="--media-w: ${d.width}; --media-h: ${d.height}"` : '';
 }
 
+// The gateway's text for a file message ("📎" or "📎 name"). The attachment
+// card already shows the file, so this caption is not rendered as text.
+export function isFileCaption(msg) {
+    return !!(msg && msg.file) && String(msg.content || '').trim().startsWith('📎');
+}
+
+// Attachment card for a message's file (pure, exported for tests). Three
+// states: the bytes are here (preview / player / download), the bytes are
+// being fetched from the gateway (a stored room file in history), or the file
+// is not available on this device (never a bare filename).
+export function attachmentHtml(file) {
+    if (!file) return '';
+    // Strip path-traversal sequences before using filename in download attribute.
+    // escHtml handles XSS; this strips directory components so the OS/browser
+    // cannot be confused into writing outside the Downloads folder.
+    const _rawFilename = String(file.filename || 'file')
+        .replace(/[/\\]/g, '')       // remove / and \
+        .replace(/\.\./g, '')         // remove ..
+        .trim() || 'file';
+    const safeFilename = escHtml(_rawFilename);
+    if (!file.data_b64) {
+        const loading = file.stored === true && file.unavailable !== true;
+        const note = loading ? t('file.loading') : t('file.unavailable');
+        return `<div class="attachment ${loading ? 'attachment-loading' : 'attachment-unavailable'}">${icon('paperclip', { size: 18 })} <span class="attachment-name">${safeFilename}</span> <span class="attachment-note"${loading ? '' : ' role="note"'}>${escHtml(note)}</span></div>`;
+    }
+    const _mime = String(file.mime_type || '').toLowerCase();
+    const _kind = attachmentKind(_mime);
+    // Wire-supplied base64 goes into innerHTML src=/href= attributes, so it
+    // MUST pass through b64attr (strips anything outside the base64 alphabet)
+    // exactly like the avatar/voice-note paths, or a crafted data_b64 breaks
+    // out of the attribute.
+    const _b64 = b64attr(file.data_b64);
+    // The link reads "Download"; the accessible name keeps the filename.
+    const _dlLink = `<a href="data:application/octet-stream;base64,${_b64}" download="${safeFilename}"
+               aria-label="${escHtml(t('file.downloadNamed', { filename: _rawFilename }))}"
+               style="color:var(--accent-text);font-size:0.8em;display:block;margin-top:3px;">${t('file.download')}</a>`;
+    if (_kind === 'image') {
+        // R13.7: inline image preview (+R60C: sender-marked spoiler
+        // renders blurred under a reveal cover — one-way, like text
+        // spoilers; the reveal handler lives in the feed delegation)
+        const _imgSrc = `data:${_mime};base64,${_b64}`;
+        // A real button wraps the preview (it opens the lightbox). Under a
+        // spoiler cover it stays out of the tab order until revealed.
+        const _spoiler = file.spoiler === true;
+        let _img = `<button type="button" class="msg-image-btn"${_spoiler ? ' tabindex="-1"' : ''}><img class="msg-image-preview" src="${_imgSrc}" alt="${safeFilename}" loading="lazy"${mediaSizeAttrs(file)}></button>`;
+        // Animated GIF/WebP: a play/pause control (WCAG 2.2.2), paused
+        // from the start under prefers-reduced-motion.
+        if (isAnimatedImage(_mime, file.data_b64)) {
+            const _gifState = initialGifState();
+            _img = `<span class="gif-wrap" data-gif="${_gifState}">${_img}${gifToggleHtml(_gifState)}</span>`;
+        }
+        return _spoiler
+            ? `<div class="attachment">
+                <div class="media-spoiler" role="button" tabindex="0" aria-label="${t('spoiler.reveal')}">
+                  ${_img}<span class="media-spoiler-label">${t('spoiler.mediaLabel')}</span>
+                </div>${_dlLink}</div>`
+            : `<div class="attachment">${_img}${_dlLink}</div>`;
+    }
+    if (_kind === 'video') {
+        // R59A: inline video player (short clips are the modern GIF)
+        return `<div class="attachment">
+            <video controls preload="metadata" class="msg-video-preview" aria-label="${safeFilename}"${mediaSizeAttrs(file)}
+                   src="data:${_mime};base64,${_b64}"></video>
+            ${_dlLink}</div>`;
+    }
+    if (_kind === 'audio') {
+        // R59A: inline audio player for music/sound attachments
+        return `<div class="attachment">
+            <audio controls class="msg-audio-preview" aria-label="${safeFilename}"
+                   src="data:${_mime};base64,${_b64}"></audio>
+            <span class="attachment-name">${safeFilename}</span>
+            ${_dlLink}</div>`;
+    }
+    // Force octet-stream to prevent data URI MIME injection
+    return `<div class="attachment">${icon('paperclip', { size: 18 })} ${safeFilename} (${Math.round((Number(file.size) || 0) / 1024)} KB)
+            <a href="data:application/octet-stream;base64,${_b64}" download="${safeFilename}"
+               style="color:var(--accent-text);margin-inline-start:10px;">${t('file.download')}</a></div>`;
+}
+
 // Scroll anchoring (pure, exported for tests). "At bottom" uses the same 60px
 // slack as the scroll-to-bottom button logic.
 export function isFeedAtBottom(feed) {
@@ -198,7 +277,46 @@ export function createRendering({
         _unreadBeforeId: null,      // "New messages" divider goes before this message
         _unreadSeen: false,         // reader reached the bottom since the divider appeared
         _unreadEnteredFor: null,    // divider id that already played its entry fade
+        _requestedFiles: new Set(), // stored room files already asked for via get_files
     };
+
+    // Stored room files in history come without their bytes. Ids rendered in
+    // one pass are sent together (get_files takes up to 20 per command).
+    let _fileQueue = [];
+    function _requestFile(msgId) {
+        if (state._requestedFiles.has(msgId)) return;
+        state._requestedFiles.add(msgId);
+        _fileQueue.push(msgId);
+        if (_fileQueue.length > 1) return;
+        const flush = () => {
+            const ids = _fileQueue;
+            _fileQueue = [];
+            const socket = getSocket();
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                // Not connected: let a later render ask again.
+                ids.forEach(id => state._requestedFiles.delete(id));
+                return;
+            }
+            for (let i = 0; i < ids.length; i += 20) {
+                socket.send(JSON.stringify({ cmd: "get_files", message_ids: ids.slice(i, i + 20) }));
+            }
+        };
+        if (typeof queueMicrotask === "function") queueMicrotask(flush); else setTimeout(flush, 0);
+    }
+
+    // Apply a get_files answer: `file` carries the bytes, or null when the
+    // gateway no longer has the file. Redraws only the attachment card.
+    function fillAttachment(msgId, file) {
+        // Answered: a later render (after a view switch dropped this copy) may ask again.
+        state._requestedFiles.delete(msgId);
+        const msg = getMessageMap()[msgId];
+        if (!msg || !msg.file) return;
+        msg.file = file && file.data_b64
+            ? { ...msg.file, ...file, stored: true }
+            : { ...msg.file, unavailable: true };
+        const card = document.getElementById(`msg-${msgId}`)?.querySelector(".attachment");
+        if (card) card.outerHTML = attachmentHtml(msg.file);
+    }
 
     function scrollToBottom() {
         const activeView = getActiveView();
@@ -485,65 +603,11 @@ export function createRendering({
 
         let fileHtml = "";
         if (msg.file) {
-            // Strip path-traversal sequences before using filename in download attribute.
-            // escHtml handles XSS; this strips directory components so the OS/browser
-            // cannot be confused into writing outside the Downloads folder.
-            const _rawFilename = (msg.file.filename || 'file')
-                .replace(/[/\\]/g, '')       // remove / and \
-                .replace(/\.\./g, '')         // remove ..
-                .trim() || 'file';
-            const safeFilename = escHtml(_rawFilename);
-            const _mime = (msg.file.mime_type || '').toLowerCase();
-            const _kind = attachmentKind(_mime);
-            // Wire-supplied base64 goes into innerHTML src=/href= attributes, so it
-            // MUST pass through b64attr (strips anything outside the base64 alphabet)
-            // exactly like the avatar/voice-note paths, or a crafted data_b64 breaks
-            // out of the attribute. The truthiness guards below keep the raw field.
-            const _b64 = b64attr(msg.file.data_b64 || '');
-            // The message text above already names the file ("📎 name"), so the
-            // link reads "Download"; the accessible name keeps the filename.
-            const _dlLink = `<a href="data:application/octet-stream;base64,${_b64}" download="${safeFilename}"
-                       aria-label="${escHtml(t('file.downloadNamed', { filename: _rawFilename }))}"
-                       style="color:var(--accent-text);font-size:0.8em;display:block;margin-top:3px;">${t('file.download')}</a>`;
-            if (_kind === 'image' && msg.file.data_b64) {
-                // R13.7: inline image preview (+R60C: sender-marked spoiler
-                // renders blurred under a reveal cover — one-way, like text
-                // spoilers; the reveal handler lives in the feed delegation)
-                const _imgSrc = `data:${_mime};base64,${_b64}`;
-                // A real button wraps the preview (it opens the lightbox). Under a
-                // spoiler cover it stays out of the tab order until revealed.
-                const _spoiler = msg.file.spoiler === true;
-                let _img = `<button type="button" class="msg-image-btn"${_spoiler ? ' tabindex="-1"' : ''}><img class="msg-image-preview" src="${_imgSrc}" alt="${safeFilename}" loading="lazy"${mediaSizeAttrs(msg.file)}></button>`;
-                // Animated GIF/WebP: a play/pause control (WCAG 2.2.2), paused
-                // from the start under prefers-reduced-motion.
-                if (isAnimatedImage(_mime, msg.file.data_b64)) {
-                    const _gifState = initialGifState();
-                    _img = `<span class="gif-wrap" data-gif="${_gifState}">${_img}${gifToggleHtml(_gifState)}</span>`;
-                }
-                fileHtml = _spoiler
-                    ? `<div class="attachment">
-                        <div class="media-spoiler" role="button" tabindex="0" aria-label="${t('spoiler.reveal')}">
-                          ${_img}<span class="media-spoiler-label">${t('spoiler.mediaLabel')}</span>
-                        </div>${_dlLink}</div>`
-                    : `<div class="attachment">${_img}${_dlLink}</div>`;
-            } else if (_kind === 'video' && msg.file.data_b64) {
-                // R59A: inline video player (short clips are the modern GIF)
-                fileHtml = `<div class="attachment">
-                    <video controls preload="metadata" class="msg-video-preview" aria-label="${safeFilename}"${mediaSizeAttrs(msg.file)}
-                           src="data:${_mime};base64,${_b64}"></video>
-                    ${_dlLink}</div>`;
-            } else if (_kind === 'audio' && msg.file.data_b64) {
-                // R59A: inline audio player for music/sound attachments
-                fileHtml = `<div class="attachment">
-                    <audio controls class="msg-audio-preview" aria-label="${safeFilename}"
-                           src="data:${_mime};base64,${_b64}"></audio>
-                    <span class="attachment-name">${safeFilename}</span>
-                    ${_dlLink}</div>`;
-            } else {
-                // Force octet-stream to prevent data URI MIME injection
-                fileHtml = `<div class="attachment">${icon('paperclip', { size: 18 })} ${safeFilename} (${Math.round(msg.file.size/1024)} KB)
-                    <a href="data:application/octet-stream;base64,${_b64}" download="${safeFilename}"
-                       style="color:var(--accent-text);margin-inline-start:10px;">${t('file.download')}</a></div>`;
+            fileHtml = attachmentHtml(msg.file);
+            // A stored room file arrives in history without its bytes: ask the
+            // gateway for them (batched; the card fills in on file_data).
+            if (msg.file.stored === true && !msg.file.data_b64 && msg.file.unavailable !== true) {
+                _requestFile(msgId);
             }
         }
 
@@ -646,6 +710,9 @@ export function createRendering({
             body.innerHTML += `<div class="msg-content"><div class="poll-card" dir="auto">
                 <div class="poll-q">${escHtml(_poll.question)}</div>${rows}
                 <div class="poll-foot"><span class="poll-hint">${t('poll.voteHint')}</span>${editedHtml}${receiptHtml}</div></div></div>`;
+        } else if (isFileCaption(msg)) {
+            // The card names the file; the "📎 name" caption would repeat it.
+            body.innerHTML += `<div class="msg-content msg-content--file"><span class="msg-text" dir="auto"></span>${editedHtml}${receiptHtml}</div>`;
         } else {
             body.innerHTML += `<div class="msg-content"><span class="msg-text" dir="auto">${renderedText}</span>${editedHtml}${receiptHtml}</div>`;
         }
@@ -826,7 +893,7 @@ export function createRendering({
         renderMessages, renderMessage, _renderThreaded, scrollToBottom,
         _renderMessageEl, _dateLabelForTimestamp,
         markUnread, setUnreadBefore, scrollToUnread, clearUnreadDivider, resetUnread,
-        removeMessage,
+        removeMessage, fillAttachment,
         mergeOlderHistory, rerenderKeepingAnchor, attach, state,
     };
 }

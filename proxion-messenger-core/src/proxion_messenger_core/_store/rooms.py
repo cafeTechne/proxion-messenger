@@ -259,6 +259,7 @@ class RoomStoreMixin(object):
             conn.execute("DELETE FROM pins WHERE thread_id = ?", (room_id,))
             conn.execute("DELETE FROM reactions WHERE room_id = ?", (room_id,))
             conn.execute("DELETE FROM messages WHERE thread_id = ?", (room_id,))
+            conn.execute("DELETE FROM message_files WHERE thread_id = ?", (room_id,))
             conn.execute("DELETE FROM room_members WHERE room_id = ?", (room_id,))
             conn.execute("DELETE FROM rooms WHERE room_id = ?", (room_id,))
     def ban_room_member(self, room_id: str, banned_did: str, banned_by: str, reason: str = "") -> None:

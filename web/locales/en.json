@@ -60,6 +60,8 @@
   "file.progressReceiving": "Receiving {name}, {pct}%",
   "file.download": "Download",
   "file.downloadNamed": "Download {filename}",
+  "file.loading": "Loading file…",
+  "file.unavailable": "File not available on this device",
   "media.micDenied": "Microphone access denied",
   "media.screenShareCancelled": "Screen share cancelled",
   "address.copied": "Address copied!",

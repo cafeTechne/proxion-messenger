@@ -100,7 +100,7 @@ import { makeListNavigable, announce } from './a11y.js';
 import { buildPageTitle, viewLabel, createFaviconBadge, jumpToMessage } from './wayfinding.js';
 import { openMenu, closeMenu, refreshMenu, isMenuOpen } from './menu.js';
 import { showConfirm, showPromptModal, installDialogDismiss, installFieldErrorSync, setFieldError } from './dialogs.js';
-import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryGetEdits, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport } from './dmhistory.js';
+import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryGetEdits, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport, applyLocalRecord } from './dmhistory.js';
 import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } from './i18n.js';
 import { createIdentityResolver } from './identity.js';
 import { initThemePicker } from './theme.js';
@@ -1696,6 +1696,11 @@ import { initThemePicker } from './theme.js';
                         dmHistorySave({ ...msg, thread_id: id });
                         // R61: opt-in archive of decrypted DM history to the pod
                         podArchiveDmMessage(id, { ...msg, thread_id: id }).catch(() => {});
+                    } else if (msg.message_id && msg.file?.data_b64
+                            && (msg.source === "local_dm" || msg.source === "relay")) {
+                        // A DM file (our own echo, or one sent without E2E): the
+                        // gateway keeps only "📎", so this device keeps the file.
+                        dmHistorySave({ ...msg, thread_id: id });
                     }
 
                     // If this is the server echo of an optimistically-rendered message,
@@ -2597,6 +2602,12 @@ import { initThemePicker } from './theme.js';
                     feed.removeAttribute("aria-busy");
                     break;
                 }
+                case "file_data":
+                    // Bytes of a stored room file requested by rendering (get_files).
+                    if (event.message_id) {
+                        rendering.fillAttachment(event.message_id, event.available ? event.file : null);
+                    }
+                    break;
                 case "message_deleted": {
                     // Original send time, before the local record is dropped: it
                     // says which UTC day file the Long Chat copy lives in.
@@ -3515,12 +3526,7 @@ import { initThemePicker } from './theme.js';
                     messageMap[lm.message_id] = msg;
                     allMessages.push(msg);
                     changed = true;
-                } else if (existing.content !== lm.content) {
-                    // Local plaintext is authoritative: the server copy of an E2E DM
-                    // is ciphertext (stored as a plain string with no e2e flag), so
-                    // it can't be distinguished from plaintext — always prefer ours.
-                    existing.content = lm.content;
-                    existing.e2e = false;
+                } else if (applyLocalRecord(existing, lm)) {
                     changed = true;
                 }
             }

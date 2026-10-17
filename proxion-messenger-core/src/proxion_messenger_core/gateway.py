@@ -1257,6 +1257,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_get_dms(websocket, data)
             elif cmd == "send_file":
                 await self._handle_send_file(websocket, data)
+            elif cmd == "get_files":
+                await self._handle_get_files(websocket, data)
             elif cmd == "file_offer":
                 await self._handle_file_offer(websocket, data)
             elif cmd == "file_accept":

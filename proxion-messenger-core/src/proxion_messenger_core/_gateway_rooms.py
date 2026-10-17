@@ -829,6 +829,7 @@ class RoomHandlerMixin:
                 }
                 for m in raw
             ]
+            self._attach_history_files(thread_id, msgs, is_room)
             reactions = []
             if is_room and self._store:
                 reactions = self._store.get_reactions(thread_id)

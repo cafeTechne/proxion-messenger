@@ -3262,6 +3262,9 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 .msg-trust-icon { margin-inline-start: var(--space-1); font-size: var(--text-sm); }
 .msg-expire-countdown { font-size: var(--text-2xs); color: var(--slate-600); margin-inline-start: var(--space-2); }
 .attachment-name { display: block; margin-top: var(--space-1); font-size: var(--text-sm); color: var(--slate-600); }
+/* A file whose bytes are still loading or are not on this device. */
+.attachment-loading .attachment-note,
+.attachment-unavailable .attachment-note { display: block; font-size: var(--text-sm); font-style: italic; color: var(--slate-600); }
 /* Voice channel participant pills and video tiles. */
 .vc-pill {
     display: flex; align-items: center; gap: var(--space-1);
