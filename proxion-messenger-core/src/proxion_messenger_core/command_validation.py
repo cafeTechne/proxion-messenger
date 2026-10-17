@@ -174,6 +174,7 @@ TEARDOWN_COMMANDS: frozenset[str] = frozenset({
 READ_ONLY_COMMANDS: frozenset[str] = frozenset({
     "register", "auth_response", "link_pod",
     "get_rooms", "get_dms", "get_local_history", "get_room_members", "get_message",
+    "get_files", "export_ticket",
     "read_dm", "read_room", "search", "get_receipts", "get_message_readers",
     "get_pins", "get_room_bans", "get_room_roles", "list_room_emoji",
     "get_disappear_timer", "list_scheduled", "get_notifications",
