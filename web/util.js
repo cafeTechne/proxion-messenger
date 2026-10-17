@@ -238,6 +238,24 @@ export function timeAgo(date) {
     return new Date(date).toLocaleDateString(locale);
 }
 
+// Attachment size for display: "18 bytes", "6.2 kB", "2 MB". Rounding everything
+// to whole KB showed small files as "0 KB".
+export function formatFileSize(bytes) {
+    const n = Number(bytes);
+    if (!Number.isFinite(n) || n < 0) return "";
+    let unit = "byte", v = n;
+    if (n >= 1024 * 1024) { unit = "megabyte"; v = n / (1024 * 1024); }
+    else if (n >= 1024) { unit = "kilobyte"; v = n / 1024; }
+    const digits = unit === "byte" || v >= 10 ? 0 : 1;
+    try {
+        return new Intl.NumberFormat(getLocale(), {
+            style: "unit", unit, unitDisplay: unit === "byte" ? "long" : "short", maximumFractionDigits: digits,
+        }).format(v);
+    } catch {
+        return `${v.toFixed(digits)} ${unit === "byte" ? "B" : unit === "kilobyte" ? "KB" : "MB"}`;
+    }
+}
+
 // Uint8Array <-> base64 (used by chunked file transfer)
 export function u8ToB64(u8) {
     let s = "";

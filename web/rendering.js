@@ -20,7 +20,7 @@
 //   renderWindow, scrollBatch,
 // })
 
-import { didSuffix, escHtml, webidColor, avatarInitial, renderMarkdown, expireLabel as _expireLabel, b64attr } from './util.js';
+import { didSuffix, escHtml, webidColor, avatarInitial, renderMarkdown, expireLabel as _expireLabel, b64attr, formatFileSize } from './util.js';
 import { parsePoll } from './polls.js';
 import { applyRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { t, tn, getLocale } from './i18n.js';
@@ -209,7 +209,7 @@ export function attachmentHtml(file) {
             ${_dlLink}</div>`;
     }
     // Force octet-stream to prevent data URI MIME injection
-    return `<div class="attachment">${icon('paperclip', { size: 18 })} ${safeFilename} (${Math.round((Number(file.size) || 0) / 1024)} KB)
+    return `<div class="attachment">${icon('paperclip', { size: 18 })} ${safeFilename} (${escHtml(formatFileSize(file.size))})
             <a href="data:application/octet-stream;base64,${_b64}" download="${safeFilename}"
                style="color:var(--accent-text);margin-inline-start:10px;">${t('file.download')}</a></div>`;
 }

@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import {
   didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, markdownToPlain, didIdTag, dmFallbackName,
   expireLabel, timeAgo, u8ToB64, b64ToU8, b64attr, scrollBehavior,
-  composerEnterAction, isCoarsePointer, supportsFieldSizing, canShareLinks, shareLink,
+  composerEnterAction, isCoarsePointer, supportsFieldSizing, canShareLinks, shareLink, formatFileSize,
 } from './util.js';
 
 describe('composerEnterAction (Enter in the message composer)', () => {
@@ -352,5 +352,15 @@ describe('avatarInitial', () => {
         expect(avatarInitial('')).toBe('?');
         expect(avatarInitial('<<>>')).toBe('?');
         expect(avatarInitial(null)).toBe('?');
+    });
+});
+
+describe('formatFileSize', () => {
+    it('never shows a small file as 0 KB', () => {
+        expect(formatFileSize(18)).toBe('18 bytes');
+        expect(formatFileSize(0)).toBe('0 bytes');
+        expect(formatFileSize(6345)).toMatch(/^6\.2\s?kB|^6\.2\s?KB/);
+        expect(formatFileSize(2097152)).toMatch(/^2\s?MB$/);
+        expect(formatFileSize(undefined)).toBe('');
     });
 });
