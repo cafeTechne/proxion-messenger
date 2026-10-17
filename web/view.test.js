@@ -315,3 +315,45 @@ describe('opening a conversation (chat conventions)', () => {
     expect(order2.indexOf('load_history')).toBeLessThan(order2.indexOf('mark_read'));
   });
 });
+
+describe('switching views resets every header control', () => {
+  const shown = (id) => els[id].style.display !== 'none';
+  beforeEach(() => { els['start-video-call-btn'] = mkEl(); });
+
+  it('a room opened after a DM drops the E2E badge, Verify and the call buttons', () => {
+    const v = make();
+    v.openContactThread({ certificate_id: 'cert-9', peer_did: 'did:key:zBob', display_name: 'Bob' });
+    expect(calls.updateE2EStatus.at(-1)).toEqual(['did:key:zBob']);
+    expect(shown('start-call-btn')).toBe(true);
+    v.addRoomToSidebar('room-own', 'Mine', '');
+    els['room-list']._children[0].onclick();
+    expect(calls.updateE2EStatus.at(-1)).toEqual([null]);
+    expect(calls.updateIdentityFingerprint.at(-1)).toEqual([null]);
+    expect(shown('start-call-btn')).toBe(false);
+    expect(shown('start-video-call-btn')).toBe(false);
+    expect(shown('members-toggle')).toBe(true);
+    expect(shown('leave-room-btn')).toBe(true);
+    expect(shown('delete-room-btn')).toBe(true);
+  });
+
+  it('a cert DM opened after a room hides Members, Leave room and Delete room', () => {
+    const v = make();
+    v.addRoomToSidebar('room-own', 'Mine', 'https://gw/?join=AB');
+    els['room-list']._children[0].onclick();
+    els['members-panel'].style.display = 'block';
+    v.openContactThread({ certificate_id: 'cert-9', peer_did: 'did:key:zBob', display_name: 'Bob' });
+    for (const id of ['members-toggle', 'leave-room-btn', 'delete-room-btn', 'invite-btn', 'members-panel']) {
+      expect(shown(id), id).toBe(false);
+    }
+    expect(calls.updateE2EStatus.at(-1)).toEqual(['did:key:zBob']);
+  });
+
+  it('a pod room from the sidebar list clears the DM badge too', () => {
+    const v = make();
+    v.openLocalDmThread('dm-1', 'Carol', 'did:key:zCarol');
+    v.populateSidebar('room-list', [{ id: 'pod-room', name: 'Pod' }], 'room');
+    els['room-list']._children[0].onclick();
+    expect(calls.updateE2EStatus.at(-1)).toEqual([null]);
+    expect(shown('start-call-btn')).toBe(false);
+  });
+});

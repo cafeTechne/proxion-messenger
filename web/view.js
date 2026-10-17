@@ -91,6 +91,32 @@ export function createView({
         li.setAttribute("aria-current", "true");
     }
 
+    // Every header control belongs to rooms or to DMs. All of them are set on
+    // each open, so nothing from the previous conversation stays behind (a room
+    // showing the DM's E2E badge and Verify, a DM showing Leave room).
+    function _setHeaderControls(view) {
+        const isDm = view.type === "dm" || view.type === "local_dm";
+        const isLocalRoom = view.type === "local_room";
+        const callsOk = isDm && (!window.proxionTransport || window.proxionTransport.supports("calls"));
+        const show = (id, on, display) => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = on ? display : "none";
+        };
+        show("start-call-btn", callsOk, "inline-flex");
+        show("start-video-call-btn", callsOk, "inline-flex");
+        show("invite-btn", !isDm && !!getRoomInviteUrls()[view.id], "inline-block");
+        show("members-toggle", isLocalRoom, "inline-block");
+        show("leave-room-btn", isLocalRoom, "inline-block");
+        show("delete-room-btn", isLocalRoom && getRoomCreatorOf().has(view.id), "inline-block");
+        if (!isLocalRoom) {
+            const mp = document.getElementById("members-panel");
+            if (mp) { mp.style.display = "none"; mp.classList.remove("mobile-open"); }
+        }
+        const peer = isDm ? (view.peerWebid || view.peerDid || null) : null;
+        updateE2EStatus(peer);
+        updateIdentityFingerprint(peer);
+    }
+
     function renderContacts(contacts) {
         const peerDidToCertId = getPeerDidToCertId();
         const _threadNames = getThreadNames();
@@ -156,14 +182,9 @@ export function createView({
         setActiveView(view);
         const header = document.getElementById("chat-header-name");
         if (header) header.textContent = view.name;
+        // A cert contact is a DM: call controls on (R82 V3), room controls off.
+        _setHeaderControls(view);
         onViewOpened();
-        // A cert contact is a DM: reveal the call controls (this path previously left
-        // them hidden, so calling a federated contact was impossible). R82 V3.
-        const _cb = document.getElementById("start-call-btn"); if (_cb) _cb.style.display = "inline-flex";
-        const _vcb = document.getElementById("start-video-call-btn"); if (_vcb) _vcb.style.display = "inline-flex";
-        const _inv = document.getElementById("invite-btn"); if (_inv) _inv.style.display = "none";
-        updateE2EStatus(contact.peer_did);
-        updateIdentityFingerprint(contact.peer_did);
         if (window.innerWidth <= 768) closeSidebar();
         // Clear feed and reset message state
         const feed = document.getElementById("message-feed");
@@ -195,25 +216,16 @@ export function createView({
     function openLocalDmThread(id, name, peerWebid) {
         const socket = getSocket();
         const unreadCounts = getUnreadCounts();
-        setActiveView({ type: "local_dm", id: id, name: name, local: true, peerWebid: peerWebid });
+        const view = { type: "local_dm", id: id, name: name, local: true, peerWebid: peerWebid };
+        setActiveView(view);
         document.getElementById("chat-header-name").innerText = "@ " + name;
+        // Calls may be gated (e.g. the gateway-less web build); see _setHeaderControls.
+        _setHeaderControls(view);
         onViewOpened();
-        updateE2EStatus(peerWebid);
-        updateIdentityFingerprint(peerWebid);
         document.getElementById("message-feed").innerHTML = "";
         resetDateDivider(); setMessageMap({}); setAllMessages([]);
         setCurrentRoomMembers([]);
         closeMentionDropdown();
-        document.getElementById("members-toggle").style.display = "none";
-        document.getElementById("leave-room-btn").style.display = "none";
-        document.getElementById("delete-room-btn").style.display = "none";
-        document.getElementById("members-panel").style.display = "none";
-        document.getElementById("members-panel").classList.remove("mobile-open");
-        // Calls may be gated (e.g. the gateway-less web build); don't re-reveal them.
-        const _callsOk = !window.proxionTransport || window.proxionTransport.supports("calls");
-        document.getElementById("start-call-btn").style.display = _callsOk ? "inline-flex" : "none";
-        { const _vb = document.getElementById("start-video-call-btn"); if (_vb) _vb.style.display = _callsOk ? "inline-flex" : "none"; }
-        document.getElementById("invite-btn").style.display = "none";
         document.querySelectorAll("nav li").forEach(el => el.classList.remove("active"));
         const li = document.getElementById(`nav-${id}`);
         if (li) li.classList.add("active");
@@ -282,25 +294,19 @@ export function createView({
         const _openRoom = () => {
             const socket = getSocket();
             const unreadCounts = getUnreadCounts();
-            const roomCreatorOf = getRoomCreatorOf();
             const _name = getThreadNames()[roomId] || name;
-                setActiveView({type: "local_room", id: roomId, name: _name, local: true});
+            const view = {type: "local_room", id: roomId, name: _name, local: true};
+            setActiveView(view);
             document.getElementById("chat-header-name").innerText = "# " + _name;
+            // No E2E badge, Verify or fingerprint bar in a room.
+            _setHeaderControls(view);
             onViewOpened();
-            updateIdentityFingerprint(null); // hide fingerprint bar in room views
             document.getElementById("message-feed").innerHTML = "";
             resetDateDivider();
             setMessageMap({});
             setAllMessages([]);
             setCurrentRoomMembers([]);
             closeMentionDropdown();
-            document.getElementById("start-call-btn").style.display = "none";
-            { const _vb = document.getElementById("start-video-call-btn"); if (_vb) _vb.style.display = "none"; }
-            document.getElementById("invite-btn").style.display =
-                roomInviteUrls[roomId] ? "inline-block" : "none";
-            document.getElementById("members-toggle").style.display = "inline-block";
-            document.getElementById("leave-room-btn").style.display = "inline-block";
-            document.getElementById("delete-room-btn").style.display = roomCreatorOf.has(roomId) ? "inline-block" : "none";
             _setActiveNavRow(li);
             unreadCounts[roomId] = 0;
             updateSidebarBadge(roomId);
@@ -353,10 +359,12 @@ export function createView({
             li.appendChild(nameSpan);
             const _openThread = () => {
                 const socket = getSocket();
-                const roomInviteUrls = getRoomInviteUrls();
                 const unreadCounts = getUnreadCounts();
-                        setActiveView({ type: type, id: id, name: name });
+                const view = { type: type, id: id, name: name };
+                if (type === "dm" && item.peer_webid) view.peerWebid = item.peer_webid;
+                setActiveView(view);
                 document.getElementById("chat-header-name").innerText = (type === "room" ? "# " : "@ ") + name;
+                _setHeaderControls(view);
                 onViewOpened();
                 document.getElementById("message-feed").innerHTML = "";
                 resetDateDivider();
@@ -368,10 +376,6 @@ export function createView({
                 }));
                 if (window.innerWidth <= 768) closeSidebar();
 
-                document.getElementById("start-call-btn").style.display = type === "dm" ? "inline-flex" : "none";
-                { const _vb = document.getElementById("start-video-call-btn"); if (_vb) _vb.style.display = type === "dm" ? "inline-flex" : "none"; }
-                document.getElementById("invite-btn").style.display =
-                    (type === "room" && roomInviteUrls[id]) ? "inline-block" : "none";
                 if (type === "room" && socket) {
                     socket.send(JSON.stringify({cmd:"get_disappear_timer", room_id:id}));
                 } else { updateDisappearBanner(0); }
