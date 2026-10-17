@@ -17,9 +17,74 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+# Per-thread retention. New messages are always stored. Once a thread grows past
+# either ceiling, its oldest-stored messages (insertion order, so a backdated
+# timestamp cannot evict a message that just arrived) are pruned together with
+# the pins, reactions, edits and receipts that hang off them. The size check
+# needs a COUNT/SUM over the thread, so it runs on the first insert into a
+# thread after startup and then every THREAD_RETENTION_CHECK_EVERY inserts.
+THREAD_RETENTION_MESSAGES = 50_000
+THREAD_RETENTION_BYTES = 200 * 1024 * 1024  # 200 MB
+THREAD_RETENTION_CHECK_EVERY = 250
+# A single message bigger than this is refused outright rather than stored and
+# then evicting a large part of the thread's history to make room.
+MAX_SINGLE_MESSAGE_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
 class MessageStoreMixin(object):
+    def _note_thread_insert(self, thread_id: str) -> None:
+        counters = self.__dict__.setdefault("_thread_insert_counts", {})
+        n = counters.get(thread_id, 0)
+        counters[thread_id] = n + 1
+        if n % THREAD_RETENTION_CHECK_EVERY == 0:
+            try:
+                self.prune_thread(thread_id)
+            except Exception:
+                logger.warning("Retention prune failed for thread %s", thread_id, exc_info=True)
+
+    def prune_thread(
+        self,
+        thread_id: str,
+        max_messages: Optional[int] = None,
+        max_bytes: Optional[int] = None,
+    ) -> int:
+        """Delete the oldest messages of a thread until it fits the retention
+        ceilings. Returns the number of messages removed."""
+        max_messages = THREAD_RETENTION_MESSAGES if max_messages is None else max_messages
+        max_bytes = THREAD_RETENTION_BYTES if max_bytes is None else max_bytes
+        size_sql = "LENGTH(COALESCE(content, '')) + LENGTH(COALESCE(audio_b64, ''))"
+        with self._conn() as conn:
+            count, total = conn.execute(
+                f"SELECT COUNT(*), COALESCE(SUM({size_sql}), 0) FROM messages WHERE thread_id = ?",
+                (thread_id,),
+            ).fetchone()
+            if count <= max_messages and total <= max_bytes:
+                return 0
+            excess_count = max(0, count - max_messages)
+            excess_bytes = max(0, total - max_bytes)
+            victims: list[str] = []
+            freed = 0
+            for mid, size in conn.execute(
+                f"SELECT message_id, {size_sql} FROM messages WHERE thread_id = ? "
+                "ORDER BY rowid ASC",
+                (thread_id,),
+            ):
+                if len(victims) >= excess_count and freed >= excess_bytes:
+                    break
+                victims.append(mid)
+                freed += size or 0
+            for i in range(0, len(victims), 500):
+                chunk = victims[i:i + 500]
+                marks = ",".join("?" * len(chunk))
+                conn.execute(f"DELETE FROM messages WHERE message_id IN ({marks})", chunk)
+                conn.execute(f"DELETE FROM pins WHERE message_id IN ({marks})", chunk)
+                conn.execute(f"DELETE FROM reactions WHERE message_id IN ({marks})", chunk)
+                conn.execute(f"DELETE FROM message_edits WHERE message_id IN ({marks})", chunk)
+                conn.execute(f"DELETE FROM message_receipts WHERE message_id IN ({marks})", chunk)
+        if victims:
+            logger.info("Pruned %d oldest messages from thread %s", len(victims), thread_id)
+        return len(victims)
+
     def delete_messages_before(self, thread_id: str, cutoff_iso: str) -> int:
         """Delete messages older than cutoff_iso from a thread. Returns count deleted."""
         with self._conn() as conn:
@@ -62,26 +127,12 @@ class MessageStoreMixin(object):
     ) -> None:
         if from_display_name:
             from_display_name = from_display_name[:64]
-        _MAX_MESSAGES_PER_THREAD = 5000
-        _MAX_BYTES_PER_THREAD = 50 * 1024 * 1024 # 50MB
+        if len(content or "") > MAX_SINGLE_MESSAGE_BYTES:
+            logger.warning("Message %s too large for thread %s", message_id, thread_id)
+            return
         received_at = datetime.now(timezone.utc).isoformat()
-        
-        with self._conn() as conn:
-            # R2: Quota Enforcement
-            res = conn.execute(
-                "SELECT COUNT(*), SUM(LENGTH(content)) FROM messages WHERE thread_id = ?", (thread_id,)
-            ).fetchone()
-            count = res[0] or 0
-            total_bytes = res[1] or 0
-            
-            if count >= _MAX_MESSAGES_PER_THREAD:
-                logger.warning("Quota exceeded for thread %s: message count %d", thread_id, count)
-                return
-            
-            if total_bytes + len(content) > _MAX_BYTES_PER_THREAD:
-                logger.warning("Quota exceeded for thread %s: byte size %d", thread_id, total_bytes)
-                return
 
+        with self._conn() as conn:
             conn.execute(
                 """
                 INSERT OR IGNORE INTO messages
@@ -105,6 +156,7 @@ class MessageStoreMixin(object):
                     prev_hash,
                 ),
             )
+        self._note_thread_insert(thread_id)
     def save_voice_message(
         self,
         message_id: str,
@@ -118,29 +170,10 @@ class MessageStoreMixin(object):
     ) -> None:
         if from_display_name:
             from_display_name = from_display_name[:64]
-        _MAX_MESSAGES_PER_THREAD = 5000
-        _MAX_BYTES_PER_THREAD = 50 * 1024 * 1024  # 50MB
+        if len(audio_b64 or "") > MAX_SINGLE_MESSAGE_BYTES:
+            logger.warning("Voice message %s too large for thread %s", message_id, thread_id)
+            return
         with self._conn() as conn:
-            # A voice message INSERTs into the same messages table, so it must
-            # honour the same per-thread quota save_message enforces. The audio
-            # payload lives in audio_b64 (content is empty), so it counts toward
-            # the byte total here.
-            res = conn.execute(
-                "SELECT COUNT(*), COALESCE(SUM(LENGTH(content) + LENGTH(COALESCE(audio_b64, ''))), 0) "
-                "FROM messages WHERE thread_id = ?",
-                (thread_id,),
-            ).fetchone()
-            count = res[0] or 0
-            total_bytes = res[1] or 0
-
-            if count >= _MAX_MESSAGES_PER_THREAD:
-                logger.warning("Quota exceeded for thread %s: message count %d", thread_id, count)
-                return
-
-            if total_bytes + len(audio_b64 or "") > _MAX_BYTES_PER_THREAD:
-                logger.warning("Quota exceeded for thread %s: byte size %d", thread_id, total_bytes)
-                return
-
             conn.execute(
                 """
                 INSERT OR IGNORE INTO messages
@@ -151,6 +184,7 @@ class MessageStoreMixin(object):
                 (message_id, thread_id, thread_type, from_webid,
                  from_display_name, "", "audio", audio_b64, duration_ms, timestamp),
             )
+        self._note_thread_insert(thread_id)
     def get_message_sender(self, message_id: str) -> Optional[str]:
         with self._conn() as conn:
             row = conn.execute(

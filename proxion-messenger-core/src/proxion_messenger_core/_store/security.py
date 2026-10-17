@@ -852,8 +852,9 @@ class SecurityStoreMixin(object):
     ) -> dict:
         """Merge exported data into the store using INSERT OR IGNORE (R14.2).
 
-        Enforces the same per-thread quotas as save_message so that the /import
-        endpoint cannot be used to bypass storage limits.  The file content is
+        Imported threads are subject to the same retention as save_message
+        (oldest messages pruned past the ceiling) so that the /import endpoint
+        cannot be used to bypass storage limits.  The file content is
         attacker-controllable, so each relationship certificate's issuer
         signature is verified before insertion and the peer identity is derived
         from the verified cert, not the sibling JSON fields.  When
@@ -866,14 +867,13 @@ class SecurityStoreMixin(object):
         restored for threads the importer participates in, and display names are
         limited to the importer and its contacts.
         """
-        _MAX_MESSAGES_PER_THREAD = 5000
-        _MAX_BYTES_PER_THREAD = 50 * 1024 * 1024  # 50 MB
         _MAX_IMPORT_MESSAGES = 10000
         _MAX_IMPORT_RELATIONSHIPS = 2000
         _MAX_IMPORT_DM_THREADS = 2000
         _MAX_IMPORT_DISPLAY_NAMES = 5000
         _MAX_CONTENT_BYTES = 16 * 1024  # 16 KiB per message
         counts = {"messages": 0, "relationships": 0, "dm_threads": 0, "display_names": 0}
+        _touched_threads: set = set()
         with self._conn() as conn:
             # dm_threads first so imported messages can be scoped against them,
             # and stamp the importing account as owner (never the file value) so
@@ -965,14 +965,6 @@ class SecurityStoreMixin(object):
                         _dt.fromisoformat(str(ts_str).replace("Z", "+00:00"))
                     except (ValueError, TypeError):
                         continue
-                    res = conn.execute(
-                        "SELECT COUNT(*), COALESCE(SUM(LENGTH(content)), 0) FROM messages WHERE thread_id = ?",
-                        (thread_id,),
-                    ).fetchone()
-                    if res[0] >= _MAX_MESSAGES_PER_THREAD:
-                        continue
-                    if res[1] + len(content) > _MAX_BYTES_PER_THREAD:
-                        continue
                     conn.execute(
                         "INSERT OR IGNORE INTO messages "
                         "(message_id, thread_id, thread_type, from_webid, from_display_name, content, timestamp, edited_at, reply_to_id, imported) "
@@ -984,6 +976,7 @@ class SecurityStoreMixin(object):
                     )
                     counts["messages"] += conn.execute("SELECT changes()").fetchone()[0]
                     _total_msg_imported = counts["messages"]
+                    _touched_threads.add(thread_id)
                 except Exception:
                     pass
             _dn_seen = 0
@@ -1019,6 +1012,11 @@ class SecurityStoreMixin(object):
                     counts["display_names"] += conn.execute("SELECT changes()").fetchone()[0]
                 except Exception:
                     pass
+        for _tid in _touched_threads:
+            try:
+                self.prune_thread(_tid)
+            except Exception:
+                pass
         return counts
     def save_credential_anomaly(
         self,
