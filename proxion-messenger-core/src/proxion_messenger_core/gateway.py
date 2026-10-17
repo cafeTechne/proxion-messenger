@@ -2396,6 +2396,13 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             "message_id": message_id,
             "own": False,
         }
+        # Persist first: members who are offline right now still need the
+        # message in history when they reconnect.
+        if self._store:
+            self._store.save_message(
+                message_id, room_id, "relay",
+                from_webid, display_name, content, timestamp,
+            )
         delivered = False
         for ws in list(room.get("members", set())):
             try:
@@ -2403,11 +2410,6 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 delivered = True
             except Exception:
                 pass
-        if delivered and self._store:
-            self._store.save_message(
-                message_id, room_id, "relay",
-                from_webid, display_name, content, timestamp,
-            )
 
         # WebPush for members with no active socket
         _vpk  = getattr(self, "_vapid_private_pem", None)
