@@ -67,14 +67,22 @@ class TestBackupAuth:
 
     def test_is_trusted_origin_localhost_origin(self):
         origin = b"http://localhost:8080"
-        assert ProxionGateway._is_trusted_origin(origin, 8080, "10.0.0.5") is True
+        assert ProxionGateway._is_trusted_origin(origin, 8080, "127.0.0.1") is True
+
+    def test_local_origin_from_remote_peer_is_forged(self):
+        # The gateway's page and the desktop webview connect from loopback, so a
+        # local Origin arriving from a LAN or proxied peer was set by the caller.
+        origin = b"http://localhost:8080"
+        assert ProxionGateway._is_trusted_origin(origin, 8080, "10.0.0.5") is False
+        assert ProxionGateway._is_trusted_origin(origin, 8080, "proxied") is False
 
     def test_is_trusted_origin_wrong_port(self):
         origin = b"http://localhost:9999"
         assert ProxionGateway._is_trusted_origin(origin, 8080, "") is False
 
     def test_is_trusted_origin_tauri(self):
-        assert ProxionGateway._is_trusted_origin(b"tauri://localhost", 8080, "1.2.3.4") is True
+        assert ProxionGateway._is_trusted_origin(b"tauri://localhost", 8080, "127.0.0.1") is True
+        assert ProxionGateway._is_trusted_origin(b"tauri://localhost", 8080, "1.2.3.4") is False
 
     def test_is_trusted_origin_external(self):
         assert ProxionGateway._is_trusted_origin(b"https://evil.com", 8080, "") is False

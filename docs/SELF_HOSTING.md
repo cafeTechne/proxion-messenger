@@ -123,6 +123,28 @@ Optional variables:
 | `PROXION_SSL_KEY` | _(empty)_ | Path to TLS key |
 | `PROXION_ALLOW_PRIVATE_RELAY` | _(empty)_ | Set to `1` for local federation testing only |
 | `PROXION_REQUIRE_AUTH` | `0` | Set to `1` to require Ed25519 DID ownership proof on WebSocket connect |
+| `PROXION_ADMIN_API_TOKEN` | _(empty)_ | Bearer token for the owner endpoints (`/backup`, `/restore`, `/export`, `/import`, `/contacts`, `/message-edits`, `/security-snapshot`). Required behind a reverse proxy, see below |
+| `PROXION_API_TOKEN` | _(empty)_ | Older name for the same token, used when `PROXION_ADMIN_API_TOKEN` is unset |
+
+### Owner endpoints behind a reverse proxy
+
+A reverse proxy connects to the gateway from 127.0.0.1, so the gateway cannot use
+the source address to tell the owner from an internet caller. A request that
+carries forwarding headers (`X-Forwarded-For`, `X-Real-IP`, `Forwarded`,
+`CF-Connecting-IP`) or a non-local `Host` is treated as remote, and once
+`PROXION_PUBLIC_URL` or `PROXION_HTTP_PUBLIC_URL` names a public host, the owner
+endpoints above refuse every caller without the token. Set
+`PROXION_ADMIN_API_TOKEN` to a long random value and send it as
+`Authorization: Bearer <token>`, for example:
+
+```bash
+curl -H "Authorization: Bearer $PROXION_ADMIN_API_TOKEN" \
+     -H "X-Proxion-Passphrase: <backup passphrase>" \
+     https://chat.example.com/backup -o proxion-backup.json
+```
+
+Without a token these endpoints return 403 on a proxied gateway, including the
+in-app backup, restore and import buttons.
 
 ---
 
@@ -134,6 +156,7 @@ Optional variables:
 - [ ] Firewall blocks ports 7474 and 8080 from external access — only your reverse proxy reaches them
 - [ ] TLS certificate is valid and renews automatically
 - [ ] `PROXION_REQUIRE_AUTH=1` in production to prevent DID spoofing
+- [ ] `PROXION_ADMIN_API_TOKEN` is set to a long random value (owner endpoints refuse proxied callers without it)
 
 ---
 

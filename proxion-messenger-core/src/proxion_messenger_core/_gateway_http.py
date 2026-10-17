@@ -91,8 +91,15 @@ class HttpEndpointsMixin:
         127.0.0.1, so a remote attacker presents peer_ip=127.0.0.1 and can forge the
         Origin header. When the tunnel is live, refuse unless a provisioned token
         (PROXION_ADMIN_API_TOKEN or PROXION_API_TOKEN) is presented. Genuine local
-        single-user desktop (no tunnel) is unaffected and keeps its loopback path."""
-        if not self._tunnel_active():
+        single-user desktop (no tunnel) is unaffected and keeps its loopback path.
+
+        The same holds behind a reverse proxy (Caddy, nginx): a request carrying
+        proxy headers or a non-local Host is remote, and once a public hostname
+        is configured (PROXION_PUBLIC_URL / PROXION_HTTP_PUBLIC_URL) a proxy may
+        hide both, so the token is required for every caller."""
+        if (not self._tunnel_active()
+                and not self._http_request_is_proxied(headers_raw)
+                and not self._public_deployment()):
             return True
         return self._recovery_token_ok(headers_raw)
 
@@ -1194,6 +1201,12 @@ class HttpEndpointsMixin:
                 _query_string = _raw_target.split("?", 1)[1] if "?" in _raw_target else ""
                 _peer_info = writer.get_extra_info("peername")
                 peer_ip = _peer_info[0] if isinstance(_peer_info, tuple) and _peer_info else ""
+                # The address used for "is this the local owner" decisions. A reverse
+                # proxy connects from loopback, so a loopback peer that carries proxy
+                # headers or a non-local Host is a remote caller, not the owner.
+                _trust_peer = peer_ip
+                if peer_ip in ("127.0.0.1", "::1") and self._http_request_is_proxied(headers_raw):
+                    _trust_peer = "proxied"
 
                 def _gated_acao() -> bytes:
                     """ACAO header for sensitive, same-origin-only endpoints.
@@ -1204,7 +1217,7 @@ class HttpEndpointsMixin:
                     which get the origin echoed back; any other website gets no ACAO and the
                     browser blocks it from reading the response. Returns b"" when untrusted.
                     """
-                    if self._is_trusted_origin(origin_header, http_port, peer_ip):
+                    if self._is_trusted_origin(origin_header, http_port, _trust_peer):
                         return b"Access-Control-Allow-Origin: " + (origin_header or b"null") + b"\r\n"
                     return b""
 
@@ -1383,7 +1396,7 @@ class HttpEndpointsMixin:
                     # trusted origin OR an authenticated WS actor from this address (the
                     # browser placing the call has already registered over the socket).
                     # Loopback single-user dev (auth off) keeps the open behavior.
-                    if self._auth_enforced() and not self._http_actor_ok(origin_header, http_port, peer_ip):
+                    if self._auth_enforced() and not self._http_actor_ok(origin_header, http_port, peer_ip, trust_ip=_trust_peer):
                         _turn_creds = None
                     else:
                         from .didkey import pub_key_to_did as _p2d_turn
@@ -1405,7 +1418,7 @@ class HttpEndpointsMixin:
                     # (client counts, pod/relay/tunnel state) is withheld from an
                     # untrusted remote caller when auth is enforced, mirroring the
                     # /setup/pod GET minimal shape. Loopback dev keeps full detail.
-                    if self._auth_enforced() and not self._http_actor_ok(origin_header, http_port, peer_ip):
+                    if self._auth_enforced() and not self._http_actor_ok(origin_header, http_port, peer_ip, trust_ip=_trust_peer):
                         health_body = json.dumps({"status": "ok"}).encode()
                     else:
                         health_body = json.dumps({
@@ -1432,7 +1445,7 @@ class HttpEndpointsMixin:
                     # is setup-guide info for the local operator, not for an untrusted
                     # remote caller. Withhold it when auth is enforced and the caller
                     # is neither a trusted origin nor an authenticated WS actor.
-                    if self._auth_enforced() and not self._http_actor_ok(origin_header, http_port, peer_ip):
+                    if self._auth_enforced() and not self._http_actor_ok(origin_header, http_port, peer_ip, trust_ip=_trust_peer):
                         conn_body = json.dumps({"relay_capable": bool(self.config.public_url)}).encode()
                     else:
                         conn_body = json.dumps({
@@ -1556,7 +1569,7 @@ class HttpEndpointsMixin:
                     # caller (not a trusted origin, no authenticated WS actor) gets only
                     # the bare shape. Loopback dev and the local/authenticated actor
                     # keep the full profile.
-                    if self._auth_enforced() and not self._http_actor_ok(origin_header, http_port, peer_ip):
+                    if self._auth_enforced() and not self._http_actor_ok(origin_header, http_port, peer_ip, trust_ip=_trust_peer):
                         _bare = json.dumps({"did": _prof_did, "status": "offline"}).encode()
                         writer.write(
                             b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
@@ -1823,7 +1836,7 @@ class HttpEndpointsMixin:
                 # ── GET /export — data export (R14.1) ──
                 if method == "GET" and path == "/export":
                     _peer = writer.get_extra_info("peername")
-                    if (_peer and _peer[0] not in ("127.0.0.1", "::1")):
+                    if _peer and _trust_peer not in ("127.0.0.1", "::1"):
                         _err = b'{"error":"forbidden"}'
                         writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: " +
                                      str(len(_err)).encode() + b"\r\n\r\n" + _err)
@@ -1870,7 +1883,7 @@ class HttpEndpointsMixin:
                 # ── GET /security-events/stream — R12: signed event stream for SIEM ──
                 if method == "GET" and path.startswith("/security-events/stream"):
                     _peer_ses = writer.get_extra_info("peername")
-                    if _peer_ses and _peer_ses[0] not in ("127.0.0.1", "::1"):
+                    if _peer_ses and _trust_peer not in ("127.0.0.1", "::1"):
                         await _write_json(writer, 403, {"error": "forbidden"})
                         await writer.drain()
                         return
@@ -1901,7 +1914,7 @@ class HttpEndpointsMixin:
                 # ── GET /security-snapshot — R9: signed security telemetry export ──
                 if method == "GET" and path == "/security-snapshot":
                     _peer_ss = writer.get_extra_info("peername")
-                    if _peer_ss and _peer_ss[0] not in ("127.0.0.1", "::1"):
+                    if _peer_ss and _trust_peer not in ("127.0.0.1", "::1"):
                         await _write_json(writer, 403, {"error": "forbidden"})
                         await writer.drain()
                         return
@@ -1932,7 +1945,7 @@ class HttpEndpointsMixin:
                 # ── GET /security-self-test — R10: loopback-only self-test endpoint ──
                 if method == "GET" and path == "/security-self-test":
                     _peer_sst = writer.get_extra_info("peername")
-                    if _peer_sst and _peer_sst[0] not in ("127.0.0.1", "::1"):
+                    if _peer_sst and _trust_peer not in ("127.0.0.1", "::1"):
                         await _write_json(writer, 403, {"error": "forbidden"})
                         await writer.drain()
                         return
@@ -1951,7 +1964,7 @@ class HttpEndpointsMixin:
                 # ── GET /setup/pod — R16.2.3: current pod connection status ──
                 if method == "GET" and path == "/setup/pod":
                     _connected = bool(self._pod_available and self._pod_url)
-                    if self._is_trusted_origin(origin_header, http_port, peer_ip):
+                    if self._is_trusted_origin(origin_header, http_port, _trust_peer):
                         _setup_status = {
                             "connected": _connected,
                             "pod_url": self._pod_url or None,
@@ -1973,7 +1986,7 @@ class HttpEndpointsMixin:
 
                 # ── POST /setup/pod — R16.2.1: wizard pod credential intake ──
                 if method == "POST" and path == "/setup/pod":
-                    if not self._is_trusted_origin(origin_header, http_port, peer_ip):
+                    if not self._is_trusted_origin(origin_header, http_port, _trust_peer):
                         fb = b'{"error":"forbidden origin"}'
                         writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\n"
                                      b"Access-Control-Allow-Origin: *\r\nContent-Length: "
@@ -2038,7 +2051,7 @@ class HttpEndpointsMixin:
 
                 # ── OPTIONS /setup/pod — CORS preflight ──
                 if method == "OPTIONS" and path == "/setup/pod":
-                    if not self._is_trusted_origin(origin_header, http_port, peer_ip):
+                    if not self._is_trusted_origin(origin_header, http_port, _trust_peer):
                         writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
                     else:
                         acao = (origin_header or b"null")
@@ -2053,7 +2066,7 @@ class HttpEndpointsMixin:
                 # ── POST /admin/revoke_contact — R12.3.2: CLI/pod-sync pushes revocation ──
                 if method == "POST" and path == "/admin/revoke_contact":
                     _peer = writer.get_extra_info("peername")
-                    if (_peer and _peer[0] not in ("127.0.0.1", "::1")):
+                    if _peer and _trust_peer not in ("127.0.0.1", "::1"):
                         _err = b'{"error":"forbidden"}'
                         writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: " +
                                      str(len(_err)).encode() + b"\r\n\r\n" + _err)
@@ -2146,7 +2159,9 @@ class HttpEndpointsMixin:
                                          b"Content-Length: " + str(len(err)).encode() + b"\r\n\r\n" + err)
                             await writer.drain()
                             return
-                    elif not self._is_trusted_origin(origin_header, http_port, peer_ip):
+                    elif not _admin_token and not self._is_trusted_origin(origin_header, http_port, _trust_peer):
+                        # A valid admin token (checked above) authenticates the
+                        # caller; only an untokened caller falls back to Origin.
                         fb = b'{"error":"forbidden origin"}'
                         writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\n"
                                      b"Content-Length: " + str(len(fb)).encode() + b"\r\n\r\n" + fb)
@@ -2279,7 +2294,9 @@ class HttpEndpointsMixin:
                                          b"Content-Length: " + str(len(err)).encode() + b"\r\n\r\n" + err)
                             await writer.drain()
                             return
-                    elif not self._is_trusted_origin(origin_header, http_port, peer_ip):
+                    elif not _admin_token and not self._is_trusted_origin(origin_header, http_port, _trust_peer):
+                        # A valid admin token (checked above) authenticates the
+                        # caller; only an untokened caller falls back to Origin.
                         fb = b'{"error":"forbidden origin"}'
                         writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\n"
                                      b"Content-Length: " + str(len(fb)).encode() + b"\r\n\r\n" + fb)
@@ -2489,7 +2506,7 @@ class HttpEndpointsMixin:
                                          + str(len(err)).encode() + b"\r\n\r\n" + err)
                             await writer.drain()
                             return
-                    elif not self._is_trusted_origin(origin_header, http_port, peer_ip):
+                    elif not _admin_token and not self._is_trusted_origin(origin_header, http_port, _trust_peer):
                         # Drain body before responding so Windows doesn't send a TCP RST
                         # (unread body on close causes ConnectionAbortedError on the client).
                         if content_length > 0:
@@ -2641,7 +2658,7 @@ class HttpEndpointsMixin:
                     # local operator or a trusted scraper, not an anonymous remote
                     # caller. Withhold the series when auth is enforced and the caller
                     # is neither a trusted origin nor an authenticated WS actor.
-                    if self._auth_enforced() and not self._http_actor_ok(origin_header, http_port, peer_ip):
+                    if self._auth_enforced() and not self._http_actor_ok(origin_header, http_port, peer_ip, trust_ip=_trust_peer):
                         writer.write(
                             b"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain; charset=utf-8\r\n"
                             + _NO_STORE_HDR
@@ -2735,7 +2752,7 @@ class HttpEndpointsMixin:
 
                 # ── POST /api/pod-disconnect — sign-out fallback usable without WebSocket ──
                 if method == "POST" and path == "/api/pod-disconnect":
-                    if not self._is_trusted_origin(origin_header, http_port, peer_ip):
+                    if not self._is_trusted_origin(origin_header, http_port, _trust_peer):
                         writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
                         await writer.drain()
                         return
@@ -2768,7 +2785,14 @@ class HttpEndpointsMixin:
                         await _write_429(writer)
                         await writer.drain()
                         return
-                    if not self._is_trusted_origin(origin_header, http_port, peer_ip):
+                    if not self._is_trusted_origin(origin_header, http_port, _trust_peer):
+                        writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+                        await writer.drain()
+                        return
+                    # Edit history holds earlier message text from any thread on this
+                    # gateway. Loopback is not an actor over the tunnel or a reverse
+                    # proxy, so require the provisioned token there (like /contacts).
+                    if not self._recovery_endpoint_allowed(headers_raw):
                         writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
                         await writer.drain()
                         return
@@ -2796,7 +2820,7 @@ class HttpEndpointsMixin:
                         await _write_429(writer)
                         await writer.drain()
                         return
-                    if not self._is_trusted_origin(origin_header, http_port, peer_ip):
+                    if not self._is_trusted_origin(origin_header, http_port, _trust_peer):
                         writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
                         await writer.drain()
                         return
@@ -2825,7 +2849,7 @@ class HttpEndpointsMixin:
                         await _write_429(writer)
                         await writer.drain()
                         return
-                    if not self._is_trusted_origin(origin_header, http_port, peer_ip):
+                    if not self._is_trusted_origin(origin_header, http_port, _trust_peer):
                         writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
                         await writer.drain()
                         return
@@ -2863,7 +2887,7 @@ class HttpEndpointsMixin:
                             writer.write(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n")
                             await writer.drain()
                             return
-                    elif not self._is_trusted_origin(origin_header, http_port, peer_ip):
+                    elif not self._is_trusted_origin(origin_header, http_port, _trust_peer):
                         writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
                         await writer.drain()
                         return
@@ -3027,7 +3051,8 @@ class HttpEndpointsMixin:
                     # keeps in-app recovery working locally while withholding the token
                     # from any LAN visitor when bound to 0.0.0.0.
                     if (_token_meta and not self._tunnel_active()
-                            and self._is_trusted_origin(origin_header, http_port, peer_ip)):
+                            and not self._public_deployment()
+                            and self._is_trusted_origin(origin_header, http_port, _trust_peer)):
                         _index_inject = inject + _token_meta
                     body = body.replace(b"</head>", _index_inject + b"</head>", 1)
                 cc = b"no-cache" if fname == "sw.js" else b"no-store"

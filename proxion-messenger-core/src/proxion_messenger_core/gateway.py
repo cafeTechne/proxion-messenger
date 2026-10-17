@@ -2122,8 +2122,13 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         peer_ip="" means the caller did not provide an IP (test / internal context);
         treat as loopback for backward compatibility.
         """
+        if peer_ip not in ("", "127.0.0.1", "::1"):
+            # A local Origin from a non-loopback (or reverse-proxied) peer is
+            # forged: the gateway's own page and the desktop webview connect
+            # from loopback.
+            return False
         if not origin:
-            return peer_ip in ("", "127.0.0.1", "::1")
+            return True
         o = origin.decode("utf-8", errors="replace").lower().rstrip("/")
         return o in ProxionGateway._local_origins(http_port)
 
@@ -2162,12 +2167,16 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 return True
         return False
 
-    def _http_actor_ok(self, origin_header: bytes, http_port: int, peer_ip: str = "") -> bool:
+    def _http_actor_ok(self, origin_header: bytes, http_port: int, peer_ip: str = "",
+                       trust_ip: Optional[str] = None) -> bool:
         """Whether a sensitive, otherwise-unauthenticated HTTP GET may return its
         full body: the caller is a trusted (local/desktop) origin, or an
         authenticated WS actor is connected from the same address. Only consulted
-        when auth is enforced; loopback single-user dev skips the gate entirely."""
-        return (self._is_trusted_origin(origin_header, http_port, peer_ip)
+        when auth is enforced; loopback single-user dev skips the gate entirely.
+        *trust_ip* is the address used for the local-origin check (it differs
+        from *peer_ip* for a reverse-proxied request)."""
+        return (self._is_trusted_origin(origin_header, http_port,
+                                        peer_ip if trust_ip is None else trust_ip)
                 or self._has_authenticated_client_ip(peer_ip))
 
     def _serialize_tunnel(self) -> "asyncio.Lock":
@@ -2204,6 +2213,9 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if owner_did and caller == owner_did:
             return True
         if not self._auth_enforced():
+            # A reverse proxy also connects from loopback; its callers are remote.
+            if self._ws_is_proxied(websocket) or self._public_deployment():
+                return False
             ip = (self._session_meta.get(websocket) or {}).get("ip_addr", "")
             return ip in ("", "127.0.0.1", "::1", "localhost", "unknown")
         return False
@@ -2218,6 +2230,106 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         The identity recovery/backup endpoints consult this so they do not hand the
         owner's keys to an anonymous remote caller over the tunnel."""
         return getattr(self, "_tunnel", None) is not None
+
+    # Headers a reverse proxy (Caddy, nginx, cloudflared, ...) adds when it
+    # forwards a request. A browser or the desktop webview talking straight to
+    # the loopback port never sends them.
+    _PROXY_HEADERS = ("x-forwarded-for", "x-forwarded-host", "x-real-ip",
+                      "forwarded", "cf-connecting-ip", "true-client-ip")
+    _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1", "tauri.localhost")
+
+    @staticmethod
+    def _host_only(host: str) -> str:
+        """Strip the port (and IPv6 brackets) from a Host header value."""
+        host = (host or "").strip().lower()
+        if host.startswith("["):
+            return host[1:].split("]", 1)[0]
+        if host.count(":") == 1:
+            return host.split(":", 1)[0]
+        return host
+
+    def _request_is_proxied(self, get_header) -> bool:
+        """Whether a request reached us through a reverse proxy.
+
+        *get_header* maps a lowercase header name to its value (str/bytes) or a
+        falsy value. Behind Caddy/nginx/cloudflared every request arrives from
+        127.0.0.1 with no Origin, so the loopback peer address says nothing about
+        who is calling. A forwarding header, or a Host that is not a loopback name
+        or the configured bind address, marks the caller as remote."""
+        for name in self._PROXY_HEADERS:
+            if get_header(name):
+                return True
+        raw_host = get_header("host")
+        if not raw_host:
+            return False
+        if isinstance(raw_host, bytes):
+            raw_host = raw_host.decode("utf-8", errors="replace")
+        host = self._host_only(raw_host)
+        if host in self._LOOPBACK_HOSTS:
+            return False
+        bind = ((getattr(self, "config", None) and self.config.host) or "").lower()
+        if bind and bind not in ("0.0.0.0", "::") and host == bind:
+            return False
+        return True
+
+    def _http_request_is_proxied(self, headers_raw: dict) -> bool:
+        """_request_is_proxied for the HTTP server's lowercase-bytes header map."""
+        return self._request_is_proxied(lambda n: headers_raw.get(n.encode(), b""))
+
+    def _ws_is_proxied(self, websocket) -> bool:
+        """_request_is_proxied for a WebSocket's opening handshake."""
+        headers = None
+        req = getattr(websocket, "request", None)
+        if req is not None:
+            headers = getattr(req, "headers", None)
+        if headers is None:
+            headers = getattr(websocket, "request_headers", None)
+        if headers is None or not hasattr(headers, "get"):
+            return False
+        try:
+            return self._request_is_proxied(lambda n: headers.get(n))
+        except Exception:
+            return False
+
+    def _public_deployment(self) -> bool:
+        """Whether the operator configured a public URL that names a real host.
+
+        A reverse proxy can be set up so it adds no forwarding header and rewrites
+        Host to the upstream (nginx's default ``proxy_pass``), which makes a remote
+        request look exactly like a local one. A configured public hostname is the
+        signal that this gateway is reachable that way, so loopback is not trusted
+        as the owner and the sensitive endpoints need the provisioned token.
+        Loopback or private-IP public URLs (tests, LAN) and UPnP-mapped URLs (direct
+        exposure, where the peer address is real) do not count. The app tunnel is
+        handled separately by _tunnel_active."""
+        if os.environ.get("PROXION_UPNP_MAPPED") == "1":
+            return False
+        cfg = getattr(self, "config", None)
+        if cfg is None:
+            return False
+        if self._tunnel_active():
+            urls = [getattr(self, "_tunnel_prev_public_url", None),
+                    getattr(cfg, "http_public_url", None)]
+        else:
+            urls = [getattr(cfg, "public_url", None), getattr(cfg, "http_public_url", None)]
+        import ipaddress as _ipa
+        from urllib.parse import urlsplit as _us
+        for url in urls:
+            if not url:
+                continue
+            try:
+                host = (_us(url).hostname or "").lower()
+            except ValueError:
+                continue
+            if not host or host in self._LOOPBACK_HOSTS:
+                continue
+            try:
+                ip = _ipa.ip_address(host)
+            except ValueError:
+                return True   # a DNS name: reachable through whatever serves it
+            if not (ip.is_loopback or ip.is_private or ip.is_link_local):
+                return True
+        return False
 
     def _allowed_ws_origins(self) -> list:
         """Build the WebSocket handshake Origin allowlist.
