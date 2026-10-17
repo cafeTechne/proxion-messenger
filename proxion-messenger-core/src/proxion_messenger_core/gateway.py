@@ -1139,8 +1139,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             return
 
         # R12: Reject mutating commands from identities in the revoked-DID set.
-        from .command_validation import MUTATING_COMMANDS
-        if cmd in MUTATING_COMMANDS and websocket in self._client_webids:
+        from .command_validation import blocked_when_locked
+        if blocked_when_locked(cmd) and websocket in self._client_webids:
             _sender_wid = self._client_webids[websocket]
             if _sender_wid in getattr(self, "_revoked_dids", set()):
                 await websocket.send(json.dumps({
@@ -1210,8 +1210,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # Safe mode: block mutating commands
         import os as _os_sm
         if _os_sm.environ.get("PROXION_SAFE_MODE") == "1":
-            from .command_validation import MUTATING_COMMANDS
-            if cmd in MUTATING_COMMANDS:
+            if blocked_when_locked(cmd):
                 await websocket.send(json.dumps({"type": "error", "code": "E_SAFE_MODE", "message": "safe_mode_enabled"}))
                 return
 

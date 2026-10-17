@@ -104,15 +104,107 @@ _OPTIONAL_PATH_IDS: dict[str, frozenset] = {
     "send_dm":  frozenset({"message_id"}),
 }
 
-# Commands that mutate state and should require auth / revocation check
+# Every WebSocket command ProxionGateway.process_command dispatches is listed in
+# exactly one of MUTATING_COMMANDS or READ_ONLY_COMMANDS
+# (tests/security/test_command_classification.py parses the dispatcher and fails
+# on any command that is in neither, so a new command can't skip the gates).
+#
+# MUTATING: writes persistent state, changes identity/keys/settings/membership,
+# or delivers content or signals to another user. A revoked identity, safe mode
+# and a failed DB integrity check all block these (except TEARDOWN_COMMANDS).
 MUTATING_COMMANDS: frozenset[str] = frozenset({
-    "send_dm", "send_room", "local_dm", "edit_message", "send_file",
-    "schedule_message", "delete_local_message", "forward_message",
+    # messages and content
+    "send_dm", "send_room", "local_dm", "sealed_dm", "send_dm_fanout",
+    "edit_message", "edit_local_message", "delete_local_message", "forward_message",
+    "send_file", "file_offer", "file_accept", "file_reject", "file_chunk", "file_complete",
+    "send_voice_message", "schedule_message", "cancel_scheduled",
     "add_reaction", "remove_reaction", "pin_message", "unpin_message",
-    "kick_member", "delete_room", "set_member_role", "transfer_ownership", "update_room",
-    "block", "unblock", "set_disappear_timer", "send_voice_message",
+    "set_disappear_timer",
+    # rooms
+    "chat_room_create", "rehost_room", "join_room", "join_by_invite", "create_invite",
+    "announce_room_join", "leave_local_room", "delete_room", "update_room",
+    "transfer_ownership", "accept_ownership", "decline_ownership",
+    "kick_member", "ban_member", "unban_member", "mute_member", "unmute_member",
+    "set_member_role", "add_room_emoji", "remove_room_emoji",
+    # contacts and trust
+    "send_friend_request", "accept_friend_request", "restore_contacts",
+    "revoke_contact", "block", "unblock", "verify_contact",
+    "apply_contact_verification_sync", "sync_contact_verifications",
+    "approve_peer_gateway_change", "resolve_peer_trust_dispute",
+    # calls and connectivity
+    "voice_invite", "voice_answer", "ice_candidate", "voice_hangup",
+    "join_voice_channel", "leave_voice_channel",
     "request_hole_punch", "hole_punch_complete_notify",
+    "start_tunnel", "stop_tunnel",
+    # identity, keys, devices
+    "set_identity", "upload_prekeys", "get_prekey_bundle", "rotate_spk",
+    "upload_sender_key", "distribute_sender_key", "ack_sender_key_rotation",
+    "register_device", "unregister_device", "set_primary_device", "revoke_device_and_rekey",
+    "pair_start", "pair_submit", "pair_approve", "pair_cancel",
+    "device_recovery_code_generate", "device_recovery_code_use",
+    "expire_dm_session", "revoke_session", "logout_all_devices",
+    # pod, push, webhooks, settings
+    "connect_css", "disconnect_pod", "reconnect_pod",
+    "subscribe_push", "unsubscribe_push",
+    "create_webhook", "delete_webhook", "rotate_webhook",
+    "set_thread_mute", "set_receipts_enabled", "set_link_previews_enabled",
+    # owner security operations
+    "prepare_recovery_operation", "confirm_recovery_operation",
+    "release_quarantine_item", "drop_quarantine_item", "ack_checksum_mismatch",
+    "set_security_tier", "set_retention_lock", "clear_retention_lock",
+    "request_admin_action", "confirm_admin_action",
+    "create_trust_revocation", "start_compromise_recovery",
+    "resume_compromise_recovery", "abort_compromise_recovery",
+    "run_recovery_drill",
 })
+
+# Mutating commands that only reduce exposure (sign out, hang up, leave, block,
+# stop sharing). A revoked identity and safe mode must still be able to run
+# these, so they skip those two gates.
+TEARDOWN_COMMANDS: frozenset[str] = frozenset({
+    "voice_hangup", "leave_voice_channel", "leave_local_room",
+    "stop_tunnel", "disconnect_pod", "unsubscribe_push", "delete_webhook",
+    "revoke_session", "logout_all_devices", "unregister_device", "pair_cancel",
+    "expire_dm_session", "block", "revoke_contact", "decline_ownership",
+})
+
+# READ_ONLY: queries, the auth handshake, and caller-scoped bookkeeping the
+# client needs in order to read (read markers, delivery acks, ratchet session
+# upkeep, typing/screen-share notices inside an existing call or thread).
+READ_ONLY_COMMANDS: frozenset[str] = frozenset({
+    "register", "auth_response", "link_pod",
+    "get_rooms", "get_dms", "get_local_history", "get_room_members", "get_message",
+    "read_dm", "read_room", "search", "get_receipts", "get_message_readers",
+    "get_pins", "get_room_bans", "get_room_roles", "list_room_emoji",
+    "get_disappear_timer", "list_scheduled", "get_notifications",
+    "resolve_did", "discover_peer", "get_identity", "get_connect_id",
+    "resolve_connect_id", "get_my_address", "get_gateway_webid", "get_inbox_webhook",
+    "get_relationships", "list_friend_requests", "list_blocks",
+    "get_contact_verification", "list_verified_contacts",
+    "get_presence", "get_all_presence", "set_presence", "typing",
+    "get_voice_channel_state", "screenshare_started", "screenshare_stopped",
+    "tunnel_status", "pod_status", "list_sessions", "list_webhooks",
+    "list_devices", "get_peer_devices", "get_peer_device_keys", "get_sender_key",
+    "list_dm_sessions",
+    # caller-scoped bookkeeping
+    "mark_read", "update_last_read", "ack_delivered", "ack_read",
+    "mark_notification_read", "catch_up", "catch_up_ack",
+    "session_unknown", "session_ready", "save_session_state", "dm_decrypt_failed",
+    # owner security reads and reports
+    "get_audit_logs", "get_security_events", "get_runtime_security_state",
+    "get_security_summary", "get_degraded_mode_state", "get_realtime_abuse_signals",
+    "export_security_snapshot", "list_quarantine_items", "get_security_tier_state",
+    "list_retention_locks", "run_security_self_test", "simulate_incident_policy",
+    "list_trust_revocations", "get_compromise_recovery_status",
+    "get_security_event_stream", "get_solid_migration_errors",
+    "get_access_grants_policy_state", "get_security_exit_gate_status",
+    "list_recovery_drill_templates", "get_recovery_drill_report",
+})
+
+
+def blocked_when_locked(cmd: str) -> bool:
+    """True when a revoked identity or safe mode must refuse *cmd*."""
+    return cmd in MUTATING_COMMANDS and cmd not in TEARDOWN_COMMANDS
 
 # Commands that are auth-rate-limited (5 per minute per socket)
 AUTH_RATE_COMMANDS: frozenset[str] = frozenset({"register", "auth_response"})
