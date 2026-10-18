@@ -390,6 +390,32 @@ class MessageStoreMixin(object):
                 (thread_id, iso),
             ).fetchone()
         return row[0] if row else 0
+    def count_unread_by_thread(
+        self, webid: str, thread_ids: list[str], last_reads: dict[str, float], cap: int = 100,
+    ) -> dict[str, int]:
+        """{thread_id: messages from others newer than webid's read marker}, one connection.
+
+        Capped at *cap* per thread (the client shows 99+). Lets the connect
+        snapshot carry unread counts, so the client no longer fetches every
+        thread's history just to count them.
+        """
+        from datetime import datetime, timezone as _tz
+        out: dict[str, int] = {}
+        if not thread_ids:
+            return out
+        with self._conn() as conn:
+            for tid in thread_ids:
+                iso = datetime.fromtimestamp(float(last_reads.get(tid, 0) or 0), tz=_tz.utc).isoformat()
+                try:
+                    row = conn.execute(
+                        "SELECT COUNT(*) FROM (SELECT 1 FROM messages WHERE thread_id = ? "
+                        "AND timestamp > ? AND from_webid != ? LIMIT ?)",
+                        (tid, iso, webid or "", cap),
+                    ).fetchone()
+                    out[tid] = int(row[0]) if row else 0
+                except Exception:
+                    out[tid] = 0
+        return out
     def count_reactions_by_sender(self, message_id: str, sender_webid: str) -> int:
         with self._conn() as conn:
             row = conn.execute(

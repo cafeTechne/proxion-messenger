@@ -4,7 +4,7 @@ vi.mock('./e2e.js', () => ({
   myX25519PubB64u: () => 'MYX25519PUB',
 }));
 
-import { createConnection, normalizeGatewayUrl } from './connection.js';
+import { createConnection, normalizeGatewayUrl, planThreadCatchUp, createRateRetry } from './connection.js';
 
 let els, store, made, hostSocket;
 function mkEl(over = {}) {
@@ -212,5 +212,74 @@ describe('normalizeGatewayUrl', () => {
     for (const bad of ['', '   ', 'not a url', 'ftp://x.example', 'javascript:alert(1)', 'ws://user:pw@host', 'ws://not%20a%20url', 'ws://a..b']) {
       expect(normalizeGatewayUrl(bad)).toBeNull();
     }
+  });
+});
+
+describe('planThreadCatchUp (connect without a history fetch per room)', () => {
+  const rooms = Array.from({ length: 70 }, (_, i) => ({ id: `r${i}`, unread_count: i % 3 }));
+  it('sets badges from the list and fetches history only for the open thread', () => {
+    const plan = planThreadCatchUp(rooms, { activeId: 'r5' });
+    expect(plan.fetch).toEqual(['r5']);
+    expect(Object.keys(plan.counts)).toHaveLength(69);
+    expect(plan.counts.r4).toBe(1);
+    expect(plan.counts.r5).toBeUndefined();
+  });
+  it('sends nothing per room when no thread is open', () => {
+    expect(planThreadCatchUp(rooms).fetch).toEqual([]);
+  });
+  it('refetches the open thread once per connection though the list arrives twice', () => {
+    const fetched = new Set();
+    expect(planThreadCatchUp(rooms, { activeId: 'r1', fetched }).fetch).toEqual(['r1']);
+    expect(planThreadCatchUp(rooms, { activeId: 'r1', fetched }).fetch).toEqual([]);
+  });
+  it('sets rather than adds, so the counts do not grow per delivery', () => {
+    const a = planThreadCatchUp(rooms).counts;
+    const b = planThreadCatchUp(rooms).counts;
+    expect(b).toEqual(a);
+  });
+  it('skips muted threads and entries without a count', () => {
+    const plan = planThreadCatchUp([{ id: 'm', unread_count: 4 }, { id: 'old' }], { muted: new Set(['m']) });
+    expect(plan.counts).toEqual({});
+  });
+});
+
+describe('createRateRetry', () => {
+  function make(max) {
+    const sent = [], timers = [];
+    const rr = createRateRetry({
+      send: (p) => sent.push(p),
+      payloadFor: (cmd) => (cmd === 'get_local_history' ? null : { cmd }),
+      schedule: (fn, ms) => timers.push({ fn, ms }),
+      maxAttempts: max,
+    });
+    return { rr, sent, timers };
+  }
+  it('resends a refused get_rooms after retry_after', () => {
+    const { rr, sent, timers } = make(3);
+    expect(rr.handle({ type: 'error', code: 'E_RATE', message: 'rate_limited', cmd: 'get_rooms', retry_after: 4 })).toBe(true);
+    expect(timers[0].ms).toBe(4000);
+    timers[0].fn();
+    expect(sent).toEqual([{ cmd: 'get_rooms' }]);
+  });
+  it('does not retry writes or other errors', () => {
+    const { rr } = make(3);
+    expect(rr.handle({ code: 'E_RATE', cmd: 'send_room' })).toBe(false);
+    expect(rr.handle({ code: 'E_SCHEMA', cmd: 'get_rooms' })).toBe(false);
+    expect(rr.handle({ code: 'E_RATE' })).toBe(false);
+  });
+  it('gives up after maxAttempts so the error is shown, until reset', () => {
+    const { rr } = make(2);
+    const ev = { code: 'E_RATE', cmd: 'get_dms', retry_after: 1 };
+    expect(rr.handle(ev)).toBe(true);
+    expect(rr.handle(ev)).toBe(true);
+    expect(rr.handle(ev)).toBe(false);
+    rr.reset();
+    expect(rr.handle(ev)).toBe(true);
+  });
+  it('drops a retry whose payload no longer applies', () => {
+    const { rr, sent, timers } = make(3);
+    rr.handle({ code: 'E_RATE', cmd: 'get_local_history', retry_after: 1 });
+    timers[0].fn();
+    expect(sent).toEqual([]);
   });
 });

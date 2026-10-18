@@ -30,7 +30,8 @@ from ._gateway_auth import AuthHandlerMixin
 from ._gateway_misc import MiscHandlerMixin
 from .linkpreview import is_safe_url
 from .relay import _validate_relay_target as _is_safe_gateway_url
-from .command_validation import validate_command_payload, SchemaError, AUTH_RATE_COMMANDS, HEAVY_COMMANDS
+from .command_validation import (validate_command_payload, SchemaError, AUTH_RATE_COMMANDS, HEAVY_COMMANDS,
+                                 SNAPSHOT_READ_COMMANDS)
 from .security_policy import get_policy
 
 logger = logging.getLogger(__name__)
@@ -161,6 +162,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         self._rate_heavy_counters = {} # websocket -> [count, window_start]  (heavy 10/min)
         self._rate_signal_counters = {} # websocket -> [count, window_start]  (call signaling)
         self._rate_file_counters = {}   # websocket -> [count, window_start]  (file chunks)
+        self._rate_read_counters = {}   # websocket -> [count, window_start]  (snapshot reads)
         self._rate_lock = asyncio.Lock()
         self._ip_connection_counts: dict = {}  # remote_ip -> active connection count
         self._revoked_sessions: set = set()  # websockets awaiting close after revocation
@@ -982,6 +984,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             self._rate_heavy_counters.pop(websocket, None)
             self._rate_signal_counters.pop(websocket, None)
             self._rate_file_counters.pop(websocket, None)
+            self._rate_read_counters.pop(websocket, None)
             self._display_names.pop(websocket, None)
             self._revoked_sessions.discard(websocket)
             if webid:
@@ -1034,6 +1037,34 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             self._rate_counters[websocket] = [1, now]
             return True
         if count >= 60:
+            return False
+        entry[0] += 1
+        return True
+
+    def _rate_retry_after(self, counters: dict, websocket, window: float = 10.0) -> int:
+        """Whole seconds until the socket's current window in *counters* resets."""
+        import math
+        import time as _time
+        entry = counters.get(websocket)
+        if not entry:
+            return 1
+        return max(1, math.ceil(window - (_time.monotonic() - entry[1])))
+
+    # Snapshot reads (command_validation.SNAPSHOT_READ_COMMANDS) have their own
+    # budget: an account with many rooms sends a burst of them on connect and a
+    # few more per room opened, which used to exhaust the general 60/10s budget
+    # and leave the room and DM sidebars empty.
+    _READ_RATE_LIMIT = 300
+
+    def _check_read_rate_limit(self, websocket) -> bool:
+        """Return True if a snapshot read is allowed (300 per 10s per socket)."""
+        import time as _time
+        now = _time.monotonic()
+        entry = self._rate_read_counters.get(websocket)
+        if entry is None or now - entry[1] >= 10.0:
+            self._rate_read_counters[websocket] = [1, now]
+            return True
+        if entry[0] >= self._READ_RATE_LIMIT:
             return False
         entry[0] += 1
         return True
@@ -1140,9 +1171,19 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await websocket.send(json.dumps({"type": "file_send_failed", "file_id": data.get("file_id", ""),
                                                  "reason": "rate_limited"}))
                 return
+        # Snapshot reads: their own budget (see _check_read_rate_limit). The
+        # refusal names the command so the client can retry it.
+        elif cmd in SNAPSHOT_READ_COMMANDS:
+            if not self._check_read_rate_limit(websocket):
+                await websocket.send(json.dumps({
+                    "type": "error", "code": "E_RATE", "message": "rate_limited", "cmd": cmd,
+                    "retry_after": self._rate_retry_after(self._rate_read_counters, websocket)}))
+                return
         # Global rate limit: 60 cmd per 10s
         elif cmd not in _RATE_EXEMPT and not self._check_ws_rate_limit(websocket):
-            await websocket.send(json.dumps({"type": "error", "code": "E_RATE", "message": "rate_limited"}))
+            await websocket.send(json.dumps({
+                "type": "error", "code": "E_RATE", "message": "rate_limited", "cmd": cmd,
+                "retry_after": self._rate_retry_after(self._rate_counters, websocket)}))
             return
         # Auth-specific limit: 5/min
         if cmd in AUTH_RATE_COMMANDS and not self._check_auth_rate_limit(websocket):

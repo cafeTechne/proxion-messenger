@@ -109,7 +109,8 @@ describe('openLocalDmThread', () => {
     expect(host.activeView).toMatchObject({ type: 'local_dm', id: 'dm-1', local: true, peerWebid: 'did:key:zCarol' });
     expect(host.currentRoomMembers).toEqual([]);
     expect(sent).toContainEqual({ cmd: 'mark_read', thread_id: 'dm-1' });
-    expect(calls.sendUpdateLastRead[0]).toEqual(['dm-1']);
+    // mark_read moves the read marker; no second update_last_read per open.
+    expect(calls.sendUpdateLastRead || []).toEqual([]);
     expect(calls.loadRoomHistory[0]).toEqual(['dm-1']);
   });
 });
@@ -307,12 +308,20 @@ describe('opening a conversation (chat conventions)', () => {
     v.openLocalDmThread('dm-1', 'Carol', 'did:key:zCarol');
     const order = sent.map(m => m.cmd);
     expect(order.indexOf('load_history')).toBeLessThan(order.indexOf('mark_read'));
-    expect(order.indexOf('load_history')).toBeLessThan(order.indexOf('update_last_read'));
     sent.length = 0;
     v.addRoomToSidebar('room-own', 'My Room', '');
     els['room-list']._children[0].onclick();
     const order2 = sent.map(m => m.cmd);
     expect(order2.indexOf('load_history')).toBeLessThan(order2.indexOf('mark_read'));
+  });
+  it('moves the read marker with one command per open (mark_read, no update_last_read)', () => {
+    const v = makeWith(() => {});
+    v.openLocalDmThread('dm-1', 'Carol', 'did:key:zCarol');
+    v.addRoomToSidebar('room-own', 'My Room', '');
+    els['room-list']._children[0].onclick();
+    const cmds = sent.map(m => m.cmd);
+    expect(cmds.filter(c => c === 'mark_read')).toHaveLength(2);
+    expect(cmds).not.toContain('update_last_read');
   });
 });
 

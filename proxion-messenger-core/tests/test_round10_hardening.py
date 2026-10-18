@@ -71,7 +71,8 @@ def _make_mock_ws(gw, webid):
 async def test_rate_limit_61st_command_rejected(tmp_path):
     """R10.7.1: 61st command in a 60s window returns rate_limited.
 
-    Uses `get_rooms` which is not in the exempt set {ping, pong, auth_response, register}.
+    Uses `mark_read`, which is on the general budget (snapshot reads such as
+    get_rooms have their own, larger one).
     """
     gw, ws_port, _, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
@@ -90,7 +91,7 @@ async def test_rate_limit_61st_command_rejected(tmp_path):
 
         # 60 non-exempt commands — all within the window, should all pass
         for i in range(60):
-            await conn.send(json.dumps({"cmd": "get_rooms"}))
+            await conn.send(json.dumps({"cmd": "mark_read", "thread_id": "rate-test"}))
 
         await asyncio.sleep(0.15)
         # Drain any responses
@@ -101,7 +102,7 @@ async def test_rate_limit_61st_command_rejected(tmp_path):
                 break
 
         # 61st command should trigger rate_limited
-        await conn.send(json.dumps({"cmd": "get_rooms"}))
+        await conn.send(json.dumps({"cmd": "mark_read", "thread_id": "rate-test"}))
         got_rate_limited = False
         deadline = asyncio.get_event_loop().time() + 2.0
         while asyncio.get_event_loop().time() < deadline:

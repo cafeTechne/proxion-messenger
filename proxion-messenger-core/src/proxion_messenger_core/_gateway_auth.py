@@ -481,6 +481,7 @@ class AuthHandlerMixin:
                     last_reads = self._store.get_all_last_reads(identity)
                     for r in restored_rooms:
                         r["last_read_ts"] = last_reads.get(r["id"], 0)
+                    self._attach_unread_counts(identity, restored_rooms, last_reads)
                 if restored_rooms:
                     await websocket.send(json.dumps({"type": "rooms", "rooms": restored_rooms}))
                     asyncio.create_task(
@@ -500,6 +501,7 @@ class AuthHandlerMixin:
                     last_reads = self._store.get_all_last_reads(identity)
                     for d in local_dms:
                         d["last_read_ts"] = last_reads.get(d["id"], 0)
+                    self._attach_unread_counts(identity, local_dms, last_reads)
                 if local_dms:
                     await websocket.send(json.dumps({"type": "local_dms", "dms": local_dms}))
 

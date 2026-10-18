@@ -258,8 +258,10 @@ export function createView({
         // which places the "New messages" divider.
         loadRoomHistory(id);
         if (socket && socket.readyState === WebSocket.OPEN) {
+            // mark_read also moves the read marker (and its pod copy), so no
+            // separate update_last_read: each extra command per open counts
+            // against the gateway's per-connection budget.
             socket.send(JSON.stringify({cmd: "mark_read", thread_id: id}));
-            sendUpdateLastRead(id);
             if (peerWebid) {
                 socket.send(JSON.stringify({cmd: "get_peer_device_keys", peer_webid: peerWebid}));
             }
@@ -338,7 +340,6 @@ export function createView({
             loadRoomHistory(roomId, 100);
             if (socket && socket.readyState === WebSocket.OPEN) {
                 socket.send(JSON.stringify({cmd: "mark_read", thread_id: roomId}));
-                sendUpdateLastRead(roomId);
             }
             localStorage.setItem("proxion_seen_" + roomId, new Date().toISOString());
             if (window.innerWidth <= 768) closeSidebar();

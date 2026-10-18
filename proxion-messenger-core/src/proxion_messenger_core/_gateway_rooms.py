@@ -725,7 +725,28 @@ class RoomHandlerMixin:
                 "topic": room.get("topic", ""),
                 "local": True,
             })
+        if _caller_wid and self._store:
+            self._attach_unread_counts(_caller_wid, [r for r in rooms if r.get("local")])
         await websocket.send(json.dumps({"type": "rooms", "rooms": rooms}))
+
+    def _attach_unread_counts(self, webid: str, entries: list, last_reads: dict | None = None) -> None:
+        """Set unread_count on each room/DM list entry for *webid*.
+
+        The client used to send get_local_history for every thread on connect
+        just to count unread messages, which with a few dozen rooms exhausted
+        the per-connection command budget.
+        """
+        if not (self._store and webid and entries):
+            return
+        try:
+            if last_reads is None:
+                last_reads = self._store.get_all_last_reads(webid)
+            counts = self._store.count_unread_by_thread(webid, [e["id"] for e in entries], last_reads)
+        except Exception as exc:
+            logger.debug("unread counts skipped: %s", exc)
+            return
+        for e in entries:
+            e["unread_count"] = counts.get(e["id"], 0)
 
     async def _handle_get_local_history(self, websocket, data: dict) -> None:
         thread_id = data.get("thread_id", "")
@@ -1769,6 +1790,10 @@ class RoomHandlerMixin:
 
         if self._store and reader_webid and thread_id:
             self._store.set_last_read(reader_webid, thread_id)
+            # Same pod flush as update_last_read, so opening a thread needs one command.
+            _rp = getattr(self, "_dirty_read_positions", None)
+            if _rp is not None:
+                _rp[(reader_webid, thread_id)] = time.time()
             # R13.12: update room read receipt table
             if thread_id in self._local_rooms and message_id_read:
                 self._store.mark_room_read(thread_id, reader_webid, message_id_read,

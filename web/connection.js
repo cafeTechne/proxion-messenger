@@ -37,6 +37,58 @@ export function normalizeGatewayUrl(raw) {
     return u.pathname === '/' && !u.search && !u.hash ? out.replace(/\/$/, '') : out;
 }
 
+// The room / DM list a connect delivers (the register snapshot and the
+// get_rooms reply both arrive) as what to do per thread. The gateway sends
+// unread_count with each entry, so threads in the background just get their
+// badge set (not added to: the list arrives twice). Only the open thread, once
+// per connection, gets its history refetched to pick up missed messages.
+// Fetching every thread's history here used to exceed the gateway's
+// per-connection command budget with a few dozen rooms, which emptied the
+// sidebars. `fetched` is a Set the caller resets on each new connection.
+export function planThreadCatchUp(entries, { activeId = null, muted = new Set(), fetched = new Set() } = {}) {
+    const counts = {};
+    const fetch = [];
+    for (const e of entries || []) {
+        if (!e || !e.id) continue;
+        if (e.id === activeId) {
+            if (!fetched.has(e.id)) { fetched.add(e.id); fetch.push(e.id); }
+            continue;
+        }
+        if (typeof e.unread_count === 'number' && !muted.has(e.id)) counts[e.id] = e.unread_count;
+    }
+    return { counts, fetch };
+}
+
+// Reads the client resends on its own when the gateway refuses them with
+// E_RATE (the refusal names the command and says when to retry), so a burst
+// never leaves the sidebars silently empty. payloadFor(cmd) rebuilds the
+// command (null to drop it). After maxAttempts in one connection the error is
+// reported as usual. reset() on each new connection.
+export const RATE_RETRY_CMDS = new Set([
+    'get_rooms', 'get_dms', 'get_identity', 'list_friend_requests', 'get_relationships',
+    'list_blocks', 'get_local_history', 'get_room_members', 'pod_status',
+]);
+
+export function createRateRetry({ send, payloadFor, schedule = setTimeout, maxAttempts = 3 }) {
+    const attempts = new Map();
+    return {
+        // True when the error was a retryable rate limit and a retry is scheduled.
+        handle(event) {
+            if (!event || event.code !== 'E_RATE' || !RATE_RETRY_CMDS.has(event.cmd)) return false;
+            const n = (attempts.get(event.cmd) || 0) + 1;
+            if (n > maxAttempts) return false;
+            attempts.set(event.cmd, n);
+            const secs = Math.min(10, Math.max(1, Number(event.retry_after) || 2));
+            schedule(() => {
+                const p = payloadFor(event.cmd);
+                if (p) send(p);
+            }, secs * 1000);
+            return true;
+        },
+        reset() { attempts.clear(); },
+    };
+}
+
 export function createConnection({
     wsUrl, getSocket, setSocket, getClientDid, generateOrLoadIdentity, handleEventAsync,
     isActive = () => true,

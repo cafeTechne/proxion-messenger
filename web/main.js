@@ -62,7 +62,7 @@ import { createMembers } from './members.js';
 import { createFriendRequests } from './friend-requests.js';
 import { createE2EStatus } from './e2e-status.js';
 import { createStatusBanners } from './status-banners.js';
-import { createConnection, normalizeGatewayUrl } from './connection.js';
+import { createConnection, normalizeGatewayUrl, planThreadCatchUp, createRateRetry } from './connection.js';
 import { createTabLock, showTabNotice, hideTabNotice } from './tablock.js';
 import { createTransport, detectMode, applyTransportGating } from './transport.js';
 import { createPodSocket } from './podtransport.js';
@@ -439,6 +439,29 @@ import { initThemePicker } from './theme.js';
         let currentRoomMembers = []; // [{ webid, display_name, status }] for @mention autocomplete
         const roomTopics = new Map(); // room_id -> topic, shown under the room name
         let mutedThreads = new Set(JSON.parse(localStorage.getItem("proxion_muted_threads") || "[]"));
+        // Per-connection connect bookkeeping (connection.js planThreadCatchUp /
+        // createRateRetry): threads whose history this socket already refetched,
+        // and retries of reads the gateway refused with E_RATE.
+        const _rateRetry = createRateRetry({
+            send: (p) => { if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(p)); },
+            payloadFor: (cmd) => {
+                if (cmd === "get_local_history") return activeView ? { cmd, thread_id: activeView.id, limit: 100 } : null;
+                if (cmd === "get_room_members") return activeView?.type === "local_room" ? { cmd, room_id: activeView.id } : null;
+                return { cmd };
+            },
+        });
+        let _connSock = null, _connFetched = new Set();
+        function _perConnection() {
+            if (_connSock !== socket) { _connSock = socket; _connFetched = new Set(); _rateRetry.reset(); }
+            return _connFetched;
+        }
+        function _applyThreadCatchUp(entries) {
+            const { counts, fetch } = planThreadCatchUp(entries, {
+                activeId: activeView ? activeView.id : null, muted: mutedThreads, fetched: _perConnection(),
+            });
+            for (const [id, n] of Object.entries(counts)) { unreadCounts[id] = n; updateSidebarBadge(id); }
+            if (socket && socket.readyState === WebSocket.OPEN) fetch.forEach(id => loadRoomHistory(id, 100));
+        }
         let currentDisappearMs = 0; // R11.1.3: active timer for current thread
         let selfWebId = clientDid; // set from localStorage immediately; updated after generateOrLoadIdentity
         // Multi-device: if this device was linked to an account, its messaging
@@ -2178,12 +2201,9 @@ import { initThemePicker } from './theme.js';
                         if (r.creator_webid && r.creator_webid === selfWebId) {
                             roomCreatorOf.add(r.id);
                         }
-                        // Request catch-up history (messages since last seen)
-                        if (socket && socket.readyState === WebSocket.OPEN) {
-                            const since = localStorage.getItem("proxion_seen_" + r.id);
-                            loadRoomHistory(r.id, 100);
-                        }
                     });
+                    // Unread badges from the list; history only for the open room.
+                    _applyThreadCatchUp(event.rooms.filter(r => r.local));
                     break;
                 case "room_created":
                     clearButtonBusy(document.getElementById("room-create-submit"));
@@ -2460,13 +2480,9 @@ import { initThemePicker } from './theme.js';
                     // Restore local DM threads persisted from previous sessions
                     event.dms.forEach(dm => {
                         localDmPeers[dm.id] = { display_name: dm.name, peer_webid: dm.peer_webid };
-                        // Request catch-up unread count
-                        if (socket && socket.readyState === WebSocket.OPEN) {
-                            const since = localStorage.getItem("proxion_seen_" + dm.id);
-                            loadRoomHistory(dm.id, 100);
-                        }
                     });
                     renderDmSidebar();
+                    _applyThreadCatchUp(event.dms);
                     break;
                 }
                 case "room_emoji":
@@ -2993,6 +3009,10 @@ import { initThemePicker } from './theme.js';
                     break;
                 }
                 case "error": {
+                    // A read refused by the gateway's rate budget is resent once the
+                    // window resets instead of leaving a sidebar or feed empty.
+                    _perConnection();
+                    if (_rateRetry.handle(event)) break;
                     if (_pendingFriendRequest && (event.message in _friendRequestErrors || event.message === "delivery_failed" || event.message === "invalid_address")) {
                         _pendingFriendRequest = false;
                         const _sb2 = document.getElementById("add-peer-submit-btn");

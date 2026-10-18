@@ -203,6 +203,27 @@ READ_ONLY_COMMANDS: frozenset[str] = frozenset({
     "list_recovery_drill_templates", "get_recovery_drill_report",
 })
 
+# Cheap reads a client sends in bursts: the connect snapshot and the lookups
+# behind opening a room or DM. They use their own, larger per-connection budget
+# (gateway._check_read_rate_limit) instead of the general 60/10s one, so a big
+# account's connect or quick room switching is not refused, and they cannot
+# use up the budget that sends and other writes rely on. Nothing here writes
+# shared state or reaches another user or gateway (mark_read, typing and
+# set_presence broadcast, search is heavy, so those stay on the general budget).
+SNAPSHOT_READ_COMMANDS: frozenset[str] = frozenset({
+    "get_rooms", "get_dms", "get_local_history", "get_room_members", "get_message",
+    "get_pins", "get_receipts", "get_message_readers", "get_room_bans",
+    "get_room_roles", "list_room_emoji", "get_disappear_timer", "list_scheduled",
+    "get_notifications", "get_identity", "get_connect_id", "get_my_address",
+    "get_gateway_webid", "get_inbox_webhook", "get_relationships",
+    "list_friend_requests", "list_blocks", "get_contact_verification",
+    "list_verified_contacts", "get_presence", "get_all_presence",
+    "get_voice_channel_state", "tunnel_status", "pod_status", "list_sessions",
+    "list_webhooks", "list_devices", "get_peer_devices", "get_peer_device_keys",
+    "get_sender_key", "list_dm_sessions", "update_last_read",
+})
+assert SNAPSHOT_READ_COMMANDS <= READ_ONLY_COMMANDS
+
 
 def blocked_when_locked(cmd: str) -> bool:
     """True when a revoked identity or safe mode must refuse *cmd*."""
