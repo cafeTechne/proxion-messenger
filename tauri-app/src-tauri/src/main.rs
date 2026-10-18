@@ -177,6 +177,187 @@ fn focus_main_window(app: &AppHandle) {
     }
 }
 
+// ── Install kind + updater target ───────────────────────────────────────────
+
+/// How this copy was installed. The Tauri v1 updater only knows the OS and
+/// arch, so on its own it hands every Windows install the manifest's default
+/// artifact (an NSIS user gets the MSI, a second install behind a UAC prompt)
+/// and offers deb/rpm installs an update it cannot apply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InstallKind {
+    WindowsNsis,
+    WindowsMsi,
+    LinuxAppImage,
+    /// deb or rpm: updated by the system package manager.
+    LinuxPackage,
+    Other,
+}
+
+fn install_kind(
+    os: &str,
+    exe_dir: &std::path::Path,
+    appimage: Option<&std::ffi::OsStr>,
+) -> InstallKind {
+    match os {
+        // The NSIS installer leaves uninstall.exe next to the app; MSI does not.
+        "windows" if exe_dir.join("uninstall.exe").is_file() => InstallKind::WindowsNsis,
+        "windows" => InstallKind::WindowsMsi,
+        "linux" if appimage.map_or(false, |a| !a.is_empty()) => InstallKind::LinuxAppImage,
+        "linux" => InstallKind::LinuxPackage,
+        _ => InstallKind::Other,
+    }
+}
+
+fn current_install_kind() -> InstallKind {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_default();
+    install_kind(
+        std::env::consts::OS,
+        &exe_dir,
+        std::env::var_os("APPIMAGE").as_deref(),
+    )
+}
+
+/// The latest.json platform key for this install ("windows-x86_64-nsis"), from
+/// the updater's default "<os>-<arch>". None keeps the default key.
+fn updater_target_for(kind: InstallKind, base: Option<String>) -> Option<String> {
+    let base = base?;
+    match kind {
+        InstallKind::WindowsNsis => Some(format!("{base}-nsis")),
+        InstallKind::WindowsMsi => Some(format!("{base}-msi")),
+        InstallKind::LinuxAppImage => Some(format!("{base}-appimage")),
+        InstallKind::LinuxPackage | InstallKind::Other => None,
+    }
+}
+
+fn self_update_supported(kind: InstallKind) -> bool {
+    kind != InstallKind::LinuxPackage
+}
+
+#[tauri::command]
+fn updates_supported() -> bool {
+    self_update_supported(current_install_kind())
+}
+
+// ── proxion:// registration ───────────────────────────────────────────────────
+
+const URL_SCHEME: &str = "proxion";
+
+/// Tauri v1 cannot register a URL scheme at install time on Windows or Linux,
+/// so the app points the scheme at its own executable on every launch. That
+/// also follows the app when an update or reinstall moves it.
+#[cfg(any(target_os = "windows", test))]
+fn windows_scheme_command(exe: &str) -> Option<String> {
+    if exe.is_empty() || exe.contains('"') || exe.chars().any(|c| c.is_control()) {
+        return None;
+    }
+    Some(format!("\"{exe}\" \"%1\""))
+}
+
+#[cfg(target_os = "windows")]
+fn register_url_scheme() {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let Some(cmd) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.to_str().and_then(windows_scheme_command))
+    else {
+        return;
+    };
+    let base = format!(r"HKCU\Software\Classes\{URL_SCHEME}");
+    let open = format!(r"{base}\shell\open\command");
+    let entries: [(&str, &str, &str); 3] = [
+        (&base, "", "URL:Proxion Protocol"),
+        (&base, "URL Protocol", ""),
+        (&open, "", &cmd),
+    ];
+    for (key, name, value) in entries {
+        let mut c = std::process::Command::new("reg");
+        c.arg("add").arg(key);
+        if name.is_empty() {
+            c.arg("/ve");
+        } else {
+            c.arg("/v").arg(name);
+        }
+        c.args(["/t", "REG_SZ", "/d", value, "/f"])
+            .creation_flags(CREATE_NO_WINDOW);
+        if let Err(e) = c.output() {
+            eprintln!("[deep-link] could not register {URL_SCHEME}://: {e}");
+            return;
+        }
+    }
+}
+
+/// Quote a path for a .desktop Exec line, or None if it cannot be written safely.
+#[cfg(any(target_os = "linux", test))]
+fn desktop_exec_quote(path: &str) -> Option<String> {
+    if path.is_empty() || path.chars().any(|c| c.is_control()) {
+        return None;
+    }
+    let mut out = String::from("\"");
+    for c in path.chars() {
+        match c {
+            // Exec quoting escapes these with a backslash, and the desktop-file
+            // string escape then doubles every backslash.
+            '"' | '`' | '$' => {
+                out.push_str("\\\\");
+                out.push(c);
+            }
+            '\\' => out.push_str("\\\\\\\\"),
+            '%' => out.push_str("%%"),
+            _ => out.push(c),
+        }
+    }
+    out.push('"');
+    Some(out)
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn desktop_handler_entry(exe: &str) -> Option<String> {
+    Some(format!(
+        "[Desktop Entry]\nType=Application\nName=Proxion\nExec={} %u\nTerminal=false\nNoDisplay=true\nMimeType=x-scheme-handler/{URL_SCHEME};\n",
+        desktop_exec_quote(exe)?
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn register_url_scheme() {
+    // An AppImage runs from a temporary mount; register the image itself.
+    let exe = std::env::var("APPIMAGE")
+        .ok()
+        .filter(|a| !a.is_empty())
+        .or_else(|| {
+            std::env::current_exe()
+                .ok()
+                .and_then(|e| e.to_str().map(String::from))
+        });
+    let Some(entry) = exe.as_deref().and_then(desktop_handler_entry) else {
+        return;
+    };
+    let apps = match std::env::var_os("XDG_DATA_HOME").filter(|v| !v.is_empty()) {
+        Some(d) => std::path::PathBuf::from(d).join("applications"),
+        None => match std::env::var_os("HOME") {
+            Some(h) => std::path::PathBuf::from(h).join(".local/share/applications"),
+            None => return,
+        },
+    };
+    let name = "proxion-url-handler.desktop";
+    if std::fs::create_dir_all(&apps).is_err() || std::fs::write(apps.join(name), entry).is_err() {
+        return;
+    }
+    let mime = format!("x-scheme-handler/{URL_SCHEME}");
+    std::process::Command::new("xdg-mime")
+        .args(["default", name, mime.as_str()])
+        .output()
+        .ok();
+}
+
+// macOS registers the scheme through Info.plist (CFBundleURLTypes).
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+fn register_url_scheme() {}
+
 // ── Autostart launch detection ────────────────────────────────────────────────
 
 struct IsAutostartLaunch(bool);
@@ -247,7 +428,12 @@ fn main() {
     let pending_link = parse_deep_link(std::env::args().skip(1));
     let is_autostart = std::env::args().any(|a| a == AUTOSTART_FLAG);
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    if let Some(target) = updater_target_for(current_install_kind(), tauri::updater::target()) {
+        builder = builder.updater_target(target);
+    }
+
+    builder
         // Registered first: a second launch forwards its argv here and exits during
         // plugin setup, before our setup could spawn another gateway sidecar.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
@@ -268,6 +454,17 @@ fn main() {
         .manage(TrayUnreadState(Mutex::new(vec![])))
         .manage(IsAutostartLaunch(is_autostart))
         .system_tray(build_tray())
+        // The close button hides the window and the app keeps running in the tray,
+        // so messages and calls still arrive. Quit in the tray menu stops it and
+        // the gateway; launching Proxion again brings the window back.
+        .on_window_event(|event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event.event() {
+                if event.window().label() == "main" {
+                    api.prevent_close();
+                    event.window().hide().ok();
+                }
+            }
+        })
         .on_system_tray_event(|app, event| match event {
             SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
                 "open" => {
@@ -308,6 +505,7 @@ fn main() {
             is_autostart_launch,
             quit_app,
             stop_gateway,
+            updates_supported,
         ])
         .setup(|app| {
             let app_data_dir = app
@@ -315,6 +513,11 @@ fn main() {
                 .app_data_dir()
                 .expect("no app data dir available");
             std::fs::create_dir_all(&app_data_dir).ok();
+
+            // Off the main thread: on Windows this shells out to reg.exe.
+            if !cfg!(debug_assertions) {
+                std::thread::spawn(register_url_scheme);
+            }
 
             // Hide window if launched with --autostart
             if app.state::<IsAutostartLaunch>().0 {
@@ -424,7 +627,94 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_deep_link, parse_gateway_error};
+    use super::{
+        desktop_exec_quote, desktop_handler_entry, install_kind, parse_deep_link,
+        parse_gateway_error, self_update_supported, updater_target_for,
+        windows_scheme_command, InstallKind,
+    };
+    use std::ffi::OsStr;
+
+    fn tmpdir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir()
+            .join(format!("proxion-app-test-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn windows_install_kind_follows_uninstaller() {
+        let msi = tmpdir("msi");
+        assert_eq!(install_kind("windows", &msi, None), InstallKind::WindowsMsi);
+        let nsis = tmpdir("nsis");
+        std::fs::write(nsis.join("uninstall.exe"), b"").unwrap();
+        assert_eq!(install_kind("windows", &nsis, None), InstallKind::WindowsNsis);
+        std::fs::remove_dir_all(&msi).ok();
+        std::fs::remove_dir_all(&nsis).ok();
+    }
+
+    #[test]
+    fn linux_install_kind_follows_appimage_env() {
+        let d = std::path::Path::new("/usr/bin");
+        assert_eq!(
+            install_kind("linux", d, Some(OsStr::new("/home/u/Proxion.AppImage"))),
+            InstallKind::LinuxAppImage
+        );
+        assert_eq!(install_kind("linux", d, None), InstallKind::LinuxPackage);
+        assert_eq!(install_kind("linux", d, Some(OsStr::new(""))), InstallKind::LinuxPackage);
+        assert_eq!(install_kind("macos", d, None), InstallKind::Other);
+    }
+
+    #[test]
+    fn each_install_gets_its_own_manifest_key() {
+        let win = || Some("windows-x86_64".to_string());
+        assert_eq!(
+            updater_target_for(InstallKind::WindowsNsis, win()).as_deref(),
+            Some("windows-x86_64-nsis")
+        );
+        assert_eq!(
+            updater_target_for(InstallKind::WindowsMsi, win()).as_deref(),
+            Some("windows-x86_64-msi")
+        );
+        assert_eq!(
+            updater_target_for(InstallKind::LinuxAppImage, Some("linux-x86_64".into())).as_deref(),
+            Some("linux-x86_64-appimage")
+        );
+        assert_eq!(updater_target_for(InstallKind::Other, Some("darwin-aarch64".into())), None);
+        assert_eq!(updater_target_for(InstallKind::WindowsNsis, None), None);
+    }
+
+    #[test]
+    fn package_manager_installs_do_not_self_update() {
+        assert!(!self_update_supported(InstallKind::LinuxPackage));
+        assert!(self_update_supported(InstallKind::LinuxAppImage));
+        assert!(self_update_supported(InstallKind::WindowsNsis));
+        assert!(self_update_supported(InstallKind::WindowsMsi));
+        assert!(self_update_supported(InstallKind::Other));
+    }
+
+    #[test]
+    fn windows_scheme_command_quotes_exe_and_arg() {
+        assert_eq!(
+            windows_scheme_command(r"C:\Users\a b\AppData\Local\Proxion\Proxion.exe").as_deref(),
+            Some(r#""C:\Users\a b\AppData\Local\Proxion\Proxion.exe" "%1""#)
+        );
+        assert_eq!(windows_scheme_command(r#"C:\a"b\x.exe"#), None);
+        assert_eq!(windows_scheme_command(""), None);
+    }
+
+    #[test]
+    fn desktop_exec_quoting() {
+        assert_eq!(desktop_exec_quote("/usr/bin/proxion-app").as_deref(), Some(r#""/usr/bin/proxion-app""#));
+        assert_eq!(desktop_exec_quote("/opt/a b/x").as_deref(), Some(r#""/opt/a b/x""#));
+        assert_eq!(desktop_exec_quote("/o/50%/x").as_deref(), Some(r#""/o/50%%/x""#));
+        assert_eq!(desktop_exec_quote("/o/$x").as_deref(), Some(r#""/o/\\$x""#));
+        assert_eq!(desktop_exec_quote(r"/o/a\b").as_deref(), Some(r#""/o/a\\\\b""#));
+        assert_eq!(desktop_exec_quote("/o/a\nb"), None);
+        assert_eq!(desktop_exec_quote(""), None);
+        let e = desktop_handler_entry("/home/u/Proxion.AppImage").unwrap();
+        assert!(e.contains("Exec=\"/home/u/Proxion.AppImage\" %u\n"));
+        assert!(e.contains("MimeType=x-scheme-handler/proxion;\n"));
+    }
 
     #[test]
     fn gateway_error_line_is_parsed() {

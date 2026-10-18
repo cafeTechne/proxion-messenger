@@ -6869,10 +6869,20 @@ import { initThemePicker } from './theme.js';
                     }
                 };
             }
+            // deb/rpm installs update through the system package manager; the
+            // desktop shell says so and the in-app updater stays out of the way.
+            async function _selfUpdateSupported() {
+                try { return (await window.__TAURI__.invoke('updates_supported')) !== false; }
+                catch (_) { return true; }
+            }
             async function _manualCheckForUpdates() {
                 const updater = window.__TAURI__ && window.__TAURI__.updater;
                 const res = document.getElementById("update-check-result");
                 if (!updater || typeof updater.checkUpdate !== "function") return;
+                if (!(await _selfUpdateSupported())) {
+                    if (res) { res.style.display = ""; res.style.color = "var(--text-secondary)"; res.textContent = t('update.packageManaged'); }
+                    return;
+                }
                 if (res) { res.style.display = ""; res.style.color = "var(--text-secondary)"; res.textContent = t('update.checking'); }
                 let info;
                 try { info = await updater.checkUpdate(); }
@@ -6889,6 +6899,7 @@ import { initThemePicker } from './theme.js';
                 const updater = window.__TAURI__ && window.__TAURI__.updater;
                 if (!updater || typeof updater.checkUpdate !== "function") return;
                 setTimeout(async () => {
+                    if (!(await _selfUpdateSupported())) return;
                     let info;
                     try { info = await updater.checkUpdate(); } catch (_) { return; } // inactive / offline — stay quiet
                     if (info && info.shouldUpdate) _showUpdateBanner(info);

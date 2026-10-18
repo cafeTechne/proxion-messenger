@@ -576,6 +576,7 @@
   "update.check": "Check for updates",
   "update.checking": "Checking for updates…",
   "update.upToDate": "You are on the latest version.",
+  "update.packageManaged": "This install is updated by your system package manager.",
   "app.runningTitle": "Proxion is running",
   "app.runningBody": "Click the tray icon to open it.",
   "common.copied": "Copied!",

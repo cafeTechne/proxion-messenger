@@ -136,3 +136,70 @@ def test_csp_script_src_and_frame_ancestors():
     assert "'unsafe-inline'" not in script
     assert "'unsafe-eval'" not in script
     assert directives.get("frame-ancestors") == ["'none'"]
+
+
+def _csp_directives(csp):
+    out = {}
+    for part in csp.split(";"):
+        tokens = part.split()
+        if tokens:
+            out[tokens[0]] = tokens[1:]
+    return out
+
+
+def test_csp_allows_inline_media_like_the_gateway():
+    # Voice messages play from data: URLs and video attachments are probed
+    # through blob: URLs; without media-src the webview falls back to
+    # default-src 'self' and blocks both.
+    d = _csp_directives(_conf()["tauri"]["security"]["csp"])
+    for directive in ("img-src", "media-src"):
+        assert directive in d, f"Tauri CSP has no {directive}"
+        for src in ("'self'", "data:", "blob:"):
+            assert src in d[directive], f"{directive} lacks {src}"
+    assert d.get("object-src") == ["'none'"]
+
+
+def test_close_button_hides_to_tray_and_quit_still_stops_gateway():
+    src = _read(_MAIN_RS)
+    m = re.search(r"\.on_window_event\(.*?\n        \}\)", src, re.S)
+    assert m, "no on_window_event handler: the window X quits the app"
+    handler = m.group(0)
+    assert "CloseRequested" in handler and "prevent_close()" in handler
+    assert ".hide()" in handler
+    # Real quits (tray Quit, quit_app, the Exit run event) still stop the gateway.
+    tray_quit = re.search(r'"quit" => \{(.*?)\}', src, re.S)
+    assert tray_quit and "shutdown_gateway(app)" in tray_quit.group(1)
+    assert re.search(r"RunEvent::Exit = event \{\s*shutdown_gateway\(app\)", src)
+
+
+def test_updater_picks_the_installed_artifact():
+    src = _read(_MAIN_RS)
+    assert ".updater_target(" in src, "updater uses the manifest default for every install"
+    for suffix in ('"{base}-nsis"', '"{base}-msi"', '"{base}-appimage"'):
+        assert suffix in src
+    # Old clients without a per-install key read the plain key: NSIS is the
+    # primary Windows download, so that key must point at the NSIS bundle.
+    wf = _read(os.path.join(_ROOT, ".github", "workflows", "release.yml"))
+    assert re.search(r"^\s*updaterJsonPreferNsis:\s*true\s*$", wf, re.M)
+    assert re.search(r"^\s*includeUpdaterJson:\s*true\s*$", wf, re.M)
+
+
+def test_package_manager_installs_skip_the_updater():
+    main_js = _read(os.path.join(_WEB, "main.js"))
+    assert "invoke('updates_supported')" in main_js
+    assert "update.packageManaged" in main_js
+    en = json.loads(_read(os.path.join(_WEB, "locales", "en.json")))
+    assert en.get("update.packageManaged")
+
+
+def test_proxion_scheme_is_registered_on_every_platform():
+    src = _read(_MAIN_RS)
+    for os_name in ("windows", "linux"):
+        assert re.search(
+            r'#\[cfg\(target_os = "%s"\)\]\s*fn register_url_scheme\(\)' % os_name, src
+        ), f"no proxion:// registration on {os_name}"
+    assert "std::thread::spawn(register_url_scheme)" in src
+    plist = _read(os.path.join(_TAURI, "Info.plist"))
+    assert re.search(r"<key>CFBundleURLSchemes</key>\s*<array>\s*<string>proxion</string>", plist)
+    # Tauri v1 never ran this NSIS hook file (and it named the wrong exe).
+    assert not os.path.exists(os.path.join(_TAURI, "nsis-hooks.nsh"))

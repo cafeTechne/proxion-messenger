@@ -144,6 +144,10 @@ jobs:
           # tauri-action generates latest.json (the updater manifest) automatically
           # when updater signing is configured, and uploads it to the release.
           includeUpdaterJson: true
+          # Installs from before per-install update keys read the plain
+          # windows-x86_64 entry; point it at the NSIS bundle (the primary
+          # download) instead of the MSI.
+          updaterJsonPreferNsis: true
 
   # E4 (verifiable builds): once all three OS builds have uploaded their
   # assets, publish a SHA256SUMS.txt and sign build-provenance attestations
