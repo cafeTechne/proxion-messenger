@@ -288,6 +288,9 @@ fn main() {
                     env.insert("PROXION_HTTP_PORT".into(), "8080".into());
                     env.insert("PROXION_HOST".into(), "127.0.0.1".into());
                     env.insert("PROXION_WS_PORT".into(), "7474".into());
+                    // The webview dials plain ws://127.0.0.1:7474 and cannot accept a
+                    // self-signed cert, so the loopback sidecar stays on plain ws/http.
+                    env.insert("PROXION_AUTO_TLS".into(), "0".into());
                     env.insert(
                         "PROXION_DATA_DIR".into(),
                         app_data_dir.to_string_lossy().to_string(),

@@ -68,6 +68,7 @@ def main() -> int:
                PROXION_HTTP_PORT=str(http_port),
                PROXION_WS_PORT=str(_free_port()),
                PROXION_HOST="127.0.0.1",
+               PROXION_AUTO_TLS="0",
                PROXION_DATA_DIR=data)
     print(f"[sidecar-check] starting {exe.name} on port {http_port}")
     proc = subprocess.Popen([str(exe)], env=env, stdout=subprocess.PIPE,

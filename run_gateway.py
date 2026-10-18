@@ -23,6 +23,10 @@ def _base_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
+def _auto_tls_enabled() -> bool:
+    return os.environ.get("PROXION_AUTO_TLS", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
 async def main():
     from proxion_messenger_core.gateway import ProxionGateway, GatewayConfig
     from proxion_messenger_core.persist import AgentState
@@ -51,7 +55,9 @@ async def main():
 
     # Auto-generate self-signed TLS cert on first run when no cert is configured.
     # Enables HTTPS (required for getUserMedia on non-localhost origins).
-    if not os.environ.get("PROXION_SSL_CERT"):
+    # The desktop app turns this off with PROXION_AUTO_TLS=0: its webview dials
+    # ws://127.0.0.1 and cannot accept a self-signed cert.
+    if not os.environ.get("PROXION_SSL_CERT") and _auto_tls_enabled():
         try:
             from proxion_messenger_core.tls import ensure_self_signed_cert
             import pathlib as _pathlib
