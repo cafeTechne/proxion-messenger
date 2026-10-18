@@ -165,6 +165,13 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
     }
 
     function handleMessageEdited(event) {
+        // The buffered copy first: a message paged out of the feed is drawn
+        // from it again when the reader scrolls back.
+        const messageMap = getMessageMap();
+        if (messageMap[event.message_id]) {
+            messageMap[event.message_id].content = event.new_content;
+            messageMap[event.message_id].edited_at = event.edited_at;
+        }
         const msgEl = document.getElementById(`msg-${event.message_id}`);
         if (!msgEl) return;
         let textEl = msgEl.querySelector(".msg-text");
@@ -183,11 +190,6 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
         }
         const editedTime = event.edited_at ? new Date(event.edited_at).toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit" }) : "";
         tag.innerText = editedTime ? t('msg.editedAt', { time: editedTime }) : t('msg.edited');
-        const messageMap = getMessageMap();
-        if (messageMap[event.message_id]) {
-            messageMap[event.message_id].content = event.new_content;
-            messageMap[event.message_id].edited_at = event.edited_at;
-        }
     }
 
     return { startEdit, commitEdit, cancelEdit, handleMessageEdited, state };

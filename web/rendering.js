@@ -244,6 +244,12 @@ export function captureScrollAnchor(feed) {
 // false when there is no anchor or it is no longer rendered.
 export function restoreScrollAnchor(feed, anchor) {
     if (!feed || !anchor) return false;
+    const byId = typeof document !== "undefined" && document.getElementById
+        ? document.getElementById(`msg-${anchor.id}`) : null;
+    if (byId && byId.parentNode === feed) {
+        feed.scrollTop += _relTop(byId, feed) - anchor.offset;
+        return true;
+    }
     for (const el of feed.querySelectorAll(".message[data-message-id]")) {
         if (el.dataset.messageId === anchor.id) {
             feed.scrollTop += _relTop(el, feed) - anchor.offset;
@@ -251,6 +257,44 @@ export function restoreScrollAnchor(feed, anchor) {
         }
     }
     return false;
+}
+
+// Feed rows that are messages, and the dividers drawn in front of one.
+function _isMsgEl(el) {
+    return !!(el && el.classList && el.classList.contains("message") && el.dataset && el.dataset.messageId);
+}
+function _isDivider(el) {
+    return !!(el && el.classList && (el.classList.contains("date-divider") || el.classList.contains("unread-divider")));
+}
+function _firstMsgEl(feed) {
+    let el = feed && feed.firstElementChild;
+    while (el && !_isMsgEl(el)) el = el.nextElementSibling;
+    return el || null;
+}
+function _lastMsgEl(feed) {
+    let el = feed && feed.lastElementChild;
+    while (el && !_isMsgEl(el)) el = el.previousElementSibling;
+    return el || null;
+}
+// The first of the dividers directly in front of `el` (or `el` itself).
+function _dividerRunStart(el) {
+    let start = el;
+    while (start.previousElementSibling && _isDivider(start.previousElementSibling)) start = start.previousElementSibling;
+    return start;
+}
+
+// Which message ids a buffer holds, so renderMessage dedupes in O(1). The
+// host reassigns allMessages on view switches and pushes into it in a few
+// places, so the index is keyed on the array and rebuilt when its length
+// moved without us.
+const _bufferIndex = new WeakMap();
+function _bufferIds(arr) {
+    let e = _bufferIndex.get(arr);
+    if (!e || e.len !== arr.length) {
+        e = { ids: new Set(arr.map(m => m && m.message_id)), len: arr.length };
+        _bufferIndex.set(arr, e);
+    }
+    return e;
 }
 
 export function createRendering({
@@ -268,9 +312,13 @@ export function createRendering({
     // names: used to match @mentions of multi-word / non-ASCII names.
     resolveName = () => "",
     getMemberNames = () => [],
+    // Most messages kept in the DOM. Paging past it drops rows from the far
+    // end; scrolling back renders them again from the buffer.
+    maxRendered = renderWindow * 3,
 }) {
     const RENDER_WINDOW = renderWindow;
     const SCROLL_BATCH = scrollBatch;
+    const MAX_RENDERED = maxRendered;
     const state = {
         _lastRenderedDate: null,    // for date dividers (reset by view-switching)
         _scrollBottomUnread: 0,     // count of messages arrived while scrolled up
@@ -281,7 +329,40 @@ export function createRendering({
         _unreadSeen: false,         // reader reached the bottom since the divider appeared
         _unreadEnteredFor: null,    // divider id that already played its entry fade
         _requestedFiles: new Set(), // stored room files already asked for via get_files
+        _detachedTail: false,       // newest messages were dropped from the DOM (reader is far up)
     };
+
+    // The rendered rows end before the newest buffered message.
+    function _tailDetached(feed) {
+        if (!state._detachedTail) return false;
+        if (!_firstMsgEl(feed)) { state._detachedTail = false; return false; }
+        return true;
+    }
+
+    // The copy of a buffered message to draw: messageMap holds edits and the
+    // latest echo, a deleted or expired one is not drawn at all.
+    function _current(m) {
+        const cur = getMessageMap()[m.message_id];
+        if (cur && cur.deleted) return null;
+        const msg = cur && cur.message_id === m.message_id ? cur : m;
+        const ms = getCurrentDisappearMs();
+        if (ms > 0 && msg.timestamp && new Date(msg.timestamp).getTime() + ms <= Date.now()) return null;
+        return msg;
+    }
+
+    // Bulk feed changes: keep the log quiet for screen readers while rows
+    // are inserted or dropped (a no-op when the caller already marked it).
+    function _busy(feed, fn) {
+        const owned = typeof feed.getAttribute === "function" && typeof feed.setAttribute === "function"
+            && !feed.getAttribute("aria-busy");
+        if (owned) feed.setAttribute("aria-busy", "true");
+        try { return fn(); } finally {
+            if (owned) {
+                const clear = () => { if (typeof feed.removeAttribute === "function") feed.removeAttribute("aria-busy"); };
+                if (typeof setTimeout === "function") setTimeout(clear, 50); else clear();
+            }
+        }
+    }
 
     // Stored room files in history come without their bytes. Ids rendered in
     // one pass are sent together (get_files takes up to 20 per command).
@@ -324,6 +405,10 @@ export function createRendering({
     function scrollToBottom() {
         const activeView = getActiveView();
         const feed = document.getElementById("message-feed");
+        if (_tailDetached(feed)) {
+            state._unreadSeen = true;
+            renderMessages();
+        }
         feed.scrollTop = feed.scrollHeight;
         state._pinnedToBottom = true;
         state._unreadSeen = true;
@@ -359,9 +444,10 @@ export function createRendering({
     function renderMessages() {
         const allMessages = getAllMessages();
         const feed = document.getElementById("message-feed");
-        const slice = allMessages.slice(-RENDER_WINDOW);
+        const slice = allMessages.slice(-RENDER_WINDOW).map(_current).filter(Boolean);
         feed.innerHTML = "";
         state._lastRenderedDate = null;
+        state._detachedTail = false;
         _renderThreaded(slice, feed);
         // Until the reader has reached the bottom once, a re-render keeps the
         // "New messages" divider in view instead of jumping past it.
@@ -419,6 +505,7 @@ export function createRendering({
     function resetUnread() {
         state._unreadBeforeId = null;
         state._unreadSeen = false;
+        state._detachedTail = false;
     }
 
     // Re-render the feed with `slice` (used when older history is prepended)
@@ -446,8 +533,12 @@ export function createRendering({
         // message has nowhere to go (it used to land under the welcome).
         if (msg.thread_id && msg.thread_id !== activeView?.id) return;
         // Push to allMessages array (virtual scroll buffer)
-        if (!allMessages.find(m => m.message_id === msg.message_id)) {
+        const buf = _bufferIds(allMessages);
+        const isNewToBuffer = !buf.ids.has(msg.message_id);
+        if (isNewToBuffer) {
             allMessages.push(msg);
+            buf.ids.add(msg.message_id);
+            buf.len = allMessages.length;
         }
         // Carry the client pod-partition timestamp across the server echo, so a later
         // edit/delete/seq addresses the day file the message was actually written to
@@ -455,9 +546,16 @@ export function createRendering({
         const _prevPodTs = messageMap[msg.message_id]?.pod_ts;
         if (_prevPodTs && !msg.pod_ts) msg.pod_ts = _prevPodTs;
         messageMap[msg.message_id] = msg;
-        // Only append DOM element if within the render window
-        if (allMessages.length <= RENDER_WINDOW || allMessages.indexOf(msg) >= allMessages.length - RENDER_WINDOW) {
-            const feed = document.getElementById("message-feed");
+        const feed = document.getElementById("message-feed");
+        const rendered = !!document.getElementById(`msg-${msg.message_id}`);
+        const detached = _tailDetached(feed);
+        // Only append a new message (the newest in the buffer), and only while
+        // the rendered rows reach the bottom; a reader paged far up gets the
+        // scroll-to-bottom count instead.
+        if (detached && isNewToBuffer) {
+            state._scrollBottomUnread++;
+            _updateScrollBottomBtn();
+        } else if (!rendered && !detached && (isNewToBuffer || allMessages.length <= RENDER_WINDOW)) {
             // The "No messages yet." hero is added when a thread opens empty;
             // clear it the moment real content arrives, or it floats above the
             // messages forever (same stale-empty-state class as the sidebar CTA).
@@ -465,10 +563,9 @@ export function createRendering({
             const atBottom = isFeedAtBottom(feed);
             // Every message, replies included, goes at the end in arrival
             // (timestamp) order; a reply shows an inline quote of its parent.
-            const visibleMsgs = [...feed.querySelectorAll(".message[data-message-id]")];
-            const lastEl = visibleMsgs[visibleMsgs.length - 1];
+            const lastEl = _lastMsgEl(feed);
             const prev = lastEl ? messageMap[lastEl.dataset.messageId] : null;
-            const isNew = opts.live && !document.getElementById(`msg-${msg.message_id}`);
+            const isNew = !!opts.live;
             _renderMessageEl(msg, feed, prev);
             if (isNew) document.getElementById(`msg-${msg.message_id}`)?.classList.add("msg-enter");
             if (atBottom) {
@@ -642,6 +739,7 @@ export function createRendering({
         // --- Body column ---
         const body = document.createElement("div");
         body.className = "msg-body";
+        let bodyHtml = "";
 
         // Inline reply quote: one muted line above the message, click jumps to
         // the parent (scroll-reply). A deleted parent leaves a tombstone in
@@ -650,10 +748,10 @@ export function createRendering({
             const parent = messageMap[msg.reply_to_id];
             const replyIdEsc = escHtml(msg.reply_to_id);
             if (parent) {
-                body.innerHTML += `<div class="reply-context" data-msg-action="scroll-reply" data-reply-id="${replyIdEsc}">${replyQuoteHtml(parent)}</div>`;
+                bodyHtml += `<div class="reply-context" data-msg-action="scroll-reply" data-reply-id="${replyIdEsc}">${replyQuoteHtml(parent)}</div>`;
             } else {
                 // Parent not in the buffer: fetch it once, fill the quote when it arrives
-                body.innerHTML += `<div class="reply-context reply-context-loading" data-msg-action="scroll-reply" data-reply-id="${replyIdEsc}" data-reply-target="${replyIdEsc}"><em>${t('msg.loadingReply')}</em></div>`;
+                bodyHtml += `<div class="reply-context reply-context-loading" data-msg-action="scroll-reply" data-reply-id="${replyIdEsc}" data-reply-target="${replyIdEsc}"><em>${t('msg.loadingReply')}</em></div>`;
                 if (!state._requestedReplies.has(msg.reply_to_id)
                         && socket && socket.readyState === WebSocket.OPEN) {
                     state._requestedReplies.add(msg.reply_to_id);
@@ -664,7 +762,7 @@ export function createRendering({
 
         // Round 68: forwarded banner
         if (msg.forwarded) {
-            body.innerHTML += `<div class="forwarded-banner">${icon('forward', { size: 12 })} ${t('msg.forwardedFrom', { name: escHtml(msg.forwarded_from_name || '') })}</div>`;
+            bodyHtml += `<div class="forwarded-banner">${icon('forward', { size: 12 })} ${t('msg.forwardedFrom', { name: escHtml(msg.forwarded_from_name || '') })}</div>`;
         }
 
         // Header: name + timestamp (first in group only)
@@ -692,7 +790,7 @@ export function createRendering({
                 const expiresAt = new Date(msg.timestamp).getTime() + currentDisappearMs;
                 expireHtml = `<span class="msg-expire-countdown" title="${t('msg.expires')}">${icon('clock', { size: 12 })} <span class="msg-expire-label">${_expireLabel(expiresAt - Date.now())}</span></span>`;
             }
-            body.innerHTML += `<div class="msg-header"><span class="msg-sender" style="color:${avatarColor}">${escHtml(name)}${botBadge}${suffixHtml}${shieldHtml}${dmAuthHtml}</span><span class="msg-ts-header">${timeHtml(msg.timestamp, "msg-ts-time")}${importedBadge}${expireHtml}</span></div>`;
+            bodyHtml += `<div class="msg-header"><span class="msg-sender" style="color:${avatarColor}">${escHtml(name)}${botBadge}${suffixHtml}${shieldHtml}${dmAuthHtml}</span><span class="msg-ts-header">${timeHtml(msg.timestamp, "msg-ts-time")}${importedBadge}${expireHtml}</span></div>`;
         }
 
         // Content
@@ -710,56 +808,231 @@ export function createRendering({
             const _durSecs = msg.duration_ms ? Math.max(1, Math.floor(msg.duration_ms / 1000)) : 0;
             const dur = _durSecs ? `<span class="audio-duration">${Math.floor(_durSecs / 60)}:${String(_durSecs % 60).padStart(2, '0')}</span>` : "";
             const _audioLabel = escHtml(t('msg.voiceFrom', { name }) + (_durSecs ? t('msg.voiceDuration', { secs: _durSecs }) : ""));
-            body.innerHTML += `<div class="audio-message"><audio controls aria-label="${_audioLabel}" src="data:audio/webm;base64,${b64attr(msg.audio_b64)}"></audio>${dur}${receiptHtml}</div>`;
+            bodyHtml += `<div class="audio-message"><audio controls aria-label="${_audioLabel}" src="data:audio/webm;base64,${b64attr(msg.audio_b64)}"></audio>${dur}${receiptHtml}</div>`;
         } else if (_poll) {
             // R59F: poll card — plain text on the wire, upgraded rendering here.
             // Each option is a vote button; renderReactions fills in the
             // counts from the keycap reactions, so they live-update.
             const rows = _poll.options.map(o =>
                 `<button type="button" class="poll-opt" data-msg-action="poll-vote" data-msg-id="${msgIdEsc}" data-emoji="${o.emoji}" aria-pressed="false"><span class="poll-opt-bar" aria-hidden="true"></span><span class="poll-opt-text">${o.emoji} ${escHtml(o.text)}</span><span class="poll-opt-count"></span></button>`).join('');
-            body.innerHTML += `<div class="msg-content"><div class="poll-card" dir="auto">
+            bodyHtml += `<div class="msg-content"><div class="poll-card" dir="auto">
                 <div class="poll-q">${escHtml(_poll.question)}</div>${rows}
                 <div class="poll-foot"><span class="poll-hint">${t('poll.voteHint')}</span>${editedHtml}${receiptHtml}</div></div></div>`;
         } else if (isFileCaption(msg)) {
             // The card names the file; the "📎 name" caption would repeat it.
-            body.innerHTML += `<div class="msg-content msg-content--file"><span class="msg-text" dir="auto"></span>${editedHtml}${receiptHtml}</div>`;
+            bodyHtml += `<div class="msg-content msg-content--file"><span class="msg-text" dir="auto"></span>${editedHtml}${receiptHtml}</div>`;
         } else {
-            body.innerHTML += `<div class="msg-content"><span class="msg-text" dir="auto">${renderedText}</span>${editedHtml}${receiptHtml}</div>`;
+            bodyHtml += `<div class="msg-content"><span class="msg-text" dir="auto">${renderedText}</span>${editedHtml}${receiptHtml}</div>`;
         }
 
-        if (fileHtml) body.innerHTML += fileHtml;
-        body.innerHTML += `<div id="reactions-${msgIdEsc}" class="reactions"></div>`;
+        if (fileHtml) bodyHtml += fileHtml;
+        bodyHtml += `<div id="reactions-${msgIdEsc}" class="reactions"></div>`;
 
         // Hover action bar
-        body.innerHTML += `<div class="msg-actions">
+        bodyHtml += `<div class="msg-actions">
             <button data-msg-action="react" data-msg-id="${msgIdEsc}" class="icon-btn" aria-label="${t('msg.react')}" title="${t('msg.react')}">${icon('face-smile')}</button>
             <button data-msg-action="reply" data-msg-id="${msgIdEsc}" class="icon-btn" aria-label="${t('msg.reply')}" title="${t('msg.reply')}">${icon('reply')}</button>
             ${editBtn}
             <button data-msg-action="more" data-msg-id="${msgIdEsc}" class="icon-btn" aria-label="${t('ui.moreActions')}" title="${t('ui.moreActions')}" aria-haspopup="true">${icon('ellipsis-horizontal')}</button>
         </div>`;
+        body.innerHTML = bodyHtml;
 
         div.appendChild(avatarCol);
         div.appendChild(body);
         div.addEventListener("contextmenu", e => openCtxMenu(e, msgId));
         feed.appendChild(div);
-        renderReactions(msgId);
+        if (opts.deferReactions) opts.deferReactions.push(msgId);
+        else renderReactions(msgId);
+    }
+
+    // --- Windowed feed ------------------------------------------------------
+    // The DOM holds a contiguous run of the buffer (allMessages). Paging older
+    // prepends only the new rows; past MAX_RENDERED rows the far end is
+    // dropped and rendered again when the reader scrolls back to it.
+
+    // Build rows for `list` off-document. Reactions are drawn once the rows
+    // are in the document (renderReactions looks them up by id).
+    function _renderBatch(list, prev) {
+        const frag = typeof document.createDocumentFragment === "function"
+            ? document.createDocumentFragment() : document.createElement("div");
+        const ids = [];
+        for (const m of list) {
+            const msg = _current(m);
+            if (!msg) continue;
+            _renderMessageEl(msg, frag, prev, { deferReactions: ids });
+            prev = msg;
+        }
+        return { frag, ids };
+    }
+
+    function _insertBatch(feed, batch, ref) {
+        const { frag, ids } = batch;
+        if (frag.nodeType === 11) feed.insertBefore(frag, ref || null);
+        else while (frag.firstElementChild) feed.insertBefore(frag.firstElementChild, ref || null);
+        ids.forEach(id => renderReactions(id));
+    }
+
+    function _labelOf(el) {
+        const m = el && getMessageMap()[el.dataset.messageId];
+        return m && m.timestamp ? _dateLabelForTimestamp(m.timestamp) : null;
+    }
+
+    function _dateDividerEl(label) {
+        const d = document.createElement("div");
+        d.className = "date-divider";
+        d.innerHTML = `<span>${escHtml(label)}</span>`;
+        return d;
+    }
+
+    function _bufferIndexOf(id, fromEnd = false) {
+        const am = getAllMessages();
+        if (fromEnd) {
+            for (let i = am.length - 1; i >= 0; i--) if (am[i].message_id === id) return i;
+            return -1;
+        }
+        return am.findIndex(m => m.message_id === id);
+    }
+
+    // Drop rows beyond MAX_RENDERED from the top or the bottom. Never drops
+    // the row holding keyboard focus.
+    function _trimFar(feed, side) {
+        if (!(MAX_RENDERED > 0)) return;
+        const els = Array.from(feed.querySelectorAll(".message[data-message-id]"));
+        const excess = els.length - MAX_RENDERED;
+        if (excess <= 0) return;
+        const ae = document.activeElement;
+        const focusRow = ae && typeof ae.closest === "function" ? ae.closest(".message") : null;
+        const fi = focusRow ? els.indexOf(focusRow) : -1;
+        if (side === "bottom") {
+            if (fi >= els.length - excess) return;
+            let el = _dividerRunStart(els[els.length - excess]);
+            while (el) { const nx = el.nextElementSibling; el.remove(); el = nx; }
+            state._lastRenderedDate = _labelOf(_lastMsgEl(feed));
+            state._detachedTail = true;
+            return;
+        }
+        if (fi >= 0 && fi < excess) return;
+        const keep = els[excess];
+        const anchor = captureScrollAnchor(feed);
+        const fromBottom = feed.scrollHeight - feed.scrollTop;
+        const stop = _dividerRunStart(keep);
+        while (feed.firstElementChild && feed.firstElementChild !== stop) feed.firstElementChild.remove();
+        // The new first row starts a day and a group of its own.
+        if (!(stop !== keep && stop.classList.contains("date-divider"))) {
+            const label = _labelOf(keep);
+            if (label) feed.insertBefore(_dateDividerEl(label), stop);
+        }
+        if (keep.classList.contains("msg-grouped")) _promoteToGroupHead(keep);
+        if (!restoreScrollAnchor(feed, anchor)) feed.scrollTop = feed.scrollHeight - fromBottom;
+    }
+
+    // Render up to `count` buffered messages above the first rendered row,
+    // keeping the row the reader is on in place. Returns how many it drew.
+    function _prependOlder(feed, count) {
+        const first = _firstMsgEl(feed);
+        if (!first) return 0;
+        const idx = _bufferIndexOf(first.dataset.messageId);
+        if (idx <= 0) return 0;
+        const list = getAllMessages().slice(Math.max(0, idx - count), idx);
+        _busy(feed, () => {
+            const anchor = captureScrollAnchor(feed);
+            const fromBottom = feed.scrollHeight - feed.scrollTop;
+            const saved = state._lastRenderedDate;
+            state._lastRenderedDate = null;
+            const batch = _renderBatch(list, null);
+            const lastLabel = state._lastRenderedDate;
+            state._lastRenderedDate = saved;
+            const run = _dividerRunStart(first);
+            _insertBatch(feed, batch, run);
+            // Same day across the seam: the old first row's day divider goes.
+            if (run !== first && run.classList.contains("date-divider") && lastLabel && lastLabel === _labelOf(first)) {
+                run.remove();
+            }
+            if (!restoreScrollAnchor(feed, anchor)) feed.scrollTop = feed.scrollHeight - fromBottom;
+            _trimFar(feed, "bottom");
+        });
+        return list.length;
+    }
+
+    // Render up to `count` buffered messages below the last rendered row
+    // (the reader scrolls back down after paging far up).
+    function _appendNewer(feed, count) {
+        const am = getAllMessages();
+        const last = _lastMsgEl(feed);
+        const idx = last ? _bufferIndexOf(last.dataset.messageId, true) : -1;
+        if (idx < 0) { renderMessages(); return; }
+        const list = am.slice(idx + 1, idx + 1 + count);
+        _busy(feed, () => {
+            _insertBatch(feed, _renderBatch(list, getMessageMap()[last.dataset.messageId] || null), null);
+            if (idx + 1 + count >= am.length) state._detachedTail = false;
+            _trimFar(feed, "top");
+        });
+    }
+
+    // Make sure a buffered message has a row (reply / pin / search jumps to
+    // a message that was paged out or never rendered). Returns the row, or
+    // null when the message is not in the buffer.
+    function revealMessage(msgId) {
+        const existing = document.getElementById(`msg-${msgId}`);
+        if (existing) return existing;
+        const am = getAllMessages();
+        const idx = _bufferIndexOf(msgId);
+        const feed = document.getElementById("message-feed");
+        if (idx < 0 || !feed) return null;
+        const from = Math.max(0, Math.min(idx - Math.floor(RENDER_WINDOW / 2), am.length - RENDER_WINDOW));
+        const to = Math.min(am.length, from + RENDER_WINDOW);
+        _busy(feed, () => {
+            feed.innerHTML = "";
+            state._lastRenderedDate = null;
+            _renderThreaded(am.slice(from, to).map(_current).filter(Boolean), feed);
+            state._detachedTail = to < am.length;
+            state._pinnedToBottom = false;
+            if (state._detachedTail) _updateScrollBottomBtn();
+        });
+        return document.getElementById(`msg-${msgId}`);
     }
 
     // C3: merge a batch of older messages (e.g. a federated /room-history page)
-    // into the buffer — dedupe, keep chronological order, re-render the expanded
-    // window and keep the message the reader was on anchored in place.
-    // Returns the number of new messages actually merged.
+    // into the buffer: dedupe, keep chronological order, draw only the new
+    // rows above the rendered ones and keep the message the reader was on
+    // anchored in place. Returns the number of new messages actually merged.
     function mergeOlderHistory(olderMsgs) {
         const am = getAllMessages();
         const mm = getMessageMap();
-        const seen = new Set(am.map(m => m.message_id));
+        const seen = _bufferIds(am).ids;
         const older = (olderMsgs || []).filter(m => m && m.message_id && !seen.has(m.message_id));
         if (!older.length) return 0;
         const feed = document.getElementById("message-feed");
-        const renderedCount = feed ? feed.querySelectorAll(".message").length : 0;
+        const firstEl = feed ? _firstMsgEl(feed) : null;
         older.forEach(m => { mm[m.message_id] = m; am.push(m); });
         am.sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || ""));
-        if (feed) rerenderKeepingAnchor(am.slice(-(renderedCount + older.length)), feed);
+        if (!feed) return older.length;
+        if (firstEl) {
+            const idx = _bufferIndexOf(firstEl.dataset.messageId);
+            const newIds = new Set(older.map(m => m.message_id));
+            let landedInside = false;
+            for (let i = Math.max(idx, 0); i < am.length && !landedInside; i++) landedInside = newIds.has(am[i].message_id);
+            if (idx >= 0 && !landedInside) {
+                _prependOlder(feed, older.length);
+                return older.length;
+            }
+            // Some of the page sorts in among the rendered rows: redraw the
+            // rendered range plus the new rows.
+            const lastEl = _lastMsgEl(feed);
+            const end = lastEl ? _bufferIndexOf(lastEl.dataset.messageId, true) + 1 : am.length;
+            let start = Math.max(0, idx < 0 ? 0 : idx);
+            for (let i = 0; i < am.length; i++) if (newIds.has(am[i].message_id)) { start = Math.min(start, i); break; }
+            _busy(feed, () => {
+                rerenderKeepingAnchor(am.slice(start, Math.max(end, start)).map(_current).filter(Boolean), feed);
+                if (end < am.length) {
+                    state._detachedTail = true;
+                    state._lastRenderedDate = _labelOf(_lastMsgEl(feed));
+                }
+                _trimFar(feed, "bottom");
+            });
+            return older.length;
+        }
+        rerenderKeepingAnchor(am.slice(-older.length).map(_current).filter(Boolean), feed);
         return older.length;
     }
 
@@ -784,22 +1057,28 @@ export function createRendering({
             const activeView = getActiveView();
             const socket = getSocket();
             const feed = e.target;
-            state._pinnedToBottom = isFeedAtBottom(feed);
+            const detached = _tailDetached(feed);
+            const atBottom = isFeedAtBottom(feed);
+            state._pinnedToBottom = atBottom && !detached;
             // Hide scroll-to-bottom btn when user scrolls to bottom
             if (state._pinnedToBottom) {
                 state._scrollBottomUnread = 0;
                 state._unreadSeen = true;
                 document.getElementById("scroll-bottom-btn").style.display = "none";
             }
+            // Paged far up and back down to the last rendered row: render
+            // the next newer rows from the buffer.
+            if (detached && atBottom) { _appendNewer(feed, SCROLL_BATCH); return; }
             if (feed.scrollTop !== 0) return;
-            // First expand the in-memory buffer, but only while it holds
-            // messages that are not rendered yet. Once everything buffered is on
-            // screen, fall through and ask for older history.
+            // First expand from the in-memory buffer, but only while it holds
+            // older messages that are not rendered yet. Once the oldest
+            // buffered message is on screen, fall through and ask for more.
+            const first = _firstMsgEl(feed);
+            const firstIdx = first ? _bufferIndexOf(first.dataset.messageId) : -1;
+            if (firstIdx > 0) { _prependOlder(feed, SCROLL_BATCH); return; }
             const rendered = feed.querySelectorAll(".message").length;
-            if (allMessages.length > rendered) {
-                const totalLoaded = rendered + SCROLL_BATCH;
-                const slice = allMessages.slice(-Math.min(totalLoaded, allMessages.length));
-                rerenderKeepingAnchor(slice, feed);
+            if (firstIdx < 0 && allMessages.length > rendered) {
+                rerenderKeepingAnchor(allMessages.slice(-Math.min(rendered + SCROLL_BATCH, allMessages.length)).map(_current).filter(Boolean), feed);
                 return;
             }
             // C3: federated room (hosted on another gateway) — page older history
@@ -904,6 +1183,6 @@ export function createRendering({
         _renderMessageEl, _dateLabelForTimestamp,
         markUnread, setUnreadBefore, scrollToUnread, clearUnreadDivider, resetUnread,
         removeMessage, fillAttachment,
-        mergeOlderHistory, rerenderKeepingAnchor, attach, state,
+        mergeOlderHistory, rerenderKeepingAnchor, revealMessage, attach, state,
     };
 }

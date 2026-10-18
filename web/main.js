@@ -642,7 +642,8 @@ import { initThemePicker } from './theme.js';
             });
         // Pinned messages: destructured into same-named bindings.
         const { pinMsg, showPinPanel, renderPins, unpinMsg, jumpToMsg } =
-            createPins({ getSocket: () => socket, getActiveView: () => activeView, getMessages: () => allMessages });
+            createPins({ getSocket: () => socket, getActiveView: () => activeView, getMessages: () => allMessages,
+                revealMessage: (id) => rendering.revealMessage(id) });
         // Profile / presence: userPresence and messageMap stay host-owned (the
         // dispatch and renderer also touch them) and are injected by reference.
         const {
@@ -3953,7 +3954,7 @@ import { initThemePicker } from './theme.js';
             row.click();
             let tries = 0;
             const wait = setInterval(() => {
-                if (document.getElementById(`msg-${msgId}`) || ++tries > 20) {
+                if (document.getElementById(`msg-${msgId}`) || allMessages.some(m => m.message_id === msgId) || ++tries > 20) {
                     clearInterval(wait);
                     jumpToMsg(msgId);
                 }
@@ -6441,7 +6442,7 @@ import { initThemePicker } from './theme.js';
                         // list) is where a contact is managed. Not both at once.
                         showProfileCard(webid, name, e.clientX, e.clientY);
                         break;
-                    case 'scroll-reply': jumpToMessage(document.getElementById(`msg-${replyId}`), scrollBehavior()); break;
+                    case 'scroll-reply': jumpToMessage(rendering.revealMessage(replyId), scrollBehavior()); break;
                     case 'bookmark':
                         savedMsgs.toggleBookmark(messageMap[msgId], activeView);
                         break;

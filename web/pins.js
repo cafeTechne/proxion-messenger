@@ -10,7 +10,8 @@ import { escHtml, scrollBehavior, didIdTag } from './util.js';
 import { jumpToMessage } from './wayfinding.js';
 import { isUndecryptable } from './e2e-secondary.js';
 
-export function createPins({ getSocket, getActiveView, getMessages = () => [] }) {
+export function createPins({ getSocket, getActiveView, getMessages = () => [],
+    revealMessage = (id) => document.getElementById(`msg-${id}`) }) {
 
     function pinMsg(msgId) {
         const socket = getSocket();
@@ -76,8 +77,8 @@ export function createPins({ getSocket, getActiveView, getMessages = () => [] })
     }
 
     function jumpToMsg(msgId) {
-        const el = document.getElementById(`msg-${msgId}`);
-        jumpToMessage(el, scrollBehavior());
+        // A pinned message paged out of the feed is rendered again first.
+        jumpToMessage(revealMessage(msgId), scrollBehavior());
     }
 
     return { pinMsg, showPinPanel, renderPins, unpinMsg, jumpToMsg };
