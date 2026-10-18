@@ -14,6 +14,7 @@
 // legacy free-form passphrases.
 
 import { t } from './i18n.js';
+import { gatewayUrl } from './util.js';
 
 // Digits + uppercase minus lookalikes (0, 1, I, L, O, U): 30 chars.
 export const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -103,7 +104,7 @@ export function createRecovery({ showToast, showPromptModal, showConfirm }) {
 
     async function _downloadKit(passphrase) {
         try {
-            const resp = await fetch('/backup',
+            const resp = await fetch(gatewayUrl('/backup'),
                 { headers: _authHeaders({ 'x-proxion-passphrase': passphrase }) });
             if (!resp.ok) { showToast(t(recoveryErrorKey('backup', resp.status)), 'error'); return false; }
             const blob = await resp.blob();
@@ -161,7 +162,7 @@ export function createRecovery({ showToast, showPromptModal, showConfirm }) {
         const pp = passphraseFromInput(raw);
         try {
             const data = await file.arrayBuffer();
-            const resp = await fetch('/restore?dry_run=1', {
+            const resp = await fetch(gatewayUrl('/restore?dry_run=1'), {
                 method: 'POST',
                 headers: _authHeaders({ 'Content-Type': 'application/json', 'x-proxion-passphrase': pp }),
                 body: data,
@@ -185,7 +186,7 @@ export function createRecovery({ showToast, showPromptModal, showConfirm }) {
         const pp = passphraseFromInput(raw);
         try {
             const data = await file.arrayBuffer();
-            const resp = await fetch('/restore', {
+            const resp = await fetch(gatewayUrl('/restore'), {
                 method: 'POST',
                 headers: _authHeaders({ 'Content-Type': 'application/json', 'x-proxion-passphrase': pp }),
                 body: data,

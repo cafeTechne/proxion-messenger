@@ -2,7 +2,7 @@
 // main.js (R40). createVoice(deps) owns voice state in `state` and returns the
 // handlers main.js wires into the WS dispatch and call/mute/leave buttons.
 import { t } from './i18n.js';
-import { escHtml } from './util.js';
+import { escHtml, gatewayUrl } from './util.js';
 import { extractFingerprint, signFingerprint, classifyPeerSdp } from './callsec.js';
 import { senderCap, canEnableVideo } from './callquality.js';
 import { mediaConstraints } from './devices.js';
@@ -661,7 +661,7 @@ export function createVoice(deps) {
             });
             if (!state._turnIceServer) {
                 try {
-                    const _tc = await fetch('/turn-credentials').then(r => r.json());
+                    const _tc = await fetch(gatewayUrl('/turn-credentials')).then(r => r.json());
                     if (_tc && _tc.urls && _tc.urls.length > 0) {
                         state._turnIceServer = { urls: _tc.urls, username: _tc.username, credential: _tc.credential };
                     }

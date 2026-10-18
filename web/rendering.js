@@ -20,7 +20,7 @@
 //   renderWindow, scrollBatch,
 // })
 
-import { didSuffix, escHtml, webidColor, avatarInitial, renderMarkdown, expireLabel as _expireLabel, b64attr, formatFileSize } from './util.js';
+import { didSuffix, escHtml, webidColor, avatarInitial, renderMarkdown, expireLabel as _expireLabel, b64attr, formatFileSize, gatewayUrl } from './util.js';
 import { parsePoll } from './polls.js';
 import { applyRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { t, tn, getLocale } from './i18n.js';
@@ -810,7 +810,7 @@ export function createRendering({
                 const _oldest = allMessages[0];
                 if (_code && _oldest && _oldest.timestamp) {
                     state._loadingOlderHistory = true;
-                    fetch(`/room-history/${encodeURIComponent(activeView.id)}?code=${encodeURIComponent(_code)}&before=${encodeURIComponent(_oldest.timestamp)}&limit=${SCROLL_BATCH}`)
+                    fetch(gatewayUrl(`/room-history/${encodeURIComponent(activeView.id)}?code=${encodeURIComponent(_code)}&before=${encodeURIComponent(_oldest.timestamp)}&limit=${SCROLL_BATCH}`))
                         .then(r => r.ok ? r.json() : null)
                         .then(data => { state._loadingOlderHistory = false; mergeOlderHistory(data && data.messages); })
                         .catch(() => { state._loadingOlderHistory = false; });

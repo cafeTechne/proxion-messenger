@@ -6,7 +6,7 @@
 // createStatusBanners() — no deps.
 
 import { t } from './i18n.js';
-import { escHtml } from './util.js';
+import { escHtml, gatewayUrl } from './util.js';
 import { icon } from './icons.js';
 
 // ── Banner slot ─────────────────────────────────────────────────────────────
@@ -132,7 +132,7 @@ export function createStatusBanners() {
         if (document.getElementById("nat-warning-banner")) return;
         if (sessionStorage.getItem("proxion_nat_dismissed")) return;
         // Fetch connectivity details to give actionable, user-friendly guidance
-        fetch("/connectivity").then(r => r.json()).then(c => {
+        fetch(gatewayUrl("/connectivity")).then(r => r.json()).then(c => {
             // Reachable directly OR via the sealed relay fallback → no warning.
             if (c.public_url_set || c.relay_fallback_active) return;
             const banner = document.createElement("div");

@@ -215,13 +215,15 @@ describe('obPodTestConnection', () => {
     expect(global.fetch.mock.calls[0][0]).toBe('/setup/pod');
     expect(els['ob-pod-continue-btn'].disabled).toBe(false);
   });
-  it('falls back to the stored gateway URL off http (desktop shell)', async () => {
-    window.location = { protocol: 'tauri:' };
-    localStorage.setItem('proxion_gateway_http_url', 'http://127.0.0.1:9123/');
+  it('posts to the loopback sidecar from the desktop shell', async () => {
+    window.location = { protocol: 'tauri:', hostname: 'localhost' };
+    // The advertised gateway URL can be a public tunnel; the shell's own
+    // gateway is always the loopback sidecar.
+    localStorage.setItem('proxion_gateway_http_url', 'https://calm-x.trycloudflare.com/');
     global.fetch = vi.fn(async () => ({ json: async () => ({ status: 'ok' }) }));
     const { ob } = make();
     fill(ob);
     await ob.obPodTestConnection();
-    expect(global.fetch.mock.calls[0][0]).toBe('http://127.0.0.1:9123/setup/pod');
+    expect(global.fetch.mock.calls[0][0]).toBe('http://127.0.0.1:8080/setup/pod');
   });
 });

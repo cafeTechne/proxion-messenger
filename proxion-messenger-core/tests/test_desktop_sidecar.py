@@ -30,6 +30,16 @@ MAIN_JS = REPO / "web" / "main.js"
 TAURI_ORIGIN = "https://tauri.localhost"
 
 
+def _run(coro):
+    """Run *coro* on a private loop, leaving the thread's current loop alone
+    (asyncio.run clears it, which breaks later tests that call get_event_loop)."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -159,7 +169,7 @@ def test_webview_can_reach_sidecar_over_plain_ws_and_http(sidecars):
         ) as ws:
             return ws.open if hasattr(ws, "open") else True
 
-    assert asyncio.run(_handshake())
+    assert _run(_handshake())
     req = urllib.request.Request(f"http://127.0.0.1:{sc.http_port}/health",
                                  headers={"Origin": TAURI_ORIGIN})
     with urllib.request.urlopen(req, timeout=10) as r:

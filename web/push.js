@@ -8,6 +8,8 @@
 //
 // createPush({ getSocket }) — getSocket returns the reassignable host socket.
 
+import { gatewayUrl } from './util.js';
+
 // A host that a remote pod's CSS could never POST (loopback / private / mDNS). If the
 // app is served from such an origin, the gateway is not publicly reachable, so
 // closed-app push via the R77 webhook cannot arrive.
@@ -70,7 +72,7 @@ export function createPush({ getSocket }) {
             if (perm !== "granted") return false;
 
             const reg = await navigator.serviceWorker.ready;
-            const resp = await fetch("/vapid-public-key");
+            const resp = await fetch(gatewayUrl("/vapid-public-key"));
             if (!resp.ok) return false;
             const { publicKey } = await resp.json();
             if (!publicKey) return false;

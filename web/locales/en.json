@@ -71,6 +71,7 @@
   "modal.noRoomsToForward": "No rooms to forward to.",
   "modal.mustBeHttps": "Must be HTTPS",
   "common.updateFailed": "Update failed, try again",
+  "common.exportFailed": "Export failed, try again",
   "common.loadingEllipsis": "Loading…",
   "dm.encryptedPreview": "Encrypted message",
   "dm.historyCleared": "DM history cleared on this device",

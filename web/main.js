@@ -39,6 +39,7 @@ import {
     didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, markdownToPlain, didIdTag, dmFallbackName, timeAgo,
     expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8, scrollBehavior,
     composerEnterAction, isCoarsePointer, supportsFieldSizing, canShareLinks, shareLink,
+    gatewayUrl, gatewayHttpBase,
 } from './util.js';
 import { createFileTransfer } from './filetransfer.js';
 import { createSecondaryCrypto, createReactionTokens, isSealedPlain, sealedState, UNDECRYPTABLE, isUndecryptable, SEALED_FIELDS, SEALED_FILE_NAME, SEALED_FILE_MIME, FILE_TAG_BYTES, FILE_MIMES } from './e2e-secondary.js';
@@ -1126,11 +1127,28 @@ import { initThemePicker } from './theme.js';
             renderDmSidebar();
         }
 
-        function downloadExport(ticket) {
+        async function downloadExport(ticket) {
+            const path = ticket ? '/export?ticket=' + encodeURIComponent(ticket) : '/export';
             const a = document.createElement('a');
-            a.href = ticket ? '/export?ticket=' + encodeURIComponent(ticket) : '/export';
             a.download = `proxion-export-${new Date().toISOString().slice(0,10)}.json`;
-            a.click();
+            if (!gatewayHttpBase()) {
+                a.href = path;
+                a.click();
+                return;
+            }
+            // Desktop: the gateway is another origin, where a link would navigate
+            // the webview away instead of downloading. Fetch it and save a blob.
+            try {
+                const resp = await fetch(gatewayUrl(path));
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const url = URL.createObjectURL(await resp.blob());
+                a.href = url;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(url), 10000);
+            } catch (e) {
+                console.warn('[Proxion] export failed:', e);
+                showToast(t('common.exportFailed'), 'error');
+            }
         }
 
         // An existing DM thread with this peer, if the sidebar already has one.
@@ -1263,7 +1281,7 @@ import { initThemePicker } from './theme.js';
             // hidden there by applyTransportGating) so we do not fire requests
             // that cannot resolve.
             if (window.proxionTransport?.supports('federation'))
-            Promise.all([fetch('/connectivity').then(r=>r.json()), fetch('/health').then(r=>r.json())])
+            Promise.all([fetch(gatewayUrl('/connectivity')).then(r=>r.json()), fetch(gatewayUrl('/health')).then(r=>r.json())])
               .then(([c, h]) => {
                 const el = document.getElementById('settings-federation-status');
                 if (!el) return;
@@ -1308,11 +1326,9 @@ import { initThemePicker } from './theme.js';
                     if (toggle) toggle.checked = !!enabled;
                 }).catch(() => {});
             }
-            // About: the version from the gateway's well-known document, same
-            // origin when the gateway served the page (browser and desktop alike).
+            // About: the version from the gateway's well-known document.
             if (window.proxionTransport?.supports('federation')) {
-                const _wkBase = /^https?:$/.test(location.protocol) ? '' : 'http://127.0.0.1:8080';
-                fetch(_wkBase + '/.well-known/proxion')
+                fetch(gatewayUrl('/.well-known/proxion'))
                     .then(r => r.json())
                     .then(d => {
                         const el = document.getElementById('settings-app-version');
@@ -2336,7 +2352,7 @@ import { initThemePicker } from './theme.js';
                     if (!event.same_gateway && event.room_id) {
                         const _rc = _roomCodes[event.room_id] || "";
                         if (_rc) {
-                            fetch(`/room-history/${encodeURIComponent(event.room_id)}?code=${encodeURIComponent(_rc)}&limit=100`)
+                            fetch(gatewayUrl(`/room-history/${encodeURIComponent(event.room_id)}?code=${encodeURIComponent(_rc)}&limit=100`))
                                 .then(r => r.ok ? r.json() : null)
                                 .then(data => {
                                     if (!data || !data.messages || !data.messages.length) return;
@@ -2789,7 +2805,7 @@ import { initThemePicker } from './theme.js';
                     }
                     // R28: NAT warning banner (shown once per session)
                     if (!sessionStorage.getItem('proxion_nat_warned')) {
-                        fetch('/.well-known/proxion').then(r => r.json()).then(d => {
+                        fetch(gatewayUrl('/.well-known/proxion')).then(r => r.json()).then(d => {
                             if (d.nat_warning) {
                                 sessionStorage.setItem('proxion_nat_warned', '1');
                                 _showNatWarning();
@@ -6167,7 +6183,7 @@ import { initThemePicker } from './theme.js';
                 // the owner's WebSocket command and wait for pod_disconnected;
                 // otherwise sign-out looked done while the gateway kept syncing.
                 let _dropped = false;
-                try { _dropped = (await fetch('/api/pod-disconnect', { method: 'POST' })).ok; } catch (_) { /* offline */ }
+                try { _dropped = (await fetch(gatewayUrl('/api/pod-disconnect'), { method: 'POST' })).ok; } catch (_) { /* offline */ }
                 if (!_dropped && socket && socket.readyState === WebSocket.OPEN) {
                     _dropped = await new Promise((resolve) => {
                         _podDisconnectWaiter = resolve;
@@ -6203,7 +6219,7 @@ import { initThemePicker } from './theme.js';
                 if (window.__TAURI__?.invoke) {
                     window.__TAURI__.invoke('clear_pod_credentials').catch(() => {});
                 }
-                try { await fetch('/api/pod-disconnect', { method: 'POST' }); } catch (_) {}
+                try { await fetch(gatewayUrl('/api/pod-disconnect'), { method: 'POST' }); } catch (_) {}
                 try {
                     await Promise.race([
                         solidSession.logout({ logoutType: 'app' }),
@@ -6282,7 +6298,7 @@ import { initThemePicker } from './theme.js';
                 if (apiToken) headers['Authorization'] = 'Bearer ' + apiToken;
                 let resp = null, result = {};
                 try {
-                    resp = await fetch('/import', { method: 'POST', body: await file.text(), headers });
+                    resp = await fetch(gatewayUrl('/import'), { method: 'POST', body: await file.text(), headers });
                     result = await resp.json().catch(() => ({}));
                 } catch (err) {
                     console.warn('[Proxion] import failed:', err);
@@ -6904,7 +6920,7 @@ import { initThemePicker } from './theme.js';
                     // an E2E DM's earlier versions only as ciphertext.
                     const _dmView = activeView && (activeView.type === 'dm' || activeView.type === 'local_dm');
                     (_dmView ? dmHistoryGetEdits(msgId)
-                        : fetch(`/message-edits?message_id=${encodeURIComponent(msgId)}`).then(r => r.json()))
+                        : fetch(gatewayUrl(`/message-edits?message_id=${encodeURIComponent(msgId)}`)).then(r => r.json()))
                         .then(edits => {
                             if (!edits.length) { popover.innerHTML = inlineNotice(t('edit.noHistory')); return; }
                             popover.innerHTML = edits.map(ed =>

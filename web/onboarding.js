@@ -7,6 +7,7 @@
 // returned functions are destructured into same-named bindings in main.js, so
 // the existing setupEventListeners wiring keeps working unchanged.
 import { t } from './i18n.js';
+import { gatewayUrl } from './util.js';
 import { podWriteProfile } from './pod.js';
 import { solidLogin } from './auth.js';
 import { POD_BANNER_SNOOZE_KEY, POD_BANNER_SNOOZE_MS } from './status-banners.js';
@@ -201,12 +202,9 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         testBtn.disabled = true;
         statusEl.textContent = "";
         try {
-            // Served by the gateway (the normal case): post same-origin. The
-            // stored URL only arrives later with my_address, and the 8080 guess
-            // is wrong for any other port and blocked by the page CSP.
-            const servedOverHttp = /^https?:$/.test(window.location?.protocol || "");
-            const gwBase = servedOverHttp ? "" : (localStorage.getItem("proxion_gateway_http_url") || "http://127.0.0.1:8080").replace(/\/$/, "");
-            const resp = await fetch(`${gwBase}/setup/pod`, {
+            // Same-origin when the gateway served the page, the sidecar's
+            // loopback port in the desktop app (see gatewayUrl).
+            const resp = await fetch(gatewayUrl("/setup/pod"), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ css_url: cssUrl, email, password }),

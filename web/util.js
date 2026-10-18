@@ -5,6 +5,30 @@
 // i18n.js. This import is cycle-free: i18n.js imports nothing from the app.
 import { getLocale, t } from './i18n.js';
 
+// Where the gateway's HTTP endpoints live. A page the gateway served posts
+// same-origin. The desktop webview is served from the Tauri asset origin
+// (tauri://localhost, or https://tauri.localhost on Windows), where a relative
+// URL resolves to the bundled files, so it goes to the sidecar's fixed loopback
+// port instead (PROXION_HTTP_PORT in tauri-app/src-tauri/src/main.rs).
+export const DESKTOP_GATEWAY_HTTP = 'http://127.0.0.1:8080';
+
+const _pageLocation = () => globalThis.window?.location || globalThis.location;
+
+export function isTauriAssetOrigin(loc = _pageLocation()) {
+    return !!loc && (loc.protocol === 'tauri:' || loc.hostname === 'tauri.localhost');
+}
+
+export function gatewayHttpBase(loc = _pageLocation()) {
+    if (!loc) return '';
+    if (isTauriAssetOrigin(loc) || !/^https?:$/.test(loc.protocol || '')) return DESKTOP_GATEWAY_HTTP;
+    return '';
+}
+
+// Absolute (desktop) or same-origin URL for a gateway path such as '/health'.
+export function gatewayUrl(path, loc = _pageLocation()) {
+    return gatewayHttpBase(loc) + path;
+}
+
 // Inline id shown beside a peer-chosen display name in member, contact and DM
 // rows, so a copied name cannot pass for someone else. Ten base58 characters
 // (~58 bits) from the end: the start of every did:key is the same "z6Mk", and

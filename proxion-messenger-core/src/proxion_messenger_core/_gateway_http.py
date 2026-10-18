@@ -65,6 +65,74 @@ def _relay_body_is_file_chunk(body: bytes) -> bool:
     return isinstance(d, dict) and d.get("content_type") == "file_chunk"
 
 
+_PREFLIGHT_HEADER_CHARS = frozenset(
+    b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_, ")
+
+
+def _app_origin_preflight(origin: bytes, headers_raw: dict) -> bytes:
+    """204 answer to a CORS preflight from one of the app's own origins."""
+    out = (b"HTTP/1.1 204 No Content\r\n"
+           b"Access-Control-Allow-Origin: " + origin + b"\r\nVary: Origin\r\n"
+           b"Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+           b"Access-Control-Max-Age: 600\r\n")
+    req_hdrs = headers_raw.get(b"access-control-request-headers", b"")
+    if req_hdrs and len(req_hdrs) <= 512 and all(c in _PREFLIGHT_HEADER_CHARS for c in req_hdrs):
+        out += b"Access-Control-Allow-Headers: " + req_hdrs + b"\r\n"
+    if headers_raw.get(b"access-control-request-private-network", b"").lower() == b"true":
+        out += b"Access-Control-Allow-Private-Network: true\r\n"
+    return out + b"Content-Length: 0\r\n\r\n"
+
+
+class _AppOriginWriter:
+    """StreamWriter wrapper that adds ``Access-Control-Allow-Origin`` for the app.
+
+    The desktop webview is served from the Tauri asset origin, so every call it
+    makes to the gateway is cross-origin, while most handlers set ACAO for only a
+    few endpoints (or set ``*``). Buffers the response head and inserts the
+    caller's origin when the handler did not set ACAO itself. Only installed for
+    origins _is_trusted_origin already accepts as the local app.
+    """
+
+    def __init__(self, writer, origin: bytes):
+        self._w = writer
+        self._hdr = b"Access-Control-Allow-Origin: " + origin + b"\r\nVary: Origin\r\n"
+        self._buf = b""
+        self._done = False
+
+    def write(self, data) -> None:
+        if self._done:
+            self._w.write(data)
+            return
+        self._buf += bytes(data)
+        if not b"HTTP/".startswith(self._buf[:5]) or b"\r\n\r\n" in self._buf:
+            self._flush()
+
+    def _flush(self) -> None:
+        if self._done:
+            return
+        self._done = True
+        buf, self._buf = self._buf, b""
+        head, sep, rest = buf.partition(b"\r\n\r\n")
+        if buf.startswith(b"HTTP/") and sep:
+            if b"\r\naccess-control-allow-origin:" not in head.lower():
+                status, crlf, others = head.partition(b"\r\n")
+                head = status + b"\r\n" + (self._hdr + others if crlf else self._hdr[:-2])
+            buf = head + sep + rest
+        if buf:
+            self._w.write(buf)
+
+    async def drain(self) -> None:
+        self._flush()
+        await self._w.drain()
+
+    def close(self) -> None:
+        self._flush()
+        self._w.close()
+
+    def __getattr__(self, name):
+        return getattr(self._w, name)
+
+
 class HttpEndpointsMixin:
 
     # /relay and /relay/receipt are public endpoints, and their rate-limit buckets
@@ -1325,6 +1393,16 @@ class HttpEndpointsMixin:
                 _trust_peer = peer_ip
                 if peer_ip in ("127.0.0.1", "::1") and self._http_request_is_proxied(headers_raw):
                     _trust_peer = "proxied"
+
+                # The app's own origins (chiefly the desktop webview, served from the
+                # Tauri asset origin) call every endpoint cross-origin: answer their
+                # CORS preflights and let them read every response.
+                if origin_header and self._is_trusted_origin(origin_header, http_port, _trust_peer):
+                    if method == "OPTIONS":
+                        writer.write(_app_origin_preflight(origin_header, headers_raw))
+                        await writer.drain()
+                        return
+                    writer = _AppOriginWriter(writer, origin_header)
 
                 def _gated_acao() -> bytes:
                     """ACAO header for sensitive, same-origin-only endpoints.
