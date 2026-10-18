@@ -10,6 +10,7 @@ Requires on self: agent, config, dm_clients, _store, _pod_url, _pod_webid,
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import time
@@ -1260,12 +1261,25 @@ class PodSyncMixin:
         from .pod_room_store import PodRoomStore
         store = PodRoomStore(client)
         loop = asyncio.get_event_loop()
+        # The pod poll keeps rooms in step once a client is connected, so a
+        # room only needs this cold-cache pull once per process, not on every
+        # register. Files whose message is already cached are not fetched.
+        done = self.__dict__.setdefault("_pod_backfilled_rooms", set())
+        local = self._store
+
+        def _cached(mid: str) -> bool:
+            return local.get_message(mid) is not None
+
         for room_id in room_ids:
+            if room_id in done:
+                continue
+            done.add(room_id)
             _cutoff = self._disappear_cutoff_iso(room_id, is_dm=False)
             # R13: retry logic with 3 attempts and 2s backoff
             for _attempt in range(3):
                 try:
-                    msgs = await loop.run_in_executor(None, store.read_messages, room_id)
+                    msgs = await loop.run_in_executor(
+                        None, functools.partial(store.read_messages, room_id, skip_message=_cached))
                     for m in msgs:
                         message_id = m["message_id"]
                         # R13: deduplication — skip if already exists
@@ -1288,6 +1302,7 @@ class PodSyncMixin:
                     break
                 except Exception as exc:
                     if _attempt == 2:
+                        done.discard(room_id)  # try again on the next register
                         logger.warning("_backfill_rooms_from_pod failed after 3 attempts: %s", exc)
                     else:
                         await asyncio.sleep(2)

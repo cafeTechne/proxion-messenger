@@ -15,13 +15,17 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
+from concurrent.futures import ThreadPoolExecutor
+from typing import Callable, Optional
+from urllib.parse import unquote
 
 from .acp import set_acl_multi_auto
 from .solid_client import SolidClient, SolidError
 
 _VALID_WEBID_PREFIXES = ("http://", "https://", "did:")
 _MAX_ROOM_MEMBERS_ACL = 500
+# Parallel GETs when reading a room's message files from the pod.
+_READ_CONCURRENCY = 6
 
 
 def _safe_segment(segment: str, kind: str) -> str:
@@ -251,6 +255,7 @@ class PodRoomStore:
         room_id: str,
         after_timestamp: Optional[str] = None,
         limit: int = 200,
+        skip_message: Optional[Callable[[str], bool]] = None,
     ) -> list[dict]:
         """LIST the messages container, GET each file, and return sorted messages.
 
@@ -265,6 +270,9 @@ class PodRoomStore:
             If provided, only return messages where ``timestamp > after_timestamp``.
         limit:
             Maximum number of messages to return (newest if truncated).
+        skip_message:
+            Called with each file's message id; files it returns True for are
+            not fetched (a backfill passes "already cached locally").
         """
         container = self._messages_container_uri(room_id)
         try:
@@ -274,18 +282,34 @@ class PodRoomStore:
                 return []
             raise
 
-        messages: list[dict] = []
+        uris = []
         for uri in members:
             if not uri.endswith(".json"):
                 continue
+            if skip_message is not None:
+                mid = unquote(uri.rsplit("/", 1)[-1][:-len(".json")])
+                try:
+                    if skip_message(mid):
+                        continue
+                except Exception:
+                    pass
+            uris.append(uri)
+
+        def _fetch(uri: str) -> Optional[dict]:
             try:
-                raw = self._client.get(uri)
-                msg = json.loads(raw.decode("utf-8"))
-                if not isinstance(msg, dict):
-                    continue
-                messages.append(msg)
+                msg = json.loads(self._client.get(uri).decode("utf-8"))
             except Exception:
-                continue
+                return None
+            return msg if isinstance(msg, dict) else None
+
+        # One GET per file is unavoidable (LDP lists names only), but they
+        # need not wait on each other: a long room took one round trip each.
+        if len(uris) > 1:
+            with ThreadPoolExecutor(max_workers=min(_READ_CONCURRENCY, len(uris))) as pool:
+                fetched = list(pool.map(_fetch, uris))
+        else:
+            fetched = [_fetch(u) for u in uris]
+        messages: list[dict] = [m for m in fetched if m is not None]
 
         # Sort by timestamp (ISO strings sort lexicographically)
         messages.sort(key=lambda m: m.get("timestamp", ""))
