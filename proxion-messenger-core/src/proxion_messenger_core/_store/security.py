@@ -837,7 +837,8 @@ class SecurityStoreMixin(object):
                 ph = ",".join("?" * len(chunk))
                 for table, col in (("message_edits", None), ("message_files", "thread_id"),
                                    ("pins", "thread_id"), ("reactions", "room_id"),
-                                   ("dm_disappear_timers", "thread_id"), ("messages", "thread_id")):
+                                   ("dm_disappear_timers", "thread_id"), ("disappear_timer_since", "thread_id"),
+                                   ("messages", "thread_id")):
                     try:
                         if col is None:
                             cur = conn.execute(
