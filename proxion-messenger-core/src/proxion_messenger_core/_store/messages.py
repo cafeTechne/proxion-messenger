@@ -10,6 +10,7 @@ import json
 import logging
 import sqlite3
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -493,7 +494,9 @@ class MessageStoreMixin(object):
             ).fetchone()
             if existing:
                 return existing[0]
-            pin_id = f"pin-{int(time.time()*1000)}"
+            # Unique per pin: a bare millisecond stamp let two pins in the same
+            # millisecond share an id, and INSERT OR IGNORE dropped the second.
+            pin_id = f"pin-{int(time.time()*1000)}-{uuid.uuid4().hex[:8]}"
             conn.execute(
                 "INSERT OR IGNORE INTO pins (pin_id, thread_id, message_id, pinned_by, pinned_at, content)"
                 " VALUES (?, ?, ?, ?, ?, ?)",

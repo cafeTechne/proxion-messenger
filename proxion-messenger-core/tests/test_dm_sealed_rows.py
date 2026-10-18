@@ -133,3 +133,11 @@ async def test_pin_of_sealed_dm_carries_no_ciphertext(gw, noauth):
     assert pins["m-old"]["content"] == "" and pins["m-old"]["e2e"] is True
     assert pins["m-plain"]["content"] == "plain hello" and "e2e" not in pins["m-plain"]
     assert CT not in json.dumps(pins)
+
+
+def test_pins_in_the_same_millisecond_are_all_kept(tmp_path, monkeypatch):
+    st = LocalStore(str(tmp_path / "s.db"))
+    monkeypatch.setattr("proxion_messenger_core._store.messages.time.time", lambda: 1700000000.0)
+    for mid in ("a", "b", "c"):
+        st.save_pin("t", mid, "did:key:x")
+    assert sorted(p["message_id"] for p in st.get_pins("t")) == ["a", "b", "c"]
