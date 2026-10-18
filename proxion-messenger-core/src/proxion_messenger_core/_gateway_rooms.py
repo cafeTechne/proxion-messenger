@@ -863,9 +863,10 @@ class RoomHandlerMixin:
                 for m in raw
             ]
             self._attach_history_files(thread_id, msgs, is_room)
-            reactions = []
-            if is_room and self._store:
-                reactions = self._store.get_reactions(thread_id)
+            # DM threads too: their reactions are stored under the thread id
+            # (a sealed DM reaction as its token), and leaving them out made
+            # every DM reaction vanish on reload. Access was checked above.
+            reactions = self._store.get_reactions(thread_id) if self._store else []
 
             last_read_ts = 0
             caller_webid = self._client_webids.get(websocket)
@@ -1940,12 +1941,18 @@ class RoomHandlerMixin:
                     "timestamp":        m["timestamp"],
                     "message_id":       m["message_id"],
                     "reply_to_id":      m.get("reply_to_id"),
+                    "edited_at":        m.get("edited_at"),
                     "local":            True,
                     **({"imported": True} if m.get("imported") else {}),
                 }
                 for m in raw
             ]
-        await websocket.send(json.dumps({"type": "history", "thread_id": cert_id, "messages": messages}))
+        # Reactions ride with the history (a sealed one as its token, which the
+        # browser maps back to the emoji it saw); without them every DM
+        # reaction vanished on reload.
+        reactions = self._store.get_reactions(cert_id) if self._store else []
+        await websocket.send(json.dumps({"type": "history", "thread_id": cert_id,
+                                         "messages": messages, "reactions": reactions}))
 
     async def _handle_read_room(self, websocket, data: dict) -> None:
         room_id = data.get("room_id", "")

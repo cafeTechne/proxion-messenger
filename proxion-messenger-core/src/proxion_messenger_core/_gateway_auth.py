@@ -339,6 +339,8 @@ class AuthHandlerMixin:
                         "cert_id": cert_id,
                         "local": True,
                     }
+                    if msg.get("reply_to_id"):
+                        event["reply_to_id"] = msg["reply_to_id"]
                     for _k in _E2E_KEYS:
                         if _k in msg:
                             event[_k] = msg[_k]

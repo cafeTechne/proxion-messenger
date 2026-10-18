@@ -2775,6 +2775,7 @@ import { createAccountSync } from './account-sync.js';
                         unreadCounts[tid] = catchUpUnread(unreadCounts[tid], msgs.length);
                         updateSidebarBadge(tid);
                     }
+                    _applyHistoryReactions(event.reactions);
                     mergeDmLocalHistory(tid);
                     feed.removeAttribute("aria-busy");
                     break;
@@ -2826,24 +2827,7 @@ import { createAccountSync } from './account-sync.js';
                             updateSidebarBadge(tid);
                         }
                     }
-                    // Apply persisted reactions
-                    if (event.reactions && event.reactions.length > 0) {
-                        event.reactions.forEach(r => {
-                            // A sealed DM reaction is stored as a token; show the
-                            // emoji this device learned for it, or nothing.
-                            const emoji = secondary.translateReaction(r.emoji);
-                            if (emoji == null) return;
-                            if (!messageReactions[r.message_id]) messageReactions[r.message_id] = {};
-                            if (!messageReactions[r.message_id][emoji]) messageReactions[r.message_id][emoji] = [];
-                            if (!messageReactions[r.message_id][emoji].includes(r.sender_webid)) {
-                                messageReactions[r.message_id][emoji].push(r.sender_webid);
-                            }
-                        });
-                        const seen = new Set();
-                        event.reactions.forEach(r => {
-                            if (!seen.has(r.message_id)) { seen.add(r.message_id); renderReactions(r.message_id); }
-                        });
-                    }
+                    _applyHistoryReactions(event.reactions);
                     mergeDmLocalHistory(tid);
                     feed.removeAttribute("aria-busy");
                     break;
@@ -3788,6 +3772,26 @@ import { createAccountSync } from './account-sync.js';
         // ratchet can't re-decrypt, so on reopen they render as ciphertext /
         // "[could not decrypt]"; this replaces those with the plaintext this device
         // cached when it sent/decrypted them. No-op for rooms (dmHistoryLoad → []).
+        // Persisted reactions that arrive with a history page (rooms and DMs).
+        function _applyHistoryReactions(reactions) {
+            if (!Array.isArray(reactions) || !reactions.length) return;
+            reactions.forEach(r => {
+                // A sealed DM reaction is stored as a token; show the
+                // emoji this device learned for it, or nothing.
+                const emoji = secondary.translateReaction(r.emoji);
+                if (emoji == null) return;
+                if (!messageReactions[r.message_id]) messageReactions[r.message_id] = {};
+                if (!messageReactions[r.message_id][emoji]) messageReactions[r.message_id][emoji] = [];
+                if (!messageReactions[r.message_id][emoji].includes(r.sender_webid)) {
+                    messageReactions[r.message_id][emoji].push(r.sender_webid);
+                }
+            });
+            const seen = new Set();
+            reactions.forEach(r => {
+                if (!seen.has(r.message_id)) { seen.add(r.message_id); renderReactions(r.message_id); }
+            });
+        }
+
         async function mergeDmLocalHistory(threadId) {
             if (!threadId || !activeView || activeView.id !== threadId) return;
             let local;

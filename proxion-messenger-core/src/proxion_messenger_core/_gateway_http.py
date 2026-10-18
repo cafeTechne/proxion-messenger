@@ -56,6 +56,15 @@ _INVITE_DOWNLOAD_URL = "https://github.com/cafeTechne/proxion-messenger"
 FILE_RELAY_CHUNKS_PER_MIN = 1200
 FILE_RELAY_BYTES_PER_MIN = 128 * 1024 * 1024
 
+_REPLY_TO_ID_RE = __import__("re").compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+
+def _relay_reply_to_id(data) -> str | None:
+    """The reply_to_id of a relayed message when it is a well-formed message id,
+    else None (a malformed pointer is dropped, the message itself still delivers)."""
+    v = data.get("reply_to_id") if isinstance(data, dict) else None
+    return v if isinstance(v, str) and _REPLY_TO_ID_RE.match(v) else None
+
 
 def _relay_body_is_file_chunk(body: bytes) -> bool:
     try:
@@ -829,6 +838,8 @@ class HttpEndpointsMixin:
             "from_webid", "from_display_name", "to_webid", "message_id", "content", "timestamp",
             "signature", "relay_nonce", "display_name", "origin_gateway_url",
             "sender_webid", "message_scope",
+            # the message a DM or room message replies to (charset-checked below)
+            "reply_to_id",
             # E2E keys
             "e2e", "nonce", "msg_num", "key_header", "ratchet_pub", "pn", "x25519_pub",
             # E2E-sealed DM edit, reaction and file header version
@@ -1113,6 +1124,9 @@ class HttpEndpointsMixin:
             return "400 Bad Request", '{"error":"invalid_relay_fields"}'
         if relay_nonce and not _NONCE_RE.match(relay_nonce):
             return "400 Bad Request", '{"error":"invalid_relay_fields"}'
+        # A reply pointer is display-only and not covered by the relay signature:
+        # keep it only when it looks like a message id, else deliver without it.
+        reply_to_id = _relay_reply_to_id(data)
         if timestamp:
             try:
                 _ts_parsed = datetime.fromisoformat(timestamp)
@@ -1238,6 +1252,8 @@ class HttpEndpointsMixin:
                 "cert_id": cert_id,
                 "local": True,
             }
+            if reply_to_id:
+                event["reply_to_id"] = reply_to_id
             for _k in _E2E_KEYS:
                 if _k in data:
                     event[_k] = data[_k]
@@ -1269,6 +1285,7 @@ class HttpEndpointsMixin:
                     self._store.save_message(
                         message_id, cert_id or from_webid, "relay",
                         from_webid, display_name or None, content, timestamp,
+                        reply_to_id=reply_to_id,
                         seq_num=int(data.get("seq_num") or 0),
                         prev_hash=str(data.get("prev_hash") or ""),
                         e2e=bool(data.get("e2e")),
@@ -1339,6 +1356,8 @@ class HttpEndpointsMixin:
             "display_name": display_name,
             "cert_id": cert_id,
         }
+        if reply_to_id:
+            queue_entry["reply_to_id"] = reply_to_id
         for _k in _E2E_KEYS:
             if _k in data:
                 queue_entry[_k] = data[_k]
@@ -1347,6 +1366,7 @@ class HttpEndpointsMixin:
             self._store.save_message(
                 message_id, cert_id or to_webid, "relay",
                 from_webid, display_name or None, content, timestamp,
+                reply_to_id=reply_to_id,
                 seq_num=int(data.get("seq_num") or 0),
                 prev_hash=str(data.get("prev_hash") or ""),
                 e2e=bool(data.get("e2e")),

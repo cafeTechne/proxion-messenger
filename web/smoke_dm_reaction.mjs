@@ -255,10 +255,101 @@ try {
       console.error(`  · Bob GW (reaction relay):\n${pick(procs[1]._log())}`);
     });
 
+  if (process.exitCode) throw new Error('stop');
+
+  // ── Reply + edit, then reload BOTH sides: the reaction, the edited marker and
+  // the reply quote must all survive (they used to vanish on reload, and a
+  // cross-gateway reply arrived without its reply_to_id).
+  const ctx = async (p, msgId, item) => {
+    await p.evaluate((id) => {
+      const m = document.querySelector(`#message-feed .message[data-message-id="${id}"]`);
+      const r = m.getBoundingClientRect();
+      m.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + 20, clientY: r.y + 10 }));
+    }, msgId);
+    await sleep(250);
+    return p.evaluate((i) => { const e = document.getElementById(i); if (!e || getComputedStyle(e).display === 'none') return false; e.click(); return true; }, item);
+  };
+  const REPLY = 'dmreply-' + Math.random().toString(36).slice(2, 7);
+  step = 'bob-reply';
+  if (!(await ctx(bob, mid, 'ctx-reply'))) { fail('Reply is not offered on Bob'); throw new Error('stop'); }
+  await sleep(200);
+  await bob.focus('#message-input');
+  await bob.type('#message-input', REPLY);
+  await bob.keyboard.press('Enter');
+  await alice.waitForFunction((t) => document.getElementById('message-feed')?.textContent.includes(t),
+    { timeout: 15000, polling: 250 }, REPLY).catch(async () => {
+      fail(`Bob's reply "${REPLY}" did not arrive on Alice`);
+      console.error('  · Bob feed tail: ' + (await bob.evaluate(() => document.getElementById('message-feed')?.textContent || '')).slice(-200));
+      const rx = /relay|reply|400|error|warn/i;
+      const pick = (log) => (log || '').split('\n').filter(l => rx.test(l)).slice(-10).map(l => '    ' + l).join('\n');
+      console.error(`  · Alice GW:\n${pick(procs[0]._log())}`);
+      console.error(`  · Bob GW:\n${pick(procs[1]._log())}`);
+      console.error(`  · Bob console:\n${bob._console.slice(-8).join('\n')}`);
+      console.error(`  · Alice console:\n${alice._console.slice(-8).join('\n')}`);
+      console.error('  · Alice feed tail: ' + (await alice.evaluate(() => document.getElementById('message-feed')?.textContent || '')).slice(-200));
+    });
+  if (process.exitCode) throw new Error('stop');
+  const replyQuoted = (p, t, parent) => p.evaluate((t, parent) => {
+    const m = [...document.querySelectorAll('#message-feed .message[data-message-id]')].find(e => e.textContent.includes(t));
+    return !!m?.querySelector(`.reply-context[data-reply-id="${parent}"]`);
+  }, t, parent);
+  step = 'alice-sees-reply-quote';
+  await alice.waitForFunction((t, parent) => {
+    const m = [...document.querySelectorAll('#message-feed .message[data-message-id]')].find(e => e.textContent.includes(t));
+    return !!m?.querySelector(`.reply-context[data-reply-id="${parent}"]`);
+  }, { timeout: 5000, polling: 250 }, REPLY, mid).catch(() => fail('cross-gateway reply arrived on Alice without its reply quote (reply_to_id lost)'));
+  if (process.exitCode) throw new Error('stop');
+
+  const EDITED = MSG + '-edited';
+  step = 'alice-edit';
+  if (!(await ctx(alice, mid, 'ctx-edit'))) { fail('Edit is not offered on Alice'); throw new Error('stop'); }
+  await sleep(300);
+  await alice.keyboard.down('Control'); await alice.keyboard.press('a'); await alice.keyboard.up('Control');
+  await alice.keyboard.type(EDITED);
+  await alice.keyboard.press('Enter');
+  await bob.waitForFunction((id, t) => document.getElementById('msg-' + id)?.textContent.includes(t),
+    { timeout: 15000, polling: 250 }, mid, EDITED).catch(() => fail('Alice\'s edit did not reach Bob'));
+  if (process.exitCode) throw new Error('stop');
+  await sleep(1000);
+
+  const reopen = async (p, label) => {
+    step = 'reload-' + label;
+    await p.bringToFront();
+    await p.reload({ waitUntil: 'load', timeout: 20000 });
+    await p.evaluate(() => { const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none'; });
+    await p.waitForFunction(() => document.querySelector('.dot')?.classList.contains('online'), { timeout: 15000 })
+      .catch(() => fail(`${label} did not reconnect after reload`));
+    if (process.exitCode) throw new Error('stop');
+    await p.waitForFunction(() => document.querySelector('#contacts-list li, #dm-list li'), { timeout: 15000 })
+      .catch(() => fail(`DM gone from ${label} after reload`));
+    if (process.exitCode) throw new Error('stop');
+    await sleep(500);
+    await p.evaluate(() => (document.querySelector('#dm-list li, #contacts-list li')).click());
+    await p.waitForFunction((t) => document.getElementById('message-feed')?.textContent.includes(t),
+      { timeout: 10000, polling: 250 }, REPLY).catch(() => fail(`${label}: DM history missing after reload`));
+    if (process.exitCode) throw new Error('stop');
+    await sleep(2000); // server history, local plaintext and reactions settle
+  };
+  for (const [p, label] of [[alice, 'alice'], [bob, 'bob']]) {
+    await reopen(p, label);
+    step = label + '-after-reload';
+    const s = await p.evaluate((id) => ({
+      text: document.getElementById('msg-' + id)?.textContent || '',
+      edited: !!document.querySelector(`#msg-${id} .edited-badge`),
+      reactions: document.getElementById('reactions-' + id)?.textContent || '',
+    }), mid);
+    if (!s.text.includes(EDITED)) fail(`${label}: edited text missing after reload`);
+    if (!s.edited) fail(`${label}: "edited" marker lost after reload`);
+    if (!s.reactions.includes('🔥')) fail(`${label}: reaction lost after reload (container: "${s.reactions}")`);
+    if (!(await replyQuoted(p, REPLY, mid))) fail(`${label}: reply quote lost after reload`);
+    if (!process.exitCode) console.log(`  · ${label}: reaction, edit marker and reply quote kept after reload`);
+  }
+
   step = 'done';
   if (!process.exitCode) {
     console.log('  ✓ cross-gateway DM reaction OK — Bob reacted 🔥 to Alice\'s message and');
-    console.log('    Alice received it (federation identity model + dm_reaction relay verified).');
+    console.log('    Alice received it (federation identity model + dm_reaction relay verified),');
+    console.log('    and the reaction, edit marker and reply quote survive a reload on both sides.');
   }
 } catch (e) {
   if (e.message !== 'stop' && e.message !== 'no bob addr') console.error(`  ✗ [${step}] threw: ${e.message}`);

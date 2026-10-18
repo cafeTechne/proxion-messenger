@@ -829,6 +829,10 @@ class DmHandlerMixin:
                                "ratchet_pub", "pn", "x25519_pub"):
                         if _k in data:
                             inner_payload[_k] = data[_k]
+                    from ._gateway_http import _relay_reply_to_id
+                    _reply_to = _relay_reply_to_id(data)
+                    if _reply_to:
+                        inner_payload["reply_to_id"] = _reply_to
                     # Attempt sealed relay if peer's x25519 pub is known
                     # What gets queued if the peer is down: the unsealed signed
                     # payload (re-signed and re-sealed on each retry, see

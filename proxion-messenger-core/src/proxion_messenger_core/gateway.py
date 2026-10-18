@@ -2828,12 +2828,17 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             "message_id": message_id,
             "own": False,
         }
+        from ._gateway_http import _relay_reply_to_id
+        _reply_to = _relay_reply_to_id(data)
+        if _reply_to:
+            event["reply_to_id"] = _reply_to
         # Persist first: members who are offline right now still need the
         # message in history when they reconnect.
         if self._store:
             self._store.save_message(
                 message_id, room_id, "relay",
                 from_webid, display_name, content, timestamp,
+                reply_to_id=_reply_to,
             )
         delivered = False
         for ws in list(room.get("members", set())):

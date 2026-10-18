@@ -103,6 +103,16 @@ export function applyLocalRecord(existing, rec) {
         existing.e2e = false;
         changed = true;
     }
+    // An edit this device saw keeps its marker even when the gateway's row
+    // has none (the sender's copy, or a row stored before the edit landed).
+    if (rec.edited_at && !existing.edited_at) {
+        existing.edited_at = rec.edited_at;
+        changed = true;
+    }
+    if (rec.reply_to_id && !existing.reply_to_id) {
+        existing.reply_to_id = rec.reply_to_id;
+        changed = true;
+    }
     // The gateway has no DM file bytes; show the copy this device kept.
     if (rec.file && !existing.file?.data_b64 && (rec.file.data_b64 || !existing.file)) {
         existing.file = rec.file;

@@ -42,6 +42,19 @@ describe('DM file history', () => {
     expect(fromGateway.content).toBe('📎 pic.png');
   });
 
+  it('the local record restores the edited marker and reply pointer the gateway row lacks', () => {
+    const fromGateway = { message_id: 'm-1', content: 'hi', timestamp: '2026-01-01T00:00:00Z' };
+    const rec = { message_id: 'm-1', content: 'hi', edited_at: '2026-01-01T00:05:00Z', reply_to_id: 'm-0' };
+    expect(applyLocalRecord(fromGateway, rec)).toBe(true);
+    expect(fromGateway.edited_at).toBe('2026-01-01T00:05:00Z');
+    expect(fromGateway.reply_to_id).toBe('m-0');
+    // A gateway value already present is kept.
+    const g2 = { message_id: 'm-2', content: 'x', edited_at: 'G', reply_to_id: 'R' };
+    applyLocalRecord(g2, { message_id: 'm-2', content: 'x', edited_at: 'L', reply_to_id: 'L' });
+    expect(g2.edited_at).toBe('G');
+    expect(g2.reply_to_id).toBe('R');
+  });
+
   it('delete and disappearing expiry purge the file with the message', async () => {
     await dmHistorySave(msg('file-1', '2026-01-01T00:00:00Z'));
     await dmHistorySave(msg('file-2', '2026-01-03T00:00:00Z'));
