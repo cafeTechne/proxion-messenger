@@ -1273,6 +1273,7 @@ class HttpEndpointsMixin:
             # own count; _handle_relay_post also caps bytes per signing gateway.
             "relay_file": FILE_RELAY_CHUNKS_PER_MIN,
             "invite":  20,   # /invite, /invite/accept: 20/min
+            "room_join": 20,  # /room-join (cross-gateway room join): 20/min
             "backup":   5,   # /backup, /restore, /import: 5/min
             "turn":    30,   # /turn-credentials: 30/min
             "profile": 60,   # /profile/<did>: 60/min
@@ -1390,6 +1391,7 @@ class HttpEndpointsMixin:
                     "/invite":        128 * 1024,        # 128 KiB
                     "/invite/accept": 128 * 1024,        # 128 KiB
                     "/devices":       8 * 1024,          # 8 KiB (signed roster request)
+                    "/room-join":     8 * 1024,          # 8 KiB (signed room join)
                     "/restore":       5 * 1024 * 1024,   # 5 MiB
                     "/import":        20 * 1024 * 1024,  # 20 MiB
                 }
@@ -1407,7 +1409,7 @@ class HttpEndpointsMixin:
                         return
 
                 # Content-Type enforcement for JSON POST endpoints
-                _JSON_POST_PATHS = {"/relay", "/invite", "/invite/accept", "/devices", "/restore", "/import"}
+                _JSON_POST_PATHS = {"/relay", "/invite", "/invite/accept", "/devices", "/room-join", "/restore", "/import"}
                 if method == "POST" and path in _JSON_POST_PATHS:
                     _ct = headers_raw.get(b"content-type", b"").decode("utf-8", errors="replace").lower()
                     _ct_base = _ct.split(";")[0].strip()
@@ -1421,7 +1423,7 @@ class HttpEndpointsMixin:
                         return
 
                 # R8: DB integrity guard — block mutating POST endpoints when DB is corrupt
-                _MUTATING_POST_PATHS = {"/relay", "/invite", "/invite/accept", "/restore", "/import"}
+                _MUTATING_POST_PATHS = {"/relay", "/invite", "/invite/accept", "/room-join", "/restore", "/import"}
                 if method == "POST" and path in _MUTATING_POST_PATHS:
                     _store_ok = not self._store or getattr(self._store, "_integrity_ok", True)
                     if not _store_ok:
@@ -1460,6 +1462,26 @@ class HttpEndpointsMixin:
                         f"HTTP/1.1 {status}\r\nContent-Type: application/json\r\n".encode()
                         + _SEC_HDR + _NO_STORE_HDR
                         + f"Content-Length: {len(resp_bytes)}\r\nAccess-Control-Allow-Origin: *\r\n\r\n".encode()
+                        + resp_bytes
+                    )
+                    await writer.drain()
+                    return
+
+                # ── POST /room-join — a member's own gateway joins them to a room here ──
+                if method == "POST" and path == "/room-join":
+                    if _check_http_rate(peer_ip, "room_join"):
+                        await _write_429(writer)
+                        await writer.drain()
+                        return
+                    body = b""
+                    if content_length > 0:
+                        body = await _read_http_body(reader, min(content_length, 8192), 10.0)
+                    status, response = await self._handle_room_join_post(body, client_ip=peer_ip or "")
+                    resp_bytes = response.encode()
+                    writer.write(
+                        f"HTTP/1.1 {status}\r\nContent-Type: application/json\r\n".encode()
+                        + _SEC_HDR + _NO_STORE_HDR
+                        + f"Content-Length: {len(resp_bytes)}\r\n\r\n".encode()
                         + resp_bytes
                     )
                     await writer.drain()

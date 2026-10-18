@@ -10,6 +10,7 @@ import { t } from './i18n.js';
 import { podWriteProfile } from './pod.js';
 import { solidLogin } from './auth.js';
 import { POD_BANNER_SNOOZE_KEY, POD_BANNER_SNOOZE_MS } from './status-banners.js';
+import { inviteJoinCommand } from './rooms.js';
 
 // The wizard's visible steps in order (step 3 was retired, so ids skip it).
 export const OB_STEPS = [1, 2, 4, 5, 6];
@@ -289,13 +290,13 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         _setError("ob-join-error", "");
         const socket = getSocket();
         if (!socket) return;
-        let code = val;
-        try {
-            const u = new URL(val);
-            const p = u.searchParams.get("join");
-            if (p) code = p;
-        } catch (_) {}
-        socket.send(JSON.stringify({ cmd: "join_room", code: code }));
+        const cmd = inviteJoinCommand(val, window.location?.origin || "");
+        if (cmd.error) {
+            _setError("ob-join-error", t(cmd.error));
+            if (input.focus) input.focus();
+            return;
+        }
+        socket.send(JSON.stringify(cmd));
         finishOnboarding();
     }
 

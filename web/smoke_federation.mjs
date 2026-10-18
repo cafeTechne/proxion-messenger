@@ -2,7 +2,8 @@
 // version of test_relay_e2e: two isolated gateways (Alice + Bob), two real
 // browsers, driving the actual cross-gateway flow through the UI — add peer by
 // Proxion address → friend request → accept → cross-gateway DM → assert it
-// renders on the other side.
+// renders on the other side. Bob then joins a room hosted on Alice's gateway
+// from its invite link, through his own gateway, and messages cross both ways.
 //
 //   node web/smoke_federation.mjs    (spawns both gateways; needs python + chrome)
 //
@@ -223,6 +224,66 @@ try {
         ? `cross-gateway DM "${MSG}" arrived but failed to DECRYPT (E2E key reconciliation)`
         : `cross-gateway DM "${MSG}" did not arrive/render on Bob`);
     });
+
+  // Bob accepts a room invite link from Alice's gateway. He joins through his
+  // OWN gateway: the tab stays on B, the room lands in B's sidebar, and
+  // messages cross in both directions.
+  step = 'room-invite-across-gateways';
+  {
+    const ROOM = 'fedroom-' + Math.random().toString(36).slice(2, 6);
+    await alice.evaluate(() => document.getElementById('create-room-btn').click());
+    await alice.waitForSelector('#room-name-input', { visible: true, timeout: 5000 });
+    await alice.type('#room-name-input', ROOM);
+    await alice.evaluate(() => document.getElementById('room-create-submit').click());
+    await alice.waitForFunction(() => (document.getElementById('room-invite-url')?.textContent || '').includes('?join='),
+      { timeout: 10000, polling: 250 }).catch(async (e) => {
+      const st = await alice.evaluate(() => ({
+        url: document.getElementById('room-invite-url')?.textContent,
+        err: document.getElementById('room-create-error')?.textContent,
+        result: document.getElementById('room-invite-result')?.style.display,
+      }));
+      console.error('  · room create state:', JSON.stringify(st), '\n' + alice._console.slice(-8).join('\n'));
+      throw e;
+    });
+    const link = await alice.evaluate(() => document.getElementById('room-invite-url').textContent.trim());
+    await alice.evaluate(() => document.getElementById('room-create-done-btn').click());
+    if (new URL(link).origin !== new URL(A.url).origin) fail(`invite link is not on Alice's gateway: ${link}`);
+    await bob.evaluate(() => document.getElementById('join-room-btn').click());
+    await bob.waitForSelector('#join-room-input', { visible: true, timeout: 5000 });
+    await bob.type('#join-room-input', link);
+    await bob.evaluate(() => document.getElementById('join-room-submit-btn').click());
+    const inRoomList = (p) => p.waitForFunction((n) => [...document.querySelectorAll('#room-list li')]
+      .some((l) => l.textContent.includes(n)), { timeout: 15000, polling: 250 }, ROOM).then(() => true, () => false);
+    if (!(await inRoomList(bob))) {
+      const err = await bob.evaluate(() => document.getElementById('join-room-error')?.textContent || '').catch(() => '(page gone)');
+      fail(`Alice's room never appeared on Bob's gateway (join error: "${err}")`);
+    }
+    if (new URL(bob.url()).origin !== new URL(B.url).origin) fail(`Bob's tab left his gateway for ${bob.url()}`);
+    if (process.exitCode) throw new Error('stop');
+    const openRoom = (p) => p.evaluate((n) => {
+      const li = [...document.querySelectorAll('#room-list li')].find((l) => l.textContent.includes(n));
+      (li.querySelector('[data-room-id]') || li.querySelector('button,a') || li).click();
+    }, ROOM);
+    const sendText = async (p, text) => {
+      await p.focus('#message-input');
+      await p.type('#message-input', text);
+      await p.keyboard.press('Enter');
+    };
+    const feedHas = (p, text) => p.waitForFunction((x) => document.getElementById('message-feed')?.textContent.includes(x),
+      { timeout: 15000, polling: 250 }, text).then(() => true, () => false);
+    await openRoom(alice); await openRoom(bob); await sleep(800);
+    const fromAlice = 'room-a-' + Math.random().toString(36).slice(2, 6);
+    await sendText(alice, fromAlice);
+    if (!(await feedHas(bob, fromAlice))) fail("Alice's room message never reached Bob's gateway");
+    const fromBob = 'room-b-' + Math.random().toString(36).slice(2, 6);
+    await sendText(bob, fromBob);
+    if (!(await feedHas(alice, fromBob))) fail("Bob's room message never reached Alice's gateway");
+    if (process.exitCode) throw new Error('stop');
+    // Back to the DM for the profile-card steps below.
+    await bob.evaluate(() => (document.querySelector('#dm-list li, #contacts-list li')).click());
+    if (!(await feedHas(bob, MSG))) fail('Bob could not reopen the DM with Alice after the room steps');
+    if (process.exitCode) throw new Error('stop');
+  }
 
   // The profile card's Send DM opens the friend's existing chat, not a second
   // thread keyed by their id.

@@ -1571,9 +1571,29 @@ import { initThemePicker } from './theme.js';
             } else {
                 try { code = localStorage.getItem(STASH) || ""; } catch (_) { /* ignore */ }
             }
+            // No account on this origin yet: the link may have been opened by
+            // someone whose Proxion lives on another gateway. Say so on the
+            // welcome step (with the link to copy into their own app) and hold
+            // the join until they choose to set up here.
+            const _freshHere = () => !localStorage.getItem("proxion_display_name");
+            if (code && _freshHere()) {
+                const link = window.location.origin + "/?join=" + encodeURIComponent(code);
+                const notice = document.getElementById("ob-invite-notice");
+                const text = document.getElementById("ob-invite-notice-text");
+                if (notice && text) {
+                    text.textContent = t('onboarding.inviteElsewhere', { host: window.location.host });
+                    notice.hidden = false;
+                    document.getElementById("ob-copy-landing-invite")?.addEventListener("click", () => {
+                        navigator.clipboard.writeText(link)
+                            .then(() => showToast(t('common.copied')))
+                            .catch(() => showCopyModal(link));
+                    });
+                }
+            }
             if (code) {
                 // Wait for socket to be open, then join
                 const tryJoin = () => {
+                    if (_freshHere()) { setTimeout(tryJoin, 1000); return; }
                     if (socket && socket.readyState === WebSocket.OPEN) {
                         socket.send(JSON.stringify({cmd: "join_room", code: code}));
                         try { localStorage.removeItem(STASH); } catch (_) { /* ignore */ }
@@ -2297,8 +2317,9 @@ import { initThemePicker } from './theme.js';
                     }, 50);
                     // R34: remember room code for REST history catch-up
                     if (event.code) _roomCodes[event.room_id] = event.code;
-                    // R31: register home gateway for federated relay fanout
-                    {
+                    // R31: register home gateway for federated relay fanout.
+                    // A federated join already went through our own gateway.
+                    if (!event.federated) {
                         const _homeGw = localStorage.getItem("proxion_gateway_http_url") || "";
                         if (_homeGw && socket?.readyState === WebSocket.OPEN) {
                             socket.send(JSON.stringify({

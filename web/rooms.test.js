@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createRooms, setButtonBusy, clearButtonBusy, isButtonBusy } from './rooms.js';
+import { createRooms, setButtonBusy, clearButtonBusy, isButtonBusy, inviteJoinCommand } from './rooms.js';
 
 let els;
 function mkEl(over = {}) {
@@ -107,6 +107,36 @@ describe('submitJoinRoom', () => {
     const { rooms, sent } = make();
     rooms.submitJoinRoom();
     expect(sent).toContainEqual({ cmd: 'join_room', code: 'XYZ' });
+  });
+  it('joins a link to another gateway through this gateway, without leaving the page', () => {
+    window.location.href = 'https://gw.example/';
+    const link = 'https://other.example:8443/?join=REMOTE1';
+    els['join-room-input'] = mkEl({ value: link });
+    const { rooms, sent } = make();
+    rooms.submitJoinRoom();
+    expect(sent).toEqual([{ cmd: 'join_remote_room', url: link }]);
+    expect(window.location.href).toBe('https://gw.example/');
+  });
+  it('explains a link with no join code', () => {
+    els['join-room-input'] = mkEl({ value: 'https://other.example/' });
+    els['join-room-error'] = mkEl();
+    const { rooms, sent } = make();
+    rooms.submitJoinRoom();
+    expect(sent).toEqual([]);
+    expect(els['join-room-error'].textContent).toBe('room.linkNoCode');
+  });
+});
+
+describe('inviteJoinCommand', () => {
+  const own = 'http://127.0.0.1:8080';
+  it('maps input to the right gateway command', () => {
+    expect(inviteJoinCommand('', own)).toBeNull();
+    expect(inviteJoinCommand(' CODE ', own)).toEqual({ cmd: 'join_room', code: 'CODE' });
+    expect(inviteJoinCommand(own + '/?join=A', own)).toEqual({ cmd: 'join_room', code: 'A' });
+    expect(inviteJoinCommand('http://127.0.0.1:9090/?join=B', own))
+      .toEqual({ cmd: 'join_remote_room', url: 'http://127.0.0.1:9090/?join=B' });
+    expect(inviteJoinCommand('https://x.example/room', own)).toEqual({ error: 'room.linkNoCode' });
+    expect(inviteJoinCommand('https://[bad', own)).toEqual({ error: 'room.invalidInviteLink' });
   });
 });
 

@@ -395,7 +395,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 "members": set(),   # repopulated as clients reconnect
                 "messages": [],     # served from DB on demand
             }
-            self._room_codes[room["code"]] = room["room_id"]
+            if room["code"]:
+                self._room_codes[room["code"]] = room["room_id"]
             # Back-fill room_members for rooms that predate the membership table
             creator = room.get("creator_webid", "")
             if creator and creator not in self._store.get_room_members(room["room_id"]):
@@ -1577,6 +1578,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_rehost_room(websocket, data)
             elif cmd == "join_room":
                 await self._handle_join_room(websocket, data)
+            elif cmd == "join_remote_room":
+                await self._handle_join_remote_room(websocket, data)
             elif cmd == "kick_member":
                 await self._handle_kick_member(websocket, data)
             elif cmd == "add_room_emoji":

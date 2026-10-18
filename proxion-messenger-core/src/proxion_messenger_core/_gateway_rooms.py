@@ -3793,3 +3793,269 @@ class RoomHandlerMixin:
             self._store.remove_room_emoji(room_id, name)
         await self._broadcast_room_emoji(room_id)
         return "200 OK", '{"status":"ok"}'
+
+    # ── Cross-gateway room join ──────────────────────────────────────────────
+    #
+    # An invite link names the host gateway (http(s)://host/?join=CODE). A user
+    # on another gateway joins THROUGH their own gateway: it asks the host over a
+    # signed POST /room-join, the host records them as a federated member, and the
+    # joiner's gateway keeps a mirror of the room so messages relay both ways.
+
+    @staticmethod
+    def _norm_gw_url(u: str) -> str:
+        return (u or "").replace("wss://", "https://").replace("ws://", "http://").rstrip("/")
+
+    async def _handle_join_remote_room(self, websocket, data: dict) -> None:
+        from urllib.parse import urlsplit, parse_qs
+        raw = str(data.get("url") or "").strip()
+        try:
+            parts = urlsplit(raw)
+            code = (parse_qs(parts.query).get("join") or [""])[0].strip()
+        except ValueError:
+            parts, code = None, ""
+        if (not parts or parts.scheme not in ("http", "https") or not parts.netloc
+                or "@" in parts.netloc or not code):
+            await websocket.send(json.dumps({"type": "error", "message": "invalid_invite_link"}))
+            return
+        origin = f"{parts.scheme}://{parts.netloc}"
+        own = self._norm_gw_url(self._gateway_http_url())
+        if origin == own or origin == self._norm_gw_url(self._ws_public_url()):
+            await self._handle_join_room(websocket, {"code": code})
+            return
+        caller = self._client_webids.get(websocket, "")
+        if not caller or not own:
+            await websocket.send(json.dumps({"type": "error", "message": "not_registered"}))
+            return
+        from .relay import _validate_relay_target, sign_relay_envelope
+        if not _validate_relay_target(origin):
+            await websocket.send(json.dumps({"type": "error", "message": "invalid_remote_gateway"}))
+            return
+        # "@<url>" is the address form with no expected did (a bare URL is not
+        # parsed as a gateway address).
+        info = await self._discover_peer_gateway("@" + origin)
+        if not info:
+            await websocket.send(json.dumps({"type": "error", "message": "remote_gateway_unreachable"}))
+            return
+        host_did = info.get("did", "")
+        host_http = self._norm_gw_url(info.get("gateway_http_url", ""))
+        if host_did == self._own_gateway_did() or host_http == own:
+            await self._handle_join_room(websocket, {"code": code})
+            return
+        payload = {
+            "code": code[:256],
+            "member_did": caller,
+            "display_name": (self._display_names.get(websocket) or "")[:64],
+            "origin_gateway_url": own,
+            "relay_sig_did": self._own_gateway_did(),
+            "relay_ts": datetime.now(timezone.utc).isoformat(),
+            "relay_nonce": secrets.token_hex(8),
+        }
+        payload["signature"] = sign_relay_envelope(self.agent.identity_key, payload)
+        from .network import async_safe_post_content, NetworkError
+        try:
+            resp = json.loads(await async_safe_post_content(
+                host_http + "/room-join", payload, timeout=10))
+        except (NetworkError, ValueError) as exc:
+            logger.info("remote room join via %s failed: %s", host_http, exc)
+            await websocket.send(json.dumps({"type": "error", "message": "remote_gateway_unreachable"}))
+            return
+        if not isinstance(resp, dict) or not resp.get("ok"):
+            err = str(resp.get("error") or "invalid_code") if isinstance(resp, dict) else "invalid_code"
+            await websocket.send(json.dumps({"type": "error", "message": err[:64]}))
+            return
+        room_id = str(resp.get("room_id") or "")
+        creator = str(resp.get("creator_webid") or "")
+        if (not re.fullmatch(r"[\w-]{1,128}", room_id) or not creator or len(creator) > 256
+                or creator == caller or creator in self._webid_sockets
+                or creator == self._own_gateway_did()):
+            await websocket.send(json.dumps({"type": "error", "message": "invalid_remote_room"}))
+            return
+        name = str(resp.get("name") or "Room").strip()[:100] or "Room"
+        topic = str(resp.get("topic") or "")[:500]
+        history_mode = "all" if resp.get("history_mode") == "all" else "none"
+        existing = self._local_rooms.get(room_id)
+        if existing is not None:
+            # Only an existing mirror of THIS host's room may be reused; a host
+            # must not be able to graft a member onto an unrelated local room.
+            _mirrored = existing.get("creator_webid") == creator and bool(self._store) and any(
+                m.get("member_did") == creator
+                and self._norm_gw_url(m.get("gateway_url", "")) == host_http
+                for m in self._store.get_federated_room_members(room_id))
+            if not _mirrored:
+                await websocket.send(json.dumps({"type": "error", "message": "room_id_conflict"}))
+                return
+            existing["members"].add(websocket)
+        else:
+            self._local_rooms[room_id] = {
+                "name": name, "code": "", "members": {websocket}, "invite_url": raw,
+                "history_mode": history_mode, "messages": [], "creator_webid": creator,
+                "topic": topic,
+            }
+            if self._store:
+                self._store.save_room(room_id, name, "", raw, history_mode, creator)
+        if self._store:
+            self._store.add_room_member(room_id, caller)
+            members = [m for m in (resp.get("members") or []) if isinstance(m, dict)]
+            if not any(m.get("webid") == creator for m in members):
+                members.insert(0, {"webid": creator})
+            for m in members[:_MAX_ROOM_MEMBERS]:
+                wid = m.get("webid")
+                if not isinstance(wid, str) or not wid or len(wid) > 256 or wid == caller:
+                    continue
+                # An identity that lives on this gateway is never accepted over a relay.
+                if wid == self._own_gateway_did() or wid in self._webid_sockets or (
+                        wid != creator and self._relay_identity_is_local(wid, room_id)):
+                    continue
+                self._store.add_federated_room_member(room_id, wid, host_http,
+                                                      max_members=_MAX_ROOM_MEMBERS)
+                dn = m.get("display_name")
+                if isinstance(dn, str) and dn.strip():
+                    self._store.save_display_name(wid, dn.strip()[:64])
+            if history_mode == "all":
+                for msg in (resp.get("messages") or [])[:50]:
+                    if not isinstance(msg, dict):
+                        continue
+                    mid = str(msg.get("message_id") or "")
+                    if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", mid):
+                        continue
+                    content = msg.get("content")
+                    if not isinstance(content, str) or len(content) > 16384:
+                        continue
+                    self._store.save_message(
+                        mid, room_id, "relay", str(msg.get("from_webid") or "")[:256],
+                        str(msg.get("from_display_name") or "")[:64], content,
+                        str(msg.get("timestamp") or ""))
+        logger.info("Joined remote room %s hosted at %s", room_id, host_http)
+        await websocket.send(json.dumps({
+            "type": "room_joined", "room_id": room_id, "name": name, "topic": topic,
+            "code": "", "invite_url": raw, "federated": True,
+        }))
+        _evt = json.dumps({"type": "room_member_joined", "room_id": room_id,
+                           "name": name, "webid": caller})
+        for ws in list(self._local_rooms[room_id]["members"]):
+            if ws is not websocket and ws in self.clients:
+                try:
+                    await ws.send(_evt)
+                except Exception:
+                    pass
+
+    async def _handle_room_join_post(self, body: bytes, client_ip: str = "") -> tuple[str, str]:
+        """POST /room-join: a member's own gateway joins them to a room hosted here.
+
+        Signed by the joiner's gateway (full-payload envelope). The home gateway
+        URL is bound to the signer by fetching its /.well-known/proxion, so relays
+        for the new member only go to the gateway that vouched for them. Admission
+        mirrors _handle_join_room: rate limit, invite code, ban, member cap and
+        invite expiry/max-uses. Refusals are 200 {"ok": false, "error": ...}.
+        """
+        from .relay import verify_relay_envelope, _validate_relay_target
+        try:
+            data = json.loads(body)
+        except Exception:
+            return "400 Bad Request", '{"error":"invalid JSON"}'
+        if not isinstance(data, dict) or not verify_relay_envelope(data):
+            return "401 Unauthorized", '{"error":"invalid signature"}'
+        signer = data.get("relay_sig_did", "")
+        nonce = str(data.get("relay_nonce") or "")
+        if not re.fullmatch(r"[A-Fa-f0-9]{8,64}", nonce):
+            return "400 Bad Request", '{"error":"invalid nonce"}'
+        import hashlib as _hl
+        _nk = _hl.sha256(f"roomjoin:{signer}:{nonce}".encode()).hexdigest()
+        if self._store:
+            if self._store.seen_relay_nonce(_nk, ttl_seconds=600):
+                return "409 Conflict", '{"error":"replay"}'
+            self._store.record_relay_nonce(_nk)
+
+        def refuse(err: str) -> tuple[str, str]:
+            return "200 OK", json.dumps({"ok": False, "error": err})
+
+        code = str(data.get("code") or "").strip()
+        member = str(data.get("member_did") or "")
+        origin = self._norm_gw_url(str(data.get("origin_gateway_url") or ""))
+        if not code or len(code) > 256 or not member or len(member) > 256:
+            return refuse("invalid_code")
+        if not member.startswith(("did:key:", "https://", "http://")):
+            return refuse("invalid_member")
+        if not origin or not _validate_relay_target(origin):
+            return refuse("invalid_home_gateway")
+        code_hash = self._hmac_invite_code(code)
+        if self._store and client_ip:
+            if self._store.count_recent_join_attempts(code_hash, client_ip, window_s=60.0) >= 10:
+                return refuse("join_rate_limited")
+            self._store.record_join_attempt(code_hash, client_ip)
+        room_id = self._room_codes.get(code_hash) or self._room_codes.get(code)
+        room = self._local_rooms.get(room_id) if room_id else None
+        creator = room.get("creator_webid", "") if room else ""
+        # Only the host answers: in a mirror of someone else's room the creator
+        # is a federated member, not a local identity.
+        if not room or not creator or not self._relay_identity_is_local(creator, room_id):
+            return refuse("invalid_code")
+        # The joiner's gateway vouches for its own users only: never for an
+        # identity that lives here, nor for one already bound to another gateway.
+        if member == creator or self._relay_identity_is_local(member, room_id):
+            return refuse("invalid_member")
+        if self._store:
+            try:
+                from .didkey import did_to_pub_key
+                _gw_hex = did_to_pub_key(signer).hex()
+                _hist = self._store.get_identity_key_history("relaygw:" + member)
+                if _hist and not any(h.get("pubkey_hex") == _gw_hex for h in _hist):
+                    return refuse("invalid_member")
+            except Exception:
+                return refuse("invalid_member")
+        info = await self._discover_peer_gateway(f"{signer}@{origin}")
+        if not info:
+            return refuse("invalid_home_gateway")
+        home = self._norm_gw_url(info.get("gateway_http_url", ""))
+        if not home or home == self._norm_gw_url(self._gateway_http_url()) \
+                or not _validate_relay_target(home):
+            return refuse("invalid_home_gateway")
+        if self._store:
+            if self._store.is_room_banned(room_id, member):
+                return refuse("banned_from_room")
+            _fed = self._store.get_federated_room_members(room_id) or []
+            _is_fed = any(m.get("member_did") == member for m in _fed)
+            _local = self._store.get_room_members(room_id) or []
+            if not _is_fed and len(_local) + len(_fed) >= _MAX_ROOM_MEMBERS:
+                return refuse("room_full")
+            if self._store.room_invite_exists(code_hash):
+                if self._store.consume_room_invite(code_hash) is None:
+                    return refuse("invite_expired_or_exhausted")
+            if not self._store.add_federated_room_member(
+                    room_id, member, home, max_members=_MAX_ROOM_MEMBERS):
+                return refuse("room_full")
+            dn = str(data.get("display_name") or "").strip()[:64]
+            if dn:
+                self._store.save_display_name(member, dn)
+            try:
+                self._sync_room_emoji_to_gateway(room_id, home)
+            except Exception:
+                pass
+        _stored = self._store.get_room_members(room_id) if self._store else []
+        members = []
+        for wid in ([creator] + [w for w in _stored if w != creator])[:_MAX_ROOM_MEMBERS]:
+            if wid and wid != member:
+                members.append({"webid": wid, "display_name":
+                                (self._store.get_display_name(wid) if self._store else None) or ""})
+        messages = []
+        if room.get("history_mode") == "all" and self._store:
+            for m in self._store.get_messages(room_id, limit=50):
+                messages.append({k: m.get(k) for k in (
+                    "message_id", "from_webid", "from_display_name", "content", "timestamp")})
+        _evt = json.dumps({
+            "type": "room_member_joined", "room_id": room_id, "name": room.get("name", ""),
+            "webid": member,
+            "display_name": (self._store.get_display_name(member) if self._store else "") or "",
+            "federated": True, "gateway": home,
+        })
+        for ws in list(room.get("members", set())):
+            try:
+                await ws.send(_evt)
+            except Exception:
+                pass
+        logger.info("Federated member joined room %s from %s", room_id, home)
+        return "200 OK", json.dumps({
+            "ok": True, "room_id": room_id, "name": room.get("name", ""),
+            "topic": room.get("topic", ""), "history_mode": room.get("history_mode", "none"),
+            "creator_webid": creator, "members": members, "messages": messages,
+        })

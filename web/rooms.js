@@ -57,6 +57,23 @@ export function isButtonBusy(btn) {
     return !!(btn && btn._busy);
 }
 
+// The gateway command for what a user typed or pasted into a join box: a bare
+// code or a link to this gateway joins here; a link to another gateway is
+// handed to OUR gateway, which joins through the host and keeps the room here
+// (the tab never leaves its own origin). Returns { error } for a bad link and
+// null for empty input.
+export function inviteJoinCommand(raw, ownOrigin) {
+    const s = String(raw || "").trim();
+    if (!s) return null;
+    if (!/^https?:\/\//i.test(s)) return { cmd: "join_room", code: s };
+    let url;
+    try { url = new URL(s); } catch { return { error: 'room.invalidInviteLink' }; }
+    const code = url.searchParams.get("join");
+    if (!code) return { error: 'room.linkNoCode' };
+    if (url.origin === ownOrigin) return { cmd: "join_room", code };
+    return { cmd: "join_remote_room", url: s };
+}
+
 export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoomInviteUrls, showConfirm, showCopyModal }) {
 
     function requestRoomMembers(roomId) {
@@ -142,23 +159,9 @@ export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoo
             errEl.textContent = t('conn.notConnectedGateway'); return;
         }
         if (!raw) { errEl.textContent = t('room.enterLinkOrCode'); return; }
-        if (raw.startsWith("http://") || raw.startsWith("https://")) {
-            try {
-                const url = new URL(raw);
-                const code = url.searchParams.get("join");
-                const sameOrigin = url.origin === window.location.origin;
-                if (sameOrigin && code) {
-                    socket.send(JSON.stringify({ cmd: "join_room", code: code }));
-                } else if (!sameOrigin) {
-                    window.location.href = raw;
-                    return;
-                } else {
-                    errEl.textContent = t('room.linkNoCode'); return;
-                }
-            } catch { errEl.textContent = t('room.invalidInviteLink'); return; }
-        } else {
-            socket.send(JSON.stringify({ cmd: "join_room", code: raw }));
-        }
+        const cmd = inviteJoinCommand(raw, window.location.origin);
+        if (cmd.error) { errEl.textContent = t(cmd.error); return; }
+        socket.send(JSON.stringify(cmd));
         // Stay open until the gateway answers (room_joined / join_request_sent
         // close it, an error clears the busy state) so a second click cannot
         // send a duplicate join.

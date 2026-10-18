@@ -111,7 +111,14 @@ describe('obStep2', () => {
 });
 
 describe('obStep4Join', () => {
-  it('extracts the join code from a full invite URL', () => {
+  it('joins a link to another gateway through this gateway', () => {
+    const { ob, sent } = make();
+    els['ob-invite-code'] = mkEl({ value: 'https://example.com/?join=ABC123' });
+    ob.obStep4Join();
+    expect(sent).toContainEqual({ cmd: 'join_remote_room', url: 'https://example.com/?join=ABC123' });
+  });
+  it('extracts the join code from an invite URL for this gateway', () => {
+    window.location = { origin: 'https://example.com' };
     const { ob, sent } = make();
     els['ob-invite-code'] = mkEl({ value: 'https://example.com/?join=ABC123' });
     ob.obStep4Join();

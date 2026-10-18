@@ -20,6 +20,8 @@ const EXACT = {
     "room_topic_too_long": "error.room_topic_too_long",
     "That user is not in this room or is offline": "error.transfer_target_offline",
     "invalid_code": "error.invalid_code",
+    "invalid_invite_link": "room.invalidInviteLink",
+    "remote_gateway_unreachable": "error.remote_gateway_unreachable",
     "room_not_found": "error.room_not_found",
     "room_full": "error.room_full",
     "invite_expired_or_exhausted": "error.invite_expired_or_exhausted",
