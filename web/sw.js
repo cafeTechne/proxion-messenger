@@ -81,6 +81,7 @@ const SHELL = [
   "menu.js",
   "errors.js",
   "dmhistory.js",
+  "dmtext.js",
   "push.js",
   "states.js",
   "icons.js",

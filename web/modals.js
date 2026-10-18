@@ -240,10 +240,14 @@ export function createModals({ getSocket, getActiveView, sendCmd, showToast, get
         if (!list) return;
         list.innerHTML = '';
         const results = (event && event.results) || [];
+        // Encrypted DMs are searched in this device's saved plaintext only.
+        const dmNote = event && event.dm_history_off
+            ? `<li class="search-panel__empty" data-search-dm-note>${inlineNotice(t('search.dmHistoryOff'))}</li>` : '';
         if (results.length === 0) {
-            list.innerHTML = `<li class="search-panel__empty">${inlineNotice(t('search.noMatches', { query }))}</li>`;
+            list.innerHTML = `<li class="search-panel__empty">${inlineNotice(t('search.noMatches', { query }))}</li>` + dmNote;
             return;
         }
+        if (dmNote) list.innerHTML = dmNote;
         results.forEach(res => {
             const li = document.createElement('li');
             const btn = document.createElement('button');

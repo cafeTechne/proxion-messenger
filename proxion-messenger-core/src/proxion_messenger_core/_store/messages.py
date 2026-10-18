@@ -29,6 +29,8 @@ THREAD_RETENTION_CHECK_EVERY = 250
 # A single message bigger than this is refused outright rather than stored and
 # then evicting a large part of the thread's history to make room.
 MAX_SINGLE_MESSAGE_BYTES = 50 * 1024 * 1024  # 50 MB
+# messages.content_type of a DM whose content is browser ratchet ciphertext.
+E2E_CONTENT_TYPE = "e2e"
 
 
 class MessageStoreMixin(object):
@@ -130,7 +132,11 @@ class MessageStoreMixin(object):
         imported: int = 0,
         seq_num: int = 0,
         prev_hash: str = "",
+        e2e: bool = False,
     ) -> None:
+        """Store one message. ``e2e`` marks content as browser ratchet
+        ciphertext (content_type 'e2e'): the gateway cannot read it, so history,
+        pins and search must never show or match it as text."""
         if from_display_name:
             from_display_name = from_display_name[:64]
         if len(content or "") > MAX_SINGLE_MESSAGE_BYTES:
@@ -144,8 +150,8 @@ class MessageStoreMixin(object):
                 INSERT OR IGNORE INTO messages
                     (message_id, thread_id, thread_type, from_webid,
                      from_display_name, content, timestamp, reply_to_id, imported,
-                     received_at, seq_num, prev_hash)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     received_at, seq_num, prev_hash, content_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     message_id,
@@ -160,6 +166,7 @@ class MessageStoreMixin(object):
                     received_at,
                     seq_num,
                     prev_hash,
+                    E2E_CONTENT_TYPE if e2e else "text",
                 ),
             )
         self._note_thread_insert(thread_id)
@@ -593,7 +600,9 @@ class MessageStoreMixin(object):
         if not query.strip():
             return []
 
-        conditions = ["messages_fts MATCH ?"]
+        # Sealed E2E rows are ciphertext: any match against them is noise.
+        conditions = ["messages_fts MATCH ?",
+                      f"COALESCE(m.content_type, 'text') != '{E2E_CONTENT_TYPE}'"]
         params: list = [query]
 
         if thread_id:

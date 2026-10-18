@@ -640,6 +640,10 @@ describe('entry motion hooks', () => {
 });
 
 describe('reply quote text', () => {
+  it('quotes an unopened DM parent as the undecryptable notice, never its ciphertext', () => {
+    expect(replySnippet({ content: '[could not decrypt]' })).toBe('e2e.undecryptable');
+    expect(replySnippet({ content: 'q3Zx9_Lw-0aBcDeFgHiJkLmNoPqRsTuV', e2e: true })).toBe('e2e.undecryptable');
+  });
   it('uses the parent text, collapsed to one line', () => {
     expect(replySnippet({ content: 'hello\n  world' })).toBe('hello world');
   });

@@ -889,6 +889,7 @@
   "search.noMatches": "No messages match \"{query}\".",
   "search.tooShort": "Type at least 3 characters.",
   "search.offline": "Search needs a connection to Proxion.",
+  "search.dmHistoryOff": "Encrypted DMs are searched on this device, and saving DM history is off here, so recent DMs may not match.",
   "feed.dmHidden": "Conversation hidden. It comes back when they send a new message.",
   "feed.removedFromRoom": "You were removed from this room.",
   "feed.roomDeletedLastMember": "Room deleted. You were the last member.",

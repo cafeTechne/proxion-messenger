@@ -1135,6 +1135,7 @@ class HttpEndpointsMixin:
                         from_webid, display_name or None, content, timestamp,
                         seq_num=int(data.get("seq_num") or 0),
                         prev_hash=str(data.get("prev_hash") or ""),
+                        e2e=bool(data.get("e2e")),
                     )
                     try:
                         self._store.append_relay_delivery_event(message_id, from_webid, "delivered")
@@ -1212,6 +1213,7 @@ class HttpEndpointsMixin:
                 from_webid, display_name or None, content, timestamp,
                 seq_num=int(data.get("seq_num") or 0),
                 prev_hash=str(data.get("prev_hash") or ""),
+                e2e=bool(data.get("e2e")),
             )
             try:
                 self._store.append_relay_delivery_event(message_id, from_webid, "accepted")

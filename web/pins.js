@@ -8,6 +8,7 @@ import { inlineNotice } from './states.js';
 import { t } from './i18n.js';
 import { escHtml, scrollBehavior, didSuffix } from './util.js';
 import { jumpToMessage } from './wayfinding.js';
+import { isUndecryptable } from './e2e-secondary.js';
 
 export function createPins({ getSocket, getActiveView, getMessages = () => [] }) {
 
@@ -48,7 +49,11 @@ export function createPins({ getSocket, getActiveView, getMessages = () => [] })
             const author = orig
                 ? orig.from_display_name || (orig.from_webid ? "·" + didSuffix(orig.from_webid) : "")
                 : "";
-            const preview = escHtml((pin.content || "").slice(0, 80));
+            // A sealed DM pin arrives as the placeholder when this device has
+            // no plaintext for it (main.js resolves it through dmtext.js).
+            const preview = isUndecryptable(pin.content)
+                ? `<span class="msg-undecryptable">${escHtml(t('e2e.undecryptable'))}</span>`
+                : escHtml((pin.content || "").slice(0, 80));
             // message_id is client-supplied and stored verbatim, so escape it before
             // it lands in these innerHTML attributes (stored XSS otherwise).
             const msgIdEsc = escHtml(pin.message_id);

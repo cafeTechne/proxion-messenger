@@ -706,6 +706,7 @@ class DmHandlerMixin:
                 reply_to_id=data.get("reply_to_id"),
                 seq_num=int(data.get("seq_num") or 0),
                 prev_hash=str(data.get("prev_hash") or ""),
+                e2e=bool(data.get("e2e")),
             )
             target_dn = self._store.get_display_name(target_webid) if target_webid else None
             self._store.save_dm_thread(thread_id, target_webid, target_dn, owner_webid=sender_webid)

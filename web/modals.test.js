@@ -179,6 +179,18 @@ describe('search panel', () => {
     expect(dom['search-panel'].querySelector('[data-search-results]').children).toHaveLength(1);
   });
 
+  it('says DM search is limited when DM history is off', () => {
+    const m = mk();
+    dom['search-input'].value = 'zzz';
+    m.renderSearchResults({ query: 'zzz', results: [], dm_history_off: true });
+    const html = dom['search-panel'].querySelector('[data-search-results]').innerHTML;
+    expect(html).toContain('search.noMatches');
+    expect(html).toContain('search.dmHistoryOff');
+    dom['search-input'].value = 'hello';
+    m.renderSearchResults({ query: 'hello', results: [{ message_id: 'm1', thread_id: 'r1', content: 'hello' }] });
+    expect(dom['search-panel'].querySelector('[data-search-results]').innerHTML).not.toContain('search.dmHistoryOff');
+  });
+
   it('shows the no-match notice inside the panel', () => {
     const m = mk();
     dom['search-input'].value = 'zzz';

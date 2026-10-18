@@ -222,6 +222,54 @@ export async function dmHistoryLoad(threadId, limit = 500) {
     }
 }
 
+// This device's cached copy of one DM message, or null.
+export async function dmHistoryGet(messageId) {
+    if (!messageId) return null;
+    try {
+        const db = await _open();
+        return await new Promise((resolve) => {
+            const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(messageId);
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => resolve(null);
+        });
+    } catch (_) {
+        return null;
+    }
+}
+
+// True when every word of `query` appears in `text`, ignoring case (pure).
+// This is how the cached DM plaintext is searched: the gateway only holds
+// ciphertext for E2E DMs, so it cannot.
+export function matchesQuery(text, query) {
+    const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return false;
+    const hay = String(text || '').toLowerCase();
+    return words.every((w) => hay.includes(w));
+}
+
+// Cached DM messages matching `query`, newest first, without file bytes.
+export async function dmHistorySearch(query, limit = 50) {
+    if (!String(query || '').trim()) return [];
+    try {
+        const db = await _open();
+        const rows = await new Promise((resolve) => {
+            const out = [];
+            const req = db.transaction(STORE, 'readonly').objectStore(STORE).openCursor();
+            req.onsuccess = (e) => {
+                const c = e.target.result;
+                if (!c) { resolve(out); return; }
+                if (matchesQuery(c.value.content, query)) out.push(c.value);
+                c.continue();
+            };
+            req.onerror = () => resolve(out);
+        });
+        rows.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+        return rows.slice(0, limit).map(stripFileBytes);
+    } catch (_) {
+        return [];
+    }
+}
+
 // Remove one message (on delete) — keep the local cache consistent.
 export async function dmHistoryDelete(messageId) {
     if (!messageId) return;

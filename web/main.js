@@ -101,7 +101,8 @@ import { makeListNavigable, announce } from './a11y.js';
 import { buildPageTitle, viewLabel, createFaviconBadge, jumpToMessage } from './wayfinding.js';
 import { openMenu, closeMenu, refreshMenu, isMenuOpen } from './menu.js';
 import { showConfirm, showPromptModal, installDialogDismiss, installFieldErrorSync, setFieldError } from './dialogs.js';
-import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryGetEdits, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport, applyLocalRecord } from './dmhistory.js';
+import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryGetEdits, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport, applyLocalRecord, dmHistoryGet, dmHistorySearch, dmHistoryEnabled } from './dmhistory.js';
+import { unsealCopy, unsealList, mergeSearchHits, previewText, isSealedCopy } from './dmtext.js';
 import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } from './i18n.js';
 import { createIdentityResolver } from './identity.js';
 import { initThemePicker } from './theme.js';
@@ -607,7 +608,10 @@ import { initThemePicker } from './theme.js';
         } = createModals({
                 getSocket: () => socket, getActiveView: () => activeView,
                 sendCmd, showToast,
-                getMessageContent: (id) => (messageMap[id] && messageMap[id].content) || '',
+                getMessageContent: (id) => {
+                    const m = messageMap[id];
+                    return m && !isUndecryptable(m.content) && !isSealedCopy(m) ? (m.content || '') : '';
+                },
                 openSearchResult: (threadId, msgId) => _openSearchResult(threadId, msgId),
             });
         // Pinned messages: destructured into same-named bindings.
@@ -1685,6 +1689,56 @@ import { initThemePicker } from './theme.js';
             handleEvent(event);
         }
 
+        // True for a DM thread (positive evidence only: a room is never guessed).
+        function _isDmThread(id) {
+            if (!id) return false;
+            if (activeView && activeView.id === id) return activeView.type === 'local_dm' || activeView.type === 'dm';
+            return !!localDmPeers[id] || Object.values(peerDidToCertId).includes(id);
+        }
+
+        // Plaintext already in the feed for a message, or null (sync).
+        function _knownPlaintext(messageId) {
+            const k = messageId && messageMap[messageId];
+            return k && k.e2e !== true && typeof k.content === 'string'
+                && !isUndecryptable(k.content) && !isSealedCopy(k, _isDmThread(k.thread_id)) ? k.content : null;
+        }
+
+        // This device's plaintext for a message: the feed copy, else the local cache.
+        async function _localPlaintext(m) {
+            const known = _knownPlaintext(m && m.message_id);
+            if (known != null) return known;
+            const rec = m && m.message_id ? await dmHistoryGet(m.message_id) : null;
+            return rec && typeof rec.content === 'string' ? rec.content : null;
+        }
+
+        // A gateway history page with every still-sealed DM body replaced by the
+        // plaintext this tab has or the undecryptable placeholder; the cached
+        // copies then land through mergeDmLocalHistory.
+        function _unsealHistory(messages, threadId) {
+            const dm = _isDmThread(threadId);
+            return (messages || []).map((m) => unsealCopy(m, { isDm: dm, plaintext: _knownPlaintext(m.message_id) }));
+        }
+
+        // Gateway search cannot read E2E DMs: drop its sealed hits and add the
+        // matches from this device's DM plaintext cache.
+        let _pinsRenderSeq = 0;
+        async function _searchWithLocalDms(event) {
+            const query = String((event && event.query) || '');
+            let local = [];
+            try { local = await dmHistorySearch(query); } catch (_) { local = []; }
+            const hits = local.map((r) => ({
+                message_id: r.message_id, thread_id: r.thread_id,
+                thread_name: _threadNames[r.thread_id] || (localDmPeers[r.thread_id] || {}).display_name || '',
+                content: r.content, from_webid: r.from_webid,
+                from_display_name: r.from_display_name || '', timestamp: r.timestamp,
+            }));
+            return {
+                ...event,
+                results: mergeSearchHits(event && event.results, hits, { isDm: (h) => _isDmThread(h.thread_id) }),
+                dm_history_off: !dmHistoryEnabled(),
+            };
+        }
+
         // Plaintext this device cached for one of its own DM messages, or null.
         async function _cachedDmPlaintext(threadId, messageId) {
             if (!threadId || !messageId) return null;
@@ -1812,7 +1866,7 @@ import { initThemePicker } from './theme.js';
                         }
                         const sender = msg.from_display_name || (msg.from_webid || "").slice(0, 12);
                         if (!mutedThreads.has(id)) {
-                            showOsNotification(`${sender}`, msg.content || "", id);
+                            showOsNotification(`${sender}`, previewText(msg, t('e2e.undecryptable')), id);
                             // Screen readers: announce a message in a thread you're
                             // not viewing (the open thread is covered by role="log").
                             // Throttle to one announcement per thread per 10s so a
@@ -2067,9 +2121,14 @@ import { initThemePicker } from './theme.js';
                         showPinPanel();
                     }
                     break;
-                case "pins":
-                    renderPins(event.pins);
+                case "pins": {
+                    // A sealed DM pin shows this device's plaintext copy or a notice.
+                    const _seq = ++_pinsRenderSeq;
+                    const _dm = String(event.thread_id || '').startsWith('dm:');
+                    unsealList(event.pins, { isDm: () => _dm, lookup: _localPlaintext })
+                        .then((pins) => { if (_seq === _pinsRenderSeq) renderPins(pins); });
                     break;
+                }
                 case "blocks":
                     blocks.handleBlocksEvent(event.webids);   // R65
                     break;
@@ -2300,7 +2359,7 @@ import { initThemePicker } from './theme.js';
                     renderDmSidebar();
                     break;
                 case "search_results":
-                    renderSearchResults(event);
+                    _searchWithLocalDms(event).then(renderSearchResults);
                     break;
                 case "voice_invite":
                     // Group channel: if we're in a voice channel, auto-answer offers
@@ -2546,8 +2605,8 @@ import { initThemePicker } from './theme.js';
                     break;
                 }
                 case "history": {
-                    const msgs = event.messages || [];
                     const tid = event.thread_id;
+                    const msgs = _unsealHistory(event.messages, tid);
                     const isActive = activeView && activeView.id === tid;
                     const feed = document.getElementById("message-feed");
                     if (isActive) feed.querySelector("#feed-notice")?.remove();
@@ -2575,8 +2634,8 @@ import { initThemePicker } from './theme.js';
                     break;
                 }
                 case "local_history": {
-                    const msgs = event.messages || [];
                     const tid = event.thread_id;
+                    const msgs = _unsealHistory(event.messages, tid);
                     const lastReadTs = event.last_read_ts || 0;
                     const feed = document.getElementById("message-feed");
                     feed.setAttribute("aria-busy", "true");
@@ -2967,7 +3026,9 @@ import { initThemePicker } from './theme.js';
                     break;
                 }
                 case "message_fetched": {
-                    const m = event.message;
+                    const m = event.message
+                        && unsealCopy(event.message, { isDm: _isDmThread(event.message.thread_id),
+                            plaintext: _knownPlaintext(event.message.message_id) });
                     if (!m) break;
                     messageMap[m.message_id] = m;
                     // Fill in any placeholders waiting for this message

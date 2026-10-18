@@ -89,6 +89,8 @@ export function dateLabel(ts, now = new Date()) {
 export function replySnippet(parent) {
     if (!parent) return "";
     if (parent.deleted) return t('msg.replyDeleted');
+    // A parent this device could not open: the notice, never its ciphertext.
+    if (parent.e2e === true || isUndecryptable(parent.content)) return t('e2e.undecryptable');
     const text = String(parent.content || "").replace(/\s+/g, " ").trim();
     if (text) return text.length > 200 ? text.slice(0, 200) + "…" : text;
     if (parent.file) {

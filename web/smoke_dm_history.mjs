@@ -264,10 +264,56 @@ try {
       : `after reload the DM message "${MSG}" is missing from history`);
   }
 
+  // ── DM history OFF: a DM received while saving is off has no local copy, and
+  // the gateway only holds its ciphertext. After a reload it must show the
+  // "could not be decrypted" notice, never the raw envelope.
+  const reopenBob = async (label) => {
+    step = label + '-reload';
+    await bob.reload({ waitUntil: 'load', timeout: 20000 });
+    await bob.evaluate(() => { const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none'; });
+    await bob.waitForFunction(() => document.querySelector('.dot')?.classList.contains('online'), { timeout: 15000 })
+      .catch(() => fail(`Bob did not reconnect (${label})`));
+    if (process.exitCode) throw new Error('stop');
+    await bob.waitForFunction(() => document.querySelector('#contacts-list li, #dm-list li'), { timeout: 15000 })
+      .catch(() => fail(`DM/contact gone from Bob (${label})`));
+    if (process.exitCode) throw new Error('stop');
+    await sleep(500);
+    await bob.evaluate(() => (document.querySelector('#dm-list li, #contacts-list li')).click());
+    await bob.waitForFunction(() => {
+      const h = document.getElementById('chat-header-name'); return h && !/welcome/i.test(h.textContent || '');
+    }, { timeout: 8000 }).catch(() => fail(`Bob could not reopen the DM (${label})`));
+    if (process.exitCode) throw new Error('stop');
+    await sleep(1500);
+  };
+  step = 'history-off';
+  await bob.evaluate(() => localStorage.setItem('dmHistoryEnabled', 'false'));
+  await reopenBob('history-off');
+  const MSG2 = 'dmoff-' + Math.random().toString(36).slice(2, 7);
+  step = 'alice-send-dm-2';
+  await alice.focus('#message-input');
+  await alice.type('#message-input', MSG2);
+  await alice.keyboard.press('Enter');
+  await bob.waitForFunction((t) => document.getElementById('message-feed')?.textContent.includes(t),
+    { timeout: 15000 }, MSG2).catch(() => fail(`second DM "${MSG2}" did not arrive on Bob`));
+  if (process.exitCode) throw new Error('stop');
+  await reopenBob('history-off-reopen');
+  step = 'assert-no-ciphertext-history-off';
+  const offView = await bob.evaluate(() => ({
+    texts: [...document.querySelectorAll('#message-feed .msg-text')].map((e) => e.textContent || ''),
+    notices: document.querySelectorAll('#message-feed .msg-undecryptable').length,
+  }));
+  const isCt = (s) => /^[A-Za-z0-9_-]{23,}$/.test(s.trim()) && /[a-z]/.test(s) && /[A-Z]/.test(s);
+  const leaked = offView.texts.filter(isCt);
+  if (leaked.length) fail(`history off: raw ciphertext rendered in the DM feed: "${leaked[0].slice(0, 40)}"`);
+  else if (offView.texts.some((s) => s.includes(MSG2))) fail('history off: the unsaved DM came back as text (unexpected cache)');
+  else if (!offView.notices) fail('history off: the unsaved DM shows neither text nor the undecryptable notice');
+  if (process.exitCode) throw new Error('stop');
+
   step = 'done';
   if (!process.exitCode) {
     console.log('  ✓ E2E DM history OK — cross-gateway E2E DM delivered + decrypted on Bob,');
-    console.log(`    AND still readable plaintext "${MSG}" after Bob reloaded + reopened the DM.`);
+    console.log(`    AND still readable plaintext "${MSG}" after Bob reloaded + reopened the DM,`);
+    console.log('    AND with DM history off an unsaved DM reloads as the notice, not ciphertext.');
   }
 } catch (e) {
   if (e.message !== 'stop' && e.message !== 'no bob addr') console.error(`  ✗ [${step}] threw: ${e.message}`);

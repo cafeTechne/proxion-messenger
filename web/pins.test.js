@@ -58,6 +58,14 @@ describe('unpinMsg', () => {
 });
 
 describe('renderPins', () => {
+  it('shows the undecryptable notice for a sealed DM pin, never its text', () => {
+    const { pins } = make({ activeView: { type: 'local_dm', id: 'cert-9' } });
+    const appended = [];
+    document.getElementById('pin-list').appendChild = (el) => appended.push(el);
+    pins.renderPins([{ message_id: 'm1', pinned_by: 'x', content: '[could not decrypt]' }]);
+    expect(appended[0].innerHTML).toContain('e2e.undecryptable');
+    expect(appended[0].innerHTML).not.toContain('[could not decrypt]');
+  });
   it('shows an empty-state message when there are no pins', () => {
     const { pins } = make();
     pins.renderPins([]);

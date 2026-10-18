@@ -835,6 +835,9 @@ class RoomHandlerMixin:
                     "edited_at": m.get("edited_at"),
                     "local": True,
                     **({"imported": True} if m.get("imported") else {}),
+                    # Still sealed: the browser shows its own plaintext copy or
+                    # an undecryptable notice, never this ciphertext.
+                    **({"e2e": True} if m.get("content_type") == "e2e" else {}),
                 }
                 for m in raw
             ]
@@ -2563,6 +2566,9 @@ class RoomHandlerMixin:
                 if pin:
                     _mr = self._store.get_messages_by_ids([message_id])
                     _c = (_mr[0].get("content", "") if _mr else content)
+                    # A sealed DM's stored text is ciphertext: keep no copy.
+                    if _mr and _mr[0].get("content_type") == "e2e":
+                        _c = ""
                     self._store.save_pin(thread_id, message_id, pinner_webid, _c)
                 else:
                     self._store.remove_pin(thread_id, message_id)
@@ -2614,8 +2620,14 @@ class RoomHandlerMixin:
                 _seen = {p["message_id"] for p in stored}
                 stored = stored + [p for p in self._store.get_pins(thread_id)
                                    if p["message_id"] not in _seen]
+            # A pin of a sealed DM carries no text (older pins kept the
+            # ciphertext); the browser fills in its own plaintext copy.
+            _sealed = {r["message_id"] for r in self._store.get_messages_by_ids(
+                [p["message_id"] for p in stored]) if r.get("content_type") == "e2e"}
             pins = [{"message_id": p["message_id"], "pinned_by": p["pinned_by"],
-                     "pinned_at": p["pinned_at"], "content": p.get("content", "")}
+                     "pinned_at": p["pinned_at"],
+                     **({"content": "", "e2e": True} if p["message_id"] in _sealed
+                        else {"content": p.get("content", "")})}
                     for p in stored]
         else:
             client = None
