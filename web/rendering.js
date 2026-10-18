@@ -297,9 +297,22 @@ function _bufferIds(arr) {
     return e;
 }
 
+// When a message disappears (ms since epoch), or null when it does not: no
+// timer, or it was sent before the timer was turned on (`since`).
+export function messageExpiresAt(timestamp, ms, since = '') {
+    if (!(ms > 0) || !timestamp) return null;
+    const ts = new Date(timestamp).getTime();
+    if (!Number.isFinite(ts)) return null;
+    if (since) {
+        const start = new Date(since).getTime();
+        if (Number.isFinite(start) && ts < start) return null;
+    }
+    return ts + ms;
+}
+
 export function createRendering({
     getActiveView, getSocket, getSelfWebId, getSelfPubHex,
-    getCurrentDisappearMs, getMessageMap, getAllMessages, getUserPresence,
+    getCurrentDisappearMs, getCurrentDisappearSince = () => '', getMessageMap, getAllMessages, getUserPresence,
     renderReactions, openCtxMenu, sendUpdateLastRead,
     getRoomCode, renderWindow, scrollBatch,
     // Account-scopes the verification-badge localStorage key so a second account
@@ -345,8 +358,8 @@ export function createRendering({
         const cur = getMessageMap()[m.message_id];
         if (cur && cur.deleted) return null;
         const msg = cur && cur.message_id === m.message_id ? cur : m;
-        const ms = getCurrentDisappearMs();
-        if (ms > 0 && msg.timestamp && new Date(msg.timestamp).getTime() + ms <= Date.now()) return null;
+        const exp = messageExpiresAt(msg.timestamp, getCurrentDisappearMs(), getCurrentDisappearSince());
+        if (exp !== null && exp <= Date.now()) return null;
         return msg;
     }
 
@@ -600,6 +613,7 @@ export function createRendering({
     function _renderMessageEl(msg, feed, prevInThread, opts = {}) {
         const messageMap = getMessageMap();
         const currentDisappearMs = getCurrentDisappearMs();
+        const msgExpiresAt = messageExpiresAt(msg.timestamp, currentDisappearMs, getCurrentDisappearSince());
         const userPresence = getUserPresence();
         const selfWebId = getSelfWebId();
         const selfPubHex = getSelfPubHex();
@@ -659,10 +673,7 @@ export function createRendering({
         div.className = "message" + (isGrouped ? " msg-grouped" : "");
         if (msg.is_search_result) div.classList.add("search-match");
         // R11.1.3: expiry tracking
-        if (currentDisappearMs > 0 && msg.timestamp) {
-            const expiresAt = new Date(msg.timestamp).getTime() + currentDisappearMs;
-            div.dataset.expiresAt = String(expiresAt);
-        }
+        if (msgExpiresAt !== null) div.dataset.expiresAt = String(msgExpiresAt);
 
         const name = msg.from_display_name || (msg.from_webid || "").slice(0, 12) || (msg.from_pub_hex || "").slice(0, 12);
         // Same ten-character tag as the member, contact and DM rows.
@@ -786,8 +797,8 @@ export function createRendering({
                 : "";
             // R11.1.3: expiry countdown label
             let expireHtml = "";
-            if (currentDisappearMs > 0 && msg.timestamp) {
-                const expiresAt = new Date(msg.timestamp).getTime() + currentDisappearMs;
+            if (msgExpiresAt !== null) {
+                const expiresAt = msgExpiresAt;
                 expireHtml = `<span class="msg-expire-countdown" title="${t('msg.expires')}">${icon('clock', { size: 12 })} <span class="msg-expire-label">${_expireLabel(expiresAt - Date.now())}</span></span>`;
             }
             bodyHtml += `<div class="msg-header"><span class="msg-sender" style="color:${avatarColor}">${escHtml(name)}${botBadge}${suffixHtml}${shieldHtml}${dmAuthHtml}</span><span class="msg-ts-header">${timeHtml(msg.timestamp, "msg-ts-time")}${importedBadge}${expireHtml}</span></div>`;

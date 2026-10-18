@@ -473,6 +473,7 @@ import { createAccountSync } from './account-sync.js';
             if (socket && socket.readyState === WebSocket.OPEN) fetch.forEach(id => loadRoomHistory(id, 100));
         }
         let currentDisappearMs = 0; // R11.1.3: active timer for current thread
+        let currentDisappearSince = ''; // when it was turned on (older messages stay)
         let selfWebId = clientDid; // set from localStorage immediately; updated after generateOrLoadIdentity
         // Multi-device: if this device was linked to an account, its messaging
         // identity is the ACCOUNT did (from the stored delegation cert). clientDid
@@ -522,6 +523,7 @@ import { createAccountSync } from './account-sync.js';
             getActiveView: () => activeView, getSocket: () => socket,
             getSelfWebId: () => selfWebId, getSelfPubHex: () => selfPubHex,
             getCurrentDisappearMs: () => currentDisappearMs,
+            getCurrentDisappearSince: () => currentDisappearSince,
             getMessageMap: () => messageMap, getAllMessages: () => allMessages,
             getUserPresence: () => userPresence,
             renderReactions: (id) => renderReactions(id),
@@ -3322,7 +3324,7 @@ import { createAccountSync } from './account-sync.js';
                 case "disappear_timer_updated": {
                     const ms = event.ms || 0;
                     if (activeView && activeView.id === event.room_id) {
-                        updateDisappearBanner(ms);
+                        updateDisappearBanner(ms, event.since);
                         const sel = document.getElementById("disappear-timer-select");
                         if (sel) sel.value = String(ms);
                     }
@@ -3331,7 +3333,7 @@ import { createAccountSync } from './account-sync.js';
                 case "disappear_timer": {
                     if (activeView && event.room_id && event.room_id !== activeView.id) break;
                     const ms2 = event.ms || 0;
-                    updateDisappearBanner(ms2);
+                    updateDisappearBanner(ms2, event.since);
                     const sel2 = document.getElementById("disappear-timer-select");
                     if (sel2) sel2.value = String(ms2);
                     break;
@@ -4017,8 +4019,9 @@ import { createAccountSync } from './account-sync.js';
         }
 
         // -- Round 65: Disappear banner --
-        function updateDisappearBanner(ms) {
+        function updateDisappearBanner(ms, since = '') {
             currentDisappearMs = ms || 0;
+            currentDisappearSince = (ms && since) || '';
             const banner = document.getElementById('disappear-banner');
             const label = document.getElementById('disappear-label');
             if (!banner || !label) return;

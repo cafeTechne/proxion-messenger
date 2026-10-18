@@ -167,3 +167,21 @@ async def test_relayed_timer_starts_on_the_peer_gateway_too(tmp_path, monkeypatc
     await asyncio.sleep(0.1)
     assert gw_b._dm_disappear_timers.get("cert-B") == 3_600_000
     assert gw_b._disappear_since.get("cert-B"), "the peer gateway applied the timer retroactively"
+
+
+@pytest.mark.asyncio
+async def test_timer_events_tell_the_browser_when_the_timer_started(tmp_path):
+    """The browser counts messages down itself; without the start it expired
+    every older message on screen after a reload."""
+    gw = _gw(tmp_path)
+    me = _did()
+    _seed_rel(gw, "cert-A", "did:key:zPeer", owner=me)
+    gw._store.save_dm_thread("cert-A", "did:key:zPeer", None, owner_webid=me)
+    ws = _mock_ws()
+    await _register(gw, ws, me)
+    await gw.process_command(ws, {"cmd": "set_disappear_timer", "room_id": "cert-A", "ms": 30_000})
+    since = gw._disappear_since["cert-A"]
+    assert _events(ws, "disappear_timer_updated")[-1]["since"] == since
+    await gw.process_command(ws, {"cmd": "get_disappear_timer", "room_id": "cert-A"})
+    ev = _events(ws, "disappear_timer")[-1]
+    assert ev["ms"] == 30_000 and ev["since"] == since

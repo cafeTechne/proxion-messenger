@@ -3030,6 +3030,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                     pass
             await self._send_to_identity(_deliver, json.dumps({
                 "type": "disappear_timer_updated", "room_id": our_cert_id, "ms": ms,
+                **self._disappear_since_field(our_cert_id),
             }))
         return "200 OK", '{"status":"received"}'
 

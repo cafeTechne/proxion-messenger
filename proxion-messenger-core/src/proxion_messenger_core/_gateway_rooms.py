@@ -2860,7 +2860,8 @@ class RoomHandlerMixin:
             self._room_disappear_timers[thread_id] = ms
             if self._store:
                 self._store.set_room_disappear_timer(thread_id, ms)
-            event = json.dumps({"type": "disappear_timer_updated", "room_id": thread_id, "ms": ms})
+            event = json.dumps({"type": "disappear_timer_updated", "room_id": thread_id, "ms": ms,
+                                **self._disappear_since_field(thread_id)})
             for ws in list(self._local_rooms.get(thread_id, {}).get("members", set())):
                 try:
                     await ws.send(event)
@@ -2898,7 +2899,8 @@ class RoomHandlerMixin:
         self._dm_disappear_timers[thread_id] = ms
         if self._store:
             self._store.set_dm_disappear_timer(thread_id, ms)  # dedicated DM table (survives restart)
-        event = json.dumps({"type": "disappear_timer_updated", "room_id": thread_id, "ms": ms})
+        event = json.dumps({"type": "disappear_timer_updated", "room_id": thread_id, "ms": ms,
+                            **self._disappear_since_field(thread_id)})
         await self._send_to_identity(caller, event)
         # Deliver to the peer — and for a cross-gateway peer, RELAY the timer so
         # THEIR gateway also expires the shared messages (disappearing messages
@@ -2945,6 +2947,12 @@ class RoomHandlerMixin:
     def _disappear_since_iso(self, thread_id: str) -> str:
         return self.__dict__.get("_disappear_since", {}).get(thread_id, "") or ""
 
+    def _disappear_since_field(self, thread_id: str) -> dict:
+        """{"since": ...} for timer events, so the browser counts down only the
+        messages the timer applies to."""
+        since = self._disappear_since_iso(thread_id)
+        return {"since": since} if since else {}
+
     async def _handle_get_disappear_timer(self, websocket, data: dict) -> None:
         room_id = data.get("room_id", "")
         if self._auth_enforced() and not self._actor_can_read_thread(
@@ -2960,6 +2968,7 @@ class RoomHandlerMixin:
             "type": "disappear_timer",
             "room_id": room_id,
             "ms": ms,
+            **self._disappear_since_field(room_id),
         }))
 
     async def _handle_send_voice_message(self, websocket, data: dict) -> None:
