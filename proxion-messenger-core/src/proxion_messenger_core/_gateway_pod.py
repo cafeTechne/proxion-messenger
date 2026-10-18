@@ -38,6 +38,12 @@ _DURABLE_RELAY_TYPES = frozenset({
     "room_moderation", "room_emoji", "room_update",
 })
 
+# Room message event fields that travel in a room_message relay.
+_ROOM_RELAY_EVENT_FIELDS = frozenset({
+    "source", "thread_id", "from_webid", "from_display_name", "content",
+    "timestamp", "message_id", "local", "seq_num", "prev_hash",
+})
+
 
 def _norm_gateway_url(url: str) -> str:
     url = (url or "").strip()
@@ -2745,7 +2751,10 @@ class PodSyncMixin:
         import secrets as _sec
         ts = event.get("timestamp", datetime.now(timezone.utc).isoformat())
         payload = {
-            **{k: v for k, v in event.items() if k not in ("own",)},
+            # Only fields the receiver's /relay allowlist accepts: the live event
+            # also carries "type", "reply_to_id" and command flags, and any one of
+            # them made the peer reject the whole message as unknown_relay_fields.
+            **{k: v for k, v in event.items() if k in _ROOM_RELAY_EVENT_FIELDS},
             "content_type": "room_message",
             "room_id": room_id,
             "relay_nonce": _sec.token_hex(8),
