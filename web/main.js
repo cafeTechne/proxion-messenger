@@ -67,7 +67,7 @@ import { createTabLock, showTabNotice, hideTabNotice } from './tablock.js';
 import { createTransport, detectMode, applyTransportGating } from './transport.js';
 import { createPodSocket } from './podtransport.js';
 import { createRendering, replyQuoteHtml } from './rendering.js';
-import { createView, appendSidebarEmpty } from './view.js';
+import { createView, appendSidebarEmpty, mergeDmSnapshot } from './view.js';
 import { createInvite } from './invite.js';
 import { createPush, closedAppPushStatus } from './push.js';
 import { subscribeWebhook, watchResource } from './notify.js';
@@ -1067,7 +1067,11 @@ import { initThemePicker } from './theme.js';
                 closeBtn.onclick = (e) => { e.stopPropagation(); hideDm(id); };
                 li.appendChild(body);
                 li.appendChild(closeBtn);
-                li.onclick = () => openLocalDmThread(id, name, peer.peer_webid);
+                // A contact's thread (keyed by the relationship cert_id) opens as the
+                // contact conversation, the same view the contacts list opens.
+                li.onclick = () => peer.cert
+                    ? openContactThread({ certificate_id: id, display_name: peer.display_name, peer_did: peer.peer_webid })
+                    : openLocalDmThread(id, name, peer.peer_webid);
                 li.addEventListener("contextmenu", e => openSidebarCtx(e, id));
                 // Mute icon
                 const muteIcon = document.createElement("span");
@@ -1973,7 +1977,8 @@ import { initThemePicker } from './theme.js';
                         setTimeout(() => {
                             if (!socket || socket.readyState !== WebSocket.OPEN) return;
                             document.getElementById("room-list").innerHTML = "";
-                            document.getElementById("dm-list").innerHTML = "";
+                            // The DM list is not cleared here: the gateway's `dms`
+                            // snapshot is merged into it when it arrives.
                             socket.send(JSON.stringify({cmd: "get_rooms"}));
                             socket.send(JSON.stringify({cmd: "get_dms"}));
                             socket.send(JSON.stringify({cmd: "get_identity"}));
@@ -2291,7 +2296,8 @@ import { initThemePicker } from './theme.js';
                     }
                     break;
                 case "dms":
-                    populateSidebar("dm-list", event.dms, "dm");
+                    mergeDmSnapshot(localDmPeers, event.dms);
+                    renderDmSidebar();
                     break;
                 case "search_results":
                     renderSearchResults(event);

@@ -64,6 +64,29 @@ export function appendSidebarEmpty(list, listId) {
     list.appendChild(li);
 }
 
+// Merge the gateway's DM snapshot (get_dms) into the sidebar's DM map without
+// dropping rows it does not list (pod-synced, just-opened or relay-added ones).
+// A known row keeps its name unless it has none; a contact thread (local:false)
+// is marked cert so it opens as a contact conversation. Returns true on change.
+export function mergeDmSnapshot(peers, dms) {
+    let changed = false;
+    for (const d of dms || []) {
+        const id = d && d.cert_id;
+        if (!id) continue;
+        const cur = peers[id];
+        if (!cur) {
+            peers[id] = { display_name: d.display_name || null, peer_webid: d.peer_webid || id };
+            if (d.local === false) peers[id].cert = true;
+            changed = true;
+            continue;
+        }
+        if (!cur.display_name && d.display_name) { cur.display_name = d.display_name; changed = true; }
+        if (!cur.peer_webid && d.peer_webid) { cur.peer_webid = d.peer_webid; changed = true; }
+        if (d.local === false && !cur.cert) { cur.cert = true; changed = true; }
+    }
+    return changed;
+}
+
 export function createView({
     getSocket,
     setActiveView, setMessageMap, setAllMessages, setCurrentRoomMembers, getAllMessages,

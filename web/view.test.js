@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('./pod.js', () => ({ podWriteReadState: vi.fn(() => Promise.resolve()) }));
 
-import { createView, appendSidebarEmpty } from './view.js';
+import { createView, appendSidebarEmpty, mergeDmSnapshot } from './view.js';
 
 let els, host, sent, calls;
 function mkEl(over = {}) {
@@ -355,5 +355,40 @@ describe('switching views resets every header control', () => {
     els['room-list']._children[0].onclick();
     expect(calls.updateE2EStatus.at(-1)).toEqual([null]);
     expect(shown('start-call-btn')).toBe(false);
+  });
+});
+
+describe('mergeDmSnapshot (get_dms reply)', () => {
+  it('adds a cross-gateway contact thread with its name and marks it a contact thread', () => {
+    const peers = {};
+    const changed = mergeDmSnapshot(peers, [
+      { cert_id: 'cert-1', peer_webid: 'did:key:zAlice', display_name: 'Alice', local: false },
+      { cert_id: 'local-x', peer_webid: 'did:key:zX', display_name: null, local: true },
+    ]);
+    expect(changed).toBe(true);
+    expect(peers['cert-1']).toEqual({ display_name: 'Alice', peer_webid: 'did:key:zAlice', cert: true });
+    expect(peers['local-x']).toEqual({ display_name: null, peer_webid: 'did:key:zX' });
+  });
+
+  it('keeps rows the snapshot does not list (an empty reply clears nothing)', () => {
+    const peers = { 'local-y': { display_name: 'Yan', peer_webid: 'did:key:zY' } };
+    expect(mergeDmSnapshot(peers, [])).toBe(false);
+    expect(mergeDmSnapshot(peers, undefined)).toBe(false);
+    expect(peers).toEqual({ 'local-y': { display_name: 'Yan', peer_webid: 'did:key:zY' } });
+  });
+
+  it('keeps a known name and only fills one that is missing', () => {
+    const peers = {
+      a: { display_name: 'Known', peer_webid: 'did:key:zA' },
+      b: { display_name: null, peer_webid: 'did:key:zB' },
+    };
+    mergeDmSnapshot(peers, [
+      { cert_id: 'a', peer_webid: 'did:key:zA', display_name: 'Other' },
+      { cert_id: 'b', peer_webid: 'did:key:zB', display_name: 'Bea', local: false },
+      { peer_webid: 'did:key:zNoId' },
+    ]);
+    expect(peers.a.display_name).toBe('Known');
+    expect(peers.b).toEqual({ display_name: 'Bea', peer_webid: 'did:key:zB', cert: true });
+    expect(Object.keys(peers)).toEqual(['a', 'b']);
   });
 });

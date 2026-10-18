@@ -219,10 +219,46 @@ class DmHandlerMixin:
                     }))
 
     async def _handle_get_dms(self, websocket, data: dict) -> None:
-        dms = []
+        """The caller's DM threads, read from the store so a conversation with a
+        peer on another gateway is listed whether or not that peer is connected:
+        the caller's own dm_threads rows, plus each contact's thread that holds
+        messages (keyed by the relationship cert_id)."""
+        dms: list = []
+        seen: set = set()
+        caller = self._client_webids.get(websocket, "")
+
+        def _add(tid, peer, name, local):
+            if not tid or tid in seen:
+                return
+            seen.add(tid)
+            dms.append({"cert_id": tid, "peer_webid": peer or "",
+                        "display_name": name or None, "local": local})
+
+        if self._store:
+            if caller:
+                for t in self._store.get_dm_threads(owner_webid=caller):
+                    peer = t.get("peer_webid") or ""
+                    _add(t["thread_id"], peer,
+                         (self._store.get_display_name(peer) if peer else None) or t.get("display_name"),
+                         True)
+            seen_peers: set = set()
+            for cert_dict in self._store.list_relationships(owner_webid=caller):
+                cid = cert_dict.get("certificate_id") or cert_dict.get("id")
+                peer = cert_dict.get("peer_did") or ""
+                # Newest cert first; a re-added peer is listed once, as in get_relationships.
+                if peer:
+                    if peer in seen_peers:
+                        continue
+                    seen_peers.add(peer)
+                if cid and self._store.count_messages_after(cid, 0) > 0:
+                    _add(cid, peer, self._store.get_display_name(peer) if peer else None, False)
+            if dms and caller:
+                last_reads = self._store.get_all_last_reads(caller)
+                for d in dms:
+                    d["last_read_ts"] = last_reads.get(d["cert_id"], 0)
         for cid, (cert, _) in self.dm_clients.items():
             if hasattr(cert, "subject"):
-                dms.append({"cert_id": cid, "peer_webid": cert.subject})
+                _add(cid, cert.subject, None, False)
         await websocket.send(json.dumps({"type": "dms", "dms": dms}))
 
     # MIME types accepted for file transfers
