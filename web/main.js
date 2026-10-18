@@ -1970,6 +1970,15 @@ import { createAccountSync } from './account-sync.js';
 
                     renderMessage(msg, { live: true });
 
+                    // A contact's DM landing in the open, visible thread is read now:
+                    // tell the gateway, which sends the read receipt to the sender.
+                    if (activeView && activeView.id === id && activeView.type === "dm" && !msg.own
+                        && msg.message_id && msg.from_webid && msg.from_webid !== selfWebId
+                        && document.visibilityState === "visible"
+                        && socket?.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({cmd: "mark_read", thread_id: id, message_id: msg.message_id}));
+                    }
+
                     // Update unread badges + DM last-message preview
                     if (!activeView || activeView.id !== id) {
                         if (!mutedThreads.has(id)) {
@@ -2271,9 +2280,15 @@ import { createAccountSync } from './account-sync.js';
                 case "read_receipt":
                     // R10.2.2: upgrade delivery badge to ✓✓
                     (function() {
+                        if (!event.message_id) return;
                         const msgEl = document.querySelector(`[data-message-id="${CSS.escape(event.message_id)}"]`);
                         if (msgEl) {
-                            const badge = msgEl.querySelector('.relay-pending-badge, .relay-delivered');
+                            let badge = msgEl.querySelector('.relay-pending-badge, .relay-delivered, .relay-read');
+                            // A DM delivered straight away never got a queued badge.
+                            if (!badge && messageMap[event.message_id]?.from_webid === selfWebId) {
+                                badge = document.createElement("span");
+                                msgEl.appendChild(badge);
+                            }
                             if (badge) {
                                 _setStatusBadge(badge, 'check-double', t('receipt.read'));
                                 badge.title = t('receipt.read');
@@ -2284,6 +2299,8 @@ import { createAccountSync } from './account-sync.js';
                     break;
                 case "presence":
                     updatePresence(event);
+                    if (event.display_name) _applyPeerRename(event.webid, event.display_name);
+                    _updateHeaderSubtitle();
                     break;
                 case "presence_update":
                     handlePresenceUpdate(event);
@@ -2992,6 +3009,7 @@ import { createAccountSync } from './account-sync.js';
                         socket.send(JSON.stringify({ cmd: 'get_relationships' }));
                     break;
                 }
+                case "contact_removed_by_peer":
                 case "contact_revoked":
                     // R12.4.1+R12.4.2: the contact is gone. Take them out of the
                     // contacts list (refetched) and the DM list, and close their
@@ -3019,7 +3037,7 @@ import { createAccountSync } from './account-sync.js';
                         dmHistoryDeleteThread(event.cert_id);
                         if (peerDidToCertId && event.peer_did) dmHistoryDeleteThread(event.peer_did);
                     }
-                    showToast(t('contact.revoked'));
+                    showToast(t(event.type === "contact_removed_by_peer" ? 'contact.removedByPeer' : 'contact.revoked'));
                     break;
                 case "relationship_established":
                     document.querySelectorAll("[data-peer-did='" + (event.peer_did || "") + "']")
@@ -3047,6 +3065,15 @@ import { createAccountSync } from './account-sync.js';
                     break;
                 case "friend_requests":
                     (event.pending || []).forEach(renderPendingInvite);
+                    break;
+                case "friend_request_dismissed":
+                    // Ignored here or on another device, or the person we asked
+                    // ignored it: the request is over on both sides.
+                    if (event.invitation_id) {
+                        document.getElementById("fri-" + event.invitation_id)?.remove();
+                        refreshFriendRequestsBadge();
+                        podDeleteInvite(event.invitation_id).catch(() => {});
+                    }
                     break;
                 case "cert_expiring_soon": {
                     const warnKey = "cert_warned_" + event.certificate_id;
@@ -4428,6 +4455,31 @@ import { createAccountSync } from './account-sync.js';
 
         // Muted line under the conversation name: member count for rooms,
         // presence for DMs (nothing when unknown).
+        // A contact renamed themselves (their gateway relays the new name with
+        // presence): follow it in the DM list, the contacts list and the header.
+        function _applyPeerRename(peerDid, name) {
+            if (!peerDid || !name) return;
+            const certId = peerDidToCertId[peerDid];
+            if (certId && _threadNames[certId] === name) return;
+            let changed = false;
+            for (const [id, peer] of Object.entries(localDmPeers)) {
+                if (id === certId || peer.peer_webid === peerDid) {
+                    if (peer.display_name !== name) { peer.display_name = name; changed = true; }
+                }
+            }
+            if (changed) renderDmSidebar();
+            if (certId) _threadNames[certId] = name;
+            if (activeView && (activeView.peerDid === peerDid || activeView.peerWebid === peerDid
+                               || (certId && activeView.id === certId))) {
+                activeView.name = name;
+                const hdr = document.getElementById("chat-header-name");
+                if (hdr) { hdr.textContent = name; hdr.title = name; }
+                updatePageTitle();
+            }
+            if (certId && socket?.readyState === WebSocket.OPEN)
+                socket.send(JSON.stringify({ cmd: 'get_relationships' }));
+        }
+
         function _updateHeaderSubtitle() {
             const el = document.getElementById("chat-header-subtitle");
             if (!el) return;
@@ -6587,6 +6639,11 @@ import { createAccountSync } from './account-sync.js';
                 else if (frAction === 'dismiss') {
                     document.getElementById(`fri-${invId}`)?.remove();
                     refreshFriendRequestsBadge();
+                    // Remember the decision: the gateway stops listing it, the pod
+                    // copy goes, and the sender's side stops showing it as pending.
+                    if (socket?.readyState === WebSocket.OPEN)
+                        socket.send(JSON.stringify({cmd: "decline_friend_request", invitation_id: invId}));
+                    podDeleteInvite(invId).catch(() => {});
                 }
             });
 

@@ -298,6 +298,12 @@ class AuthHandlerMixin:
                 _prev_did = self._client_webids.get(websocket, "")
                 if str(_prev_did).startswith("did:key:"):
                     self._session_signing_did[websocket] = _prev_did
+            # Re-register as a different identity on the same socket: take it out
+            # of the old identity's maps first, or that identity stays "online"
+            # with a socket that now speaks for someone else.
+            _old_identity = self._client_webids.get(websocket, "")
+            if _old_identity and _old_identity != identity:
+                self._detach_socket_identity(websocket, _old_identity)
             self._client_webids[websocket] = identity
             self._webid_sockets.setdefault(identity, set()).add(websocket)
             # R7: single-session mode — revoke all other active sockets for this identity
@@ -374,6 +380,11 @@ class AuthHandlerMixin:
                 "updated_at": now,
                 "last_active_at": now,
             })
+            # First connection for this identity: tell contacts on other gateways.
+            if len(self._presence_by_identity.get(identity, ())) == 1:
+                asyncio.create_task(self._relay_presence_to_contacts(
+                    identity, "online", self._user_presence[identity]["status_message"],
+                    display_name=self._display_names.get(websocket, "")))
             turn_creds = self._make_turn_creds(identity)
             registered_msg: dict = {"type": "registered", "webid": identity}
             if turn_creds:

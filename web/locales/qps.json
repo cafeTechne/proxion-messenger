@@ -107,6 +107,7 @@
   "contact.connected": "⟦Çóñţáçţ çóññéçţéð: {peer} áéíóúáéí⟧",
   "contact.revoked": "⟦Á çóñţáçţ ĥáš ḅééñ ŕéṽóķéð. áéíóúáéíóúá⟧",
   "contact.revokedBadge": "⟦Çóñţáçţ ŕéṽóķéð áéíóúá⟧",
+  "contact.removedByPeer": "⟦Á çóñţáçţ ŕéɱóṽéð ýóú. Ţĥéíŕ çóñṽéŕšáţíóñ íš çĺóšéð. áéíóúáéíóúáéíóúáéíóúá⟧",
   "contact.connectedWith": "⟦Çóññéçţéð ŵíţĥ {peer} áéíóúá⟧",
   "contact.expiresInDays.one": "⟦Ýóúŕ çóññéçţíóñ ŵíţĥ {peer} éẋρíŕéš íñ {count} ðáý. áéíóúáéíóúáéíóú⟧",
   "contact.expiresInDays.other": "⟦Ýóúŕ çóññéçţíóñ ŵíţĥ {peer} éẋρíŕéš íñ {count} ðáýš. áéíóúáéíóúáéíóúá⟧",

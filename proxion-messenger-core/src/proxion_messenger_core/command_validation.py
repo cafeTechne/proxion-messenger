@@ -129,7 +129,7 @@ MUTATING_COMMANDS: frozenset[str] = frozenset({
     "kick_member", "ban_member", "unban_member", "mute_member", "unmute_member",
     "set_member_role", "add_room_emoji", "remove_room_emoji",
     # contacts and trust
-    "send_friend_request", "accept_friend_request", "restore_contacts",
+    "send_friend_request", "accept_friend_request", "decline_friend_request", "restore_contacts",
     "revoke_contact", "block", "unblock", "verify_contact",
     "apply_contact_verification_sync", "sync_contact_verifications",
     "approve_peer_gateway_change", "resolve_peer_trust_dispute",

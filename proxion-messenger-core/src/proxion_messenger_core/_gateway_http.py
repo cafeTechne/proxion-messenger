@@ -431,6 +431,61 @@ class HttpEndpointsMixin:
 
         return "200 OK", '{"status":"received"}'
 
+    async def _handle_invite_decline_post(self, body: bytes) -> tuple[str, str]:
+        """Handle POST /invite/decline: the invitee's gateway says our request was
+        ignored. Signed by the invitee's gateway key, and only honored for a still
+        pending request this gateway sent to exactly that did, so nobody else can
+        cancel it. The request is marked declined and the owner's UI drops it."""
+        try:
+            data = json.loads(body)
+        except Exception:
+            return "400 Bad Request", '{"error":"invalid JSON"}'
+        if not isinstance(data, dict):
+            return "400 Bad Request", '{"error":"invalid JSON"}'
+        invitation_id = str(data.get("invitation_id") or "")
+        from_did = str(data.get("from_did") or "")
+        ts = str(data.get("timestamp") or "")
+        sig = str(data.get("signature") or "")
+        if not (invitation_id and from_did.startswith("did:key:") and ts and sig):
+            return "400 Bad Request", '{"error":"missing fields"}'
+        try:
+            import base64 as _b64
+            from datetime import datetime as _dt, timezone as _tz
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+            from .didkey import did_to_pub_key
+            from .gateway import invite_decline_signing_input, invite_issuer_did
+            sent = _dt.fromisoformat(ts.replace("Z", "+00:00"))
+            if sent.tzinfo is None:
+                sent = sent.replace(tzinfo=_tz.utc)
+            if abs((_dt.now(_tz.utc) - sent).total_seconds()) > 86400:
+                return "400 Bad Request", '{"error":"stale"}'
+            raw_sig = _b64.urlsafe_b64decode(sig + "=" * (-len(sig) % 4))
+            Ed25519PublicKey.from_public_bytes(did_to_pub_key(from_did)).verify(
+                raw_sig, invite_decline_signing_input(invitation_id, from_did, ts))
+        except Exception:
+            return "400 Bad Request", '{"error":"invalid signature"}'
+        if not self._store:
+            return "200 OK", '{"status":"received"}'
+        row = self._store.get_pending_invite_row(invitation_id)
+        invite = (row or {}).get("invite") or {}
+        # Ours (we issued it), still pending, and addressed to the decliner.
+        if (not row or row.get("status") != "pending"
+                or invite_issuer_did(invite) != self._own_gateway_did()
+                or row.get("target_did") != from_did):
+            return "200 OK", '{"status":"received"}'
+        self._store.mark_invite_status(invitation_id, "declined")
+        sender = ""
+        try:
+            sender = self._store.get_pending_invite_sender(invitation_id) or ""
+        except Exception:
+            pass
+        await self._send_to_identity(sender or self._own_gateway_did(), json.dumps({
+            "type": "friend_request_dismissed",
+            "invitation_id": invitation_id,
+            "declined": True,
+        }))
+        return "200 OK", '{"status":"ok"}'
+
     async def _handle_invite_accept_post(self, body: bytes) -> tuple[str, str]:
         """Handle POST /invite/accept — receive acceptance from acceptor's gateway.
 
@@ -838,7 +893,7 @@ class HttpEndpointsMixin:
         #     participate in the channel, else it could inject a fake peer.
         _SELF_SIGNED_TYPES = (
             "dm_reaction", "dm_edit", "dm_delete", "dm_pin", "dm_disappear_timer",
-            "voice_signal")
+            "voice_signal", "contact_removed")
         _MEMBER_SIGNED_TYPES = (
             "room_message", "room_reaction", "room_edit", "room_delete", "room_moderation",
             "room_emoji", "room_update",
@@ -992,6 +1047,10 @@ class HttpEndpointsMixin:
             "file_received",
         ):
             return await self._handle_file_relay(data)
+
+        # ── Contact removed us: end the relationship on this side too ──
+        if data.get("content_type") == "contact_removed":
+            return await self._handle_contact_removed_relay(data)
 
         # ── Presence relay — update cache and broadcast ──
         if data.get("content_type") == "presence":
@@ -1477,6 +1536,7 @@ class HttpEndpointsMixin:
                     "/relay":         128 * 1024,        # 128 KiB
                     "/invite":        128 * 1024,        # 128 KiB
                     "/invite/accept": 128 * 1024,        # 128 KiB
+                    "/invite/decline": 4 * 1024,         # 4 KiB (signed decline)
                     "/devices":       8 * 1024,          # 8 KiB (signed roster request)
                     "/room-join":     8 * 1024,          # 8 KiB (signed room join)
                     "/restore":       5 * 1024 * 1024,   # 5 MiB
@@ -1496,7 +1556,7 @@ class HttpEndpointsMixin:
                         return
 
                 # Content-Type enforcement for JSON POST endpoints
-                _JSON_POST_PATHS = {"/relay", "/invite", "/invite/accept", "/devices", "/room-join", "/restore", "/import"}
+                _JSON_POST_PATHS = {"/relay", "/invite", "/invite/accept", "/invite/decline", "/devices", "/room-join", "/restore", "/import"}
                 if method == "POST" and path in _JSON_POST_PATHS:
                     _ct = headers_raw.get(b"content-type", b"").decode("utf-8", errors="replace").lower()
                     _ct_base = _ct.split(";")[0].strip()
@@ -1510,7 +1570,7 @@ class HttpEndpointsMixin:
                         return
 
                 # R8: DB integrity guard — block mutating POST endpoints when DB is corrupt
-                _MUTATING_POST_PATHS = {"/relay", "/invite", "/invite/accept", "/room-join", "/restore", "/import"}
+                _MUTATING_POST_PATHS = {"/relay", "/invite", "/invite/accept", "/invite/decline", "/room-join", "/restore", "/import"}
                 if method == "POST" and path in _MUTATING_POST_PATHS:
                     _store_ok = not self._store or getattr(self._store, "_integrity_ok", True)
                     if not _store_ok:
@@ -2013,7 +2073,16 @@ class HttpEndpointsMixin:
                             "thread_id": thread_id,
                             "timestamp": timestamp,
                         })
-                        await self._send_to_identity(to_did, receipt_event)
+                        # to_did is this gateway's did (federated relationships are
+                        # gateway to gateway); the reader's contact lives under the
+                        # local account that holds the relationship.
+                        _rcpt_owner = ""
+                        if self._store:
+                            try:
+                                _rcpt_owner = self._store.get_relationship_owner(from_did) or ""
+                            except Exception:
+                                _rcpt_owner = ""
+                        await self._send_to_identity(_rcpt_owner or to_did, receipt_event)
                         ok = b'{"status":"ok"}'
                         writer.write(
                             b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
@@ -2055,6 +2124,25 @@ class HttpEndpointsMixin:
                     if content_length > 0:
                         body = await _read_http_body(reader, min(content_length, 65536), 10.0)
                     status, response = await self._handle_invite_accept_post(body)
+                    resp_bytes = response.encode()
+                    writer.write(
+                        f"HTTP/1.1 {status}\r\nContent-Type: application/json\r\n"
+                        f"Content-Length: {len(resp_bytes)}\r\nAccess-Control-Allow-Origin: *\r\n\r\n".encode()
+                        + resp_bytes
+                    )
+                    await writer.drain()
+                    return
+
+                # ── POST /invite/decline: the peer ignored our friend request ──
+                if method == "POST" and path == "/invite/decline":
+                    if _check_http_rate(peer_ip, "invite"):
+                        await _write_429(writer)
+                        await writer.drain()
+                        return
+                    body = b""
+                    if content_length > 0:
+                        body = await _read_http_body(reader, min(content_length, 4096), 10.0)
+                    status, response = await self._handle_invite_decline_post(body)
                     resp_bytes = response.encode()
                     writer.write(
                         f"HTTP/1.1 {status}\r\nContent-Type: application/json\r\n"

@@ -320,6 +320,18 @@ class FederationStoreMixin(object):
             for r in rows:
                 conn.execute("UPDATE pending_relays SET status = 'failed' WHERE id = ?", (r["id"],))
             return [dict(r) for r in rows]
+    def take_pending_relays_to(self, to_webid: str, limit: int = 500) -> list[dict]:
+        """Still-pending relays addressed to to_webid (a contact who removed us),
+        returned so the caller can fail them and tell each sender."""
+        if not to_webid:
+            return []
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM pending_relays WHERE status = 'pending' AND to_webid = ? "
+                "ORDER BY created_at ASC LIMIT ?",
+                (to_webid, limit),
+            ).fetchall()
+            return [dict(r) for r in rows]
     def mark_relay_delivered(self, relay_id: str) -> None:
         with self._conn() as conn:
             conn.execute(

@@ -45,7 +45,10 @@ describe('handlePresenceUpdate', () => {
     const { profile, userPresence } = make();
     els['message-feed'] = mkEl({ querySelectorAll: () => [] });
     profile.handlePresenceUpdate({ webid: 'did:key:zBob', status: 'online', updated_at: 't' });
-    expect(userPresence['did:key:zBob']).toEqual({ status: 'online', updated_at: 't' });
+    expect(userPresence['did:key:zBob']).toEqual({ status: 'online', updated_at: 't', status_message: '' });
+    // A contact's status message (relayed from their gateway) is kept for the profile card.
+    profile.handlePresenceUpdate({ webid: 'did:key:zBob', status: 'busy', updated_at: 'u', status_message: 'at lunch' });
+    expect(userPresence['did:key:zBob'].status_message).toBe('at lunch');
   });
   it('ignores events with no webid', () => {
     const { profile, userPresence } = make();

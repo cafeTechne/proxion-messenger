@@ -87,6 +87,26 @@ class GatewayConfig:
     # Set automatically by run_gateway.py when UPnP succeeds
     upnp_mapped: bool = field(default_factory=lambda: os.environ.get("PROXION_UPNP_MAPPED") == "1")
 
+
+def invite_decline_signing_input(invitation_id: str, from_did: str, ts: str) -> bytes:
+    """Bytes the declining gateway signs for POST /invite/decline."""
+    return f"proxion-invite-decline|{invitation_id}|{from_did}|{ts}".encode()
+
+
+def invite_issuer_did(invite: dict) -> str:
+    """The did of a stored invite's issuer ('' when it cannot be told)."""
+    issuer = invite.get("issuer") if isinstance(invite, dict) else None
+    if not isinstance(issuer, dict):
+        return ""
+    if issuer.get("did"):
+        return str(issuer["did"])
+    try:
+        from .didkey import pub_key_to_did
+        return pub_key_to_did(bytes.fromhex(issuer.get("public_key", "")))
+    except Exception:
+        return ""
+
+
 class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSyncMixin, RoomHandlerMixin, DmHandlerMixin, AuthHandlerMixin, MiscHandlerMixin, HttpEndpointsMixin):
     def __init__(
         self,
@@ -996,37 +1016,50 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             self._display_names.pop(websocket, None)
             self._revoked_sessions.discard(websocket)
             if webid:
-                sockets = self._webid_sockets.get(webid, set())
-                sockets.discard(websocket)
-                if not sockets:
-                    self._webid_sockets.pop(webid, None)
+                self._detach_socket_identity(websocket, webid)
 
-                # R13.13: multi-device presence aggregation
-                _pid_set = self._presence_by_identity.get(webid, set())
-                _pid_set.discard(websocket)
-                if not _pid_set:
-                    self._presence_by_identity.pop(webid, None)
-                    # Last connection gone → broadcast offline
-                    now = datetime.now(timezone.utc).isoformat()
-                    old_presence = self._user_presence.get(webid, {})
-                    self._user_presence[webid] = {
-                        "status": "offline",
-                        "status_message": old_presence.get("status_message", ""),
-                        "updated_at": now,
-                        "last_active_at": now,
-                    }
-                    asyncio.create_task(self.broadcast({
-                        "type": "presence_update",
-                        "webid": webid,
-                        "status": "offline",
-                        "status_message": old_presence.get("status_message", ""),
-                        "updated_at": now,
-                        "last_active_at": now,
-                    }))
-            
             await self._cleanup_voice_sessions(websocket, webid or "")
             for room in self._local_rooms.values():
                 room["members"].discard(websocket)
+
+    def _detach_socket_identity(self, websocket, webid: str) -> None:
+        """Drop *websocket* from *webid*'s socket and presence sets. When it was
+        that identity's last connection, mark it offline and tell contacts (and
+        their gateways). Used on disconnect and when a socket re-registers as a
+        different identity, which otherwise left it listed under the old one."""
+        sockets = self._webid_sockets.get(webid, set())
+        sockets.discard(websocket)
+        if not sockets:
+            self._webid_sockets.pop(webid, None)
+        # R13.13: multi-device presence aggregation
+        _pid_set = self._presence_by_identity.get(webid, set())
+        _pid_set.discard(websocket)
+        if _pid_set:
+            return
+        self._presence_by_identity.pop(webid, None)
+        # Last connection gone: broadcast offline
+        now = datetime.now(timezone.utc).isoformat()
+        old_presence = self._user_presence.get(webid, {})
+        self._user_presence[webid] = {
+            "status": "offline",
+            "status_message": old_presence.get("status_message", ""),
+            "updated_at": now,
+            "last_active_at": now,
+        }
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self.broadcast({
+            "type": "presence_update",
+            "webid": webid,
+            "status": "offline",
+            "status_message": old_presence.get("status_message", ""),
+            "updated_at": now,
+            "last_active_at": now,
+        }))
+        loop.create_task(self._relay_presence_to_contacts(
+            webid, "offline", old_presence.get("status_message", "")))
 
     def _check_ws_rate_limit(self, websocket) -> bool:
         """Return True if command is allowed; False if global rate limit exceeded.
@@ -1644,6 +1677,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
             elif cmd == "accept_friend_request":
                 await self._handle_accept_friend_request(websocket, data)
+            elif cmd == "decline_friend_request":
+                await self._handle_decline_friend_request(websocket, data)
 
             elif cmd == "list_friend_requests":
                 await self._handle_list_friend_requests(websocket, data)
@@ -1892,6 +1927,49 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             "target_did": target_did,
             "target_address": target_address,
         }))
+
+    async def _handle_decline_friend_request(self, websocket, data: dict):
+        """Ignore an inbound friend request: mark it declined so it is not pushed
+        again on the next connect, and tell the requester's gateway so their
+        side stops showing the request as pending."""
+        invitation_id = str(data.get("invitation_id") or "")
+        if self._auth_enforced():
+            caller_did = self._client_webids.get(websocket, "")
+            if caller_did != self._own_gateway_did():
+                await websocket.send(json.dumps({"type": "error", "message": "not_owner"}))
+                return
+        if not self._store or not invitation_id:
+            await websocket.send(json.dumps({"type": "error", "message": "invitation_id required"}))
+            return
+        row = self._store.get_pending_invite_row(invitation_id)
+        invite = (row or {}).get("invite") or {}
+        # Inbound only: a request this gateway issued is withdrawn, not declined.
+        if (not row or row.get("status") != "pending"
+                or invite_issuer_did(invite) == self._own_gateway_did()):
+            await websocket.send(json.dumps({"type": "error", "message": "invite_not_found"}))
+            return
+        self._store.mark_invite_status(invitation_id, "declined")
+        hints = invite.get("endpoint_hints") or []
+        endpoint = hints[0] if hints and isinstance(hints[0], str) else ""
+        if endpoint:
+            http_base = endpoint.replace("wss://", "https://").replace("ws://", "http://").rstrip("/")
+            if _is_safe_gateway_url(http_base):
+                import base64 as _b64
+                own = self._own_gateway_did()
+                ts = datetime.now(timezone.utc).isoformat()
+                sig = _b64.urlsafe_b64encode(self.agent.identity_key.sign(
+                    invite_decline_signing_input(invitation_id, own, ts))).rstrip(b"=").decode()
+                from .network import async_safe_post
+                asyncio.create_task(async_safe_post(http_base + "/invite/decline", {
+                    "invitation_id": invitation_id, "from_did": own,
+                    "timestamp": ts, "signature": sig,
+                }))
+        _caller = self._client_webids.get(websocket, "")
+        _evt = json.dumps({"type": "friend_request_dismissed", "invitation_id": invitation_id})
+        if _caller:
+            await self._send_to_identity(_caller, _evt)
+        else:
+            await websocket.send(_evt)
 
     async def _handle_accept_friend_request(self, websocket, data: dict):
         """Accept an inbound FederationInvite: issue a RelationshipCertificate,
@@ -2184,18 +2262,9 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             "relationships": relationships
         }))
 
-    async def _handle_revoke_contact(self, websocket, data: dict) -> None:
-        """R12.3.1 — Mark a contact's cert as revoked, update in-memory set, broadcast event."""
-        cert_id = data.get("cert_id", "")
-        caller_webid = self._client_webids.get(websocket, "")
-        if not cert_id or not self._store:
-            await websocket.send(json.dumps({"type": "error", "message": "cert_id required"}))
-            return
-        cert_dict = self._store.get_relationship_by_cert_id(cert_id)
-        if not cert_dict:
-            await websocket.send(json.dumps({"type": "error", "message": "cert_not_found"}))
-            return
-        peer_did = cert_dict.get("peer_did", "")
+    def _revoke_contact_state(self, cert_id: str, peer_did: str) -> None:
+        """Revoke a contact locally: revocation record, in-memory set, cancelled
+        pending requests, revoked relationship rows and a durable pod tombstone."""
         self._store.mark_revoked(cert_id, peer_did)
         self._revoked_dids.add(peer_did)
         # A request sent to them earlier must not re-add them when accepted later.
@@ -2209,6 +2278,74 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # Write a durable pod tombstone so the revocation survives a SQLite cold
         # start / DID rotation and is the authority on restore (harasser stays out).
         asyncio.create_task(self._sync_revocation_to_pod(cert_id, peer_did))
+
+    async def _handle_contact_removed_relay(self, data: dict) -> tuple[str, str]:
+        """A contact's gateway says they removed us. End the relationship on this
+        side too (same revocation as a local remove, so cold start and pod import
+        keep it ended), fail what is still queued for them, and tell the owner.
+
+        Only a relationship made before the signed removal time is ended: a
+        relationship from a later re-add is never touched by an old notice."""
+        from_webid = data.get("from_webid", "")
+        rel = self._authorized_relationship(from_webid) if from_webid else None
+        if not rel or not self._store:
+            return "200 OK", '{"status":"received"}'
+        cert_dict, our_cert_id = rel
+        try:
+            removed_at = datetime.fromisoformat(
+                str(data.get("timestamp", "")).replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return "200 OK", '{"status":"received"}'
+        try:
+            created_at = float(cert_dict.get("created_at") or 0)
+        except (TypeError, ValueError):
+            created_at = 0.0
+        if created_at > removed_at:
+            return "200 OK", '{"status":"received"}'
+        owner = ""
+        try:
+            owner = self._store.get_relationship_owner(from_webid) or ""
+        except Exception:
+            pass
+        self._revoke_contact_state(our_cert_id, from_webid)
+        try:
+            for relay in self._store.take_pending_relays_to(from_webid):
+                await self._fail_queued_relay(relay, "contact removed")
+        except Exception:
+            logger.debug("failing relays queued for removed contact failed", exc_info=True)
+        await self._send_to_identity(owner or self._own_gateway_did(), json.dumps({
+            "type": "contact_removed_by_peer",
+            "cert_id": our_cert_id,
+            "peer_did": from_webid,
+        }))
+        return "200 OK", '{"status":"ok"}'
+
+    async def _handle_revoke_contact(self, websocket, data: dict) -> None:
+        """R12.3.1 — Mark a contact's cert as revoked, update in-memory set, broadcast event."""
+        cert_id = data.get("cert_id", "")
+        caller_webid = self._client_webids.get(websocket, "")
+        if not cert_id or not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "cert_id required"}))
+            return
+        cert_dict = self._store.get_relationship_by_cert_id(cert_id)
+        if not cert_dict:
+            await websocket.send(json.dumps({"type": "error", "message": "cert_not_found"}))
+            return
+        peer_did = cert_dict.get("peer_did", "")
+        self._revoke_contact_state(cert_id, peer_did)
+        # Tell the peer's gateway, so their side ends the relationship too instead
+        # of queueing DMs our gateway now refuses. Queued for retry while the peer
+        # gateway is down; the removal time lets the receiver ignore a notice for
+        # a relationship made after it (a later re-add).
+        if peer_did and not self._sockets_for(peer_did):
+            _pg = self._resolve_peer_gateway(peer_did)
+            if _pg:
+                asyncio.create_task(self._relay_ephemeral(_pg, {
+                    "content_type": "contact_removed",
+                    "from_webid": self._own_gateway_did(),
+                    "to_webid": peer_did,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }))
         # Scope to the revoker's OWN identity (all their devices, so each purges
         # the contact + cached DM plaintext) rather than telling every session on
         # the gateway that this user revoked this peer (a relationship-metadata
@@ -3226,7 +3363,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         """Inbound relayed presence update — update local cache and broadcast to connected clients."""
         from_webid = data.get("from_webid", "")
         status = data.get("status", "")
-        status_message = data.get("status_message", "")
+        status_message = str(data.get("status_message", "") or "")[:100]
         updated_at = data.get("updated_at", "")
 
         if not from_webid or status not in ("online", "away", "busy", "offline"):
@@ -3246,13 +3383,25 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             "updated_at": updated_at,
             "last_active_at": updated_at,
         }
-        presence_event = json.dumps({
+        _presence = {
             "type": "presence",
             "webid": from_webid,
             "status": status,
             "status_message": status_message,
             "updated_at": updated_at,
-        })
+        }
+        # The contact's own name rides along (signed by their gateway, bound to
+        # from_webid above), so a rename on their side replaces the stored name.
+        _dn = data.get("display_name")
+        if isinstance(_dn, str) and _dn.strip() and self._store:
+            _dn = _dn.strip()[:100]
+            try:
+                if self._store.get_display_name(from_webid) != _dn:
+                    self._store.save_display_name(from_webid, _dn)
+            except Exception:
+                logger.debug("saving relayed display name failed", exc_info=True)
+            _presence["display_name"] = _dn
+        presence_event = json.dumps(_presence)
         # Deliver to the local user(s) who actually have this peer as a contact,
         # not every session on the gateway (a multi-user leak). Fall back to
         # broadcast only when the owner is unknown — single-user-safe.

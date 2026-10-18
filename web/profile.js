@@ -14,11 +14,11 @@ export function createProfile({ getSocket, showToast, getUserPresence, getMessag
     const state = { profileCardActive: null };
 
     function handlePresenceUpdate(event) {
-        const { webid, status, updated_at } = event;
+        const { webid, status, updated_at, status_message } = event;
         if (!webid) return;
 
         // Store presence data
-        getUserPresence()[webid] = { status, updated_at };
+        getUserPresence()[webid] = { status, updated_at, status_message: status_message || "" };
 
         // Re-render all messages from this user to update presence indicators
         const messageMap = getMessageMap();

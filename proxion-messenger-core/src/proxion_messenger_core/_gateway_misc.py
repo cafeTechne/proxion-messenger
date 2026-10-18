@@ -84,20 +84,58 @@ class MiscHandlerMixin:
             except Exception as e:
                 logger.debug(f"Failed to set presence on pod: {e}")
 
-        # Relay presence to all known federated peers (fire-and-forget)
-        if webid and self._peer_gateway_urls:
-            _now_iso = datetime.now(timezone.utc).isoformat()
-            _pres_payload = {
-                "content_type": "presence",
-                "from_webid": webid,
-                "status": status,
-                "status_message": status_message,
-                "updated_at": _now_iso,
-            }
-            for _peer_gw in set(self._peer_gateway_urls.values()):
-                asyncio.create_task(self._relay_ephemeral(_peer_gw, _pres_payload))
+        # Relay presence to the caller's contacts on other gateways (fire-and-forget)
+        if webid and status in ("online", "away", "busy", "offline"):
+            asyncio.create_task(self._relay_presence_to_contacts(webid, status, status_message))
 
         await websocket.send(json.dumps({"type": "presence_set", "status": status, "status_message": status_message}))
+
+    async def _relay_presence_to_contacts(self, webid: str, status: str,
+                                          status_message: str = "",
+                                          display_name: str = "") -> None:
+        """Send *webid*'s presence (and current display name) to the gateways of
+        its contacts that live elsewhere.
+
+        Federated contacts know this side by the GATEWAY did (relationships are
+        keyed gateway to gateway), so the relay speaks as the gateway did; the
+        receiver binds from_webid to the envelope signer. Contacts with a live
+        session on this gateway already got the local presence_update."""
+        if not webid or not self._store or status not in ("online", "away", "busy", "offline"):
+            return
+        try:
+            rels = self._store.list_relationships(webid) or []
+        except Exception:
+            return
+        if not display_name:
+            try:
+                display_name = self._store.get_display_name(webid) or ""
+            except Exception:
+                display_name = ""
+        gateways = set()
+        for rel in rels:
+            peer = rel.get("peer_did") or ""
+            if not peer or self._sockets_for(peer):
+                continue
+            gw = self._resolve_peer_gateway(peer)
+            if gw:
+                gateways.add(gw.replace("wss://", "https://").replace("ws://", "http://").rstrip("/"))
+        if not gateways:
+            return
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for gw in gateways:
+            payload = {
+                "content_type": "presence",
+                "from_webid": self._own_gateway_did(),
+                "status": status,
+                "status_message": (status_message or "")[:100],
+                "updated_at": now_iso,
+            }
+            if display_name:
+                payload["display_name"] = display_name.strip()[:100]
+            try:
+                await self._relay_ephemeral(gw, payload)
+            except Exception:
+                logger.debug("presence relay to %s failed", gw, exc_info=True)
 
     async def _handle_resolve_did(self, websocket, data: dict) -> None:
         did = data.get("did", "").strip()
@@ -574,6 +612,12 @@ class MiscHandlerMixin:
                     if self._client_webids.get(ws) == webid:
                         self._display_names[ws] = display_name
                 await self._push_account_sync(websocket, webid, {"display_name": display_name})
+                # Contacts on other gateways learn the new name with a presence
+                # relay, so their contacts list and DM header follow the rename.
+                _pres = self._user_presence.get(webid, {})
+                asyncio.create_task(self._relay_presence_to_contacts(
+                    webid, _pres.get("status", "online"), _pres.get("status_message", ""),
+                    display_name=display_name))
 
     async def _handle_connect_css(self, websocket, data: dict) -> None:
         # Only the gateway owner (whose identity matches self.agent) may reconfigure pod connectivity.

@@ -1803,6 +1803,18 @@ class RoomHandlerMixin:
                 self._store.save_message_receipt(message_id_read, reader_webid,
                                                   datetime.now(timezone.utc).isoformat())
 
+        # Opening a contact's thread sends mark_read without a message id: the
+        # receipt then covers the newest message the contact sent in it.
+        if (reader_webid and thread_id and not message_id_read and self._store
+                and self._store.get_relationship_by_cert_id(thread_id)):
+            try:
+                for _m in reversed(self._store.get_messages(thread_id, limit=20)):
+                    if _m.get("from_webid") and _m.get("from_webid") != reader_webid:
+                        message_id_read = _m.get("message_id") or ""
+                        break
+            except Exception:
+                message_id_read = ""
+
         # R10.1.1: relay read-receipt to peer gateway for cert DMs or relay DIDs
         if reader_webid and thread_id and message_id_read:
             cert_dict = self._store.get_relationship_by_cert_id(thread_id) if self._store else None

@@ -121,7 +121,7 @@ _RESTRICTED_HTTP_PATHS: set[str] = {
 }
 
 _PUBLIC_HTTP_PATHS: set[str] = {
-    "/relay", "/invite", "/invite/accept",
+    "/relay", "/invite", "/invite/accept", "/invite/decline",
     "/.well-known/proxion", "/health",
 }
 

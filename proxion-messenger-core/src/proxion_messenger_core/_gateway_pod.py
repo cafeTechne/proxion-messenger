@@ -37,6 +37,7 @@ _DURABLE_RELAY_TYPES = frozenset({
     "dm_edit", "dm_delete", "dm_reaction", "dm_pin", "dm_disappear_timer",
     "room_message", "room_edit", "room_delete", "room_reaction",
     "room_moderation", "room_emoji", "room_update",
+    "contact_removed",
 })
 
 # Room message event fields that travel in a room_message relay.
