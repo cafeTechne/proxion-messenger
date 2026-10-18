@@ -122,6 +122,9 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         self.message_cache: deque = deque(maxlen=2000)  # bounded in-memory search cache
         self.identity_cache = {} # webid -> {"card": IdentityCard, "avatar_b64": str, "expiry": timestamp}
         self._stop_event = asyncio.Event()
+        # Called once run() is listening on every port (the launcher prints READY).
+        self.on_listening = None
+        self._http_bound = None
         
         from .blocklist import Blocklist
         from .outbox import Outbox
@@ -3787,13 +3790,44 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         scheme = "wss" if ssl_ctx else "ws"
         _max_ws_clients = int(os.environ.get("PROXION_MAX_CLIENTS", "200"))
         _allowed_origins = self._allowed_ws_origins()
-        async with websockets.serve(
-            self.handle_client, self.config.host, self.config.port,
-            ssl=ssl_ctx, ping_interval=60, ping_timeout=20,
-            max_size=4 * 1024 * 1024,
-            origins=_allowed_origins,
-        ):
+        from .lifecycle import GatewayBindError, wait_for_free_ports
+        _serve_http_ui = bool(self.config.http_port and self.config.web_dir)
+        # After a desktop relaunch or update the previous gateway may still be
+        # shutting down on these ports; PROXION_BIND_WAIT gives it time.
+        _bind_wait = float(os.environ.get("PROXION_BIND_WAIT") or 0)
+        if _bind_wait > 0:
+            await wait_for_free_ports(
+                self.config.host,
+                [self.config.port] + ([self.config.http_port] if _serve_http_ui else []),
+                _bind_wait,
+            )
+        try:
+            _ws_server = await websockets.serve(
+                self.handle_client, self.config.host, self.config.port,
+                ssl=ssl_ctx, ping_interval=60, ping_timeout=20,
+                max_size=4 * 1024 * 1024,
+                origins=_allowed_origins,
+            )
+        except OSError as exc:
+            raise GatewayBindError(self.config.host, self.config.port, exc) from exc
+        async with _ws_server:
             logger.info(f"Proxion gateway running on {scheme}://{self.config.host}:{self.config.port}")
+
+            # The web UI listener binds before anything else starts, so a taken
+            # port fails startup instead of ending a running gateway with exit 0.
+            _http_task = None
+            if _serve_http_ui:
+                self._http_bound = asyncio.get_running_loop().create_future()
+                _http_task = asyncio.create_task(
+                    self._serve_http(self.config.web_dir, self.config.http_port)
+                )
+                await asyncio.wait({_http_task, self._http_bound},
+                                   return_when=asyncio.FIRST_COMPLETED)
+                if _http_task.done():
+                    _exc = _http_task.exception() if not _http_task.cancelled() else None
+                    raise _exc or GatewayBindError(self.config.host, self.config.http_port)
+            if self.on_listening is not None:
+                self.on_listening()
 
             # 1. Start core loops (polling + flushing)
             main_tasks = [
@@ -3826,11 +3860,9 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             if relay_node_enabled():
                 main_tasks.append(asyncio.create_task(self._supervised(self._mailbox_purge_loop)))
 
-            # 1b. Optional HTTP server for serving the web UI
-            if self.config.http_port and self.config.web_dir:
-                main_tasks.append(asyncio.create_task(
-                    self._serve_http(self.config.web_dir, self.config.http_port)
-                ))
+            # 1b. The web UI server, already listening (started above)
+            if _http_task is not None:
+                main_tasks.append(_http_task)
 
             # 2. Add push notifications if enabled
             if self.config.push:
@@ -3875,18 +3907,28 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 asyncio.wait(main_tasks, return_when=asyncio.FIRST_EXCEPTION)
             )
             _stop_task = asyncio.create_task(self._stop_event.wait())
+            _failure = None
             try:
                 await asyncio.wait(
                     [_wait_task, _stop_task],
                     return_when=asyncio.FIRST_COMPLETED,
                 )
+                # A core task died (not a requested stop): exit non-zero below
+                # instead of returning as if the gateway had shut down normally.
+                if not self._stop_event.is_set():
+                    for t in main_tasks:
+                        if t.done() and not t.cancelled() and t.exception() is not None:
+                            _failure = t.exception()
+                            logger.error("gateway task failed, shutting down: %r", _failure)
+                            break
             finally:
                 _stop_task.cancel()
                 _wait_task.cancel()
                 # Drain: notify clients and give them 2 s
-                for ws in list(self.clients):
-                    asyncio.create_task(ws.close(1001, "Gateway shutting down"))
-                await asyncio.sleep(2)
+                if self.clients:
+                    for ws in list(self.clients):
+                        asyncio.create_task(ws.close(1001, "Gateway shutting down"))
+                    await asyncio.sleep(2)
                 for t in main_tasks:
                     if not t.done():
                         t.cancel()
@@ -3896,6 +3938,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                         self._store.checkpoint()
                     except Exception:
                         pass
+            if _failure is not None:
+                raise _failure
 
 
 async def run_gateway(*args, **kwargs):

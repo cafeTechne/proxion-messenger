@@ -145,6 +145,7 @@
   "file.deliveryFailed": "{filename} did not reach the recipient, try sending it again",
   "invite.shortLinkCopied": "Short link copied!",
   "app.gatewayCrashed": "Gateway crashed - please restart the app",
+  "app.gatewayPortBusy": "Proxion could not start: port {port} is in use. Close the other program using it (or an older Proxion still running) and restart the app.",
   "backup.downloaded": "Identity backup downloaded.",
   "backup.needPassphrase": "Enter a passphrase to make a backup.",
   "backup.localOnly": "Backups only work on this computer, not over a shared link.",

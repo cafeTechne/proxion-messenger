@@ -6692,6 +6692,12 @@ import { initThemePicker } from './theme.js';
             window.__TAURI__.event.listen("gateway-crashed", () => {
                 showToast(t('app.gatewayCrashed'), "error");
             });
+            // The sidecar could not start, e.g. "port_in_use 8080".
+            window.__TAURI__.event.listen("gateway-error", ({ payload }) => {
+                const [kind, port] = String(payload || "").split(" ");
+                showToast(kind === "port_in_use" && /^\d+$/.test(port || "")
+                    ? t('app.gatewayPortBusy', { port }) : t('app.gatewayCrashed'), "error");
+            });
             // R17.4.3: deep link from OS protocol handler (cold-start)
             window.__TAURI__.event.listen("deep-link-invoke", ({ payload }) => {
                 _handleDeepLinkUrl(payload);

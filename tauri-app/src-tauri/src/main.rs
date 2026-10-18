@@ -186,6 +186,17 @@ fn quit_app(app: AppHandle, gateway: State<GatewayChild>) {
     app.exit(0);
 }
 
+// ── Gateway output ────────────────────────────────────────────────────────────
+
+/// The reason from a "PROXION_GATEWAY_ERROR <kind> <detail>" line the gateway
+/// prints when it cannot start (e.g. "port_in_use 8080").
+fn parse_gateway_error(line: &str) -> Option<String> {
+    line.trim()
+        .strip_prefix("PROXION_GATEWAY_ERROR ")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && s.len() <= 200)
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 fn main() {
@@ -305,9 +316,16 @@ fn main() {
 
                     let app_handle2 = app_handle.clone();
                     tauri::async_runtime::spawn(async move {
+                        // Set once the gateway explained its own failure, so the
+                        // generic crash toast does not repeat it.
+                        let mut reported = false;
                         while let Some(event) = rx.recv().await {
                             match event {
                                 tauri::api::process::CommandEvent::Stdout(line) => {
+                                    if let Some(err) = parse_gateway_error(&line) {
+                                        reported = true;
+                                        app_handle2.emit_all("gateway-error", err).ok();
+                                    }
                                     if line.contains("PROXION_GATEWAY_READY") {
                                         app_handle2.emit_all("gateway-ready", ()).ok();
                                         // Deliver cold-start deep link now that gateway is up
@@ -327,7 +345,7 @@ fn main() {
                                 }
                                 tauri::api::process::CommandEvent::Terminated(payload) => {
                                     eprintln!("[gateway] exited: {:?}", payload.code);
-                                    if payload.code.unwrap_or(0) != 0 {
+                                    if payload.code.unwrap_or(0) != 0 && !reported {
                                         app_handle2.emit_all("gateway-crashed", ()).ok();
                                     }
                                 }
@@ -348,7 +366,18 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_deep_link;
+    use super::{parse_deep_link, parse_gateway_error};
+
+    #[test]
+    fn gateway_error_line_is_parsed() {
+        assert_eq!(
+            parse_gateway_error("PROXION_GATEWAY_ERROR port_in_use 8080\r"),
+            Some("port_in_use 8080".to_string())
+        );
+        assert_eq!(parse_gateway_error("PROXION_GATEWAY_READY"), None);
+        assert_eq!(parse_gateway_error("PROXION_GATEWAY_ERROR "), None);
+        assert_eq!(parse_gateway_error("  Web UI  : http://127.0.0.1:8080"), None);
+    }
 
     #[test]
     fn accepts_single_valid_link() {

@@ -3317,9 +3317,16 @@ class HttpEndpointsMixin:
                 except Exception:
                     pass
 
-        server = await asyncio.start_server(
-            handle, self.config.host, http_port, ssl=ssl_ctx_http
-        )
+        try:
+            server = await asyncio.start_server(
+                handle, self.config.host, http_port, ssl=ssl_ctx_http
+            )
+        except OSError as exc:
+            from .lifecycle import GatewayBindError
+            raise GatewayBindError(self.config.host, http_port, exc) from exc
+        _bound = getattr(self, "_http_bound", None)
+        if _bound is not None and not _bound.done():
+            _bound.set_result(True)
         scheme = "https" if ssl_ctx_http else "http"
         host_display = self.config.host if self.config.host != "0.0.0.0" else "localhost"
         logger.info(f"Web UI available at {scheme}://{host_display}:{http_port}")

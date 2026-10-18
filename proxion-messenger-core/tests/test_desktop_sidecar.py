@@ -175,3 +175,56 @@ def test_webview_can_reach_sidecar_over_plain_ws_and_http(sidecars):
     with urllib.request.urlopen(req, timeout=10) as r:
         assert r.status == 200
         assert r.headers.get("Access-Control-Allow-Origin") == TAURI_ORIGIN
+
+
+# ── U4: a taken port fails loudly instead of "READY" then exit 0 ─────────────
+
+def _hold_port(port: int) -> socket.socket:
+    s = socket.socket()
+    s.bind(("127.0.0.1", port))
+    s.listen()
+    return s
+
+
+def _log_text(tmp: Path) -> str:
+    logs = tmp / "data" / "logs"
+    return "".join(p.read_text(encoding="utf-8", errors="replace")
+                   for p in logs.glob("*") if p.is_file()) if logs.exists() else ""
+
+
+@pytest.mark.parametrize("which", ["http", "ws"])
+def test_busy_port_exits_nonzero_without_ready(sidecars, tmp_path, which):
+    port = _free_port()
+    holder = _hold_port(port)
+    try:
+        kw = {"http_port": port} if which == "http" else {"ws_port": port}
+        sc = sidecars(which, extra_env={"PROXION_BIND_WAIT": "0.5"}, **kw)
+        code = sc.wait_exit(60)
+        out = sc.output()
+        assert code is not None, "sidecar kept running with its port taken:\n" + out
+        assert code != 0, out
+        assert "PROXION_GATEWAY_READY" not in out
+        assert f"PROXION_GATEWAY_ERROR port_in_use {port}" in out
+        assert f"127.0.0.1:{port}" in _log_text(tmp_path / which)
+    finally:
+        holder.close()
+
+
+def test_bind_wait_rides_out_a_previous_gateway_shutting_down(sidecars):
+    port = _free_port()
+    holder = _hold_port(port)
+    sc = sidecars(http_port=port, extra_env={"PROXION_BIND_WAIT": "20"})
+    time.sleep(2.0)
+    assert "PROXION_GATEWAY_READY" not in sc.output()
+    holder.close()
+    sc.wait_ready()
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=10) as r:
+        assert r.status == 200
+
+
+def test_ready_means_both_ports_accept(sidecars):
+    sc = sidecars()
+    sc.wait_ready()
+    for port in (sc.http_port, sc.ws_port):
+        with socket.create_connection(("127.0.0.1", port), timeout=2):
+            pass
