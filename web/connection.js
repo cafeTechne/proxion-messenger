@@ -115,7 +115,7 @@ export const UNPACED_CMDS = new Set([
     'get_gateway_webid', 'get_inbox_webhook', 'get_relationships',
     'list_friend_requests', 'list_blocks', 'get_contact_verification',
     'list_verified_contacts', 'get_presence', 'get_all_presence',
-    'get_voice_channel_state', 'tunnel_status', 'pod_status', 'list_sessions',
+    'get_voice_channel_state', 'tunnel_status', 'pod_status', 'list_sessions', 'get_account_sync',
     'list_webhooks', 'list_devices', 'get_peer_devices', 'get_peer_device_keys',
     'get_sender_key', 'list_dm_sessions', 'update_last_read',
 ]);
