@@ -21,13 +21,22 @@ const FOCUSABLE = [
 // id suffix catches the handful created without the attribute.
 const MODAL_SEL = '[role="dialog"], [id$="-modal"]';
 
-function isVisible(el) {
-    // offsetParent is null for display:none (and detached) nodes; it stays
-    // set for our position:fixed overlays whenever they're shown.
-    if (el.offsetParent !== null) return true;
-    // position:fixed elements have a null offsetParent even when visible, so
-    // fall back to the computed display for those.
-    return getComputedStyle(el).display !== 'none';
+// Whether a control is actually rendered and reachable. Its own computed
+// display is not enough: a checkbox inside a hidden <label> computes to
+// display:inline-block, and counting it as the trap's first stop sent focus to
+// <body> on open (a hidden element cannot take focus) so Tab never reached the
+// dialog's buttons. Walk every ancestor for hidden / inert / display:none, and
+// check visibility on the element itself (it inherits). A dialog stacked under
+// another one is inert but still open, so modal checks pass inert:false.
+// getStyle is injectable for tests (default: getComputedStyle).
+export function isVisible(el, getStyle = (n) => getComputedStyle(n), { inert = true } = {}) {
+    if (!el || (typeof el.isConnected === 'boolean' && !el.isConnected)) return false;
+    for (let n = el; n && n.nodeType !== 9; n = n.parentElement) {
+        if (n.hidden || (inert && n.inert)) return false;
+        if (getStyle(n).display === 'none') return false;
+    }
+    const vis = getStyle(el).visibility;
+    return vis !== 'hidden' && vis !== 'collapse';
 }
 
 function focusableWithin(modal) {
@@ -175,7 +184,7 @@ export function installFocusTrap() {
     function sync(modal) {
         // Cheap check first: a closing dialog has an inline display:none, and
         // reading it does not force a style recalc before focus moves.
-        if (_isDisplayNone(modal) || !isVisible(modal)) release(modal);
+        if (_isDisplayNone(modal) || !isVisible(modal, undefined, { inert: false })) release(modal);
         else trap(modal);
     }
 
@@ -200,7 +209,7 @@ export function installFocusTrap() {
     });
 
     // Catch any modal already visible at install time.
-    document.querySelectorAll(MODAL_SEL).forEach(el => { if (isVisible(el)) trap(el); });
+    document.querySelectorAll(MODAL_SEL).forEach(el => { if (isVisible(el, undefined, { inert: false })) trap(el); });
 }
 
 // ---- Escape: close only the topmost dialog ----

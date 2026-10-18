@@ -110,8 +110,9 @@ try {
   await sleep(400);
 
   // 1. First-run onboarding is a required gate: Escape must NOT dismiss it
-  //    (Escape closes only the topmost non-persistent dialog). Hide it directly
-  //    to continue the journey, as smoke_browser does.
+  //    (Escape closes only the topmost non-persistent dialog). Then walk it to
+  //    the end with the keyboard alone: focus must start on a real control (a
+  //    hidden one used to win the trap's first slot and drop focus to <body>).
   await page.keyboard.press('Escape');
   await sleep(200);
   const onboardingKept = await page.evaluate(() => {
@@ -119,10 +120,49 @@ try {
     return !m || getComputedStyle(m).display !== 'none';
   });
   check('Escape leaves the onboarding gate open', onboardingKept);
-  await page.evaluate(() => {
+  check('onboarding opens with focus on Get started', (await active(page))?.id === 'ob-start-btn');
+  const obInDialog = () => page.evaluate(() => document.getElementById('onboarding-modal').contains(document.activeElement));
+  let obTrapped = true;
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press('Tab'); await sleep(30);
+    if (!(await obInDialog())) obTrapped = false;
+  }
+  check('Tab cycles inside the onboarding dialog', obTrapped);
+  check('Tab reaches Get started', await tabTo(page, a => a.id === 'ob-start-btn', { max: 10 }));
+  await page.keyboard.press('Enter');
+  await sleep(300);
+  check('Tab reaches the name field', await tabTo(page, a => a.id === 'ob-name', { max: 10 }));
+  await page.keyboard.type('Kim');
+  check('Tab reaches Continue', await tabTo(page, a => a.id === 'ob-step2-btn', { max: 10 }));
+  await page.keyboard.press('Enter');
+  await sleep(300);
+  check('Tab reaches Start now', await tabTo(page, a => a.id === 'ob-skip-pod', { max: 20 }));
+  await page.keyboard.press('Enter');
+  await sleep(400);
+  // "Start now" asks for confirmation in the shared confirm dialog, stacked
+  // over the onboarding gate.
+  check('the no-pod confirm takes focus',
+    await page.evaluate(() => document.getElementById('confirm-modal').contains(document.activeElement)));
+  check('Tab reaches the no-pod Confirm', await tabTo(page, a => a.id === 'confirm-ok', { max: 6 }));
+  await page.keyboard.press('Enter');
+  await sleep(400);
+  check('Tab reaches Skip for now', await tabTo(page, a => a.id === 'ob-step5-skip', { max: 20 }));
+  await page.keyboard.press('Enter');
+  await sleep(300);
+  check('Tab reaches Finish', await tabTo(page, a => a.id === 'ob-finish-btn', { max: 20 }));
+  await page.keyboard.press('Enter');
+  await sleep(600);
+  const onboardingDone = await page.evaluate(() => {
     const m = document.getElementById('onboarding-modal');
-    if (m) m.style.display = 'none';
+    return !m || getComputedStyle(m).display === 'none';
   });
+  check('onboarding completed by keyboard alone', onboardingDone);
+  if (!onboardingDone) {
+    await page.evaluate(() => {
+      const m = document.getElementById('onboarding-modal');
+      if (m) m.style.display = 'none';
+    });
+  }
   await sleep(200);
 
   // 2. Skip link is the first tab stop, and activating it focuses the composer.
@@ -212,6 +252,36 @@ try {
   check(`focus never dropped to <body> while closing (${focusLog.join(' > ') || 'none'})`, !focusLog.includes('BODY'));
   check('the page is live again after the modal closes',
     await page.evaluate(() => !document.getElementById('app').inert && !document.querySelector('[data-trap-inert]')));
+
+  // 8. Confirm dialogs: leave the room from the room-options menu and confirm
+  //    with the keyboard. The confirm's hidden "also delete" checkbox used to
+  //    count as the first tab stop, so focus fell to <body> and Tab never got
+  //    to Confirm.
+  check('Tab reaches room options', await tabTo(page, a => a.id === 'room-options-btn'));
+  await page.keyboard.press('Enter');
+  await sleep(300);
+  let atLeave = false;
+  for (let i = 0; i < 15 && !atLeave; i++) {
+    atLeave = await page.evaluate(() => /leave/i.test(document.activeElement?.textContent || ''));
+    if (!atLeave) { await page.keyboard.press('ArrowDown'); await sleep(40); }
+  }
+  check('arrow keys reach Leave room', atLeave);
+  await page.keyboard.press('Enter');
+  await sleep(400);
+  const confirmShown = () => page.evaluate(() => getComputedStyle(document.getElementById('confirm-modal')).display !== 'none');
+  check('the confirm dialog opens', await confirmShown());
+  const confirmFocus = await active(page);
+  check(`confirm opens with focus inside it (${confirmFocus?.id || confirmFocus?.tag})`,
+    await page.evaluate(() => document.getElementById('confirm-modal').contains(document.activeElement)));
+  check('Tab reaches Confirm', await tabTo(page, a => a.id === 'confirm-ok', { max: 6 }));
+  check('Shift+Tab reaches Cancel', await tabTo(page, a => a.id === 'confirm-cancel', { max: 6, shift: true }));
+  check('Tab wraps back to Confirm', await tabTo(page, a => a.id === 'confirm-ok', { max: 6 }));
+  await page.keyboard.press('Enter');
+  await sleep(800);
+  check('Enter on Confirm closes the dialog', !(await confirmShown()));
+  const roomGone = await page.evaluate(() => !Array.from(document.querySelectorAll('nav li'))
+    .some(li => /general/i.test(li.textContent || '')));
+  check('the room was left', roomGone);
 
 } catch (e) {
   console.error('  ✗ threw: ' + (e.stack || e.message));

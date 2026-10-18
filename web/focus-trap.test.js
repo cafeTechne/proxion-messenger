@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { topmostDialog, closeTopmostDialog, syncBackgroundInert, closeDialog, initialFocusTarget } from './focus-trap.js';
+import { topmostDialog, closeTopmostDialog, syncBackgroundInert, closeDialog, initialFocusTarget, isVisible } from './focus-trap.js';
 
 describe('initialFocusTarget', () => {
   const ctl = (attrs = {}) => ({ hasAttribute: (k) => k in attrs });
@@ -193,5 +193,44 @@ describe('closeDialog', () => {
     closeDialog(d);
     expect(d.style.display).toBe('none');
     expect(() => closeDialog(null)).not.toThrow();
+  });
+});
+
+// The confirm dialog's "also delete" checkbox sits in a <label hidden>. Its own
+// computed display is inline-block, so the old check counted it as the trap's
+// first stop: focus went to <body> on open and Tab never reached Confirm.
+describe('isVisible', () => {
+  const el = ({ display = 'block', visibility = 'visible', hidden = false, inert = false, parent = null } = {}) =>
+    ({ nodeType: 1, isConnected: true, hidden, inert, parentElement: parent, _s: { display, visibility } });
+  const gs = (n) => n._s;
+  const dialog = () => el({ display: 'flex' });
+
+  it('a control in a shown dialog is visible', () => {
+    expect(isVisible(el({ parent: dialog() }), gs)).toBe(true);
+  });
+  it('a checkbox inside a hidden label is not', () => {
+    const label = el({ display: 'none', hidden: true, parent: dialog() });
+    expect(isVisible(el({ display: 'inline-block', parent: label }), gs)).toBe(false);
+  });
+  it('the hidden attribute counts even when CSS overrides its display', () => {
+    const label = el({ display: 'flex', hidden: true, parent: dialog() });
+    expect(isVisible(el({ parent: label }), gs)).toBe(false);
+  });
+  it('any display:none ancestor hides the control', () => {
+    const wrap = el({ display: 'none', parent: el({ parent: dialog() }) });
+    expect(isVisible(el({ parent: wrap }), gs)).toBe(false);
+  });
+  it('visibility hidden or collapse hides the control', () => {
+    expect(isVisible(el({ visibility: 'hidden', parent: dialog() }), gs)).toBe(false);
+    expect(isVisible(el({ visibility: 'collapse', parent: dialog() }), gs)).toBe(false);
+  });
+  it('an inert ancestor hides the control unless inert checks are off', () => {
+    const d = el({ display: 'flex', inert: true });
+    expect(isVisible(el({ parent: d }), gs)).toBe(false);
+    expect(isVisible(d, gs, { inert: false })).toBe(true);
+  });
+  it('a detached node is not visible', () => {
+    expect(isVisible({ ...el(), isConnected: false }, gs)).toBe(false);
+    expect(isVisible(null, gs)).toBe(false);
   });
 });
