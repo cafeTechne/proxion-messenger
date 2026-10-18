@@ -113,3 +113,20 @@ async def test_still_ringing_and_burst_are_throttled(room):
     assert await _ring(gw, a, bd, "c3")
     await gw.process_command(b, {"cmd": "voice_hangup", "session_id": "c3", "reason": "declined"})
     assert not await _ring(gw, a, bd, "c4"), "a fourth ring inside the window must be refused"
+
+
+async def test_redial_after_connected_call_drops_on_disconnect(room):
+    gw, a, ad, b, bd, rid = room
+    for sid in ("c1", "c2"):
+        assert await _ring(gw, a, bd, sid)
+        await gw.process_command(b, {"cmd": "voice_hangup", "session_id": sid, "reason": "declined"})
+    assert await _ring(gw, a, bd, "c3")
+    await gw.process_command(b, {"cmd": "voice_answer", "target_webid": ad,
+                                 "session_id": "c3", "sdp_answer": "v=0"})
+    # The caller's tab dies mid-call; it reconnects and calls back.
+    gw.clients.discard(a)
+    await gw._cleanup_voice_sessions(a, ad)
+    a2 = _mock_ws()
+    gw.clients.add(a2)
+    await gw.process_command(a2, {"cmd": "register", "did": ad, "display_name": "x"})
+    assert await _ring(gw, a2, bd, "c4"), "redial after a dropped connected call was blocked"

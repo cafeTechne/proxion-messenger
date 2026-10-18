@@ -331,8 +331,18 @@ try {
   if (!(await hidden(bob, 'voice-banner'))) fail('Alice cancelled but Bob kept ringing');
   if (!(await toasted(bob, 'missed call'))) fail('Bob got no missed-call notice for the cancelled ring');
 
+  step = 'redial-after-cancel';
+  // A cancelled ring can be redialed: the pair gets a few rings a minute.
+  for (const n of [2, 3]) {
+    await click(alice, 'start-call-btn');
+    if (!(await ringing(bob, 15000))) fail(`redial ${n} after a cancelled ring never rang`);
+    await click(alice, 'end-call');
+    if (!(await hidden(bob, 'voice-banner'))) fail(`Alice cancelled redial ${n} but Bob kept ringing`);
+  }
+
   step = 'throttled-redial';
-  // An unanswered ring IS throttled: the error must end "Calling...", not hang.
+  // A fourth unanswered ring in a minute IS throttled: the error must end
+  // "Calling...", not hang.
   await click(alice, 'start-call-btn');
   if (!(await toasted(alice, 'wait a moment'))) fail(`throttled redial gave no message (${await alice.evaluate(() => window.__toasts.join(' | '))})`);
   if (!(await hidden(alice, 'voice-widget', 3000))) fail('throttled redial left Alice stuck in "Calling..."');

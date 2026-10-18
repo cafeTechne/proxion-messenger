@@ -59,6 +59,10 @@ class VoiceHandlerMixin:
                     }))
                 except Exception:
                     pass
+            if sess.get("answered"):
+                # Same as a hangup: a connected call that dropped may be redialed.
+                _voice_invite_ts.pop((sess.get("caller_webid"), sess.get("target_webid")), None)
+                _voice_invite_ts.pop((sess.get("target_webid"), sess.get("caller_webid")), None)
             del self._voice_sessions[sid]
 
         # Also remove from any voice channels this socket is in. Only the entry
