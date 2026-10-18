@@ -1153,9 +1153,8 @@ class PodSyncMixin:
         - ``auto`` (default): try SDK, fall back to polling on error.
         - ``legacy``: polling only.
 
-        Skips the full poll when no WebSocket clients are connected, sleeping
-        for 1800 s instead of the normal interval to avoid unnecessary network
-        traffic for offline/stale users.
+        Skips the poll while no WebSocket clients are connected, and starts
+        polling within about a second of the first client connecting.
         """
         import os as _os_nm
         notifs_mode = _os_nm.environ.get("PROXION_SOLID_NOTIFS_MODE", "auto")
@@ -1172,11 +1171,13 @@ class PodSyncMixin:
 
         backoff = self.config.poll_interval
         max_backoff = 120.0
-        _OFFLINE_INTERVAL = 1800.0
+        _IDLE_CHECK = 1.0
         while not self._stop_event.is_set():
             if not self.clients:
+                # Re-check often: a 30 minute sleep here meant a client that
+                # connected just after startup got no pod poll for 30 minutes.
                 try:
-                    await asyncio.wait_for(self._stop_event.wait(), timeout=_OFFLINE_INTERVAL)
+                    await asyncio.wait_for(self._stop_event.wait(), timeout=_IDLE_CHECK)
                 except asyncio.TimeoutError:
                     pass
                 continue
