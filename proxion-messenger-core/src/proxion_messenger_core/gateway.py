@@ -385,9 +385,13 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         password = base64.b64encode(mac.digest()).decode()
         return {"urls": [url], "username": username, "credential": password}
 
-    def _hydrate_from_store(self) -> None:
-        """Re-populate _local_rooms and _room_codes from the persistent store on startup."""
+    def _hydrate_from_store(self, only_new: bool = False) -> None:
+        """Re-populate _local_rooms and _room_codes from the persistent store on startup.
+
+        With *only_new* (after an /import), add just the rooms not loaded yet."""
         for room in self._store.get_all_rooms():
+            if only_new and room["room_id"] in self._local_rooms:
+                continue
             self._local_rooms[room["room_id"]] = {
                 "name": room["name"],
                 "code": room["code"],
@@ -408,7 +412,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # R11.2.3: restore per-room disappear timers from SQLite
         for room in self._store.get_all_rooms():
             ms = room.get("disappear_after_ms", 0)
-            if ms:
+            if ms and not (only_new and room["room_id"] in self._room_disappear_timers):
                 # Heal a pre-existing poisoned row so an over-large persisted ms
                 # cannot overflow the expiry sweep after a restart.
                 self._room_disappear_timers[room["room_id"]] = min(int(ms), _MAX_DISAPPEAR_MS)
@@ -417,7 +421,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # UPDATE-rooms persistence was a no-op for DM ids, so this never worked.
         try:
             for _tid, _dms in self._store.get_all_dm_disappear_timers().items():
-                if _dms:
+                if _dms and not (only_new and _tid in self._dm_disappear_timers):
                     self._dm_disappear_timers[_tid] = min(int(_dms), _MAX_DISAPPEAR_MS)
         except Exception:
             logger.debug("DM disappear-timer restore skipped", exc_info=True)
@@ -1381,7 +1385,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             elif cmd == "get_local_history":
                 await self._handle_get_local_history(websocket, data)
             elif cmd == "export_ticket":
-                await self._handle_export_ticket(websocket)
+                await self._handle_export_ticket(websocket, data)
             elif cmd == "delete_local_message":
                 await self._handle_delete_local_message(websocket, data)
             elif cmd == "edit_local_message":

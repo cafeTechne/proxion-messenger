@@ -884,6 +884,37 @@ class SecurityStoreMixin(object):
                 "SELECT owner_webid, blocked_webid, created_at FROM blocks"
             ).fetchall()
                 if owner_webid is None or r["owner_webid"] == owner_webid]
+            # The account's rooms with their members, roles, bans and mutes, and
+            # the pins, reactions, mutes and timers of every exported thread.
+            rooms = [dict(r) for r in conn.execute("SELECT * FROM rooms").fetchall()]
+            if owner_webid is not None:
+                _mine = {r[0] for r in conn.execute(
+                    "SELECT room_id FROM room_members WHERE webid = ?", (owner_webid,)
+                ).fetchall()}
+                rooms = [r for r in rooms if r["room_id"] in _mine]
+            for r in rooms:
+                r.pop("unread_count", None)
+            room_ids = {r["room_id"] for r in rooms}
+
+            def _rows(sql, key, keep):
+                return [dict(r) for r in conn.execute(sql).fetchall()
+                        if owner_webid is None or r[key] in keep]
+            room_members = _rows("SELECT room_id, webid FROM room_members", "room_id", room_ids)
+            room_roles = _rows("SELECT room_id, webid, role FROM room_roles", "room_id", room_ids)
+            room_bans = _rows("SELECT room_id, banned_did, banned_by, banned_at, reason FROM room_bans",
+                              "room_id", room_ids)
+            room_mutes = _rows("SELECT room_id, muted_did, muted_by, muted_at, expires_at FROM room_mutes",
+                               "room_id", room_ids)
+            _threads = {t["thread_id"] for t in dm_threads} | room_ids
+            if owner_webid is not None:
+                _threads |= threads
+            pins = _rows("SELECT pin_id, thread_id, message_id, pinned_by, pinned_at, content FROM pins",
+                         "thread_id", _threads)
+            reactions = _rows("SELECT room_id, message_id, emoji, sender_webid, created_at FROM reactions",
+                              "room_id", _threads)
+            thread_mutes = _rows("SELECT owner_webid, mute_key, updated_at FROM thread_mutes",
+                                 "owner_webid", {owner_webid})
+            dm_timers = _rows("SELECT thread_id, ms FROM dm_disappear_timers", "thread_id", _threads)
 
         if minimize:
             _REDACTED = "[redacted]"
@@ -912,9 +943,19 @@ class SecurityStoreMixin(object):
             "display_names": display_names,
             "revocations": revocations,
             "blocks": blocks,
+            "rooms": rooms,
+            "room_members": room_members,
+            "room_roles": room_roles,
+            "room_bans": room_bans,
+            "room_mutes": room_mutes,
+            "pins": pins,
+            "reactions": reactions,
+            "thread_mutes": thread_mutes,
+            "dm_disappear_timers": dm_timers,
         }
     def import_data(
-        self, data: dict, owner_pub_hex: str = "", owner_webid: str = ""
+        self, data: dict, owner_pub_hex: str = "", owner_webid: str = "",
+        operator: bool = False,
     ) -> dict:
         """Merge exported data into the store using INSERT OR IGNORE (R14.2).
 
@@ -932,6 +973,13 @@ class SecurityStoreMixin(object):
         an account that already owns data on this gateway; otherwise they are
         stamped with ``owner_webid`` (the importing account). Display names are
         limited to those owners and their contacts.
+
+        Rooms are only created, never merged into: a room id or code already
+        here is skipped, and members, roles, bans and mutes are restored only for
+        rooms this import created. A room must list the importing account as a
+        member unless ``operator`` (the gateway operator restoring a full
+        backup). Pins and reactions by other people are restored only in threads
+        this import created; in existing threads only the importer's own.
         """
         _MAX_IMPORT_MESSAGES = 10000
         _MAX_IMPORT_RELATIONSHIPS = 2000
@@ -940,10 +988,15 @@ class SecurityStoreMixin(object):
         _MAX_CONTENT_BYTES = 16 * 1024  # 16 KiB per message
         _MAX_IMPORT_REVOCATIONS = 5000
         _MAX_IMPORT_BLOCKS = 5000
+        _MAX_IMPORT_ROOMS = 1000
+        _MAX_IMPORT_ROOM_ROWS = 20000  # members, roles, bans, mutes, pins, reactions each
+        _MAX_AUDIO_B64 = 700_000       # the live voice-message limit
+        _CONTENT_TYPES = {"text", "audio", "e2e"}
         from .identity import stored_cert_expiry
         counts = {"messages": 0, "relationships": 0, "dm_threads": 0, "display_names": 0,
                   "revocations": 0, "blocks": 0, "relationships_skipped_revoked": 0}
         _touched_threads: set = set()
+        _new_threads: set = set()
         # A row keeps the account it belongs to when that account is one of
         # this gateway's (a per-account export restored here); any other value
         # is replaced by the importing owner, so a backup cannot create rows
@@ -984,7 +1037,10 @@ class SecurityStoreMixin(object):
                          dm.get("display_name"), _dm_owner,
                          dm.get("created_at", 0)),
                     )
-                    counts["dm_threads"] += conn.execute("SELECT changes()").fetchone()[0]
+                    _added = conn.execute("SELECT changes()").fetchone()[0]
+                    counts["dm_threads"] += _added
+                    if _added:
+                        _new_threads.add(dm.get("thread_id"))
                     if _dm_owner:
                         _import_owners.add(_dm_owner)
                 except Exception:
@@ -1119,20 +1175,34 @@ class SecurityStoreMixin(object):
                         _dt.fromisoformat(str(ts_str).replace("Z", "+00:00"))
                     except (ValueError, TypeError):
                         continue
+                    _ctype = msg.get("content_type") or "text"
+                    if _ctype not in _CONTENT_TYPES:
+                        continue
+                    _audio = msg.get("audio_b64")
+                    if _audio is not None and not (
+                            isinstance(_audio, str) and len(_audio) <= _MAX_AUDIO_B64):
+                        continue
+                    _dur = msg.get("duration_ms")
+                    _dur = int(_dur) if isinstance(_dur, (int, float)) and _dur >= 0 else 0
                     conn.execute(
                         "INSERT OR IGNORE INTO messages "
-                        "(message_id, thread_id, thread_type, from_webid, from_display_name, content, timestamp, edited_at, reply_to_id, imported) "
-                        "VALUES (?,?,?,?,?,?,?,?,?,1)",
+                        "(message_id, thread_id, thread_type, from_webid, from_display_name, content, timestamp, edited_at, reply_to_id, imported, "
+                        "content_type, audio_b64, duration_ms) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?)",
                         (msg.get("message_id"), thread_id, msg.get("thread_type", "relay"),
                          msg.get("from_webid", ""), msg.get("from_display_name"),
                          content, msg.get("timestamp", ""),
-                         msg.get("edited_at"), msg.get("reply_to_id")),
+                         msg.get("edited_at"), msg.get("reply_to_id"),
+                         _ctype, _audio, _dur),
                     )
                     counts["messages"] += conn.execute("SELECT changes()").fetchone()[0]
                     _total_msg_imported = counts["messages"]
                     _touched_threads.add(thread_id)
                 except Exception:
                     pass
+            self._import_rooms_and_threads(
+                conn, data, owner_webid, operator, _new_threads, _row_owner, counts,
+                _MAX_IMPORT_ROOMS, _MAX_IMPORT_ROOM_ROWS)
             _dn_seen = 0
             _allowed_dn = None
             for dn in data.get("display_names", []):
@@ -1176,6 +1246,150 @@ class SecurityStoreMixin(object):
             except Exception:
                 pass
         return counts
+
+    @staticmethod
+    def _import_rooms_and_threads(conn, data, owner_webid, operator, new_threads,
+                                  row_owner, counts, max_rooms, max_rows) -> None:
+        """Restore rooms (create-only) and per-thread pins, reactions, mutes and
+        disappearing timers. See import_data for the rules."""
+        def _id(v, n=1024):
+            return isinstance(v, str) and 0 < len(v) <= n
+
+        def _num(v):
+            return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+        def _rows(key):
+            rows = data.get(key) or []
+            if not isinstance(rows, list):
+                return []
+            return [r for r in rows[:max_rows] if isinstance(r, dict)]
+
+        members_by_room: dict = {}
+        for m in _rows("room_members"):
+            if _id(m.get("room_id")) and _id(m.get("webid")):
+                members_by_room.setdefault(m["room_id"], set()).add(m["webid"])
+
+        new_rooms: set = set()
+        counts.setdefault("rooms", 0)
+        for room in _rows("rooms")[:max_rooms]:
+            rid, code = room.get("room_id"), room.get("code")
+            if not (_id(rid) and _id(code, 256)):
+                continue
+            members = members_by_room.get(rid, set())
+            creator = room.get("creator_webid") or ""
+            if not isinstance(creator, str) or (creator and creator not in members):
+                continue
+            if not operator and owner_webid not in members:
+                continue
+            if conn.execute("SELECT 1 FROM rooms WHERE room_id = ? OR code = ?",
+                            (rid, code)).fetchone():
+                continue
+            mode = room.get("history_mode")
+            ms = room.get("disappear_after_ms")
+            created = room.get("created_at")
+            conn.execute(
+                "INSERT INTO rooms (room_id, name, code, invite_url, history_mode, creator_webid, "
+                "created_at, disappear_after_ms, topic) VALUES (?,?,?,?,?,?,?,?,?)",
+                (rid, str(room.get("name") or "")[:64], code, str(room.get("invite_url") or "")[:2048],
+                 mode if isinstance(mode, str) and 0 < len(mode) <= 32 else "none", creator,
+                 float(created) if _num(created) else time.time(),
+                 int(ms) if _num(ms) and ms > 0 else 0,
+                 str(room.get("topic") or "")[:1024]),
+            )
+            new_rooms.add(rid)
+            counts["rooms"] += 1
+        for rid in new_rooms:
+            for w in members_by_room.get(rid, ()):
+                conn.execute("INSERT OR IGNORE INTO room_members (room_id, webid) VALUES (?,?)", (rid, w))
+        for r in _rows("room_roles"):
+            if r.get("room_id") in new_rooms and _id(r.get("webid")) and _id(r.get("role"), 32):
+                conn.execute("INSERT OR IGNORE INTO room_roles (room_id, webid, role) VALUES (?,?,?)",
+                             (r["room_id"], r["webid"], r["role"]))
+        for b in _rows("room_bans"):
+            if b.get("room_id") in new_rooms and _id(b.get("banned_did")):
+                at = b.get("banned_at")
+                conn.execute(
+                    "INSERT OR IGNORE INTO room_bans (room_id, banned_did, banned_by, banned_at, reason) "
+                    "VALUES (?,?,?,?,?)",
+                    (b["room_id"], b["banned_did"], str(b.get("banned_by") or "")[:1024],
+                     float(at) if _num(at) else time.time(), str(b.get("reason") or "")[:512]))
+        for m in _rows("room_mutes"):
+            if m.get("room_id") in new_rooms and _id(m.get("muted_did")):
+                at, exp = m.get("muted_at"), m.get("expires_at")
+                conn.execute(
+                    "INSERT OR IGNORE INTO room_mutes (room_id, muted_did, muted_by, muted_at, expires_at) "
+                    "VALUES (?,?,?,?,?)",
+                    (m["room_id"], m["muted_did"], str(m.get("muted_by") or "")[:1024],
+                     float(at) if _num(at) else time.time(), float(exp) if _num(exp) else None))
+
+        created_here = new_threads | new_rooms
+        # Threads the importer is party to, for its own pins and reactions.
+        mine = {r[0] for r in conn.execute(
+            "SELECT thread_id FROM dm_threads WHERE owner_webid = ?", (owner_webid,)).fetchall()}
+        mine |= {r[0] for r in conn.execute(
+            "SELECT room_id FROM room_members WHERE webid = ?", (owner_webid,)).fetchall()}
+
+        def _may(thread_id, actor):
+            return thread_id in created_here or (actor == owner_webid and thread_id in mine)
+
+        counts.setdefault("pins", 0)
+        for p in _rows("pins"):
+            tid, mid, by = p.get("thread_id"), p.get("message_id"), p.get("pinned_by")
+            if not (_id(tid) and _id(mid) and _id(by)) or not _may(tid, by):
+                continue
+            if conn.execute("SELECT 1 FROM pins WHERE thread_id = ? AND message_id = ?",
+                            (tid, mid)).fetchone():
+                continue
+            pid = p.get("pin_id") if _id(p.get("pin_id"), 128) else ""
+            if not pid or conn.execute("SELECT 1 FROM pins WHERE pin_id = ?", (pid,)).fetchone():
+                pid = f"pin-{tid}-{mid}"
+            at = p.get("pinned_at")
+            conn.execute(
+                "INSERT OR IGNORE INTO pins (pin_id, thread_id, message_id, pinned_by, pinned_at, content) "
+                "VALUES (?,?,?,?,?,?)",
+                (pid, tid, mid, by, float(at) if _num(at) else time.time(),
+                 str(p.get("content") or "")[:16384]))
+            counts["pins"] += conn.execute("SELECT changes()").fetchone()[0]
+        counts.setdefault("reactions", 0)
+        for r in _rows("reactions"):
+            tid, mid, emoji, by = r.get("room_id"), r.get("message_id"), r.get("emoji"), r.get("sender_webid")
+            if not (_id(tid) and _id(mid) and _id(emoji, 256) and _id(by)) or not _may(tid, by):
+                continue
+            at = r.get("created_at")
+            conn.execute(
+                "INSERT OR IGNORE INTO reactions (room_id, message_id, emoji, sender_webid, created_at) "
+                "VALUES (?,?,?,?,?)",
+                (tid, mid, emoji, by, float(at) if _num(at) else time.time()))
+            counts["reactions"] += conn.execute("SELECT changes()").fetchone()[0]
+        for m in _rows("thread_mutes"):
+            owner = row_owner(m)
+            if owner and owner == owner_webid and _id(m.get("mute_key")):
+                at = m.get("updated_at")
+                conn.execute(
+                    "INSERT OR IGNORE INTO thread_mutes (owner_webid, mute_key, updated_at) VALUES (?,?,?)",
+                    (owner, m["mute_key"], int(at) if _num(at) else int(time.time())))
+        # Pending scheduled sends go out as their author, so only the importer's
+        # own (any author for the operator's full restore).
+        counts.setdefault("scheduled", 0)
+        for sm in _rows("scheduled"):
+            frm, tid, content = sm.get("from_webid"), sm.get("thread_id"), sm.get("content")
+            if not (_id(sm.get("id"), 256) and _id(frm) and _id(tid) and isinstance(content, str)
+                    and len(content.encode("utf-8", errors="replace")) <= 16384
+                    and _num(sm.get("send_at"))):
+                continue
+            if frm != owner_webid and not operator:
+                continue
+            ca = sm.get("created_at")
+            conn.execute(
+                "INSERT OR IGNORE INTO scheduled_messages (id, thread_id, from_webid, content, send_at, created_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (sm["id"], tid, frm, content, float(sm["send_at"]), float(ca) if _num(ca) else time.time()))
+            counts["scheduled"] += conn.execute("SELECT changes()").fetchone()[0]
+        for t in _rows("dm_disappear_timers"):
+            tid, ms = t.get("thread_id"), t.get("ms")
+            if tid in new_threads and _num(ms) and ms > 0:
+                conn.execute("INSERT OR IGNORE INTO dm_disappear_timers (thread_id, ms) VALUES (?,?)",
+                             (tid, int(ms)))
     def save_credential_anomaly(
         self,
         id: str,

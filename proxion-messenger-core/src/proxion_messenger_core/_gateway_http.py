@@ -164,9 +164,12 @@ class HttpEndpointsMixin:
 
     # /export is a plain download link, so the account it is for rides in a
     # short-lived single-use ticket minted over the caller's authenticated socket.
+    # The same ticket, minted with purpose "import", names the account a POST
+    # /import restores into. A ticket is only good for the purpose it was minted for.
     _EXPORT_TICKET_TTL = 120.0
+    _TICKET_PURPOSES = ("export", "import")
 
-    async def _handle_export_ticket(self, websocket) -> None:
+    async def _handle_export_ticket(self, websocket, data: dict | None = None) -> None:
         webid = self._client_webids.get(websocket)
         if not webid:
             await websocket.send(json.dumps({"type": "error", "message": "Not registered"}))
@@ -178,15 +181,21 @@ class HttpEndpointsMixin:
         now = time.monotonic()
         for k in [k for k, (_w, exp) in tickets.items() if exp <= now]:
             tickets.pop(k, None)
+        purpose = (data or {}).get("purpose") or "export"
+        if purpose not in self._TICKET_PURPOSES:
+            await websocket.send(json.dumps({"type": "error", "message": "invalid purpose"}))
+            return
         ticket = _secrets.token_urlsafe(24)
-        tickets[ticket] = (webid, now + self._EXPORT_TICKET_TTL)
-        await websocket.send(json.dumps({"type": "export_ticket", "ticket": ticket}))
+        tickets[ticket] = (webid, now + self._EXPORT_TICKET_TTL, purpose)
+        await websocket.send(json.dumps({"type": "export_ticket", "ticket": ticket, "purpose": purpose}))
 
-    def _take_export_ticket(self, ticket: str):
-        """The account a valid /export ticket was minted for (consumed), else None."""
+    def _take_export_ticket(self, ticket: str, purpose: str = "export"):
+        """The account a valid ticket for *purpose* was minted for (consumed), else None."""
         tickets = getattr(self, "_export_tickets", None) or {}
         entry = tickets.pop(ticket, None) if ticket else None
         if not entry or entry[1] <= time.monotonic():
+            return None
+        if (entry[2] if len(entry) > 2 else "export") != purpose:
             return None
         return entry[0]
 
@@ -2098,6 +2107,11 @@ class HttpEndpointsMixin:
                             await _write_json(writer, 403, {"error": "export_needs_account"})
                             await writer.drain()
                             return
+                        # A ticket export is the account's own backup, fetched
+                        # over its authenticated socket: always the full data, so
+                        # a restore does not come back with truncated messages.
+                        if _export_owner:
+                            _full_export = True
                         export_data = self._store.export_all(
                             minimize=not _full_export, owner_webid=_export_owner)
                         resp_bytes = json.dumps(export_data).encode()
@@ -2834,6 +2848,19 @@ class HttpEndpointsMixin:
                         return
                     # Check for dry_run query parameter (Round 6)
                     _dry_run_i = "dry_run=1" in parts[1] if len(parts) > 1 else False
+                    # The account restoring its own export (ticket minted on its
+                    # socket). Without one the gateway operator imports and rows
+                    # with no local owner go to the gateway identity.
+                    from urllib.parse import parse_qs as _pqs_imp
+                    _qs_imp = parts[1].split("?", 1)[1] if (len(parts) > 1 and "?" in parts[1]) else ""
+                    _imp_ticket = (_pqs_imp(_qs_imp).get("ticket") or [""])[0]
+                    _ticket_owner = None
+                    if _imp_ticket:
+                        _ticket_owner = self._take_export_ticket(_imp_ticket, "import")
+                        if not _ticket_owner:
+                            await _write_json(writer, 403, {"error": "import_ticket_invalid"})
+                            await writer.drain()
+                            return
                     try:
                         import_data = json.loads(body)
                         if _dry_run_i:
@@ -2858,14 +2885,16 @@ class HttpEndpointsMixin:
                             )
                         else:
                             from .didkey import pub_key_to_did as _p2d_imp
-                            _import_owner = _p2d_imp(self.agent.identity_pub_bytes)
+                            _import_owner = _ticket_owner or _p2d_imp(self.agent.identity_pub_bytes)
                             counts = self._store.import_data(
                                 import_data,
                                 owner_pub_hex=self.agent.identity_pub_bytes.hex(),
                                 owner_webid=_import_owner,
+                                operator=not _ticket_owner,
                             )
-                            # Imported revocations take effect now, not on restart.
+                            # Imported revocations and rooms take effect now, not on restart.
                             self._revoked_dids |= self._store.get_revoked_dids()
+                            self._hydrate_from_store(only_new=True)
                             await self.broadcast({"type": "import_complete", "counts": counts})
                             # R7: Save import provenance
                             if self._store:

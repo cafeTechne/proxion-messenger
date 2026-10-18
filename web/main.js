@@ -1186,6 +1186,9 @@ import { createAccountSync } from './account-sync.js';
             renderDmSidebar();
         }
 
+        // Resolves the pending import's ticket request (see the import button).
+        let _importTicketWaiter = null;
+
         async function downloadExport(ticket) {
             const path = ticket ? '/export?ticket=' + encodeURIComponent(ticket) : '/export';
             const a = document.createElement('a');
@@ -2559,7 +2562,9 @@ import { createAccountSync } from './account-sync.js';
                     handleTyping(event);
                     break;
                 case "export_ticket":
-                    if (event.ticket) downloadExport(event.ticket);
+                    if (event.purpose === 'import') {
+                        if (_importTicketWaiter) _importTicketWaiter(event.ticket || '');
+                    } else if (event.ticket) downloadExport(event.ticket);
                     break;
                 case "did_resolved": {
                     const peerDid = event.did;
@@ -6386,9 +6391,21 @@ import { createAccountSync } from './account-sync.js';
                 const headers = { 'Content-Type': 'application/json' };
                 const apiToken = document.querySelector('meta[name="x-api-token"]')?.content || '';
                 if (apiToken) headers['Authorization'] = 'Bearer ' + apiToken;
+                // Restore into this account: a one-time ticket from our socket
+                // tells the gateway whose data the file is.
+                let ticket = '';
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    ticket = await new Promise((resolve) => {
+                        _importTicketWaiter = resolve;
+                        socket.send(JSON.stringify({ cmd: 'export_ticket', purpose: 'import' }));
+                        setTimeout(() => resolve(''), 5000);
+                    });
+                    _importTicketWaiter = null;
+                }
+                const importPath = ticket ? '/import?ticket=' + encodeURIComponent(ticket) : '/import';
                 let resp = null, result = {};
                 try {
-                    resp = await fetch(gatewayUrl('/import'), { method: 'POST', body: await file.text(), headers });
+                    resp = await fetch(gatewayUrl(importPath), { method: 'POST', body: await file.text(), headers });
                     result = await resp.json().catch(() => ({}));
                 } catch (err) {
                     console.warn('[Proxion] import failed:', err);
