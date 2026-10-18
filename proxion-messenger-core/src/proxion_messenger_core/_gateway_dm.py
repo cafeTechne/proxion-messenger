@@ -333,9 +333,12 @@ class DmHandlerMixin:
 
         # Pre-decode size guard: reject before attempting expensive decode
         import binascii as _binascii
-        _max_b64_len = ((512 * 1024 + 2) // 3) * 4  # 699052 chars ≈ 512 KB decoded
+        from ._gateway_files import INLINE_DM_FILE_BYTES, ROOM_FILE_BYTES
+        _max_bytes = INLINE_DM_FILE_BYTES if cert_id else ROOM_FILE_BYTES
+        _max_b64_len = ((_max_bytes + 2) // 3) * 4
+        _too_large = json.dumps({"type": "error", "message": f"File too large (max {_max_bytes // 1024} KB)"})
         if len(data_b64) > _max_b64_len:
-            await websocket.send(json.dumps({"type": "error", "message": "invalid_file_encoding"}))
+            await websocket.send(_too_large)
             return
         try:
             file_bytes = _b64.b64decode(data_b64, validate=True)
@@ -399,8 +402,8 @@ class DmHandlerMixin:
             return
         mime_type = effective_mime
 
-        if len(file_bytes) > 524288:
-            await websocket.send(json.dumps({"type": "error", "message": "File too large (max 512 KB)"}))
+        if len(file_bytes) > _max_bytes:
+            await websocket.send(_too_large)
         elif cert_id and cert_id in self.dm_clients:
             import tempfile, os as _os
             from .files import send_file as _send_file_pod

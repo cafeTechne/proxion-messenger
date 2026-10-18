@@ -240,8 +240,9 @@ class MessageStoreMixin(object):
             conn.execute("DELETE FROM message_files WHERE message_id = ?", (message_id,))
 
     # Room file attachments (the message_files table). The per-file cap is the
-    # inline send limit; the per-thread cap matches the message byte quota.
-    MAX_MESSAGE_FILE_BYTES = 512 * 1024
+    # room send limit (_gateway_files.ROOM_FILE_BYTES); the per-thread cap
+    # matches the message byte quota.
+    MAX_MESSAGE_FILE_BYTES = 2 * 1024 * 1024
     MAX_THREAD_FILE_BYTES = 50 * 1024 * 1024
 
     def save_message_file(

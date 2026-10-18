@@ -1,14 +1,27 @@
-// media-resize.js — R59B: auto-downscale images so they fit a room's 512 KB
-// inline-attachment cap (the chunked 25 MB path is DM-only). Without this, a
-// normal phone photo simply cannot be posted to a room.
+// media-resize.js — R59B: auto-downscale images so they fit a room's inline
+// attachment cap (the chunked 25 MB path is DM-only). Without this, a large
+// phone photo simply cannot be posted to a room.
 //
 // needsDownscale is pure (unit-tested); downscaleImage is browser-only
 // (canvas) and verified by the live smoke.
 
-// Raw target under the gateway's 512 KB decoded guard, with headroom.
-export const DOWNSCALE_TARGET_BYTES = 500 * 1024;
+// Inline send_file caps, matching the gateway (_gateway_files.py): a DM file
+// above its cap goes chunked; a room file has no chunked path, so its cap is
+// larger (bounded by the gateway's 4 MiB WebSocket frame).
+export const DM_INLINE_FILE_BYTES = 512 * 1024;
+export const ROOM_FILE_BYTES = 2 * 1024 * 1024;
+const ROOM_INLINE_LIMIT = ROOM_FILE_BYTES;
+
+// Largest file sent inline in this kind of view. tagBytes is the AES-GCM tag
+// an E2E-sealed DM file adds, which the cap has to hold too.
+export function inlineFileLimit(viewType, tagBytes = 0) {
+    const isDm = viewType === 'dm' || viewType === 'local_dm';
+    return isDm ? DM_INLINE_FILE_BYTES - tagBytes : ROOM_FILE_BYTES;
+}
+
+// Raw target under the room cap, with headroom.
+export const DOWNSCALE_TARGET_BYTES = ROOM_FILE_BYTES - 128 * 1024;
 export const DOWNSCALE_MAX_DIM = 2048;
-const ROOM_INLINE_LIMIT = 524288;
 
 // Animated GIFs are excluded: canvas re-encode would freeze them to one frame.
 const _RESIZABLE = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/avif']);

@@ -169,3 +169,56 @@ async def test_legacy_file_row_is_marked_unavailable(gw):
     msgs = {m["message_id"]: m for m in await _history(gw, alice)}
     assert msgs["file-old"]["file"] == {"filename": "old.pdf", "unavailable": True}
     assert "file" not in msgs["msg-plain"]
+
+
+# F25: a room has no chunked path, so its inline cap is larger than a DM's.
+BIG_PNG = b"\x89PNG\r\n\x1a\n" + b"\x01" * (1536 * 1024)
+
+
+@pytest.mark.asyncio
+async def test_room_takes_a_file_over_512_kb_and_keeps_it(gw):
+    from proxion_messenger_core._gateway_files import ROOM_FILE_BYTES
+    assert LocalStore.MAX_MESSAGE_FILE_BYTES == ROOM_FILE_BYTES
+    alice = _sock(gw, "did:key:alice")
+    bob = _sock(gw, "did:key:bob")
+    await gw._handle_send_file(alice, {
+        "room_id": ROOM, "filename": "photo.png", "mime_type": "image/png",
+        "data_b64": base64.b64encode(BIG_PNG).decode(),
+    })
+    assert _sent(alice, "error") == []
+    [ev] = [e for e in _sent(bob, "message") if e.get("file")]
+    assert ev["file"]["size"] == len(BIG_PNG)
+    [fd] = await _get_files(gw, bob, [ev["message_id"]])
+    assert base64.b64decode(fd["file"]["data_b64"]) == BIG_PNG
+
+
+@pytest.mark.asyncio
+async def test_room_file_over_the_cap_is_refused_as_too_large(gw):
+    from proxion_messenger_core._gateway_files import ROOM_FILE_BYTES
+    alice = _sock(gw, "did:key:alice")
+    data = b"\x89PNG\r\n\x1a\n" + b"\x01" * ROOM_FILE_BYTES
+    await gw._handle_send_file(alice, {
+        "room_id": ROOM, "filename": "huge.png", "mime_type": "image/png",
+        "data_b64": base64.b64encode(data).decode(),
+    })
+    [err] = _sent(alice, "error")
+    assert err["message"].startswith("File too large")
+    assert _sent(alice, "message") == []
+
+
+@pytest.mark.asyncio
+async def test_dm_inline_cap_stays_512_kb(gw):
+    alice = _sock(gw, "did:key:alice", member=False)
+    await gw._handle_send_file(alice, {
+        "cert_id": "dm-thread", "filename": "photo.png", "mime_type": "image/png",
+        "data_b64": base64.b64encode(BIG_PNG).decode(),
+    })
+    [err] = _sent(alice, "error")
+    assert err["message"] == "File too large (max 512 KB)"
+
+
+def test_room_file_cap_fits_one_websocket_frame():
+    from proxion_messenger_core._gateway_files import ROOM_FILE_BYTES, WS_MAX_FRAME_BYTES
+    b64_len = ((ROOM_FILE_BYTES + 2) // 3) * 4
+    # Room id, filename, dims and JSON framing fit easily in what is left.
+    assert b64_len + 64 * 1024 < WS_MAX_FRAME_BYTES

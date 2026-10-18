@@ -33,6 +33,14 @@ logger = logging.getLogger("proxion_messenger_core.gateway")
 MAX_FILE_BYTES = 25 * 1024 * 1024   # 25 MB ceiling for chunked transfer
 MAX_CHUNK_B64_LEN = 96 * 1024       # 96 KB base64 per chunk (64 KB binary + overhead)
 
+# Inline send_file limits. A DM file over the inline cap takes the chunked
+# path; a room file has no chunked path, so its cap is larger, bounded by the
+# 4 MiB WebSocket frame (2 MiB is about 2.8 MB of base64 plus the envelope).
+# LocalStore.MAX_MESSAGE_FILE_BYTES matches ROOM_FILE_BYTES.
+INLINE_DM_FILE_BYTES = 512 * 1024
+ROOM_FILE_BYTES = 2 * 1024 * 1024
+WS_MAX_FRAME_BYTES = 4 * 1024 * 1024   # websockets.serve max_size
+
 # A sealed (E2E) transfer: ciphertext is the file plus a 16-byte AES-GCM tag,
 # and the offer declares this placeholder type.
 SEALED_TAG_BYTES = 16

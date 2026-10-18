@@ -20,7 +20,7 @@ from .readstate import ReadState
 from .inbox import InboxEntry, poll_inbox
 from .didkey import pub_key_to_did
 from ._gateway_voice import VoiceHandlerMixin
-from ._gateway_files import FileTransferMixin
+from ._gateway_files import FileTransferMixin, WS_MAX_FRAME_BYTES
 from ._gateway_mailbox import MailboxMixin, relay_node_enabled, relay_fallback_url
 from ._gateway_pod import PodSyncMixin, extract_mentions
 from ._gateway_rooms import RoomHandlerMixin, _MAX_DISAPPEAR_MS
@@ -3821,7 +3821,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             _ws_server = await websockets.serve(
                 self.handle_client, self.config.host, self.config.port,
                 ssl=ssl_ctx, ping_interval=60, ping_timeout=20,
-                max_size=4 * 1024 * 1024,
+                max_size=WS_MAX_FRAME_BYTES,
                 origins=_allowed_origins,
             )
         except OSError as exc:

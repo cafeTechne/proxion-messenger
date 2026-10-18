@@ -83,7 +83,7 @@ import { chatRootUrl } from './longchat.js';
 import { createPairing } from './pairing.js';
 import { createRecovery, importErrorKey } from './recovery.js';
 import { createGifTray, saveFavorite, pushAllGifsToPod } from './gifs.js';
-import { needsDownscale, downscaleImage, measureMedia } from './media-resize.js';
+import { needsDownscale, downscaleImage, measureMedia, inlineFileLimit } from './media-resize.js';
 import { attachGifMotion } from './gifmotion.js';
 import { createDropZone } from './dropzone.js';
 import { createEmoji } from './emoji.js';
@@ -4864,7 +4864,7 @@ import { createAccountSync } from './account-sync.js';
         // user is not asked to confirm a file that is then refused.
         function attachmentBlockReason(file) {
             const view = activeView;
-            if (!file || !view || needsDownscale(file, view.type)) return null;
+            if (!file || !view) return null;
             const sealFile = secondary.mustSeal(view);
             // The receiver refuses a type outside the allowlist, which used to
             // surface only as "File declined" after the whole confirm. An untyped
@@ -4872,7 +4872,7 @@ import { createAccountSync } from './account-sync.js';
             // goes out as application/octet-stream, which is not allowed.
             const mime = (file.type || '').toLowerCase().split(';')[0].trim();
             if ((mime || sealFile) && !FILE_MIMES.has(mime)) return 'error.file_type_not_allowed';
-            const inlineMax = sealFile ? 524288 - FILE_TAG_BYTES : 524288;
+            const inlineMax = inlineFileLimit(view.type, sealFile ? FILE_TAG_BYTES : 0);
             if (file.size <= inlineMax) return null;
             if (file.size > 25 * 1024 * 1024 - (sealFile ? FILE_TAG_BYTES : 0)) return 'file.tooLarge';
             const isDm = view.type === "dm" || view.type === "local_dm";
@@ -4882,9 +4882,9 @@ import { createAccountSync } from './account-sync.js';
 
         // Single attachment entry point — used by the file picker, clipboard
         // paste, drag-drop, and the GIF tray (R58). Routes small files inline
-        // and large ones (>512 KB) through the chunked DM-only path.
+        // and large DM ones (>512 KB) through the chunked DM-only path.
         // R59B: oversized still images headed to a ROOM are downscaled to fit
-        // the 512 KB inline cap instead of being refused outright.
+        // the room cap (2 MB) instead of being refused outright.
         async function sendAttachmentFile(file, opts = {}) {
             if (!file || !socket || !activeView) return;
             if (needsDownscale(file, activeView.type)) {
@@ -4897,7 +4897,7 @@ import { createAccountSync } from './account-sync.js';
             // the AES-GCM tag to what the inline cap has to hold.
             const view = activeView;
             const sealFile = secondary.mustSeal(view);
-            const inlineMax = sealFile ? 524288 - FILE_TAG_BYTES : 524288;
+            const inlineMax = inlineFileLimit(view.type, sealFile ? FILE_TAG_BYTES : 0);
             if (file.size > inlineMax) {
                 const isDm = view.type === "dm" || view.type === "local_dm";
                 const peerWebid = view.peerWebid || "";
@@ -4986,6 +4986,14 @@ import { createAccountSync } from './account-sync.js';
         }
 
         async function confirmAndSend(file, batch = null) {
+            // Downscale first, so the confirm shows the file that will be sent
+            // and a photo that cannot be made to fit is refused before it.
+            if (activeView && needsDownscale(file, activeView.type)) {
+                try {
+                    file = await downscaleImage(file);
+                    showToast(t('file.reduced'));
+                } catch (_) { /* refused below */ }
+            }
             const blocked = attachmentBlockReason(file);
             if (blocked) { showToast(t(blocked)); return; }
             const { ok, spoiler } = await confirmAttachment(file, batch);

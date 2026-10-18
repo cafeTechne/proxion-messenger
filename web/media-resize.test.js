@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
     needsDownscale, downscalePlan, DOWNSCALE_TARGET_BYTES, DOWNSCALE_MAX_DIM,
     normalizeMediaDims, measureMedia, MAX_MEDIA_DIM,
+    inlineFileLimit, ROOM_FILE_BYTES, DM_INLINE_FILE_BYTES,
 } from './media-resize.js';
 
 const mk = (size, type) => ({ size, type, name: 'x' });
@@ -12,6 +13,8 @@ describe('needsDownscale', () => {
     it('small files never downscale', () => {
         expect(needsDownscale(mk(100 * 1024, 'image/png'), 'room')).toBe(false);
         expect(needsDownscale(mk(524288, 'image/png'), 'room')).toBe(false);
+        // F25: a 1.5 MB photo fits a room as is.
+        expect(needsDownscale(mk(1536 * 1024, 'image/jpeg'), 'room')).toBe(false);
     });
     it('oversized still images downscale for rooms, not DMs', () => {
         const big = mk(3 * 1024 * 1024, 'image/jpeg');
@@ -28,6 +31,16 @@ describe('needsDownscale', () => {
     });
 });
 
+describe('inlineFileLimit (F25)', () => {
+    it('rooms take 2 MB inline; DMs keep 512 KB and go chunked above it', () => {
+        expect(ROOM_FILE_BYTES).toBe(2 * 1024 * 1024);
+        expect(inlineFileLimit('room')).toBe(ROOM_FILE_BYTES);
+        expect(inlineFileLimit('local_room')).toBe(ROOM_FILE_BYTES);
+        expect(inlineFileLimit('dm')).toBe(DM_INLINE_FILE_BYTES);
+        expect(inlineFileLimit('local_dm', 16)).toBe(512 * 1024 - 16);
+    });
+});
+
 describe('downscalePlan', () => {
     it('steps quality within a size, then halves dimensions, floor 256', () => {
         const plan = downscalePlan(1024);
@@ -39,7 +52,7 @@ describe('downscalePlan', () => {
         expect(plan.every(s => s.dim >= 256)).toBe(true);
     });
     it('sane exported constants', () => {
-        expect(DOWNSCALE_TARGET_BYTES).toBeLessThan(524288);
+        expect(DOWNSCALE_TARGET_BYTES).toBeLessThan(ROOM_FILE_BYTES);
         expect(DOWNSCALE_MAX_DIM).toBeGreaterThanOrEqual(1024);
     });
 });
