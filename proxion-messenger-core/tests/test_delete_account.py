@@ -192,3 +192,12 @@ def test_wire_needs_a_proven_identity(tmp_path, monkeypatch):
     asyncio.run(run())
     assert gw._store.get_dm_threads(owner_webid=alice) == []
     assert [t["thread_id"] for t in gw._store.get_dm_threads(owner_webid=CAROL)] == ["dm-c"]
+
+
+def test_store_deletes_the_accounts_synced_settings(tmp_path):
+    s = LocalStore(str(tmp_path / "s.db"))
+    s.set_account_sync("did:key:zAlice", "pref:proxion_theme", "dark")
+    s.set_account_sync("did:key:zCarol", "pref:proxion_theme", "light")
+    s.delete_account_data("did:key:zAlice")
+    assert s.get_account_sync("did:key:zAlice") == {}
+    assert s.get_account_sync("did:key:zCarol") == {"pref:proxion_theme": "light"}

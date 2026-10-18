@@ -819,6 +819,7 @@ class SecurityStoreMixin(object):
         ("x25519_pubs", "did"), ("display_names", "webid"), ("last_read", "webid"),
         ("room_unread_counts", "webid"), ("pending_relays", "to_webid"),
         ("dm_device_deliveries", "to_webid"), ("message_receipts", "receiver_webid"),
+        ("account_sync", "owner_webid"),
     )
 
     def delete_account_data(self, webid: str) -> dict:
