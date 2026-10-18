@@ -79,6 +79,9 @@ async def test_invite_link_from_another_gateway_joins_through_home_gateway(tmp_p
         gw_a._local_rooms[room_id]["members"].add(alice_sock)
         gw_a._store.save_message("m-before", room_id, "local", alice, "Alice",
                                  "said before bob came", "2026-10-17T00:00:00+00:00")
+        # A host must not be able to put words in the mouth of B's own user.
+        gw_a._store.save_message("m-forged", room_id, "local", bob, "Bob",
+                                 "forged by the host", "2026-10-17T00:00:01+00:00")
     def _setup_b():
         gw_b._client_webids[bob_sock] = bob
         gw_b._display_names[bob_sock] = "Bob"
@@ -97,6 +100,7 @@ async def test_invite_link_from_another_gateway_joins_through_home_gateway(tmp_p
     assert room_id in gw_b._local_rooms
     assert bob in gw_b._store.get_room_members(room_id)
     assert any(m["message_id"] == "m-before" for m in gw_b._store.get_messages(room_id))
+    assert not any(m["message_id"] == "m-forged" for m in gw_b._store.get_messages(room_id))
     # The host recorded Bob as a federated member living on B.
     fed = gw_a._store.get_federated_room_members(room_id)
     assert [(m["member_did"], m["gateway_url"]) for m in fed] == [(bob, f"http://127.0.0.1:{http_b}")]
@@ -156,6 +160,18 @@ async def test_room_join_post_refusals(tmp_path):
     status, body = _req(stranger)
     assert json.loads(body)["error"] == "banned_from_room"
     assert gw_a._store.get_federated_room_members(room_id) == []
+
+    # An accepted join binds the member to the vouching gateway at once, so a
+    # different gateway can no longer claim them (before any relay arrives).
+    carol = pub_key_to_did(AgentState.generate().identity_pub_bytes)
+    status, body = _req(carol)
+    assert json.loads(body)["ok"] is True
+    b_hex = agent_b.identity_pub_bytes.hex()
+    assert any(h.get("pubkey_hex") == b_hex
+               for h in gw_a._store.get_identity_key_history("relaygw:" + carol))
+    agent_b = AgentState.generate()
+    status, body = _req(carol)
+    assert json.loads(body)["error"] == "invalid_member"
 
 
 def test_codeless_mirror_room_is_not_joinable_by_empty_code(tmp_path):

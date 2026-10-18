@@ -3921,8 +3921,13 @@ class RoomHandlerMixin:
                     content = msg.get("content")
                     if not isinstance(content, str) or len(content) > 16384:
                         continue
+                    _from = str(msg.get("from_webid") or "")[:256]
+                    # The host speaks for its own members, never for anyone here.
+                    if _from == caller or (_from != creator
+                                           and self._relay_identity_is_local(_from, room_id)):
+                        continue
                     self._store.save_message(
-                        mid, room_id, "relay", str(msg.get("from_webid") or "")[:256],
+                        mid, room_id, "relay", _from,
                         str(msg.get("from_display_name") or "")[:64], content,
                         str(msg.get("timestamp") or ""))
         logger.info("Joined remote room %s hosted at %s", room_id, host_http)
@@ -4001,6 +4006,7 @@ class RoomHandlerMixin:
                 _hist = self._store.get_identity_key_history("relaygw:" + member)
                 if _hist and not any(h.get("pubkey_hex") == _gw_hex for h in _hist):
                     return refuse("invalid_member")
+                _seed_binding = not _hist
             except Exception:
                 return refuse("invalid_member")
         info = await self._discover_peer_gateway(f"{signer}@{origin}")
@@ -4024,6 +4030,10 @@ class RoomHandlerMixin:
             if not self._store.add_federated_room_member(
                     room_id, member, home, max_members=_MAX_ROOM_MEMBERS):
                 return refuse("room_full")
+            # Bind the member to the gateway that vouched for them now, so no other
+            # gateway can seed the binding with the member's first relay.
+            if _seed_binding:
+                self._store.record_identity_key_seen("relaygw:" + member, _gw_hex, trusted=True)
             dn = str(data.get("display_name") or "").strip()[:64]
             if dn:
                 self._store.save_display_name(member, dn)
