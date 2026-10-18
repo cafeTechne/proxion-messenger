@@ -348,7 +348,64 @@ class MiscHandlerMixin:
         mute_key = data.get("mute_key", "")
         if not owner or not mute_key or not self._store:
             return
-        self._store.set_thread_mute(owner, mute_key, bool(data.get("muted", False)))
+        muted = bool(data.get("muted", False))
+        self._store.set_thread_mute(owner, mute_key, muted)
+        # Linked devices: the client's own thread id travels too, so the
+        # account's other devices mute the same sidebar entry.
+        thread_id = data.get("thread_id")
+        if isinstance(thread_id, str) and 0 < len(thread_id) <= 256:
+            if muted and self._store.count_account_sync(owner, "mute:") >= self.ACCOUNT_SYNC_MAX_MUTES:
+                return
+            self._store.set_account_sync(owner, "mute:" + thread_id, "1" if muted else None)
+            await self._push_account_sync(websocket, owner, {"mutes": {thread_id: muted}})
+
+    # ── Account settings sync across linked devices ────────────────────────
+    # A linked device registers AS the account once its delegation cert
+    # verifies, so _client_webids is the account identity for every device of
+    # it. Reads and writes are scoped to that identity only, never to an id
+    # named in the payload, and changes go to the account's other sessions.
+    ACCOUNT_SYNC_PREFS = frozenset({
+        "proxion_receipts_enabled", "proxion_link_previews_enabled",
+        "proxion_locale", "proxion_theme",
+    })
+    ACCOUNT_SYNC_MAX_VALUE = 32
+    ACCOUNT_SYNC_MAX_MUTES = 2000
+
+    async def _push_account_sync(self, websocket, owner: str, change: dict) -> None:
+        payload = json.dumps({"type": "account_sync", "webid": owner, **change})
+        for ws in list(self._webid_sockets.get(owner, ()) or ()):
+            if ws is websocket or self._client_webids.get(ws) != owner:
+                continue
+            try:
+                await ws.send(payload)
+            except Exception:
+                pass
+
+    async def _handle_get_account_sync(self, websocket, data: dict) -> None:
+        owner = self._client_webids.get(websocket, "")
+        if not owner:
+            return
+        entries = self._store.get_account_sync(owner) if self._store else {}
+        prefs = {k[5:]: v for k, v in entries.items()
+                 if k.startswith("pref:") and k[5:] in self.ACCOUNT_SYNC_PREFS}
+        muted = sorted(k[5:] for k in entries if k.startswith("mute:"))
+        name = ((self._store.get_display_name(owner) if self._store else None)
+                or self._display_names.get(websocket, ""))
+        await websocket.send(json.dumps({
+            "type": "account_sync", "full": True, "webid": owner,
+            "display_name": name or "", "prefs": prefs, "muted_threads": muted,
+        }))
+
+    async def _handle_set_account_pref(self, websocket, data: dict) -> None:
+        owner = self._client_webids.get(websocket, "")
+        key, value = data.get("key"), data.get("value")
+        if (not owner or not self._store or key not in self.ACCOUNT_SYNC_PREFS
+                or not isinstance(value, str) or len(value) > self.ACCOUNT_SYNC_MAX_VALUE):
+            return
+        self._store.set_account_sync(owner, "pref:" + key, value)
+        if key == "proxion_receipts_enabled":
+            self._client_receipts_prefs[owner] = value != "0"
+        await self._push_account_sync(websocket, owner, {"prefs": {key: value}})
 
     async def _handle_get_message(self, websocket, data: dict) -> None:
         message_id = data.get("message_id", "")
@@ -512,6 +569,11 @@ class MiscHandlerMixin:
             webid = self._client_webids.get(websocket)
             if webid and self._store:
                 self._store.save_display_name(webid, display_name)
+            if webid:
+                for ws in list(self._webid_sockets.get(webid, ()) or ()):
+                    if self._client_webids.get(ws) == webid:
+                        self._display_names[ws] = display_name
+                await self._push_account_sync(websocket, webid, {"display_name": display_name})
 
     async def _handle_connect_css(self, websocket, data: dict) -> None:
         # Only the gateway owner (whose identity matches self.agent) may reconfigure pod connectivity.

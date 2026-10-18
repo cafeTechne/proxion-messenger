@@ -1535,6 +1535,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_remove_reaction(websocket, data)
             elif cmd == "set_thread_mute":
                 await self._handle_set_thread_mute(websocket, data)
+            elif cmd == "get_account_sync":
+                await self._handle_get_account_sync(websocket, data)
+            elif cmd == "set_account_pref":
+                await self._handle_set_account_pref(websocket, data)
             elif cmd == "block":
                 await self._handle_block(websocket, data)
             elif cmd == "unblock":

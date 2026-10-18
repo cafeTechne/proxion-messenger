@@ -322,6 +322,18 @@ class _StoreBase(object):
                     PRIMARY KEY (owner_webid, mute_key)
                 );
 
+                -- Account settings shared by every device of one account (linked
+                -- devices register AS the account, so owner_webid is the account
+                -- identity). key is "pref:<name>" for an allowlisted setting or
+                -- "mute:<thread_id>" for a muted thread.
+                CREATE TABLE IF NOT EXISTS account_sync (
+                    owner_webid TEXT NOT NULL,
+                    key         TEXT NOT NULL,
+                    value       TEXT NOT NULL,
+                    updated_at  REAL NOT NULL,
+                    PRIMARY KEY (owner_webid, key)
+                );
+
                 -- Per-owner blocklist: which user (owner_webid) blocked which
                 -- peer (blocked_webid). Replaces the gateway-global file for the
                 -- send path so one user's block no longer silences a peer for

@@ -107,7 +107,8 @@ import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, 
 import { unsealCopy, unsealList, mergeSearchHits, previewText, isSealedCopy } from './dmtext.js';
 import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } from './i18n.js';
 import { createIdentityResolver } from './identity.js';
-import { initThemePicker } from './theme.js';
+import { initThemePicker, applyTheme, readThemePref } from './theme.js';
+import { createAccountSync } from './account-sync.js';
 
         // Populate the settings language picker from the locale manifest, mark the
         // active one, and reload on change (J1). Endonyms so each language reads
@@ -125,7 +126,12 @@ import { initThemePicker } from './theme.js';
                 sel.appendChild(opt);
             }
             sel.onchange = () => {
-                if (sel.value && sel.value !== cur) { setLocale(sel.value); pushSettingsToPod(); }
+                if (sel.value && sel.value !== cur) {
+                    try { localStorage.setItem('proxion_locale', sel.value); } catch (_) { /* private mode */ }
+                    accountSync.pushPref('proxion_locale');
+                    pushSettingsToPod();
+                    setLocale(sel.value);
+                }
             };
         }
 
@@ -195,6 +201,7 @@ import { initThemePicker } from './theme.js';
         applyStaticI18n();
         _initLanguagePicker();
         initThemePicker(document.getElementById('settings-theme'));
+        document.getElementById('settings-theme')?.addEventListener('change', () => accountSync.pushPref('proxion_theme'));
 
         // Modal a11y: focus-restore + Tab-trap for every dialog (observer-based,
         // so it covers all ~20 modals without retrofitting their open/close sites).
@@ -849,6 +856,43 @@ import { initThemePicker } from './theme.js';
             generateOrLoadIdentity, handleEventAsync: _handleEventAsync,
             isActive: () => tabLock.isLeader(),
         });
+        // Linked devices share the account's name, mutes and settings through
+        // the gateway (account-sync.js). Scoped to the account this socket
+        // registered as; see the "registered" and "account_sync" events.
+        const accountSync = createAccountSync({
+            send: (p) => socketSendOrQueue(p),
+            storage: localStorage,
+            getMutedThreads: () => mutedThreads,
+            applyMute: (tid, muted) => { if (muted) muteThread(tid); else unmuteThread(tid); },
+            sendMute: (tid, muted) => _sendServerMute(tid, muted),
+            onName: (name) => {
+                const u = document.getElementById("username");
+                if (u) u.innerText = name;
+                const f = document.getElementById("settings-display-name");
+                if (f && document.activeElement !== f) f.value = name;
+            },
+            onPrefs: _applySyncedPrefs,
+        });
+        function _applySyncedPrefs(keys) {
+            if (keys.includes('proxion_theme')) {
+                const pref = readThemePref();
+                applyTheme(pref);
+                const ts = document.getElementById('settings-theme');
+                if (ts) ts.value = pref;
+            }
+            const rt = document.getElementById('settings-receipts-toggle');
+            if (rt) rt.checked = localStorage.getItem('proxion_receipts_enabled') !== '0';
+            const pt = document.getElementById('settings-link-previews-toggle');
+            const previews = localStorage.getItem('proxion_link_previews_enabled') === '1';
+            if (pt) pt.checked = previews;
+            if (keys.includes('proxion_link_previews_enabled') && socket?.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({cmd: "set_link_previews_enabled", enabled: previews}));
+            }
+            if (keys.includes('proxion_locale')) {
+                const loc = localStorage.getItem('proxion_locale');
+                if (loc && loc !== getLocale()) { try { setLocale(loc); } catch (_) { /* stays on reload */ } }
+            }
+        }
         // Another tab took over: stop the socket, let in-flight ratchet work save
         // its state, hand the unsent commands to the new tab, then reload into
         // the "open in another tab" notice so no timer or watcher keeps running.
@@ -1365,9 +1409,8 @@ import { initThemePicker } from './theme.js';
             if (!displayName || displayName === (localStorage.getItem("proxion_display_name") || "")) return;
             localStorage.setItem("proxion_display_name", displayName);
             document.getElementById("username").innerText = displayName;
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({cmd: "set_identity", display_name: displayName}));
-            }
+            // Queued while offline, so a linked device's later sync does not undo it.
+            socketSendOrQueue({cmd: "set_identity", display_name: displayName});
             podWriteProfile({ displayName }).catch(() => {});
             // R100/A1: also publish the name into the standard WebID card so
             // other Solid apps show a name, not an opaque id.
@@ -2061,6 +2104,7 @@ import { initThemePicker } from './theme.js';
                     break;
                 case "registered":
                     if (event.turn) voice.state._turnIceServer = event.turn;
+                    accountSync.setAccount(event.webid);
                     // R85 Track 1: cache the gateway's cert for our signing key so calls
                     // can prove this browser speaks for our gateway identity (the id a
                     // federated contact knows us by). Refreshed on every register.
@@ -2076,6 +2120,7 @@ import { initThemePicker } from './theme.js';
                         // if flushed at onopen, before registration.
                         flushPending();
                         sendStatus.resumeWaiting();   // queued sends just went out
+                        accountSync.request();   // after the flush, so offline changes land first
                         // A contact DM opened while offline shows a notice in
                         // place of history: fetch that history now.
                         if (activeView?.type === "dm" && document.getElementById("feed-notice")) {
@@ -2762,6 +2807,9 @@ import { initThemePicker } from './theme.js';
                     feed.removeAttribute("aria-busy");
                     break;
                 }
+                case "account_sync":
+                    accountSync.apply(event);
+                    break;
                 case "file_data":
                     // Bytes of a stored room file requested by rendering (get_files).
                     if (event.message_id) {
@@ -5185,7 +5233,7 @@ import { initThemePicker } from './theme.js';
         function _sendServerMute(threadId, muted) {
             if (!socket || !threadId) return;
             const key = _serverMuteKey(threadId);
-            if (key) socketSendOrQueue({ cmd: "set_thread_mute", mute_key: key, muted });
+            if (key) socketSendOrQueue({ cmd: "set_thread_mute", mute_key: key, thread_id: threadId, muted });
         }
         document.getElementById("sctx-mute").onclick = () => {
             if (_sctxTargetId) { muteThread(_sctxTargetId); _sendServerMute(_sctxTargetId, true); }
@@ -6328,6 +6376,7 @@ import { initThemePicker } from './theme.js';
                     localStorage.setItem("proxion_receipts_enabled", enabled ? "1" : "0");
                     if (socket?.readyState === WebSocket.OPEN)
                         socket.send(JSON.stringify({cmd: "set_receipts_enabled", enabled}));
+                    accountSync.pushPref("proxion_receipts_enabled");
                     pushSettingsToPod();   // R62
                 };
             }
@@ -6341,6 +6390,7 @@ import { initThemePicker } from './theme.js';
                     localStorage.setItem("proxion_link_previews_enabled", enabled ? "1" : "0");
                     if (socket?.readyState === WebSocket.OPEN)
                         socket.send(JSON.stringify({cmd: "set_link_previews_enabled", enabled}));
+                    accountSync.pushPref("proxion_link_previews_enabled");
                     pushSettingsToPod();   // R62
                 };
             }

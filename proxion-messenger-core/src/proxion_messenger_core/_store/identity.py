@@ -89,6 +89,34 @@ class IdentityStoreMixin(object):
                 "SELECT display_name FROM display_names WHERE webid = ?", (webid,)
             ).fetchone()
             return row["display_name"] if row else None
+    # Account settings sync (linked devices). Scoped by the caller's account.
+    def set_account_sync(self, owner_webid: str, key: str, value: Optional[str]) -> None:
+        """Set (or, with value None, clear) one account-sync entry."""
+        with self._conn() as conn:
+            if value is None:
+                conn.execute(
+                    "DELETE FROM account_sync WHERE owner_webid = ? AND key = ?",
+                    (owner_webid, key),
+                )
+            else:
+                conn.execute(
+                    "INSERT OR REPLACE INTO account_sync (owner_webid, key, value, updated_at)"
+                    " VALUES (?, ?, ?, ?)",
+                    (owner_webid, key, value, time.time()),
+                )
+    def get_account_sync(self, owner_webid: str) -> dict:
+        """{key: value} for every account-sync entry of owner_webid."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT key, value FROM account_sync WHERE owner_webid = ?", (owner_webid,)
+            ).fetchall()
+        return {r["key"]: r["value"] for r in rows}
+    def count_account_sync(self, owner_webid: str, prefix: str) -> int:
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM account_sync WHERE owner_webid = ? AND key LIKE ?",
+                (owner_webid, prefix.replace("%", "") + "%"),
+            ).fetchone()[0]
     def save_x25519_pub(self, did: str, pub_b64u: str) -> None:
         with self._conn() as conn:
             conn.execute(

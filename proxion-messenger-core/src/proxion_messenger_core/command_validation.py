@@ -150,6 +150,7 @@ MUTATING_COMMANDS: frozenset[str] = frozenset({
     "subscribe_push", "unsubscribe_push",
     "create_webhook", "delete_webhook", "rotate_webhook",
     "set_thread_mute", "set_receipts_enabled", "set_link_previews_enabled",
+    "set_account_pref",
     # owner security operations
     "prepare_recovery_operation", "confirm_recovery_operation",
     "release_quarantine_item", "drop_quarantine_item", "ack_checksum_mismatch",
@@ -188,7 +189,7 @@ READ_ONLY_COMMANDS: frozenset[str] = frozenset({
     "get_voice_channel_state", "screenshare_started", "screenshare_stopped",
     "tunnel_status", "pod_status", "list_sessions", "list_webhooks",
     "list_devices", "get_peer_devices", "get_peer_device_keys", "get_sender_key",
-    "list_dm_sessions",
+    "list_dm_sessions", "get_account_sync",
     # caller-scoped bookkeeping
     "mark_read", "update_last_read", "ack_delivered", "ack_read",
     "mark_notification_read", "catch_up", "catch_up_ack",
@@ -221,7 +222,7 @@ SNAPSHOT_READ_COMMANDS: frozenset[str] = frozenset({
     "list_verified_contacts", "get_presence", "get_all_presence",
     "get_voice_channel_state", "tunnel_status", "pod_status", "list_sessions",
     "list_webhooks", "list_devices", "get_peer_devices", "get_peer_device_keys",
-    "get_sender_key", "list_dm_sessions", "update_last_read",
+    "get_sender_key", "list_dm_sessions", "update_last_read", "get_account_sync",
 })
 assert SNAPSHOT_READ_COMMANDS <= READ_ONLY_COMMANDS
 
