@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import { webcrypto } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { createVoice, CallState, audioLevel } from './voice.js';
 import { extractFingerprint, verifyFingerprint, ed25519PubToDid } from './callsec.js';
 
@@ -48,6 +49,7 @@ function makeVoice(over = {}) {
     getSocket: () => socket, getActiveView: () => over.activeView ?? null,
     getSelfWebId: () => 'did:key:zSelf', getTurnUrl: () => null, getTurnSecret: () => null,
     getLocalDmPeers: () => over.localDmPeers ?? {}, getCurrentRoomMembers: () => over.members ?? [],
+    getContactName: (did) => (over.contacts || {})[did] || '',
     getIsSharing: () => false,
     getExpectedPeerDid: () => over.expectedPeerDid ?? '',
     getDeviceCert: () => over.deviceCert ?? null,
@@ -655,5 +657,71 @@ describe('call lifecycle signaling', () => {
     expect(voice.handleCallError('call_too_frequent')).toBe(true);
     expect(voice.state._callState).toBe(CallState.IDLE);
     expect(voice.handleCallError('call_too_frequent')).toBe(false);   // idle: nothing to end
+  });
+});
+
+// F4: the incoming-call banner named the caller by a raw did:key prefix even
+// when the caller was a contact: across gateways the invite's caller_webid is
+// the caller's browser key, while the contact is known by the (authenticated)
+// relaying gateway did. Both are looked up, contacts included, and the label
+// carries the same id tag the contact row shows.
+describe('caller naming (F4)', () => {
+  const GW = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK';
+  const BROWSER = 'did:key:z6MkmdPx39wGDaTCfUunQwErTyUiOpAsDfGhJkLzXcVbNm';
+  it('rings a cross-gateway contact as known, labelled by the contact name and tag', () => {
+    const { voice } = makeVoice({ contacts: { [GW]: 'Alice' } });
+    voice.handleVoiceSignalRelay({ signal_type: 'offer', session_id: 's1', from_webid: GW,
+      signal_data: { caller_webid: BROWSER, sdp_offer: 'v=0' } });
+    expect(document.getElementById('voice-msg').innerText).toBe('voice.incomingFrom');
+    expect(voice._callerLabel(BROWSER, GW)).toBe('Alice ·nnEGta2doK');
+  });
+  it('never shows a raw did:key prefix for an unknown caller', () => {
+    const { voice } = makeVoice();
+    expect(voice._callerLabel(BROWSER)).toBe('did:key:…' + BROWSER.slice(-10));
+    expect(voice._callerDisplayName(BROWSER)).not.toMatch(/^did:key:z6Mk/);
+  });
+  it('the call widget shows the contact name, not the key', () => {
+    const { voice } = makeVoice({ contacts: { [GW]: 'Alice' } });
+    expect(voice._callerDisplayName(GW)).toBe('Alice');
+  });
+});
+
+// F3: the voice channel panel lists everyone as a tile, yourself included, with
+// your mute state, so a lone participant still sees who is in the channel.
+describe('voice channel tiles (F3)', () => {
+  it('renders a self tile with the muted state, and one tile per remote peer', async () => {
+    const { voice } = makeVoice({ members: [{ webid: 'did:key:z6MkBobBobBobBobBob', display_name: 'Bob' }] });
+    voice.state.localStream = { getTracks: () => [{ stop() {} }], getAudioTracks: () => [] };
+    await voice.joinVoice('room-1');
+    voice.state.isMuted = true;
+    voice._addChannelParticipant('did:key:z6MkBobBobBobBobBob');
+    const html = document.getElementById('voice-channel-participants').innerHTML;
+    expect(html).toContain('data-vc-self');
+    expect(html).toContain('ui.muted');
+    expect(html).toMatch(/class="vc-tile[^"]*"[^>]*data-vc-webid="did:key:z6MkBobBobBobBobBob"/);
+    expect(html).toContain('Bob');
+    // The self tile carries no data-vc-webid, so remote-peer counts stay exact.
+    expect((html.match(/data-vc-webid=/g) || []).length).toBe(1);
+  });
+});
+
+// F3 layout: the voice channel panel used to be position:fixed across the
+// bottom of the window, over the composer; the 1:1 call widget's controls row
+// did not wrap, so in the 260px sidebar the hang-up button was clipped.
+describe('call layout (F3)', () => {
+  const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  it('the voice channel panel sits in the chat column, not fixed over the composer', () => {
+    const tag = html.match(/<div id="voice-channel-panel"[^>]*>/)?.[0] || '';
+    expect(tag).not.toMatch(/position\s*:\s*fixed/);
+    const rule = css.match(/#voice-channel-panel\s*\{[^}]*\}/)?.[0] || '';
+    expect(rule).not.toMatch(/position\s*:\s*fixed/);
+    // In the DOM it follows the chat header and precedes the feed.
+    expect(html.indexOf('id="voice-channel-panel"')).toBeLessThan(html.indexOf('id="message-feed"'));
+  });
+  it('the call widget controls wrap so the hang-up button stays in view', () => {
+    const rule = css.match(/\.vw-controls\s*\{[^}]*\}/)?.[0] || '';
+    expect(rule).toMatch(/flex-wrap\s*:\s*wrap/);
+    expect(css).toMatch(/\.vw-controls\s*>\s*#vw-quality\s*\{[^}]*flex:\s*1 0 100%/);
   });
 });

@@ -8,6 +8,8 @@
 
 // ~160 common emoji, Discord/Slack-compatible names. Names match
 // /^[a-z0-9_+-]+$/ (the autocomplete trigger charset).
+import { openListbox, closeListbox, setActiveOption, makeOption, keepInputFocus } from './autocomplete.js';
+
 export const EMOJI_MAP = {
     grinning: '😀', smiley: '😃', smile: '😄', grin: '😁', laughing: '😆',
     sweat_smile: '😅', joy: '😂', rofl: '🤣', slight_smile: '🙂', upside_down: '🙃',
@@ -86,8 +88,10 @@ export function matchShortcodes(query, limit = 8, custom = null) {
     if (!q) return [];
     const rank = (names) => {
         const sorted = [...names].sort();
+        // Name starts first, then a later word start ("sweat_smile" for
+        // "smile"); a letter run inside a word ("art" in "heart") is no match.
         return sorted.filter(n => n.startsWith(q))
-            .concat(sorted.filter(n => !n.startsWith(q) && n.includes(q)));
+            .concat(sorted.filter(n => !n.startsWith(q) && n.split('_').some(w => w.startsWith(q))));
     };
     const customNames = rank(Object.keys(custom || {}));
     const builtin = rank(Object.keys(EMOJI_MAP)).filter(n => !custom || !custom[n]);
@@ -126,8 +130,7 @@ export function createEmoji({ getCustomEmoji } = {}) {
     function _dd() { return document.getElementById('emoji-dropdown'); }
 
     function closeEmojiDropdown() {
-        const dd = _dd();
-        if (dd) dd.style.display = 'none';
+        closeListbox(inputEl, _dd());
         state.colonStart = -1;
     }
 
@@ -137,9 +140,7 @@ export function createEmoji({ getCustomEmoji } = {}) {
         state.focusIdx = 0;
         dd.innerHTML = '';
         matches.forEach((m, i) => {
-            const row = document.createElement('div');
-            row.className = 'mention-option' + (i === 0 ? ' focused' : '');
-            row.dataset.idx = String(i);
+            const row = makeOption('emoji', i);
             // What selection inserts: unicode for built-ins, literal :name:
             // for room custom emoji (rendered as an image after send).
             row.dataset.emoji = m.custom ? ':' + m.name + ':' : m.emoji;
@@ -148,20 +149,23 @@ export function createEmoji({ getCustomEmoji } = {}) {
                 img.className = 'custom-emoji';
                 img.src = `data:${m.mime};base64,${m.data_b64}`;
                 img.alt = '';
-                img.style.marginRight = '8px';
                 row.appendChild(img);
             } else {
                 const glyph = document.createElement('span');
+                glyph.className = 'ac-glyph';
+                glyph.setAttribute?.('aria-hidden', 'true');
                 glyph.textContent = m.emoji;
-                glyph.style.marginRight = '8px';
                 row.appendChild(glyph);
             }
             const label = document.createElement('span');
+            label.className = 'ac-label';
             label.textContent = ':' + m.name + ':';
             row.appendChild(label);
             dd.appendChild(row);
         });
-        dd.style.display = matches.length ? 'block' : 'none';
+        if (!matches.length) { closeEmojiDropdown(); return; }
+        openListbox(inputEl, dd);
+        setActiveOption(inputEl, dd.querySelectorAll('.mention-option'), 0);
     }
 
     function _selectEmoji(emoji) {
@@ -260,20 +264,23 @@ export function createEmoji({ getCustomEmoji } = {}) {
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
                 state.focusIdx = Math.min(state.focusIdx + 1, items.length - 1);
-                items.forEach((el2, i) => el2.classList.toggle('focused', i === state.focusIdx));
+                setActiveOption(inputEl, items, state.focusIdx);
             } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
                 state.focusIdx = Math.max(state.focusIdx - 1, 0);
-                items.forEach((el2, i) => el2.classList.toggle('focused', i === state.focusIdx));
+                setActiveOption(inputEl, items, state.focusIdx);
             } else if (e.key === 'Enter' || e.key === 'Tab') {
                 const emoji = items[state.focusIdx]?.dataset.emoji;
-                if (emoji) { e.preventDefault(); _selectEmoji(emoji); }
+                if (emoji) { e.preventDefault(); e.stopImmediatePropagation?.(); _selectEmoji(emoji); }
             } else if (e.key === 'Escape') {
                 e.preventDefault();
+                e.stopPropagation?.();
                 closeEmojiDropdown();
             }
         });
 
+        el.addEventListener('blur', () => closeEmojiDropdown());
+        keepInputFocus(_dd());
         // Dropdown click-select (delegation, like the mention dropdown's).
         _dd()?.addEventListener('click', (e) => {
             const row = e.target.closest('.mention-option');

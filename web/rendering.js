@@ -20,7 +20,7 @@
 //   renderWindow, scrollBatch,
 // })
 
-import { didSuffix, escHtml, webidColor, avatarInitial, renderMarkdown, expireLabel as _expireLabel, b64attr, formatFileSize, gatewayUrl } from './util.js';
+import { didIdTag, escHtml, webidColor, avatarInitial, renderMarkdown, expireLabel as _expireLabel, b64attr, formatFileSize, gatewayUrl } from './util.js';
 import { parsePoll } from './polls.js';
 import { applyRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { t, tn, getLocale } from './i18n.js';
@@ -568,7 +568,8 @@ export function createRendering({
         }
 
         const name = msg.from_display_name || (msg.from_webid || "").slice(0, 12) || (msg.from_pub_hex || "").slice(0, 12);
-        const suffix = didSuffix(msg.from_webid || msg.from_pub_hex || "");
+        // Same ten-character tag as the member, contact and DM rows.
+        const suffix = didIdTag(msg.from_webid || msg.from_pub_hex || "");
         // A11y: each message is an article with an accessible name of
         // "«sender», «time»" so a screen reader announces who/when before the
         // body content that follows (grouped messages hide the visual header but
@@ -668,7 +669,7 @@ export function createRendering({
 
         // Header: name + timestamp (first in group only)
         if (!isGrouped) {
-            const suffixHtml = suffix ? `<span class="id-suffix">·${suffix}</span>` : "";
+            const suffixHtml = suffix ? `<span class="id-suffix">·${escHtml(suffix)}</span>` : "";
             const botBadge = msg.is_bot ? `<span class="bot-badge">BOT</span>` : "";
             const importedBadge = msg.imported ? `<span class="msg-badge-imported">Imported</span>` : "";
             // R11.2.3: unverified shield for DID contacts not yet verified

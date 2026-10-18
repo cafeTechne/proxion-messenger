@@ -448,8 +448,13 @@ export function createView({
         return true;
     }
 
+    // The listed contact with this DID, or undefined (call banner naming).
+    function contactByDid(did) {
+        return did ? _contactsByDid.get(did) : undefined;
+    }
+
     return {
-        renderContacts, openContactThread, openContactByDid, openLocalDmThread,
+        renderContacts, openContactThread, openContactByDid, openLocalDmThread, contactByDid,
         addRoomToSidebar, renameRoomInSidebar, populateSidebar, _navigateToThread,
     };
 }

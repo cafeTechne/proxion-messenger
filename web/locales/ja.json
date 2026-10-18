@@ -299,7 +299,6 @@
   "label.inviteLinkClickCopy": "招待リンク（クリックしてコピー）",
   "label.displayName": "表示名",
   "label.customStatusMax100": "カスタムステータス（最大 100 文字）",
-  "label.didShareThisPeers": "あなたの DID（ピアと共有してください）",
   "label.gatewayWebsocketUrl": "ゲートウェイの WebSocket URL",
   "btn.sendDm": "DM を送信",
   "btn.answer": "応答",

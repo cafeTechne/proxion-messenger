@@ -306,7 +306,6 @@
   "label.inviteLinkClickCopy": "رابط الدعوة (انقر للنسخ)",
   "label.displayName": "الاسم المعروض",
   "label.customStatusMax100": "حالة مخصصة (100 حرف كحد أقصى)",
-  "label.didShareThisPeers": "معرّفك DID (شاركه مع النظراء)",
   "label.gatewayWebsocketUrl": "عنوان WebSocket للبوابة",
   "btn.sendDm": "إرسال رسالة مباشرة",
   "btn.answer": "رد",

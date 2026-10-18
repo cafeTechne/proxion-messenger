@@ -299,7 +299,6 @@
   "label.inviteLinkClickCopy": "Einladungslink (zum Kopieren klicken)",
   "label.displayName": "Anzeigename",
   "label.customStatusMax100": "Eigener Status (max. 100 Zeichen)",
-  "label.didShareThisPeers": "Deine DID (teile sie mit Peers)",
   "label.gatewayWebsocketUrl": "Gateway-WebSocket-URL",
   "btn.sendDm": "DM senden",
   "btn.answer": "Annehmen",

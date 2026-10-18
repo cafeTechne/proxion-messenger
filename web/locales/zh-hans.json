@@ -299,7 +299,6 @@
   "label.inviteLinkClickCopy": "邀请链接（点击复制）",
   "label.displayName": "显示名称",
   "label.customStatusMax100": "自定义状态（最多 100 个字符）",
-  "label.didShareThisPeers": "你的 DID（与对等方分享）",
   "label.gatewayWebsocketUrl": "网关 WebSocket URL",
   "btn.sendDm": "发送私信",
   "btn.answer": "接听",

@@ -37,6 +37,7 @@ const SHELL = [
   "edit.js",
   "mute.js",
   "mentions.js",
+  "autocomplete.js",
   "rooms.js",
   "address.js",
   "typing.js",

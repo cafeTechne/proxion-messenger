@@ -299,7 +299,6 @@
   "label.inviteLinkClickCopy": "Liên kết mời (nhấp để sao chép)",
   "label.displayName": "Tên hiển thị",
   "label.customStatusMax100": "Trạng thái tùy chỉnh (tối đa 100 ký tự)",
-  "label.didShareThisPeers": "DID của bạn (chia sẻ với ngang hàng)",
   "label.gatewayWebsocketUrl": "URL WebSocket của cổng",
   "btn.sendDm": "Gửi tin nhắn riêng",
   "btn.answer": "Trả lời",

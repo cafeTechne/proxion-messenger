@@ -303,7 +303,6 @@
   "label.inviteLinkClickCopy": "Link z zaproszeniem (kliknij, aby skopiować)",
   "label.displayName": "Nazwa wyświetlana",
   "label.customStatusMax100": "Własny status (maks. 100 znaków)",
-  "label.didShareThisPeers": "Twój DID (udostępnij peerom)",
   "label.gatewayWebsocketUrl": "URL WebSocket bramy",
   "btn.sendDm": "Wyślij wiadomość prywatną",
   "btn.answer": "Odbierz",

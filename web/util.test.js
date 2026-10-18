@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
-  didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, markdownToPlain, didIdTag, dmFallbackName,
+  didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, markdownToPlain, didIdTag, dmFallbackName, nameWithIdTag,
   expireLabel, timeAgo, u8ToB64, b64ToU8, b64attr, scrollBehavior,
   composerEnterAction, isCoarsePointer, supportsFieldSizing, canShareLinks, shareLink, formatFileSize,
 } from './util.js';
@@ -363,4 +363,15 @@ describe('formatFileSize', () => {
         expect(formatFileSize(2097152)).toMatch(/^2\s?MB$/);
         expect(formatFileSize(undefined)).toBe('');
     });
+});
+
+describe('nameWithIdTag', () => {
+  const did = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK';
+  it('is the name plus the same tag the rows show', () => {
+    expect(nameWithIdTag('Bob', did)).toBe('Bob ·' + didIdTag(did));
+  });
+  it('never falls back to a raw did:key prefix', () => {
+    expect(nameWithIdTag('', did)).toBe('did:key:…nnEGta2doK');
+    expect(nameWithIdTag('', did)).not.toContain('z6Mk');
+  });
 });

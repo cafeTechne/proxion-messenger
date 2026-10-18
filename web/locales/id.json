@@ -299,7 +299,6 @@
   "label.inviteLinkClickCopy": "Tautan undangan (klik untuk menyalin)",
   "label.displayName": "Nama tampilan",
   "label.customStatusMax100": "Status khusus (maks. 100 karakter)",
-  "label.didShareThisPeers": "DID Anda (bagikan dengan rekan)",
   "label.gatewayWebsocketUrl": "URL WebSocket gateway",
   "btn.sendDm": "Kirim DM",
   "btn.answer": "Jawab",

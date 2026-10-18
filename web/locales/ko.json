@@ -299,7 +299,6 @@
   "label.inviteLinkClickCopy": "초대 링크(클릭하여 복사)",
   "label.displayName": "표시 이름",
   "label.customStatusMax100": "사용자 지정 상태(최대 100자)",
-  "label.didShareThisPeers": "내 DID(피어와 공유)",
   "label.gatewayWebsocketUrl": "게이트웨이 WebSocket URL",
   "btn.sendDm": "DM 보내기",
   "btn.answer": "받기",

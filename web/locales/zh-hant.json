@@ -299,7 +299,6 @@
   "label.inviteLinkClickCopy": "邀請連結（點擊複製）",
   "label.displayName": "顯示名稱",
   "label.customStatusMax100": "自訂狀態（最多 100 個字元）",
-  "label.didShareThisPeers": "你的 DID（與對等方分享）",
   "label.gatewayWebsocketUrl": "閘道 WebSocket URL",
   "btn.sendDm": "傳送私訊",
   "btn.answer": "接聽",

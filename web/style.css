@@ -761,8 +761,8 @@ main { background: var(--surface-0); }
     border-color: var(--color-danger);
 }
 /* Voice speaking indicator (Phase J): green ring on the active speaker's pill. */
-#voice-channel-participants span { transition: box-shadow var(--transition-fast); }
-#voice-channel-participants span.vc-speaking { box-shadow: 0 0 0 2px var(--color-success-soft); }
+#voice-channel-participants .vc-tile__avatar { transition: box-shadow var(--transition-fast); }
+#voice-channel-participants .vc-speaking .vc-tile__avatar { box-shadow: 0 0 0 2px var(--surface-1), 0 0 0 4px var(--color-success-soft); }
 /* Tall-modal safety (esp. mobile): cap a dialog's inner container to the viewport
    and let it scroll, so a tall modal (e.g. expanded settings) never pushes its top/
    bottom — including the action buttons — off-screen with no way to reach them. */
@@ -1380,10 +1380,20 @@ button {
 @layer components {
 .vw-controls {
     display: flex;
+    flex-wrap: wrap;
     gap: var(--space-1);
+}
+/* The sidebar is 260px: mute, camera, screen, fullscreen and hang-up share the
+   first row and the quality picker takes its own row underneath, so the
+   hang-up button can never be pushed out of view. */
+.vw-controls > #vw-quality {
+    order: 1;
+    flex: 1 0 100%;
+    min-width: 0;
 }
 .vw-controls button {
     flex: 1;
+    min-width: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3268,6 +3278,88 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 /* A file whose bytes are still loading or are not on this device. */
 .attachment-loading .attachment-note,
 .attachment-unavailable .attachment-note { display: block; font-size: var(--text-sm); font-style: italic; color: var(--slate-600); }
+/* Composer suggestion popups (@mention, :shortcode:). autocomplete.js sets
+   left/top/bottom next to the message input; everything else lives here. */
+.ac-popup {
+    position: fixed; z-index: 1100;
+    list-style: none; margin: 0; padding: var(--space-1);
+    min-width: 200px; max-width: min(360px, calc(100vw - var(--space-4)));
+    max-height: 240px; overflow-y: auto; overscroll-behavior: contain;
+    background: var(--surface-1); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+}
+.ac-option {
+    display: flex; align-items: center; gap: var(--space-2);
+    padding: var(--space-1) var(--space-2); border-radius: var(--radius-md);
+    font-size: var(--text-md); line-height: 1.4; cursor: pointer;
+    white-space: nowrap;
+}
+.ac-option:hover { background: var(--tint-hover); }
+.ac-option.focused { background: var(--surface-3); }
+.ac-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ac-glyph { font-size: var(--text-lg); line-height: 1; flex-shrink: 0; }
+.ac-option .custom-emoji { flex-shrink: 0; }
+.mo-avatar {
+    width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: var(--text-xs); font-weight: var(--weight-semibold);
+    color: var(--avatar-initial);
+}
+.mo-presence {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    margin-inline-start: auto; background: var(--color-success);
+}
+@media (forced-colors: active) {
+    .ac-option.focused { forced-color-adjust: none; background: Highlight; color: HighlightText; }
+}
+/* Voice channel panel: an in-flow strip under the chat header (it used to be
+   position:fixed across the bottom of the window, over the composer). */
+#voice-channel-panel {
+    flex-direction: column; gap: var(--space-2); flex-shrink: 0;
+    padding: var(--space-2) var(--space-4);
+    background: var(--surface-1); border-bottom: 1px solid var(--border);
+    max-height: 50vh; overflow-y: auto;
+}
+.vc-panel__head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
+.vc-panel__title {
+    font-size: var(--text-sm); font-weight: var(--weight-semibold);
+    color: var(--color-success-soft); flex-shrink: 0;
+}
+.vc-panel__controls {
+    display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2);
+    margin-inline-start: auto;
+}
+.vc-quality {
+    background: var(--slate-800); color: var(--slate-100);
+    border: 1px solid var(--slate-600); border-radius: var(--radius-sm);
+    font-size: var(--text-xs); padding: var(--space-1) var(--space-2);
+}
+.vc-tiles { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.vc-tiles:empty { display: none; }
+.vc-tile {
+    display: flex; align-items: center; gap: var(--space-2);
+    min-width: 0; max-width: 220px;
+    padding: var(--space-2) var(--space-3);
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); color: var(--text-primary);
+}
+.vc-tile__avatar {
+    width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: var(--text-sm); font-weight: var(--weight-semibold);
+    color: var(--avatar-initial);
+}
+.vc-tile__body { display: flex; flex-direction: column; min-width: 0; }
+.vc-tile__name {
+    font-size: var(--text-sm); font-weight: var(--weight-semibold);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vc-tile__state {
+    display: inline-flex; align-items: center; gap: var(--space-1);
+    font-size: var(--text-xs); color: var(--text-secondary);
+}
+.vc-tile__state--muted { color: var(--color-danger-soft); }
 /* Voice channel participant pills and video tiles. */
 .vc-pill {
     display: flex; align-items: center; gap: var(--space-1);

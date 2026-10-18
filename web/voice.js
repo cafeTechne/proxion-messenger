@@ -2,7 +2,7 @@
 // main.js (R40). createVoice(deps) owns voice state in `state` and returns the
 // handlers main.js wires into the WS dispatch and call/mute/leave buttons.
 import { t } from './i18n.js';
-import { escHtml, gatewayUrl } from './util.js';
+import { escHtml, gatewayUrl, didIdTag, dmFallbackName, nameWithIdTag, webidColor, avatarInitial } from './util.js';
 import { extractFingerprint, signFingerprint, classifyPeerSdp } from './callsec.js';
 import { senderCap, canEnableVideo } from './callquality.js';
 import { mediaConstraints } from './devices.js';
@@ -41,7 +41,7 @@ export function audioLevel(data) {
 
 export function createVoice(deps) {
     const { showToast, renderMessage, showOsNotification, sendCmd, playNotificationSound, normalizeRelayThreadId, stopScreenShare, getSocket, getActiveView, getSelfWebId, getTurnUrl, getTurnSecret, getLocalDmPeers, getCurrentRoomMembers, getIsSharing, getIdentityPrivKey, getClientDid, getExpectedPeerDid, getDeviceCert,
-        getPeerBindsCalls, onPeerVerified, getUserRelay, getUseDefaultRelay } = deps;
+        getPeerBindsCalls, onPeerVerified, getUserRelay, getUseDefaultRelay, getContactName } = deps;
     const state = {
             currentCall: null,
             localStream: null,
@@ -217,6 +217,7 @@ export function createVoice(deps) {
             updateVoiceChannels(roomId);
             _showChannelPanel();
             _renderChannelPanel();
+            if (state.localStream?.getAudioTracks?.().length) _speaking.attach(SELF, state.localStream);
         }
 
         function leaveVoiceChannel() {
@@ -259,22 +260,52 @@ export function createVoice(deps) {
             showToast(t('voice.left'));
         }
 
-        function _callerDisplayName(webid) {
+        // The name we know `webid` by: a DM peer, a contact, or a member of the
+        // open room. '' when it is nobody we know.
+        function _knownName(webid) {
+            if (!webid) return '';
             const dmPeer = Object.values(getLocalDmPeers()).find(p => p.peer_webid === webid);
             if (dmPeer && dmPeer.display_name) return dmPeer.display_name;
+            const contact = getContactName ? getContactName(webid) : '';
+            if (contact) return contact;
             const member = getCurrentRoomMembers().find(m => m.webid === webid);
             if (member && member.display_name) return member.display_name;
-            return webid.slice(0, 28);
+            return '';
+        }
+
+        // Which of the identities on a call we know, preferring the first. Across
+        // gateways an invite carries the caller's own key (caller_webid) and the
+        // relaying gateway did (caller_gateway, authenticated by the relay); a
+        // contact on another gateway is known by the latter.
+        function _knownIdentity(...ids) {
+            for (const id of ids) if (id && _knownName(id)) return id;
+            return '';
+        }
+
+        // Name only (toasts, tiles). Unknown: the did's distinguishing tail.
+        function _callerDisplayName(webid, alt) {
+            const known = _knownIdentity(webid, alt);
+            return known ? _knownName(known) : dmFallbackName(webid || alt || '');
+        }
+
+        // "Name ·idtag" (call banner, call widget): the tag of the identity we
+        // matched, the same tag that contact's row shows.
+        function _callerLabel(webid, alt) {
+            const known = _knownIdentity(webid, alt);
+            return known ? nameWithIdTag(_knownName(known), known) : dmFallbackName(webid || alt || '');
         }
 
         // In gateway-free web mode the call inbox is public-Append, so caller_webid
         // and display_name in a voice_invite are attacker-settable. Treat a caller as
         // known only when they are an existing DM peer or a member of the current
         // room; anything else rings as unverified so a spoofed name is not trusted.
-        function _isKnownCaller(webid) {
-            if (!webid) return false;
-            if (Object.values(getLocalDmPeers()).some(p => p.peer_webid === webid)) return true;
-            if (getCurrentRoomMembers().some(m => m.webid === webid)) return true;
+        function _isKnownCaller(webid, gatewayDid) {
+            for (const id of [webid, gatewayDid]) {
+                if (!id) continue;
+                if (Object.values(getLocalDmPeers()).some(p => p.peer_webid === id)) return true;
+                if (getContactName && getContactName(id)) return true;
+                if (getCurrentRoomMembers().some(m => m.webid === id)) return true;
+            }
             return false;
         }
 
@@ -318,7 +349,7 @@ export function createVoice(deps) {
                     && state._callPeerWebid && _inviteRoute(invite) === state._callPeerWebid;
                 if (!glare) {
                     _rejectInvite(invite, 'busy');
-                    showToast(t('voice.missedFrom', { peer: _callerDisplayName(invite.caller_webid || '') }));
+                    showToast(t('voice.missedFrom', { peer: _callerDisplayName(invite.caller_webid || '', invite._fromGateway ? invite.caller_gateway : undefined) }));
                     return;
                 }
                 // Both sides called at once and both see this. The call with the lower
@@ -334,10 +365,13 @@ export function createVoice(deps) {
             setCallState(CallState.RINGING);
             const banner = document.getElementById("voice-banner");
             const _cw = invite.caller_webid;
-            const _known = _isKnownCaller(_cw);
+            // caller_gateway is set only by the authenticated relay path.
+            const _gw = invite._fromGateway ? invite.caller_gateway : undefined;
+            const _known = _isKnownCaller(_cw, _gw);
+            const _label = _callerLabel(_cw, _gw);
             document.getElementById("voice-msg").innerText = _known
-                ? t('voice.incomingFrom', { name: _callerDisplayName(_cw) })
-                : t('voice.incomingFromUnverified', { name: _callerDisplayName(_cw) });
+                ? t('voice.incomingFrom', { name: _label })
+                : t('voice.incomingFromUnverified', { name: _label });
             banner.style.display = "flex";
             // Move focus to Answer so a keyboard / screen-reader user lands on the
             // primary action; the banner's role="alert" announces the caller.
@@ -355,7 +389,7 @@ export function createVoice(deps) {
                     setCallState(CallState.IDLE);
                     stopRingTone();
                     // R82 W3: an unanswered ring leaves a missed-call trace in-app.
-                    showToast(t('voice.missedFrom', { peer: _callerDisplayName(_ringCaller) }));
+                    showToast(t('voice.missedFrom', { peer: _callerDisplayName(_ringCaller, _gw) }));
                 }
             }, 30000);
         }
@@ -917,13 +951,15 @@ export function createVoice(deps) {
         // Speaking detection (Phase J): one shared AudioContext + an AnalyserNode per
         // remote stream; a single throttled rAF loop samples levels and toggles the
         // .vc-speaking ring on each participant pill directly (no full re-render).
+        const SELF = '__self__';   // _speaking key for our own microphone
         const _speaking = (() => {
             let ctx = null, raf = null, lastTick = 0;
             const nodes = {};  // webid -> { source, analyser, data }
             const THRESHOLD = 0.045;
             function setSpeaking(webid, on) {
-                const pill = document.querySelector?.(
-                    '#voice-channel-participants [data-vc-webid="' + webid + '"]');
+                const pill = document.querySelector?.(webid === SELF
+                    ? '#voice-channel-participants [data-vc-self]'
+                    : '#voice-channel-participants [data-vc-webid="' + webid + '"]');
                 if (pill) pill.classList.toggle('vc-speaking', on);
                 // R81 Q3: also ring the participant's video tile (group) so the active
                 // speaker is visible, not just their pill.
@@ -998,27 +1034,44 @@ export function createVoice(deps) {
             }
         }
 
+        // One tile per person in the channel: avatar, name, and state. Your own
+        // tile comes first and shows your mute state; it has no data-vc-webid
+        // (that attribute marks remote peers, which callers count). The avatar
+        // rings while someone speaks (.vc-speaking, set by _speaking).
         function _renderChannelPanel() {
             const container = document.getElementById("voice-channel-participants");
             if (!container) return;
             const ok = "var(--color-success-soft)", warn = "var(--color-warning-soft)", bad = "var(--color-danger-soft)";
             const stateColor = { connected: ok, connecting: warn, checking: warn, completed: ok,
                                   disconnected: bad, failed: bad, closed: "var(--slate-600)" };
-            // The status dot is colour-only; pair it with a word (title tooltip + an
-            // sr-only span) so the connection state is not lost to colour-blind or
-            // screen-reader users.
+            // The status dot is colour-only; pair it with a word so the connection
+            // state is not lost to colour-blind or screen-reader users.
             const stateWord = { connected: "connected", completed: "connected",
                                 connecting: "connecting", checking: "connecting",
                                 disconnected: "disconnected", failed: "connection failed",
                                 closed: "left" };
-            container.innerHTML = Object.entries(state._channelParticipants).map(([webid, info]) => {
+            const tile = (attrs, name, colorSeed, title, stateHtml, cls = "") =>
+                `<div class="vc-tile${cls}" role="listitem" ${attrs} title="${escHtml(title)}">
+                    <span class="vc-tile__avatar" style="background:${webidColor(colorSeed)}" aria-hidden="true">${escHtml(avatarInitial(name))}</span>
+                    <span class="vc-tile__body"><span class="vc-tile__name" dir="auto">${escHtml(name)}</span>${stateHtml}</span>
+                </div>`;
+            let html = "";
+            if (state._inVoiceChannel) {
+                const me = getSelfWebId ? (getSelfWebId() || "") : "";
+                const you = t('voice.you');
+                const muted = !!state.isMuted;
+                html += tile('data-vc-self="1"', you, me, muted ? `${you}: ${t('ui.muted')}` : you,
+                    muted ? `<span class="vc-tile__state vc-tile__state--muted">${escHtml(t('ui.muted'))}</span>` : "",
+                    muted ? " vc-tile--muted" : "");
+            }
+            html += Object.entries(state._channelParticipants).map(([webid, info]) => {
                 const color = stateColor[info.state] || "var(--text-secondary)";
                 const word = stateWord[info.state] || "unknown";
-                return `<span data-vc-webid="${escHtml(webid)}" title="${escHtml(info.name)}: ${escHtml(word)}" class="vc-pill">
-                    <span class="vc-pill__dot" style="background:${color}" aria-hidden="true"></span>
-                    ${escHtml(info.name)}<span class="sr-only"> (${escHtml(word)})</span>
-                </span>`;
+                return tile(`data-vc-webid="${escHtml(webid)}"`, info.name, webid,
+                    `${nameWithIdTag(info.name, webid)}: ${word}`,
+                    `<span class="vc-tile__state"><span class="vc-pill__dot" style="background:${color}" aria-hidden="true"></span>${escHtml(word)}</span>`);
             }).join("");
+            container.innerHTML = html;
         }
 
         function _showChannelPanel() {
@@ -1094,7 +1147,11 @@ export function createVoice(deps) {
                 if (event.track) event.track.onmute = event.track.onunmute = event.track.onended = _syncRemoteVideoVisibility;
                 setCallState(CallState.CONNECTED);
                 _updateVerifyBadge();
-                const peerName = getActiveView() ? (getActiveView().name || getActiveView().id || "") : "";
+                // Answered call: name the caller (the open view may be a room).
+                const _inv = state.currentCall;
+                const peerName = _inv && (_inv.caller_webid || _inv.caller_gateway)
+                    ? _callerLabel(_inv.caller_webid, _inv._fromGateway ? _inv.caller_gateway : undefined)
+                    : (getActiveView() ? (getActiveView().name || getActiveView().id || "") : "");
                 const pn = document.getElementById("vw-peer-name");
                 if (pn) pn.textContent = peerName || "";
             };
@@ -1314,6 +1371,8 @@ export function createVoice(deps) {
             }
             const was = state._callState;
             const peer = ringingSid && state.currentCall ? state.currentCall.caller_webid : '';
+            const peerGw = ringingSid && state.currentCall && state.currentCall._fromGateway
+                ? state.currentCall.caller_gateway : undefined;
             if (state._callState !== CallState.IDLE) setCallState(CallState.ENDING);
             hangupCleanup();
             // Say why the call ended, so a caller is not left guessing.
@@ -1324,7 +1383,7 @@ export function createVoice(deps) {
             } else if (was === CallState.CONNECTED) {
                 showToast(t('voice.ended'));
             } else if (was === CallState.RINGING) {
-                showToast(t('voice.missedFrom', { peer: _callerDisplayName(peer || '') }));
+                showToast(t('voice.missedFrom', { peer: _callerDisplayName(peer || '', peerGw) }));
             }
         }
 
@@ -1551,6 +1610,7 @@ export function createVoice(deps) {
         playRingTone,
         stopRingTone,
         _callerDisplayName,
+        _callerLabel,
         _setRemoteAndDrainCandidates,
         updateVoiceChannels,
         setVoiceChannelState,

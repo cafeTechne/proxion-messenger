@@ -299,7 +299,6 @@
   "label.inviteLinkClickCopy": "Davet bağlantısı (kopyalamak için tıklayın)",
   "label.displayName": "Görünen ad",
   "label.customStatusMax100": "Özel durum (en fazla 100 karakter)",
-  "label.didShareThisPeers": "DID'iniz (eşlerinizle paylaşın)",
   "label.gatewayWebsocketUrl": "Ağ geçidi WebSocket URL'si",
   "btn.sendDm": "DM gönder",
   "btn.answer": "Yanıtla",

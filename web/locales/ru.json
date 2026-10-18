@@ -303,7 +303,6 @@
   "label.inviteLinkClickCopy": "Ссылка-приглашение (нажмите, чтобы скопировать)",
   "label.displayName": "Отображаемое имя",
   "label.customStatusMax100": "Свой статус (макс. 100 символов)",
-  "label.didShareThisPeers": "Ваш DID (поделитесь с участниками)",
   "label.gatewayWebsocketUrl": "URL WebSocket шлюза",
   "btn.sendDm": "Отправить ЛС",
   "btn.answer": "Ответить",

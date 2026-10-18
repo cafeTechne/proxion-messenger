@@ -871,3 +871,26 @@ describe('scroll to top with the whole buffer rendered', () => {
     expect(sent.filter(m => m.cmd === 'get_local_history')).toHaveLength(0);
   });
 });
+
+describe('message header id tag matches the rows (F4)', () => {
+  it('uses the same ten-character tag as member/contact/DM rows, escaped', () => {
+    els['message-feed'] = mkEl({ scrollHeight: 500, clientHeight: 500 });
+    const created = [];
+    const orig = global.document.createElement;
+    global.document.createElement = () => { const el = mkEl(); created.push(el); return el; };
+    try {
+      const did = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK';
+      make().renderMessage({ message_id: 'tag1', thread_id: 'room-1', from_webid: did,
+        from_display_name: 'Bob', content: 'hi', timestamp: new Date().toISOString() });
+      const html = created.map(e => e.innerHTML).join('\n');
+      expect(html).toContain('<span class="id-suffix">·nnEGta2doK</span>');
+      created.length = 0;
+      make().renderMessage({ message_id: 'tag2', thread_id: 'room-1', from_webid: 'x<img src=x>',
+        from_display_name: 'Eve', content: 'hi', timestamp: new Date().toISOString() });
+      const html2 = created.map(e => e.innerHTML).join('\n');
+      expect(html2).not.toContain('<img src=x>');
+    } finally {
+      global.document.createElement = orig;
+    }
+  });
+});

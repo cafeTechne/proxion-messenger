@@ -47,6 +47,16 @@ export function dmFallbackName(id) {
     return id.length > 24 ? id.slice(0, 23) + "…" : id;
 }
 
+// Plain-text "Name ·idtag" for surfaces that show who someone is outside a
+// row (call banner, call widget, voice tiles): the same ten-character tag the
+// member, contact and DM rows use, so one person reads the same everywhere.
+// Without a name, falls back to dmFallbackName (never a raw did:key prefix).
+export function nameWithIdTag(name, id) {
+    const tag = didIdTag(id || "");
+    if (!name) return dmFallbackName(id || "");
+    return tag ? `${name} ·${tag}` : name;
+}
+
 export function didSuffix(id) {
     if (!id || id.length < 5) return "";
     return id.slice(-5);

@@ -13,6 +13,15 @@ describe('settings name readout', () => {
     const body = fn.slice(0, fn.indexOf('function _saveStatusMessage('));
     expect(body).toContain('_renderSettingsDid();');
   });
+  // F4: it showed a 5-character tag (rows show 10) and the full DID right
+  // above the Proxion address, which carries a second DID.
+  it('shows the same id tag as the rows and no second DID line', () => {
+    const fn = src.slice(src.indexOf('function _renderSettingsDid('));
+    const body = fn.slice(0, fn.indexOf('\n        }\n'));
+    expect(body).toContain('didIdTag(_myDid)');
+    expect(body).not.toContain('didSuffix(');
+    expect(body).not.toContain('${escHtml(_myDid)}');
+  });
 });
 
 describe('feed empty states in main.js', () => {

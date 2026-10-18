@@ -8,7 +8,31 @@
 // and read live via getCurrentRoomMembers(); webidColor is imported.
 // closeMentionDropdown and _selectMention are also returned for the external
 // callers in main.js (thread switches and the dropdown click handler).
+// Popup placement and the listbox/aria-activedescendant wiring are shared with
+// the :shortcode: popup in autocomplete.js.
 import { webidColor, avatarInitial } from './util.js';
+import { openListbox, closeListbox, setActiveOption, makeOption, keepInputFocus } from './autocomplete.js';
+
+// Members whose display name starts with the query, then members with a later
+// word starting with it ("Anna Bell" for "b"), each alphabetical. A letter in
+// the middle of a name, or anywhere in a DID, is not a match. A member with no
+// display name matches on the start of their key ("z6Mk..." after did:key:).
+export function matchMembers(members, query, limit = 8) {
+    const q = (query || '').toLowerCase();
+    const prefix = [], word = [];
+    for (const m of members || []) {
+        const name = (m.display_name || '').toLowerCase();
+        if (!name) {
+            const key = (m.webid || '').toLowerCase().replace(/^did:key:/, '');
+            if (key.startsWith(q)) word.push(m);
+            continue;
+        }
+        if (name.startsWith(q)) prefix.push(m);
+        else if (name.split(/[\s._-]+/).some(w => w.startsWith(q))) word.push(m);
+    }
+    const byName = (a, b) => (a.display_name || a.webid || '').localeCompare(b.display_name || b.webid || '');
+    return prefix.sort(byName).concat(word.sort(byName)).slice(0, limit);
+}
 
 export function createMentions({ getCurrentRoomMembers }) {
     const state = { mentionStart: -1, mentionFocusIdx: 0 };
@@ -21,38 +45,31 @@ export function createMentions({ getCurrentRoomMembers }) {
         dd.innerHTML = "";
         matches.forEach((m, i) => {
             const name = m.display_name || (m.webid || "").slice(0, 12);
-            const color = webidColor(m.webid);
-            const initial = avatarInitial(name);
-            const row = document.createElement("div");
-            row.className = "mention-option" + (i === 0 ? " focused" : "");
-            row.dataset.idx = String(i);
+            const row = makeOption("mention", i);
             row.dataset.name = name;
 
-            const avatar = document.createElement("div");
+            const avatar = document.createElement("span");
             avatar.className = "mo-avatar";
-            avatar.style.background = color;
-            avatar.style.color = "var(--avatar-initial)";
-            avatar.textContent = initial;
+            avatar.setAttribute?.("aria-hidden", "true");
+            avatar.style.background = webidColor(m.webid);
+            avatar.textContent = avatarInitial(name);
             row.appendChild(avatar);
 
             const label = document.createElement("span");
+            label.className = "ac-label";
             label.textContent = name;
             row.appendChild(label);
 
             if (m.status === "online") {
                 const dot = document.createElement("span");
-                dot.style.width = "6px";
-                dot.style.height = "6px";
-                dot.style.borderRadius = "50%";
-                dot.style.background = "var(--color-success)";
-                dot.style.display = "inline-block";
-                dot.style.marginLeft = "auto";
-                dot.style.flexShrink = "0";
+                dot.className = "mo-presence";
+                dot.setAttribute?.("aria-hidden", "true");
                 row.appendChild(dot);
             }
             dd.appendChild(row);
         });
-        dd.style.display = "block";
+        openListbox(inputEl, dd);
+        setActiveOption(inputEl, dd.querySelectorAll(".mention-option"), 0);
     }
 
     function _selectMention(name) {
@@ -68,13 +85,13 @@ export function createMentions({ getCurrentRoomMembers }) {
     }
 
     function closeMentionDropdown() {
-        const dd = document.getElementById("mention-dropdown");
-        if (dd) dd.style.display = "none";
+        closeListbox(inputEl, document.getElementById("mention-dropdown"));
         state.mentionStart = -1;
     }
 
     function attach(el) {
         inputEl = el;
+        keepInputFocus(document.getElementById("mention-dropdown"));
 
         el.addEventListener("input", () => {
             const val = inputEl.value;
@@ -86,15 +103,13 @@ export function createMentions({ getCurrentRoomMembers }) {
             }
             const members = getCurrentRoomMembers();
             if (atPos === -1 || !members.length) { closeMentionDropdown(); return; }
-            const query = val.slice(atPos + 1, caret).toLowerCase();
-            const matches = members.filter(m =>
-                (m.display_name || "").toLowerCase().includes(query) ||
-                (m.webid || "").toLowerCase().includes(query)
-            ).slice(0, 8);
+            const matches = matchMembers(members, val.slice(atPos + 1, caret));
             if (!matches.length) { closeMentionDropdown(); return; }
             state.mentionStart = atPos;
             _renderMentionDropdown(matches);
         });
+
+        el.addEventListener("blur", () => closeMentionDropdown());
 
         el.addEventListener("keydown", e => {
             const dd = document.getElementById("mention-dropdown");
@@ -104,16 +119,16 @@ export function createMentions({ getCurrentRoomMembers }) {
             if (e.key === "ArrowDown") {
                 e.preventDefault();
                 state.mentionFocusIdx = Math.min(state.mentionFocusIdx + 1, items.length - 1);
-                items.forEach((el2, i) => el2.classList.toggle("focused", i === state.mentionFocusIdx));
+                setActiveOption(inputEl, items, state.mentionFocusIdx);
             } else if (e.key === "ArrowUp") {
                 e.preventDefault();
                 state.mentionFocusIdx = Math.max(state.mentionFocusIdx - 1, 0);
-                items.forEach((el2, i) => el2.classList.toggle("focused", i === state.mentionFocusIdx));
+                setActiveOption(inputEl, items, state.mentionFocusIdx);
             } else if (e.key === "Enter" || e.key === "Tab") {
                 const name = items[state.mentionFocusIdx]?.dataset.name;
-                if (name) { e.preventDefault(); _selectMention(name); }
+                if (name) { e.preventDefault(); e.stopImmediatePropagation?.(); _selectMention(name); }
             } else if (e.key === "Escape") {
-                e.preventDefault(); closeMentionDropdown();
+                e.preventDefault(); e.stopPropagation?.(); closeMentionDropdown();
             }
         });
     }

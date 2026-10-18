@@ -36,7 +36,7 @@ import { verifyDeviceCert } from './device-cert.js';
 import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
 import { buildRoomDescriptor, withMembers, descriptorSigningBytes } from './roomdesc.js';
 import {
-    didSuffix, escHtml, formatTimestamp, webidColor, renderMarkdown, markdownToPlain, didIdTag, dmFallbackName, timeAgo,
+    escHtml, formatTimestamp, webidColor, renderMarkdown, markdownToPlain, didIdTag, dmFallbackName, timeAgo,
     expireLabel as _expireLabel, u8ToB64 as _u8ToB64, b64ToU8 as _b64ToU8, scrollBehavior,
     composerEnterAction, isCoarsePointer, supportsFieldSizing, canShareLinks, shareLink,
     gatewayUrl, gatewayHttpBase,
@@ -55,6 +55,7 @@ import { createProfile } from './profile.js';
 import { createEdit } from './edit.js';
 import { createMute } from './mute.js';
 import { createMentions } from './mentions.js';
+import { isPopupOpen as isAcPopupOpen } from './autocomplete.js';
 import { createRooms, setButtonBusy, clearButtonBusy, isButtonBusy } from './rooms.js';
 import { friendlyErrorKey } from './errors.js';
 import { createAddress } from './address.js';
@@ -563,6 +564,7 @@ import { initThemePicker } from './theme.js';
                 catch { return true; }
             },
             getLocalDmPeers: () => localDmPeers, getCurrentRoomMembers: () => currentRoomMembers, getIsSharing: () => media.state.isSharing,
+            getContactName: (did) => contactByDid(did)?.display_name || '',
             // R79: end-to-end call authentication — our identity key signs the DTLS
             // fingerprint; the peer's known identity verifies it.
             getIdentityPrivKey: () => _identityPrivKey,
@@ -876,7 +878,7 @@ import { initThemePicker } from './theme.js';
         // click. resetDateDivider pokes rendering.state. Instantiated after its
         // module deps (rooms/members/e2e-status/mentions/voice/rendering) exist.
         const {
-            renderContacts, openContactThread, openContactByDid, openLocalDmThread,
+            renderContacts, openContactThread, openContactByDid, openLocalDmThread, contactByDid,
             addRoomToSidebar, renameRoomInSidebar, populateSidebar, _navigateToThread,
         } = createView({
             getSocket: () => socket,
@@ -1218,9 +1220,13 @@ import { initThemePicker } from './theme.js';
             if (!el) return;
             const _myDid = clientDid || localStorage.getItem("proxion_identity_did") || "";
             const _myName = localStorage.getItem("proxion_display_name") || "";
-            const _mySuffix = didSuffix(_myDid);
+            // Name plus the same ten-character tag others see next to you in
+            // member, contact and DM rows. The full key is on hover; the
+            // Proxion address below is the one thing to share.
+            const _myTag = didIdTag(_myDid);
+            el.title = _myDid;
             el.innerHTML = _myDid
-                ? `<span class="text-primary">${escHtml(_myName || t('settings.noNameSet'))}</span><span class="id-suffix">·${escHtml(_mySuffix)}</span><br><span class="text-muted">${escHtml(_myDid)}</span>`
+                ? `<span class="text-primary">${escHtml(_myName || t('settings.noNameSet'))}</span><span class="id-suffix">·${escHtml(_myTag)}</span>`
                 : escHtml(t('settings.didGenerating'));
         }
 
@@ -4470,6 +4476,7 @@ import { initThemePicker } from './theme.js';
         // Send on Enter (not Shift+Enter); on touch, Enter is a newline and the
         // Send button sends.
         document.getElementById("message-input").addEventListener("keydown", function(e) {
+            if (isAcPopupOpen()) return;   // the open suggestion popup owns Enter/arrows
             if (e.key === "ArrowUp" && !this.value && !e.shiftKey && !e.altKey
                     && !e.ctrlKey && !e.metaKey && !e.isComposing) {
                 if (_editLastOwnMessage()) e.preventDefault();
@@ -5962,7 +5969,9 @@ import { initThemePicker } from './theme.js';
                     btn.textContent = voice.state.isMuted ? t('btn.unmute') : t('btn.mute2');
                     btn.classList.toggle("btn--danger", voice.state.isMuted);
                     btn.classList.toggle("btn--slate", !voice.state.isMuted);
+                    btn.setAttribute("aria-pressed", String(voice.state.isMuted));
                 }
+                voice._renderChannelPanel();   // your tile shows Muted
             });
 
             // Members panel close

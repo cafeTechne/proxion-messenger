@@ -299,7 +299,6 @@
   "label.inviteLinkClickCopy": "Enlace de invitación (haz clic para copiar)",
   "label.displayName": "Nombre visible",
   "label.customStatusMax100": "Estado personalizado (máx. 100 caracteres)",
-  "label.didShareThisPeers": "Tu DID (compártelo con tus pares)",
   "label.gatewayWebsocketUrl": "URL del WebSocket del gateway",
   "btn.sendDm": "Enviar MD",
   "btn.answer": "Responder",

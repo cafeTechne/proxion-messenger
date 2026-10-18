@@ -493,23 +493,25 @@
                 <button id="start-video-call-btn" style="display:none;" aria-label="Start video call" title="Video call" data-i18n-attr="title:ui.videoCall;aria-label:ui.videoCall"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h8.25a2.25 2.25 0 0 0 2.25-2.25V7.5a2.25 2.25 0 0 0-2.25-2.25H4.5A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z"/></svg> <span class="btn-label" data-i18n="ui.video">Video</span></button></div>
             </header>
             <!-- R34: Voice channel participant panel; R80: group video grid + controls -->
-            <div id="voice-channel-panel" style="display:none;position:fixed;bottom:0;left:0;right:0;background:var(--slate-900);border-top:1px solid var(--slate-800);padding:var(--space-2) var(--space-4);padding-bottom:calc(var(--space-2) + env(safe-area-inset-bottom, 0px));z-index:800;flex-direction:column;gap:var(--space-2);">
-              <div id="voice-channel-videos" style="display:none;gap:var(--space-2);flex-wrap:wrap;align-items:center;">
-                <video id="vc-local-video" autoplay playsinline muted style="display:none;width:160px;max-height:120px;background:#000;border:1px solid var(--slate-600);border-radius:6px;object-fit:cover;transform:scaleX(-1);"></video>
-              </div>
-              <div style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;row-gap:var(--space-2);">
-                <span style="font-size:var(--text-sm);color:var(--color-success-soft);font-weight:var(--weight-semibold);flex-shrink:0;"><span aria-hidden="true">&#x1F50A;</span> <span data-i18n="voice.channel">Voice channel</span></span>
-                <div id="voice-channel-participants" style="display:flex;gap:var(--space-2);flex:1;flex-wrap:wrap;"></div>
+            <div id="voice-channel-panel" class="vc-panel" role="region" aria-label="Voice channel" data-i18n-attr="aria-label:voice.channel" style="display:none;">
+              <div class="vc-panel__head">
+                <span class="vc-panel__title"><span aria-hidden="true">&#x1F50A;</span> <span data-i18n="voice.channel">Voice channel</span></span>
+                <div class="vc-panel__controls">
+                <button id="voice-channel-mute-btn" class="btn btn--slate btn--sm" aria-pressed="false" data-i18n="btn.mute2">Mute</button>
                 <button id="voice-channel-camera-btn" aria-label="Turn camera on or off" title="Camera on / off" aria-pressed="false" class="btn btn--slate btn--sm" data-i18n-attr="title:ui.cameraToggle;aria-label:ui.cameraToggle" data-i18n="ui.video">Video</button>
                 <button id="voice-channel-screenshare-btn" aria-pressed="false" aria-label="Share screen" title="Share screen" class="btn btn--slate btn--sm" data-i18n-attr="title:ui.shareScreen;aria-label:ui.shareScreen2" data-i18n="ui.shareScreen">Share screen</button>
                 <button id="vc-fullscreen-btn" aria-label="Fullscreen" title="Fullscreen" class="btn btn--slate btn--sm" data-i18n-attr="title:ui.fullscreen;aria-label:ui.fullscreen" data-i18n="ui.fullscreen">Fullscreen</button>
-                <select id="vc-quality" aria-label="Video quality" title="Video quality" data-i18n-attr="title:quality.label;aria-label:quality.label" style="background:var(--slate-800);color:var(--slate-100);border:1px solid var(--slate-600);border-radius:4px;font-size:var(--text-xs);padding:var(--space-1) var(--space-2);flex-shrink:0;">
+                <select id="vc-quality" class="vc-quality" aria-label="Video quality" title="Video quality" data-i18n-attr="title:quality.label;aria-label:quality.label">
                   <option value="auto" data-i18n="quality.auto">Auto</option>
                   <option value="high" data-i18n="quality.high">High</option>
                   <option value="standard" data-i18n="quality.standard">Standard</option>
                   <option value="saver" data-i18n="quality.saver">Data saver</option>
                 </select>
-                <button id="voice-channel-mute-btn" class="btn btn--slate btn--sm" data-i18n="btn.mute2">Mute</button>
+                </div>
+              </div>
+              <div id="voice-channel-participants" class="vc-tiles" role="list" aria-label="In the voice channel" data-i18n-attr="aria-label:voice.tilesLabel"></div>
+              <div id="voice-channel-videos" style="display:none;gap:var(--space-2);flex-wrap:wrap;align-items:center;">
+                <video id="vc-local-video" autoplay playsinline muted style="display:none;width:160px;max-height:120px;background:#000;border:1px solid var(--slate-600);border-radius:6px;object-fit:cover;transform:scaleX(-1);"></video>
               </div>
             </div>
             <!-- R11.2.2: Safety number bar (DM only) -->
@@ -685,7 +687,7 @@
                 <option value="dark" data-i18n="settings.theme.dark">Dark</option>
                 <option value="light" data-i18n="settings.theme.light">Light</option>
               </select>
-              <div class="settings-field-label" data-i18n="label.didShareThisPeers">Your DID (share this with peers)</div>
+              <div class="settings-field-label" data-i18n="label.yourIdTag">Your name and ID tag</div>
               <div id="settings-did" class="settings-readout"></div>
               <div class="settings-field-label">
                 <span data-i18n="label.proxionAddress">Your Proxion address</span> <span class="settings-muted" data-i18n="label.proxionAddressHint">(share this with cross-gateway peers)</span>
@@ -1374,19 +1376,9 @@
               style="position:absolute;top:12px;inset-inline-end:12px;background:transparent;border:none;color:var(--text-secondary);cursor:pointer;line-height:0;" data-i18n-attr="aria-label:ui.closePinnedMessages"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
       <div id="pin-list"></div>
     </div>
-    <ul id="mention-dropdown"
-        style="display:none; position:fixed; background:var(--bg-secondary);
-               border:1px solid var(--border); border-radius:6px;
-               list-style:none; padding:var(--space-1) 0; margin:0; z-index:1100;
-               min-width:180px; max-height:200px; overflow-y:auto;
-               box-shadow:var(--shadow-md);"></ul>
-    <!-- R59C: :shortcode: emoji autocomplete (same shape as the mention dropdown) -->
-    <ul id="emoji-dropdown"
-        style="display:none; position:fixed; background:var(--bg-secondary);
-               border:1px solid var(--border); border-radius:6px;
-               list-style:none; padding:var(--space-1) 0; margin:0; z-index:1100;
-               min-width:180px; max-height:200px; overflow-y:auto;
-               box-shadow:var(--shadow-md);"></ul>
+    <!-- Composer suggestion popups (autocomplete.js places them by the input). -->
+    <ul id="mention-dropdown" class="ac-popup" role="listbox" aria-label="Mention someone" data-i18n-attr="aria-label:ui.mentionSuggestions" style="display:none;"></ul>
+    <ul id="emoji-dropdown" class="ac-popup" role="listbox" aria-label="Emoji suggestions" data-i18n-attr="aria-label:ui.emojiSuggestions" style="display:none;"></ul>
 
     <script src="vendor/qrcode.min.js"></script>
     <script src="vendor/jsQR.min.js"></script>
