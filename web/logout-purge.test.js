@@ -22,7 +22,7 @@ vi.mock('./solid-authn.bundle.js', () => ({
 const { podQueueClear } = vi.hoisted(() => ({ podQueueClear: vi.fn(async () => {}) }));
 vi.mock('./podqueue.js', () => ({ podQueueClear }));
 
-import { solidLogout } from './auth.js';
+import { solidLogout, solidSession } from './auth.js';
 
 function memLocalStorage() {
     const s = {};
@@ -79,6 +79,20 @@ describe('solidLogout purges pod-derived state', () => {
         expect(await idbCount('proxion-dm-history', 'messages')).toBe(0);
         expect(await idbCount('proxion-saved-messages', 'saved')).toBe(0);
     });
+
+    // Pod sign-out awaits this before reloading, so an issuer that never answers
+    // must not keep the purge from running.
+    it('purges even when the OIDC logout never settles', async () => {
+        const orig = solidSession.logout;
+        solidSession.logout = () => new Promise(() => {});
+        try {
+            await solidLogout();
+        } finally {
+            solidSession.logout = orig;
+        }
+        expect(deleted.sort()).toEqual(['proxion-shell-v1', 'proxion-shell-v213']);
+        expect(podQueueClear).toHaveBeenCalledTimes(1);
+    }, 5000);
 });
 
 // Open a database, creating the store (and an optional index) if missing, put a

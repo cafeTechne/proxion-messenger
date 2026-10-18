@@ -1675,6 +1675,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_revoke_session(websocket, data)
             elif cmd == "logout_all_devices":
                 await self._handle_logout_all_devices(websocket, data)
+            elif cmd == "delete_account":
+                await self._handle_delete_account(websocket, data)
             elif cmd == "set_member_role":
                 await self._handle_set_member_role(websocket, data)
             elif cmd == "get_room_roles":

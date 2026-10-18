@@ -97,8 +97,12 @@ export async function solidLogout() {
     const savedDb = accountDbName(_SAVED_DB);
     const gifDb = accountDbName(_GIF_DB);
     const sendQueueDb = accountDbName(_SEND_QUEUE_DB);
+    // An unreachable issuer must not hold up the local purge below.
     try {
-        await solidSession.logout({ logoutType: 'app' });
+        await Promise.race([
+            solidSession.logout({ logoutType: 'app' }),
+            new Promise((r) => setTimeout(r, 1500)),
+        ]);
     } catch (e) {
         console.warn('OIDC logout failed:', e);
     }

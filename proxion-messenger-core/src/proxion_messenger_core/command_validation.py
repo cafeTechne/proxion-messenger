@@ -144,7 +144,7 @@ MUTATING_COMMANDS: frozenset[str] = frozenset({
     "register_device", "unregister_device", "set_primary_device", "revoke_device_and_rekey",
     "pair_start", "pair_submit", "pair_approve", "pair_cancel",
     "device_recovery_code_generate", "device_recovery_code_use",
-    "expire_dm_session", "revoke_session", "logout_all_devices",
+    "expire_dm_session", "revoke_session", "logout_all_devices", "delete_account",
     # pod, push, webhooks, settings
     "connect_css", "disconnect_pod", "reconnect_pod",
     "subscribe_push", "unsubscribe_push",

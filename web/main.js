@@ -993,6 +993,8 @@ import { createAccountSync } from './account-sync.js';
         const roomAdminOf = new Set();
         // Resolves when the gateway confirms pod sign-out (pod_disconnected).
         let _podDisconnectWaiter = null;
+        // Resolves when the gateway confirms "Delete identity" erased this account.
+        let _accountDeleteWaiter = null;
         const _canAdminRoom = (id) => roomCreatorOf.has(id) || roomAdminOf.has(id);
         // Render-cursor state (date divider, scroll-unread counter, older-history
         // in-flight flag): moved to rendering.js (createRendering state). External
@@ -2560,6 +2562,9 @@ import { createAccountSync } from './account-sync.js';
                     break;
                 case "typing":
                     handleTyping(event);
+                    break;
+                case "account_deleted":
+                    _accountDeleteWaiter?.(true);
                     break;
                 case "export_ticket":
                     if (event.purpose === 'import') {
@@ -6291,14 +6296,11 @@ import { createAccountSync } from './account-sync.js';
                     showToast(t('pod.signOutFailed'), 'error');
                     return;
                 }
-                // Clear Solid OIDC browser session (if any) with timeout
-                try {
-                    await Promise.race([
-                        solidSession.logout({ logoutType: 'app' }),
-                        new Promise(r => setTimeout(r, 1500)),
-                    ]);
-                } catch (_) {}
-                // Clear only pod-related localStorage — identity, rooms, and messages survive
+                // End the Solid session and purge what this browser cached from
+                // it: decrypted DM history, saved messages, ratchet state, the
+                // SW cache and the offline queue.
+                try { await solidLogout(); } catch (_) {}
+                // The identity key and the gateway's rooms and messages survive.
                 const _podKeys = [
                     'proxion_pod_connected', 'proxion_pod_webid', 'proxion_css_url',
                     'proxion_pod_setup_skipped', 'proxion_pod_banner_dismissed',
@@ -6314,13 +6316,19 @@ import { createAccountSync } from './account-sync.js';
                 if (window.__TAURI__?.invoke) {
                     window.__TAURI__.invoke('clear_pod_credentials').catch(() => {});
                 }
+                // Erase this account on the gateway too (its DMs, contacts, keys
+                // and room memberships). A linked device only wipes itself.
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    const _erased = await new Promise((resolve) => {
+                        _accountDeleteWaiter = resolve;
+                        socket.send(JSON.stringify({ cmd: 'delete_account', confirm: 'delete' }));
+                        setTimeout(() => resolve(false), 8000);
+                    });
+                    _accountDeleteWaiter = null;
+                    if (!_erased) console.warn('[Proxion] gateway did not confirm account deletion');
+                }
                 try { await fetch(gatewayUrl('/api/pod-disconnect'), { method: 'POST' }); } catch (_) {}
-                try {
-                    await Promise.race([
-                        solidSession.logout({ logoutType: 'app' }),
-                        new Promise(r => setTimeout(r, 1500)),
-                    ]);
-                } catch (_) {}
+                try { await solidLogout(); } catch (_) {}
                 localStorage.clear();
                 sessionStorage.clear();
                 try {

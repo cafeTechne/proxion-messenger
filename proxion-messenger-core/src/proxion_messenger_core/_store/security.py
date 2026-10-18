@@ -805,6 +805,58 @@ class SecurityStoreMixin(object):
             ).fetchall()
         return {r[0] for r in rows}
 
+    # Rows that belong to one account, by (table, column). Room membership and
+    # the account's messages in rooms are left to the room leave path: those
+    # rooms are shared with other people and stay theirs.
+    _ACCOUNT_ROWS = (
+        ("relationships", "owner_webid"), ("contacts", "owner_webid"),
+        ("blocks", "owner_webid"), ("thread_mutes", "owner_webid"),
+        ("scheduled_messages", "from_webid"), ("webhooks", "owner_webid"),
+        ("push_subscriptions", "owner_webid"), ("device_registrations", "owner_webid"),
+        ("device_recovery_codes", "owner_webid"), ("dm_sessions", "owner_webid"),
+        ("dm_prekeys", "owner_webid"), ("catchup_watermarks", "owner_webid"),
+        ("stun_sessions", "owner_webid"), ("device_e2e_keys", "account_did"),
+        ("x25519_pubs", "did"), ("display_names", "webid"), ("last_read", "webid"),
+        ("room_unread_counts", "webid"), ("pending_relays", "to_webid"),
+        ("dm_device_deliveries", "to_webid"), ("message_receipts", "receiver_webid"),
+    )
+
+    def delete_account_data(self, webid: str) -> dict:
+        """Delete everything this gateway keeps for one local account: its DM
+        threads with their messages, pins, reactions, edits, files and timers,
+        and the per-account rows in _ACCOUNT_ROWS. Returns rows deleted per table."""
+        if not webid:
+            return {}
+        counts: dict = {}
+        with self._conn() as conn:
+            threads = [r[0] for r in conn.execute(
+                "SELECT thread_id FROM dm_threads WHERE owner_webid = ?", (webid,)).fetchall()]
+            for i in range(0, len(threads), 500):
+                chunk = threads[i:i + 500]
+                ph = ",".join("?" * len(chunk))
+                for table, col in (("message_edits", None), ("message_files", "thread_id"),
+                                   ("pins", "thread_id"), ("reactions", "room_id"),
+                                   ("dm_disappear_timers", "thread_id"), ("messages", "thread_id")):
+                    try:
+                        if col is None:
+                            cur = conn.execute(
+                                f"DELETE FROM {table} WHERE message_id IN "
+                                f"(SELECT message_id FROM messages WHERE thread_id IN ({ph}))", chunk)
+                        else:
+                            cur = conn.execute(f"DELETE FROM {table} WHERE {col} IN ({ph})", chunk)
+                        counts[table] = counts.get(table, 0) + cur.rowcount
+                    except sqlite3.OperationalError:
+                        pass
+            counts["dm_threads"] = conn.execute(
+                "DELETE FROM dm_threads WHERE owner_webid = ?", (webid,)).rowcount
+            for table, col in self._ACCOUNT_ROWS:
+                try:
+                    counts[table] = counts.get(table, 0) + conn.execute(
+                        f"DELETE FROM {table} WHERE {col} = ?", (webid,)).rowcount
+                except sqlite3.OperationalError:
+                    pass  # table not present in this schema version
+        return counts
+
     def export_all(self, minimize: bool = True, owner_webid: Optional[str] = None) -> dict:
         """Return a JSON-serializable export of all store data (R14.1).
 

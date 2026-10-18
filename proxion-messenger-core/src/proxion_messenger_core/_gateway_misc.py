@@ -820,6 +820,44 @@ class MiscHandlerMixin:
             "revoked_count": len(other_sockets),
         }))
 
+    async def _handle_delete_account(self, websocket, data: dict) -> None:
+        """Delete the calling account's data from this gateway ("Delete identity").
+
+        Only the account's own primary session may do this (a linked device
+        cannot erase the account for every device), never for the gateway's own
+        identity, and only with an explicit confirm. The caller leaves its rooms
+        the normal way first, so ownership passes on and members are told."""
+        from .didkey import pub_key_to_did
+        webid = self._client_webids.get(websocket, "")
+
+        async def _refuse(reason: str) -> None:
+            await websocket.send(json.dumps({"type": "error", "cmd": "delete_account", "message": reason}))
+
+        if not webid or data.get("confirm") != "delete":
+            return await _refuse("confirm_required")
+        if websocket in self._session_device_did:
+            return await _refuse("linked_device")
+        if webid == pub_key_to_did(self.agent.identity_pub_bytes):
+            return await _refuse("gateway_identity")
+        if not self._store:
+            return await _refuse("no_store")
+        for room_id, room in list(self._local_rooms.items()):
+            if websocket in room.get("members", ()) or webid in self._store.get_room_members(room_id):
+                await self._handle_leave_local_room(websocket, {"room_id": room_id})
+        counts = self._store.delete_account_data(webid)
+        self._user_presence.pop(webid, None)
+        self._relay_queue.pop(webid, None)
+        self._did_pod_webids.pop(webid, None)
+        for key in [k for k in self._fanout_queue if k[0] == webid]:
+            self._fanout_queue.pop(key, None)
+        try:
+            self._store.save_security_event("account_deleted", "info", webid=webid,
+                                            details=f"rows={sum(counts.values())}")
+        except Exception:
+            pass
+        await websocket.send(json.dumps({"type": "account_deleted"}))
+        await self._revoke_websockets(list(self._webid_sockets.get(webid, set())), "account_deleted")
+
     async def _handle_get_audit_logs(self, websocket, data: dict) -> None:
         """Return recent audit log entries. Restricted to the gateway owner."""
         from .didkey import pub_key_to_did
