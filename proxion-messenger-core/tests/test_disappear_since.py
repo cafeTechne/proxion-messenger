@@ -185,3 +185,14 @@ async def test_timer_events_tell_the_browser_when_the_timer_started(tmp_path):
     await gw.process_command(ws, {"cmd": "get_disappear_timer", "room_id": "cert-A"})
     ev = _events(ws, "disappear_timer")[-1]
     assert ev["ms"] == 30_000 and ev["since"] == since
+
+
+def test_a_timer_from_before_start_times_were_kept_starts_on_upgrade(tmp_path):
+    from proxion_messenger_core.local_store import LocalStore
+    old = LocalStore(str(tmp_path / "u.db"))
+    old.set_dm_disappear_timer("cert-A", 60_000)   # on, but no recorded start
+    before = datetime.now(timezone.utc).isoformat()
+    gw = _gw(tmp_path, "u")
+    since = gw._disappear_since.get("cert-A", "")
+    assert since >= before
+    assert _gw(tmp_path, "u")._disappear_since.get("cert-A") == since   # persisted, not re-stamped

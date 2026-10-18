@@ -449,6 +449,13 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             logger.debug("DM disappear-timer restore skipped", exc_info=True)
         try:
             self._disappear_since.update(self._store.get_all_disappear_since())
+            # A timer turned on before start times were recorded starts now, so
+            # it never reaches back over messages sent before it existed.
+            _now_iso = datetime.now(timezone.utc).isoformat()
+            for _tid, _ms in [*self._room_disappear_timers.items(), *self._dm_disappear_timers.items()]:
+                if _ms and _tid not in self._disappear_since:
+                    self._disappear_since[_tid] = _now_iso
+                    self._store.set_disappear_since(_tid, _now_iso)
         except Exception:
             logger.debug("disappear-since restore skipped", exc_info=True)
         # R12: load revoked DIDs into fast in-memory set
