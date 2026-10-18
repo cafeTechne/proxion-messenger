@@ -64,7 +64,7 @@ import { createMembers } from './members.js';
 import { createFriendRequests } from './friend-requests.js';
 import { createE2EStatus } from './e2e-status.js';
 import { createStatusBanners } from './status-banners.js';
-import { createConnection, normalizeGatewayUrl, planThreadCatchUp, createRateRetry } from './connection.js';
+import { createConnection, normalizeGatewayUrl, planThreadCatchUp, createRateRetry, catchUpUnread } from './connection.js';
 import { createTabLock, showTabNotice, hideTabNotice } from './tablock.js';
 import { createTransport, detectMode, applyTransportGating } from './transport.js';
 import { createPodSocket } from './podtransport.js';
@@ -92,6 +92,7 @@ import { createBlocks } from './blocks.js';
 import { createSolidChat } from './solidchat.js';
 import { createSolidChatUI } from './solidchat-ui.js';
 import { createSendStatus } from './send-status.js';
+import { sendQueueStore } from './sendqueue.js';
 import { createPolls } from './polls.js';
 import { createRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { createMeme } from './meme.js';
@@ -613,6 +614,9 @@ import { createAccountSync } from './account-sync.js';
             tokens: createReactionTokens({ storage: localStorage, key: () => e2eScopedKey('proxion_e2e_react_tokens') }),
         });
         const _onSealFailed = () => showToast(t('e2e.secondarySendFailed'), 'error');
+        // Edits, deletes, pins and reactions made offline wait in the connection
+        // queue (connection.js) instead of going into a closed socket.
+        const _sendOrQueue = (p) => socketSendOrQueue(p);
         // Reactions / emoji picker: destructured into same-named bindings.
         // messageReactions stays host-owned (the message loader populates it);
         // it is injected by reference and mutated in place, never reassigned.
@@ -633,6 +637,7 @@ import { createAccountSync } from './account-sync.js';
                 sealReaction: (view, mid, emoji) => secondary.sealReaction(view, mid, emoji),
                 wireEmoji: (mid, emoji) => secondary.reactionWireEmoji(mid, emoji),
                 onSealFailed: _onSealFailed,
+                send: _sendOrQueue,
             });
         // Standalone modals (forward / schedule / integrations / search results).
         const {
@@ -650,7 +655,8 @@ import { createAccountSync } from './account-sync.js';
         // Pinned messages: destructured into same-named bindings.
         const { pinMsg, showPinPanel, renderPins, unpinMsg, jumpToMsg } =
             createPins({ getSocket: () => socket, getActiveView: () => activeView, getMessages: () => allMessages,
-                revealMessage: (id) => rendering.revealMessage(id) });
+                revealMessage: (id) => rendering.revealMessage(id),
+                send: _sendOrQueue });
         // Profile / presence: userPresence and messageMap stay host-owned (the
         // dispatch and renderer also touch them) and are injected by reference.
         const {
@@ -668,6 +674,7 @@ import { createAccountSync } from './account-sync.js';
         // R66: optimistic-send failure tracking (mark unconfirmed messages failed + retry).
         const sendStatus = createSendStatus({
             isOnline: () => !!socket && socket.readyState === WebSocket.OPEN,
+            onRetry: () => probeConnection(),
         });
         // R65: user blocking (the gateway enforces; this is the client feature).
         const blocks = createBlocks({
@@ -793,6 +800,7 @@ import { createAccountSync } from './account-sync.js';
             getClientDid: () => clientDid, getMessageMap: () => messageMap,
             sealEdit: (view, mid, text) => secondary.sealEdit(view, mid, text),
             onSealFailed: _onSealFailed,
+            send: _sendOrQueue,
         });
         const { startEdit, commitEdit, cancelEdit, handleMessageEdited } = edit;
         // Mute: mutedThreads is a host-owned Set (read by renderer/dispatch),
@@ -849,12 +857,16 @@ import { createAccountSync } from './account-sync.js';
         // One active tab per browser profile (tablock.js): only the leader
         // connects and runs the DM ratchet, or two tabs would fork it.
         const tabLock = createTabLock();
-        const { socketSendOrQueue, forceReconnect, connect, flushPending, shutdown: stopConnection } = createConnection({
+        const {
+            socketSendOrQueue, sendOnce, restorePersisted, probe: probeConnection,
+            forceReconnect, connect, flushPending, shutdown: stopConnection,
+        } = createConnection({
             wsUrl: WS_URL,
             getSocket: () => socket, setSocket: (s) => { socket = s; },
             getClientDid: () => clientDid,
             generateOrLoadIdentity, handleEventAsync: _handleEventAsync,
             isActive: () => tabLock.isLeader(),
+            persist: sendQueueStore,   // unsent writes survive closing the tab
         });
         // Linked devices share the account's name, mutes and settings through
         // the gateway (account-sync.js). Scoped to the account this socket
@@ -2120,6 +2132,8 @@ import { createAccountSync } from './account-sync.js';
                         // if flushed at onopen, before registration.
                         flushPending();
                         sendStatus.resumeWaiting();   // queued sends just went out
+                        // Writes a closed tab left unsent (once per page load).
+                        restorePersisted().catch(() => {});
                         accountSync.request();   // after the flush, so offline changes land first
                         // A contact DM opened while offline shows a notice in
                         // place of history: fetch that history now.
@@ -2731,7 +2745,7 @@ import { createAccountSync } from './account-sync.js';
                             maybeShowEmptyState();
                         }
                     } else if (msgs.length > 0) {
-                        unreadCounts[tid] = (unreadCounts[tid] || 0) + msgs.length;
+                        unreadCounts[tid] = catchUpUnread(unreadCounts[tid], msgs.length);
                         updateSidebarBadge(tid);
                     }
                     mergeDmLocalHistory(tid);
@@ -2781,7 +2795,7 @@ import { createAccountSync } from './account-sync.js';
                         if (msgs.length > 0 && !mutedThreads.has(tid)) {
                             const lastReadTime = new Date(lastReadTs * 1000);
                             const unreadCount = msgs.filter(m => new Date(m.timestamp) > lastReadTime).length;
-                            unreadCounts[tid] = (unreadCounts[tid] || 0) + unreadCount;
+                            unreadCounts[tid] = catchUpUnread(unreadCounts[tid], unreadCount);
                             updateSidebarBadge(tid);
                         }
                     }
@@ -3016,7 +3030,7 @@ import { createAccountSync } from './account-sync.js';
                     (event.contacts || []).forEach(c => {
                         if (c.peer_did && c.x25519_pub) cachePeerPub(c.peer_did, c.x25519_pub);
                         if (c.unread_count > 0) {
-                            unreadCounts[c.certificate_id] = (unreadCounts[c.certificate_id] || 0) + c.unread_count;
+                            unreadCounts[c.certificate_id] = catchUpUnread(unreadCounts[c.certificate_id], c.unread_count);
                             updateSidebarBadge(c.certificate_id);
                         }
                     });
@@ -3105,6 +3119,16 @@ import { createAccountSync } from './account-sync.js';
                     // window resets instead of leaving a sidebar or feed empty.
                     _perConnection();
                     if (_rateRetry.handle(event)) break;
+                    // A refused send names its message_id: retry it after the
+                    // rate window, or fail its bubble now instead of after the
+                    // confirm timeout.
+                    if (typeof event.message_id === "string" && event.message_id) {
+                        if (event.code === "E_RATE") {
+                            sendStatus.retryLater(event.message_id, Math.max(1, Number(event.retry_after) || 1) * 1000);
+                            break;
+                        }
+                        sendStatus.fail(event.message_id);
+                    }
                     if (_pendingFriendRequest && (event.message in _friendRequestErrors || event.message === "delivery_failed" || event.message === "invalid_address")) {
                         _pendingFriendRequest = false;
                         const _sb2 = document.getElementById("add-peer-submit-btn");
@@ -3783,11 +3807,11 @@ import { createAccountSync } from './account-sync.js';
         function deleteMsg(msgId) {
             if (!activeView) return;
             showConfirm(t('confirm.deleteMessage'), () => {
-                socket.send(JSON.stringify({
+                socketSendOrQueue({
                     cmd: "delete_local_message",
                     message_id: msgId,
                     thread_id: activeView.id,
-                }));
+                });
             }, null, { title: t('confirm.deleteMessage.title'), confirmLabel: t('confirm.deleteMessage.verb'), danger: true });
         }
 
@@ -5961,10 +5985,10 @@ import { createAccountSync } from './account-sync.js';
                     // handler for, so it only cleared local DOM and never
                     // reached the store or the peer. Use the real delete path.
                     const mid = e.target.dataset.msgId;
-                    if (socket && mid && activeView) {
-                        socket.send(JSON.stringify({
+                    if (mid && activeView) {
+                        socketSendOrQueue({
                             cmd: 'delete_local_message', message_id: mid, thread_id: activeView.id,
-                        }));
+                        });
                     }
                     document.getElementById(`msg-${mid}`)?.remove();
                     closeMenu(sub);
@@ -7177,6 +7201,6 @@ import { createAccountSync } from './account-sync.js';
                 // Gateway mode: open the WS.
                 transport.connect();
                 // Commands the tab we took over from had not sent yet.
-                tabLock.onHandoff((payload) => socketSendOrQueue(payload));
+                tabLock.onHandoff((payload) => sendOnce(payload));
             }
         })();

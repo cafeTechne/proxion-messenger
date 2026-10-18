@@ -160,3 +160,20 @@ describe('multi-line inline editor', () => {
     expect(sent[0]).toMatchObject({ cmd: 'edit_local_message', content: 'line one' });
   });
 });
+
+describe('offline edits are queued, not dropped', () => {
+  it('hands the edit to the queueing send when the socket is gone', () => {
+    els['msg-m1'] = mkEl();
+    const queued = [];
+    const edit = createEdit({
+      getSocket: () => null,
+      getActiveView: () => ({ type: 'local_room', id: 'room-1' }),
+      getClientDid: () => 'did:key:zSelf',
+      getMessageMap: () => ({}),
+      send: (p) => queued.push(p),
+    });
+    edit.commitEdit('m1', 'fixed typo');
+    expect(queued).toEqual([{ cmd: 'edit_local_message', message_id: 'm1', thread_id: 'room-1',
+      content: 'fixed typo', from_webid: 'did:key:zSelf' }]);
+  });
+});

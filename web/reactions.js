@@ -19,7 +19,9 @@ import { icon } from './icons.js';
 // token in `emoji` plus the sealed header), null when no sealing applies, or
 // throws (nothing is sent, onSealFailed() is called). wireEmoji(messageId,
 // emoji) names our own reaction for remove_reaction (its token, if sealed).
-export function createReactions({ getSocket, getActiveView, getSelfWebId, getMessageReactions, getRoomEmojiMap, getMessageTs, getRemoteRoom, resolveName, sealReaction, wireEmoji, onSealFailed }) {
+// send (optional): queues reactions while offline (connection.js
+// socketSendOrQueue) so they go out on reconnect instead of being dropped.
+export function createReactions({ getSocket, getActiveView, getSelfWebId, getMessageReactions, getRoomEmojiMap, getMessageTs, getRemoteRoom, resolveName, sealReaction, wireEmoji, onSealFailed, send = null }) {
     const state = { lastEmojiMsgId: null };
 
     // R60A: a reaction key like ":name:" refers to the room's custom emoji.
@@ -282,11 +284,11 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         _safeSend(payload);
     }
 
-    // Only send on an OPEN socket. A raw .send() on a CONNECTING socket (mid-
-    // reconnect) throws InvalidStateError; on CLOSING/CLOSED it's silently
-    // discarded. Reactions are low-stakes, so a no-op on a non-open socket is
-    // the right graceful behavior (vs. an unhandled exception).
+    // With a queueing send, hand it over (it waits for the connection).
+    // Otherwise only send on an OPEN socket: a raw .send() on a CONNECTING
+    // socket throws InvalidStateError and on CLOSING/CLOSED it is discarded.
     function _safeSend(payload) {
+        if (send) { send(payload); return true; }
         const s = getSocket();
         const OPEN = (typeof WebSocket !== 'undefined' && WebSocket.OPEN) || 1;
         if (!s || s.readyState !== OPEN) return false;

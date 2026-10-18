@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('./e2e.js', () => ({
   myX25519PubB64u: () => 'MYX25519PUB',
 }));
 
-import { createConnection, normalizeGatewayUrl, planThreadCatchUp, createRateRetry } from './connection.js';
+import { createConnection, normalizeGatewayUrl, planThreadCatchUp, createRateRetry, createSendPacer, queueKey, PACE_LIMIT, catchUpUnread } from './connection.js';
 
 let els, store, made, hostSocket;
 function mkEl(over = {}) {
@@ -32,6 +32,8 @@ beforeEach(() => {
   };
   vi.useFakeTimers();
 });
+// Connections from earlier tests share hostSocket: drop their timers.
+afterEach(() => { vi.clearAllTimers(); });
 
 function make(over = {}) {
   return createConnection({
@@ -281,5 +283,212 @@ describe('createRateRetry', () => {
     rr.handle({ code: 'E_RATE', cmd: 'get_local_history', retry_after: 1 });
     timers[0].fn();
     expect(sent).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Send and connection resilience (single-flight connect, heartbeat, pacing,
+// durable offline queue).
+
+async function openCurrent() {
+  const ws = hostSocket;
+  ws.readyState = FakeWS.OPEN;
+  await ws.onopen();
+  return ws;
+}
+function dropCurrent() { hostSocket.readyState = FakeWS.CLOSED; hostSocket.onclose(); }
+function liveSockets() { return made.filter(s => s.readyState !== FakeWS.CLOSED); }
+
+describe('single-flight connect', () => {
+  it('a send during the reconnect backoff opens one socket, not two', () => {
+    const c = make();
+    c.connect();
+    dropCurrent();                 // instant retry
+    vi.advanceTimersByTime(0);
+    dropCurrent();                 // second failure: 6s backoff scheduled
+    expect(c.state._retryTimeout).not.toBe(null);
+    const before = made.length;
+    c.socketSendOrQueue({ cmd: 'send_room', room_id: 'r', content: 'x' });
+    expect(made.length).toBe(before + 1);
+    vi.advanceTimersByTime(7000);  // the backoff connect must not open another
+    expect(made.length).toBe(before + 1);
+    expect(liveSockets()).toHaveLength(1);
+  });
+  it('connect() is a no-op while a socket is connecting or open', async () => {
+    const c = make();
+    c.connect();
+    c.connect();
+    expect(made).toHaveLength(1);
+    await openCurrent();
+    c.connect();
+    expect(made).toHaveLength(1);
+  });
+});
+
+describe('heartbeat', () => {
+  it('pings an open socket and reconnects when nothing comes back', async () => {
+    const c = make();
+    c.connect();
+    const ws = await openCurrent();
+    vi.advanceTimersByTime(25000);
+    expect(ws.sent.some(m => m.cmd === 'ping')).toBe(true);
+    expect(made).toHaveLength(1);
+    vi.advanceTimersByTime(10000);   // no pong: the socket is half-open
+    expect(made).toHaveLength(2);
+    expect(hostSocket).toBe(made[1]);
+    expect(ws.readyState).toBe(FakeWS.CLOSED);
+  });
+  it('a pong keeps the socket and is not dispatched', async () => {
+    const handleEventAsync = vi.fn();
+    const c = make({ handleEventAsync });
+    c.connect();
+    const ws = await openCurrent();
+    vi.advanceTimersByTime(25000);
+    ws.onmessage({ data: JSON.stringify({ type: 'pong' }) });
+    vi.advanceTimersByTime(10000);
+    expect(made).toHaveLength(1);
+    expect(handleEventAsync).not.toHaveBeenCalled();
+  });
+  it('probe() on a dead open socket reconnects within its timeout', async () => {
+    const c = make();
+    c.connect();
+    const ws = await openCurrent();
+    c.probe(3000);
+    expect(ws.sent.at(-1)).toEqual({ cmd: 'ping' });
+    vi.advanceTimersByTime(3000);
+    expect(made).toHaveLength(2);
+  });
+  it('going online or back to the tab probes the connection', async () => {
+    const winH = {}, docH = {};
+    global.window = { addEventListener: (t, f) => { winH[t] = f; } };
+    global.document.addEventListener = (t, f) => { docH[t] = f; };
+    global.document.visibilityState = 'visible';
+    try {
+      const c = make();
+      c.connect();
+      const ws = await openCurrent();
+      winH.online();
+      expect(ws.sent.at(-1)).toEqual({ cmd: 'ping' });
+      ws.onmessage({ data: JSON.stringify({ type: 'pong' }) });
+      docH.visibilitychange();
+      expect(ws.sent.filter(m => m.cmd === 'ping')).toHaveLength(2);
+      // A closed socket reconnects at once instead of waiting out the backoff.
+      dropCurrent(); vi.advanceTimersByTime(0); dropCurrent();
+      const n = made.length;
+      winH.online();
+      expect(made.length).toBe(n + 1);
+    } finally { delete global.window; }
+  });
+  it('tolerates a frame that is not JSON', async () => {
+    const handleEventAsync = vi.fn();
+    const c = make({ handleEventAsync });
+    c.connect();
+    const ws = await openCurrent();
+    expect(() => ws.onmessage({ data: 'not json' })).not.toThrow();
+    expect(handleEventAsync).not.toHaveBeenCalled();
+  });
+});
+
+describe('send pacing', () => {
+  it('holds writes past the gateway budget and sends them when the window allows', async () => {
+    const c = make();
+    c.connect();
+    const ws = await openCurrent();
+    for (let i = 0; i < 70; i++) c.socketSendOrQueue({ cmd: 'send_room', room_id: 'r', content: String(i) });
+    expect(ws.sent.filter(m => m.cmd === 'send_room').length).toBe(PACE_LIMIT - 1);  // register used one slot
+    // Snapshot reads and pings have their own gateway budget: never held.
+    ws.send(JSON.stringify({ cmd: 'get_rooms' }));
+    expect(ws.sent.at(-1)).toEqual({ cmd: 'get_rooms' });
+    vi.advanceTimersByTime(10000);
+    const sends = ws.sent.filter(m => m.cmd === 'send_room');
+    expect(sends.map(m => m.content)).toEqual(Array.from({ length: 70 }, (_, i) => String(i)));
+  });
+  it('requeues held frames when the socket drops so they go out after register', async () => {
+    const c = make();
+    c.connect();
+    await openCurrent();
+    for (let i = 0; i < 60; i++) c.socketSendOrQueue({ cmd: 'send_room', room_id: 'r', content: String(i) });
+    const held = 60 - (PACE_LIMIT - 1);
+    dropCurrent();
+    expect(c.state._pendingOnConnect.map(p => p.payload.content))
+      .toEqual(Array.from({ length: held }, (_, i) => String(PACE_LIMIT - 1 + i)));
+  });
+  it('createSendPacer keeps a sliding window', () => {
+    let t = 0; const out = []; const timers = [];
+    const p = createSendPacer({ send: (d) => out.push(d), limit: 2, windowMs: 1000, now: () => t,
+      schedule: (fn, ms) => { timers.push({ fn, at: t + ms }); return timers.length; }, cancel: () => {} });
+    p.push('{"cmd":"a"}'); p.push('{"cmd":"b"}'); p.push('{"cmd":"c"}');
+    expect(out).toEqual(['{"cmd":"a"}', '{"cmd":"b"}']);
+    expect(timers[0].at).toBe(1000);
+    t = 1000; timers[0].fn();
+    expect(out).toHaveLength(3);
+  });
+});
+
+describe('durable offline queue', () => {
+  function mkPersist(initial = []) {
+    const rows = new Map(initial.map(e => [e.key, e]));
+    return {
+      rows,
+      save: vi.fn(async (e) => { rows.set(e.key, e); }),
+      remove: vi.fn(async (k) => { rows.delete(k); }),
+      load: vi.fn(async () => [...rows.values()]),
+    };
+  }
+  it('persists queued message writes and forgets them once sent', async () => {
+    const persist = mkPersist();
+    const c = make({ persist });
+    c.connect();
+    const send = { cmd: 'send_room', room_id: 'r', content: 'offline', message_id: 'm1' };
+    c.socketSendOrQueue(send);
+    c.socketSendOrQueue({ cmd: 'typing', room_id: 'r' });       // ephemeral: not persisted
+    c.socketSendOrQueue({ cmd: 'edit_local_message', message_id: 'm0', thread_id: 'r', content: 'e' });
+    await Promise.resolve();
+    expect(persist.rows.size).toBe(2);
+    const [row] = persist.rows.values();
+    expect(row).toMatchObject({ key: queueKey(send), owner: 'did:key:zSelf', payload: send });
+    const ws = await openCurrent();
+    c.flushPending();
+    await Promise.resolve();
+    expect(ws.sent.filter(m => m.cmd === 'send_room')).toHaveLength(1);
+    expect(persist.rows.size).toBe(0);
+  });
+  it('restores a queue left by a closed tab, only for this identity, once', async () => {
+    const mine = { cmd: 'send_room', room_id: 'r', content: 'left', message_id: 'm2' };
+    const theirs = { cmd: 'send_room', room_id: 'r', content: 'other', message_id: 'm3' };
+    const persist = mkPersist([
+      { key: queueKey(mine), owner: 'did:key:zSelf', payload: mine, queued_at: 1 },
+      { key: queueKey(theirs), owner: 'did:key:zOther', payload: theirs, queued_at: 2 },
+    ]);
+    const c = make({ persist });
+    c.connect();
+    const ws = await openCurrent();
+    await c.restorePersisted();
+    await c.restorePersisted();
+    expect(ws.sent.filter(m => m.cmd === 'send_room')).toEqual([mine]);
+    expect([...persist.rows.keys()]).toEqual([queueKey(theirs)]);
+  });
+  it('sendOnce skips a frame this tab already sent (handoff and restore race)', async () => {
+    const persist = mkPersist();
+    const c = make({ persist });
+    c.connect();
+    const ws = await openCurrent();
+    const p = { cmd: 'send_dm', cert_id: 'c', content: 'x', message_id: 'm4' };
+    c.socketSendOrQueue(p);
+    c.sendOnce(p);
+    expect(ws.sent.filter(m => m.cmd === 'send_dm')).toHaveLength(1);
+  });
+});
+
+describe('catchUpUnread (badges do not double on reconnect)', () => {
+  it('the same catch-up arriving twice leaves the badge unchanged', () => {
+    let badge = 0;
+    badge = catchUpUnread(badge, 3);
+    badge = catchUpUnread(badge, 3);
+    expect(badge).toBe(3);
+  });
+  it('keeps a live count that is already higher', () => {
+    expect(catchUpUnread(5, 3)).toBe(5);
+    expect(catchUpUnread(undefined, 2)).toBe(2);
   });
 });

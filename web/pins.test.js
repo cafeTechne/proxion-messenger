@@ -128,3 +128,20 @@ describe('renderPins', () => {
     expect(html).toContain('data-msg-id="&quot;&gt;&lt;img');
   });
 });
+
+describe('offline pins are queued, not dropped', () => {
+  it('pin and unpin go to the queueing send without a socket', () => {
+    const queued = [];
+    const pins = createPins({
+      getSocket: () => null,
+      getActiveView: () => ({ type: 'local_room', id: 'room-1' }),
+      send: (p) => queued.push(p),
+    });
+    pins.pinMsg('m1');
+    pins.unpinMsg('m1', 'room:room-1');
+    expect(queued).toEqual([
+      { cmd: 'pin_message', message_id: 'm1', thread_id: 'room:room-1' },
+      { cmd: 'unpin_message', message_id: 'm1', thread_id: 'room:room-1' },
+    ]);
+  });
+});

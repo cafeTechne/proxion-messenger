@@ -235,3 +235,22 @@ describe('reaction pills name the reactors and offer an add pill', () => {
     expect(picker.style.display).toBe('grid');
   });
 });
+
+describe('offline reactions are queued, not dropped', () => {
+  it('a reaction on a closed socket goes to the queueing send', () => {
+    const queued = [];
+    const r = createReactions({
+      getSocket: () => ({ readyState: 3, send() { throw new Error('closed'); } }),
+      getActiveView: () => ({ type: 'local_room', id: 'room-1' }),
+      getSelfWebId: () => 'did:key:zSelf',
+      getMessageReactions: () => ({}),
+      send: (p) => queued.push(p),
+    });
+    r.addEmoji('👍', 'm1');
+    r.removeReaction('👍', 'm1');
+    expect(queued).toEqual([
+      { cmd: 'add_reaction', message_id: 'm1', emoji: '👍', room_id: 'room-1' },
+      { cmd: 'remove_reaction', message_id: 'm1', emoji: '👍', room_id: 'room-1' },
+    ]);
+  });
+});

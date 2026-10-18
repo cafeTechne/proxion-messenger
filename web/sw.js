@@ -74,6 +74,7 @@ const SHELL = [
   "saved.js",
   "blocks.js",
   "send-status.js",
+  "sendqueue.js",
   "podqueue.js",
   "notify.js",
   "polls.js",

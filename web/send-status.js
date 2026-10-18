@@ -20,7 +20,9 @@ const CONFIRM_TIMEOUT_MS = 18000;
 // offline sits in the connection queue and goes out on reconnect, so its
 // confirm timer must not run until then; it shows "Waiting for connection"
 // instead, and resumeWaiting() (called after the queue flushes) arms it.
-export function createSendStatus({ isOnline } = {}) {
+// onRetry (optional): runs before a Retry resends, so the connection can be
+// checked first (a half-open socket would swallow the resend).
+export function createSendStatus({ isOnline, onRetry } = {}) {
     const pending = new Map();   // msgId -> { timer, resend, waiting }
 
     function _el(msgId) { return document.getElementById('msg-' + msgId); }
@@ -102,8 +104,26 @@ export function createSendStatus({ isOnline } = {}) {
         announce(t('send.notDelivered'), true);
     }
 
+    // The gateway refused a send for now (rate limit): resend it after
+    // `delayMs` and keep the bubble pending instead of failing it. After a
+    // few refusals in a row it fails, with the usual Retry.
+    function retryLater(msgId, delayMs) {
+        const rec = pending.get(msgId);
+        if (!rec || !rec.resend || (rec.rateRetries || 0) >= 3) { _fail(msgId); return; }
+        rec.rateRetries = (rec.rateRetries || 0) + 1;
+        clearTimeout(rec.timer);
+        rec.waiting = false;
+        rec.timer = setTimeout(() => {
+            try { rec.resend(); } catch (_) { /* the confirm timer below re-fails it */ }
+            _arm(msgId, rec.resend);
+            const again = pending.get(msgId);
+            if (again) again.rateRetries = rec.rateRetries;
+        }, Math.max(0, delayMs));
+    }
+
     function _retry(msgId) {
         const rec = pending.get(msgId);
+        if (onRetry) { try { onRetry(); } catch (_) { /* best-effort */ } }
         const el = _el(msgId);
         if (el) { el.classList.remove('msg-failed'); el.classList.add('msg-pending'); _clearNote(el); }
         if (rec && rec.resend) {
@@ -140,5 +160,5 @@ export function createSendStatus({ isOnline } = {}) {
         return false;
     }
 
-    return { track, confirm, fail, trackPodWrite, resumeWaiting };
+    return { track, confirm, fail, retryLater, trackPodWrite, resumeWaiting };
 }

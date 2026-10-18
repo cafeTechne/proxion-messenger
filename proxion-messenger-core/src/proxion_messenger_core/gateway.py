@@ -1164,6 +1164,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
         if not cmd:
             return
+        # A refusal of a send names its message_id so the client can fail or
+        # retry that one pending message right away.
+        _mid = data.get("message_id")
+        _mid = {"message_id": _mid} if isinstance(_mid, str) and _mid else {}
 
         # Call signaling: its own budget (see _check_signal_rate_limit).
         if cmd in self._SIGNAL_RATE_COMMANDS:
@@ -1187,7 +1191,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         elif cmd not in _RATE_EXEMPT and not self._check_ws_rate_limit(websocket):
             await websocket.send(json.dumps({
                 "type": "error", "code": "E_RATE", "message": "rate_limited", "cmd": cmd,
-                "retry_after": self._rate_retry_after(self._rate_counters, websocket)}))
+                "retry_after": self._rate_retry_after(self._rate_counters, websocket), **_mid}))
             return
         # Auth-specific limit: 5/min
         if cmd in AUTH_RATE_COMMANDS and not self._check_auth_rate_limit(websocket):
@@ -1195,11 +1199,17 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             return
         # Heavy command limit: 10/min
         if cmd in HEAVY_COMMANDS and not self._check_heavy_rate_limit(websocket):
-            await websocket.send(json.dumps({"type": "error", "code": "E_RATE", "message": "rate_limited"}))
+            await websocket.send(json.dumps({"type": "error", "code": "E_RATE", "message": "rate_limited",
+                                             "cmd": cmd, **_mid}))
             return
 
         # Drop all commands from explicitly-revoked sessions immediately.
         if websocket in self._revoked_sessions:
+            return
+
+        # Heartbeat (web/connection.js): any reply proves the socket is alive.
+        if cmd == "ping":
+            await websocket.send(json.dumps({"type": "pong"}))
             return
 
         # R1: Reject commands from unregistered clients; internal stubs bypass.
@@ -1277,7 +1287,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 if cmd in _ROOM_MEMBER_CMDS:
                     if not is_room_member(self._store, self._local_rooms, _room_id_acl, _caller_webid_acl, websocket):
                         await websocket.send(json.dumps({
-                            "type": "error", "code": "E_FORBIDDEN", "message": "not_room_member",
+                            "type": "error", "code": "E_FORBIDDEN", "message": "not_room_member", **_mid,
                         }))
                         return
                 if cmd in _ROOM_OWNER_CMDS:

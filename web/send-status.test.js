@@ -202,3 +202,51 @@ describe('createSendStatus while offline', () => {
         expect(els['msg-o1'].classList.contains('msg-failed')).toBe(true);
     });
 });
+
+describe('refused sends (rate limit, error frames)', () => {
+    it('retryLater resends after the delay and keeps the bubble pending', () => {
+        const ss = createSendStatus({ isOnline: () => true });
+        els['msg-r1'] = mkMsgEl();
+        const resend = vi.fn();
+        ss.track('r1', resend);
+        ss.retryLater('r1', 2000);
+        vi.advanceTimersByTime(1999);
+        expect(resend).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1);
+        expect(resend).toHaveBeenCalledTimes(1);
+        expect(els['msg-r1'].classList.contains('msg-failed')).toBe(false);
+        ss.confirm('r1');
+        vi.advanceTimersByTime(60000);
+        expect(els['msg-r1'].classList.contains('msg-failed')).toBe(false);
+    });
+
+    it('fails after repeated refusals instead of retrying forever', () => {
+        const ss = createSendStatus({ isOnline: () => true });
+        els['msg-r2'] = mkMsgEl();
+        const resend = vi.fn();
+        ss.track('r2', resend);
+        for (let i = 0; i < 3; i++) { ss.retryLater('r2', 1000); vi.advanceTimersByTime(1000); }
+        expect(resend).toHaveBeenCalledTimes(3);
+        ss.retryLater('r2', 1000);
+        expect(els['msg-r2'].classList.contains('msg-failed')).toBe(true);
+    });
+
+    it('fail() marks the bubble at once, without waiting for the timeout', () => {
+        const ss = createSendStatus({ isOnline: () => true });
+        els['msg-r3'] = mkMsgEl();
+        ss.track('r3', () => {});
+        ss.fail('r3');
+        expect(els['msg-r3'].classList.contains('msg-failed')).toBe(true);
+    });
+
+    it('Retry checks the connection before resending', () => {
+        const order = [];
+        const ss = createSendStatus({ isOnline: () => true, onRetry: () => order.push('probe') });
+        els['msg-r4'] = mkMsgEl();
+        ss.track('r4', () => order.push('resend'));
+        ss.fail('r4');
+        const note = els['msg-r4']._children.find(c => c.className === 'msg-fail-note');
+        note._kids[1]._on();
+        expect(order).toEqual(['probe', 'resend']);
+    });
+});

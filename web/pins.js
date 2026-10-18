@@ -10,15 +10,21 @@ import { escHtml, scrollBehavior, didIdTag } from './util.js';
 import { jumpToMessage } from './wayfinding.js';
 import { isUndecryptable } from './e2e-secondary.js';
 
+// send (optional): queues pin/unpin while offline (connection.js
+// socketSendOrQueue) instead of dropping them into a closed socket.
 export function createPins({ getSocket, getActiveView, getMessages = () => [],
-    revealMessage = (id) => document.getElementById(`msg-${id}`) }) {
+    revealMessage = (id) => document.getElementById(`msg-${id}`), send = null }) {
+    function _send(socket, payload) {
+        if (send) send(payload);
+        else socket.send(JSON.stringify(payload));
+    }
 
     function pinMsg(msgId) {
         const socket = getSocket();
         const activeView = getActiveView();
-        if (!socket || !activeView) return;
+        if ((!socket && !send) || !activeView) return;
         const threadId = (activeView.type === "dm" || activeView.type === "local_dm" ? "dm:" : "room:") + activeView.id;
-        socket.send(JSON.stringify({ cmd: "pin_message", message_id: msgId, thread_id: threadId }));
+        _send(socket, { cmd: "pin_message", message_id: msgId, thread_id: threadId });
     }
 
     function showPinPanel() {
@@ -72,8 +78,8 @@ export function createPins({ getSocket, getActiveView, getMessages = () => [],
 
     function unpinMsg(msgId, threadId) {
         const socket = getSocket();
-        if (!socket) return;
-        socket.send(JSON.stringify({ cmd: "unpin_message", message_id: msgId, thread_id: threadId }));
+        if (!socket && !send) return;
+        _send(socket, { cmd: "unpin_message", message_id: msgId, thread_id: threadId });
     }
 
     function jumpToMsg(msgId) {
