@@ -6843,7 +6843,14 @@ import { initThemePicker } from './theme.js';
                 dismissBtn.onclick = () => banner.remove();
                 installBtn.onclick = async () => {
                     installBtn.disabled = true; installBtn.textContent = t('update.updating');
+                    // The running gateway locks its executable and would outlive the
+                    // update, so stop it first; a failed update relaunches to restart it.
+                    let _gwStopped = false;
                     try {
+                        if (window.__TAURI__?.invoke) {
+                            await window.__TAURI__.invoke('stop_gateway');
+                            _gwStopped = true;
+                        }
                         await updater.installUpdate();
                         if (window.__TAURI__.process && window.__TAURI__.process.relaunch) {
                             await window.__TAURI__.process.relaunch();
@@ -6851,6 +6858,11 @@ import { initThemePicker } from './theme.js';
                             installBtn.textContent = t('update.restart');
                         }
                     } catch (e) {
+                        if (_gwStopped && window.__TAURI__.process?.relaunch) {
+                            showToast(t('common.updateFailed'));
+                            await window.__TAURI__.process.relaunch();
+                            return;
+                        }
                         installBtn.disabled = false;
                         installBtn.textContent = t('update.retry');
                         showToast(t('common.updateFailed'));

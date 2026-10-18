@@ -11,6 +11,7 @@ loopback-skips-auth default.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import hashlib
 import json
 import logging
@@ -18,6 +19,7 @@ import os
 import platform
 import re
 import shutil
+import signal
 import sys
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
@@ -156,6 +158,7 @@ class TunnelManager:
         self._url: Optional[str] = None
         self._error: Optional[str] = None
         self._state = "stopped" if self._path else "absent"
+        self._atexit_registered = False
 
     def status(self) -> dict:
         return {"state": self._state, "url": self._url, "error": self._error}
@@ -190,6 +193,9 @@ class TunnelManager:
         self._error = None
         try:
             self._proc = await self._spawn(self._path, http_port)
+            if not self._atexit_registered:
+                atexit.register(self._kill_at_exit)
+                self._atexit_registered = True
             url = await asyncio.wait_for(self._read_until_url(), timeout)
         except asyncio.TimeoutError:
             self._error = "timed out waiting for the tunnel URL"
@@ -206,6 +212,18 @@ class TunnelManager:
         self._url = url
         self._state = "running"
         return self.status()
+
+    def _kill_at_exit(self) -> None:
+        """Backstop for an exit that skipped stop(): never leave cloudflared
+        forwarding the internet to a gateway port after the gateway is gone."""
+        proc = self._proc
+        # Only a process we really spawned (tests inject stand-ins).
+        if not isinstance(proc, asyncio.subprocess.Process) or proc.returncode is not None:
+            return
+        try:
+            os.kill(proc.pid, signal.SIGTERM)
+        except Exception:
+            pass
 
     async def stop(self) -> None:
         proc = self._proc

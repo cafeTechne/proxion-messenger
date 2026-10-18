@@ -1,7 +1,9 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tauri::{
     AppHandle, CustomMenuItem, Manager, State, SystemTray, SystemTrayEvent,
     SystemTrayMenu, SystemTrayMenuItem,
@@ -12,6 +14,14 @@ use serde::{Deserialize, Serialize};
 // ── Shared state ─────────────────────────────────────────────────────────────
 
 struct GatewayChild(Mutex<Option<tauri::api::process::CommandChild>>);
+
+#[derive(Default)]
+struct GatewayFlags {
+    /// The sidecar process is alive (cleared on its Terminated event).
+    running: AtomicBool,
+    /// We asked it to stop, so its exit is not a crash.
+    stopping: AtomicBool,
+}
 struct PendingDeepLink(Mutex<Option<String>>);
 struct TrayUnreadState(Mutex<Vec<UnreadContact>>);
 
@@ -178,12 +188,46 @@ fn is_autostart_launch(state: State<IsAutostartLaunch>) -> bool {
 
 // ── Quit (clean shutdown) ─────────────────────────────────────────────────────
 
-#[tauri::command]
-fn quit_app(app: AppHandle, gateway: State<GatewayChild>) {
-    if let Some(child) = gateway.0.lock().unwrap().take() {
+/// Ask the gateway to shut down and wait for it, killing it only if it does not
+/// exit in time. A clean exit stops its cloudflared tunnel and flushes the
+/// database; a bare kill skipped both, and on macOS/Linux it hit only the
+/// onefile launcher and orphaned the real gateway process behind it.
+/// If this app dies without calling it, the gateway sees EOF on its stdin and
+/// shuts itself down (PROXION_SHUTDOWN_ON_STDIN_EOF).
+fn shutdown_gateway(app: &AppHandle) {
+    let child = app.state::<GatewayChild>().0.lock().unwrap().take();
+    let Some(mut child) = child else { return };
+    let flags = app.state::<GatewayFlags>();
+    flags.stopping.store(true, Ordering::SeqCst);
+    if child.write(b"shutdown\n").is_ok() {
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while flags.running.load(Ordering::SeqCst) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    if flags.running.load(Ordering::SeqCst) {
         child.kill().ok();
     }
+}
+
+fn hide_main_window(app: &AppHandle) {
+    if let Some(win) = app.get_window("main") {
+        win.hide().ok();
+    }
+}
+
+#[tauri::command]
+fn quit_app(app: AppHandle) {
+    hide_main_window(&app);
+    shutdown_gateway(&app);
     app.exit(0);
+}
+
+/// Stops the gateway before the updater replaces its executable (a running
+/// gateway keeps the old binary locked and would outlive the update).
+#[tauri::command]
+async fn stop_gateway(app: AppHandle) {
+    shutdown_gateway(&app);
 }
 
 // ── Gateway output ────────────────────────────────────────────────────────────
@@ -219,6 +263,7 @@ fn main() {
             Some(vec![AUTOSTART_FLAG]),
         ))
         .manage(GatewayChild(Mutex::new(None)))
+        .manage(GatewayFlags::default())
         .manage(PendingDeepLink(Mutex::new(pending_link)))
         .manage(TrayUnreadState(Mutex::new(vec![])))
         .manage(IsAutostartLaunch(is_autostart))
@@ -232,11 +277,8 @@ fn main() {
                     }
                 }
                 "quit" => {
-                    if let Some(child) =
-                        app.state::<GatewayChild>().0.lock().unwrap().take()
-                    {
-                        child.kill().ok();
-                    }
+                    hide_main_window(app);
+                    shutdown_gateway(app);
                     app.exit(0);
                 }
                 id if id.starts_with("unread:") => {
@@ -265,6 +307,7 @@ fn main() {
             consume_pending_deep_link,
             is_autostart_launch,
             quit_app,
+            stop_gateway,
         ])
         .setup(|app| {
             let app_data_dir = app
@@ -302,6 +345,11 @@ fn main() {
                     // The webview dials plain ws://127.0.0.1:7474 and cannot accept a
                     // self-signed cert, so the loopback sidecar stays on plain ws/http.
                     env.insert("PROXION_AUTO_TLS".into(), "0".into());
+                    // Exit cleanly when this app closes our end of its stdin.
+                    env.insert("PROXION_SHUTDOWN_ON_STDIN_EOF".into(), "1".into());
+                    // After a relaunch or update, wait for the previous gateway to
+                    // release its ports instead of failing on them.
+                    env.insert("PROXION_BIND_WAIT".into(), "15".into());
                     env.insert(
                         "PROXION_DATA_DIR".into(),
                         app_data_dir.to_string_lossy().to_string(),
@@ -313,6 +361,7 @@ fn main() {
 
                     let (mut rx, child) = cmd.spawn().expect("failed to spawn sidecar");
                     *app.state::<GatewayChild>().0.lock().unwrap() = Some(child);
+                    app.state::<GatewayFlags>().running.store(true, Ordering::SeqCst);
 
                     let app_handle2 = app_handle.clone();
                     tauri::async_runtime::spawn(async move {
@@ -345,7 +394,10 @@ fn main() {
                                 }
                                 tauri::api::process::CommandEvent::Terminated(payload) => {
                                     eprintln!("[gateway] exited: {:?}", payload.code);
-                                    if payload.code.unwrap_or(0) != 0 && !reported {
+                                    let flags = app_handle2.state::<GatewayFlags>();
+                                    flags.running.store(false, Ordering::SeqCst);
+                                    let stopping = flags.stopping.load(Ordering::SeqCst);
+                                    if payload.code.unwrap_or(0) != 0 && !reported && !stopping {
                                         app_handle2.emit_all("gateway-crashed", ()).ok();
                                     }
                                 }
@@ -358,8 +410,14 @@ fn main() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Closing the last window ends the event loop; stop the gateway with it.
+            if let tauri::RunEvent::Exit = event {
+                shutdown_gateway(app);
+            }
+        });
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

@@ -3730,6 +3730,18 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
         return report
 
+    async def _stop_tunnel_for_exit(self) -> None:
+        """Stop the app-managed cloudflared tunnel, if any, as the gateway exits."""
+        mgr = getattr(self, "_tunnel", None)
+        if mgr is None:
+            return
+        self._tunnel = None
+        try:
+            await asyncio.wait_for(mgr.stop(), 8.0)
+            logger.info("Public tunnel stopped on shutdown")
+        except Exception as exc:
+            logger.warning("Stopping the public tunnel on shutdown failed: %s", exc)
+
     async def run(self):
         """Start the gateway server and poll loop."""
         try:
@@ -3932,6 +3944,9 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 for t in main_tasks:
                     if not t.done():
                         t.cancel()
+                # A cloudflared left running would keep forwarding the internet to
+                # loopback, where the next gateway trusts it as the local owner.
+                await self._stop_tunnel_for_exit()
                 # WAL checkpoint
                 if self._store:
                     try:

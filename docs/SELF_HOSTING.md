@@ -122,6 +122,8 @@ Optional variables:
 | `PROXION_SSL_CERT` | _(empty)_ | Path to TLS cert for gateway-native TLS (use Nginx/Caddy instead) |
 | `PROXION_SSL_KEY` | _(empty)_ | Path to TLS key |
 | `PROXION_AUTO_TLS` | `1` | `run_gateway.py` makes a self-signed cert when no cert is set. `0` keeps plain http/ws (the desktop app sets this) |
+| `PROXION_BIND_WAIT` | `0` | Seconds to wait for a taken port to free up before giving up (the desktop app sets 15 so a relaunch can wait for the old gateway) |
+| `PROXION_SHUTDOWN_ON_STDIN_EOF` | _(empty)_ | `1` makes the gateway shut down on a `shutdown` line or end of input on stdin (set by the desktop app) |
 | `PROXION_ALLOW_PRIVATE_RELAY` | _(empty)_ | Set to `1` for local federation testing only |
 | `PROXION_REQUIRE_AUTH` | `0` | Set to `1` to require Ed25519 DID ownership proof on WebSocket connect |
 | `PROXION_ADMIN_API_TOKEN` | _(empty)_ | Bearer token for the owner endpoints (`/backup`, `/restore`, `/export`, `/import`, `/contacts`, `/message-edits`, `/security-snapshot`). Required behind a reverse proxy, see below |

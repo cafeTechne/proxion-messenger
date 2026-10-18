@@ -85,7 +85,8 @@ class SidecarProcess:
         self.proc = subprocess.Popen(
             [sys.executable, str(REPO / "run_gateway.py")],
             cwd=str(tmp), env=env,
-            stdin=stdin if stdin is not None else subprocess.DEVNULL,
+            # Held open like the desktop app does; closing it means "app gone".
+            stdin=stdin if stdin is not None else subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace",
         )
@@ -118,6 +119,11 @@ class SidecarProcess:
         if self.proc.poll() is None:
             self.proc.kill()
             self.proc.wait(10)
+        if self.proc.stdin:
+            try:
+                self.proc.stdin.close()
+            except OSError:
+                pass
 
 
 @pytest.fixture
@@ -228,3 +234,98 @@ def test_ready_means_both_ports_accept(sidecars):
     for port in (sc.http_port, sc.ws_port):
         with socket.create_connection(("127.0.0.1", port), timeout=2):
             pass
+
+
+# ── U3: the sidecar never outlives the desktop app ───────────────────────────
+
+def test_sidecar_env_asks_for_stdin_shutdown_and_bind_wait():
+    env = tauri_sidecar_env()
+    assert env.get("PROXION_SHUTDOWN_ON_STDIN_EOF") == "1"
+    assert float(env.get("PROXION_BIND_WAIT", "0")) > 0
+
+
+def test_app_exit_closing_stdin_stops_the_sidecar(sidecars, tmp_path):
+    sc = sidecars()
+    sc.wait_ready()
+    sc.proc.stdin.close()      # what the OS does when the desktop app exits
+    code = sc.wait_exit(30)
+    assert code == 0, sc.output()
+    assert "stdin" in _log_text(tmp_path / "a")
+
+
+def test_shutdown_line_stops_the_sidecar(sidecars):
+    sc = sidecars()
+    sc.wait_ready()
+    sc.proc.stdin.write("shutdown\n")
+    sc.proc.stdin.flush()
+    assert sc.wait_exit(30) == 0, sc.output()
+
+
+def test_without_the_flag_a_closed_stdin_is_ignored(sidecars):
+    # Running the gateway by hand (stdin at /dev/null, a service, nohup) must
+    # not make it exit.
+    sc = sidecars(extra_env={"PROXION_SHUTDOWN_ON_STDIN_EOF": ""}, stdin=subprocess.DEVNULL)
+    sc.wait_ready()
+    assert sc.wait_exit(3) is None
+
+
+def test_gateway_exit_stops_the_tunnel(tmp_path):
+    from proxion_messenger_core.gateway import ProxionGateway, GatewayConfig
+    from proxion_messenger_core.persist import AgentState
+    from proxion_messenger_core.readstate import ReadState
+
+    class FakeTunnel:
+        stopped = False
+
+        async def stop(self):
+            FakeTunnel.stopped = True
+
+    gw = ProxionGateway(agent=AgentState.generate(), dm_clients={}, room_memberships={},
+                        config=GatewayConfig(host="127.0.0.1", port=_free_port(),
+                                             db_path=str(tmp_path / "gw.db")),
+                        read_state=ReadState())
+    gw._tunnel = FakeTunnel()
+    _run(gw._stop_tunnel_for_exit())
+    assert FakeTunnel.stopped and gw._tunnel is None
+    src = (SRC / "proxion_messenger_core" / "gateway.py").read_text(encoding="utf-8")
+    run_body = src[src.index("    async def run(self):"):]
+    assert "await self._stop_tunnel_for_exit()" in run_body
+
+
+def test_tunnel_backstop_kills_cloudflared_at_exit():
+    from proxion_messenger_core.tunnel import TunnelManager
+
+    async def spawn(path, port):
+        return await asyncio.create_subprocess_exec(
+            sys.executable, "-c",
+            "import sys,time; print('https://fake-x.trycloudflare.com', flush=True); time.sleep(120)",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+
+    async def scenario():
+        mgr = TunnelManager(cloudflared_path="cloudflared", spawn=spawn)
+        try:
+            st = await mgr.start(8080, timeout=20)
+            assert st["state"] == "running", st
+            assert mgr._atexit_registered
+            proc = mgr._proc
+            mgr._kill_at_exit()          # what atexit runs if stop() was skipped
+            await asyncio.wait_for(proc.wait(), 10)
+            assert proc.returncode is not None
+        finally:
+            await mgr.stop()
+
+    _run(scenario())
+
+
+def test_desktop_shell_stops_the_gateway_on_every_exit_path():
+    src = MAIN_RS.read_text(encoding="utf-8")
+    body = src[:src.index("#[cfg(test)]")]
+    assert "RunEvent::Exit" in body
+    assert r'child.write(b"shutdown\n")' in body
+    # The only hard kill is the timeout fallback inside shutdown_gateway.
+    assert body.count("child.kill()") == 1
+    fn = body[body.index("fn shutdown_gateway"):]
+    assert "child.kill()" in fn[:fn.index("\n}\n")]
+    for path in ("fn quit_app", '"quit" =>', "async fn stop_gateway"):
+        seg = body[body.index(path):]
+        assert "shutdown_gateway(" in seg[:400], path

@@ -132,7 +132,20 @@ async def main():
         from proxion_messenger_core.upnp import remove_upnp_map
         atexit.register(remove_upnp_map, _upnp_mapped_port)
 
-    from proxion_messenger_core.lifecycle import GatewayBindError
+    from proxion_messenger_core.lifecycle import GatewayBindError, watch_stdin_for_shutdown
+    # Desktop sidecar: the app holds our stdin open. "shutdown", or EOF when the
+    # app exits for any reason (quit, relaunch, update, crash), stops the gateway
+    # cleanly so it is never orphaned and its cloudflared tunnel is closed.
+    if os.environ.get("PROXION_SHUTDOWN_ON_STDIN_EOF") == "1" and sys.stdin is not None:
+        _loop = asyncio.get_running_loop()
+
+        def _request_stop():
+            try:
+                _loop.call_soon_threadsafe(gw._stop_event.set)
+            except RuntimeError:
+                pass  # loop already closed: the gateway is exiting anyway
+
+        watch_stdin_for_shutdown(sys.stdin, _request_stop)
     try:
         await gw.run()
     except GatewayBindError as exc:
