@@ -140,6 +140,9 @@ async def test_rapid_room_switching_is_not_refused(big_account):
 async def test_reads_do_not_spend_the_write_budget_and_writes_stay_limited(big_account):
     gw, me, room_ids = big_account
     ws = await _register(gw, me)
+    # register spent one write; start the window clean so the count below does
+    # not depend on how long the store took (the window is 10 s).
+    gw._rate_counters.clear()
     for _ in range(200):
         await gw.process_command(ws, {"cmd": "get_rooms"})
     ws.send.reset_mock()

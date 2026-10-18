@@ -1696,20 +1696,24 @@ class SecurityStoreMixin(object):
         with self._conn() as conn:
             if cursor:
                 row = conn.execute(
-                    "SELECT created_at FROM security_events WHERE id = ?", (cursor,)
+                    "SELECT created_at, rowid FROM security_events WHERE id = ?", (cursor,)
                 ).fetchone()
                 if row:
+                    # Events written in the same clock tick share created_at;
+                    # page on (created_at, rowid) so none are skipped.
                     rows = conn.execute(
-                        "SELECT * FROM security_events WHERE created_at > ? ORDER BY created_at ASC LIMIT ?",
-                        (row[0], limit),
+                        "SELECT * FROM security_events WHERE created_at > ? "
+                        "OR (created_at = ? AND rowid > ?) "
+                        "ORDER BY created_at ASC, rowid ASC LIMIT ?",
+                        (row[0], row[0], row[1], limit),
                     ).fetchall()
                 else:
                     rows = conn.execute(
-                        "SELECT * FROM security_events ORDER BY created_at ASC LIMIT ?", (limit,)
+                        "SELECT * FROM security_events ORDER BY created_at ASC, rowid ASC LIMIT ?", (limit,)
                     ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT * FROM security_events ORDER BY created_at ASC LIMIT ?", (limit,)
+                    "SELECT * FROM security_events ORDER BY created_at ASC, rowid ASC LIMIT ?", (limit,)
                 ).fetchall()
             return [dict(r) for r in rows]
     def record_notification_fallback(

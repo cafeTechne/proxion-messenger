@@ -9,7 +9,9 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -28,6 +30,86 @@ WRAPPED_SECRET_COLUMNS: tuple[tuple[str, str], ...] = (
 )
 
 
+_POOL_LOCK = threading.Lock()
+
+
+class _ConnSlot(object):
+    """One thread's connection plus its ``with`` nesting depth."""
+    __slots__ = ("raw", "depth", "__weakref__")
+
+    def __init__(self, raw: sqlite3.Connection):
+        self.raw = raw
+        self.depth = 0
+
+
+class _PooledConn(object):
+    """Handle on a thread's shared connection.
+
+    Behaves like the per-call connection it replaces: ``with`` commits on
+    success and rolls back on error (outermost block only), ``close()`` and
+    dropping the handle discard a transaction that was never committed, so a
+    stray uncommitted write cannot hold the write lock.
+    """
+    __slots__ = ("_slot",)
+
+    def __init__(self, slot: _ConnSlot):
+        object.__setattr__(self, "_slot", slot)
+
+    @property
+    def _raw(self) -> sqlite3.Connection:
+        raw = self._slot.raw
+        if raw is None:
+            raise sqlite3.ProgrammingError("Cannot operate on a closed database.")
+        return raw
+
+    def __getattr__(self, name):
+        return getattr(self._raw, name)
+
+    def __setattr__(self, name, value):
+        setattr(self._raw, name, value)
+
+    # Defined here (not via __getattr__) so the handle stays alive for the
+    # call and a one-shot ``store._conn().execute(...)`` is discarded after.
+    def execute(self, *args):
+        return self._raw.execute(*args)
+
+    def executemany(self, *args):
+        return self._raw.executemany(*args)
+
+    def executescript(self, *args):
+        return self._raw.executescript(*args)
+
+    def __enter__(self):
+        self._slot.depth += 1
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        slot = self._slot
+        slot.depth -= 1
+        if slot.depth == 0 and slot.raw is not None:
+            if exc_type is None:
+                slot.raw.commit()
+            else:
+                slot.raw.rollback()
+        return False
+
+    def _discard_open_txn(self) -> None:
+        slot = self._slot
+        raw = slot.raw
+        if slot.depth == 0 and raw is not None and raw.in_transaction:
+            try:
+                raw.rollback()
+            except Exception:
+                pass
+
+    def close(self) -> None:
+        self._discard_open_txn()
+
+    def __del__(self):
+        try:
+            self._discard_open_txn()
+        except Exception:
+            pass
 
 
 class _StoreBase(object):
@@ -125,11 +207,48 @@ class _StoreBase(object):
         self._db_wrap_key = new_key
         return changed
 
-    def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+    def _conn(self) -> "_PooledConn":
+        """Return this thread's connection to the store, opening it once.
+
+        Opening a connection and setting WAL cost more than most queries, and
+        the gateway makes several store calls per message, so each thread keeps
+        one connection for the life of the store. ``with self._conn()`` keeps
+        sqlite's commit-or-rollback semantics; nested blocks join the
+        outermost transaction, which commits when it exits.
+        """
+        tls = self.__dict__.get("_tls")
+        if tls is None:
+            tls = self.__dict__.setdefault("_tls", threading.local())
+        slot = getattr(tls, "slot", None)
+        if slot is None or slot.raw is None:
+            raw = sqlite3.connect(self.db_path, check_same_thread=False)
+            raw.execute("PRAGMA journal_mode=WAL")
+            slot = _ConnSlot(raw)
+            tls.slot = slot
+            with _POOL_LOCK:
+                self.__dict__.setdefault("_all_slots", []).append(slot)
+        raw = slot.raw
+        if slot.depth == 0:
+            raw.row_factory = sqlite3.Row
+        return _PooledConn(slot)
+
+    @contextmanager
+    def transaction(self):
+        """Group several store calls into one commit on this thread."""
+        with self._conn() as conn:
+            yield conn
+
+    def close(self) -> None:
+        """Close every pooled connection (each thread reopens on next use)."""
+        with _POOL_LOCK:
+            slots = self.__dict__.pop("_all_slots", [])
+        for slot in slots:
+            raw, slot.raw = slot.raw, None
+            if raw is not None:
+                try:
+                    raw.close()
+                except Exception:
+                    pass
     def checkpoint(self) -> None:
         """Flush the WAL to the main database file (call before shutdown)."""
         with self._conn() as conn:

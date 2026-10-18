@@ -3973,6 +3973,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                         self._store.checkpoint()
                     except Exception:
                         pass
+                    self._store.close()
             if _failure is not None:
                 raise _failure
 
