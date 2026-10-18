@@ -30,8 +30,12 @@ class VoiceHandlerMixin:
         parties = {sess.get("caller_webid"), sess.get("target_webid")}
         return a in parties and b in parties
 
-    async def _cleanup_voice_sessions(self, websocket) -> None:
-        """Notify the other party and remove any voice sessions the socket was in."""
+    async def _cleanup_voice_sessions(self, websocket, webid: str = "") -> None:
+        """Notify the other party and remove any voice sessions the socket was in.
+
+        ``webid`` is the socket's identity. handle_client pops _client_webids
+        before calling this, so it passes the webid in; without it the voice
+        channel cleanup below found no identity and left a ghost member."""
         for sid, sess in list(self._voice_sessions.items()):
             if websocket not in (sess.get("caller_ws"), sess.get("callee_ws")):
                 continue
@@ -51,27 +55,62 @@ class VoiceHandlerMixin:
                     pass
             del self._voice_sessions[sid]
 
-        # Also remove from any voice channels
-        leaver_webid = self._client_webids.get(websocket, "")
+        # Also remove from any voice channels this socket is in. Only the entry
+        # owned by THIS socket: another tab of the same account may be the one in
+        # the call, and closing an idle tab must not drop it.
+        leaver_webid = webid or self._client_webids.get(websocket, "")
         if leaver_webid:
             for ch_id in list(self._voice_channels.keys()):
                 ch = self._voice_channels.get(ch_id)
-                if ch and leaver_webid in ch.get("members", {}):
-                    ch["members"].pop(leaver_webid, None)
-                    for minfo in list(ch.get("members", {}).values()):
-                        mws = minfo.get("ws") if isinstance(minfo, dict) else minfo
-                        if mws:
-                            try:
-                                asyncio.create_task(mws.send(json.dumps({
-                                    "type": "voice_peer_left",
-                                    "channel_id": ch_id,
-                                    "peer_webid": leaver_webid,
-                                })))
-                            except Exception:
-                                pass
-                    if not ch.get("members"):
-                        self._voice_channels.pop(ch_id, None)
-                    asyncio.create_task(self._broadcast_voice_channel_state(ch_id))
+                minfo = ch.get("members", {}).get(leaver_webid) if ch else None
+                mws = minfo.get("ws") if isinstance(minfo, dict) else minfo
+                if minfo is not None and mws is websocket:
+                    await self._depart_voice_channel(ch_id, leaver_webid)
+
+    async def _depart_voice_channel(self, channel_id: str, leaver_webid: str) -> None:
+        """Remove a local member from a voice channel and tell everyone else:
+        local members by socket, remote members' gateways by relay, and, for a
+        channel hosted on another gateway, the host too. The host must hear it
+        even when the leaver was alone in the call, or it keeps a ghost."""
+        channel = self._voice_channels.get(channel_id)
+        if not channel:
+            return
+        channel["members"].pop(leaver_webid, None)
+        own_gw = self._gateway_http_url()
+        leave_event = json.dumps({
+            "type": "voice_peer_left",
+            "channel_id": channel_id,
+            "peer_webid": leaver_webid,
+        })
+        relay_to = []
+        for member_info in list(channel["members"].values()):
+            member_ws = member_info.get("ws") if isinstance(member_info, dict) else member_info
+            member_gw = member_info.get("gateway_url") if isinstance(member_info, dict) else None
+            if member_ws:
+                try:
+                    await member_ws.send(leave_event)
+                except Exception:
+                    pass
+            elif member_gw and member_gw not in relay_to:
+                relay_to.append(member_gw)
+        host_gw = channel.get("host_gateway_url")
+        if host_gw and host_gw != own_gw and host_gw not in relay_to:
+            relay_to.append(host_gw)
+        for gw_url in relay_to:
+            asyncio.create_task(self._relay_ephemeral(gw_url, {
+                "content_type": "voice_channel_leave",
+                "channel_id": channel_id,
+                "from_webid": leaver_webid,
+                "origin_gateway_url": own_gw,
+            }))
+        # A channel mirrored for a room hosted elsewhere only exists for our local
+        # users; once none is left, drop it with its remote routing entries.
+        if not channel["members"] or (
+            channel_id not in self._local_rooms
+            and not any((m.get("ws") if isinstance(m, dict) else m)
+                        for m in channel["members"].values())):
+            self._voice_channels.pop(channel_id, None)
+        await self._broadcast_voice_channel_state(channel_id)
 
     def _voice_channel_participants(self, channel_id: str) -> list:
         ch = self._voice_channels.get(channel_id) or {}
@@ -976,35 +1015,4 @@ class VoiceHandlerMixin:
         leaver_webid = self._client_webids.get(websocket, "")
         if not channel_id or not leaver_webid:
             return
-
-        channel = self._voice_channels.get(channel_id)
-        if not channel:
-            return
-
-        channel["members"].pop(leaver_webid, None)
-        own_gw = self._gateway_http_url()
-
-        for member_webid, member_info in list(channel["members"].items()):
-            member_ws = member_info.get("ws") if isinstance(member_info, dict) else member_info
-            member_gw = member_info.get("gateway_url") if isinstance(member_info, dict) else None
-            leave_event = json.dumps({
-                "type": "voice_peer_left",
-                "channel_id": channel_id,
-                "peer_webid": leaver_webid,
-            })
-            if member_ws:
-                try:
-                    await member_ws.send(leave_event)
-                except Exception:
-                    pass
-            elif member_gw:
-                asyncio.create_task(self._relay_ephemeral(member_gw, {
-                    "content_type": "voice_channel_leave",
-                    "channel_id": channel_id,
-                    "from_webid": leaver_webid,
-                    "origin_gateway_url": own_gw,
-                }))
-
-        if not channel["members"]:
-            self._voice_channels.pop(channel_id, None)
-        await self._broadcast_voice_channel_state(channel_id)
+        await self._depart_voice_channel(channel_id, leaver_webid)

@@ -1020,7 +1020,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                         "last_active_at": now,
                     }))
             
-            await self._cleanup_voice_sessions(websocket)
+            await self._cleanup_voice_sessions(websocket, webid or "")
             for room in self._local_rooms.values():
                 room["members"].discard(websocket)
 
