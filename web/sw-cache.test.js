@@ -109,3 +109,55 @@ describe('service worker fetch handler', () => {
         }
     });
 });
+
+// The install step used cache.addAll(SHELL), which is atomic: clientid.jsonld
+// 404ing off localhost failed the whole install, so no worker ever activated.
+describe('service worker install', () => {
+    function loadForInstall(failing) {
+        const listeners = {};
+        const added = [];
+        let skipped = false;
+        const cache = {
+            addAll: async (urls) => {
+                for (const u of urls) if (failing.has(u)) throw new TypeError('bad response: ' + u);
+                added.push(...urls);
+            },
+            add: async (u) => {
+                if (failing.has(u)) throw new TypeError('bad response: ' + u);
+                added.push(u);
+            },
+        };
+        const self = {
+            location: new URL(ORIGIN + '/'),
+            addEventListener: (type, fn) => { listeners[type] = fn; },
+            skipWaiting: () => { skipped = true; },
+            clients: { claim: () => {}, matchAll: async () => [] },
+            registration: { showNotification: async () => {} },
+        };
+        new Function('self', 'caches', 'fetch', 'URL', 'Request', 'indexedDB', SRC)(
+            self, { open: async () => cache }, async () => ({}), URL, Request, undefined,
+        );
+        const run = async () => {
+            let p = null;
+            listeners.install({ waitUntil: (x) => { p = x; } });
+            await p;
+        };
+        return { run, added, skipped: () => skipped };
+    }
+
+    it('installs when an optional asset fails, caching everything else', async () => {
+        const sw = loadForInstall(new Set(['clientid.jsonld']));
+        await sw.run();
+        expect(sw.skipped()).toBe(true);
+        expect(sw.added).toContain('index.html');
+        expect(sw.added).toContain('main.js');
+        expect(sw.added).toContain('vendor/jsQR.min.js');
+        expect(sw.added).not.toContain('clientid.jsonld');
+    });
+
+    it('still fails the install when the page itself cannot be cached', async () => {
+        const sw = loadForInstall(new Set(['index.html']));
+        await expect(sw.run()).rejects.toThrow(/index\.html/);
+        expect(sw.skipped()).toBe(false);
+    });
+});

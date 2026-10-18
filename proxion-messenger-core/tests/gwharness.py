@@ -88,8 +88,12 @@ class GatewayHandle:
 
 
 def serve_gateway(gw, ws_port: int, http_port: int, *, serve_http: bool = True,
-                  wait_http: bool = True, timeout: float = STARTUP_TIMEOUT) -> GatewayHandle:
+                  wait_http: bool = True, timeout: float = STARTUP_TIMEOUT,
+                  web_dir: str | None = None) -> GatewayHandle:
     """Run ``gw`` in a background thread and wait until it is actually serving.
+
+    ``web_dir`` serves static files from that directory (default: none, so
+    every static path 404s).
 
     Raises RuntimeError if the gateway fails to start or never accepts a
     connection, instead of handing back a dead gateway.
@@ -107,7 +111,7 @@ def serve_gateway(gw, ws_port: int, http_port: int, *, serve_http: bool = True,
             async with websockets.serve(gw.handle_client, "127.0.0.1", ws_port):
                 http_task = None
                 if serve_http:
-                    http_task = asyncio.create_task(gw._serve_http(None, http_port))
+                    http_task = asyncio.create_task(gw._serve_http(web_dir, http_port))
                 handle.ready.set()
                 try:
                     await stop.wait()

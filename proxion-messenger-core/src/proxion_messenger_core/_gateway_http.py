@@ -3149,6 +3149,8 @@ class HttpEndpointsMixin:
                     '.js':   b'application/javascript; charset=utf-8',
                     '.css':  b'text/css',
                     '.json': b'application/manifest+json',
+                    # clientid.jsonld is in the service worker's shell list.
+                    '.jsonld': b'application/ld+json',
                     '.svg':  b'image/svg+xml',
                     '.png':  b'image/png',
                     '.ico':  b'image/x-icon',

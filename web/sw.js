@@ -119,10 +119,19 @@ const IS_LOCAL = self.location.hostname === "localhost" ||
 // GETs or dynamic gateway responses, and keep the cache from growing unbounded.
 const STATIC_ASSET = /\.(?:js|jsonld|css|svg|png|ico|woff2|json|webmanifest)$/;
 
+// The page itself must be cached for the worker to be useful offline; the rest
+// is cached one by one, so a single asset that 404s (or a gateway that serves
+// it with the wrong type) cannot fail the whole install. addAll is atomic and
+// one miss used to leave the app with no worker at all: no offline shell, and
+// no push over the tunnel.
+const SHELL_REQUIRED = ["./", "index.html", "style.css", "main.js"];
+
 self.addEventListener("install", (e) => {
   if (IS_LOCAL) { self.skipWaiting(); return; }
   e.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())
+    caches.open(CACHE).then((c) => c.addAll(SHELL_REQUIRED).then(() =>
+      Promise.allSettled(SHELL.filter((u) => !SHELL_REQUIRED.includes(u)).map((u) => c.add(u)))
+    )).then(() => self.skipWaiting())
   );
 });
 
