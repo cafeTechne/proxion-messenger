@@ -104,7 +104,7 @@ import { makeListNavigable, announce } from './a11y.js';
 import { buildPageTitle, viewLabel, createFaviconBadge, jumpToMessage } from './wayfinding.js';
 import { openMenu, closeMenu, refreshMenu, isMenuOpen } from './menu.js';
 import { showConfirm, showPromptModal, installDialogDismiss, installFieldErrorSync, setFieldError } from './dialogs.js';
-import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryGetEdits, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport, applyLocalRecord, dmHistoryGet, dmHistorySearch, dmHistoryEnabled } from './dmhistory.js';
+import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryGetEdits, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport, applyLocalRecord, isExpired, dmHistoryGet, dmHistorySearch, dmHistoryEnabled } from './dmhistory.js';
 import { unsealCopy, unsealList, mergeSearchHits, previewText, isSealedCopy } from './dmtext.js';
 import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } from './i18n.js';
 import { createIdentityResolver } from './identity.js';
@@ -3252,23 +3252,24 @@ import { createAccountSync } from './account-sync.js';
                 }
                 case "dm_messages_expired": {
                     const expBefore = event.before_timestamp;
+                    const expSince = event.since_timestamp || '';
                     // Purge the LOCAL plaintext cache first, and unconditionally
                     // (not just for the active view) — otherwise "disappeared"
                     // messages lived on in IndexedDB and, because the history
                     // merge is local-always-wins, RE-RENDERED on the next open.
                     if (expBefore) {
-                        dmHistoryDeleteBefore(event.thread_id, expBefore);
+                        dmHistoryDeleteBefore(event.thread_id, expBefore, expSince);
                         // The cache may key this thread by the peer's DID rather
                         // than the cert id — purge that alias too.
                         const _expPeer = Object.keys(peerDidToCertId)
                             .find(d => peerDidToCertId[d] === event.thread_id);
-                        if (_expPeer) dmHistoryDeleteBefore(_expPeer, expBefore);
+                        if (_expPeer) dmHistoryDeleteBefore(_expPeer, expBefore, expSince);
                     }
                     if (activeView && (activeView.certId === event.thread_id || activeView.id === event.thread_id) && expBefore) {
                         document.querySelectorAll('#message-feed .message').forEach(el => {
                             const msgId = el.dataset.messageId;
                             const msg = msgId && messageMap[msgId];
-                            if (msg && msg.timestamp && msg.timestamp < expBefore) {
+                            if (msg && msg.timestamp && isExpired(msg.timestamp, expBefore, expSince)) {
                                 el.remove();
                                 allMessages = allMessages.filter(m => m.message_id !== msgId);
                                 delete messageMap[msgId];

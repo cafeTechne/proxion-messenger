@@ -11,7 +11,7 @@ vi.mock('./auth.js', () => ({
 import {
   dmHistorySave, dmHistoryLoad, dmHistoryClearAll, dmHistorySetEnabled,
   dmHistoryDelete, dmHistoryDeleteBefore, dmHistoryExportRecent,
-  applyLocalRecord, fileForRecord, MAX_FILE_B64,
+  applyLocalRecord, fileForRecord, MAX_FILE_B64, isExpired,
 } from './dmhistory.js';
 
 const FILE = { filename: 'pic.png', mime_type: 'image/png', size: 4, data_b64: 'AAAAAA==', width: 2, height: 2 };
@@ -61,6 +61,16 @@ describe('DM file history', () => {
     await dmHistoryDelete('file-2');
     await dmHistoryDeleteBefore('t1', '2026-01-02T00:00:00Z');
     expect(await dmHistoryLoad('t1')).toEqual([]);
+  });
+
+  it('disappearing expiry keeps messages sent before the timer was turned on', async () => {
+    await dmHistorySave(msg('old', '2026-01-01T00:00:00Z'));
+    await dmHistorySave(msg('timed', '2026-01-02T12:00:00Z'));
+    await dmHistorySave(msg('fresh', '2026-01-04T00:00:00Z'));
+    await dmHistoryDeleteBefore('t1', '2026-01-03T00:00:00Z', '2026-01-02T00:00:00Z');
+    expect((await dmHistoryLoad('t1')).map(r => r.message_id).sort()).toEqual(['fresh', 'old']);
+    expect(isExpired('2026-01-02T12:00:00Z', '2026-01-03T00:00:00Z')).toBe(true);
+    expect(isExpired('2026-01-01T00:00:00Z', '2026-01-03T00:00:00Z', '2026-01-02T00:00:00Z')).toBe(false);
   });
 
   it('a too-large file keeps only its metadata and is marked unavailable', () => {

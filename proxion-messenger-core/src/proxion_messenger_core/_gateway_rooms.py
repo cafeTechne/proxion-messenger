@@ -45,6 +45,16 @@ _MAX_EDITS_PER_MESSAGE = 100
 _MAX_DISAPPEAR_MS = 365 * 24 * 60 * 60 * 1000
 
 
+def _expire_tick_seconds() -> float:
+    """Seconds between disappearing-message sweeps (PROXION_EXPIRE_TICK_S, for
+    tests that wait on an expiry; default 30)."""
+    import os
+    try:
+        return min(max(float(os.environ.get("PROXION_EXPIRE_TICK_S", "30")), 0.5), 300.0)
+    except ValueError:
+        return 30.0
+
+
 def _disappear_cutoff(ms) -> Optional[str]:
     """Return the ISO cutoff for a disappearing timer, or None to skip.
 
@@ -321,7 +331,7 @@ class RoomHandlerMixin:
         _POD_EXPIRE_BATCH = 200
         _consecutive_failures = 0
         while True:
-            await asyncio.sleep(30)
+            await asyncio.sleep(_expire_tick_seconds())
             try:
                 # --- Rooms ---
                 for room_id, ms in list(self._room_disappear_timers.items()):
@@ -333,11 +343,13 @@ class RoomHandlerMixin:
                     cutoff = _disappear_cutoff(ms)
                     if cutoff is None:
                         continue
-                    expired = []
-                    for msg in list(room.get("messages", [])):
-                        if msg.get("timestamp", "") < cutoff:
-                            expired.append(msg.get("message_id"))
-                    room["messages"] = [m for m in room.get("messages", []) if m.get("timestamp", "") >= cutoff]
+                    since = self._disappear_since_iso(room_id)
+
+                    def _gone(m, cutoff=cutoff, since=since):
+                        ts = m.get("timestamp", "")
+                        return ts < cutoff and (not since or ts >= since)
+                    expired = [m.get("message_id") for m in room.get("messages", []) if _gone(m)]
+                    room["messages"] = [m for m in room.get("messages", []) if not _gone(m)]
                     # Purge the STORE unconditionally by cutoff. This was gated on
                     # the in-memory `expired` list, but a room only keeps messages
                     # in memory when history_mode=="all" — so for normal rooms
@@ -350,7 +362,7 @@ class RoomHandlerMixin:
                         # pod object best-effort, then delete exactly those rows so
                         # nothing is orphaned; the rest expires on later ticks.
                         _expired_ids = self._store.select_message_ids_before(
-                            room_id, cutoff, limit=_POD_EXPIRE_BATCH)
+                            room_id, cutoff, limit=_POD_EXPIRE_BATCH, since_iso=since)
                         store_deleted = 0
                         for _mid in _expired_ids:
                             # Only drop the local row once the pod object is gone.
@@ -370,7 +382,8 @@ class RoomHandlerMixin:
                                 self._store.delete_message(_mid)
                                 store_deleted += 1
                     else:
-                        store_deleted = self._store.delete_messages_before(room_id, cutoff) if self._store else 0
+                        store_deleted = (self._store.delete_messages_before(room_id, cutoff, since)
+                                         if self._store else 0)
                     for mid in expired:
                         for ws in list(room.get("members", set())):
                             try:
@@ -390,6 +403,7 @@ class RoomHandlerMixin:
                                     "type": "dm_messages_expired",
                                     "thread_id": room_id,
                                     "before_timestamp": cutoff,
+                                    **({"since_timestamp": since} if since else {}),
                                 }))
                             except Exception:
                                 pass
@@ -408,7 +422,8 @@ class RoomHandlerMixin:
                         # DM messages are written through to the pod (local_dms/…)
                         # and re-imported on restart; delete the pod object too.
                         _expired_ids = self._store.select_message_ids_before(
-                            cert_id, cutoff, limit=_POD_EXPIRE_BATCH)
+                            cert_id, cutoff, limit=_POD_EXPIRE_BATCH,
+                            since_iso=self._disappear_since_iso(cert_id))
                         deleted = 0
                         for _mid in _expired_ids:
                             # Gate the local delete on pod success (see rooms
@@ -423,7 +438,8 @@ class RoomHandlerMixin:
                                 self._store.delete_message(_mid)
                                 deleted += 1
                     else:
-                        deleted = self._store.delete_messages_before(cert_id, cutoff)
+                        deleted = self._store.delete_messages_before(
+                            cert_id, cutoff, self._disappear_since_iso(cert_id))
                     if deleted:
                         await self._notify_dm_expired(cert_id, cutoff)
                 _consecutive_failures = 0  # reset on success
@@ -443,6 +459,7 @@ class RoomHandlerMixin:
         """Broadcast message_deleted events for DM threads to connected participants."""
         if not self._store:
             return
+        since = self._disappear_since_iso(cert_id)
         # Find all sockets that have this cert_id in their active view
         for webid, sockets in list(self._webid_sockets.items()):
             for ws in list(sockets):
@@ -451,6 +468,7 @@ class RoomHandlerMixin:
                         "type": "dm_messages_expired",
                         "thread_id": cert_id,
                         "before_timestamp": cutoff,
+                        **({"since_timestamp": since} if since else {}),
                     }))
                 except Exception:
                     pass
@@ -2838,6 +2856,7 @@ class RoomHandlerMixin:
             if not self._check_room_permission(websocket, thread_id, role="owner"):
                 await websocket.send(json.dumps({"type": "error", "message": "Only the room owner can set the disappear timer"}))
                 return
+            self._note_disappear_since(thread_id, self._room_disappear_timers.get(thread_id, 0), ms)
             self._room_disappear_timers[thread_id] = ms
             if self._store:
                 self._store.set_room_disappear_timer(thread_id, ms)
@@ -2875,6 +2894,7 @@ class RoomHandlerMixin:
         if self._auth_enforced() and caller not in (self._own_gateway_did(), peer):
             await websocket.send(json.dumps({"type": "error", "message": "Not a participant in this thread"}))
             return
+        self._note_disappear_since(thread_id, self._dm_disappear_timers.get(thread_id, 0), ms)
         self._dm_disappear_timers[thread_id] = ms
         if self._store:
             self._store.set_dm_disappear_timer(thread_id, ms)  # dedicated DM table (survives restart)
@@ -2897,6 +2917,33 @@ class RoomHandlerMixin:
                         "to_webid": peer,
                         "ms": ms,
                     }))
+
+    def _note_disappear_since(self, thread_id: str, old_ms, new_ms) -> None:
+        """Turning a timer on starts it now: messages sent before stay. Changing
+        the duration keeps the start; turning it off clears it."""
+        since_map = self.__dict__.setdefault("_disappear_since", {})
+        try:
+            old_ms, new_ms = int(old_ms or 0), int(new_ms or 0)
+        except (TypeError, ValueError):
+            return
+        if new_ms <= 0:
+            since = None
+        elif old_ms <= 0:
+            since = datetime.now(timezone.utc).isoformat()
+        else:
+            return
+        if since:
+            since_map[thread_id] = since
+        else:
+            since_map.pop(thread_id, None)
+        if self._store:
+            try:
+                self._store.set_disappear_since(thread_id, since)
+            except Exception:
+                logger.debug("could not persist disappear start", exc_info=True)
+
+    def _disappear_since_iso(self, thread_id: str) -> str:
+        return self.__dict__.get("_disappear_since", {}).get(thread_id, "") or ""
 
     async def _handle_get_disappear_timer(self, websocket, data: dict) -> None:
         room_id = data.get("room_id", "")

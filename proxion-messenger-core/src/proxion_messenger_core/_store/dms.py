@@ -207,6 +207,22 @@ class DmStoreMixin(object):
             ).fetchone()
         return int(row[0]) if row else 0
 
+    def set_disappear_since(self, thread_id: str, since: Optional[str]) -> None:
+        """Record (or clear, with None) when a thread's timer was turned on."""
+        with self._conn() as conn:
+            if since:
+                conn.execute(
+                    "INSERT OR REPLACE INTO disappear_timer_since (thread_id, since) VALUES (?,?)",
+                    (thread_id, since),
+                )
+            else:
+                conn.execute("DELETE FROM disappear_timer_since WHERE thread_id = ?", (thread_id,))
+
+    def get_all_disappear_since(self) -> dict:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT thread_id, since FROM disappear_timer_since").fetchall()
+        return {r[0]: r[1] for r in rows}
+
     def get_all_dm_disappear_timers(self) -> dict:
         with self._conn() as conn:
             rows = conn.execute("SELECT thread_id, ms FROM dm_disappear_timers").fetchall()

@@ -473,6 +473,14 @@ class _StoreBase(object):
                     ms        INTEGER NOT NULL
                 );
 
+                -- When a thread's disappearing timer was turned on (room or DM).
+                -- Only messages sent from then on expire; no row means the timer
+                -- predates this table and applies to every message, as before.
+                CREATE TABLE IF NOT EXISTS disappear_timer_since (
+                    thread_id TEXT PRIMARY KEY,
+                    since     TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS pending_relays (
                     id              TEXT PRIMARY KEY,
                     to_webid        TEXT NOT NULL,

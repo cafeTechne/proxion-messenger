@@ -296,8 +296,14 @@ export async function dmHistoryDelete(messageId) {
 
 // Remove a thread's cached messages older than a cutoff — disappearing-message
 // expiry. Without this, "disappeared" DMs lived on in the local plaintext cache
-// and re-rendered on the next open (the merge is local-always-wins).
-export async function dmHistoryDeleteBefore(threadId, beforeIso) {
+// and re-rendered on the next open (the merge is local-always-wins). With
+// sinceIso, messages sent before the timer was turned on are kept.
+export function isExpired(timestamp, beforeIso, sinceIso = '') {
+    const ts = timestamp || '';
+    return ts < beforeIso && (!sinceIso || ts >= sinceIso);
+}
+
+export async function dmHistoryDeleteBefore(threadId, beforeIso, sinceIso = '') {
     if (!threadId || !beforeIso) return;
     try {
         const db = await _open();
@@ -308,7 +314,7 @@ export async function dmHistoryDeleteBefore(threadId, beforeIso) {
             req.onsuccess = (e) => {
                 const cur = e.target.result;
                 if (cur) {
-                    if ((cur.value.timestamp || '') < beforeIso) os.delete(cur.primaryKey);
+                    if (isExpired(cur.value.timestamp, beforeIso, sinceIso)) os.delete(cur.primaryKey);
                     cur.continue();
                 }
             };

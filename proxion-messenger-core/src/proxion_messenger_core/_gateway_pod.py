@@ -1276,6 +1276,7 @@ class PodSyncMixin:
                 continue
             done.add(room_id)
             _cutoff = self._disappear_cutoff_iso(room_id, is_dm=False)
+            _since = self._disappear_since_iso(room_id)
             # R13: retry logic with 3 attempts and 2s backoff
             for _attempt in range(3):
                 try:
@@ -1287,7 +1288,7 @@ class PodSyncMixin:
                         if self._store.get_message(message_id):
                             continue
                         # F5: do not resurrect an expired disappearing message.
-                        if _cutoff and (m.get("timestamp") or "") < _cutoff:
+                        if _cutoff and _since <= (m.get("timestamp") or "") < _cutoff:
                             continue
                         try:
                             self._store.save_message(
@@ -1418,13 +1419,14 @@ class PodSyncMixin:
         for cert in certs:
             try:
                 _cutoff = self._disappear_cutoff_iso(cert.certificate_id, is_dm=True)
+                _since = self._disappear_since_iso(cert.certificate_id)
                 messages = await loop.run_in_executor(None, _msg_receive, cert, client)
                 for msg in messages:
                     if self._store.get_message(msg.message_id):
                         continue
                     ts_iso = datetime.fromtimestamp(msg.timestamp, tz=timezone.utc).isoformat()
                     # F5: do not resurrect an expired disappearing message.
-                    if _cutoff and ts_iso < _cutoff:
+                    if _cutoff and _since <= ts_iso < _cutoff:
                         continue
                     try:
                         self._store.save_message(

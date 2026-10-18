@@ -285,6 +285,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # Disappearing messages: room_id -> ms (0 = disabled) — must init before _hydrate_from_store
         self._room_disappear_timers: dict = {}
         self._dm_disappear_timers: dict = {}  # cert_id -> ms
+        # thread id -> ISO time the timer was turned on (older messages stay)
+        self._disappear_since: dict = {}
 
         # Dirty read positions for pod flush (flushed every 30s by _read_position_flush_loop)
         self._dirty_read_positions: dict = {}  # (webid, channel_id) -> ts
@@ -445,6 +447,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                     self._dm_disappear_timers[_tid] = min(int(_dms), _MAX_DISAPPEAR_MS)
         except Exception:
             logger.debug("DM disappear-timer restore skipped", exc_info=True)
+        try:
+            self._disappear_since.update(self._store.get_all_disappear_since())
+        except Exception:
+            logger.debug("disappear-since restore skipped", exc_info=True)
         # R12: load revoked DIDs into fast in-memory set
         if self._store:
             self._revoked_dids = self._store.get_revoked_dids()
@@ -3015,6 +3021,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # different local user). Same derivation presence relay uses.
         _deliver = (self._store.get_relationship_owner(from_webid) if self._store else "") or to_webid
         if our_cert_id:
+            self._note_disappear_since(our_cert_id, self._dm_disappear_timers.get(our_cert_id, 0), ms)
             self._dm_disappear_timers[our_cert_id] = ms
             if self._store:
                 try:

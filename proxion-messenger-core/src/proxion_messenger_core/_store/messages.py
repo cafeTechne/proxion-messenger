@@ -105,21 +105,21 @@ class MessageStoreMixin(object):
             logger.info("Pruned %d oldest messages from thread %s", len(victims), thread_id)
         return len(victims)
 
-    def delete_messages_before(self, thread_id: str, cutoff_iso: str) -> int:
-        """Delete messages older than cutoff_iso from a thread. Returns count deleted."""
+    def delete_messages_before(self, thread_id: str, cutoff_iso: str, since_iso: str = "") -> int:
+        """Delete messages older than cutoff_iso from a thread (and, with
+        since_iso, not older than it). Returns count deleted."""
+        where = "thread_id = ? AND timestamp < ?" + (" AND timestamp >= ?" if since_iso else "")
+        params = (thread_id, cutoff_iso) + ((since_iso,) if since_iso else ())
         with self._conn() as conn:
             conn.execute(
                 "DELETE FROM message_files WHERE message_id IN ("
-                "SELECT message_id FROM messages WHERE thread_id = ? AND timestamp < ?)",
-                (thread_id, cutoff_iso),
+                f"SELECT message_id FROM messages WHERE {where})",
+                params,
             )
-            cur = conn.execute(
-                "DELETE FROM messages WHERE thread_id = ? AND timestamp < ?",
-                (thread_id, cutoff_iso)
-            )
+            cur = conn.execute(f"DELETE FROM messages WHERE {where}", params)
             return cur.rowcount
     def select_message_ids_before(
-        self, thread_id: str, cutoff_iso: str, limit: int = 0
+        self, thread_id: str, cutoff_iso: str, limit: int = 0, since_iso: str = ""
     ) -> list[str]:
         """Return message_ids in a thread older than cutoff_iso, oldest first.
 
@@ -128,8 +128,8 @@ class MessageStoreMixin(object):
         so a thread with many expired ids does not wedge the expiry loop.
         """
         sql = ("SELECT message_id FROM messages WHERE thread_id = ? AND timestamp < ? "
-               "ORDER BY timestamp ASC")
-        params: list = [thread_id, cutoff_iso]
+               + ("AND timestamp >= ? " if since_iso else "") + "ORDER BY timestamp ASC")
+        params: list = [thread_id, cutoff_iso] + ([since_iso] if since_iso else [])
         if limit and limit > 0:
             sql += " LIMIT ?"
             params.append(limit)

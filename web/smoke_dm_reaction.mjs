@@ -63,6 +63,8 @@ async function startGateway(name) {
     // Federation mutations enforce HTTPS by default; opt out for loopback http.
     PROXION_ALLOW_INSECURE_FEDERATION: '1',
     PROXION_LOG_LEVEL: process.env.PROXION_LOG_LEVEL || 'INFO',
+    // Sweep disappearing messages every 2 s so the expiry check below is quick.
+    PROXION_EXPIRE_TICK_S: '2',
   };
   const p = spawn('python', ['scripts/run_test_gateway.py'], { cwd: REPO, env });
   procs.push(p);
@@ -345,11 +347,60 @@ try {
     if (!process.exitCode) console.log(`  · ${label}: reaction, edit marker and reply quote kept after reload`);
   }
 
+  if (process.exitCode) throw new Error('stop');
+
+  // ── Disappearing messages: Alice turns on a 30 s timer. Messages sent after
+  // that vanish live on BOTH sides (sender included) and stay gone after a
+  // reload; the older messages above stay (the timer is not retroactive).
+  step = 'disappear-set';
+  await alice.evaluate(async () => {
+    document.getElementById('room-options-btn').click();
+    await new Promise(r => setTimeout(r, 300));
+    document.getElementById('room-opt-disappear').click();
+  });
+  await sleep(500);
+  await alice.evaluate(() => {
+    document.getElementById('disappear-timer-select').value = '30000';
+    document.getElementById('disappear-save').click();
+  });
+  await bob.waitForFunction(() => getComputedStyle(document.getElementById('disappear-banner')).display !== 'none',
+    { timeout: 10000 }).catch(() => fail('Bob never saw the disappearing-messages timer'));
+  if (process.exitCode) throw new Error('stop');
+  const VA = 'vanish-a-' + Math.random().toString(36).slice(2, 6);
+  const VB = 'vanish-b-' + Math.random().toString(36).slice(2, 6);
+  for (const [p, t] of [[alice, VA], [bob, VB]]) {
+    await p.focus('#message-input'); await p.type('#message-input', t); await p.keyboard.press('Enter');
+  }
+  const feedHas = (p) => p.evaluate((a, b, keep) => {
+    const t = document.getElementById('message-feed')?.textContent || '';
+    return { a: t.includes(a), b: t.includes(b), keep: t.includes(keep) };
+  }, VA, VB, REPLY);
+  step = 'disappear-sent';
+  for (const [p, label] of [[alice, 'alice'], [bob, 'bob']]) {
+    await p.waitForFunction((a, b) => { const t = document.getElementById('message-feed')?.textContent || ''; return t.includes(a) && t.includes(b); },
+      { timeout: 15000, polling: 250 }, VA, VB).catch(() => fail(`${label}: timed messages never showed up`));
+  }
+  if (process.exitCode) throw new Error('stop');
+  step = 'disappear-live';
+  for (const [p, label] of [[alice, 'alice'], [bob, 'bob']]) {
+    await p.waitForFunction((a, b) => { const t = document.getElementById('message-feed')?.textContent || ''; return !t.includes(a) && !t.includes(b); },
+      { timeout: 60000, polling: 500 }, VA, VB).catch(async () => fail(`${label}: timed messages not removed live ${JSON.stringify(await feedHas(p))}`));
+  }
+  if (process.exitCode) throw new Error('stop');
+  for (const [p, label] of [[alice, 'alice'], [bob, 'bob']]) {
+    if (!(await feedHas(p)).keep) fail(`${label}: a message from before the timer disappeared too`);
+    await reopen(p, label);
+    const s = await feedHas(p);
+    if (s.a || s.b) fail(`${label}: an expired message came back after reload`);
+  }
+  if (!process.exitCode) console.log('  · disappearing messages: removed live on both sides, older messages kept');
+
   step = 'done';
   if (!process.exitCode) {
     console.log('  ✓ cross-gateway DM reaction OK — Bob reacted 🔥 to Alice\'s message and');
     console.log('    Alice received it (federation identity model + dm_reaction relay verified),');
     console.log('    and the reaction, edit marker and reply quote survive a reload on both sides.');
+    console.log('    Disappearing messages expire live for both sides, from when the timer went on.');
   }
 } catch (e) {
   if (e.message !== 'stop' && e.message !== 'no bob addr') console.error(`  ✗ [${step}] threw: ${e.message}`);
