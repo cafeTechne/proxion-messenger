@@ -134,7 +134,7 @@ class _StoreBase(object):
         """Flush the WAL to the main database file (call before shutdown)."""
         with self._conn() as conn:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    _SCHEMA_VERSION = 61
+    _SCHEMA_VERSION = 62
     _integrity_ok: bool = True
     def _init_db(self) -> None:
         with self._conn() as conn:
@@ -415,6 +415,17 @@ class _StoreBase(object):
                 CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
                     INSERT INTO messages_fts(messages_fts, rowid, message_id, thread_id, content, from_webid, from_display_name, timestamp)
                     VALUES ('delete', old.rowid, old.message_id, old.thread_id, old.content, old.from_webid, old.from_display_name, old.timestamp);
+                END;
+
+                -- An edit must drop the old tokens before indexing the new
+                -- ones. Without this the index kept edited-out text, and the
+                -- delete trigger then passed the new text, leaving the old
+                -- tokens behind for whatever row reused the rowid.
+                CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+                    INSERT INTO messages_fts(messages_fts, rowid, message_id, thread_id, content, from_webid, from_display_name, timestamp)
+                    VALUES ('delete', old.rowid, old.message_id, old.thread_id, old.content, old.from_webid, old.from_display_name, old.timestamp);
+                    INSERT INTO messages_fts(rowid, message_id, thread_id, content, from_webid, from_display_name, timestamp)
+                    VALUES (new.rowid, new.message_id, new.thread_id, new.content, new.from_webid, new.from_display_name, new.timestamp);
                 END;
             """)
             self._run_migrations(conn)
@@ -1390,6 +1401,12 @@ class _StoreBase(object):
                     "CREATE INDEX IF NOT EXISTS idx_dm_threads_thread ON dm_threads(thread_id)",
                 ],
             },
+            # 62: rebuild the search index from messages. Before the update
+            # trigger existed, edits left old text indexed and later deletes
+            # could not remove it; 'rebuild' rereads the content table.
+            [
+                "INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')",
+            ],
         ]
 
         for version, migration in enumerate(migrations, start=1):

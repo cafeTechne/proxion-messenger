@@ -231,3 +231,77 @@ async def test_search_fts_trigger_inserts(gateway_with_store):
     assert len(results) >= 1
     assert results[0]["message_id"] == "msg-fts-1"
     assert "full text search" in results[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_search_with_no_threads_does_not_search_everything(gateway_with_store):
+    """A caller in no rooms and with no DMs must not get other threads' hits."""
+    ws = _mock_ws()
+    await _register(gateway_with_store, ws, "did:key:zLoner")
+    gateway_with_store._store.save_message(
+        "msg-other", "room-not-mine", "room", "did:key:zOther", "Other",
+        "private planning notes", "2026-04-30T12:00:00Z")
+    gateway_with_store._store.save_message(
+        "dm-other", "dm-not-mine", "dm", "did:key:zOther", "Other",
+        "private planning notes too", "2026-04-30T12:00:00Z")
+
+    await gateway_with_store.process_command(ws, {"cmd": "search", "query": "private"})
+
+    resp = json.loads(ws.send.call_args[0][0])
+    assert resp["type"] == "search_results"
+    assert resp["results"] == []
+
+
+@pytest.mark.asyncio
+async def test_search_dm_scoped_to_own_account(gateway_with_store):
+    """Plain (non-E2E) DM rows are searchable by their account only."""
+    store = gateway_with_store._store
+    alice, carol = "did:key:zAlice", "did:key:zCarol"
+    store.save_dm_thread("dm-alice-bob", "did:key:zBob", owner_webid=alice)
+    store.save_dm_thread("dm-carol-dan", "did:key:zDan", owner_webid=carol)
+    store.save_message("m-ab", "dm-alice-bob", "dm", "did:key:zBob", "Bob",
+                       "meet at the harbor", "2026-04-30T12:00:00Z")
+    store.save_message("m-cd", "dm-carol-dan", "dm", "did:key:zDan", "Dan",
+                       "meet at the station", "2026-04-30T12:00:00Z")
+
+    ws_a, ws_c = _mock_ws(), _mock_ws()
+    await _register(gateway_with_store, ws_a, alice)
+    await _register(gateway_with_store, ws_c, carol)
+
+    await gateway_with_store.process_command(ws_a, {"cmd": "search", "query": "meet"})
+    got_a = [r["message_id"] for r in json.loads(ws_a.send.call_args[0][0])["results"]]
+    await gateway_with_store.process_command(ws_c, {"cmd": "search", "query": "meet"})
+    got_c = [r["message_id"] for r in json.loads(ws_c.send.call_args[0][0])["results"]]
+    assert got_a == ["m-ab"]
+    assert got_c == ["m-cd"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query", ["e-mail", "v1.2", "don't", "AND", "x:y"])
+async def test_search_query_punctuation_is_literal(gateway_with_store, query):
+    ws = _mock_ws()
+    await _register(gateway_with_store, ws)
+    _setup_room(gateway_with_store, ws, "room-p", "Room P")
+    gateway_with_store._store.save_message(
+        "msg-p", "room-p", "room", "https://alice.pod/profile/card#me", "Alice",
+        f"note: {query} here", "2026-04-30T12:00:00Z")
+
+    await gateway_with_store.process_command(ws, {"cmd": "search", "query": query})
+
+    resp = json.loads(ws.send.call_args[0][0])
+    assert [r["message_id"] for r in resp["results"]] == ["msg-p"]
+
+
+@pytest.mark.asyncio
+async def test_search_does_not_return_edited_out_text(gateway_with_store):
+    ws = _mock_ws()
+    await _register(gateway_with_store, ws)
+    _setup_room(gateway_with_store, ws, "room-e", "Room E")
+    store = gateway_with_store._store
+    store.save_message("msg-e", "room-e", "room", "https://alice.pod/profile/card#me",
+                       "Alice", "my password is hunter2", "2026-04-30T12:00:00Z")
+    store.update_message("msg-e", "oops, removed")
+
+    await gateway_with_store.process_command(ws, {"cmd": "search", "query": "hunter2"})
+
+    assert json.loads(ws.send.call_args[0][0])["results"] == []

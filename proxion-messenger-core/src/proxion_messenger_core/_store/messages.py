@@ -33,6 +33,22 @@ MAX_SINGLE_MESSAGE_BYTES = 50 * 1024 * 1024  # 50 MB
 E2E_CONTENT_TYPE = "e2e"
 
 
+def fts_literal_query(text: str) -> str:
+    """Turn user text into an FTS5 query that matches it literally.
+
+    Each whitespace-separated word becomes a quoted string (embedded quotes
+    doubled), so hyphens, dots, apostrophes, colons and words like AND/NOT are
+    never parsed as FTS5 syntax. Words are ANDed. Words with no letters or
+    digits are dropped; an empty result means "match nothing".
+    """
+    terms = []
+    for word in (text or "").split():
+        if not any(ch.isalnum() for ch in word):
+            continue
+        terms.append('"' + word.replace('"', '""') + '"')
+    return " ".join(terms)
+
+
 class MessageStoreMixin(object):
     def _note_thread_insert(self, thread_id: str) -> None:
         counters = self.__dict__.setdefault("_thread_insert_counts", {})
@@ -608,8 +624,9 @@ class MessageStoreMixin(object):
 
         Parameters
         ----------
-        query:       FTS5 match expression.
-        member_thread_ids: restrict to these thread IDs (ignored if thread_id given).
+        query:       user search text, matched literally (see fts_literal_query).
+        member_thread_ids: restrict to these thread IDs (ignored if thread_id
+                     given). An empty list matches nothing; None is unscoped.
         limit:       max results (capped at 100).
         offset:      skip first N results (for cursor pagination).
         thread_id:   restrict to a single thread.
@@ -623,13 +640,18 @@ class MessageStoreMixin(object):
         ``offset + len(results)`` so callers can build a pagination cursor.
         """
         limit = min(limit, 100)
-        if not query.strip():
+        match = fts_literal_query(query)
+        if not match:
+            return []
+        # An explicit but empty scope means the caller belongs to no thread:
+        # match nothing. Only None (internal callers) searches every thread.
+        if not thread_id and member_thread_ids is not None and not member_thread_ids:
             return []
 
         # Sealed E2E rows are ciphertext: any match against them is noise.
         conditions = ["messages_fts MATCH ?",
                       f"COALESCE(m.content_type, 'text') != '{E2E_CONTENT_TYPE}'"]
-        params: list = [query]
+        params: list = [match]
 
         if thread_id:
             conditions.append("m.thread_id = ?")
@@ -701,14 +723,10 @@ class MessageStoreMixin(object):
         """Rebuild the FTS5 index from scratch (repair stale/partial index)."""
         with self._conn() as conn:
             try:
-                conn.execute("DELETE FROM messages_fts")
-                conn.execute(
-                    """INSERT INTO messages_fts(rowid, message_id, thread_id, content,
-                       from_webid, from_display_name, timestamp)
-                       SELECT rowid, message_id, thread_id, content,
-                              from_webid, from_display_name, timestamp
-                       FROM messages"""
-                )
+                # External-content table: 'rebuild' discards the index and
+                # rereads messages. A plain DELETE would look up the current
+                # content and leave stale tokens in place.
+                conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
             except Exception as exc:
                 logger.warning("rebuild_messages_fts failed: %s", exc)
     def list_messages_for_thread(self, thread_id: str) -> list[dict]:

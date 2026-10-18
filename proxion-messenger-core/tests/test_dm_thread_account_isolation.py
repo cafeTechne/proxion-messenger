@@ -163,7 +163,7 @@ def test_migration_keeps_existing_dm_threads(tmp_path):
 
     s = LocalStore(db)
     with sqlite3.connect(db) as conn:
-        assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == 61
+        assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == 62
     assert [(t["thread_id"], t["peer_webid"], t["display_name"])
             for t in s.get_dm_threads(owner_webid="did:key:zA")] == [
         ("local-did-key-zB", "did:key:zB", "Bob"), ("cert-1", "did:key:zC", None)]
