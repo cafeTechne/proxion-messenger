@@ -99,4 +99,23 @@ describe('account sync (linked devices)', () => {
         expect(s.sent).toEqual([{ cmd: 'set_account_pref', key: 'proxion_theme', value: '' }]);
         expect(SYNCED_PREFS).not.toContain('proxion_gateway_http_url');
     });
+
+    it('a setting changed here since the last sync is pushed, not reverted', () => {
+        s.sync.apply({ type: 'account_sync', full: true, webid: ACCOUNT, display_name: 'A',
+            prefs: { proxion_locale: 'qps' }, muted_threads: [] });
+        expect(s.storage.getItem('proxion_locale')).toBe('qps');
+        s.storage.setItem('proxion_locale', 'ar');   // changed while not synced
+        s.sent.length = 0;
+        s.sync.apply({ type: 'account_sync', full: true, webid: ACCOUNT, display_name: 'A',
+            prefs: { proxion_locale: 'qps' }, muted_threads: [] });
+        expect(s.storage.getItem('proxion_locale')).toBe('ar');
+        expect(s.sent).toContainEqual({ cmd: 'set_account_pref', key: 'proxion_locale', value: 'ar' });
+    });
+
+    it('a device that never synced still takes the account value', () => {
+        const d = setup({ proxion_locale: 'de' });
+        d.sync.apply({ type: 'account_sync', full: true, webid: ACCOUNT, display_name: 'A',
+            prefs: { proxion_locale: 'fr' }, muted_threads: [] });
+        expect(d.storage.getItem('proxion_locale')).toBe('fr');
+    });
 });

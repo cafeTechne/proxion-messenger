@@ -33,6 +33,16 @@ export function createAccountSync({ send, storage, getMutedThreads, applyMute, s
     let account = null;
 
     const seededKey = (webid) => `proxion_account_sync_seeded:${webid}`;
+    // The value this device last exchanged with the account, per pref. A local
+    // value that differs from it was changed here since (offline, or before the
+    // push went out), so it is pushed instead of being overwritten.
+    const syncedKey = (key) => `proxion_account_sync_last:${account}:${key}`;
+    function _readSynced(key) {
+        try { return storage.getItem(syncedKey(key)); } catch (_) { return null; }
+    }
+    function _markSynced(key, value) {
+        try { storage.setItem(syncedKey(key), value); } catch (_) { /* private mode */ }
+    }
 
     function setAccount(webid) {
         account = typeof webid === 'string' && webid ? webid : null;
@@ -45,12 +55,15 @@ export function createAccountSync({ send, storage, getMutedThreads, applyMute, s
     function pushPref(key) {
         if (!SYNCED_PREFS.includes(key)) return;
         const v = storage.getItem(key);
-        send({ cmd: 'set_account_pref', key, value: v === null ? '' : String(v) });
+        const value = v === null ? '' : String(v);
+        send({ cmd: 'set_account_pref', key, value });
+        _markSynced(key, value);
     }
 
     // Write one pref locally; true when the stored value changed.
     function _setPref(key, value) {
         if (!SYNCED_PREFS.includes(key) || typeof value !== 'string' || value.length > MAX_PREF_LEN) return false;
+        _markSynced(key, value);
         const cur = storage.getItem(key);
         if (value === '') {
             if (cur === null) return false;
@@ -78,11 +91,16 @@ export function createAccountSync({ send, storage, getMutedThreads, applyMute, s
             const local = storage.getItem('proxion_display_name');
             if (local) send({ cmd: 'set_identity', display_name: local });
         }
-        // Prefs: synced values win; a local value the account lacks seeds it.
+        // Prefs: synced values win, except a local change made since this
+        // device last synced; a local value the account lacks seeds it.
         const prefs = event.prefs && typeof event.prefs === 'object' ? event.prefs : {};
         const changed = [];
         for (const key of SYNCED_PREFS) {
-            if (Object.prototype.hasOwnProperty.call(prefs, key)) {
+            const last = _readSynced(key);
+            const cur = storage.getItem(key);
+            if (last !== null && (cur === null ? '' : cur) !== last) {
+                pushPref(key);
+            } else if (Object.prototype.hasOwnProperty.call(prefs, key)) {
                 if (_setPref(key, prefs[key])) changed.push(key);
             } else if (storage.getItem(key) !== null) {
                 pushPref(key);
