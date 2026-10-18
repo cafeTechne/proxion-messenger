@@ -257,13 +257,15 @@ async def test_redial_allowed_right_after_a_connected_call(gateway):
     errs = [json.loads(c[0][0]) for c in alice.send.call_args_list]
     assert not any(m.get("message") == "call_too_frequent" for m in errs)
     assert "c2" in gateway._voice_sessions
-    # An unanswered ring that was hung up still throttles the redial.
-    await gateway.process_command(alice, {"cmd": "voice_hangup", "session_id": "c2"})
-    alice.send.reset_mock()
-    await gateway.process_command(alice, {"cmd": "voice_invite", "session_id": "c3",
-                                          "target_webid": "did:key:zBob", "sdp_offer": "v=0"})
-    errs = [json.loads(c[0][0]) for c in alice.send.call_args_list]
-    assert any(m.get("message") == "call_too_frequent" for m in errs)
+    # Unanswered rings that were hung up may be redialed, up to the burst limit.
+    for sid, refused in (("c3", False), ("c4", False), ("c5", True)):
+        await gateway.process_command(alice, {"cmd": "voice_hangup", "session_id": {
+            "c3": "c2", "c4": "c3", "c5": "c4"}[sid]})
+        alice.send.reset_mock()
+        await gateway.process_command(alice, {"cmd": "voice_invite", "session_id": sid,
+                                              "target_webid": "did:key:zBob", "sdp_offer": "v=0"})
+        errs = [json.loads(c[0][0]) for c in alice.send.call_args_list]
+        assert any(m.get("message") == "call_too_frequent" for m in errs) is refused, sid
     _gv._voice_invite_ts.clear()
 
 

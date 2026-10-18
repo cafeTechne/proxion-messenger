@@ -116,10 +116,10 @@ async def test_voice_invite_ts_does_not_grow_without_bound(gateway, voice_client
     # Clear any state left by other tests (module-level dict persists across tests)
     _voice_invite_ts.clear()
 
-    # Pre-seed 100 expired entries (timestamp 60 s in the past — well beyond the 30 s window)
-    stale_ts = _time.monotonic() - 60.0
+    # Pre-seed 100 expired entries (timestamp 120 s in the past, well beyond the window)
+    stale_ts = _time.monotonic() - 120.0
     for i in range(100):
-        _voice_invite_ts[(f"did:key:spam{i}", f"did:key:victim{i}")] = stale_ts
+        _voice_invite_ts[(f"did:key:spam{i}", f"did:key:victim{i}")] = [stale_ts]
 
     pre_count = len(_voice_invite_ts)
     assert pre_count == 100

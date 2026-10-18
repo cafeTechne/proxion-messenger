@@ -12,7 +12,13 @@ import logging
 
 logger = logging.getLogger("proxion_messenger_core.gateway")
 
-_voice_invite_ts: dict = {}  # (caller_webid, target_webid) -> float
+# Per-pair ring throttle: (caller_webid, target_webid) -> recent invite times
+# (monotonic). At most _INVITE_BURST rings per pair per _INVITE_WINDOW seconds,
+# and never a second ring while the first is still ringing. A burst rather than
+# one ring per 30 s, so a redial after a decline or a cancelled call goes through.
+_voice_invite_ts: dict = {}
+_INVITE_WINDOW = 60.0
+_INVITE_BURST = 3
 _HANGUP_REASONS = ("declined", "busy")
 
 
@@ -306,15 +312,28 @@ class VoiceHandlerMixin:
 
         _key = (caller_webid, target_webid)
         _now = _time.monotonic()
-        if _now - _voice_invite_ts.get(_key, 0.0) < 30.0:
-            await websocket.send(json.dumps({"type": "error", "message": "call_too_frequent"}))
-            return
+        _cutoff = _now - _INVITE_WINDOW
         # Evict stale entries before inserting to bound memory usage.
         # Without this, a flood of random target_webid values grows the dict without limit.
-        _cutoff = _now - 30.0
-        for _k in [k for k, ts in _voice_invite_ts.items() if ts < _cutoff]:
+        for _k in [k for k, ts in _voice_invite_ts.items() if not ts or ts[-1] < _cutoff]:
             del _voice_invite_ts[_k]
-        _voice_invite_ts[_key] = _now
+        # A group-call mesh offer between two members of the same voice channel
+        # is not a ring: it is auto-answered, and it is re-sent on every rejoin
+        # and ICE recovery. Throttling it left the pair without audio.
+        _ch = self._voice_channels.get(data.get("channel_id") or "") or {}
+        _mesh = bool(target_webid) and target_webid in _ch.get("members", {}) and any(
+            (m.get("ws") if isinstance(m, dict) else m) is websocket
+            for m in _ch.get("members", {}).values())
+        if not _mesh:
+            _recent = [t for t in _voice_invite_ts.get(_key, []) if t >= _cutoff]
+            _ringing = any(
+                s.get("caller_webid") == caller_webid and s.get("target_webid") == target_webid
+                and not s.get("answered")
+                for s in self._voice_sessions.values())
+            if _ringing or len(_recent) >= _INVITE_BURST:
+                await websocket.send(json.dumps({"type": "error", "message": "call_too_frequent"}))
+                return
+            _voice_invite_ts[_key] = _recent + [_now]
 
         # Contact check: caller must share a room with or have a stored relationship
         # with the target. Prevents cold-calling strangers on the gateway.
@@ -681,8 +700,7 @@ class VoiceHandlerMixin:
         self._voice_sessions.pop(session_id, None)
         if sess.get("answered"):
             # The call connected, so calling back right away is not spam: lift the
-            # per-pair invite throttle, otherwise a dropped call can't be redialed
-            # for 30 seconds.
+            # per-pair invite throttle, so a dropped call can always be redialed.
             _voice_invite_ts.pop((sess.get("caller_webid"), sess.get("target_webid")), None)
             _voice_invite_ts.pop((sess.get("target_webid"), sess.get("caller_webid")), None)
         event = {"type": "voice_hangup", "session_id": session_id}
