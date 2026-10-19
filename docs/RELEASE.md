@@ -84,6 +84,26 @@ serve the web app), builds Windows/macOS/Linux installers, generates
 notes are that `CHANGELOG.md` section. Review and publish; the landing page
 picks it up automatically.
 
+### Before publishing the draft: install checks
+
+CI compiles and unit-tests the desktop app, but these only show up on a real
+install. Run them on the draft's installers before publishing.
+
+Windows (setup .exe):
+- [ ] Install, launch, send a message. Voice message and video attachment play.
+- [ ] Click a `proxion://` link in a browser: Proxion opens (or focuses) and handles it.
+- [ ] Close with X: the window hides, the tray icon stays, messages still arrive. Tray > Quit stops the app and the gateway (no `proxion-gateway` process left).
+- [ ] Update from the previous release: it installs the setup .exe build, not the MSI.
+
+Linux:
+- [ ] KDE Plasma (Wayland) and Ubuntu GNOME: X hides to the tray; the tray icon reopens the window.
+- [ ] Stock GNOME without an AppIndicator extension: X quits (no hidden process left); autostart opens minimized.
+- [ ] `proxion://` link opens the app (AppImage and .deb).
+- [ ] .deb/.rpm: "Check for updates" says updates come from the package manager.
+
+macOS:
+- [ ] `proxion://` link opens the app; X hides to the tray; Quit stops the gateway.
+
 ## Homebrew tap (macOS)
 
 `brew install cafeTechne/proxion/proxion` installs the .dmg from the tap repo
