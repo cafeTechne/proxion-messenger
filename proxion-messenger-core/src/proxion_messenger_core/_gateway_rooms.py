@@ -1483,6 +1483,7 @@ class RoomHandlerMixin:
                 else:
                     self._pending_ownership_transfers[room_id] = {
                         "from_ws": websocket, "to_ws": to_ws, "to_did": to_did,
+                        "from_did": caller_did,
                     }
                     caller_name = self._name_for(websocket, caller_did)
                     await to_ws.send(json.dumps({
@@ -1497,6 +1498,12 @@ class RoomHandlerMixin:
                         "message": f"Transfer request sent to {self._name_for(to_ws, to_did)}. Waiting for their response.",
                     }))
 
+    def _drop_ownership_offer(self, room_id: str, target_did: str) -> None:
+        """Forget a pending ownership offer to *target_did* (kicked or banned)."""
+        pending = self._pending_ownership_transfers.get(room_id)
+        if pending and pending.get("to_did") == target_did:
+            self._pending_ownership_transfers.pop(room_id, None)
+
     async def _handle_accept_ownership(self, websocket, data: dict) -> None:
         room_id = data.get("room_id", "")
         pending = self._pending_ownership_transfers.get(room_id)
@@ -1504,7 +1511,19 @@ class RoomHandlerMixin:
             await websocket.send(json.dumps({"type": "error", "message": "No pending transfer for this room"}))
         else:
             room = self._local_rooms.get(room_id)
-            if not room:
+            _to = pending.get("to_did", "")
+            # The offer is only good while both sides are where it found them: a
+            # kicked, banned or departed target (or an owner who already handed the
+            # room on) must not be able to take ownership with a stale offer.
+            _stale = bool(room) and (
+                websocket not in room.get("members", set())
+                or self._client_webids.get(websocket, "") != _to
+                or ("from_did" in pending and room.get("creator_webid") != pending["from_did"])
+                or (self._store is not None and self._store.is_room_banned(room_id, _to)))
+            if _stale:
+                self._pending_ownership_transfers.pop(room_id, None)
+                await websocket.send(json.dumps({"type": "error", "message": "No pending transfer for this room"}))
+            elif not room:
                 await websocket.send(json.dumps({"type": "error", "message": "Room no longer exists"}))
             else:
                 new_owner_did = pending["to_did"]
@@ -2349,6 +2368,7 @@ class RoomHandlerMixin:
             if self._store:
                 self._store.remove_room_member(room_id, target_webid)
                 self._store.delete_room_role(room_id, target_webid)
+            self._drop_ownership_offer(room_id, target_webid)
             # Evict ALL of the target's sockets and notify each — a single-socket
             # discard left a second device connected and still receiving.
             _target_sockets = self._sockets_for(target_webid)
@@ -2421,6 +2441,7 @@ class RoomHandlerMixin:
         self._store.ban_room_member(room_id, target_webid, caller_webid, reason)
         self._store.remove_room_member(room_id, target_webid)
         self._store.delete_room_role(room_id, target_webid)
+        self._drop_ownership_offer(room_id, target_webid)
         # Evict ALL of the target's sockets (a single-socket discard left a second
         # device connected and still able to decrypt future messages) and notify each.
         _target_sockets = self._sockets_for(target_webid)
