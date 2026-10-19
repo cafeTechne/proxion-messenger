@@ -147,6 +147,7 @@
   "ui.gifTray": "GIF tray",
   "file.tooLarge": "File too large, max 25 MB",
   "file.largeDmOnly": "Large files can only be sent in direct messages",
+  "file.roomTooLarge": "Room files can be up to {mb} MB. Send larger files in a direct message.",
   "file.sendFailed": "File send failed",
   "file.deliveryFailed": "{filename} did not reach the recipient, try sending it again",
   "invite.shortLinkCopied": "Short link copied!",

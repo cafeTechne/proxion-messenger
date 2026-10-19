@@ -83,7 +83,7 @@ import { chatRootUrl } from './longchat.js';
 import { createPairing } from './pairing.js';
 import { createRecovery, importErrorKey } from './recovery.js';
 import { createGifTray, saveFavorite, pushAllGifsToPod } from './gifs.js';
-import { needsDownscale, downscaleImage, measureMedia, inlineFileLimit } from './media-resize.js';
+import { needsDownscale, downscaleImage, measureMedia, inlineFileLimit, ROOM_FILE_BYTES } from './media-resize.js';
 import { attachGifMotion } from './gifmotion.js';
 import { createDropZone } from './dropzone.js';
 import { createEmoji } from './emoji.js';
@@ -4954,6 +4954,7 @@ import { createAccountSync } from './account-sync.js';
             },
         });
 
+        const ROOM_FILE_MB = ROOM_FILE_BYTES / (1024 * 1024);
         // Size and destination limits, checked before the confirm dialog so the
         // user is not asked to confirm a file that is then refused.
         function attachmentBlockReason(file) {
@@ -4970,7 +4971,8 @@ import { createAccountSync } from './account-sync.js';
             if (file.size <= inlineMax) return null;
             if (file.size > 25 * 1024 * 1024 - (sealFile ? FILE_TAG_BYTES : 0)) return 'file.tooLarge';
             const isDm = view.type === "dm" || view.type === "local_dm";
-            if (!isDm || !view.peerWebid) return 'file.largeDmOnly';
+            if (!isDm) return 'file.roomTooLarge';
+            if (!view.peerWebid) return 'file.largeDmOnly';
             return null;
         }
 
@@ -4996,7 +4998,8 @@ import { createAccountSync } from './account-sync.js';
                 const isDm = view.type === "dm" || view.type === "local_dm";
                 const peerWebid = view.peerWebid || "";
                 if (file.size > 25 * 1024 * 1024 - (sealFile ? FILE_TAG_BYTES : 0)) { showToast(t('file.tooLarge')); return; }
-                if (!isDm || !peerWebid) { showToast(t('file.largeDmOnly')); return; }
+                if (!isDm) { showToast(t('file.roomTooLarge', { mb: ROOM_FILE_MB })); return; }
+                if (!peerWebid) { showToast(t('file.largeDmOnly')); return; }
                 const xferOpts = sealFile ? { seal: (u8, meta) => secondary.sealFile(view, u8, meta, { echo: false }) } : {};
                 fileTransfer.sendFileChunked(file, peerWebid, xferOpts).catch(err => {
                     console.warn("chunked send failed", err);
@@ -5089,7 +5092,7 @@ import { createAccountSync } from './account-sync.js';
                 } catch (_) { /* refused below */ }
             }
             const blocked = attachmentBlockReason(file);
-            if (blocked) { showToast(t(blocked)); return; }
+            if (blocked) { showToast(t(blocked, { mb: ROOM_FILE_MB })); return; }
             const { ok, spoiler } = await confirmAttachment(file, batch);
             if (ok) await sendAttachmentFile(file, { spoiler });
         }
