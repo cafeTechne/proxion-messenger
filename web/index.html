@@ -25,7 +25,7 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <a href="#message-input" class="skip-nav">Skip to conversation</a>
+    <a href="#message-input" class="skip-nav" data-i18n="ui.skipToConversation">Skip to conversation</a>
     <div id="emoji-picker" class="emoji-picker" role="menu" aria-label="React with emoji" data-i18n-attr="aria-label:ui.reactWithEmoji">
         <button type="button" role="menuitem" data-emoji="👍" aria-label="thumbs up" data-i18n-attr="aria-label:ui.thumbsUp">👍</button> <button type="button" role="menuitem" data-emoji="❤️" aria-label="heart" data-i18n-attr="aria-label:ui.heart">❤️</button>
         <button type="button" role="menuitem" data-emoji="😂" aria-label="laughing" data-i18n-attr="aria-label:ui.laughing">😂</button> <button type="button" role="menuitem" data-emoji="😮" aria-label="surprised" data-i18n-attr="aria-label:ui.surprised">😮</button>
@@ -190,12 +190,12 @@
         <p id="add-peer-error" class="field-error" role="alert"></p>
         <!-- R17.3: QR scan -->
         <div>
-          <label id="scan-qr-label" style="display:inline-flex;align-items:center;gap:var(--space-2);cursor:pointer;
+          <button type="button" id="scan-qr-btn" style="display:inline-flex;align-items:center;gap:var(--space-2);cursor:pointer;border:none;font:inherit;
                  background:var(--slate-700);padding:var(--space-2) var(--space-4);border-radius:4px;font-size:var(--text-md);color:var(--slate-50);">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="16" height="16" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 3.75 9.375v-4.5ZM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 0 1-1.125-1.125v-4.5ZM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 13.5 9.375v-4.5ZM6.75 6.75h.75v.75h-.75v-.75ZM6.75 16.5h.75v.75h-.75v-.75ZM16.5 6.75h.75v.75h-.75v-.75ZM13.5 13.5h.75v.75h-.75v-.75ZM13.5 19.5h.75v.75h-.75v-.75ZM19.5 13.5h.75v.75h-.75v-.75ZM19.5 19.5h.75v.75h-.75v-.75ZM16.5 16.5h.75v.75h-.75v-.75Z"/></svg>
-            Scan QR code
-            <input type="file" id="scan-qr-input" accept="image/*" capture="environment" style="display:none;">
-          </label>
+            <span data-i18n="btn.scanQr">Scan QR code</span>
+          </button>
+          <input type="file" id="scan-qr-input" accept="image/*" capture="environment" hidden>
           <span id="scan-qr-error" style="display:none;color:var(--color-danger-soft);font-size:var(--text-sm);margin-inline-start:var(--space-2);"></span>
         </div>
         <div class="btn-row modal__footer">
@@ -407,7 +407,7 @@
                     <span class="dot online" style="flex-shrink:0;"></span>
                     <div style="display:flex;flex-direction:column;gap:1px;overflow:hidden;min-width:0;">
                         <span id="vw-peer-name" style="font-size:var(--text-sm);font-weight:var(--weight-semibold);color:var(--slate-50);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
-                        <span id="vw-status" style="font-size:var(--text-xs);color:var(--color-success-soft);white-space:nowrap;">In call</span>
+                        <span id="vw-status" style="font-size:var(--text-xs);color:var(--color-success-soft);white-space:nowrap;" data-i18n="voice.inCall">In call</span>
                     </div>
                     <span id="vw-conn" class="status-dot" role="status" aria-live="polite" title="" style="display:none;margin-inline-start:auto;flex-shrink:0;font-size:var(--text-2xs);"></span>
                     <span id="vw-verified" role="status" aria-live="polite" title="" style="display:none;flex-shrink:0;font-size:var(--text-2xs);padding:1px var(--space-2);border-radius:10px;background:var(--slate-800);color:var(--slate-200);"></span>
@@ -1029,13 +1029,11 @@
     <div id="pair-device-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="pair-device-title" style="display:none;">
       <div class="modal__panel modal__panel--sm">
         <h3 id="pair-device-title" class="modal__title" data-i18n="heading.linkThisDevice">Link this device</h3>
-        <p class="modal__desc">On your other device, open Settings &rarr; Link a device, then enter the code shown there (or scan its QR).</p>
+        <p class="modal__desc" data-i18n="pairing.joinHint">On your other device, open Settings → Link a device, then enter the code shown there (or scan its QR).</p>
         <label for="pair-code-input" class="field-label" data-i18n="ui.pairingCode">Pairing code</label>
         <input id="pair-code-input" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" class="input" type="text" placeholder="Pairing code" autocomplete="off" style="font-family:var(--font-mono);" data-i18n-attr="placeholder:ui.pairingCode">
-        <label id="pair-scan-label" style="display:inline-flex;align-items:center;gap:var(--space-2);cursor:pointer;font-size:var(--text-sm);color:var(--text-secondary);margin-bottom:var(--space-2);">
-          Scan QR code
-          <input type="file" id="pair-scan-input" accept="image/*" capture="environment" style="display:none;">
-        </label>
+        <button type="button" id="pair-scan-btn" class="btn btn--ghost btn--sm" style="margin-bottom:var(--space-2);" data-i18n="btn.scanQr">Scan QR code</button>
+        <input type="file" id="pair-scan-input" accept="image/*" capture="environment" hidden>
         <p id="pair-device-status" style="margin:var(--space-2) 0;font-size:var(--text-md);color:var(--text-secondary);"></p>
         <p id="pair-device-safety" style="margin:0 0 var(--space-3);font-family:monospace;font-size:1.3em;letter-spacing:2px;color:var(--color-success-soft);text-align:center;"></p>
         <div class="btn-row modal__footer">

@@ -91,14 +91,14 @@ import { createSaved, syncSavedFromPod, pushAllSavedToPod, forgetSavedMessage, f
 import { createBlocks } from './blocks.js';
 import { createSolidChat } from './solidchat.js';
 import { createSolidChatUI } from './solidchat-ui.js';
-import { createSendStatus } from './send-status.js';
+import { createSendStatus, seenByText } from './send-status.js';
 import { sendQueueStore } from './sendqueue.js';
 import { createPolls } from './polls.js';
 import { createRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { createMeme } from './meme.js';
 import { inlineNotice, feedEmptyState, showFeedNotice } from './states.js';
 import { icon } from './icons.js';
-import { installFocusTrap, closeTopmostDialog } from './focus-trap.js';
+import { installFocusTrap, closeTopmostDialog, closeDialog } from './focus-trap.js';
 import { initSettingsNav, createDebouncedSaver } from './settings-panel.js';
 import { makeListNavigable, announce } from './a11y.js';
 import { buildPageTitle, viewLabel, createFaviconBadge, jumpToMessage } from './wayfinding.js';
@@ -241,6 +241,11 @@ import { createAccountSync } from './account-sync.js';
             };
             makeListNavigable(document.getElementById("message-feed"), {
                 itemSelector: ".message",
+                // Links, images, poll options, downloads, spoilers and reactions
+                // in the current message stay reachable with Tab; the hover
+                // action bar is reached through the menu instead.
+                innerTabbable: true,
+                innerSkip: ".msg-actions",
                 onActivate: _openMsgMenu,
                 onContextMenu: _openMsgMenu,
             });
@@ -1147,9 +1152,14 @@ import { createAccountSync } from './account-sync.js';
                 li.className = "dm-item" + (activeView && activeView.id === id ? " active" : "");
                 const body = document.createElement("div");
                 body.className = "dm-item-body";
+                // The named body takes focus (as in the room rows), not the
+                // <li>, which also holds the hide button.
+                body.setAttribute("role", "button");
+                body.setAttribute("data-roving-target", "");
+                body.tabIndex = 0;
                 const ts = last ? timeAgo(last.timestamp) : "";
-                body.innerHTML = `<div class="dm-item-name" dir="auto"><span class="dm-item-label" title="${escHtml(name)}">${escHtml(name)}${idTag}</span>${ts ? `<span class="dm-item-ts">${ts}</span>` : ""}</div>
-                    ${last ? `<div class="dm-item-preview" dir="auto" title="${escHtml(last.snippet)}">${last.snippet.replace(/</g,"&lt;")}</div>` : ""}`;
+                body.innerHTML = `<div class="dm-item-name"><span class="dm-item-label" title="${escHtml(name)}"><bdi>${escHtml(name)}</bdi>${idTag}</span>${ts ? `<span class="dm-item-ts">${ts}</span>` : ""}</div>
+                    ${last ? `<div class="dm-item-preview" title="${escHtml(last.snippet)}"><bdi>${escHtml(last.snippet)}</bdi></div>` : ""}`;
                 const closeBtn = document.createElement("button");
                 closeBtn.className = "dm-close-btn";
                 closeBtn.innerHTML = icon('x-mark', { size: 14 });
@@ -1357,15 +1367,16 @@ import { createAccountSync } from './account-sync.js';
                 if (!el) return;
                 const tick = ok => ok ? '<span class="text-success">&#x2713;</span>' : '<span class="text-danger">&#x2717;</span>';
                 const reachable = c.public_url_set || c.relay_capable || c.relay_fallback_active;
+                const tx = (k) => escHtml(t(k));
                 const reachHow = reachable
-                    ? (c.upnp_mapped ? ' <span class="text-muted">(via UPnP)</span>'
-                       : c.relay_fallback_active && !c.public_url_set ? ' <span class="text-muted">(via relay)</span>'
-                       : ' <span class="text-muted">(manual)</span>')
-                    : ` <span class="text-warning">not reachable. <a href="#" id="fix-conn-link" class="link-inherit">Fix this</a></span>`;
+                    ? ` <span class="text-muted">${tx(c.upnp_mapped ? 'settings.fed.viaUpnp'
+                       : c.relay_fallback_active && !c.public_url_set ? 'settings.fed.viaRelay'
+                       : 'settings.fed.manual')}</span>`
+                    : ` <span class="text-warning">${tx('settings.fed.notReachable')} <a href="#" id="fix-conn-link" class="link-inherit">${tx('settings.fed.fixThis')}</a></span>`;
                 el.innerHTML = [
-                    `${tick(reachable)} Internet reachable:${reachHow}`,
-                    `${tick(h.turn_configured)} TURN: ${h.turn_configured ? 'configured' : '<span class="text-warning">not set</span>'}`,
-                    `${tick(h.pod_available)} Solid Pod: ${h.pod_available ? 'connected' : 'offline'}`,
+                    `${tick(reachable)} ${tx('settings.fed.internet')}${reachHow}`,
+                    `${tick(h.turn_configured)} ${tx('settings.fed.turn')} ${h.turn_configured ? tx('settings.fed.configured') : `<span class="text-warning">${tx('settings.fed.notSet')}</span>`}`,
+                    `${tick(h.pod_available)} ${tx('settings.fed.pod')} ${tx(h.pod_available ? 'settings.fed.connected' : 'settings.fed.offline')}`,
                 ].join('<br>');
                 document.getElementById('fix-conn-link')?.addEventListener('click', e => {
                     e.preventDefault();
@@ -1585,7 +1596,14 @@ import { createAccountSync } from './account-sync.js';
             const preview = roomLastMessages[roomId];
             const previewEl = li.querySelector(".room-item-preview");
             if (previewEl) {
-                previewEl.textContent = preview ? (preview.senderName ? preview.senderName + ": " : "") + preview.snippet : "";
+                // Name and text are isolated (<bdi>): a right-to-left sender
+                // name used to flip the whole line ("hello :2 محمد").
+                previewEl.textContent = "";
+                if (preview) {
+                    const part = (s) => { const b = document.createElement("bdi"); b.textContent = s; return b; };
+                    if (preview.senderName) previewEl.append(part(preview.senderName), ": ");
+                    previewEl.append(part(preview.snippet));
+                }
                 previewEl.title = previewEl.textContent;
             }
         }
@@ -2012,7 +2030,7 @@ import { createAccountSync } from './account-sync.js';
                             if (_now - (_announceThrottle[id] || 0) > 10000) {
                                 _announceThrottle[id] = _now;
                                 const _threadName = _threadNames[id] || sender;
-                                announce(`New message from ${sender} in ${_threadName}`);
+                                announce(t('a11y.newMessageIn', { name: sender, thread: _threadName }));
                             }
                         }
                     }
@@ -3318,7 +3336,7 @@ import { createAccountSync } from './account-sync.js';
                     if (!event.webhooks || !event.webhooks.length) { wl.innerHTML = inlineNotice(t('empty.webhooks'), 'empty'); break; }
                     wl.innerHTML = event.webhooks.map(h => `<div class="list-row">
                         <span class="list-row__main">${escHtml(h.bot_name)} (${escHtml(h.direction)})</span>
-                        <button data-del-wh="${escHtml(h.id)}" class="btn btn--sm btn-danger">Delete</button>
+                        <button data-del-wh="${escHtml(h.id)}" class="btn btn--sm btn-danger">${escHtml(t('btn.delete'))}</button>
                     </div>`).join('');
                     wl.querySelectorAll('[data-del-wh]').forEach(btn => {
                         btn.addEventListener('click', () => socket && socket.send(JSON.stringify({cmd:'delete_webhook',id:btn.dataset.delWh})));
@@ -3508,12 +3526,8 @@ import { createAccountSync } from './account-sync.js';
                 case "message_readers": {
                     const el = document.querySelector(`.seen-by-row[data-msg-id="${event.message_id}"]`);
                     if (!el) break;
-                    const readers = (event.readers || []).filter(r => r.receiver_webid !== selfWebId);
-                    if (readers.length === 0) break;
-                    const names = readers.slice(0, 3).map(r => escHtml(r.display_name || r.receiver_webid.slice(-8))).join(", ");
-                    el.textContent = readers.length <= 3
-                        ? `Seen by ${names}`
-                        : `Seen by ${names} +${readers.length - 3} more`;
+                    const seen = seenByText(event.readers, selfWebId);
+                    if (seen) el.textContent = seen;
                     break;
                 }
                 case "import_complete":
@@ -3908,13 +3922,25 @@ import { createAccountSync } from './account-sync.js';
                     if (mentioned) {
                         const sr = document.createElement("span");
                         sr.className = "sr-only";
-                        sr.textContent = "mentions you, ";
+                        sr.textContent = t('sidebar.mentionsYou') + ", ";
                         badge.appendChild(sr);
                     }
-                    badge.appendChild(document.createTextNode(countText));
+                    // The count alone ("3") read as part of the row; screen
+                    // readers get it as the row's description instead.
+                    const countEl = document.createElement("span");
+                    countEl.setAttribute("aria-hidden", "true");
+                    countEl.textContent = countText;
+                    badge.appendChild(countEl);
+                    const srCount = document.createElement("span");
+                    srCount.className = "sr-only";
+                    srCount.textContent = tn('sidebar.unreadCount', count);
+                    badge.appendChild(srCount);
+                    badge.id = `unread-${id}`;
+                    li.querySelector("[data-roving-target]")?.setAttribute("aria-describedby", badge.id);
                     li.style.fontWeight = "600";
                 } else {
                     if (badge) badge.remove();
+                    li.querySelector("[data-roving-target]")?.removeAttribute("aria-describedby");
                     unreadMentions.delete(id); // thread read → clear its mention flag
                     li.style.fontWeight = "normal";
                 }
@@ -6201,6 +6227,9 @@ import { createAccountSync } from './account-sync.js';
 
             // R17.2: QR scan — decode image and pre-fill add-peer input
             const scanInput = document.getElementById('scan-qr-input');
+            // A real button opens the hidden file picker: a <label> around a
+            // display:none input was never a tab stop.
+            attachListener('#scan-qr-btn', 'click', () => scanInput?.click());
             if (scanInput) {
                 scanInput.addEventListener('change', async (e) => {
                     const file = e.target.files[0];
@@ -6216,7 +6245,7 @@ import { createAccountSync } from './account-sync.js';
                     const result = typeof jsQR !== 'undefined' ? jsQR(imgData.data, imgData.width, imgData.height) : null;
                     scanInput.value = '';
                     if (!result) {
-                        if (errEl) { errEl.textContent = 'No QR code found.'; errEl.style.display = 'inline'; }
+                        if (errEl) { errEl.textContent = t('qr.notFound'); errEl.style.display = 'inline'; }
                         return;
                     }
                     if (errEl) errEl.style.display = 'none';
@@ -6260,6 +6289,7 @@ import { createAccountSync } from './account-sync.js';
             });
             // New device: scan the primary's pairing QR to fill the code field.
             const pairScan = document.getElementById('pair-scan-input');
+            attachListener('#pair-scan-btn', 'click', () => pairScan?.click());
             if (pairScan) {
                 pairScan.addEventListener('change', async (e) => {
                     const file = e.target.files[0]; if (!file) return;
@@ -7101,19 +7131,21 @@ import { createAccountSync } from './account-sync.js';
             })();
 
             // R13.7: Image lightbox
-            document.getElementById("lightbox-close")?.addEventListener("click", () => {
-                document.getElementById("lightbox")?.classList.remove("visible");
-            });
+            // Shown and hidden through the inline display like every other
+            // dialog, which is what the focus trap watches: a class toggle over
+            // an inline display:none left it untrapped, with Tab walking the
+            // page behind it and focus not returned to the image on close.
+            const _closeLightbox = () => closeDialog(document.getElementById("lightbox"));
+            document.getElementById("lightbox-close")?.addEventListener("click", _closeLightbox);
             document.getElementById("lightbox")?.addEventListener("click", (e) => {
-                if (e.target === document.getElementById("lightbox"))
-                    document.getElementById("lightbox").classList.remove("visible");
+                if (e.target === document.getElementById("lightbox")) _closeLightbox();
             });
             // Escape is handled by the generic topmost-dialog close (lightbox-close
             // carries data-modal-cancel).
             const _openLightbox = (img) => {
                 const lb = document.getElementById("lightbox");
                 const lbImg = document.getElementById("lightbox-img");
-                if (lb && lbImg) { lbImg.src = img.src; lb.classList.add("visible"); }
+                if (lb && lbImg) { lbImg.src = img.src; lb.style.display = "flex"; }
             };
             // The preview is a <button> wrapping the image, so Enter/Space and
             // clicks all arrive here. A click that just revealed a media spoiler

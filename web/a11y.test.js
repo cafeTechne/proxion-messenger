@@ -194,6 +194,78 @@ describe('makeListNavigable — keyboard movement', () => {
   });
 });
 
+// A control double inside a row: `chrome` marks the hover action bar,
+// `cover` puts it under a spoiler-style [role=button] cover.
+function mkCtl(row, { chrome = false, cover = null, tag = 'A' } = {}) {
+  const ctl = {
+    tagName: tag, tabIndex: 0,
+    closest: (sel) => {
+      if (sel === '.msg-actions') return chrome ? {} : null;
+      if (sel.includes('input')) return tag === 'AUDIO' ? ctl : (sel.includes('[role="button"]') ? ctl : null);
+      return null;
+    },
+    parentElement: { closest: () => cover || row },
+  };
+  return ctl;
+}
+function mkRow(ctlSpecs = []) {
+  const row = mkItem();
+  const cover = { tagName: 'DIV' };
+  row._ctls = ctlSpecs.map(spec => mkCtl(row, { ...spec, cover: spec.covered ? cover : null }));
+  row.querySelectorAll = () => row._ctls;
+  row.contains = (t) => t === row || t === cover || row._ctls.includes(t);
+  return row;
+}
+
+describe('makeListNavigable: innerTabbable (message feed)', () => {
+  it("keeps the current row's links and buttons in the tab order, not the other rows'", () => {
+    const rows = [mkRow([{}, { tag: 'BUTTON' }]), mkRow([{}])];
+    const { el } = mkList(rows);
+    makeListNavigable(el, { innerTabbable: true, innerSkip: '.msg-actions' });
+    expect(rows[0].tabIndex).toBe(0);
+    expect(rows[0]._ctls.map(c => c.tabIndex)).toEqual([0, 0]);
+    expect(rows[1]._ctls.map(c => c.tabIndex)).toEqual([-1]);
+  });
+
+  it('keeps the hover action bar and controls under a spoiler cover out', () => {
+    const rows = [mkRow([{ chrome: true }, { covered: true, tag: 'BUTTON' }, {}])];
+    const { el } = mkList(rows);
+    makeListNavigable(el, { innerTabbable: true, innerSkip: '.msg-actions' });
+    expect(rows[0]._ctls.map(c => c.tabIndex)).toEqual([-1, -1, 0]);
+  });
+
+  it('moves the inner tab stops with the current row on ArrowDown', () => {
+    const rows = [mkRow([{}]), mkRow([{}])];
+    const { el, fire } = mkList(rows);
+    makeListNavigable(el, { innerTabbable: true });
+    fire(keyEvent('ArrowDown', rows[0]));
+    expect(rows[1].tabIndex).toBe(0);
+    expect(rows[0]._ctls[0].tabIndex).toBe(-1);
+    expect(rows[1]._ctls[0].tabIndex).toBe(0);
+  });
+
+  it('without innerTabbable every nested control is demoted (sidebar lists)', () => {
+    const rows = [mkRow([{}, {}])];
+    const { el } = mkList(rows);
+    makeListNavigable(el);
+    expect(rows[0]._ctls.map(c => c.tabIndex)).toEqual([-1, -1]);
+  });
+
+  it('leaves Enter on a [role=button] spoiler to the spoiler, and arrows to a media player', () => {
+    const rows = [mkRow([{ tag: 'SPAN' }, { tag: 'AUDIO' }]), mkRow([])];
+    rows[0]._ctls[0].closest = (sel) => (sel.includes('[role="button"]') ? rows[0]._ctls[0] : null);
+    const { el, fire } = mkList(rows);
+    const onActivate = vi.fn();
+    makeListNavigable(el, { innerTabbable: true, onActivate });
+    fire(keyEvent('Enter', rows[0]._ctls[0]));
+    expect(onActivate).not.toHaveBeenCalled();
+    const ev = keyEvent('ArrowDown', rows[0]._ctls[1]);
+    fire(ev);
+    expect(ev.preventDefault).not.toHaveBeenCalled();
+    expect(rows[0].tabIndex).toBe(0);
+  });
+});
+
 describe('announce', () => {
   it('is a harmless no-op when createElement yields a non-element stub', () => {
     global.document = {

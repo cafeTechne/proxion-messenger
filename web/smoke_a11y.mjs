@@ -181,6 +181,35 @@ async function auditCallContract(browser, url) {
   }
 }
 
+// Reflow at 400% zoom (WCAG 1.4.10): a 1280x800 window at 400% is 320x200
+// CSS px. The fixed chrome used to take all of it and leave the feed 0px
+// tall, and the settings pane about 30px. Returns problem strings.
+async function auditReflow(browser, url) {
+  const page = await browser.newPage();
+  try {
+    await page.setViewport({ width: 1280, height: 800 });
+    await page.goto(url, { waitUntil: 'load', timeout: 20000 });
+    await page.evaluate(() => { const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none'; });
+    await page.waitForFunction(() => document.querySelector('.dot')?.classList.contains('online'), { timeout: 15000 }).catch(() => {});
+    await page.evaluate(SCREENS.find(s => s.name === 'room-with-messages').prepare);
+    await sleep(300);
+    await page.setViewport({ width: 320, height: 200 });
+    await sleep(300);
+    const problems = [];
+    const feedH = await page.evaluate(() => document.getElementById('message-feed').getBoundingClientRect().height);
+    if (feedH < 100) problems.push(`message feed is ${Math.round(feedH)}px tall at 320x200`);
+    const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+    if (sw > 320) problems.push(`page scrolls sideways at 320px (${sw}px wide)`);
+    await page.evaluate(() => document.getElementById('settings-btn').click());
+    await sleep(400);
+    const paneH = await page.evaluate(() => document.querySelector('#settings-modal .settings-content').getBoundingClientRect().height);
+    if (paneH < 100) problems.push(`settings pane is ${Math.round(paneH)}px tall at 320x200`);
+    return problems;
+  } finally {
+    await page.close();
+  }
+}
+
 let totalViolations = 0;
 let browser = null;
 try {
@@ -232,6 +261,15 @@ try {
     totalViolations += callProblems.length;
     console.error(`  ✗ call-contract: ${callProblems.length} problem(s)`);
     for (const p of callProblems) console.error(`      - ${p}`);
+  }
+
+  const reflowProblems = await auditReflow(browser, url);
+  if (reflowProblems.length === 0) {
+    console.log('  ✓ reflow: feed and settings usable at 400% zoom (320x200)');
+  } else {
+    totalViolations += reflowProblems.length;
+    console.error(`  ✗ reflow: ${reflowProblems.length} problem(s)`);
+    for (const p of reflowProblems) console.error(`      - ${p}`);
   }
 } catch (e) {
   console.error('  ✗ threw: ' + e.message);

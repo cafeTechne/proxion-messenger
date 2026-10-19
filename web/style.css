@@ -665,6 +665,15 @@ main { background: var(--surface-0); }
     flex-direction: column;
     gap: var(--space-3);
 }
+
+/* Short viewports (a laptop at 400% zoom is about 320x200 CSS px): the
+   header, banners and composer alone are taller than the window, and the
+   feed, the only flexible part, shrank to 0px. Let the page scroll instead
+   and give the feed a height of its own (WCAG 1.4.10 reflow). */
+@media (max-height: 420px) {
+    body { height: auto; min-height: 100vh; min-height: 100dvh; }
+    #message-feed { flex: none; height: 75vh; height: 75dvh; min-height: 120px; }
+}
 } /* layout */
 
 @layer components {
@@ -1616,11 +1625,6 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
     color: inherit;
     cursor: auto;
     user-select: auto;
-}
-/* The lightbox carries an inline display: none, hence !important. */
-#lightbox { display: none; }
-#lightbox.visible {
-    display: flex !important;
 }
 
 /* 13.11: Edit history */
@@ -2785,6 +2789,14 @@ button:is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; opacity: 0.5
     .settings-input, .settings-inline, .settings-readout { max-width: 420px; }
     .settings-inline > .settings-input { max-width: none; }
     .settings-toggle { max-width: 560px; }
+}
+
+/* Short phone-width viewports (400% zoom): the header and footer left the
+   scrolling pane about 30px tall. Scroll the whole panel instead. */
+@media (max-height: 420px) and (max-width: 768px) {
+    #settings-modal > .settings-panel { overflow-y: auto; }
+    #settings-modal .settings-body { flex: none; }
+    #settings-modal .settings-content { overflow: visible; }
 }
 
 /* ── Defensive layout ──

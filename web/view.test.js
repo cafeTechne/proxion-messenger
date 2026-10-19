@@ -144,7 +144,7 @@ describe('renderContacts', () => {
   it('wraps the name in its own element so CSS can truncate it and keep the id', () => {
     make().renderContacts([{ certificate_id: 'c1', peer_did: 'did:key:zRealAlice', display_name: '<b>Al</b>' }]);
     const html = els['contacts-list']._children[0].innerHTML;
-    expect(html).toMatch(/<span class="contact-item-label" dir="auto"><span class="contact-item-name">&lt;b&gt;Al&lt;\/b&gt;<\/span> <span class="dm-id-suffix id-suffix">/);
+    expect(html).toMatch(/<span class="contact-item-label"><span class="contact-item-name" dir="auto">&lt;b&gt;Al&lt;\/b&gt;<\/span> <span class="dm-id-suffix id-suffix">/);
   });
   it('opens contact details from a right-click or the context-menu key on the row', () => {
     // The contact details panel (with Remove contact) had no way in from the list.
@@ -201,7 +201,7 @@ describe('addRoomToSidebar + its click', () => {
     const v = make();
     v.addRoomToSidebar('room-long', 'A very long <room> name', '');
     const li = els['room-list']._children[0];
-    expect(li.innerHTML).toContain('class="room-item-name" dir="auto" title="A very long &lt;room&gt; name"');
+    expect(li.innerHTML).toContain('class="room-item-name" title="A very long &lt;room&gt; name"');
   });
 });
 

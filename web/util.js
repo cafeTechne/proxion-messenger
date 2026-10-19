@@ -62,6 +62,13 @@ export function didSuffix(id) {
     return id.slice(-5);
 }
 
+// A presence status as words ("online", "away"), translated. Unknown or empty
+// statuses give "" so a missing status never shows a raw wire value.
+const _PRESENCE_KEYS = { online: 'presence.online', away: 'presence.away', busy: 'presence.busy', offline: 'presence.offline' };
+export function presenceLabel(status) {
+    return Object.prototype.hasOwnProperty.call(_PRESENCE_KEYS, status) ? t(_PRESENCE_KEYS[status]) : '';
+}
+
 export function escHtml(str) {
     return String(str)
         .replace(/&/g, '&amp;')

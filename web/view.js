@@ -12,7 +12,7 @@
 import { escHtml, didIdTag } from './util.js';
 import { podWriteReadState } from './pod.js';
 
-import { t } from './i18n.js';
+import { t, bidiIsolate } from './i18n.js';
 import { showFeedNotice } from './states.js';
 
 // Make a sidebar conversation row operable by keyboard and announced to assistive
@@ -24,6 +24,8 @@ function _makeRowOperable(li, activate, focusEl) {
     const target = focusEl || li;
     target.setAttribute("role", "button");
     target.tabIndex = 0;
+    // The list's roving tabindex moves focus to this element, not the bare <li>.
+    if (target !== li) target.setAttribute("data-roving-target", "");
     li.onclick = activate;
     target.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
@@ -174,7 +176,7 @@ export function createView({
             const idTag = c.display_name && didIdTag(c.peer_did)
                 ? ` <span class="dm-id-suffix id-suffix">·${escHtml(didIdTag(c.peer_did))}</span>`
                 : "";
-            li.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25z"/></svg><span class="contact-item-label" dir="auto"><span class="contact-item-name">' + escHtml(label) + '</span>' + idTag + '</span>';
+            li.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25z"/></svg><span class="contact-item-label"><span class="contact-item-name" dir="auto">' + escHtml(label) + '</span>' + idTag + '</span>';
             _makeRowOperable(li, () => openContactThread(c));
             if (c.peer_did) _contactsByDid.set(c.peer_did, c);
             if (onContactMenu) {
@@ -241,7 +243,7 @@ export function createView({
         const unreadCounts = getUnreadCounts();
         const view = { type: "local_dm", id: id, name: name, local: true, peerWebid: peerWebid };
         setActiveView(view);
-        document.getElementById("chat-header-name").innerText = "@ " + name;
+        document.getElementById("chat-header-name").innerText = "@ " + bidiIsolate(name);
         // Calls may be gated (e.g. the gateway-less web build); see _setHeaderControls.
         _setHeaderControls(view);
         onViewOpened();
@@ -285,7 +287,7 @@ export function createView({
         const view = getActiveView();
         if (view && view.id === roomId) {
             view.name = name;
-            document.getElementById("chat-header-name").innerText = "# " + name;
+            document.getElementById("chat-header-name").innerText = "# " + bidiIsolate(name);
         }
     }
 
@@ -311,8 +313,8 @@ export function createView({
         li.style.gap = "6px";
         li.innerHTML = `
             <div class="room-item-body">
-                <div class="room-item-name" dir="auto" title="${escHtml(name)}">${escHtml(name)}</div>
-                <div class="room-item-preview" dir="auto"></div>
+                <div class="room-item-name" title="${escHtml(name)}"><bdi>${escHtml(name)}</bdi></div>
+                <div class="room-item-preview"></div>
             </div>
             <button data-sidebar-action="members" data-room-id="${escHtml(roomId)}" title="${escHtml(t('ui.members'))}" aria-label="${escHtml(t('ui.members'))}"
                     class="sidebar-icon-btn"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></svg></button>`;
@@ -322,7 +324,7 @@ export function createView({
             const _name = getThreadNames()[roomId] || name;
             const view = {type: "local_room", id: roomId, name: _name, local: true};
             setActiveView(view);
-            document.getElementById("chat-header-name").innerText = "# " + _name;
+            document.getElementById("chat-header-name").innerText = "# " + bidiIsolate(_name);
             // No E2E badge, Verify or fingerprint bar in a room.
             _setHeaderControls(view);
             onViewOpened();
@@ -387,7 +389,7 @@ export function createView({
                 const view = { type: type, id: id, name: name };
                 if (type === "dm" && item.peer_webid) view.peerWebid = item.peer_webid;
                 setActiveView(view);
-                document.getElementById("chat-header-name").innerText = (type === "room" ? "# " : "@ ") + name;
+                document.getElementById("chat-header-name").innerText = (type === "room" ? "# " : "@ ") + bidiIsolate(name);
                 _setHeaderControls(view);
                 onViewOpened();
                 document.getElementById("message-feed").innerHTML = "";

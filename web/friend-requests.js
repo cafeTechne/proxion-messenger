@@ -5,6 +5,7 @@
 // socket. escHtml imported from util.js.
 
 import { escHtml } from './util.js';
+import { t } from './i18n.js';
 
 export function createFriendRequests({ getSocket }) {
     function refreshFriendRequestsBadge() {
@@ -26,17 +27,21 @@ export function createFriendRequests({ getSocket }) {
         li.id = "fri-" + req.invitation_id;
         li.dataset.peerDid = req.from_did || "";
         li.className = "fr-card";
+        // "From {name}" is translated as one phrase (word order differs by
+        // language); the bold name is spliced in at the placeholder, and <bdi>
+        // keeps a right-to-left name from reordering the words around it.
+        const [before, after = ""] = t('fr.from', { name: "\u0000" }).split("\u0000");
         const nameLine = claimed
-            ? `<div class="fr-card__name">From <b>${escHtml(claimed)}</b> <span class="fr-card__claim">claimed name, unverified</span></div>`
-            : `<div class="fr-card__name">Friend request</div>`;
+            ? `<div class="fr-card__name">${escHtml(before)}<b><bdi>${escHtml(claimed)}</bdi></b>${escHtml(after)} <span class="fr-card__claim">${escHtml(t('fr.claimedUnverified'))}</span></div>`
+            : `<div class="fr-card__name">${escHtml(t('fr.title'))}</div>`;
         li.innerHTML =
             nameLine +
             `<div class="fr-card__did" title="${escHtml(fromDid)}">${escHtml(fromDid)}</div>` +
             `<div class="fr-card__actions">` +
             `<button data-fr-action="accept" data-inv-id="${escHtml(req.invitation_id)}" ` +
-            `class="btn btn--sm btn--accent">Accept</button>` +
+            `class="btn btn--sm btn--accent">${escHtml(t('btn.accept'))}</button>` +
             `<button data-fr-action="dismiss" data-inv-id="${escHtml(req.invitation_id)}" ` +
-            `class="btn btn--sm btn--slate">Ignore</button>` +
+            `class="btn btn--sm btn--slate">${escHtml(t('fr.ignore'))}</button>` +
             `</div>`;
         list.appendChild(li);
         refreshFriendRequestsBadge();

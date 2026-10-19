@@ -894,3 +894,43 @@ describe('message header id tag matches the rows (F4)', () => {
     }
   });
 });
+
+describe('message accessible name and description', () => {
+  // Arrow keys in the feed land on the article itself; its label is only
+  // "sender, time", so the content has to be its description.
+  function render(msg) {
+    els['message-feed'] = mkEl({ scrollHeight: 500, clientHeight: 500 });
+    const created = [];
+    const orig = global.document.createElement;
+    global.document.createElement = () => {
+      const attrs = {};
+      const el = mkEl({ setAttribute(k, v) { attrs[k] = String(v); } });
+      el._attrs = attrs;
+      created.push(el);
+      return el;
+    };
+    try {
+      make().renderMessage({ thread_id: 'room-1', from_webid: 'did:key:zBob',
+        from_display_name: 'Bob', timestamp: new Date().toISOString(), ...msg });
+    } finally {
+      global.document.createElement = orig;
+    }
+    const article = created.find(e => e._attrs.role === 'article');
+    const html = created.map(e => e.innerHTML).join('');
+    return { article, html };
+  }
+
+  it('points aria-describedby at the message text', () => {
+    const { article, html } = render({ message_id: 'm1', content: 'hello there' });
+    expect(article._attrs['aria-label']).toMatch(/^Bob, /);
+    expect(article._attrs['aria-describedby']).toBe('msgc-m1');
+    expect(html).toContain('id="msgc-m1" class="msg-content"');
+  });
+
+  it('includes the attachment card when there is one', () => {
+    const { article, html } = render({ message_id: 'm2', content: '📎 a.txt',
+      file: { filename: 'a.txt', mime_type: 'text/plain', size: 3, data_b64: 'YWJj' } });
+    expect(article._attrs['aria-describedby']).toBe('msgc-m2 msgf-m2');
+    expect(html).toContain('id="msgf-m2" class="attachment');
+  });
+});

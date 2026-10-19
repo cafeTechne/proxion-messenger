@@ -16,7 +16,7 @@ import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 import puppeteer from 'puppeteer-core';
 
-setTimeout(() => { console.error('HARD TIMEOUT'); process.exit(3); }, 150000);
+setTimeout(() => { console.error('HARD TIMEOUT'); process.exit(3); }, 180000);
 
 const CHROME = [
   process.env.PROXION_CHROME,
@@ -75,7 +75,8 @@ async function startGateway() {
 // ── Keyboard-only primitives ────────────────────────────────────────────────
 const active = (page) => page.evaluate(() => {
   const a = document.activeElement;
-  return a ? { id: a.id, cls: (a.className || '').toString(), tag: a.tagName } : null;
+  return a ? { id: a.id, cls: (a.className || '').toString(), tag: a.tagName,
+    inFeed: !!a.closest?.('#message-feed'), inNav: !!a.closest?.('nav li') } : null;
 });
 
 // Press Tab (or Shift+Tab) up to `max` times until the focused element satisfies
@@ -210,16 +211,77 @@ try {
     .some(m => /hello from the keyboard/.test(m.textContent || '')));
   check('message sent with Enter', messageSent);
 
+  // 5b. Content inside a message is reachable: the feed is one tab stop with
+  //     arrows between messages, and Tab from the current message walks its
+  //     links and buttons (the roving tabindex used to demote all of them).
+  await page.keyboard.type('see https://example.com/kbd for details');
+  await page.keyboard.press('Enter');
+  await sleep(500);
+  const inFeed = (a) => a && a.inFeed;
+  check('Shift+Tab from the composer reaches the feed', await tabTo(page, inFeed, { shift: true, max: 20 }));
+  await page.keyboard.press('End');
+  await sleep(80);
+  const lastMsg = await page.evaluate(() => {
+    const a = document.activeElement;
+    const ids = (a.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean);
+    return { isMsg: a.classList.contains('message'),
+      described: ids.map(id => document.getElementById(id)?.textContent || '').join(' ') };
+  });
+  check('End lands on the last message', lastMsg.isMsg);
+  check('the focused message describes its content, not only sender and time', /example\.com\/kbd/.test(lastMsg.described));
+  await page.keyboard.press('Tab');
+  await sleep(60);
+  check('Tab from a message reaches the link in it',
+    await page.evaluate(() => document.activeElement?.tagName === 'A' && /example\.com\/kbd/.test(document.activeElement.href)));
+  // An image in the current message opens the lightbox, which traps focus and
+  // hands it back to the image on Escape. The image button is planted in the
+  // message (uploading a file is outside this smoke's scope).
+  await page.evaluate(() => {
+    const msgs = document.querySelectorAll('#message-feed .message');
+    const body = msgs[msgs.length - 1].querySelector('.msg-content');
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'msg-image-btn'; b.id = 'kbd-img-btn';
+    b.innerHTML = '<img class="msg-image-preview" alt="pixel" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">';
+    body.appendChild(b);
+  });
+  await sleep(100);
+  check('Tab reaches an image in the message', await tabTo(page, a => a.id === 'kbd-img-btn', { max: 6 }));
+  await page.keyboard.press('Enter');
+  await sleep(300);
+  const lbOpen = () => page.evaluate(() => getComputedStyle(document.getElementById('lightbox')).display !== 'none');
+  check('Enter on the image opens the lightbox', await lbOpen());
+  let lbTrapped = await page.evaluate(() => document.getElementById('lightbox').contains(document.activeElement));
+  for (let i = 0; i < 3; i++) {
+    await page.keyboard.press('Tab'); await sleep(30);
+    if (!(await page.evaluate(() => document.getElementById('lightbox').contains(document.activeElement)))) lbTrapped = false;
+  }
+  check('focus stays inside the lightbox', lbTrapped);
+  await page.keyboard.press('Escape');
+  await sleep(300);
+  check('Escape closes the lightbox', !(await lbOpen()));
+  check('closing the lightbox returns focus to the image', (await active(page))?.id === 'kbd-img-btn');
+
   // 6. Roving tabindex: Tab onto a sidebar row, ArrowDown moves focus to another
-  //    row (the whole list is one tab stop — Phase B).
-  const atRow = await tabTo(page, a => a.tag === 'LI');
+  //    row (the whole list is one tab stop — Phase B). The focused element is
+  //    a named button, not a bare listitem.
+  const atRow = await tabTo(page, a => a.inNav);
   check('Tab reaches a sidebar row', atRow);
-  const before = await active(page);
+  const rowAx = await page.evaluate(() => ({ role: document.activeElement.getAttribute('role'),
+    name: (document.activeElement.textContent || '').replace(/\s+/g, ' ').trim() }));
+  check(`the focused sidebar row is a named button (${rowAx.role}: ${rowAx.name.slice(0, 30)})`,
+    rowAx.role === 'button' && /general/.test(rowAx.name));
   await page.keyboard.press('ArrowDown');
   await sleep(120);
   const afterArrow = await active(page);
-  check('ArrowDown moves within the sidebar list',
-    !!afterArrow && afterArrow.tag === 'LI');
+  check('ArrowDown moves within the sidebar list', !!afterArrow && afterArrow.inNav);
+
+  // 6b. Add contact: the Scan QR control is a real tab stop.
+  check('Tab reaches the add-contact button', await tabTo(page, a => a.id === 'add-peer-btn'));
+  await page.keyboard.press('Enter');
+  await sleep(300);
+  check('Tab reaches Scan QR code', await tabTo(page, a => a.id === 'scan-qr-btn', { max: 10 }));
+  await page.keyboard.press('Escape');
+  await sleep(300);
 
   // 7. Shortcut modal open (Ctrl+/) then Escape must RESTORE focus to the opener.
   //    Park focus on a known control first so we can assert the restore target.

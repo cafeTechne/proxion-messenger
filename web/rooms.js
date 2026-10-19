@@ -87,9 +87,7 @@ export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoo
         const activeView = getActiveView();
         if (!activeView || activeView.type !== "local_room") return;
         const isOwner = getRoomCreatorOf().has(activeView.id);
-        const msg = isOwner
-            ? "Leave this room? As the owner, ownership will be transferred to another member, or the room will be deleted if you're the last member."
-            : "Leave this room? You can rejoin with the invite link.";
+        const msg = isOwner ? t('confirm.leaveRoom.ownerBody') : t('confirm.leaveRoom.body');
         showConfirm(msg, () => {
             getSocket().send(JSON.stringify({ cmd: "leave_local_room", room_id: activeView.id }));
         }, null, { title: t('confirm.leaveRoom.title'), confirmLabel: t('confirm.leaveRoom.verb'), danger: true });

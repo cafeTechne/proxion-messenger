@@ -119,10 +119,24 @@ function _lookup(key) {
     return null;
 }
 
+// Wrap user-supplied text in Unicode isolates (FSI ... PDI) so a name written
+// right to left cannot reorder the words around it ("From محمد 2" stays in
+// order, in an LTR or an RTL locale). Invisible, and ignored by screen readers.
+export function bidiIsolate(s) {
+    const v = String(s ?? '');
+    return v ? `\u2068${v}\u2069` : v;
+}
+
+// Interpolation params that carry peer-chosen text (names, room names,
+// message excerpts) and get isolated. Counts, times and sizes do not.
+const BIDI_PARAMS = new Set(['name', 'names', 'sender', 'peer', 'user', 'room', 'thread', 'content', 'filename']);
+
 function _interp(str, params) {
     if (!params) return str;
-    return str.replace(/\{(\w+)\}/g, (m, k) =>
-        (Object.prototype.hasOwnProperty.call(params, k) ? String(params[k]) : m));
+    return str.replace(/\{(\w+)\}/g, (m, k) => {
+        if (!Object.prototype.hasOwnProperty.call(params, k)) return m;
+        return BIDI_PARAMS.has(k) ? bidiIsolate(params[k]) : String(params[k]);
+    });
 }
 
 export function t(key, params) {

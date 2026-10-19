@@ -20,7 +20,7 @@
 //   renderWindow, scrollBatch,
 // })
 
-import { didIdTag, escHtml, webidColor, avatarInitial, renderMarkdown, expireLabel as _expireLabel, b64attr, formatFileSize, gatewayUrl } from './util.js';
+import { didIdTag, escHtml, presenceLabel, webidColor, avatarInitial, renderMarkdown, expireLabel as _expireLabel, b64attr, formatFileSize, gatewayUrl } from './util.js';
 import { parsePoll } from './polls.js';
 import { applyRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { t, tn, getLocale } from './i18n.js';
@@ -412,7 +412,8 @@ export function createRendering({
             ? { ...msg.file, ...file, stored: true }
             : { ...msg.file, unavailable: true };
         const card = document.getElementById(`msg-${msgId}`)?.querySelector(".attachment");
-        if (card) card.outerHTML = attachmentHtml(msg.file);
+        // Keep the id the message's aria-describedby points at.
+        if (card) card.outerHTML = attachmentHtml(msg.file).replace('<div class="attachment', `<div id="msgf-${escHtml(msgId)}" class="attachment`);
     }
 
     function scrollToBottom() {
@@ -694,7 +695,7 @@ export function createRendering({
         const avatarBase = msg.from_avatar_b64
             ? `<img src="data:image/png;base64,${b64attr(msg.from_avatar_b64)}" class="avatar" alt="" style="width:40px;height:40px;border-radius:50%;">`
             : `<div class="avatar placeholder" style="background:${avatarColor};color:var(--avatar-initial);width:40px;height:40px;line-height:40px;font-size:16px;font-weight:bold;text-align:center;border-radius:50%;">${escHtml(avatarInitial(name))}</div>`;
-        const presenceDot = `<div class="avatar-presence ${presenceClass}" title="${escHtml(presenceData.status || '')}" style="bottom:-1px;inset-inline-end:-1px;"></div>`;
+        const presenceDot = `<div class="avatar-presence ${presenceClass}" title="${escHtml(presenceLabel(presenceData.status))}" style="bottom:-1px;inset-inline-end:-1px;"></div>`;
         const avatarHtml = `<div style="position:relative;display:inline-block;cursor:pointer;" data-profile-avatar data-msg-action="profile" data-webid="${escHtml(msg.from_webid || '')}" data-name="${escHtml(name)}">${avatarBase}${presenceDot}</div>`;
 
         // Render text with Markdown and mention highlighting
@@ -819,24 +820,24 @@ export function createRendering({
             const _durSecs = msg.duration_ms ? Math.max(1, Math.floor(msg.duration_ms / 1000)) : 0;
             const dur = _durSecs ? `<span class="audio-duration">${Math.floor(_durSecs / 60)}:${String(_durSecs % 60).padStart(2, '0')}</span>` : "";
             const _audioLabel = escHtml(t('msg.voiceFrom', { name }) + (_durSecs ? t('msg.voiceDuration', { secs: _durSecs }) : ""));
-            bodyHtml += `<div class="audio-message"><audio controls aria-label="${_audioLabel}" src="data:audio/webm;base64,${b64attr(msg.audio_b64)}"></audio>${dur}${receiptHtml}</div>`;
+            bodyHtml += `<div id="msgc-${msgIdEsc}" class="audio-message"><audio controls aria-label="${_audioLabel}" src="data:audio/webm;base64,${b64attr(msg.audio_b64)}"></audio>${dur}${receiptHtml}</div>`;
         } else if (_poll) {
             // R59F: poll card — plain text on the wire, upgraded rendering here.
             // Each option is a vote button; renderReactions fills in the
             // counts from the keycap reactions, so they live-update.
             const rows = _poll.options.map(o =>
                 `<button type="button" class="poll-opt" data-msg-action="poll-vote" data-msg-id="${msgIdEsc}" data-emoji="${o.emoji}" aria-pressed="false"><span class="poll-opt-bar" aria-hidden="true"></span><span class="poll-opt-text">${o.emoji} ${escHtml(o.text)}</span><span class="poll-opt-count"></span></button>`).join('');
-            bodyHtml += `<div class="msg-content"><div class="poll-card" dir="auto">
+            bodyHtml += `<div id="msgc-${msgIdEsc}" class="msg-content"><div class="poll-card" dir="auto">
                 <div class="poll-q">${escHtml(_poll.question)}</div>${rows}
                 <div class="poll-foot"><span class="poll-hint">${t('poll.voteHint')}</span>${editedHtml}${receiptHtml}</div></div></div>`;
         } else if (isFileCaption(msg)) {
             // The card names the file; the "📎 name" caption would repeat it.
-            bodyHtml += `<div class="msg-content msg-content--file"><span class="msg-text" dir="auto"></span>${editedHtml}${receiptHtml}</div>`;
+            bodyHtml += `<div id="msgc-${msgIdEsc}" class="msg-content msg-content--file"><span class="msg-text" dir="auto"></span>${editedHtml}${receiptHtml}</div>`;
         } else {
-            bodyHtml += `<div class="msg-content"><span class="msg-text" dir="auto">${renderedText}</span>${editedHtml}${receiptHtml}</div>`;
+            bodyHtml += `<div id="msgc-${msgIdEsc}" class="msg-content"><span class="msg-text" dir="auto">${renderedText}</span>${editedHtml}${receiptHtml}</div>`;
         }
 
-        if (fileHtml) bodyHtml += fileHtml;
+        if (fileHtml) bodyHtml += fileHtml.replace('<div class="attachment', `<div id="msgf-${msgIdEsc}" class="attachment`);
         bodyHtml += `<div id="reactions-${msgIdEsc}" class="reactions"></div>`;
 
         // Hover action bar
@@ -847,6 +848,10 @@ export function createRendering({
             <button data-msg-action="more" data-msg-id="${msgIdEsc}" class="icon-btn" aria-label="${t('ui.moreActions')}" title="${t('ui.moreActions')}" aria-haspopup="true">${icon('ellipsis-horizontal')}</button>
         </div>`;
         body.innerHTML = bodyHtml;
+        // The label names the sender and time; the content is the
+        // description, so a screen reader landing on the message (arrow keys
+        // in the feed) reads what it says, not just who said it when.
+        div.setAttribute("aria-describedby", `msgc-${msgId}` + (fileHtml ? ` msgf-${msgId}` : ""));
 
         div.appendChild(avatarCol);
         div.appendChild(body);

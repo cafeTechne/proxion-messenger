@@ -60,7 +60,7 @@ describe('renderMembersPanel', () => {
     make().renderMembersPanel([
       { webid: 'did:key:zC', display_name: 'Carol', status: 'online', federated: true, gateway: 'gw.remote' },
     ]);
-    expect(els['members-list'].innerHTML).toContain('Federated member');
+    expect(els['members-list'].innerHTML).toContain('members.federatedTitle');
   });
   it('appends a stable short id so members sharing a display name stay distinct', () => {
     els['members-list'] = mkEl();

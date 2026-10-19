@@ -16,6 +16,18 @@ import { announce } from './a11y.js';
 
 const CONFIRM_TIMEOUT_MS = 18000;
 
+// "Seen by A, B, C and 2 more" for a read-receipt row, other readers only.
+// Plain text for a textContent sink: names are not HTML-escaped here (that
+// showed "A&amp;B" for a reader named "A&B"). Returns "" with no readers.
+export function seenByText(readers, selfWebId) {
+    const others = (readers || []).filter(r => r.receiver_webid !== selfWebId);
+    if (!others.length) return '';
+    const names = others.slice(0, 3).map(r => r.display_name || String(r.receiver_webid || '').slice(-8)).join(', ');
+    return others.length <= 3
+        ? t('msg.seenBy', { names })
+        : t('msg.seenByMore', { names, count: others.length - 3 });
+}
+
 // isOnline (optional): true when the socket is OPEN. A message sent while
 // offline sits in the connection queue and goes out on reconnect, so its
 // confirm timer must not run until then; it shows "Waiting for connection"
