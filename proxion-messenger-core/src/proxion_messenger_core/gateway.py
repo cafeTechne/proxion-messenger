@@ -1139,10 +1139,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
     # candidates, which used to eat the general 60/10s budget so the next call's
     # invite or hangup was refused, leaving a call that could not be ended.
     _SIGNAL_RATE_COMMANDS = frozenset({"ice_candidate", "voice_invite", "voice_answer", "voice_hangup"})
-    _SIGNAL_RATE_LIMIT = 300
+    _SIGNAL_RATE_LIMIT = 150
 
     def _check_signal_rate_limit(self, websocket) -> bool:
-        """Return True if a call-signaling command is allowed (300 per 10s per socket)."""
+        """Return True if a call-signaling command is allowed (150 per 10s per socket)."""
         import time as _time
         now = _time.monotonic()
         entry = self._rate_signal_counters.get(websocket)

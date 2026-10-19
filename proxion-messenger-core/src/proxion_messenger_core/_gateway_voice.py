@@ -21,6 +21,33 @@ _INVITE_WINDOW = 60.0
 _INVITE_BURST = 3
 _HANGUP_REASONS = ("declined", "busy")
 
+# A hangup with no local session is relayed to the caller's gateway by webid.
+# Without a cap each repeat (or each made-up session id) was one more outbound
+# relay POST: relay a given session's hangup once, and at most
+# _SESSIONLESS_HANGUP_BURST of them per sender per _SESSIONLESS_HANGUP_WINDOW.
+_sessionless_hangups: dict = {}
+_SESSIONLESS_HANGUP_WINDOW = 60.0
+_SESSIONLESS_HANGUP_BURST = 10
+
+
+def _sessionless_hangup_allowed(sender: str, target: str, session_id: str) -> bool:
+    import time as _t
+    now = _t.monotonic()
+    if len(_sessionless_hangups) > 4096:
+        for k in [k for k, ts in _sessionless_hangups.items()
+                  if now - ts >= _SESSIONLESS_HANGUP_WINDOW]:
+            _sessionless_hangups.pop(k, None)
+    key = (sender, target, session_id)
+    ts = _sessionless_hangups.get(key)
+    if ts is not None and now - ts < _SESSIONLESS_HANGUP_WINDOW:
+        return False
+    recent = sum(1 for (s, _tg, _sid), t in _sessionless_hangups.items()
+                 if s == sender and now - t < _SESSIONLESS_HANGUP_WINDOW)
+    if recent >= _SESSIONLESS_HANGUP_BURST:
+        return False
+    _sessionless_hangups[key] = now
+    return True
+
 
 class VoiceHandlerMixin:
 
@@ -689,7 +716,8 @@ class VoiceHandlerMixin:
             sender_wid = self._client_webids.get(websocket, "")
             if (session_id and target_webid and sender_wid and target_webid != sender_wid
                     and self._store and self._store.get_relationship_by_did(target_webid)
-                    and not self._any_socket(target_webid)):
+                    and not self._any_socket(target_webid)
+                    and _sessionless_hangup_allowed(sender_wid, target_webid, str(session_id))):
                 sig = {"session_id": session_id}
                 if reason:
                     sig["reason"] = reason
