@@ -4,7 +4,7 @@ import asyncio
 import pytest
 
 from proxion_messenger_core.persist import AgentState
-from .helpers import connect_and_register
+from .helpers import answer_auth_challenge, connect_and_register
 
 
 @pytest.fixture
@@ -43,6 +43,7 @@ async def test_register_issues_gateway_delegation_cert(live_gateway, alice_agent
         registered = None
         for _ in range(6):
             ev = json.loads(await asyncio.wait_for(ws.recv(), timeout=5.0))
+            await answer_auth_challenge(ws, ev, alice_agent.identity_key)
             if ev.get("type") == "registered":
                 registered = ev
                 break
@@ -96,6 +97,7 @@ async def test_contacts_list_exposes_binds_calls(live_gateway):
         contacts = None
         for _ in range(10):
             ev = json.loads(await asyncio.wait_for(ws.recv(), timeout=5.0))
+            await answer_auth_challenge(ws, ev, gw.agent.identity_key)
             if ev.get("type") == "relationships":
                 contacts = ev.get("contacts", [])
                 break

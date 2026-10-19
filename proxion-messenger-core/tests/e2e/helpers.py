@@ -65,6 +65,21 @@ class WsSession:
         return events
 
 
+async def answer_auth_challenge(ws, event: dict, identity_key) -> bool:
+    """If *event* is an auth_challenge, sign its nonce with *identity_key* and
+    send the auth_response. Returns True when it answered one."""
+    if event.get("type") != "auth_challenge":
+        return False
+    import base64
+    sig = identity_key.sign(event["nonce"].encode())
+    await ws.send(json.dumps({
+        "cmd": "auth_response",
+        "nonce": event["nonce"],
+        "signature": base64.urlsafe_b64encode(sig).rstrip(b"=").decode(),
+    }))
+    return True
+
+
 async def connect_and_register(
     url: str,
     display_name: str,

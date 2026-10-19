@@ -89,11 +89,15 @@ class GatewayHandle:
 
 def serve_gateway(gw, ws_port: int, http_port: int, *, serve_http: bool = True,
                   wait_http: bool = True, timeout: float = STARTUP_TIMEOUT,
-                  web_dir: str | None = None) -> GatewayHandle:
+                  web_dir: str | None = None,
+                  auto_shutdown: bool = True) -> GatewayHandle:
     """Run ``gw`` in a background thread and wait until it is actually serving.
 
     ``web_dir`` serves static files from that directory (default: none, so
     every static path 404s).
+
+    ``auto_shutdown=False`` keeps the gateway out of the per-test drain, for a
+    session-scoped fixture that must call ``handle.stop()`` in its own teardown.
 
     Raises RuntimeError if the gateway fails to start or never accepts a
     connection, instead of handing back a dead gateway.
@@ -131,7 +135,8 @@ def serve_gateway(gw, ws_port: int, http_port: int, *, serve_http: bool = True,
                 pass
 
     handle.thread = threading.Thread(target=_run, daemon=True)
-    _REGISTRY.append(handle)
+    if auto_shutdown:
+        _REGISTRY.append(handle)
     handle.thread.start()
 
     if not handle.ready.wait(timeout=timeout):

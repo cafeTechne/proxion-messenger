@@ -1187,6 +1187,15 @@ class RoomHandlerMixin:
             return True
         return False
 
+    def _local_dm_pair(self, actor: str, peer: str) -> bool:
+        """True when *actor* and the did *peer* have a local_dm thread on this
+        gateway, opened by either side. A DM reaction names the thread by the
+        peer's did, which has no relationship row for two local accounts."""
+        if not self._store or not actor or not str(peer).startswith("did:key:"):
+            return False
+        return (any(t.get("peer_webid") == peer for t in self._store.get_dm_threads(owner_webid=actor))
+                or any(t.get("peer_webid") == actor for t in self._store.get_dm_threads(owner_webid=peer)))
+
     def _actor_can_read_thread(self, websocket, actor: str, thread_id: str) -> bool:
         """True when *actor* may READ thread *thread_id* — a DM party or a room
         member. Gate for read-only handlers (history/pins/timer) under
@@ -1708,7 +1717,10 @@ class RoomHandlerMixin:
             # DID ≠ the gateway DID, so the check would wrongly reject the real
             # local user (this is why federated DM reactions never worked). See
             # _auth_enforced().
-            if self._auth_enforced() and sender_webid not in (self._own_gateway_did(), _peer_did):
+            # A same-gateway local_dm is keyed by the peer's did and has no
+            # relationship row: allow it when the two accounts have a DM here.
+            if (self._auth_enforced() and sender_webid not in (self._own_gateway_did(), _peer_did)
+                    and not self._local_dm_pair(sender_webid, cert_id)):
                 await websocket.send(json.dumps({"type": "error", "message": "Not a participant in this DM"}))
                 return
             if self._store and message_id and emoji:
@@ -1808,7 +1820,8 @@ class RoomHandlerMixin:
                 _cert_dict_r = self._store.get_relationship_by_cert_id(cert_id)
                 if _cert_dict_r:
                     _peer_did_r = _cert_dict_r.get("peer_did", "")
-            if self._auth_enforced() and sender_webid not in (self._own_gateway_did(), _peer_did_r):
+            if (self._auth_enforced() and sender_webid not in (self._own_gateway_did(), _peer_did_r)
+                    and not self._local_dm_pair(sender_webid, cert_id)):
                 await websocket.send(json.dumps({"type": "error", "message": "Not a participant in this DM"}))
                 return
             if self._store and message_id and emoji:
