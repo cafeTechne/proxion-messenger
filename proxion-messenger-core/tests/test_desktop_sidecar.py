@@ -361,8 +361,10 @@ def test_frozen_default_data_dir_is_not_the_pyinstaller_temp_dir(tmp_path):
     home = tmp_path / "home"
     meipass.mkdir()
     home.mkdir()
+    # Stub dotenv: a developer's repo-root .env may set PROXION_DATA_DIR.
     code = (
-        "import sys; sys.frozen = True; sys._MEIPASS = sys.argv[1];"
+        "import sys, types; sys.modules['dotenv'] = types.SimpleNamespace(load_dotenv=lambda *a, **k: None);"
+        "sys.frozen = True; sys._MEIPASS = sys.argv[1];"
         "sys.path.insert(0, sys.argv[2]); import run_gateway;"
         "print(run_gateway._data_dir())"
     )
