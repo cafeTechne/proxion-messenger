@@ -14,7 +14,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from .messages import purge_message_dependents
+
 logger = logging.getLogger(__name__)
+
+# Everything a room owns, by the column that names the room. delete_room
+# clears all of it: an invite code, a webhook token or a ban list must not
+# outlive the room, and a room id reused later must start empty.
+_ROOM_ID_TABLES = (
+    "reactions", "room_roles", "room_read_receipts", "room_unread_counts",
+    "room_invites", "sender_keys", "room_federated_members", "room_bans",
+    "room_mutes", "room_emoji", "room_members",
+)
+_ROOM_THREAD_TABLES = (
+    "scheduled_messages", "webhook_delivery_logs", "webhooks",
+    "dm_disappear_timers", "disappear_timer_since", "thread_integrity_state",
+    "thread_participant_bindings", "room_seq_counters", "catchup_watermarks",
+)
 
 
 
@@ -254,13 +270,21 @@ class RoomStoreMixin(object):
                 (new_creator_webid, room_id),
             )
     def delete_room(self, room_id: str) -> None:
-        """Delete a room and all associated data (members, messages, reactions, pins)."""
+        """Delete a room and everything stored under it: messages and their
+        pins, edits, reactions, receipts and files, plus members, roles, bans,
+        mutes, invites, emoji, federated members, webhooks and counters."""
         with self._conn() as conn:
+            ids = [r[0] for r in conn.execute(
+                "SELECT message_id FROM messages WHERE thread_id = ?", (room_id,))]
+            purge_message_dependents(conn, ids)
             conn.execute("DELETE FROM pins WHERE thread_id = ?", (room_id,))
-            conn.execute("DELETE FROM reactions WHERE room_id = ?", (room_id,))
-            conn.execute("DELETE FROM messages WHERE thread_id = ?", (room_id,))
             conn.execute("DELETE FROM message_files WHERE thread_id = ?", (room_id,))
-            conn.execute("DELETE FROM room_members WHERE room_id = ?", (room_id,))
+            conn.execute("DELETE FROM messages WHERE thread_id = ?", (room_id,))
+            for table in _ROOM_ID_TABLES:
+                conn.execute(f"DELETE FROM {table} WHERE room_id = ?", (room_id,))
+            for table in _ROOM_THREAD_TABLES:
+                conn.execute(f"DELETE FROM {table} WHERE thread_id = ?", (room_id,))
+            conn.execute("DELETE FROM last_read WHERE channel_id = ?", (room_id,))
             conn.execute("DELETE FROM rooms WHERE room_id = ?", (room_id,))
     def ban_room_member(self, room_id: str, banned_did: str, banned_by: str, reason: str = "") -> None:
         with self._conn() as conn:

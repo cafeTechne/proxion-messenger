@@ -50,6 +50,25 @@ def fts_literal_query(text: str) -> str:
     return " ".join(terms)
 
 
+# Rows keyed by message_id that hang off a message: a pin and an edit carry
+# copies of its text, a reaction or receipt says who saw it, message_files holds
+# an attachment's bytes. Every path that deletes messages removes these too.
+MESSAGE_DEPENDENT_TABLES = (
+    "pins", "reactions", "message_edits", "message_receipts",
+    "message_files", "dm_device_deliveries",
+)
+
+
+def purge_message_dependents(conn, message_ids) -> None:
+    """Delete the dependent rows of *message_ids* inside an open transaction."""
+    ids = [m for m in message_ids if m]
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        marks = ",".join("?" * len(chunk))
+        for table in MESSAGE_DEPENDENT_TABLES:
+            conn.execute(f"DELETE FROM {table} WHERE message_id IN ({marks})", chunk)
+
+
 class MessageStoreMixin(object):
     def _note_thread_insert(self, thread_id: str) -> None:
         counters = self.__dict__.setdefault("_thread_insert_counts", {})
@@ -96,11 +115,7 @@ class MessageStoreMixin(object):
                 chunk = victims[i:i + 500]
                 marks = ",".join("?" * len(chunk))
                 conn.execute(f"DELETE FROM messages WHERE message_id IN ({marks})", chunk)
-                conn.execute(f"DELETE FROM pins WHERE message_id IN ({marks})", chunk)
-                conn.execute(f"DELETE FROM reactions WHERE message_id IN ({marks})", chunk)
-                conn.execute(f"DELETE FROM message_edits WHERE message_id IN ({marks})", chunk)
-                conn.execute(f"DELETE FROM message_receipts WHERE message_id IN ({marks})", chunk)
-                conn.execute(f"DELETE FROM message_files WHERE message_id IN ({marks})", chunk)
+            purge_message_dependents(conn, victims)
         if victims:
             logger.info("Pruned %d oldest messages from thread %s", len(victims), thread_id)
         return len(victims)
@@ -111,13 +126,14 @@ class MessageStoreMixin(object):
         where = "thread_id = ? AND timestamp < ?" + (" AND timestamp >= ?" if since_iso else "")
         params = (thread_id, cutoff_iso) + ((since_iso,) if since_iso else ())
         with self._conn() as conn:
-            conn.execute(
-                "DELETE FROM message_files WHERE message_id IN ("
-                f"SELECT message_id FROM messages WHERE {where})",
-                params,
-            )
+            # The pins, edits, reactions, receipts and files of an expired
+            # message go with it, or a "disappeared" message stays readable.
+            ids = [r[0] for r in conn.execute(
+                f"SELECT message_id FROM messages WHERE {where}", params)]
+            purge_message_dependents(conn, ids)
             cur = conn.execute(f"DELETE FROM messages WHERE {where}", params)
             return cur.rowcount
+
     def select_message_ids_before(
         self, thread_id: str, cutoff_iso: str, limit: int = 0, since_iso: str = ""
     ) -> list[str]:
@@ -230,15 +246,12 @@ class MessageStoreMixin(object):
     def delete_message(self, message_id: str) -> None:
         # Delete the message row (the FTS trigger drops its index entry) AND the
         # dependent rows that carry copies of the content: a pin holds the pinned
-        # text, an edit holds prev+new content, and receipts hold reader state.
-        # Leaving those behind let a disappeared pinned/edited message be
-        # recovered, so purge them in the same transaction.
+        # text, an edit holds prev+new content, and reactions and receipts hold
+        # reader state. Leaving those behind let a disappeared pinned/edited
+        # message be recovered, so purge them in the same transaction.
         with self._conn() as conn:
             conn.execute("DELETE FROM messages WHERE message_id = ?", (message_id,))
-            conn.execute("DELETE FROM pins WHERE message_id = ?", (message_id,))
-            conn.execute("DELETE FROM message_edits WHERE message_id = ?", (message_id,))
-            conn.execute("DELETE FROM message_receipts WHERE message_id = ?", (message_id,))
-            conn.execute("DELETE FROM message_files WHERE message_id = ?", (message_id,))
+            purge_message_dependents(conn, [message_id])
 
     # Room file attachments (the message_files table). The per-file cap is the
     # room send limit (_gateway_files.ROOM_FILE_BYTES); the per-thread cap
