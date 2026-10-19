@@ -23,6 +23,9 @@ logger = logging.getLogger("proxion_messenger_core.gateway")
 # container and overwrite an arbitrary resource on the operator's pod.
 _SAFE_POD_ID_RE = _re.compile(r"^[\w.-]{1,128}$")
 
+# Fire-and-forget push fan-outs, held so they are not garbage collected mid-send.
+_PUSH_TASKS: "set[asyncio.Future]" = set()
+
 
 def _is_safe_pod_id(value) -> bool:
     return (
@@ -88,7 +91,8 @@ class DmHandlerMixin:
             from .messaging import compose, send
             msg = compose(self.agent.identity_key, cert, content, encrypt=encrypt, reply_to_id=data.get("reply_to_id"))
             try:
-                send(msg, client)
+                # Blocking pod write: run it off the event loop.
+                await asyncio.get_running_loop().run_in_executor(None, send, msg, client)
                 logger.info(f"Sent DM to {cert_id}")
             except Exception as e:
                 logger.warning(f"Failed to send DM to {cert_id}, enqueuing: {e}")
@@ -143,7 +147,7 @@ class DmHandlerMixin:
                 encrypt=encrypt
             )
             try:
-                send(msg, client)
+                await asyncio.get_running_loop().run_in_executor(None, send, msg, client)
                 logger.info(f"Sent edit for {message_id} to {cert_id}")
                 # Deliver the edit to the DM participants ONLY — never broadcast a
                 # private DM edit to every client on the gateway.
@@ -1174,6 +1178,18 @@ class DmHandlerMixin:
         if len(q) >= 100:
             q.pop(0)  # drop-oldest
         q.append({"message_id": message_id, "from_webid": from_webid, "payload": payload})
+
+    def _spawn_push_fanout(self, subs, payload: dict, vpk: str, vsub: str) -> None:
+        """Start a web-push fan-out without waiting for it.
+
+        For callers that answer a peer (an HTTP relay) and must not hold the
+        reply for a slow push service. The task is kept referenced until done.
+        """
+        if not subs:
+            return
+        task = asyncio.ensure_future(self._push_offline_fanout(subs, payload, vpk, vsub))
+        _PUSH_TASKS.add(task)
+        task.add_done_callback(_PUSH_TASKS.discard)
 
     async def _push_offline_fanout(self, subs, payload: dict, vpk: str, vsub: str) -> None:
         """Send a web-push fan-out to *subs* off the event loop.

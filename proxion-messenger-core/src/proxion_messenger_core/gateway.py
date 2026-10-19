@@ -2877,7 +2877,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         _vpk  = getattr(self, "_vapid_private_pem", None)
         _vsub = getattr(self, "_vapid_subject", None)
         if self._store and _vpk and _vsub:
-            from .webpush import send_web_push
+            _push_subs = []
             _all_member_dids = self._store.get_room_members(room_id) or []
             for _mid in _all_member_dids:
                 if _mid == from_webid:
@@ -2886,28 +2886,15 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                     continue  # already delivered via WebSocket
                 if self._store.is_thread_muted(_mid, room_id):
                     continue  # member muted this room — no push
-                _subs = self._store.get_push_subscriptions(_mid)
-                for _sub in (_subs or []):
-                    try:
-                        send_web_push(
-                            subscription={
-                                "endpoint": _sub["endpoint"],
-                                "keys": {
-                                    "p256dh": _sub["p256dh_b64"],
-                                    "auth":   _sub["auth_b64"],
-                                },
-                            },
-                            payload={
-                                "type": "message",
-                                "thread_id": room_id,
-                                "display_name": display_name,
-                                "room_name": room.get("name", ""),
-                            },
-                            vapid_private_pem=_vpk,
-                            vapid_subject=_vsub,
-                        )
-                    except Exception:
-                        pass
+                _push_subs.extend(self._store.get_push_subscriptions(_mid) or [])
+            # send_web_push blocks on the network (up to 10 s per subscription);
+            # run it off the loop and do not hold the peer's relay reply for it.
+            self._spawn_push_fanout(_push_subs, {
+                "type": "message",
+                "thread_id": room_id,
+                "display_name": display_name,
+                "room_name": room.get("name", ""),
+            }, _vpk, _vsub)
 
         return "200 OK", '{"status":"delivered"}' if delivered else '{"status":"offline"}'
 

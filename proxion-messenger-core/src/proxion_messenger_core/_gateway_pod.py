@@ -1196,7 +1196,8 @@ class PodSyncMixin:
         """Periodically try to send queued messages."""
         while not self._stop_event.is_set():
             try:
-                self._flush_outbox_once()
+                # Each queued item is a blocking pod write; keep them off the loop.
+                await asyncio.get_running_loop().run_in_executor(None, self._flush_outbox_once)
             except Exception as exc:
                 # One bad pass (e.g. "database is locked") must not end the task:
                 # the gateway shuts down when a background task dies.

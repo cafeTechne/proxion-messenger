@@ -142,6 +142,39 @@ class _AppOriginWriter:
         return getattr(self._w, name)
 
 
+# Static assets compressed on the wire (text types only).
+_EXT_GZIP = frozenset({".html", ".js", ".css", ".json", ".jsonld", ".svg"})
+_GZIP_MIN_BYTES = 1024
+
+# path -> (mtime_ns, size, body, etag, gzipped body or None)
+_STATIC_CACHE: dict = {}
+
+
+def _static_file(fpath) -> "tuple[bytes, bytes, bytes | None]":
+    """Body, weak ETag and pre-gzipped body of a web asset, cached by mtime.
+
+    Each file is read and compressed once and reused until it changes on disk,
+    instead of a synchronous read (and now a compress) on every request.
+    """
+    import gzip
+    st = fpath.stat()
+    key = str(fpath)
+    hit = _STATIC_CACHE.get(key)
+    if hit and hit[0] == st.st_mtime_ns and hit[1] == st.st_size:
+        return hit[2], hit[3], hit[4]
+    body = fpath.read_bytes()
+    etag = b'W/"' + hashlib.sha256(body).hexdigest()[:20].encode() + b'"'
+    gz = None
+    if fpath.suffix.lower() in _EXT_GZIP and len(body) >= _GZIP_MIN_BYTES:
+        gz = gzip.compress(body, 6)
+        if len(gz) >= len(body):
+            gz = None
+    if len(_STATIC_CACHE) > 512:
+        _STATIC_CACHE.clear()
+    _STATIC_CACHE[key] = (st.st_mtime_ns, st.st_size, body, etag, gz)
+    return body, etag, gz
+
+
 class HttpEndpointsMixin:
 
     # /relay and /relay/receipt are public endpoints, and their rate-limit buckets
@@ -1310,28 +1343,16 @@ class HttpEndpointsMixin:
         _vpk_dm  = getattr(self, "_vapid_private_pem", None)
         _vsub_dm = getattr(self, "_vapid_subject", None)
         if self._store and _vpk_dm and _vsub_dm and to_webid:
-            from .webpush import send_web_push as _swp
-            _dm_subs = self._store.get_push_subscriptions(to_webid)
-            for _sub in (_dm_subs or []):
-                try:
-                    _swp(
-                        subscription={
-                            "endpoint": _sub["endpoint"],
-                            "keys": {
-                                "p256dh": _sub["p256dh_b64"],
-                                "auth":   _sub["auth_b64"],
-                            },
-                        },
-                        payload={
-                            "type": "message",
-                            "thread_id": cert_id or from_webid,
-                            "display_name": display_name,
-                        },
-                        vapid_private_pem=_vpk_dm,
-                        vapid_subject=_vsub_dm,
-                    )
-                except Exception:
-                    pass
+            # Off the loop, and the relay reply does not wait for it.
+            self._spawn_push_fanout(
+                self._store.get_push_subscriptions(to_webid),
+                {
+                    "type": "message",
+                    "thread_id": cert_id or from_webid,
+                    "display_name": display_name,
+                },
+                _vpk_dm, _vsub_dm,
+            )
 
         # Target not connected — queue + store for when they reconnect.
         # Two-level budget: max 500 unique recipients AND max 5000 total messages
@@ -1445,8 +1466,21 @@ class HttpEndpointsMixin:
         _HTTP_RATE_PRUNE_AT = 2048
 
         async def handle(reader, writer):
+            # Static GETs keep the connection open for the next request (the
+            # shell is ~100 files); every other response closes it as before.
+            conn = {"keep": False, "served": 0}
+            while True:
+                conn["keep"] = False
+                await _handle_one(reader, writer, conn)
+                if not conn["keep"]:
+                    return
+                conn["served"] += 1
+
+        async def _handle_one(reader, writer, conn):
             try:
                 req = await asyncio.wait_for(reader.readline(), timeout=5.0)
+                if not req:
+                    return  # peer closed (an idle keep-alive connection ends here)
                 # Collect all request headers
                 headers_raw = {}
                 content_length = 0
@@ -3426,7 +3460,7 @@ class HttpEndpointsMixin:
                                  b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body)
                     await writer.drain()
                     return
-                body = fpath.read_bytes()
+                body, etag, gz = _static_file(fpath)
                 is_index = (fname == "index.html")
                 if is_index:
                     _index_inject = inject
@@ -3442,21 +3476,57 @@ class HttpEndpointsMixin:
                             and self._is_trusted_origin(origin_header, http_port, _trust_peer)):
                         _index_inject = inject + _token_meta
                     body = body.replace(b"</head>", _index_inject + b"</head>", 1)
-                cc = b"no-cache" if fname == "sw.js" else b"no-store"
+                # index.html carries per-request injections (and sometimes the
+                # API token), so it is never stored. Everything else may be
+                # stored but is revalidated on every use (no-cache + ETag), so
+                # a service-worker update still sees the new files at once.
+                _keep = (method == "GET" and content_length == 0
+                         and req.rstrip().endswith(b"HTTP/1.1")
+                         and headers_raw.get(b"connection", b"").lower() != b"close"
+                         and conn["served"] < 100)
+                _conn_hdr = (b"Connection: keep-alive\r\nKeep-Alive: timeout=5, max=100\r\n"
+                             if _keep else b"Connection: close\r\n")
+                _gzip_ok = b"gzip" in headers_raw.get(b"accept-encoding", b"").lower()
+                if is_index:
+                    cc = b"no-store"
+                    _extra = b""
+                    if _gzip_ok and len(body) >= _GZIP_MIN_BYTES:
+                        import gzip as _gz
+                        body = _gz.compress(body, 6)
+                        _extra = b"Content-Encoding: gzip\r\nVary: Accept-Encoding\r\n"
+                else:
+                    cc = b"no-cache"
+                    _extra = b"ETag: " + etag + b"\r\n"
+                    if gz is not None:
+                        _extra += b"Vary: Accept-Encoding\r\n"
+                    _inm = headers_raw.get(b"if-none-match", b"")
+                    if _inm and etag in [t.strip() for t in _inm.split(b",")]:
+                        writer.write(
+                            b"HTTP/1.1 304 Not Modified\r\n" + _STATIC_SEC_HDR + _extra
+                            + _conn_hdr + b"Cache-Control: no-cache\r\n\r\n")
+                        await writer.drain()
+                        conn["keep"] = _keep
+                        return
+                    if gz is not None and _gzip_ok:
+                        body = gz
+                        _extra += b"Content-Encoding: gzip\r\n"
                 writer.write(
                     b"HTTP/1.1 200 OK\r\nContent-Type: " + ct + b"\r\n"
-                    + _STATIC_SEC_HDR
+                    + _STATIC_SEC_HDR + _extra + _conn_hdr
                     + b"Content-Length: " + str(len(body)).encode()
                     + b"\r\nCache-Control: " + cc + b"\r\n\r\n" + body
                 )
                 await writer.drain()
+                conn["keep"] = _keep
             except Exception as exc:
                 logger.debug(f"HTTP handler error: {exc}")
+                conn["keep"] = False
             finally:
-                try:
-                    writer.close()
-                except Exception:
-                    pass
+                if not conn["keep"]:
+                    try:
+                        writer.close()
+                    except Exception:
+                        pass
 
         try:
             server = await asyncio.start_server(

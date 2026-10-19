@@ -295,8 +295,8 @@ class _StoreBase(object):
                     reply_to_id       TEXT,
                     imported          INTEGER NOT NULL DEFAULT 0
                 );
-                CREATE INDEX IF NOT EXISTS idx_msg_thread_ts
-                    ON messages(thread_id, timestamp);
+                -- The thread/timestamp index is created after the migrations
+                -- (it needs received_at): see _ensure_query_indexes.
 
                 CREATE TABLE IF NOT EXISTS display_names (
                     webid        TEXT PRIMARY KEY,
@@ -568,6 +568,35 @@ class _StoreBase(object):
                 END;
             """)
             self._run_migrations(conn)
+    # Indexes for hot lookups, created on every start (idempotent) rather than
+    # as a numbered migration. Each pairs with a query that otherwise scans or
+    # sorts in a temp b-tree: rooms an account is in, an owner's DM list, the
+    # inbound-webhook lookup, and every history page (ordered by timestamp then
+    # received_at).
+    _QUERY_INDEXES = (
+        "CREATE INDEX IF NOT EXISTS idx_room_members_webid ON room_members(webid)",
+        "CREATE INDEX IF NOT EXISTS idx_dm_threads_owner_created ON dm_threads(owner_webid, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_webhooks_thread_dir ON webhooks(thread_id, direction)",
+        "CREATE INDEX IF NOT EXISTS idx_msg_thread_ts_recv ON messages(thread_id, timestamp, received_at)",
+    )
+
+    def _ensure_query_indexes(self, conn: "sqlite3.Connection") -> None:
+        for stmt in self._QUERY_INDEXES:
+            try:
+                with conn:
+                    conn.execute(stmt)
+            except Exception as exc:
+                logger.warning("Index setup failed (%s): %s", stmt.split(" ON ")[0], exc)
+        # The old (thread_id, timestamp) index is a prefix of the new one; drop
+        # it once the replacement exists so each insert maintains one, not two.
+        try:
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='index' "
+                            "AND name='idx_msg_thread_ts_recv'").fetchone():
+                with conn:
+                    conn.execute("DROP INDEX IF EXISTS idx_msg_thread_ts")
+        except Exception as exc:
+            logger.warning("Index cleanup failed: %s", exc)
+
     def _run_rebuild_migration(self, conn: "sqlite3.Connection", migration: dict) -> None:
         """Run a destructive table rebuild without swallowing failures.
 
@@ -1582,6 +1611,8 @@ class _StoreBase(object):
                 import logging as _log
                 _log.getLogger(__name__).warning("Migration %d failed: %s", version, exc)
                 break
+
+        self._ensure_query_indexes(conn)
 
         # R8: startup integrity check — sets _integrity_ok; callers may gate writes on this
         try:

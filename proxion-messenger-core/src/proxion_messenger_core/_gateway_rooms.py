@@ -36,6 +36,8 @@ _MAX_ROOM_MEMBERS = 500
 # Per-message edit-history cap. Each edit appends a message_edits row holding the
 # previous and new content, so an unbounded edit loop is a disk-growth vector.
 _MAX_EDITS_PER_MESSAGE = 100
+# In-memory history kept per room when the gateway runs without a store.
+_ROOM_MEMORY_CAP = 1000
 
 # Upper bound on a disappearing-message timer, in milliseconds (365 days). The
 # 30s expiry sweep builds datetime.now() - timedelta(milliseconds=ms); an
@@ -636,7 +638,8 @@ class RoomHandlerMixin:
             from .room import send
             msg = compose(self.agent.identity_key, membership.cert, content, encrypt=encrypt, reply_to_id=data.get("reply_to_id"))
             try:
-                send(msg, client)
+                # Blocking pod write: run it off the event loop.
+                await asyncio.get_running_loop().run_in_executor(None, send, msg, client)
                 logger.info(f"Sent message to room {room_id}")
             except Exception as e:
                 logger.warning(f"Failed to send room message, enqueuing: {e}")
@@ -712,8 +715,13 @@ class RoomHandlerMixin:
                 self._metrics["messages_total"] += 1
             asyncio.create_task(self._sync_room_message_to_pod(room_id, event))
             room = self._local_rooms[room_id]
-            if room.get("history_mode") == "all":
-                room["messages"].append(event)
+            if room.get("history_mode") == "all" and not self._store:
+                # Storeless rooms keep recent history in memory for late joiners
+                # and search; with a store those read SQLite, so nothing is kept.
+                _mem = room.setdefault("messages", [])
+                _mem.append(event)
+                if len(_mem) > _ROOM_MEMORY_CAP:
+                    del _mem[:len(_mem) - _ROOM_MEMORY_CAP]
             for ws in list(room["members"]):
                 own = ws == websocket
                 try:
@@ -906,7 +914,10 @@ class RoomHandlerMixin:
             # DM threads too: their reactions are stored under the thread id
             # (a sealed DM reaction as its token), and leaving them out made
             # every DM reaction vanish on reload. Access was checked above.
-            reactions = self._store.get_reactions(thread_id) if self._store else []
+            # Only the reactions on this page's messages: the whole thread's
+            # set made every page (and every room open) grow with its history.
+            reactions = self._store.get_reactions(
+                thread_id, [m["message_id"] for m in msgs]) if self._store else []
 
             last_read_ts = 0
             caller_webid = self._client_webids.get(websocket)
@@ -2009,7 +2020,8 @@ class RoomHandlerMixin:
         # Reactions ride with the history (a sealed one as its token, which the
         # browser maps back to the emoji it saw); without them every DM
         # reaction vanished on reload.
-        reactions = self._store.get_reactions(cert_id) if self._store else []
+        reactions = self._store.get_reactions(
+            cert_id, [m["message_id"] for m in messages]) if self._store else []
         await websocket.send(json.dumps({"type": "history", "thread_id": cert_id,
                                          "messages": messages, "reactions": reactions}))
 

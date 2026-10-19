@@ -528,13 +528,33 @@ class MessageStoreMixin(object):
                 "DELETE FROM pins WHERE thread_id = ? AND message_id = ?",
                 (thread_id, message_id),
             )
-    def get_reactions(self, room_id: str) -> list[dict]:
+    def get_reactions(self, room_id: str, message_ids=None) -> list[dict]:
+        """Reactions in a thread, oldest first.
+
+        With ``message_ids`` only the reactions on those messages are returned,
+        so a history page carries the reactions for its own messages instead of
+        every reaction the thread ever had.
+        """
         with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT message_id, emoji, sender_webid FROM reactions WHERE room_id=? ORDER BY created_at ASC",
-                (room_id,),
-            ).fetchall()
-            return [dict(r) for r in rows]
+            if message_ids is None:
+                rows = conn.execute(
+                    "SELECT message_id, emoji, sender_webid FROM reactions WHERE room_id=? ORDER BY created_at ASC",
+                    (room_id,),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            ids = [m for m in dict.fromkeys(message_ids) if m]
+            rows = []
+            for i in range(0, len(ids), 500):
+                chunk = ids[i:i + 500]
+                marks = ",".join("?" * len(chunk))
+                rows.extend(conn.execute(
+                    "SELECT id, message_id, emoji, sender_webid, created_at FROM reactions "
+                    f"WHERE room_id=? AND message_id IN ({marks})",
+                    (room_id, *chunk),
+                ).fetchall())
+            rows.sort(key=lambda r: (r["created_at"] or 0, r["id"]))
+            return [{"message_id": r["message_id"], "emoji": r["emoji"],
+                     "sender_webid": r["sender_webid"]} for r in rows]
     def save_scheduled_message(self, sched: dict) -> None:
         with self._conn() as conn:
             conn.execute(

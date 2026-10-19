@@ -6,6 +6,15 @@ from proxion_messenger_core.gateway import ProxionGateway, GatewayConfig
 from proxion_messenger_core.persist import AgentState
 from proxion_messenger_core.readstate import ReadState
 from proxion_messenger_core.local_store import LocalStore
+import proxion_messenger_core._gateway_dm as _dm_mod
+
+
+async def _pushes_done():
+    """Relay pushes run as background tasks; wait for them before asserting."""
+    import asyncio
+    tasks = list(getattr(_dm_mod, "_PUSH_TASKS", ()))
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 @pytest.fixture
@@ -43,6 +52,7 @@ async def test_room_relay_fires_push_for_offline_member(gateway):
             "message_id": "msg-push-1", "content": "hello",
             "timestamp": "2026-06-02T10:00:00Z",
         })
+        await _pushes_done()
         mock_push.assert_called_once()
 
 
@@ -70,6 +80,7 @@ async def test_room_relay_skips_push_for_connected_member(gateway):
             "message_id": "msg-push-2", "content": "hi",
             "timestamp": "2026-06-02T10:00:00Z",
         })
+        await _pushes_done()
         mock_push.assert_not_called()
 
 
@@ -90,6 +101,7 @@ async def test_room_relay_skips_push_without_vapid(gateway):
             "message_id": "msg-push-3", "content": "test",
             "timestamp": "2026-06-02T10:00:00Z",
         })
+        await _pushes_done()
         mock_push.assert_not_called()
 
 
@@ -125,6 +137,7 @@ async def test_dm_relay_fires_push_for_offline_target(gateway):
 
     with patch("proxion_messenger_core.webpush.send_web_push") as mock_push:
         status, _ = await gateway._handle_relay_post(body, client_ip="127.0.0.1")
+        await _pushes_done()
         # 202 = offline (no socket), push should have been attempted
         assert status in ("200 OK", "202 Accepted")
         if status == "202 Accepted":
