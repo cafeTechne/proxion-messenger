@@ -18,37 +18,55 @@ def gateway(tmp_path):
     )
 
 
+def _post_import(port: int, body: bytes, manifest: dict | None = None) -> tuple[int, dict]:
+    import http.client
+    headers = {"Content-Type": "application/json"}
+    if manifest is not None:
+        headers["X-Proxion-Import-Manifest"] = json.dumps(manifest)
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    try:
+        conn.request("POST", "/import?dry_run=1", body=body, headers=headers)
+        resp = conn.getresponse()
+        return resp.status, json.loads(resp.read() or b"{}")
+    finally:
+        conn.close()
+
+
+@pytest.fixture
+def live_http_port(tmp_path):
+    from gwharness import free_port, start_gateway
+    from proxion_messenger_core.persist import AgentState
+    from proxion_messenger_core.gateway import ProxionGateway, GatewayConfig
+    ws_port, http_port = free_port(), free_port()
+    gw = ProxionGateway(
+        agent=AgentState.generate(), dm_clients={}, room_memberships={},
+        config=GatewayConfig(host="127.0.0.1", port=ws_port, http_port=http_port,
+                             db_path=str(tmp_path / "live.db")),
+    )
+    start_gateway(gw, ws_port, http_port)
+    return http_port
+
+
+_BODY = json.dumps({"messages": [], "relationships": []}).encode()
+
+
 class TestImportManifestVerification:
-    def test_import_accepts_matching_manifest_hash(self, gateway):
-        """Import succeeds when X-Proxion-Import-Manifest sha256 matches body."""
-        body = json.dumps({"messages": [], "relationships": []}).encode()
-        sha = hashlib.sha256(body).hexdigest()
-        manifest = json.dumps({"source": "test", "sha256": sha}).encode()
-        headers_raw = {
-            b"x-proxion-import-manifest": manifest,
-            b"origin": b"http://localhost",
-            b"authorization": b"",
-        }
-        # Simulate the internal checks by calling the store directly
-        store = gateway._store
-        assert store is not None
-        # Verify the hash manually — the manifest check logic hashes the body
-        actual = hashlib.sha256(body).hexdigest()
-        assert actual == sha
+    def test_import_accepts_matching_manifest_hash(self, live_http_port):
+        manifest = {"source": "test", "sha256": hashlib.sha256(_BODY).hexdigest()}
+        status, body = _post_import(live_http_port, _BODY, manifest)
+        assert status == 200, body
+        assert body.get("dry_run") is True
 
-    def test_import_rejects_hash_mismatch(self, gateway):
-        """Import body hash mismatch should be detected."""
-        body = b'{"messages": []}'
-        bad_sha = "0" * 64
-        actual_sha = hashlib.sha256(body).hexdigest()
-        assert actual_sha != bad_sha
+    def test_import_rejects_hash_mismatch(self, live_http_port):
+        status, body = _post_import(live_http_port, _BODY, {"source": "test", "sha256": "0" * 64})
+        assert (status, body) == (400, {"error": "import_manifest_hash_mismatch"})
 
-    def test_import_requires_manifest_when_env_enabled(self, gateway):
+    def test_import_requires_manifest_when_env_enabled(self, live_http_port, monkeypatch):
         """When PROXION_REQUIRE_IMPORT_MANIFEST=1, import without manifest should fail."""
-        os.environ["PROXION_REQUIRE_IMPORT_MANIFEST"] = "1"
-        # Verify the env is set
-        assert os.environ.get("PROXION_REQUIRE_IMPORT_MANIFEST") == "1"
-        os.environ.pop("PROXION_REQUIRE_IMPORT_MANIFEST", None)
+        assert _post_import(live_http_port, _BODY)[0] == 200
+        monkeypatch.setenv("PROXION_REQUIRE_IMPORT_MANIFEST", "1")
+        status, body = _post_import(live_http_port, _BODY)
+        assert (status, body) == (400, {"error": "import_manifest_required"})
 
     def test_import_provenance_saved_after_successful_import(self, gateway):
         """After a successful import, provenance record is saved."""
