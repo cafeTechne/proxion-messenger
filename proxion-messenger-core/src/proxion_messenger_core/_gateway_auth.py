@@ -324,7 +324,7 @@ class AuthHandlerMixin:
             _E2E_KEYS = ("e2e", "e2e_v", "nonce", "msg_num", "key_header",
                          "ratchet_pub", "pn", "x25519_pub", "file")
             queued = self._relay_queue.pop(identity, [])
-            for msg in queued:
+            for _qi, msg in enumerate(queued):
                 try:
                     cert_id = msg.get("cert_id")
                     event = {
@@ -344,26 +344,45 @@ class AuthHandlerMixin:
                     for _k in _E2E_KEYS:
                         if _k in msg:
                             event[_k] = msg[_k]
-                    await websocket.send(json.dumps(event))
+                    _wire = json.dumps(event)
                 except Exception:
-                    pass
+                    continue  # malformed entry: drop it
+                try:
+                    await websocket.send(_wire)
+                except Exception:
+                    # The socket went away mid-drain: put this message and the
+                    # rest back in front of anything queued since, so the next
+                    # register delivers them instead of losing them.
+                    self._relay_queue[identity] = (
+                        queued[_qi:] + self._relay_queue.get(identity, []))
+                    break
             # Drain per-device fanout envelopes queued while THIS device was
             # offline (fanout has no server history — without this drain those
             # DMs were lost). The primary's device id is the account did.
             _dev_id = self._session_device_did.get(websocket) or identity
-            for _env in self._fanout_queue.pop((identity, _dev_id), []):
+            _fq = self._fanout_queue.pop((identity, _dev_id), [])
+            for _fi, _env in enumerate(_fq):
                 try:
-                    await websocket.send(json.dumps({
+                    _wire = json.dumps({
                         "type": "dm_fanout",
                         "message_id": _env["message_id"],
                         "from_webid": _env["from_webid"],
                         "to_device_id": _dev_id,
                         "payload": _env["payload"],
-                    }))
-                    if self._store:
-                        self._store.mark_dm_delivered(_env["message_id"], identity, _dev_id)
+                    })
                 except Exception:
-                    pass
+                    continue  # malformed entry: drop it
+                try:
+                    await websocket.send(_wire)
+                except Exception:
+                    self._fanout_queue[(identity, _dev_id)] = (
+                        _fq[_fi:] + self._fanout_queue.get((identity, _dev_id), []))
+                    break
+                if self._store:
+                    try:
+                        self._store.mark_dm_delivered(_env["message_id"], identity, _dev_id)
+                    except Exception:
+                        pass
             if gateway_url:
                 self._peer_gateway_urls[identity] = gateway_url
 
