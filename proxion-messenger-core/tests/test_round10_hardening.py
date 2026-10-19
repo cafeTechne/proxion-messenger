@@ -104,7 +104,9 @@ async def test_rate_limit_61st_command_rejected(tmp_path):
         # 61st command should trigger rate_limited
         await conn.send(json.dumps({"cmd": "mark_read", "thread_id": "rate-test"}))
         got_rate_limited = False
-        deadline = asyncio.get_event_loop().time() + 2.0
+        # Keep reading until the deadline: on a slow runner the refusal can trail
+        # the other replies by more than one short recv timeout.
+        deadline = asyncio.get_event_loop().time() + 10.0
         while asyncio.get_event_loop().time() < deadline:
             try:
                 raw = await asyncio.wait_for(conn.recv(), timeout=0.3)
@@ -113,7 +115,7 @@ async def test_rate_limit_61st_command_rejected(tmp_path):
                     got_rate_limited = True
                     break
             except asyncio.TimeoutError:
-                break
+                continue
         assert got_rate_limited, "Expected rate_limited error on 61st command"
 
 
