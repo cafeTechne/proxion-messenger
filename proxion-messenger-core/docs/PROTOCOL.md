@@ -1,6 +1,8 @@
 # Proxion Protocol Specification
 
-This document describes the protocol layer of Proxion — the federated, decentralized messaging platform built on the Solid Protocol. It covers the wire format, message flow, federation semantics, and extensibility mechanisms that enable real-time communication on user-owned data pods.
+This document describes the protocol layer of Proxion, the federated messaging platform built on the Solid Protocol: the pod data model, capability certificates and gateway command shapes in `proxion_messenger_core`.
+
+The messenger delivers messages gateway to gateway first and uses the pod as durable storage; see [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) for the as-built flow, [docs/POD_DATA_MODEL.md](../../docs/POD_DATA_MODEL.md) for what lands on a pod, and [docs/E2E_ENCRYPTION.md](../../docs/E2E_ENCRYPTION.md) for encryption. The full command list with field limits is `command_validation.py`.
 
 ## Table of Contents
 
@@ -161,7 +163,7 @@ Proxion uses **Linked Data Platform (LDP)** containers for append-only lists (me
      "mentions": []
    }
    ```
-2. If encryption enabled: Alice derives a shared key from Bob's public key, encrypts content.
+2. In the messenger, the browser encrypts the content first (see [section 7](#7-end-to-end-encryption)).
 3. Alice PUTs to `stash://messages/thread/<cert_id>/messages/<message_id>.json`.
 4. Alice updates WAC/ACP to grant Bob read access.
 5. Alice notifies Bob via POD notification or polling.
@@ -170,7 +172,7 @@ Proxion uses **Linked Data Platform (LDP)** containers for append-only lists (me
 
 1. Bob polls or receives push notification for new messages.
 2. Bob fetches the message from Alice's stash:// container.
-3. If encrypted: Bob decrypts using the shared key.
+3. If encrypted: Bob's browser decrypts it with the ratchet session (section 7).
 4. Bob can optionally mark message as read by writing to `stash://receipts/<thread_id>/<message_id>.json`.
 
 ---
@@ -271,40 +273,23 @@ A certificate can grant authority to a third party (e.g., a gateway, bot, or cli
 
 ## 7. End-to-End Encryption
 
-### Key Derivation
+Direct-message encryption runs in the browser, not in this library, and is
+specified in full in [docs/E2E_ENCRYPTION.md](../../docs/E2E_ENCRYPTION.md) at the
+repository root. In short:
 
-When Alice wants to encrypt messages for Bob in a DM:
+- Each DM peer pair (and each peer device) has a **Double Ratchet** session
+  (`web/e2e.js`), started from the recipient's published X25519 prekeys.
+- Message bodies, edits, reactions and file attachments to a keyed peer are
+  ratchet messages; file bytes are encrypted under a fresh AES-256-GCM key
+  carried inside one (`web/e2e-secondary.js`).
+- The gateway stores and relays ciphertext. It sees sender and recipient
+  identifiers, message ids, sizes and timing.
+- Gateway-to-gateway relay envelopes are Ed25519-signed and, when the peer
+  gateway's seal key is known, sealed with X25519 + ChaCha20-Poly1305
+  (`sealed_relay.py`).
 
-1. Alice derives a **message key** from the shared certificate:
-   ```
-   message_key = HKDF-SHA256(
-     key=certificate_bytes,
-     salt=thread_id,
-     info="proxion-message",
-     length=32
-   )
-   ```
-2. Alice uses `message_key` for ChaCha20-Poly1305 AEAD encryption.
-
-### Encryption Format
-
-Each encrypted message has:
-
-```json
-{
-  "id": "<uuid>",
-  "from_webid": "alice@pod.example",
-  "encrypted": true,
-  "ciphertext": "<base64(ChaCha20-Poly1305(plaintext))>",
-  "nonce": "<base64(12-byte random nonce)>",
-  "aad": "<certificate_id>",
-  "timestamp": "..."
-}
-```
-
-### Optional Compression
-
-Before encryption, the message is optionally compressed with zlib to reduce ciphertext size.
+Room messages are not end-to-end encrypted: rooms are standard Solid Long Chat
+so other Solid apps can read them.
 
 ---
 
@@ -411,8 +396,8 @@ Clients send commands like:
 
 ```json
 {
-  "cmd": "send_message",
-  "thread_id": "room:r1",
+  "cmd": "send_room",
+  "room_id": "r1",
   "content": "Hello everyone!"
 }
 

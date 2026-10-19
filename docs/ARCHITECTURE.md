@@ -47,7 +47,8 @@ deep link) that resolves to that address.
 ### Code map
 - `web/`: vanilla-JS SPA (ES modules; `main.js` is the composition root, with
   feature modules: `connection.js`, `rendering.js`, `view.js`, `voice.js`,
-  `e2e.js`, `pod.js`, …). Served by the gateway over HTTPS.
+  `e2e.js`, `pod.js`, …). Served by the gateway (HTTPS when run with
+  `run_gateway.py`; plain loopback HTTP inside the desktop app).
 - `proxion-messenger-core/src/proxion_messenger_core/`
   - `gateway.py`: `ProxionGateway`, the WS command `switch` + connection state,
     composed from mixins.
@@ -70,7 +71,8 @@ deep link) that resolves to that address.
   per install. The user never sees a WebID unless they opt into a Pod.
 - **X25519** keys back the E2E ratchet; published so peers can start a session.
 - **AgentState** (`persist.py`) holds the Ed25519 identity key + X25519 store
-  key. Losing it = losing identity (see Phase E recovery work).
+  key. Losing it means losing the identity; the recovery kit and encrypted
+  backups exist for that.
 - **RelationshipCertificate**: issued during a mutual opt-in *friend request*
   handshake; authorizes DM capability between two identities. Federation invites
   (`/invite` + `/invite/accept`) exchange these across gateways.
@@ -84,14 +86,15 @@ deep link) that resolves to that address.
 
 ## 3. Transport & federation (relay-first)
 
-1. **Client ↔ own gateway:** JSON commands over a WebSocket (`wss://…:7474` by
-   default). The client only ever talks to *its own* gateway.
+1. **Client ↔ own gateway:** JSON commands over a WebSocket on port 7474
+   (`wss://` from `run_gateway.py` with its self-signed cert, `ws://127.0.0.1`
+   inside the desktop app). The client only ever talks to *its own* gateway.
 2. **Gateway ↔ gateway:** cross-gateway delivery is an HTTP `POST /relay` to the
    peer gateway (resolved from the recipient's address). Message **content** is
    encrypted end to end, so no gateway on the path reads it in the clear. On the
    direct path the recipient's *own* gateway sees the routing fields
    (`from_webid`/`to_webid`) because it has to deliver to its user; those fields
-   are Ed25519-signed and bound to the sending gateway (R55) so a peer cannot
+   are Ed25519-signed and bound to the sending gateway so a peer cannot
    forge them. When delivery instead goes through a **managed middle relay**
    (§3.3), the sender identity is additionally sealed for the recipient gateway
    only (`sealed_relay.py`: X25519 + ChaCha20-Poly1305), so the middle node sees
@@ -100,11 +103,16 @@ deep link) that resolves to that address.
 3. **Reachability (the "it just works" layer):**
    - TLS auto-cert on first run (HTTPS UI ⇒ `wss` WS; the meta `x-gateway-url`
      scheme is reconciled to match).
-   - **UPnP** auto-port-mapping (R33) so most home gateways are directly
-     reachable.
-   - **Managed sealed-relay fallback** (R38) for the ~40% of networks where UPnP
-     can't help. Routes through a community relay node without exposing
-     plaintext/metadata.
+   - **UPnP** auto-port-mapping when `PROXION_PUBLIC_URL` is unset, so many home
+     gateways are directly reachable.
+   - **Connect a phone**: the app can open a Cloudflare tunnel to the local
+     gateway (needs `cloudflared`); authentication is forced on while it is open.
+   - **Sealed-relay fallback**, opt-in: when `PROXION_RELAY_FALLBACK_URL` names a
+     gateway running with `PROXION_RELAY_NODE=1`, a relay that cannot be
+     delivered directly is left in that node's mailbox for the recipient gateway
+     to collect (both sides need the setting). It is sealed, so the node sees the
+     destination gateway but not the sender or content. No relay is configured by
+     default.
    - **TURN** credentials for WebRTC when symmetric NAT blocks direct media.
 4. **Mailbox**: messages to an offline peer gateway are queued and delivered on
    reconnect (`_gateway_mailbox.py`).
@@ -116,7 +124,7 @@ deep link) that resolves to that address.
 DMs, rooms, reactions, edits, threads, pins, disappearing messages, scheduling,
 search, read receipts, presence, and typing are all implemented. The flow:
 
-1. Client sends `{"cmd": "send_dm"/"chat_room_send", …}` to its gateway.
+1. Client sends `{"cmd": "send_dm"/"send_room", …}` to its gateway.
 2. For a DM the browser has already encrypted the text (below). The gateway
    persists the message as received to `local_store` and delivers:
    local recipients over their WS; remote recipients via `/relay` to their
@@ -143,9 +151,11 @@ The full protocol, with its limits, is specified in
 - Identity verification: safety-number comparison, surfaced in the DM E2E badge
   and verify modal.
 
-Rooms are not end-to-end encrypted. DM edits, reactions and attachments are
-sent to the gateway outside the ratchet. Gateways see routing and timing
-metadata.
+DM edits, reactions and file attachments to a keyed peer are sealed with the
+same ratchet session (`web/e2e-secondary.js`): the gateway stores the edit text
+and file bytes as ciphertext and a reaction as an opaque token. Rooms are not
+end-to-end encrypted, by design, so other Solid apps can read them. Gateways see
+routing and timing metadata.
 
 ---
 
@@ -166,15 +176,16 @@ metadata.
 
 | Data                    | Protection                 | Visible to a transit/relay node |
 | :---------------------- | :------------------------- | :------------------------------ |
-| DM message text         | E2E (Double Ratchet/AEAD) once a peer key is known | No              |
-| Room text, DM edits, reactions, attachments | Transport only | Yes, to gateways handling them |
+| DM text, edits, reactions, files | E2E (Double Ratchet/AEAD; files AES-256-GCM) once a peer key is known | No (sizes, ids and timing only) |
+| Room text, reactions, files | Transport only | Yes, to gateways handling them |
 | Routing (who→who, when) | Sealed sender mitigates    | Limited routing/timing metadata |
 | Identity key (Ed25519)  | Local AgentState           | No (never transmitted)          |
 | Pod-stored history      | Owner-only Pod ACLs (open typed RDF, not encrypted at rest) | Only the user's own Pod host |
 
 Hardening present elsewhere in the stack: SSRF/relay-target validation, trust
 pinning + revocation, per-endpoint HTTP rate limits and body-size caps, audit
-logging. The heavyweight assurance subsystem is opt-in (R35).
+logging. The heavyweight assurance subsystem is opt-in (see
+[CONFIGURATION.md](CONFIGURATION.md#hardening-off-by-default)).
 
 ---
 
@@ -198,7 +209,8 @@ logging. The heavyweight assurance subsystem is opt-in (R35).
 ## 9. Distribution
 
 Native executables via PyInstaller (`build_sidecar.py` → per-triple
-`proxion-gateway`) + Tauri packaging. Signed installers + auto-update (R37). No
+`proxion-gateway`) + Tauri packaging. Auto-updates are signed with the updater
+key ([RELEASE.md](RELEASE.md)); installers are not OS-code-signed. No
 Docker dependency at runtime.
 
 ---
@@ -227,7 +239,7 @@ Pod I/O converges on the official Inrupt SDK. Canonical package set:
 |---|---|---|
 | Client shows "connecting", never connects | https page + `ws://` meta (mixed content) | gateway must advertise `wss://` when TLS is on (`_ws_public_url`) |
 | Rooms don't appear after a gateway restart | membership rebuilt only for live sockets | `get_rooms` falls back to persistent store membership by webid |
-| Friends can't reach you | UPnP off / CGNAT | sealed managed-relay fallback (R38); or set `PROXION_PUBLIC_URL` |
+| Friends can't reach you | UPnP off / CGNAT | set `PROXION_PUBLIC_URL` behind a reverse proxy ([SELF_HOSTING.md](SELF_HOSTING.md)), use Connect a phone, or configure `PROXION_RELAY_FALLBACK_URL` |
 | Voice connects but no audio | ICE failed (symmetric NAT) | ensure TURN credentials; check `iceServers` |
 | 403 on Pod PUT/GET | Pod ACL not granted | re-run the relationship/room ACL setup |
 | `DPoP token expired` | clock skew | sync system clock |

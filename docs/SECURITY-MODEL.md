@@ -65,14 +65,19 @@ TURN relay sees only ciphertext. See `docs/CALLS.md` for the full description.
 - **Media authentication.** Each peer signs its DTLS fingerprint with its Ed25519
   identity key, bound to the role, and the other peer verifies it against every
   fingerprint in the SDP it received (a swapped or split fingerprint fails to verify).
-  This is currently **advisory**: it drives a Verified / Unverified status rather than
-  refusing the call, because a call is signed by the browser identity while a federated
-  contact is known by their gateway identity, so the two do not always match for a
-  legitimate call. Binding the call signature to the contact roster, so a genuine
-  mismatch can be treated as an alarm, is planned. The media is DTLS-SRTP encrypted
-  either way.
-- **Scope.** This covers 1:1 and group calls, including cross-gateway 1:1 calls (the
-  answer and ICE candidates route by WebID, gated on a stored relationship).
+  A signature from a linked device or a gateway-certified browser is accepted when its
+  device cert chains to the contact's account identity.
+- **Enforcement.** The call is **refused** when the signature is bound to the contact but
+  the fingerprint does not match, when an offered device cert does not chain to the
+  contact, or when a contact already known to sign calls sends a call with no binding
+  proof (a downgrade). A peer whose identity is unknown, or the first call from a
+  contact not yet known to sign calls, connects as Unverified: that first call is
+  trust-on-first-use. A verified call marks the contact as call-signing, so later
+  unsigned calls from them are refused. The logic is `classifyPeerSdp` in
+  `web/callsec.js`, applied in `web/voice.js`.
+- **Scope.** This covers 1:1 and group calls (each group peer is checked and refused on
+  its own), including cross-gateway calls (the answer and ICE candidates route by WebID,
+  gated on a stored relationship).
 - **Capture.** Camera and screen capture require an explicit action and the browser's
   permission prompt. A self-view and an on-air indicator show what is being sent.
   Nothing is recorded.
