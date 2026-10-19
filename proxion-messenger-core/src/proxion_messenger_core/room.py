@@ -271,7 +271,11 @@ def join_room(
 
     invite = FederationInvite.from_dict(invite_data)
 
-    # Verify invite signature before processing (prevents forged invites)
+    # Verify invite signature before processing (prevents forged invites). An
+    # unsigned invite is refused: skipping the check for it let anyone forge one
+    # by simply leaving the signature out.
+    if not invite.signature:
+        raise ValueError("FederationInvite is unsigned")
     if invite.signature:
         def _ed25519_verify(pub_hex: str, sig_bytes: bytes, data_bytes: bytes) -> bool:
             try:

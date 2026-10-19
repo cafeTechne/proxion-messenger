@@ -141,7 +141,9 @@ class TestJoinRoomInviteVerification:
         invite.sign(priv)
         return json.dumps(invite.to_dict()), priv
 
-    def test_unsigned_invite_accepted(self):
+    def test_unsigned_invite_rejected(self):
+        """Leaving the signature out used to skip verification entirely, so
+        anyone could forge an invite by not signing it."""
         from proxion_messenger_core.federation import FederationInvite, Capability
         from proxion_messenger_core.room import join_room
         import json
@@ -165,7 +167,21 @@ class TestJoinRoomInviteVerification:
             mock_cert = MagicMock()
             mock_cert.certificate_id = "cert-xyz"
             mock_recv.return_value = [(mock_cert, True)]
-            # Should not raise
+            with pytest.raises(ValueError, match="unsigned"):
+                join_room(invite_json, mock_agent, "https://bob.example.com/profile/card#me", mock_store)
+
+    def test_signed_invite_accepted(self):
+        from proxion_messenger_core.room import join_room
+        invite_json, _priv = self._make_signed_invite_json()
+        mock_agent = MagicMock()
+        mock_agent.identity_key = MagicMock()
+        mock_agent.store_pub_bytes = bytes(32)
+        mock_store = MagicMock()
+        with patch("proxion_messenger_core.handshake.accept_invite"), \
+             patch("proxion_messenger_core.handshake.receive_certificates") as mock_recv:
+            mock_cert = MagicMock()
+            mock_cert.certificate_id = "cert-xyz"
+            mock_recv.return_value = [(mock_cert, True)]
             join_room(invite_json, mock_agent, "https://bob.example.com/profile/card#me", mock_store)
 
     def test_signed_invite_with_wrong_key_rejected(self):

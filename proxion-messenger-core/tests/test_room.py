@@ -241,17 +241,17 @@ def test_invite_to_room_returns_json(sample_room, alice_agent):
         assert data["invite_id"] == "invite-123"
 
 
-def test_join_room_accepts_invite(alice_agent):
-    """Test join_room() accepts an invite and returns membership."""
-    invite_data = {
-        "invite_id": "invite-123",
-        "inviter_key": "test-key",
-        "capabilities": [
-            {"can": "read", "with_": "stash://rooms/test/"},
-            {"can": "write", "with_": "stash://rooms/test/"},
-        ],
-    }
-    invite_json = json.dumps(invite_data)
+def test_join_room_accepts_invite(alice_agent, bob_agent):
+    """Test join_room() accepts a signed invite and returns membership."""
+    from proxion_messenger_core.federation import FederationInvite, Capability
+    invite = FederationInvite(
+        issuer={"public_key": bob_agent.identity_pub_bytes.hex()},
+        endpoint_hints=[],
+        capabilities=[Capability(can="read", with_="stash://rooms/test/"),
+                      Capability(can="write", with_="stash://rooms/test/")],
+    )
+    invite.sign(bob_agent.identity_key)
+    invite_json = json.dumps(invite.to_dict())
     mock_store = MagicMock()
 
     with patch("proxion_messenger_core.handshake.accept_invite") as mock_accept, \
@@ -265,6 +265,20 @@ def test_join_room_accepts_invite(alice_agent):
         assert membership.member_webid == "http://localhost:3001/alice/profile/card#me"
         assert membership.cert == mock_cert
         assert membership.room.stash_root == "stash://rooms/test/"
+
+
+def test_join_room_rejects_unsigned_old_style_invite(alice_agent):
+    """The old-style wrapper (inviter_key/invite_id) carries no signature, so it
+    can no longer be joined: anyone could have written it."""
+    invite_json = json.dumps({
+        "invite_id": "invite-123",
+        "inviter_key": "test-key",
+        "capabilities": [{"can": "read", "with_": "stash://rooms/test/"}],
+    })
+    with patch("proxion_messenger_core.handshake.accept_invite") as mock_accept:
+        with pytest.raises(ValueError, match="unsigned"):
+            join_room(invite_json, alice_agent, "http://localhost:3001/alice/profile/card#me", MagicMock())
+        mock_accept.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
