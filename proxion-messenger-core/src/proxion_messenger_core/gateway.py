@@ -200,9 +200,18 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         except Exception:
             self._invite_hmac_key = secrets.token_bytes(32)
 
-        # Lightweight stash for invites and notifications
+        # Lightweight stash for invites and notifications, kept in the data dir
+        # next to the database so separate gateways never share invite codes.
         from pathlib import Path
-        stash_dir = Path(os.path.expanduser("~/.proxion/stash"))
+        stash_dir = Path(_data_dir) / "stash"
+        _legacy_stash = Path(os.path.expanduser("~/.proxion/stash"))
+        if (os.environ.get("PROXION_SKIP_LEGACY_MIGRATION") != "1"
+                and _legacy_stash.resolve() != stash_dir.resolve()
+                and _legacy_stash.is_dir() and not stash_dir.exists()):
+            try:
+                shutil.copytree(_legacy_stash, stash_dir)
+            except Exception:
+                pass
         stash_dir.mkdir(parents=True, exist_ok=True)
         from .stash import SimpleStash
         self.stash = SimpleStash(stash_dir)

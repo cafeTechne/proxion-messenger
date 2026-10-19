@@ -329,3 +329,48 @@ def test_desktop_shell_stops_the_gateway_on_every_exit_path():
     for path in ("fn quit_app", '"quit" =>', "async fn stop_gateway"):
         seg = body[body.index(path):]
         assert "shutdown_gateway(" in seg[:400], path
+
+
+# ── Direct runs keep every file in the data dir ───────────────────────────────
+
+def test_direct_run_keeps_tls_and_stash_in_data_dir(sidecars, tmp_path):
+    """A plain `python run_gateway.py` (auto-TLS on) writes its cert, key and
+    invite stash under PROXION_DATA_DIR, not the shared ~/.proxion, and the
+    banner advertises the https URL it actually serves."""
+    sc = sidecars("direct", extra_env={"PROXION_AUTO_TLS": "1",
+                                       "PROXION_PUBLIC_URL": "",
+                                       "PROXION_HOST": "127.0.0.1"})
+    sc.wait_ready()
+    data = tmp_path / "direct" / "data"
+    home = tmp_path / "direct" / "home"
+    assert (data / "tls" / "cert.pem").is_file()
+    assert (data / "tls" / "key.pem").is_file()
+    assert (data / "stash").is_dir()
+    assert not (home / ".proxion" / "tls").exists()
+    assert not (home / ".proxion" / "stash").exists()
+    deadline = time.monotonic() + 5
+    while "Web UI" not in sc.output() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert f"Web UI  : https://127.0.0.1:{sc.http_port}" in sc.output()
+
+
+def test_frozen_default_data_dir_is_not_the_pyinstaller_temp_dir(tmp_path):
+    """A onefile executable unpacks into _MEIPASS, which is deleted on exit.
+    The default data dir must survive that."""
+    meipass = tmp_path / "_MEI12345"
+    home = tmp_path / "home"
+    meipass.mkdir()
+    home.mkdir()
+    code = (
+        "import sys; sys.frozen = True; sys._MEIPASS = sys.argv[1];"
+        "sys.path.insert(0, sys.argv[2]); import run_gateway;"
+        "print(run_gateway._data_dir())"
+    )
+    env = {k: v for k, v in os.environ.items() if k != "PROXION_DATA_DIR"}
+    env.update(HOME=str(home), USERPROFILE=str(home), PYTHONPATH=str(SRC))
+    out = subprocess.run([sys.executable, "-c", code, str(meipass), str(REPO)],
+                         env=env, capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    data_dir = Path(out.stdout.strip().splitlines()[-1])
+    assert meipass not in data_dir.parents and data_dir != meipass
+    assert data_dir == home / ".proxion" / "data"

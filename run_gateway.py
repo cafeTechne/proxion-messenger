@@ -23,6 +23,22 @@ def _base_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
+def _default_data_dir() -> Path:
+    """Where state lives when PROXION_DATA_DIR is not set.
+
+    A source checkout keeps it in ./data next to this file. A frozen
+    (PyInstaller onefile) executable must not: _MEIPASS is a temp dir that is
+    deleted on exit, which would throw away the identity and every message.
+    """
+    if getattr(sys, "frozen", False):
+        return Path.home() / ".proxion" / "data"
+    return Path(__file__).resolve().parent / "data"
+
+
+def _data_dir() -> Path:
+    return Path(os.environ.get("PROXION_DATA_DIR") or str(_default_data_dir()))
+
+
 # Exit status when a port cannot be bound (the desktop app reports it).
 EXIT_BIND_FAILED = 3
 
@@ -39,7 +55,7 @@ async def main():
 
     _log_fmt = os.environ.get("PROXION_LOG_FORMAT", "text")
     _log_level = os.environ.get("PROXION_LOG_LEVEL", "INFO")
-    _base_for_log = Path(os.environ.get("PROXION_DATA_DIR", str(Path(__file__).resolve().parent / "data")))
+    _base_for_log = _data_dir()
     configure_logging(
         json_output=(_log_fmt.lower() == "json"),
         log_level=_log_level,
@@ -47,7 +63,7 @@ async def main():
     )
 
     base = _base_dir()
-    data_dir = Path(os.environ.get("PROXION_DATA_DIR", str(base / "data")))
+    data_dir = _data_dir()
     data_dir.mkdir(parents=True, exist_ok=True)
 
     # Raw identity.key / store.key. Also finishes (or rolls back) an identity
@@ -64,8 +80,7 @@ async def main():
     if not os.environ.get("PROXION_SSL_CERT") and _auto_tls_enabled():
         try:
             from proxion_messenger_core.tls import ensure_self_signed_cert
-            import pathlib as _pathlib
-            _tls_dir = _pathlib.Path.home() / ".proxion" / "tls"
+            _tls_dir = data_dir / "tls"
             _cert, _key = ensure_self_signed_cert(_tls_dir)
             os.environ["PROXION_SSL_CERT"] = str(_cert)
             os.environ["PROXION_SSL_KEY"] = str(_key)
