@@ -248,6 +248,15 @@ class IdentityStoreMixin(object):
             ).fetchall()
         return [r["account_did"] for r in rows]
 
+    def list_relationship_owners(self) -> list[str]:
+        """The distinct local accounts that own at least one relationship row
+        (older ownerless rows are not counted)."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT owner_webid FROM relationships WHERE owner_webid <> ''"
+            ).fetchall()
+        return [r["owner_webid"] for r in rows if r["owner_webid"]]
+
     def list_all_device_e2e_keys(self) -> list[dict]:
         """Every device E2E key regardless of account — the one-gateway-per-user
         fallback for the /devices roster when a request addresses the GATEWAY

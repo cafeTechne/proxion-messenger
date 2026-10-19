@@ -752,12 +752,16 @@ class HttpEndpointsMixin:
         # expose its device keys. When the owner cannot be resolved (legacy rows saved
         # without an owner) never return the union of every account's device keys,
         # which would let one contact enumerate other accounts on a multi-account
-        # gateway. A gateway holding device keys for exactly one account has no
-        # other account to leak, so that account is the owner.
+        # gateway. A gateway holding device keys for exactly one account, where no
+        # OTHER account owns contacts, has no other account to leak, so that
+        # account is the owner. (One account with keys among several accounts with
+        # contacts says nothing about whose contact the requester is.)
         owner = self._store.get_relationship_owner(requester)
         if not owner:
             _accounts = self._store.list_device_key_accounts()
-            owner = _accounts[0] if len(_accounts) == 1 else ""
+            if len(_accounts) == 1:
+                _others = set(self._store.list_relationship_owners()) - {_accounts[0]}
+                owner = "" if _others else _accounts[0]
         devices = self._store.list_device_e2e_keys(owner) if owner else []
         return "200 OK", json.dumps({"devices": devices[:16]})
 

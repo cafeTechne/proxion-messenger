@@ -128,6 +128,24 @@ async def test_devices_endpoint_owner_unresolved_single_account(tmp_path):
     assert {d["device_id"] for d in json.loads(resp)["devices"]} == {"did:key:zUser", "did:key:zDev2"}
 
 
+@pytest.mark.asyncio
+async def test_devices_endpoint_owner_unresolved_other_account_has_contacts(tmp_path):
+    """Only account B has device keys, but account A owns contacts too: an
+    ownerless relationship could be A's, so B's roster must not be returned."""
+    gw = _gw(tmp_path, "a")
+    own_did = pub_key_to_did(gw.agent.identity_pub_bytes)
+    req_key = Ed25519PrivateKey.generate()
+    req_did = _did(req_key)
+    _seed_relationship(gw, req_did, owner="")
+    _seed_relationship(gw, "did:key:zSomeoneElse", owner="did:key:zAccountA")
+    gw._store.save_device_e2e_key("did:key:zAccountB", "did:key:zAccountB", "B1")
+
+    body = json.dumps(_sign_devices_request(req_key, req_did, own_did)).encode()
+    status, resp = await gw._handle_devices_post(body)
+    assert status.startswith("200")
+    assert json.loads(resp)["devices"] == []
+
+
 def test_friend_request_records_the_owning_account(tmp_path):
     """The account that sent an invite is stored with it, and a re-save of the
     relationship without an owner keeps the one already recorded."""
