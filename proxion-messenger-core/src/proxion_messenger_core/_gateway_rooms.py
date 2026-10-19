@@ -460,16 +460,38 @@ class RoomHandlerMixin:
         if not self._store:
             return
         since = self._disappear_since_iso(cert_id)
-        # Find all sockets that have this cert_id in their active view
-        for webid, sockets in list(self._webid_sockets.items()):
-            for ws in list(sockets):
+        payload = json.dumps({
+            "type": "dm_messages_expired",
+            "thread_id": cert_id,
+            "before_timestamp": cutoff,
+            **({"since_timestamp": since} if since else {}),
+        })
+        # Only the thread's local participants, not every session on the gateway:
+        # the account holding the relationship cert, and the owner/peer of a
+        # did-keyed local DM thread.
+        participants = set()
+        try:
+            _owner = self._store.get_relationship_owner_by_cert_id(cert_id)
+            if _owner:
+                participants.add(_owner)
+            elif self._store.get_relationship_by_cert_id(cert_id):
+                # Older relationship rows carry no owner: the gateway's own user.
+                participants.add(self._own_gateway_did())
+            for _t in self._store.get_all_dm_threads():
+                if _t.get("thread_id") == cert_id:
+                    participants.update(w for w in (_t.get("owner_webid"), _t.get("peer_webid")) if w)
+        except Exception:
+            logger.debug("resolving DM expiry participants failed", exc_info=True)
+        if str(cert_id).startswith("did:key:"):
+            participants.add(cert_id)
+        seen = set()
+        for wid in participants:
+            for ws in self._sockets_for(wid):
+                if id(ws) in seen:
+                    continue
+                seen.add(id(ws))
                 try:
-                    await ws.send(json.dumps({
-                        "type": "dm_messages_expired",
-                        "thread_id": cert_id,
-                        "before_timestamp": cutoff,
-                        **({"since_timestamp": since} if since else {}),
-                    }))
+                    await ws.send(payload)
                 except Exception:
                     pass
 
@@ -2796,8 +2818,10 @@ class RoomHandlerMixin:
         })
         _targets = set(room.get("members", set()))
         if self._store:
+            # Exact lookup: an offline member whose id is the gateway DID (often the
+            # owner) must not fall back to every connected socket.
             for _wid in self._store.get_room_members(room_id):
-                _targets.update(self._sockets_for(_wid))
+                _targets.update(self._sockets_for_exact(_wid))
         if extra_ws is not None:
             _targets.add(extra_ws)
         for ws in list(_targets):

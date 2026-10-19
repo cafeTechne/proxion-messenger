@@ -759,9 +759,21 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             return [ws for ws in self.clients]
         return result
 
-    async def _send_to_identity(self, identity: str, payload: str):
-        """Send a message to all connected sockets for an identity, skipping broken ones."""
-        for ws in self._sockets_for(identity):
+    def _sockets_for_exact(self, identity: str) -> list:
+        """Live sockets registered as exactly *identity*, without the gateway-DID
+        fallback. For deliveries addressed to a specific local account (a room
+        member, the sender of a queued relay): when that account is offline the
+        event must not spill onto every other session on the gateway."""
+        val = self._webid_sockets.get(identity) if identity else None
+        if val is None:
+            return []
+        candidates = val if isinstance(val, set) else {val}
+        return [ws for ws in candidates if ws in self.clients]
+
+    async def _send_to_identity(self, identity: str, payload: str, exact: bool = False):
+        """Send a message to all connected sockets for an identity, skipping broken ones.
+        exact=True skips the gateway-DID fallback (see _sockets_for_exact)."""
+        for ws in (self._sockets_for_exact(identity) if exact else self._sockets_for(identity)):
             try:
                 await ws.send(payload)
             except Exception:
@@ -3454,18 +3466,28 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # the local account that holds the relationship.
         _our_cert_id = rel[1]
         if _our_cert_id and self._store:
-            _owner = self._store.get_relationship_owner(from_webid) or self._own_gateway_did()
-            await self._send_to_identity(_owner, json.dumps(
-                {"type": "typing", "from_webid": from_webid, "cert_id": _our_cert_id}))
+            # The relationship's owner, or (older rows saved without one) the
+            # gateway's own user. An ownerless row on a gateway that enforces auth
+            # names no one, so it reaches no one instead of every session.
+            _owner = self._store.get_relationship_owner(from_webid)
+            if not _owner and not self._auth_enforced():
+                _owner = self._own_gateway_did()
+            if _owner:
+                await self._send_to_identity(_owner, json.dumps(
+                    {"type": "typing", "from_webid": from_webid, "cert_id": _our_cert_id}))
             return "200 OK", '{"status":"ok"}'
         # Find the local user who is in this DM thread. (Was get_dm_threads() with
         # no owner → always empty, so cross-gateway typing never delivered.)
         if self._store and cert_id:
             threads = [t for t in self._store.get_all_dm_threads() if t["thread_id"] == cert_id]
             if threads:
-                local_webid = threads[0].get("peer_webid") or threads[0].get("owner_webid")
+                # Whichever party is not the typist, by exact identity (no
+                # gateway-DID spill onto every session).
+                local_webid = next((w for w in (threads[0].get("peer_webid"),
+                                                threads[0].get("owner_webid"))
+                                    if w and w != from_webid), "")
                 if local_webid:
-                    sockets = self._sockets_for(local_webid)
+                    sockets = self._sockets_for_exact(local_webid)
                     event = json.dumps({"type": "typing", "from_webid": from_webid, "cert_id": cert_id})
                     for ws in sockets:
                         try:

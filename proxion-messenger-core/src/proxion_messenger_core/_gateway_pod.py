@@ -710,7 +710,7 @@ class PodSyncMixin:
                 await self._send_to_identity(sender, json.dumps({
                     "type": "relay_expired",
                     "message_id": relay["id"],
-                }))
+                }), exact=True)
         except Exception:
             pass
 
@@ -728,7 +728,7 @@ class PodSyncMixin:
                     await self._send_to_identity(sender, json.dumps({
                         "type": "relay_expired",
                         "message_id": relay["id"],
-                    }))
+                    }), exact=True)
             except Exception:
                 pass
 
