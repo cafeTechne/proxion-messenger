@@ -208,7 +208,7 @@
       </div>
       <div id="dl-sub" class="dl-sub"></div>
       <div id="ver" class="ver"></div>
-      <p class="platforms">Windows x64 / ARM64 · macOS Intel / Apple Silicon · Linux x64 / ARM64 · or any browser (PWA)</p>
+      <p class="platforms">Windows x64 · macOS Intel / Apple Silicon · Linux x64 · or any browser (PWA)</p>
 
       <div class="shot">
         <div class="frame">
@@ -294,8 +294,8 @@
     <p class="solid-badge">Not a walled garden</p>
     <h2 id="interop-h">Your rooms work in other Solid apps, not just this one</h2>
     <p class="lead">A Proxion room is standard Solid Long Chat, so the rest of the Solid
-    ecosystem can read and write it. Each of these is checked in CI against the real
-    apps, not claimed from a spec.</p>
+    ecosystem can read and write it. Each of these has tests that run against a live
+    Solid pod, including one that drives the real SolidOS databrowser.</p>
 
     <figure class="interop-shot">
       <div class="frame">
@@ -342,7 +342,7 @@
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3V5.5Zm0 13L10.5 19.6v-7H3v6ZM11.5 4.25 21 3v8.5h-9.5V4.25Zm0 15.5L21 21v-8.5h-9.5v7.25Z"/></svg>
             Windows
           </div>
-          <div class="req">Windows 10 and 11 · x64 and ARM64</div>
+          <div class="req">Windows 10 and 11 · x64</div>
           <div class="dl-opts" id="opts-windows"></div>
         </div>
         <div class="dl-card" id="card-macos">
@@ -359,7 +359,7 @@
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2c-1.7 0-2.9 1.6-2.9 3.6 0 1 .1 1.7.1 2.6 0 .7-.6 1.3-1.2 2.3-.7 1-1.9 2.5-2.4 4.3-.3.9-.3 1.7-.1 2.3-.2.2-.3.5-.3.9 0 .6.3.9.8 1.2.4.2.9.3 1.4.6.5.3.9.7 1.6.8.3 0 .7 0 1-.3.4-.3.5-.7.5-1.1.7-.5 1.5-.8 2.4-.8.9 0 1.7.3 2.4.8 0 .4.1.8.5 1.1.3.3.7.3 1 .3.7-.1 1.1-.5 1.6-.8.5-.3 1-.4 1.4-.6.5-.3.8-.6.8-1.2 0-.4-.1-.7-.3-.9.2-.6.2-1.4-.1-2.3-.5-1.8-1.7-3.3-2.4-4.3-.6-1-1.2-1.6-1.2-2.3 0-.9.1-1.6.1-2.6C14.9 3.6 13.7 2 12 2Z"/></svg>
             Linux
           </div>
-          <div class="req">x64 and ARM64</div>
+          <div class="req">x64</div>
           <div class="dl-opts" id="opts-linux"></div>
         </div>
       </div>
@@ -393,7 +393,8 @@
       <div class="step">
         <h3>Share your address</h3>
         <p>You get a Proxion address instead of a phone number. Friends add it from their own
-        gateway; a verified, end-to-end encrypted thread opens between you.</p>
+        gateway; an end-to-end encrypted thread opens between you, and comparing
+        safety numbers verifies it.</p>
       </div>
     </div>
 
@@ -530,8 +531,10 @@ const STEPS = {
     <p>If SmartScreen shows <em>"Windows protected your PC"</em>, click
     <code>More info</code> → <code>Run anyway</code>. You only do this once.</p>`,
   macos: `<h3>First launch on macOS</h3>
-    <p>Right-click (or Control-click) the app → <code>Open</code> → <code>Open</code> in the prompt.
-    You only do this once. (Gatekeeper blocks a normal double-click for apps not notarized by Apple.)</p>
+    <p>Open the app once; macOS blocks it because it is not notarized by Apple. Then go to
+    <code>System Settings</code> → <code>Privacy &amp; Security</code>, click <code>Open Anyway</code>
+    next to Proxion, and confirm. You only do this once. (On macOS 14 and earlier,
+    right-click the app → <code>Open</code> → <code>Open</code> also works.)</p>
     <p>Prefer Homebrew? <code>brew install cafeTechne/proxion/proxion</code></p>`,
   linux: `<h3>First launch on Linux</h3>
     <p>AppImage: make it executable (<code>chmod +x Proxion*.AppImage</code>) and run it.

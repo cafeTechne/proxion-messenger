@@ -22,7 +22,7 @@ shasum -a 256 -c SHA256SUMS.txt --ignore-missing
 
 **Windows (PowerShell)**
 ```powershell
-(Get-FileHash .\Proxion_0.1.0_x64-setup.exe -Algorithm SHA256).Hash
+(Get-FileHash .\Proxion_0.2.6_x64-setup.exe -Algorithm SHA256).Hash
 # compare with the matching line in SHA256SUMS.txt
 ```
 
@@ -39,7 +39,7 @@ produced it, countersigned by GitHub's Sigstore instance.
 With the [GitHub CLI](https://cli.github.com/):
 
 ```sh
-gh attestation verify Proxion_0.1.0_x64-setup.exe \
+gh attestation verify Proxion_0.2.6_x64-setup.exe \
   --repo cafeTechne/proxion-messenger
 ```
 

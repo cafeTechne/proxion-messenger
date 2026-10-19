@@ -1,4 +1,4 @@
-# Releasing & distributing Proxion
+# Releasing and distributing Proxion
 
 Proxion is distributed **off GitHub, free, with no vendor lock-in**. Users
 install from a GitHub Pages landing page that points at the latest GitHub
@@ -15,7 +15,7 @@ Microsoft**.
 You can ship a fully working, auto-updating, sovereign app using only the
 updater key. The OS prompt is a one-time "are you sure?", see the landing
 page copy for the per-OS steps (Linux: none; Windows: More info → Run
-anyway; macOS: right-click → Open).
+anyway; macOS 15+: System Settings → Privacy & Security → Open Anyway).
 
 ## Install front door (GitHub Pages)
 
@@ -34,9 +34,8 @@ The updater is turned ON: `tauri.conf.json` has `updater.active = true` and a
 committed `updater.pubkey`, so running installs check the endpoint, verify a new
 version against that public key, and update, with no Apple/Microsoft involved.
 
-**REQUIRED before the next release, or the build fails.** Because the updater is
-active, `tauri build` must SIGN the update artifacts. The signing private key is
-not in the repo; it is provided to CI as repo secrets. Set both once:
+Because the updater is active, `tauri build` must SIGN the update artifacts. The
+signing private key is not in the repo; it is provided to CI as repo secrets:
 
 - `TAURI_PRIVATE_KEY`, the CONTENTS of the private key file from
   `tauri signer generate` (paste the file's text, not its path).
@@ -70,8 +69,11 @@ Absent secrets are skipped, the release still builds.
 
 ## Cutting a release
 
-Add a `## X.Y.Z` section to `CHANGELOG.md`, bump `version.txt` and
-`tauri-app/src-tauri/tauri.conf.json`, commit, then:
+Add a `## X.Y.Z` section to `CHANGELOG.md` and set the new version in
+`version.txt`, `tauri-app/src-tauri/tauri.conf.json`, `tauri-app/src-tauri/Cargo.toml`
+(and its `Cargo.lock` entry), `tauri-app/package.json` (and `package-lock.json`), and
+`proxion-messenger-core/pyproject.toml`. `proxion-messenger-core/tests/test_version_sync.py` fails if any of
+them disagree. Commit, then:
 
 ```
 git tag vX.Y.Z
@@ -116,7 +118,7 @@ the cask can be bumped by hand. Graduating to the official `homebrew-cask`
 repo is possible later once the project meets their notability bar
 (★75/30 forks); the cask file carries over as-is.
 
-## Verifiable builds (E4)
+## Verifiable builds
 
 After the three OS builds upload their assets, the `verify` job in
 `release.yml` publishes a `SHA256SUMS.txt` to the release and signs a
@@ -138,8 +140,8 @@ entries. `proxion-messenger-core/tests/test_updater_manifest.py` validates the s
   updater endpoint; repo pushed; Pages enabled.
 - ✅ Auto-update ON: `updater.active = true` with a committed `pubkey`
   (key ID `529EEA89E67E1E6E`).
-- ⏳ REQUIRED before the next release: add the `TAURI_PRIVATE_KEY` /
-  `TAURI_KEY_PASSWORD` repo secrets, or the signed build fails (see above).
+- ✅ `TAURI_PRIVATE_KEY` / `TAURI_KEY_PASSWORD` repo secrets set; releases ship a
+  signed `latest.json`.
 
 ## Bundling cloudflared (turnkey "Connect a phone")
 
