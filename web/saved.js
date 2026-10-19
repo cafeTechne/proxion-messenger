@@ -12,6 +12,7 @@ import { inlineNotice } from './states.js';
 import { evictOverCap, sortByRecency } from './gifs.js';
 import { podSyncSavedMessage, podSyncRemoveSavedMessage, podReadSavedMessages } from './pod.js';
 import { accountDbName } from './auth.js';
+import { isExpired } from './dmhistory.js';
 
 // Base name; the live database is namespaced per authenticated account by
 // accountDbName (see auth.js), because a snapshot stores up to 500 chars of a
@@ -88,6 +89,38 @@ export async function removeSaved(id) {
         req.onsuccess = () => res();
         req.onerror = () => rej(req.error);
     });
+}
+
+// A bookmark is a copy of the message (up to 500 chars of its text). When the
+// message is deleted or disappears, the copy goes too, here and on the pod.
+export async function forgetSavedMessage(id) {
+    if (!id) return false;
+    const db = await _open();
+    const existing = await new Promise((res) => {
+        const req = _tx(db, 'readonly').get(id);
+        req.onsuccess = () => res(req.result);
+        req.onerror = () => res(null);
+    });
+    if (!existing) return false;
+    await removeSaved(id);
+    await podSyncRemoveSavedMessage(id).catch(() => {});
+    return true;
+}
+
+// Disappearing-message expiry for a thread (see isExpired): drop every bookmark
+// of a message in one of threadIds sent before beforeIso (and, with sinceIso,
+// not before the timer was turned on). Returns how many were removed.
+export async function forgetSavedExpired(threadIds, beforeIso, sinceIso = '') {
+    const ids = new Set((threadIds || []).filter(Boolean));
+    if (!ids.size || !beforeIso) return 0;
+    const rows = await listSaved();
+    const victims = rows.filter((r) => ids.has(r.thread_id) && r.timestamp
+        && isExpired(r.timestamp, beforeIso, sinceIso));
+    for (const r of victims) {
+        await removeSaved(r.id);
+        await podSyncRemoveSavedMessage(r.id).catch(() => {});
+    }
+    return victims.length;
 }
 
 // R62: put a row without toggling (used when merging pod-synced bookmarks into

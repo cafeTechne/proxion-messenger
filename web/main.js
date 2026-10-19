@@ -87,7 +87,7 @@ import { needsDownscale, downscaleImage, measureMedia, inlineFileLimit, ROOM_FIL
 import { attachGifMotion } from './gifmotion.js';
 import { createDropZone } from './dropzone.js';
 import { createEmoji } from './emoji.js';
-import { createSaved, syncSavedFromPod, pushAllSavedToPod } from './saved.js';
+import { createSaved, syncSavedFromPod, pushAllSavedToPod, forgetSavedMessage, forgetSavedExpired } from './saved.js';
 import { createBlocks } from './blocks.js';
 import { createSolidChat } from './solidchat.js';
 import { createSolidChatUI } from './solidchat-ui.js';
@@ -2853,6 +2853,8 @@ import { createAccountSync } from './account-sync.js';
                     allMessages = allMessages.filter(m => m.message_id !== event.message_id);
                     _syncPreviewAfterChange(event.message_id, null);
                     dmHistoryDelete(event.message_id);
+                    // A bookmark must not outlive the message (local and pod copy).
+                    forgetSavedMessage(event.message_id).then(_refreshSavedPanel).catch(() => {});
                     if (event.message_id && event.thread_id) {
                         const _isRoom = !!(activeView && activeView.type === 'local_room');
                         if (_isRoom) {
@@ -3266,6 +3268,8 @@ import { createAccountSync } from './account-sync.js';
                         const _expPeer = Object.keys(peerDidToCertId)
                             .find(d => peerDidToCertId[d] === event.thread_id);
                         if (_expPeer) dmHistoryDeleteBefore(_expPeer, expBefore, expSince);
+                        forgetSavedExpired([event.thread_id, _expPeer], expBefore, expSince)
+                            .then(_refreshSavedPanel).catch(() => {});
                     }
                     if (activeView && (activeView.certId === event.thread_id || activeView.id === event.thread_id) && expBefore) {
                         document.querySelectorAll('#message-feed .message').forEach(el => {
@@ -5374,6 +5378,11 @@ import { createAccountSync } from './account-sync.js';
         // R59E: saved messages (private bookmarks)
         const savedMsgs = createSaved({ showToast, jumpToMsg });
         savedMsgs.wireSaved();
+        // Re-render the Saved list after a deleted/expired message took its bookmark.
+        function _refreshSavedPanel(removed) {
+            if (!removed) return;
+            try { savedMsgs.renderSaved(); } catch (_) { /* not wired yet */ }
+        }
         // R59F: polls (plain-text message; votes are keycap reactions)
         const polls = createPolls({ showToast });
         polls.wirePolls();
