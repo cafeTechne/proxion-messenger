@@ -1050,7 +1050,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if _pid_set:
             return
         self._presence_by_identity.pop(webid, None)
-        # Last connection gone: broadcast offline
+        # Last connection gone: tell its own sessions and contacts it is offline
         now = datetime.now(timezone.utc).isoformat()
         old_presence = self._user_presence.get(webid, {})
         self._user_presence[webid] = {
@@ -1063,7 +1063,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        loop.create_task(self.broadcast({
+        loop.create_task(self._push_presence_to_contacts(webid, {
             "type": "presence_update",
             "webid": webid,
             "status": "offline",

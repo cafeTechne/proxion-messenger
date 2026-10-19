@@ -22,6 +22,33 @@ logger = logging.getLogger("proxion_messenger_core.gateway")
 
 class MiscHandlerMixin:
 
+    async def _push_presence_to_contacts(self, webid: str, event: dict) -> None:
+        """Send a presence event to *webid*'s own sessions and its contacts on this
+        gateway, not every connected socket. A raw broadcast leaked presence state
+        and the free-text status_message to non-contacts on a multi-account
+        gateway, contradicting get_all_presence which already filters to
+        relationships."""
+        recipients = {webid}
+        if self._store:
+            try:
+                for rel in (self._store.list_relationships(webid) or []):
+                    peer = rel.get("peer_did") or ""
+                    if peer:
+                        recipients.add(peer)
+            except Exception:
+                pass
+        payload = json.dumps(event, default=str)
+        seen = set()
+        for wid in recipients:
+            for ws in self._sockets_for(wid):
+                if id(ws) in seen:
+                    continue
+                seen.add(id(ws))
+                try:
+                    await ws.send(payload)
+                except Exception:
+                    pass
+
     async def _handle_set_presence(self, websocket, data: dict) -> None:
         status = data.get("status", "online")
         status_message = data.get("status_message", "").strip()
@@ -49,30 +76,7 @@ class MiscHandlerMixin:
                 "updated_at": now,
                 "last_active_at": last_active
             }
-            # Scope the push to the user's own contacts (+ their own other sessions),
-            # not every connected socket. A raw broadcast leaked presence state and
-            # the free-text status_message to non-contacts on a multi-account gateway,
-            # contradicting get_all_presence which already filters to relationships.
-            _recipients = {webid}
-            if self._store:
-                try:
-                    for _rel in (self._store.list_relationships(webid) or []):
-                        _peer = _rel.get("peer_did") or ""
-                        if _peer:
-                            _recipients.add(_peer)
-                except Exception:
-                    pass
-            _presence_payload = json.dumps(_presence_event, default=str)
-            _presence_seen = set()
-            for _wid in _recipients:
-                for _ws in self._sockets_for(_wid):
-                    if id(_ws) in _presence_seen:
-                        continue
-                    _presence_seen.add(id(_ws))
-                    try:
-                        await _ws.send(_presence_payload)
-                    except Exception:
-                        pass
+            await self._push_presence_to_contacts(webid, _presence_event)
 
         from .presence import set_presence
         _pc_entry = self._any_pod_client_entry()

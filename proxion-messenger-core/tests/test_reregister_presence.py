@@ -76,3 +76,36 @@ async def test_reregister_as_another_identity_leaves_the_old_one(tmp_path):
     assert first not in gw._presence_by_identity
     assert second not in gw._presence_by_identity
     assert gw._user_presence.get(first, {}).get("status") != "online"
+
+
+@pytest.mark.asyncio
+async def test_going_offline_reaches_contacts_only(tmp_path):
+    gw = ProxionGateway(agent=AgentState.generate(), dm_clients={}, room_memberships={},
+                        config=GatewayConfig(host="127.0.0.1", db_path=str(tmp_path / "g.db")))
+    leaver, friend, stranger = _did(), _did(), _did()
+    gw._store.save_relationship(
+        {"certificate_id": "cert-F", "subject": "ab" * 32, "created_at": 0,
+         "expires_at": 2**31 - 1}, peer_did=friend, owner_webid=leaver)
+    socks = {}
+    for did in (friend, stranger):
+        w = AsyncMock()
+        w.remote_address = ("127.0.0.1", 1)
+        gw.clients.add(w)
+        await gw.process_command(w, {"cmd": "register", "did": did, "display_name": "x"})
+        socks[did] = w
+    ws = _WS([{"cmd": "register", "did": leaver, "display_name": "L"},
+              {"cmd": "set_status_message", "status_message": "at the dentist"}])
+    task = asyncio.create_task(gw.handle_client(ws))
+    await asyncio.sleep(0.3)
+    for w in socks.values():
+        w.send.reset_mock()
+    ws.push(None)   # tab closes
+    await asyncio.wait_for(task, 5)
+    await asyncio.sleep(0.2)
+
+    def offline_for(w):
+        return [json.loads(c.args[0]) for c in w.send.call_args_list
+                if json.loads(c.args[0]).get("type") == "presence_update"
+                and json.loads(c.args[0]).get("webid") == leaver]
+    assert offline_for(socks[friend]) and offline_for(socks[friend])[-1]["status"] == "offline"
+    assert offline_for(socks[stranger]) == []
