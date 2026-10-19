@@ -304,7 +304,7 @@ class FederationStoreMixin(object):
             ).fetchall()
             return [dict(r) for r in rows]
     def take_expired_relays(self, limit: int = 50) -> list[dict]:
-        """Still-pending relays past expires_at, marked failed and returned so the
+        """Still-pending relays past expires_at, removed and returned so the
         sender can be told. get_pending_relays skips them, so without this sweep
         they stayed 'pending' (and the sender's message stayed "queued") forever."""
         with self._conn() as conn:
@@ -318,7 +318,7 @@ class FederationStoreMixin(object):
                 (time.time(), limit),
             ).fetchall()
             for r in rows:
-                conn.execute("UPDATE pending_relays SET status = 'failed' WHERE id = ?", (r["id"],))
+                conn.execute("DELETE FROM pending_relays WHERE id = ?", (r["id"],))
             return [dict(r) for r in rows]
     def take_pending_relays_to(self, to_webid: str, limit: int = 500) -> list[dict]:
         """Still-pending relays addressed to to_webid (a contact who removed us),
@@ -332,18 +332,21 @@ class FederationStoreMixin(object):
                 (to_webid, limit),
             ).fetchall()
             return [dict(r) for r in rows]
+    # A queued relay holds the whole payload (message text, file bytes), so the
+    # row is deleted once it is delivered or given up on. The delivery outcome
+    # is kept in relay_delivery_chain, which carries no payload.
     def mark_relay_delivered(self, relay_id: str) -> None:
         with self._conn() as conn:
-            conn.execute(
-                "UPDATE pending_relays SET status = 'delivered' WHERE id = ?",
-                (relay_id,),
-            )
+            conn.execute("DELETE FROM pending_relays WHERE id = ?", (relay_id,))
     def mark_relay_permanently_failed(self, relay_id: str) -> None:
         with self._conn() as conn:
-            conn.execute(
-                "UPDATE pending_relays SET status = 'failed' WHERE id = ?",
-                (relay_id,),
-            )
+            conn.execute("DELETE FROM pending_relays WHERE id = ?", (relay_id,))
+    def prune_finished_relays(self) -> int:
+        """Delete queue rows that are no longer pending (delivered or failed rows
+        written before they were deleted on the spot). Returns rows removed."""
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM pending_relays WHERE status != 'pending'")
+            return cur.rowcount
 
     # ── Per-destination-gateway reachability health (R94) ──────────────────
     def record_peer_gateway_success(self, gateway_url: str) -> None:
