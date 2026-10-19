@@ -14,7 +14,7 @@ wrapper / federation protocol), reproduction steps, and impact assessment.
 
 ## Scope
 
-In scope: anything in this repository — the Python gateway, the web client,
+In scope: anything in this repository: the Python gateway, the web client,
 the Tauri wrapper, the federation/relay protocol, and the release pipeline.
 
 Particularly interesting: E2E encryption breaks, cross-gateway authentication
@@ -28,5 +28,5 @@ security backports.
 ## Design documentation
 
 The threat model and security baseline live in
-[`docs/security/`](docs/security/) — start with
+[`docs/security/`](docs/security/); start with
 `definition_of_secure_enough.md` and `control_baseline_v1.md`.

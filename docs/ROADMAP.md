@@ -48,7 +48,7 @@ are listed in `docs/SOLID_COMPLIANCE.md`.
 
 > A sovereign Discord/Signal for small trusted groups (2–6 people). Download
 > a `.exe`, run it, share your Proxion address, and message + voice-call your
-> friends — with no company in the middle, no account, and no central server.
+> friends, with no company in the middle, no account, and no central server.
 > Self-hosting is a backend detail the user should never have to think about.
 
 Every roadmap decision is judged against that thesis. The two implications
@@ -70,7 +70,7 @@ have since been addressed (see the Status section above and `CHANGELOG.md`).
 
 **Strengths (genuinely strong):**
 - Mature messaging: rooms, DMs, reactions, edits, threads, pins, disappearing
-  messages, scheduling, search, receipts, presence, typing — all working.
+  messages, scheduling, search, receipts, presence, typing, all working.
 - Real E2E: Double Ratchet, sealed sender, group sender keys, device registry.
 - Federation that actually works cross-gateway: messages, reactions, edits,
   presence, typing, 1:1 voice, group voice (2–6), push.
@@ -84,8 +84,8 @@ have since been addressed (see the Status section above and `CHANGELOG.md`).
 - **Reachability is automatic only when UPnP works.** The fallback (manual
   port-forward / Cloudflare Tunnel) is a wall for a non-technical user.
 - **Three monoliths**: `gateway.py` (4.7K), `local_store.py` (5.9K),
-  `main.js` (5.9K) — increasingly hard to evolve safely.
-- **Over-built governance subsystem** with dead modules — large maintenance
+  `main.js` (5.9K), increasingly hard to evolve safely.
+- **Over-built governance subsystem** with dead modules, large maintenance
   surface for near-zero user value at this scale.
 - **No mobile story.** PWA exists (`sw.js`) but no packaged mobile app.
 - **Hard 512 KB file limit**, below user expectations for photo sharing. (Since
@@ -95,18 +95,18 @@ have since been addressed (see the Status section above and `CHANGELOG.md`).
 
 ---
 
-## Phase A — "Download and it just works" (HIGHEST PRIORITY)
+## Phase A: "Download and it just works" (HIGHEST PRIORITY)
 
 The thesis lives or dies here. Goal: a non-technical person installs Proxion
 and reaches their friends with zero configuration.
 
 **A1. Signed, auto-updating installers.**
-- Code-sign Windows (Authenticode) and macOS (notarized) builds — unsigned
+- Code-sign Windows (Authenticode) and macOS (notarized) builds: unsigned
   binaries trigger scary OS warnings that kill noobie adoption.
 - Tauri auto-updater wired to GitHub Releases so users get fixes silently.
 - Linux: AppImage + optionally Flatpak.
 
-**A2. Reachability that survives UPnP failure — without user effort.**
+**A2. Reachability that survives UPnP failure, without user effort.**
 - Built-in managed relay/TURN fallback: when a gateway can't be reached
   directly, route through a community/relay node (sealed, so the relay never
   sees plaintext or metadata beyond routing). This is the missing piece that
@@ -130,7 +130,7 @@ and reaches their friends with zero configuration.
 
 ---
 
-## Phase B — Architecture hygiene (enables everything after)
+## Phase B: Architecture hygiene (enables everything after)
 
 Pay down the debt that will otherwise make Phases C–E slow and risky.
 
@@ -146,7 +146,7 @@ moving the HTTP endpoint handlers out of the WS command loop into an
 
 **B3. Modularize `main.js` (5.9K).** Move to ES modules (`ws.js`, `voice.js`,
 `rooms.js`, `dms.js`, `ui/*.js`) with a tiny build step (esbuild). Add a
-real vitest suite — the frontend is currently the least-tested, most-changed
+real vitest suite: the frontend is currently the least-tested, most-changed
 surface. No framework needed; keep it vanilla.
 
 **B4. Right-size the governance subsystem.** Audit
@@ -166,7 +166,7 @@ the root `ARCH.md` (homelab infra) out of this repo entirely.
 
 ---
 
-## Phase C — Federation completeness & robustness
+## Phase C: Federation completeness & robustness
 
 Close the cross-gateway gaps so federation is trustworthy end-to-end.
 
@@ -184,7 +184,7 @@ endpoint is the foundation; add cursor pagination in the UI and a
 "load older" affordance for federated members.
 
 **C4. did:web identity (optional).** Lets users have a human-readable identity
-(`did:web:alice.example.com`) alongside `did:key`. Lower priority — `did:key`
+(`did:web:alice.example.com`) alongside `did:key`. Lower priority: `did:key`
 works for the core thesis.
 
 **C5. Federation resilience.** Quarantine misbehaving peer gateways, surface
@@ -193,7 +193,7 @@ relay health in the UI, exponential backoff with jitter on relay retries
 
 ---
 
-## Phase D — Feature parity for the social experience
+## Phase D: Feature parity for the social experience
 
 Make it feel as good as the apps people are leaving.
 
@@ -212,16 +212,16 @@ voice messages (exists) polish, animated reactions.
 
 **D4. Notifications that work when the app is closed.** The WebPush/VAPID
 bridge exists; wire it to a background service so users get messages without
-the gateway window open — critical for a real messenger.
+the gateway window open, which is critical for a real messenger.
 
 ---
 
-## Phase E — Trust, recovery & long-term durability
+## Phase E: Trust, recovery & long-term durability
 
 The sovereignty promise requires users never lose their identity or history.
 
 **E1. Identity backup & recovery UX.** Backup exists; make it
-foolproof — recovery codes, "export to file", optional encrypted cloud
+foolproof: recovery codes, "export to file", optional encrypted cloud
 backup the user controls. Losing the Ed25519 key today = losing identity.
 
 **E2. Multi-device made real.** Device registry exists; finish the UX so a
@@ -234,7 +234,7 @@ from anywhere" upgrade, not a requirement. Make connecting a pod a one-click
 optional step.
 
 **E4. Verifiable builds.** Reproducible builds + published hashes so a
-security-conscious user can verify the `.exe` matches the source — fits the
+security-conscious user can verify the `.exe` matches the source. That fits the
 sovereignty ethos and leverages the existing `supply_chain` work.
 
 ---
@@ -255,14 +255,14 @@ E (durability)       ──►  deliver the full sovereignty promise
 
 - **A and B interleave.** Ship A1–A3 for adoption while doing B1–B3 to keep
   velocity. Don't let either fully block the other.
-- **Phase A is the highest ROI** — the product is technically excellent but
+- **Phase A is the highest ROI**: the product is technically excellent but
   undeliverable to its target user until install + reachability are invisible.
-- **Phase B4 (governance right-sizing) is the highest *effort-saving* move** —
+- **Phase B4 (governance right-sizing) is the highest *effort-saving* move**:
   it removes maintenance drag from every future round.
 
 ## What to explicitly NOT build
 
-- SFU / large-room voice (40-person raids belong on TeamSpeak — confirmed).
+- SFU / large-room voice (40-person raids belong on TeamSpeak, confirmed).
 - Screen share (out of scope per product direction at the time; later added to
   1:1 calls, see `docs/CALLS.md`).
 - A central account system or directory (violates the thesis).

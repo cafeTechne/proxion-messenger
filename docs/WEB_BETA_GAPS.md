@@ -42,7 +42,7 @@ origin-root inbox. Fixed in `auth.js` by deriving the own-root from the WebID
 path the same way the sender does, keeping an https `pim:storage` claim when the
 profile provides one (including cross-origin, as Inrupt PodSpaces uses).
 
-### Audit pass (three reviewers) — fixed and deferred
+### Audit pass (three reviewers): fixed and deferred
 
 A focused review of the gateway-free surfaces (delivery, calls/presence, auth/ACL)
 found more issues. Fixed in this round:
@@ -80,7 +80,7 @@ found more issues. Fixed in this round:
   now uses the presence resource's `Last-Modified` (a CORS-safelisted header, so
   one trusted server clock) when present, falling back to the heartbeat; the
   heartbeat is still shown as last-seen. (The unload offline write still cannot
-  use `sendBeacon` — an authenticated pod PUT needs DPoP headers it cannot carry —
+  use `sendBeacon` (an authenticated pod PUT needs DPoP headers it cannot carry),
   and the freshness decay already covers a missed unload write.)
 - **DM receive deleted the drop before a durable write.** The receive path fired
   the message event (which persists to the local DM history) fire-and-forget and
@@ -127,10 +127,10 @@ Fixed:
 - **XSS/HTML-injection in the message renderer.** `rendering.js` interpolated a
   file attachment's `data_b64` into five `innerHTML` `src=`/`href=` attributes, a
   sender's `from_webid` into a `data-webid` attribute, and a peer's presence
-  `status` into a `title` attribute, all unescaped — attacker-controlled in web
+  `status` into a `title` attribute, all unescaped, attacker-controlled in web
   mode. Now routed through the same `b64attr`/`escHtml` helpers the file already
   uses elsewhere. (Today's CSP `script-src 'self'` blocked inline handlers, so
-  this was content/DOM injection, not arbitrary JS — but it defeated the escaping
+  this was content/DOM injection, not arbitrary JS, but it defeated the escaping
   contract and would become stored XSS under any CSP relaxation.)
 - **Received-DM persist gate (regression from the previous round).** The receive
   path had been gating BOTH the live render and the drop deletion on the
@@ -152,7 +152,7 @@ Fixed:
   `did:key` (`dmsig.js`). Each device publishes its signer identity at its own pod
   (`proxion/identity/signer.json`), and on receipt the recipient verifies the
   signature and confirms the signer is the one published at the SENDER's pod (or a
-  device certified by the published account, via `device-cert.js`) — an anchor an
+  device certified by the published account, via `device-cert.js`), an anchor an
   attacker forging a "from alice" message cannot write to. Per the chosen
   transition policy it is non-gating: a verified DM shows no marker, an unsigned or
   unverifiable one still delivers but is marked "unverified sender", so nothing
@@ -177,8 +177,8 @@ Fixed:
   key and the ratchet state-encryption key are now non-extractable CryptoKeys in
   IndexedDB, so an XSS can no longer exfiltrate the private scalar (the way it could
   from the old localStorage JWK the state key derived from). An existing localStorage
-  keypair is migrated once — the state key is imported at its EXISTING value so
-  stored ratchet state still decrypts — then the scalar is removed. When IndexedDB
+  keypair is migrated once, the state key is imported at its EXISTING value so
+  stored ratchet state still decrypts, then the scalar is removed. When IndexedDB
   is unavailable it falls back to the legacy localStorage keypair so nothing breaks.
 - **Participant `acl:Write` allows tampering (documented limitation).** The Long
   Chat grant gives every participant Write on the shared container, so a

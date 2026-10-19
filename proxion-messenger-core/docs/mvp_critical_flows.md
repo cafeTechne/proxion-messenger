@@ -20,7 +20,7 @@ the same `device_id` do not create duplicates.
 
 ---
 
-## 2. DM — Online and Offline Catch-Up
+## 2. DM: Online and Offline Catch-Up
 
 **Flow**: Alice sends a DM to Bob while Bob is offline → Bob reconnects → Bob issues
 `catch_up` for the thread → messages are delivered in order.
@@ -47,7 +47,7 @@ Alice and Bob get a new epoch sender key → Carol's old key is deleted.
 - New sender key saved with `epoch` incremented.
 - `sender_key_rotation` event emitted to remaining members with `next_epoch`.
 - Carol receives a `removed_from_room` event and cannot decrypt post-removal messages
-  (her cached key has a lower epoch — `decrypt_group_message` raises
+  (her cached key has a lower epoch, `decrypt_group_message` raises
   `sender_key_epoch_stale`).
 
 **Recovery**: If a member misses the rotation event, they re-request the sender key

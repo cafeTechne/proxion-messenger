@@ -1,4 +1,4 @@
-# Control Baseline v1 — Proxion Messenger Backend
+# Control Baseline v1: Proxion Messenger Backend
 
 This document freezes the minimum set of controls that define "ship-ready backend security."
 Controls marked **required** must be active in any production deployment.

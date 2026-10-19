@@ -1,4 +1,4 @@
-# Post-Baseline Roadmap — Next Focus After DoSE
+# Post-Baseline Roadmap: Next Focus After DoSE
 
 Once all exit gates pass for 30 consecutive days, backend hardening rounds pause.
 The following areas become the primary investment targets.
@@ -60,6 +60,6 @@ security-event audit log, `acp.py`, `attenuation.py`, `authz.py`.
 `provenance_verify`.
 
 **Pending keep/cut decision (NOT yet removed):**
-- `wg_overlay` — full WireGuard-overlay subsystem, 13 test files, zero `src`
+- `wg_overlay`: full WireGuard-overlay subsystem, 13 test files, zero `src`
   importers. Never wired into the gateway. Decide: future infra or remove.
-- `nss_setup` — Node-Solid-Server helper, test-only. Verify CLI usage first.
+- `nss_setup`: Node-Solid-Server helper, test-only. Verify CLI usage first.

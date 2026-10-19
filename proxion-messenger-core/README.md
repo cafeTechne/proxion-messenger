@@ -19,8 +19,8 @@ Python ≥ 3.12.
 
 | Module | Responsibility |
 |---|---|
-| `gateway.py` | `ProxionGateway` — WebSocket routing, HTTP serving, room/DM/voice logic (composed from the `_gateway_*` mixins) |
-| `persist.py` | `AgentState` — Ed25519 identity + X25519 store-key management |
+| `gateway.py` | `ProxionGateway`: WebSocket routing, HTTP serving, room/DM/voice logic (composed from the `_gateway_*` mixins) |
+| `persist.py` | `AgentState`: Ed25519 identity + X25519 store-key management |
 | `local_store.py`, `_store/` | SQLite persistence: rooms, messages, relationships, devices, security state |
 | `solid_client.py` | DPoP-authenticated Solid pod I/O (Community Solid Server oriented) |
 | `messaging.py` | Signed message format, canonical serialization, hash chaining |

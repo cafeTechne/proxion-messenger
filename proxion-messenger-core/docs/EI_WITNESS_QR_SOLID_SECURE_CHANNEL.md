@@ -4,11 +4,11 @@
 
 Proxion defines a universal, tool‑agnostic architecture for privacy‑preserving device‑to‑device connection bootstrapping via a dedicated control plane. The architecture combines interactive authorization (UMA‑style), capability tokens with contextual caveats (macaroon‑style), delegation and revocation (CapBAC), and decentralized service discovery, while explicitly separating authorization and negotiation from data transport. Normative invariants guarantee least authority, single‑use bootstrapping, finite authority, contextual enforcement, audience binding with proof‑of‑possession, and the absence of any requirement for globally stable identifiers.
 
-A minimal reference implementation (EI₀) demonstrates the existence of a system satisfying these invariants without prescribing identity systems, transports, or user interfaces. By decoupling governance from payload movement, Proxion admits diverse instantiations—from local pairing to secure channel bootstrapping—while preserving strong privacy properties and fail‑closed semantics. This work positions Proxion as a unifying control‑plane pattern applicable across Solid‑style governance, capability systems, and secure channel establishment.
+A minimal reference implementation (EI₀) demonstrates the existence of a system satisfying these invariants without prescribing identity systems, transports, or user interfaces. By decoupling governance from payload movement, Proxion admits diverse instantiations, from local pairing to secure channel bootstrapping, while preserving strong privacy properties and fail‑closed semantics. This work positions Proxion as a unifying control‑plane pattern applicable across Solid‑style governance, capability systems, and secure channel establishment.
 
 ---
 
-## Standalone EI Witness — QR Bootstrap (Non‑Normative)
+## Standalone EI Witness: QR Bootstrap (Non‑Normative)
 
 > This document describes a **concrete existential instantiation (EI)** of the Proxion Universal Architecture. It is informative only and imposes no requirements on the UI.
 
@@ -53,7 +53,7 @@ A minimal reference implementation (EI₀) demonstrates the existence of a syste
 
 ---
 
-## Separate Architecture Note — Solid ↔ Secure‑Channel EI (Informative)
+## Separate Architecture Note: Solid ↔ Secure‑Channel EI (Informative)
 
 ### Goal
 

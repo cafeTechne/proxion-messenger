@@ -7,8 +7,8 @@ Phases A–D are done; E (durability) remains.
 
 This second roadmap is about a different axis: **turning a feature-rich tool into
 a polished, trustworthy, obviously-usable product a non-technical person loves.**
-The thesis is unchanged — *download a `.exe`, share a link, talk to your friends*
-— but the bar moves from "it works" to "it feels like a modern app and never
+The thesis is unchanged (*download a `.exe`, share a link, talk to your friends*),
+but the bar moves from "it works" to "it feels like a modern app and never
 makes me feel lost or unsure."
 
 Written after a full read of the web client and a session that decomposed and
@@ -54,13 +54,13 @@ open.
 **Where it falls short of "delightful & trustworthy"** (all measured)
 1. **Visual/design debt.** 343 inline `style=` attributes in `index.html`; 51
    distinct hardcoded hex colors against only 8 design tokens; CSS split between
-   a 444-line inline `<style>` block and `style.css`. There is a token system —
-   it's just barely used. The UI is functional but inconsistent and hard to
+   a 444-line inline `<style>` block and `style.css`. There is a token system,
+   but it is barely used. The UI is functional but inconsistent and hard to
    re-theme or keep visually coherent.
 2. **Keyboard & focus accessibility.** Essentially **no `:focus` styles** (2
-   total) — keyboard users can't see where they are. `aria-*` is present (38) but
+   total), keyboard users can't see where they are. `aria-*` is present (38) but
    focus management is minimal (1 `tabindex`); never audited against WCAG.
-3. **Cognitive load.** 32 settings controls and 12 modals — enterprise-grade
+3. **Cognitive load.** 32 settings controls and 12 modals, enterprise-grade
    surface area for a "noobie" app. Onboarding still surfaces Solid-Pod/CSS
    concepts in its default path (the A3.2 follow-up).
 4. **Half-built features that look present.** Room **voice channels** are a UI
@@ -69,7 +69,7 @@ open.
    (you can't tell who's talking), no call-quality stats, no push-to-talk (the
    D1 follow-ups).
 5. **Reliability blind spots.** This session found and fixed *real* latent bugs
-   that no test caught — `_write_json`/`_IMPORT_MAX` `NameError` landmines in
+   that no test caught: `_write_json`/`_IMPORT_MAX` `NameError` landmines in
    cold HTTP error paths, a ws/wss mixed-content failure that silently broke
    connection, and an empty-room-list-after-restart bug. Cold/error paths are
    under-exercised, and there is no automated full *user-journey* E2E (the smoke
@@ -82,7 +82,7 @@ open.
 
 ---
 
-## Phase F — Visual coherence & a real design system  (highest leverage)
+## Phase F: Visual coherence & a real design system  (highest leverage)
 
 A product feels trustworthy before a user reads a word. Pay down the visual debt.
 
@@ -95,13 +95,13 @@ A product feels trustworthy before a user reads a word. Pay down the visual debt
   `style.css` into one structured stylesheet. This is mechanical and unlocks
   consistency + theming + smaller HTML.
 - **F3. State design.** A deliberate pass on empty / loading / error / offline
-  states — skeleton loaders, friendly copy, illustrations. Replace ad-hoc
+  states, skeleton loaders, friendly copy, illustrations. Replace ad-hoc
   "Loading…" strings with a consistent pattern.
 - **F4. Micro-interaction polish.** Consistent transitions, the reaction-pop
-  pattern extended tastefully, message-send optimism, scroll behavior — all
+  pattern extended tastefully, message-send optimism, scroll behavior, all
   behind `prefers-reduced-motion`.
 
-## Phase G — Usability & cognitive-load reduction
+## Phase G: Usability & cognitive-load reduction
 
 Make the obvious thing obvious; hide power behind progressive disclosure.
 
@@ -113,10 +113,10 @@ Make the obvious thing obvious; hide power behind progressive disclosure.
   carries the inviter through.
 - **G3. Discoverability.** Contextual tooltips, empty-state CTAs ("Add your first
   friend"), a command palette (the shortcut system exists), and first-use
-  coachmarks. Reduce modals — prefer inline/side-panel flows.
+  coachmarks. Reduce modals, prefer inline/side-panel flows.
 - **G4. Reduce dead ends.** Audit every error/empty state for a next action.
 
-## Phase H — Reliability & quality hardening
+## Phase H: Reliability & quality hardening
 
 Trust is lost in the cold paths. Make the latent-bug class systematically
 impossible.
@@ -127,14 +127,14 @@ impossible.
   this session) as a CI gate for both Python and JS; sweep error/recovery paths.
 - **H2. Real user-journey E2E.** Grow the puppeteer harness from "page loads
   cleanly" to driving actual flows (send/receive, react, reply, edit, room
-  create/join, settings) with assertions — and a **two-gateway federation
+  create/join, settings) with assertions, and a **two-gateway federation
   harness** for the cross-gateway DM/voice paths that are currently manual.
 - **H3. Visual-regression snapshots** on key screens so the Phase F refactor and
   future changes don't silently break layout.
-- **H4. Graceful degradation audit** — every external dependency (pod, relay,
+- **H4. Graceful degradation audit**: every external dependency (pod, relay,
   TURN, push) failing should degrade visibly, never silently.
 
-## Phase I — Accessibility & inclusivity
+## Phase I: Accessibility & inclusivity
 
 - **I1. WCAG 2.1 AA pass.** Visible focus (`:focus-visible`) everywhere; full
   keyboard navigation; SR labels/roles audit; contrast-check the color set
@@ -142,21 +142,21 @@ impossible.
 - **I2. Localization scaffolding.** Extract user-facing strings for i18n (the
   earlier copy work is a start); the sovereignty audience is global.
 
-## Phase J — Voice & calls excellence (finish D1 + room voice)
+## Phase J: Voice & calls excellence (finish D1 + room voice)
 
 - **J1.** Speaking/level indicators (Web Audio `AnalyserNode`), per-call quality
   stats (`getStats`: jitter/RTT/loss) in the participant panel, push-to-talk,
   input/output device pickers, a polished ring/answer/hangup flow.
 - **J2.** Either ship the stubbed **room voice channels** (the signaling exists)
-  with real UI, or remove the dead surface — don't leave a half-feature.
+  with real UI, or remove the dead surface; don't leave a half-feature.
 
-## Phase K — Mobile as a first-class client (D2)
+## Phase K: Mobile as a first-class client (D2)
 
 Installable PWA polish (icons/splash, offline shell, push already wired),
 mobile-native interaction patterns (gestures, bottom-sheet, safe-area insets),
 and a Tauri-mobile/Capacitor wrapper. A mobile-first layout pass on the web UI.
 
-## Phase L — Durability (carried over from ROADMAP.md Phase E)
+## Phase L: Durability (carried over from ROADMAP.md Phase E)
 
 E1 identity backup/recovery UX, E2 multi-device (QR pairing), E3 Pod as the
 optional "never lose anything" backbone, E4 reproducible/verifiable builds. Still
@@ -172,7 +172,7 @@ F (design system)  ┐
                    ├─► the adoption unlock: a non-technical user must find it
 G (usability)      ┘   beautiful and obvious in the first 60 seconds
         │
-H (reliability)    ──► interleave throughout — trust is the product
+H (reliability)    ──► interleave throughout, trust is the product
         │
 I (a11y)  J (voice)  K (mobile)  ──► breadth of "feels like a real app"
         │
@@ -181,11 +181,11 @@ L (durability)     ──► the long-term sovereignty promise
 
 - **F + G are the highest ROI now.** The product is feature-complete but its
   first impression (visual coherence) and learnability (cognitive load) are the
-  current ceiling on adoption — exactly the noobie thesis.
+  current ceiling on adoption, exactly the noobie thesis.
 - **H interleaves.** Each polish change ships behind expanded automated coverage
   so we don't trade reliability for shine. The latent bugs found this session are
   the proof this matters.
-- **F1/F2 also de-risk everything after** — a token system + de-inlined CSS makes
+- **F1/F2 also de-risk everything after**: a token system + de-inlined CSS makes
   a11y (I), mobile (K), and theming cheap.
 
 ## What to explicitly NOT do
@@ -194,7 +194,7 @@ L (durability)     ──► the long-term sovereignty promise
   system is CSS + classes, not React.
 - **No new top-level features before polishing the existing ones.** The gap is
   finish/feel, not breadth.
-- **No teams/admin/enterprise surface, no SFU, no central directory** — same
+- **No teams/admin/enterprise surface, no SFU, no central directory**, same
   guardrails as ROADMAP.md; the target is 2–6 trusted friends.
 - **Don't let Settings grow.** Every new toggle is a usability tax (Phase G is
   about shrinking it).

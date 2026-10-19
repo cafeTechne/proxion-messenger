@@ -53,5 +53,5 @@ calendar days.  A single day above any threshold resets the 14-day clock.
 
 ---
 
-*Document status: DRAFT — thresholds and conditions are provisional until the
+*Document status: DRAFT: thresholds and conditions are provisional until the
 first canary release is evaluated.*

@@ -22,6 +22,6 @@ body:
     attributes:
       value: >-
         Heads-up on scope: Proxion deliberately avoids central services
-        (directories, SFUs, telemetry) and stays framework-free — see
+        (directories, SFUs, telemetry) and stays framework-free; see
         CONTRIBUTING.md. Feature ideas that fit the self-hosted,
         data-sovereign model have the best odds.

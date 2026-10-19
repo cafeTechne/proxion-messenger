@@ -31,7 +31,7 @@ A compact Connect ID is displayed:
 proxion:H4sI...#a3f2
 ```
 
-This string encodes your DID and gateway URL — no external coordinator is used.
+This string encodes your DID and gateway URL; no external coordinator is used.
 Send it to your contact via any channel (SMS, email, QR code).
 
 ### 3. Accept a Contact Request
@@ -48,8 +48,8 @@ A plain-language label appears in Settings → Connectivity:
 
 | Label | Meaning |
 |---|---|
-| **Private direct connection** | WireGuard direct UDP path — best privacy and latency |
-| **Private relayed connection** | HTTP relay fallback — still E2E encrypted, no message content visible to relay |
+| **Private direct connection** | WireGuard direct UDP path, best privacy and latency |
+| **Private relayed connection** | HTTP relay fallback, still E2E encrypted, no message content visible to relay |
 | **Needs attention** | Check internet connection or firewall |
 
 ### 5. Chat and Voice
@@ -62,7 +62,7 @@ Messages and voice calls work automatically. No additional configuration needed.
 
 - **Direct path**: Only your gateway and your contact's gateway are involved. No third party sees traffic.
 - **Relay path**: HTTP relay sees encrypted ciphertext only (sealed sender, e2e_v=3). Relay cannot read message content or determine sender identity.
-- **Connect ID**: Self-contained — contains your DID and gateway URL. No central resolver; no tracking.
+- **Connect ID**: Self-contained: contains your DID and gateway URL. No central resolver; no tracking.
 
 ---
 

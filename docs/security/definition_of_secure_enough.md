@@ -1,4 +1,4 @@
-# Definition of Secure Enough (DoSE) — Proxion Messenger Backend
+# Definition of Secure Enough (DoSE): Proxion Messenger Backend
 
 ## Top Risk Register (Top 10)
 
@@ -63,7 +63,7 @@ New backend security rounds require one of:
 When `evaluate_security_program_stability_gate` returns `recommendation="hold_line"` (all gates pass for 45 consecutive days, no critical events), transition to **monthly security maintenance cycle**:
 
 1. Run `run_recovery_drill` monthly for each template.
-2. Review continuous assurance snapshots — investigate any `amber` or `red` states.
+2. Review continuous assurance snapshots: investigate any `amber` or `red` states.
 3. Rotate identity key if `key_lifecycle_policy` flags overdue.
 4. Review and archive evidence verification records quarterly.
 5. No new hardening rounds without a trigger from the stop rule above.

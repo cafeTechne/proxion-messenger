@@ -35,7 +35,7 @@ Same gateway, two browser tabs. Tests local relay.
 2. Tab A: copy DID from Settings → share with Tab B
 3. Tab B: click ＋ Add Contact → paste Tab A's DID → DM opens
 4. Send messages in both directions
-5. Click 📞 Call — verify voice ring + accept + audio (check DevTools → Media)
+5. Click 📞 Call: verify voice ring + accept + audio (check DevTools → Media)
 
 ---
 
@@ -87,11 +87,11 @@ Bob: Add Contact → paste Alice's address (Settings shows it, `did:key:…@http
 ### Security checks during OIDC test
 
 - DevTools → Network: after redirect back, confirm URL in browser bar has NO
-  `?code=` or `?state=` — they should be stripped before the page finishes loading
+  `?code=` or `?state=`. They should be stripped before the page finishes loading
 - DevTools → Application → Local Storage: confirm `proxion_pod_webid` is set, but
   NO token or secret is stored (tokens live in IndexedDB via the Inrupt library)
-- DevTools → Application → IndexedDB → `solid-client-authn` — session data is here
-- DevTools → Network → Response Headers for `index.html` — confirm `Content-Security-Policy` present
+- DevTools → Application → IndexedDB → `solid-client-authn`, session data is here
+- DevTools → Network → Response Headers for `index.html`, confirm `Content-Security-Policy` present
 - DevTools → Console → no CSP violation warnings after normal app use
 
 ---
@@ -148,9 +148,9 @@ protocol is specified in [docs/E2E_ENCRYPTION.md](docs/E2E_ENCRYPTION.md).
 
 ### Ratchet state persistence
 
-12. Exchange 3 encrypted messages. Close Tab A completely (not just reload — close the tab).
+12. Exchange 3 encrypted messages. Close Tab A completely (close the tab, do not just reload).
 13. Reopen `https://127.0.0.1:8080/` in a new tab. Re-register (DID auto-loaded from localStorage).
-14. Send an encrypted message — should work without any re-init prompt.
+14. Send an encrypted message. It works without any re-init prompt.
 
 ### E2E unit tests
 
@@ -165,7 +165,7 @@ python -m pytest proxion-messenger-core/tests/test_e2e_crypto.py -v
 ```
 
 Verifies HKDF-SHA256 salt/info strings, HMAC chain constants, AES-256-GCM wire format,
-`kdfRk` vectors, full ratchet round DH symmetry, and `safetyNumber` format — all must match
+`kdfRk` vectors, full ratchet round DH symmetry, and `safetyNumber` format. All must match
 the JS implementation in `web/e2e.js`.
 
 ---

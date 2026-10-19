@@ -1,4 +1,4 @@
-# Security SLOs — Proxion Messenger Backend
+# Security SLOs: Proxion Messenger Backend
 
 These SLOs define the operational targets for the 30-day rolling window evaluated
 by the `slo_gate` exit gate. All SLOs apply to production deployments.
@@ -25,12 +25,12 @@ by the `slo_gate` exit gate. All SLOs apply to production deployments.
 ## Evidence Storage
 
 SLO evaluation snapshots are persisted in `security_slo_snapshots` with:
-- `window_start`, `window_end` — 30-day window bounds
-- `metrics_json` — per-SLO measurement and pass/fail
-- `evaluated_at` — timestamp of evaluation
+- `window_start`, `window_end`: 30-day window bounds
+- `metrics_json`: per-SLO measurement and pass/fail
+- `evaluated_at`: timestamp of evaluation
 
 Drill results are persisted in `security_drill_results` with:
-- `drill_type` — `incident | recovery | rollback`
-- `status` — `pass | fail`
+- `drill_type`: `incident | recovery | rollback`
+- `status`: `pass | fail`
 - `duration_seconds`
 - `findings_json`

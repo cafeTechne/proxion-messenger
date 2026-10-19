@@ -53,11 +53,11 @@ Proxion is a federated messaging protocol where:
 Each user has a Solid Pod (typically hosted at `https://user.pod/`). The pod serves as a personal data store, exposing a WebDAV interface and RDF data.
 
 **Key endpoints:**
-- `/.well-known/openid-configuration` — OIDC discovery (if pod supports OpenID Connect)
-- `/profile/card` — User identity (RDF/turtle)
-- `/inbox/` — LDP Inbox for notifications (RFC 6047 LDP containers)
-- `/.acl` — Web Access Control (WAC) lists
-- `/.acr` — Access Control Resources (ACP) for ACP-enabled pods
+- `/.well-known/openid-configuration`: OIDC discovery (if pod supports OpenID Connect)
+- `/profile/card`: User identity (RDF/turtle)
+- `/inbox/`: LDP Inbox for notifications (RFC 6047 LDP containers)
+- `/.acl`: Web Access Control (WAC) lists
+- `/.acr`: Access Control Resources (ACP) for ACP-enabled pods
 
 ### Authentication
 
@@ -117,7 +117,7 @@ stash://
 
 Proxion uses **Linked Data Platform (LDP)** containers for append-only lists (messages, reactions, etc.). Each container exposes:
 
-- `Contains: <uri1>, <uri2>, ...` — List of member URIs
+- `Contains: <uri1>, <uri2>, ...`: List of member URIs
 - Each member is a separate JSON resource
 
 ---
