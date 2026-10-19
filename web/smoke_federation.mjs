@@ -9,7 +9,7 @@
 //
 // Exit 0 = the cross-gateway DM was delivered and rendered, non-zero = a step failed.
 
-import { existsSync, mkdtempSync, rmSync } from 'fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'fs';
 import { spawn } from 'child_process';
 import { createServer, connect } from 'net';
 import { tmpdir } from 'os';
@@ -45,6 +45,17 @@ const waitForPort = (port, ms) => new Promise((res, rej) => {
   tryOnce();
 });
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+// Files under dir whose raw bytes contain text (SQLite pages, WAL, logs, pod cache).
+function filesContaining(dir, text) {
+  const hits = [];
+  const needle = Buffer.from(text, 'utf8');
+  for (const e of readdirSync(dir, { withFileTypes: true, recursive: true })) {
+    if (!e.isFile()) continue;
+    const f = join(e.parentPath ?? e.path, e.name);
+    try { if (readFileSync(f).includes(needle)) hits.push(f); } catch { /* locked or gone */ }
+  }
+  return hits;
+}
 
 const procs = [], dirs = [];
 async function startGateway(name) {
@@ -281,6 +292,21 @@ try {
     await sendText(bob, fromBob);
     if (!(await feedHas(alice, fromBob))) fail("Bob's room message never reached Alice's gateway");
     if (process.exitCode) throw new Error('stop');
+
+    // The E2E DM's plaintext must never reach either gateway: not its database,
+    // not anything else in its data dir, not its log (which would show a relay
+    // payload). Room messages are not E2E, so finding one proves the scan reads
+    // the same files the DM would have landed in.
+    step = 'dm-plaintext-not-on-gateways';
+    await sleep(1500);
+    if (!filesContaining(dirs[0], fromAlice).length) fail("scan control: Alice's room message not found in her gateway's data dir");
+    for (const [i, dir] of dirs.entries()) {
+      const hits = filesContaining(dir, MSG);
+      if (hits.length) fail(`E2E DM plaintext found on gateway ${i}: ${hits.join(', ')}`);
+      if (procs[i]._log().includes(MSG)) fail(`E2E DM plaintext found in gateway ${i}'s log`);
+    }
+    if (process.exitCode) throw new Error('stop');
+    step = 'room-invite-across-gateways';
     // Back to the DM for the profile-card steps below.
     await bob.evaluate(() => (document.querySelector('#dm-list li, #contacts-list li')).click());
     if (!(await feedHas(bob, MSG))) fail('Bob could not reopen the DM with Alice after the room steps');
