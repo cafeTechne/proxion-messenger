@@ -3,23 +3,27 @@
 This document maps the EI0 reference implementation in `proxion-messenger-core` to the
 Universal Architecture (UI) invariants and sections.
 
+> Paths: the EI0 modules now live in `src/proxion_messenger_core/`. Rows citing
+> `tickets.py`, `test_tickets.py` or `test_caveats.py` describe the original EI0
+> reference; that ticket store and those tests are not in this package.
+
 ## UI Invariants I1–I6
 
-- I1 (No Authority Amplification): `proxion_core/attenuation.py` enforces
+- I1 (No Authority Amplification): `proxion_messenger_core/attenuation.py` enforces
   `narrower_perms` as a subset of parent permissions and adds caveats only.
-- I2 (Single-Use Tickets): `proxion_core/tickets.py` stores `redeemed` and
+- I2 (Single-Use Tickets): `proxion_messenger_core/tickets.py` stores `redeemed` and
   rejects any second redemption.
-- I3 (Finite Authority): `proxion_core/tickets.py` and `proxion_core/tokens.py`
+- I3 (Finite Authority): `proxion_messenger_core/tickets.py` and `proxion_messenger_core/tokens.py`
   require expirations and validate TTLs on mint/verify.
-- I4 (Contextual Authorization): `proxion_core/validator.py` evaluates caveats
+- I4 (Contextual Authorization): `proxion_messenger_core/validator.py` evaluates caveats
   against `RequestContext` and denies on failure.
 - I5 (No Global Identity Requirement): tokens bind to
   `holder_key_fingerprint`, which can be ephemeral; no global identifiers are
   required or persisted.
-- I6 (Audience & Possession): `proxion_core/validator.py` checks `aud` binding
+- I6 (Audience & Possession): `proxion_messenger_core/validator.py` checks `aud` binding
   and proof-of-possession (default fingerprint match or custom verifier).
-  Optional revocation is enforced via `proxion_core/revocation.py` and
-  `proxion_core/validator.py`.
+  Optional revocation is enforced via `proxion_messenger_core/revocation.py` and
+  `proxion_messenger_core/validator.py`.
 
 ## §8 Lifecycle Semantics
 

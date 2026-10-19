@@ -16,7 +16,7 @@ Private where it counts, and easier on the eyes.
 - **A redesigned interface.** A light theme alongside the dark one, two-pane settings that
   save as you type, one style for every dialog and menu, a single icon set, and better phone
   layouts. Polls, voice notes, scheduled messages and the disappearing timer were fixed along
-  the way, and every string is translated into all 15 languages.
+  the way, and the new interface is translated into 15 languages.
 - **Accessibility.** Dialogs make the rest of the page inert, every flow works from the
   keyboard, controls stay visible in forced-colors mode, and contrast is checked in both
   themes.

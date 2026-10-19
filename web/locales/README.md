@@ -1,7 +1,6 @@
 # Localization (`web/locales/`)
 
-Proxion's web client is fully internationalized. Every user-facing string is
-externalized into a per-locale JSON file and resolved at runtime by
+Proxion's web client resolves its user-facing strings from a per-locale JSON file and resolved at runtime by
 [`web/i18n.js`](../i18n.js).
 
 ## Files
@@ -9,7 +8,7 @@ externalized into a per-locale JSON file and resolved at runtime by
 | File | Role |
 |------|------|
 | `en.json` | **Canonical.** The single source of truth, every key lives here first. |
-| `es/de/fr/ar.json` | Shippable drafts (`_meta.draft: true`). May lag `en.json`; missing keys fall back to English per-key. |
+| `ar de es fr id it ja ko pl pt ru tr vi zh-hans zh-hant` `.json` | 15 translations, all marked `_meta.draft: true`. They may lag `en.json`; a missing key falls back to English per key, and `check:i18n` lists the gaps as warnings. |
 | `qps.json` | **Generated, test-only** pseudo-locale. Do not edit by hand, run `npm run gen:pseudo`. Never listed in `SUPPORTED_LOCALES`, so it's only reachable via an explicit `localStorage.proxion_locale = "qps"`. |
 
 ## Key conventions
@@ -39,7 +38,8 @@ code and interpolate plain-text `t()` fragments (see `status-banners.js`).
    automatically.
 2. Create/extend `web/locales/<code>.json`. Copy keys from `en.json`; leave out
    any you haven't translated (they fall back to English).
-3. Add `<code>.json` to the `SHELL` list in `web/sw.js` and bump `CACHE`.
+3. Add `<code>.json` to the `SHELL` list in `web/sw.js` and bump the version in its
+   `CACHE` name (`proxion-shell-vN`).
 4. Run the checks below.
 
 ## Checks

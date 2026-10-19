@@ -162,7 +162,7 @@
   "restore.localOnly": "Restore only works on this computer, not over a shared link.",
   "restore.failedGeneric": "Restore didn't work. Check the file and passphrase.",
   "recovery.tooManyAttempts": "Too many attempts. Wait a minute and try again.",
-  "recovery.explain": "This code encrypts your recovery kit. Write it down and keep it somewhere safe, you will need it to restore your identity, and it is shown only once.",
+  "recovery.explain": "This code encrypts your recovery kit. Write it down and keep it somewhere safe. You will need it to restore your identity, and it is shown only once.",
   "recovery.confirmSaved": "I have written down my recovery code",
   "recovery.useCustom": "Use my own passphrase instead",
   "recovery.copied": "Recovery code copied.",
