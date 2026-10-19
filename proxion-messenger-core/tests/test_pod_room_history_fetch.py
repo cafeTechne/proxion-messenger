@@ -29,6 +29,8 @@ class SlowPod:
         }
         self.gets = []
         self.lists = 0
+        self.in_flight = 0
+        self.max_in_flight = 0
         self._lock = threading.Lock()
 
     def list(self, uri):
@@ -38,18 +40,20 @@ class SlowPod:
     def get(self, uri):
         with self._lock:
             self.gets.append(uri)
+            self.in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self.in_flight)
         time.sleep(self.delay)
+        with self._lock:
+            self.in_flight -= 1
         return json.dumps(self.files[uri]).encode()
 
 
 def test_read_messages_fetches_files_in_parallel():
     pod = SlowPod(30, delay=0.05)
-    t = time.perf_counter()
     msgs = PodRoomStore(pod).read_messages(ROOM)
-    elapsed = time.perf_counter() - t
     assert [m["message_id"] for m in msgs] == [f"m{i}" for i in range(30)]
-    # Sequential would be 1.5 s.
-    assert elapsed < 0.75, elapsed
+    # Counted, not timed: a wall-clock bound flaked on slow CI runners.
+    assert pod.max_in_flight > 1, "pod GETs ran one at a time"
 
 
 def test_read_messages_skips_files_already_cached():
