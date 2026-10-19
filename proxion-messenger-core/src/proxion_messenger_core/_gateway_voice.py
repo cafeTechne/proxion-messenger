@@ -786,17 +786,34 @@ class VoiceHandlerMixin:
 
         own_gw = self._gateway_http_url()
 
-        # If the room is not local but is in room_federated_members, relay join to host gateway
-        if channel_id not in self._local_rooms and self._store:
-            # Look for the room's host gateway via peer_gateways or federated membership
-            _host_gw = self._resolve_peer_gateway(channel_id)
-            if not _host_gw:
-                # Try finding any peer gateway that hosts this room
-                for _did, _gw in list(self._peer_gateway_urls.items()):
-                    if _gw != own_gw:
-                        _host_gw = _gw
-                        break
-            if _host_gw and _host_gw != own_gw:
+        # If the room is not local, relay the join to its host gateway. A channel
+        # is always a room's: with no local room and no known host there is
+        # nothing to join, so refuse instead of opening an ad-hoc channel under
+        # any id a client names.
+        if channel_id not in self._local_rooms:
+            _host_gw = None
+            if self._store:
+                # The host recorded for this room at federation time first.
+                _hosts = {m.get("gateway_url") for m in
+                          (self._store.get_federated_room_members(channel_id) or [])
+                          if m.get("gateway_url") and m.get("gateway_url") != own_gw}
+                if len(_hosts) == 1:
+                    _host_gw = _hosts.pop()
+                if not _host_gw:
+                    _host_gw = self._resolve_peer_gateway(channel_id)
+                if not _host_gw:
+                    # Only an unambiguous peer: picking the first of several sent
+                    # the joiner's id and the channel id to an unrelated gateway.
+                    _peers = {_gw for _gw in self._peer_gateway_urls.values()
+                              if _gw and _gw != own_gw}
+                    if len(_peers) == 1:
+                        _host_gw = _peers.pop()
+            if not _host_gw or _host_gw == own_gw:
+                await websocket.send(json.dumps({
+                    "type": "error", "message": "unknown_voice_channel", "channel_id": channel_id,
+                }))
+                return
+            if _host_gw:
                 # Register the joiner in a LOCAL channel entry so the host's
                 # inbound voice_channel_peer_present / peer_joined notifications
                 # can be delivered to this client's socket. Previously we returned
