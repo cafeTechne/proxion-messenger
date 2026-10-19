@@ -107,7 +107,8 @@ try {
   page.on('dialog', d => d.accept());
   await page.setViewport({ width: 1280, height: 800 });
   await page.goto(url, { waitUntil: 'load', timeout: 20000 });
-  await page.waitForFunction(() => document.querySelector('.dot')?.classList.contains('online'), { timeout: 15000 }).catch(() => {});
+  await page.waitForFunction(() => document.querySelector('.dot')?.classList.contains('online'), { timeout: 15000 })
+    .catch(() => { console.error('  x the app never connected to the gateway'); failures++; });
   await sleep(400);
 
   // 1. First-run onboarding is a required gate: Escape must NOT dismiss it

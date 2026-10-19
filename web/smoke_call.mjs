@@ -79,7 +79,7 @@ async function openClient(browser, url, label) {
   const page = await browser.newPage();
   page._console = [];
   page.on('console', m => page._console.push(`${m.type()}: ${m.text()}`));
-  page.on('pageerror', e => { page._console.push('PAGEERR: ' + e.message); console.error(`  [${label}] pageerror: ${e.message}`); });
+  page.on('pageerror', e => { pageErrors.push(`${label}: ${e.message}`); page._console.push('PAGEERR: ' + e.message); console.error(`  [${label}] pageerror: ${e.message}`); });
   // Start as an onboarded user. Hiding the onboarding dialog is not enough:
   // the app reopens it on connect, and the page behind an open dialog is inert.
   await page.evaluateOnNewDocument((n) => {
@@ -110,6 +110,8 @@ const remoteVideoTracks = (page) => page.evaluate(() => {
 });
 
 let step = 'init';
+// An uncaught exception in any page fails the run, even if every step passed.
+const pageErrors = [];
 let browser = null;
 const fail = (m) => { console.error(`  ✗ [${step}] ${m}`); process.exitCode = 1; };
 try {
@@ -356,6 +358,7 @@ try {
   if (await shown(alice, 'voice-banner')) fail('Alice\'s banner stayed up after declining');
 
   step = 'done';
+  if (pageErrors.length) fail(`uncaught page errors: ${pageErrors.join(' | ')}`);
   if (!process.exitCode) {
     console.log('  ✓ two-party call OK — cross-gateway signaling, both answered, bidirectional');
     console.log('    video media, and the preview + quality controls work interactively.');

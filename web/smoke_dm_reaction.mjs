@@ -85,7 +85,7 @@ async function openClient(browser, url, label) {
   const page = await browser.newPage();
   page._console = [];
   page.on('console', m => page._console.push(`${m.type()}: ${m.text()}`));
-  page.on('pageerror', e => { page._console.push('PAGEERR: ' + e.message); console.error(`  [${label}] pageerror: ${e.message}`); });
+  page.on('pageerror', e => { pageErrors.push(`${label}: ${e.message}`); page._console.push('PAGEERR: ' + e.message); console.error(`  [${label}] pageerror: ${e.message}`); });
   // Start as an onboarded user. Hiding the onboarding dialog is not enough:
   // the app reopens it on connect, and the page behind an open dialog is inert.
   await page.evaluateOnNewDocument((n) => {
@@ -98,6 +98,8 @@ async function openClient(browser, url, label) {
 }
 
 let step = 'init';
+// An uncaught exception in any page fails the run, even if every step passed.
+const pageErrors = [];
 let browser = null;
 const fail = (m) => { console.error(`  ✗ [${step}] ${m}`); process.exitCode = 1; };
 try {
@@ -396,6 +398,7 @@ try {
   if (!process.exitCode) console.log('  · disappearing messages: removed live on both sides, older messages kept');
 
   step = 'done';
+  if (pageErrors.length) fail(`uncaught page errors: ${pageErrors.join(' | ')}`);
   if (!process.exitCode) {
     console.log('  ✓ cross-gateway DM reaction OK — Bob reacted 🔥 to Alice\'s message and');
     console.log('    Alice received it (federation identity model + dm_reaction relay verified),');

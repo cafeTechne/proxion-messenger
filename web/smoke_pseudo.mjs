@@ -91,7 +91,8 @@ async function loadWithLocale(browser, url, locale) {
   await page.goto(url, { waitUntil: 'load', timeout: 20000 });
   await page.evaluate((loc) => localStorage.setItem('proxion_locale', loc), locale);
   await page.reload({ waitUntil: 'load', timeout: 20000 });
-  await page.waitForFunction(() => document.querySelector('.dot')?.classList.contains('online'), { timeout: 15000 }).catch(() => {});
+  await page.waitForFunction(() => document.querySelector('.dot')?.classList.contains('online'), { timeout: 15000 })
+    .catch(() => { console.error('  x the app never connected to the gateway'); failures++; });
   await sleep(500);
   await page.evaluate(() => { const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none'; });
   await sleep(200);

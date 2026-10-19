@@ -228,7 +228,8 @@ try {
     if (screen.name !== 'onboarding') {
       await page.evaluate(() => { const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none'; });
     }
-    await page.waitForFunction(() => document.querySelector('.dot')?.classList.contains('online'), { timeout: 15000 }).catch(() => {});
+    await page.waitForFunction(() => document.querySelector('.dot')?.classList.contains('online'), { timeout: 15000 })
+    .catch(() => { console.error('  x the app never connected to the gateway'); totalViolations++; });
     await sleep(300);
     if (screen.prepare) { await page.evaluate(screen.prepare); await sleep(300); }
 
