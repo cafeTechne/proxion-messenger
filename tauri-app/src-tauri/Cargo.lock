@@ -3239,7 +3239,7 @@ dependencies = [
 
 [[package]]
 name = "proxion-app"
-version = "0.2.2"
+version = "0.2.6"
 dependencies = [
  "keyring",
  "serde",
