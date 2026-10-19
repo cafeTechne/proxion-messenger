@@ -1,69 +1,102 @@
 # Proxion Self-Hosting Guide
 
+The desktop app runs its own gateway and needs none of this. This guide is for
+running an always-on gateway from source on a server or a spare machine.
+
+For reaching your desktop from a phone without a server, the **Connect a phone**
+button in the invite dialog opens a Cloudflare tunnel to the local gateway
+(it needs `cloudflared`, which release builds can bundle; see
+[RELEASE.md](RELEASE.md)).
+
 ## Prerequisites
 
-- Docker + Docker Compose v2
-- A domain name pointing to your server's public IP
-- Ports 80 and 443 open in your firewall
-- Ports 7474 and 8080 blocked from external access (handled by your reverse proxy)
+- Python 3.12 or newer
+- For a public deployment: a domain name pointing at the server, ports 80 and 443
+  open, and a reverse proxy (Caddy or Nginx examples below)
 
 ---
 
-## Quick start (local only, no TLS)
+## Quick start (one machine)
 
 ```bash
-cp .env.example .env
-# Edit .env: set PROXION_CSS_EMAIL and PROXION_CSS_PASSWORD
-docker compose up -d
+pip install -e "./proxion-messenger-core[gateway]"
+cp .env.example .env     # optional: pod credentials; leave blank for local-only rooms
+python run_gateway.py
 ```
 
-Open `http://localhost:8080/`. The CSS pod server starts automatically.
+The gateway prints its address when it is ready:
+
+```
+PROXION_GATEWAY_READY
+  Web UI  : https://127.0.0.1:8080
+```
+
+On first start `run_gateway.py` creates a self-signed certificate in
+`<data dir>/tls/` and serves the web UI on `https://127.0.0.1:8080` and the
+WebSocket on `wss://127.0.0.1:7474`. Your browser shows a certificate warning
+once. Set `PROXION_AUTO_TLS=0` to serve plain `http://` and `ws://` instead
+(fine on loopback; browsers only allow camera and microphone on a non-loopback
+address over https).
+
+The data dir defaults to `./data` next to `run_gateway.py` (a packaged
+executable uses `~/.proxion/data`). Set `PROXION_DATA_DIR` to move it. It holds
+the identity and store keys, the SQLite database, logs, the TLS cert and the
+invite stash.
+
+The gateway does not start a Solid server. To back it with a pod, set
+`PROXION_CSS_URL`, `PROXION_CSS_EMAIL` and `PROXION_CSS_PASSWORD` for an existing
+CSS, JSS or NSS account; see
+[SOLID_SERVER_COMPATIBILITY.md](SOLID_SERVER_COMPATIBILITY.md).
 
 ---
 
-## Production setup with TLS
+## Public deployment behind a reverse proxy
 
-### Option A — Caddy (recommended, auto-cert)
+The proxy terminates TLS, so the gateway runs plain http/ws on loopback.
+Put this in `.env` (replace `chat.example.com`):
 
-Install Caddy on the host, then create a `Caddyfile`:
+```
+PROXION_AUTO_TLS=0
+PROXION_HOST=127.0.0.1
+PROXION_PUBLIC_URL=wss://chat.example.com/ws
+PROXION_HTTP_PUBLIC_URL=https://chat.example.com
+PROXION_ALLOWED_ORIGINS=https://chat.example.com
+PROXION_REQUIRE_AUTH=1
+PROXION_ADMIN_API_TOKEN=<output of: openssl rand -hex 32>
+```
+
+Why each one:
+
+- `PROXION_PUBLIC_URL` is the WebSocket URL the page connects to and that peers
+  are told. The gateway accepts WebSocket connections on any path, so `/ws` lets
+  one hostname carry both the page and the socket.
+- `PROXION_HTTP_PUBLIC_URL` is the base URL peer gateways use for `/relay` and
+  the other federation endpoints.
+- `PROXION_ALLOWED_ORIGINS` adds your site to the WebSocket Origin allowlist.
+  Without it the browser's handshake from `https://chat.example.com` is refused
+  (only loopback and the desktop webview are allowed by default).
+- `PROXION_REQUIRE_AUTH=1`: authentication is required by default unless the
+  gateway is bound to loopback. Behind a proxy it is bound to loopback, so turn
+  it on explicitly.
+- `PROXION_ADMIN_API_TOKEN`: see [Owner endpoints](#owner-endpoints-behind-a-reverse-proxy).
+
+Setting `PROXION_PUBLIC_URL` also skips the UPnP port-mapping attempt that
+`run_gateway.py` otherwise makes on start.
+
+### Option A: Caddy (automatic certificates)
 
 ```
 chat.example.com {
-    # HTTP web UI and REST endpoints
-    reverse_proxy / localhost:8080
-    reverse_proxy /invite localhost:8080
-    reverse_proxy /.well-known/* localhost:8080
-    reverse_proxy /relay localhost:8080
-    reverse_proxy /file/* localhost:8080
+    @ws path /ws
+    reverse_proxy @ws 127.0.0.1:7474
 
-    # WebSocket gateway — upgrade headers required
-    @ws {
-        path /ws
-        header Connection *Upgrade*
-        header Upgrade websocket
-    }
-    reverse_proxy @ws localhost:7474
-
-    # Catch-all for WebSocket connections to the gateway port
-    @wsroot {
-        header Connection *Upgrade*
-        header Upgrade websocket
-    }
-    reverse_proxy @wsroot localhost:7474
+    reverse_proxy 127.0.0.1:8080
 }
 ```
 
-Start Caddy:
-```bash
-caddy start --config Caddyfile
-```
+Caddy forwards WebSocket upgrades and adds `X-Forwarded-For` on its own.
 
-Set in `.env`:
-```
-PROXION_PUBLIC_URL=wss://chat.example.com
-```
-
-### Option B — Nginx + Certbot
+### Option B: Nginx + Certbot
 
 ```nginx
 server {
@@ -72,20 +105,22 @@ server {
     ssl_certificate     /etc/letsencrypt/live/chat.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/chat.example.com/privkey.pem;
 
-    # Web UI
-    location / {
-        proxy_pass http://localhost:8080;
-        proxy_set_header Host $host;
-    }
-
     # WebSocket gateway
-    location /ws {
-        proxy_pass http://localhost:7474;
+    location = /ws {
+        proxy_pass http://127.0.0.1:7474;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
+    }
+
+    # Web UI and HTTP endpoints
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 }
 
@@ -96,38 +131,7 @@ server {
 }
 ```
 
-Obtain the cert:
-```bash
-certbot --nginx -d chat.example.com
-```
-
----
-
-## Environment variables
-
-Copy `.env.example` to `.env` and fill in values. Required variables:
-
-| Variable | Description |
-|---|---|
-| `PROXION_CSS_EMAIL` | Email for the gateway's CSS pod account (auto-created on first start) |
-| `PROXION_CSS_PASSWORD` | Password for the CSS pod account — use a strong random value |
-| `PROXION_PUBLIC_URL` | Publicly reachable WebSocket URL — `wss://` for production |
-
-Optional variables:
-
-| Variable | Default | Description |
-|---|---|---|
-| `GATEWAY_WS_PORT` | `7474` | Host port for the WebSocket gateway |
-| `GATEWAY_HTTP_PORT` | `8080` | Host port for the web UI |
-| `PROXION_SSL_CERT` | _(empty)_ | Path to TLS cert for gateway-native TLS (use Nginx/Caddy instead) |
-| `PROXION_SSL_KEY` | _(empty)_ | Path to TLS key |
-| `PROXION_AUTO_TLS` | `1` | `run_gateway.py` makes a self-signed cert when no cert is set. `0` keeps plain http/ws (the desktop app sets this) |
-| `PROXION_BIND_WAIT` | `0` | Seconds to wait for a taken port to free up before giving up (the desktop app sets 15 so a relaunch can wait for the old gateway) |
-| `PROXION_SHUTDOWN_ON_STDIN_EOF` | _(empty)_ | `1` makes the gateway shut down on a `shutdown` line or end of input on stdin (set by the desktop app) |
-| `PROXION_ALLOW_PRIVATE_RELAY` | _(empty)_ | Set to `1` for local federation testing only |
-| `PROXION_REQUIRE_AUTH` | `0` | Set to `1` to require Ed25519 DID ownership proof on WebSocket connect |
-| `PROXION_ADMIN_API_TOKEN` | _(empty)_ | Bearer token for the owner endpoints (`/backup`, `/restore`, `/export`, `/import`, `/contacts`, `/message-edits`, `/security-snapshot`). Required behind a reverse proxy, see below |
-| `PROXION_API_TOKEN` | _(empty)_ | Older name for the same token, used when `PROXION_ADMIN_API_TOKEN` is unset |
+Obtain the cert with `certbot --nginx -d chat.example.com`.
 
 ### Owner endpoints behind a reverse proxy
 
@@ -136,8 +140,9 @@ the source address to tell the owner from an internet caller. A request that
 carries forwarding headers (`X-Forwarded-For`, `X-Real-IP`, `Forwarded`,
 `CF-Connecting-IP`) or a non-local `Host` is treated as remote, and once
 `PROXION_PUBLIC_URL` or `PROXION_HTTP_PUBLIC_URL` names a public host, the owner
-endpoints above refuse every caller without the token. Set
-`PROXION_ADMIN_API_TOKEN` to a long random value and send it as
+endpoints (`/backup`, `/restore`, `/export`, `/import`, `/contacts`,
+`/message-edits`, `/security-snapshot`) refuse every caller without the token.
+Set `PROXION_ADMIN_API_TOKEN` to a long random value and send it as
 `Authorization: Bearer <token>`, for example:
 
 ```bash
@@ -147,95 +152,83 @@ curl -H "Authorization: Bearer $PROXION_ADMIN_API_TOKEN" \
 ```
 
 Without a token these endpoints return 403 on a proxied gateway, including the
-in-app backup, restore and import buttons.
+in-app backup, restore and import buttons. `PROXION_API_TOKEN` is the older name
+for the same token and is used when `PROXION_ADMIN_API_TOKEN` is unset.
 
 ---
 
 ## Security checklist
 
-- [ ] `PROXION_CSS_PASSWORD` is a strong random password (not the example value)
-- [ ] `PROXION_PUBLIC_URL` uses `wss://` (not `ws://`)
-- [ ] CSS container has no exposed ports on the host (it's on `proxion-internal` network)
-- [ ] Firewall blocks ports 7474 and 8080 from external access — only your reverse proxy reaches them
-- [ ] TLS certificate is valid and renews automatically
-- [ ] `PROXION_REQUIRE_AUTH=1` in production to prevent DID spoofing
-- [ ] `PROXION_ADMIN_API_TOKEN` is set to a long random value (owner endpoints refuse proxied callers without it)
+- [ ] `PROXION_PUBLIC_URL` uses `wss://` and `PROXION_ALLOWED_ORIGINS` names only your site
+- [ ] Ports 7474 and 8080 are reachable only from the proxy (`PROXION_HOST=127.0.0.1`)
+- [ ] `PROXION_REQUIRE_AUTH=1`
+- [ ] `PROXION_ADMIN_API_TOKEN` is a long random value
+- [ ] `PROXION_CSS_PASSWORD`, if used, is a strong random password
+- [ ] The TLS certificate renews automatically
+- [ ] The data dir is backed up (it holds the identity key)
 
 ---
 
-## Upgrading
+## Calls and TURN
 
-```bash
-docker compose pull          # pull latest images
-docker compose build         # rebuild gateway image
-docker compose up -d         # restart with new images
-```
+Calls try a direct path first, then STUN. The web client also includes the free
+public relay `openrelay.metered.ca` as a last resort for networks with no direct
+path (see `DEFAULT_TURN` in `web/connectivity.js`). Media stays end-to-end
+encrypted (DTLS-SRTP), so a relay forwards ciphertext only. Users can turn that
+default off or enter their own relay in Settings > Calls.
 
-Data (identity keys, SQLite database, pod files) persists in Docker named volumes
-(`pod-data`, `gateway-data`) and survives upgrades.
-
----
-
-## Full stack (with TURN server for WebRTC)
-
-Use `docker-compose.full.yml` which adds a coturn TURN server for reliable voice calls
-through NAT. Set `TURN_SECRET` in `.env` to a strong random value:
-
-```bash
-TURN_SECRET=$(openssl rand -hex 32)
-echo "TURN_SECRET=$TURN_SECRET" >> .env
-docker compose -f docker-compose.full.yml up -d
-```
-
-The gateway automatically generates time-limited TURN credentials using `TURN_SECRET`
-and sends them to clients over the authenticated WebSocket.
-
-If you run the gateway directly (the `pip install` path, not `docker-compose.full.yml`),
-point it at your own coturn with both variables:
+To offer your own coturn to every client of this gateway, set both:
 
 ```bash
 TURN_URL=turn:relay.example.com:3478
 TURN_SECRET=<same shared secret coturn uses (use-auth-secret / static-auth-secret)>
 ```
 
-Both must be set for the relay to be offered. With neither, calls use STUN only:
-they connect on ordinary home networks but cannot get through symmetric NAT or a
-strict firewall, and a call that finds no direct path ends with a message telling
-the user a relay is needed rather than failing silently.
+The gateway then hands out time-limited TURN credentials over the authenticated
+WebSocket. Both must be set for the relay to be offered. More in
+[CALLS.md](CALLS.md).
+
+---
+
+## Upgrading
+
+```bash
+git pull
+pip install -e "./proxion-messenger-core[gateway]"
+# restart run_gateway.py (or your service unit)
+```
+
+The data dir is untouched by upgrades.
 
 ---
 
 ## Backup and restore
 
-Gateway data lives in the `gateway-data` Docker volume. To back up:
+Stop the gateway and copy the data dir. That is a complete backup of this
+gateway: keys, database and settings.
 
-```bash
-docker run --rm -v gateway-data:/data -v $(pwd):/backup alpine \
-    tar czf /backup/gateway-data-$(date +%Y%m%d).tar.gz /data
-```
+For an encrypted, portable identity backup while the gateway runs, use
+Settings > Backup & recovery in the app, or `/backup` with the admin token as shown above.
 
-To restore:
-```bash
-docker compose down
-docker run --rm -v gateway-data:/data -v $(pwd):/backup alpine \
-    tar xzf /backup/gateway-data-YYYYMMDD.tar.gz -C /
-docker compose up -d
-```
-
-Pod data (messages on Solid pods) is stored on users' individual pod servers and
-is not part of the gateway backup.
+Messages kept on Solid pods live on those pod servers and are not part of the
+gateway backup.
 
 ---
 
 ## Troubleshooting
 
-**"Can't connect" in browser:**
-- Check `PROXION_PUBLIC_URL` — must be the full WebSocket URL clients reach, not the internal Docker URL
-- Verify your reverse proxy forwards WebSocket upgrade headers (`Connection: Upgrade`, `Upgrade: websocket`)
+**"Can't connect" in the browser:**
+- `PROXION_PUBLIC_URL` must be the WebSocket URL the browser reaches (`wss://chat.example.com/ws`), not the internal address
+- `PROXION_ALLOWED_ORIGINS` must contain the page's origin exactly (scheme, host, and port if not 443)
+- The proxy must forward the WebSocket upgrade headers (`Connection: Upgrade`, `Upgrade: websocket`)
+- With auto-TLS on, the upstream speaks https/wss; behind a proxy set `PROXION_AUTO_TLS=0`
 
-**CSS pod fails to start:**
-- Check `docker compose logs css` — CSS needs write access to the `pod-data` volume
+**The gateway exits right after start:**
+- Another program holds port 8080 or 7474. The gateway prints
+  `PROXION_GATEWAY_ERROR port_in_use <port>`; pick other ports with
+  `PROXION_HTTP_PORT` and `PROXION_WS_PORT`.
 
-**Voice calls fail through corporate NAT:**
-- Deploy the full stack (`docker-compose.full.yml`) with a TURN server
-- STUN-only works in simple NAT scenarios but fails with symmetric NAT
+**Calls fail on a restrictive network:**
+- Run Settings > Calls > Test call connectivity, then add a TURN relay as above.
+
+All settings are listed in [CONFIGURATION.md](CONFIGURATION.md).
