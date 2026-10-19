@@ -534,6 +534,13 @@ class SecurityStoreMixin(object):
                 (webid,),
             ).fetchall()
         return {row["channel_id"]: row["last_read_ts"] for row in rows}
+    def get_every_last_read(self) -> dict[str, dict[str, float]]:
+        """Every stored read position, as {webid: {channel_id: last_read_ts}}."""
+        out: dict[str, dict[str, float]] = {}
+        with self._conn() as conn:
+            for row in conn.execute("SELECT webid, channel_id, last_read_ts FROM last_read"):
+                out.setdefault(row["webid"], {})[row["channel_id"]] = row["last_read_ts"]
+        return out
     def get_security_summary(self, hours: int = 24) -> dict:
         """Return 24h (or custom hours) rollups of high-signal security metrics."""
         hours = max(1, min(hours, 168))

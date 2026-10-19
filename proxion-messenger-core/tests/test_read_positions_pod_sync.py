@@ -93,3 +93,48 @@ async def test_restore_read_positions_skips_older_values(gateway):
     await gateway._restore_read_positions_from_pod()
     result = gateway._store.get_last_read(webid, channel)
     assert result == pytest.approx(local_ts, abs=1.0)
+
+
+@pytest.mark.asyncio
+async def test_flush_keeps_positions_that_did_not_change(gateway):
+    """The pod document is the whole backup: a flush with one dirty entry keeps
+    every other position (from SQLite and from the pod), newest timestamp wins."""
+    alice, bob = "https://alice.pod/profile/card#me", "did:key:zBob"
+    gateway._store.set_last_read_ts(alice, "room-a", 100.0)
+    gateway._store.set_last_read_ts(bob, "dm-1", 200.0)
+    mock_client = _mock_pod_client(gateway)
+    mock_client.get = MagicMock(return_value=json.dumps({
+        alice: {"room-a": 50.0, "room-old": 10.0},
+        "https://carol.pod/profile/card#me": {"room-c": 30.0},
+    }).encode())
+    gateway._dirty_read_positions[(alice, "room-b")] = 300.0
+    await gateway._sync_read_positions_to_pod()
+    written = json.loads(mock_client.put.call_args[0][1].decode())
+    assert written == {
+        alice: {"room-a": 100.0, "room-old": 10.0, "room-b": 300.0},
+        bob: {"dm-1": 200.0},
+        "https://carol.pod/profile/card#me": {"room-c": 30.0},
+    }
+
+
+@pytest.mark.asyncio
+async def test_flush_does_not_overwrite_an_unreadable_backup(gateway):
+    """A read failure other than 404 leaves the pod document alone and keeps
+    the dirty entries for the next cycle."""
+    from proxion_messenger_core.solid_client import SolidError
+    mock_client = _mock_pod_client(gateway)
+    mock_client.get = MagicMock(side_effect=SolidError("GET: HTTP 503", status_code=503))
+    gateway._dirty_read_positions[("user", "channel")] = 5.0
+    await gateway._sync_read_positions_to_pod()
+    assert not mock_client.put.called
+    assert gateway._dirty_read_positions == {("user", "channel"): 5.0}
+
+
+@pytest.mark.asyncio
+async def test_flush_creates_the_backup_when_missing(gateway):
+    from proxion_messenger_core.solid_client import SolidError
+    mock_client = _mock_pod_client(gateway)
+    mock_client.get = MagicMock(side_effect=SolidError("GET: HTTP 404", status_code=404))
+    gateway._dirty_read_positions[("user", "channel")] = 5.0
+    await gateway._sync_read_positions_to_pod()
+    assert json.loads(mock_client.put.call_args[0][1].decode()) == {"user": {"channel": 5.0}}

@@ -1787,10 +1787,15 @@ class PodSyncMixin:
                 logger.debug("_read_position_flush_loop error: %s", exc)
 
     async def _sync_read_positions_to_pod(self) -> None:
-        """Flush all dirty read positions to pod as a single JSON document.
+        """Write every read position to the pod as a single JSON document.
 
         Pod path: stash://pod/read_positions.json
         Format: { webid: { channel_id: ts, ... }, ... }
+
+        The document is the whole backup, so it is rebuilt from what the pod
+        already holds plus every SQLite row plus the dirty entries (latest
+        timestamp wins). Writing only the dirty entries replaced the backup with
+        whatever changed in the last 30 s.
         """
         dirty = getattr(self, "_dirty_read_positions", {})
         if not dirty:
@@ -1801,12 +1806,44 @@ class PodSyncMixin:
         # Snapshot + clear before the await so new dirty entries aren't lost
         snapshot = dict(dirty)
         dirty.clear()
-        merged: dict = {}
-        for (webid, channel_id), ts in snapshot.items():
-            merged.setdefault(webid, {})[channel_id] = ts
+
+        def _take(into: dict, webid, channel_id, ts) -> None:
+            try:
+                ts = float(ts)
+            except (TypeError, ValueError):
+                return
+            if not isinstance(webid, str) or not isinstance(channel_id, str):
+                return
+            row = into.setdefault(webid, {})
+            if ts > row.get(channel_id, float("-inf")):
+                row[channel_id] = ts
+
         async with self._pod_sync_sem:
             try:
                 loop = asyncio.get_event_loop()
+                merged: dict = {}
+                raw = b""
+                try:
+                    raw = await loop.run_in_executor(
+                        None, client.get, "stash://pod/read_positions.json")
+                except Exception as exc:
+                    if getattr(exc, "status_code", None) != 404:
+                        raise  # unreadable backup: retry later, never clobber it
+                try:
+                    existing = json.loads(raw.decode("utf-8")) if raw else {}
+                except ValueError:
+                    existing = {}  # a corrupt document is replaced
+                if isinstance(existing, dict):
+                    for webid, channels in existing.items():
+                        if isinstance(channels, dict):
+                            for channel_id, ts in channels.items():
+                                _take(merged, webid, channel_id, ts)
+                if self._store:
+                    for webid, channels in self._store.get_every_last_read().items():
+                        for channel_id, ts in channels.items():
+                            _take(merged, webid, channel_id, ts)
+                for (webid, channel_id), ts in snapshot.items():
+                    _take(merged, webid, channel_id, ts)
                 data = json.dumps(merged).encode("utf-8")
                 await loop.run_in_executor(
                     None, lambda: client.put(
