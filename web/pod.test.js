@@ -4,7 +4,8 @@
  * Before running: start css-alice (`docker compose -f docker-compose.test.yml up -d css-alice`)
  * and provision credentials (`python scripts/provision_test_pod.py`).
  *
- * If TEST_CSS_CLIENT_ID is not set, all tests are skipped.
+ * If TEST_CSS_CLIENT_ID is not set, the live tests are reported as skipped
+ * (not passed); the input-validation tests at the end always run.
  */
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 
@@ -43,12 +44,8 @@ function uid(prefix = 'test') {
     return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function skipIfNoCss() {
-    if (!process.env.TEST_CSS_CLIENT_ID) {
-        return true;
-    }
-    return false;
-}
+// Live-pod tests show up as skipped, not passed, when no CSS is configured.
+const liveIt = it.skipIf(!process.env.TEST_CSS_CLIENT_ID);
 
 function makeMsg(roomId, extra = {}) {
     return {
@@ -83,8 +80,7 @@ afterAll(async () => {
 // ── ensureProxionContainer ────────────────────────────────────────────────────
 
 describe('ensureProxionContainer', () => {
-    it('creates proxion/ container without error', async () => {
-        if (skipIfNoCss()) return;
+    liveIt('creates proxion/ container without error', async () => {
         await expect(ensureProxionContainer()).resolves.not.toThrow();
     });
 });
@@ -92,8 +88,7 @@ describe('ensureProxionContainer', () => {
 // ── podWriteRoomMeta / podReadRoomMeta ────────────────────────────────────────
 
 describe('podWriteRoomMeta + podReadRoomMeta', () => {
-    it('round-trips room metadata', async () => {
-        if (skipIfNoCss()) return;
+    liveIt('round-trips room metadata', async () => {
         const roomId = uid('room');
         const meta = { room_id: roomId, name: 'Test Room', created_at: new Date().toISOString() };
         await podWriteRoomMeta(roomId, meta);
@@ -103,8 +98,7 @@ describe('podWriteRoomMeta + podReadRoomMeta', () => {
         expect(fetched.name).toBe('Test Room');
     });
 
-    it('returns null for unknown room', async () => {
-        if (skipIfNoCss()) return;
+    liveIt('returns null for unknown room', async () => {
         const result = await podReadRoomMeta('nonexistent-room-zzzz');
         expect(result).toBeNull();
     });
@@ -113,8 +107,7 @@ describe('podWriteRoomMeta + podReadRoomMeta', () => {
 // ── podWriteMessage / podReadMessages ─────────────────────────────────────────
 
 describe('podWriteMessageWithIndex + podReadMessages', () => {
-    it('writes a message and reads it back', async () => {
-        if (skipIfNoCss()) return;
+    liveIt('writes a message and reads it back', async () => {
         const roomId = uid('room');
         const msg = makeMsg(roomId);
         await podWriteMessageWithIndex(roomId, msg);
@@ -125,14 +118,12 @@ describe('podWriteMessageWithIndex + podReadMessages', () => {
         expect(found.content).toBe('hello pod');
     });
 
-    it('returns empty array for unknown room', async () => {
-        if (skipIfNoCss()) return;
+    liveIt('returns empty array for unknown room', async () => {
         const result = await podReadMessages('nonexistent-room-zzzz');
         expect(result).toEqual([]);
     });
 
-    it('accumulates multiple messages in index order', async () => {
-        if (skipIfNoCss()) return;
+    liveIt('accumulates multiple messages in index order', async () => {
         const roomId = uid('room');
         const msgs = [
             makeMsg(roomId, { content: 'first', timestamp: '2026-01-01T00:00:00Z' }),
@@ -151,8 +142,7 @@ describe('podWriteMessageWithIndex + podReadMessages', () => {
 // ── podDeleteMessage (JSON-LD path) ───────────────────────────────────────────
 
 describe('podWriteMessageJsonLd + podDeleteMessage', () => {
-    it('writes then deletes a message without error', async () => {
-        if (skipIfNoCss()) return;
+    liveIt('writes then deletes a message without error', async () => {
         const threadId = uid('room');
         const messageId = uid('msg');
         const msg = { content: 'temp', from_webid: process.env.TEST_WEBID || '', timestamp: new Date().toISOString() };
@@ -164,8 +154,7 @@ describe('podWriteMessageJsonLd + podDeleteMessage', () => {
 // ── podWriteReactions ─────────────────────────────────────────────────────────
 
 describe('podWriteReactions', () => {
-    it('writes reactions without error', async () => {
-        if (skipIfNoCss()) return;
+    liveIt('writes reactions without error', async () => {
         const roomId = uid('room');
         const messageId = uid('msg');
         const reactions = { '👍': ['https://example.com/profile#me'] };
@@ -176,8 +165,7 @@ describe('podWriteReactions', () => {
 // ── podWriteReadState / podReadReadState ──────────────────────────────────────
 
 describe('podWriteReadState + podReadReadState', () => {
-    it('round-trips read state', async () => {
-        if (skipIfNoCss()) return;
+    liveIt('round-trips read state', async () => {
         const threadId = uid('thread');
         const lastId = uid('msg');
         await podWriteReadState(threadId, lastId);
@@ -187,8 +175,7 @@ describe('podWriteReadState + podReadReadState', () => {
         expect(state['px:lastReadMessageId']).toBe(lastId);
     });
 
-    it('returns null for unknown thread', async () => {
-        if (skipIfNoCss()) return;
+    liveIt('returns null for unknown thread', async () => {
         const result = await podReadReadState('nonexistent-thread-zzzz');
         expect(result).toBeNull();
     });
@@ -197,8 +184,7 @@ describe('podWriteReadState + podReadReadState', () => {
 // ── podWriteScheduled / podDeleteScheduled ────────────────────────────────────
 
 describe('podWriteScheduled + podDeleteScheduled', () => {
-    it('writes and then deletes a scheduled message', async () => {
-        if (skipIfNoCss()) return;
+    liveIt('writes and then deletes a scheduled message', async () => {
         const id = uid('sched');
         const threadId = uid('thread');
         await podWriteScheduled(id, threadId, new Date().toISOString(), 'preview text');
@@ -209,8 +195,7 @@ describe('podWriteScheduled + podDeleteScheduled', () => {
 // ── podWriteWebhook / podDeleteWebhook ────────────────────────────────────────
 
 describe('podWriteWebhook + podDeleteWebhook', () => {
-    it('writes and then deletes a webhook', async () => {
-        if (skipIfNoCss()) return;
+    liveIt('writes and then deletes a webhook', async () => {
         const id = uid('wh');
         const wh = { direction: 'incoming', bot_name: 'TestBot', token: 'tok-abc' };
         await podWriteWebhook(id, wh);
@@ -221,10 +206,21 @@ describe('podWriteWebhook + podDeleteWebhook', () => {
 // ── input validation (no CSS needed) ─────────────────────────────────────────
 
 describe('input validation (no CSS needed)', () => {
-    it('podWriteMessage silently returns on invalid roomId', async () => {
+    it('podWriteMessage makes no request for an invalid roomId', async () => {
         const msg = makeMsg('ok', { message_id: 'ok-id' });
-        // Even with live session, invalid ID must be a no-op
-        await expect(podWriteMessage('../etc/passwd', msg)).resolves.not.toThrow();
+        // Even with a logged-in session, an invalid id must never reach fetch.
+        const saved = [_session, _storageRoot];
+        const fetch = vi.fn(async () => new Response('', { status: 201 }));
+        _session = { fetch, info: { isLoggedIn: true } };
+        _storageRoot = 'https://pod.example/alice/';
+        try {
+            await podWriteMessage('../etc/passwd', msg);
+            expect(fetch).not.toHaveBeenCalled();
+            await podWriteMessage('room-ok', msg);
+            expect(fetch).toHaveBeenCalled();
+        } finally {
+            [_session, _storageRoot] = saved;
+        }
     });
 
     it('podReadMessages returns [] on invalid roomId', async () => {
