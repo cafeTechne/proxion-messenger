@@ -54,7 +54,6 @@ class TestBackupPassphrase:
         """GET /backup with X-Proxion-Passphrase header returns 200."""
         gw, http_port, ready = _start_gateway(tmp_path)
         assert ready.wait(timeout=5), "gateway failed to start"
-        await asyncio.sleep(0.1)
 
         resp = await _http(http_port,
             b"GET /backup HTTP/1.0\r\nHost: 127.0.0.1\r\n"
@@ -67,7 +66,6 @@ class TestBackupPassphrase:
         """GET /backup?passphrase=... still works (backwards compat)."""
         gw, http_port, ready = _start_gateway(tmp_path)
         assert ready.wait(timeout=5), "gateway failed to start"
-        await asyncio.sleep(0.1)
 
         resp = await _http(http_port,
             b"GET /backup?passphrase=testpass HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n"
@@ -79,7 +77,6 @@ class TestBackupPassphrase:
         """When both header and query are supplied, header passphrase is used."""
         gw, http_port, ready = _start_gateway(tmp_path)
         assert ready.wait(timeout=5), "gateway failed to start"
-        await asyncio.sleep(0.1)
 
         resp = await _http(http_port,
             b"GET /backup?passphrase=ignored HTTP/1.0\r\nHost: 127.0.0.1\r\n"
@@ -92,7 +89,6 @@ class TestBackupPassphrase:
         """GET /backup with no passphrase returns 400."""
         gw, http_port, ready = _start_gateway(tmp_path)
         assert ready.wait(timeout=5), "gateway failed to start"
-        await asyncio.sleep(0.1)
 
         resp = await _http(http_port,
             b"GET /backup HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n"
@@ -109,7 +105,6 @@ class TestRestorePassphrase:
         """POST /restore with no passphrase returns 400."""
         gw, http_port, ready = _start_gateway(tmp_path)
         assert ready.wait(timeout=5), "gateway failed to start"
-        await asyncio.sleep(0.1)
 
         body = b'{"dummy":"backup"}'
         resp = await _http(http_port,
@@ -124,7 +119,6 @@ class TestRestorePassphrase:
         """POST /restore?passphrase=... does not reject on missing passphrase."""
         gw, http_port, ready = _start_gateway(tmp_path)
         assert ready.wait(timeout=5), "gateway failed to start"
-        await asyncio.sleep(0.1)
 
         pp = b"testpass"
         blob = gw.agent.export_backup(pp)
@@ -142,7 +136,6 @@ class TestRestorePassphrase:
         """POST /restore with X-Proxion-Passphrase header does not reject passphrase."""
         gw, http_port, ready = _start_gateway(tmp_path)
         assert ready.wait(timeout=5), "gateway failed to start"
-        await asyncio.sleep(0.1)
 
         pp = b"testpass"
         blob = gw.agent.export_backup(pp)

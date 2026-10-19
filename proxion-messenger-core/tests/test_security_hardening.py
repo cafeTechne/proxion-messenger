@@ -83,7 +83,6 @@ async def test_setup_pod_untrusted_origin_returns_403(tmp_path):
     """R9.4.1: POST /setup/pod from a third-party origin is rejected."""
     gw, http_port, _, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.2)
 
     resp = _post_retry(
         f"http://127.0.0.1:{http_port}/setup/pod",
@@ -101,7 +100,6 @@ async def test_setup_pod_no_origin_passes_cors_check(tmp_path):
     """R9.4.2: POST /setup/pod with no Origin header passes the origin check."""
     gw, http_port, _, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.2)
 
     # Should reach the actual handler (fail with bad credentials, not 403)
     resp = httpx.post(
@@ -119,7 +117,6 @@ async def test_import_untrusted_origin_returns_403(tmp_path):
     """R9.4.4: POST /import from a third-party origin is rejected."""
     gw, http_port, _, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.2)
 
     resp = httpx.post(
         f"http://127.0.0.1:{http_port}/import",

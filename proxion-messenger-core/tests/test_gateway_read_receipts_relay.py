@@ -164,7 +164,6 @@ async def test_relay_receipt_endpoint_delivers_read_receipt_event(tmp_path):
     agent = AgentState.generate()
     gw, _, _, ready = _start_gateway(agent, ws_port, http_port, str(tmp_path / "gw.db"))
     assert ready.wait(timeout=5), "Gateway failed to start"
-    await asyncio.sleep(0.2)
 
     recipient_did = pub_key_to_did(agent.identity_pub_bytes)
 
@@ -248,7 +247,6 @@ async def test_relay_receipt_from_stranger_or_blocked_not_delivered(tmp_path):
     agent = AgentState.generate()
     gw, _, _, ready = _start_gateway(agent, ws_port, http_port, str(tmp_path / "gw.db"))
     assert ready.wait(timeout=5), "Gateway failed to start"
-    await asyncio.sleep(0.2)
 
     recipient_did = pub_key_to_did(agent.identity_pub_bytes)
     sender_priv = Ed25519PrivateKey.generate()

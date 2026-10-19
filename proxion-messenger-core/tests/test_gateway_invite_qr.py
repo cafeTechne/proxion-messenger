@@ -46,7 +46,6 @@ async def test_short_invite_landing_valid_token(tmp_path):
     branches app/web/download and carries the inviter address through each path."""
     gw, http_port, _, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.2)
 
     token = gw._short_invite_token
     assert token, "gateway must have a short invite token"
@@ -77,7 +76,6 @@ async def test_short_invite_redirect_bad_token(tmp_path):
     """R17.5.2: GET /i/<wrong-token> returns 404."""
     gw, http_port, _, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.2)
 
     resp = httpx.get(
         f"http://127.0.0.1:{http_port}/i/00000000",
@@ -96,7 +94,6 @@ async def test_my_address_includes_short_invite_url(tmp_path):
     from proxion_messenger_core.didkey import pub_key_to_did
     gw, http_port, ws_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.2)
 
     my_did = pub_key_to_did(gw.agent.identity_pub_bytes)
 
@@ -144,7 +141,6 @@ async def test_well_known_includes_gateway_version(tmp_path):
     """R18.4.1: /.well-known/proxion response includes gateway_version field."""
     gw, http_port, _, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.2)
 
     resp = httpx.get(f"http://127.0.0.1:{http_port}/.well-known/proxion", timeout=5)
     assert resp.status_code == 200
@@ -181,7 +177,6 @@ async def test_short_invite_token_stable_in_session(tmp_path):
     """R18.4.3: The same short invite token serves the landing consistently (stable per gateway instance)."""
     gw, http_port, _, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.2)
 
     token = gw._short_invite_token
 

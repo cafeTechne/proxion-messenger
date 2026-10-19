@@ -64,7 +64,6 @@ def _set_tunnel_active(gw, active: bool):
 async def test_backup_refused_over_tunnel_without_token(tmp_path):
     gw, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5)
-    await asyncio.sleep(0.1)
     _set_tunnel_active(gw, True)
     resp = await _http(http_port,
         b"GET /backup HTTP/1.0\r\nHost: 127.0.0.1\r\nX-Proxion-Passphrase: p\r\n\r\n")
@@ -76,7 +75,6 @@ async def test_backup_refused_over_tunnel_without_token(tmp_path):
 async def test_restore_refused_over_tunnel_without_token(tmp_path):
     gw, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5)
-    await asyncio.sleep(0.1)
     _set_tunnel_active(gw, True)
     resp = await _http(http_port,
         b"POST /restore HTTP/1.0\r\nHost: 127.0.0.1\r\n"
@@ -89,7 +87,6 @@ async def test_restore_refused_over_tunnel_without_token(tmp_path):
 async def test_export_refused_over_tunnel_without_token(tmp_path):
     gw, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5)
-    await asyncio.sleep(0.1)
     _set_tunnel_active(gw, True)
     resp = await _http(http_port, b"GET /export HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
     assert b"403" in resp, resp[:200]
@@ -100,7 +97,6 @@ async def test_export_refused_over_tunnel_without_token(tmp_path):
 async def test_import_refused_over_tunnel_without_token(tmp_path):
     gw, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5)
-    await asyncio.sleep(0.1)
     _set_tunnel_active(gw, True)
     resp = await _http(http_port,
         b"POST /import HTTP/1.0\r\nHost: 127.0.0.1\r\n"
@@ -113,7 +109,6 @@ async def test_import_refused_over_tunnel_without_token(tmp_path):
 async def test_security_snapshot_refused_over_tunnel_without_token(tmp_path):
     gw, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5)
-    await asyncio.sleep(0.1)
     _set_tunnel_active(gw, True)
     resp = await _http(http_port,
         b"GET /security-snapshot HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
@@ -127,7 +122,6 @@ async def test_security_snapshot_refused_over_tunnel_without_token(tmp_path):
 async def test_backup_allowed_loopback_no_tunnel(tmp_path):
     gw, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5)
-    await asyncio.sleep(0.1)
     _set_tunnel_active(gw, False)
     resp = await _http(http_port,
         b"GET /backup HTTP/1.0\r\nHost: 127.0.0.1\r\nX-Proxion-Passphrase: testpass\r\n\r\n")
@@ -139,7 +133,6 @@ async def test_backup_allowed_loopback_no_tunnel(tmp_path):
 async def test_export_allowed_loopback_no_tunnel(tmp_path):
     gw, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5)
-    await asyncio.sleep(0.1)
     _set_tunnel_active(gw, False)
     resp = await _http(http_port, b"GET /export HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
     assert b"200 OK" in resp, resp[:200]
@@ -152,7 +145,6 @@ async def test_backup_allowed_over_tunnel_with_admin_token(tmp_path, monkeypatch
     monkeypatch.setenv("PROXION_ADMIN_API_TOKEN", "secret-admin-token")
     gw, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5)
-    await asyncio.sleep(0.1)
     _set_tunnel_active(gw, True)
     resp = await _http(http_port,
         b"GET /backup HTTP/1.0\r\nHost: 127.0.0.1\r\n"
@@ -167,7 +159,6 @@ async def test_backup_refused_over_tunnel_with_wrong_token(tmp_path, monkeypatch
     monkeypatch.setenv("PROXION_ADMIN_API_TOKEN", "secret-admin-token")
     gw, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5)
-    await asyncio.sleep(0.1)
     _set_tunnel_active(gw, True)
     resp = await _http(http_port,
         b"GET /backup HTTP/1.0\r\nHost: 127.0.0.1\r\n"
@@ -182,7 +173,6 @@ async def test_import_of_a_non_export_file_returns_a_stable_code(tmp_path):
     # parser message ("Expecting value: line 1 column 1") must not reach it.
     gw, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5)
-    await asyncio.sleep(0.1)
     _set_tunnel_active(gw, False)
     body = b"this is not json"
     resp = await _http(http_port,

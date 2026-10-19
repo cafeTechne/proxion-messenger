@@ -45,7 +45,6 @@ async def test_get_setup_pod_no_pod_configured(tmp_path):
     """R16.5.3: GET /setup/pod returns connected: false when no pod is configured."""
     gw, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.2)
 
     resp = httpx.get(f"http://127.0.0.1:{http_port}/setup/pod", timeout=5)
     assert resp.status_code == 200
@@ -62,7 +61,6 @@ async def test_post_setup_pod_missing_fields_returns_400(tmp_path):
     """POST /setup/pod with missing fields returns 400."""
     gw, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.2)
 
     resp = httpx.post(
         f"http://127.0.0.1:{http_port}/setup/pod",
@@ -78,7 +76,6 @@ async def test_post_setup_pod_bad_credentials_returns_error_message(tmp_path):
     """R16.5.2: POST /setup/pod with wrong credentials returns status:error with human message."""
     gw, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.2)
 
     resp = httpx.post(
         f"http://127.0.0.1:{http_port}/setup/pod",
@@ -131,7 +128,6 @@ async def test_get_setup_pod_returns_connected_after_mock_pod(tmp_path):
     """R16.5.1 (partial): GET /setup/pod returns connected: true after _pod_available set."""
     gw, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.2)
 
     # Simulate a successful pod connection by directly setting gateway state
     gw._pod_available = True
@@ -149,7 +145,6 @@ async def test_get_setup_pod_connected_after_post(tmp_path):
     """R18.4.2: GET /setup/pod returns connected: true and correct pod_url after POST succeeds."""
     gw, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.2)
 
     # Stub _connect_css_sync so no real CSS server is needed
     def _fake_connect(css_url, email, password):
@@ -183,7 +178,6 @@ async def test_get_setup_pod_untrusted_origin_omits_pod_url(tmp_path):
     pod is connected, never its pod_url/css_url."""
     gw, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.2)
 
     gw._pod_available = True
     gw._pod_url = "https://pod.solidcommunity.net/secret-user/"
@@ -205,7 +199,6 @@ async def test_get_setup_pod_trusted_origin_returns_full_body(tmp_path):
     """The local web UI (trusted origin) still receives pod_url/css_url."""
     gw, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.2)
 
     gw._pod_available = True
     gw._pod_url = "https://pod.solidcommunity.net/testuser/"
@@ -227,7 +220,6 @@ async def test_my_address_event_includes_gateway_http_url(tmp_path):
     from proxion_messenger_core.didkey import pub_key_to_did
     gw, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.2)
 
     ws_port = gw.config.port
     my_did = pub_key_to_did(gw.agent.identity_pub_bytes)

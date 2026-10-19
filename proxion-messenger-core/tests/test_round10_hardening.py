@@ -76,7 +76,6 @@ async def test_rate_limit_61st_command_rejected(tmp_path):
     """
     gw, ws_port, _, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.15)
 
     async with websockets.connect(f"ws://127.0.0.1:{ws_port}") as conn:
         # Register (exempt — doesn't count against limit)
@@ -177,7 +176,6 @@ async def test_invite_enum_rate_limit(tmp_path):
     """R10.7.4: GET /i/<token> returns 429 after 20 attempts per minute from same IP."""
     gw, _, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.15)
 
     bad_token = "a" * 16  # non-existent token
     status_codes = []
@@ -369,7 +367,6 @@ async def test_imported_messages_flagged(tmp_path):
     import httpx
     gw, _, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.15)
 
     import_payload = {
         "messages": [{

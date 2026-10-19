@@ -264,7 +264,6 @@ async def test_admin_revoke_contact_broadcasts_event(tmp_path):
     handle = _serve_gw(gw, ws_port, http_port)
     ready = handle.ready
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.2)
 
     # Connect a WebSocket client and register
     my_did = pub_key_to_did(agent.identity_pub_bytes)

@@ -196,7 +196,6 @@ async def test_metrics_endpoint_returns_counters(tmp_path):
     """GET /metrics returns 200 with proxion_messages_total line."""
     gw, _, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.15)
 
     reader, writer = await asyncio.open_connection("127.0.0.1", http_port)
     writer.write(b"GET /metrics HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
@@ -215,7 +214,6 @@ async def test_metrics_ws_connections_tracked(tmp_path):
     """_metrics['ws_connections_total'] increments on connect."""
     gw, ws_port, _, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.15)
 
     pytest.importorskip("websockets")
     import websockets
@@ -251,7 +249,6 @@ async def test_restore_writes_launcher_key_files(tmp_path):
     """POST /restore writes identity.key and store.key next to the db."""
     gw, _, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.15)
 
     # Generate a backup blob from the current agent
     passphrase = b"test-pass-123"
@@ -324,7 +321,6 @@ async def test_contacts_search_endpoint(tmp_path):
     """GET /contacts/search?q=al returns matching contacts as JSON."""
     gw, _, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.15)
 
     # Pre-populate a contact
     gw._store.upsert_contact("did:key:alice123", "Alice Smith", source="dm")

@@ -90,7 +90,6 @@ async def test_backup_endpoint(tmp_path):
     """R12.8.2: GET /backup?passphrase=test returns 200 with Content-Disposition and valid JSON."""
     gw, _, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.15)
 
     reader, writer = await asyncio.open_connection("127.0.0.1", http_port)
     writer.write(b"GET /backup?passphrase=testpass HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
@@ -211,7 +210,6 @@ async def test_import_wrong_api_token(tmp_path, monkeypatch):
 
     gw, _, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.15)
 
     reader, writer = await asyncio.open_connection("127.0.0.1", http_port)
     body = b'{"messages":[]}'

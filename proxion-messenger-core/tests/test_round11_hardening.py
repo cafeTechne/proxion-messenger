@@ -176,7 +176,6 @@ async def test_health_endpoint(tmp_path):
     """R11.6.5: GET /health returns 200 with status, connected_clients, and uptime_s."""
     gw, _, http_port, ready = _start_gateway(tmp_path)
     assert ready.wait(timeout=5), "gateway failed to start"
-    await asyncio.sleep(0.15)
 
     reader, writer = await asyncio.open_connection("127.0.0.1", http_port)
     writer.write(b"GET /health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")

@@ -243,7 +243,6 @@ async def test_get_invite_with_from_param_returns_html(tmp_path):
 
     _, ready = _start_http_gateway(agent, ws_port, http_port)
     assert ready.wait(timeout=5), "HTTP gateway failed to start"
-    await asyncio.sleep(0.2)
 
     from_addr = "did:key:z6MkAlice@http://alice-gateway:9000"
     resp = _httpx.get(
@@ -268,7 +267,6 @@ async def test_get_invite_without_param_still_returns_html(tmp_path):
 
     _, ready = _start_http_gateway(agent, ws_port, http_port)
     assert ready.wait(timeout=5), "HTTP gateway failed to start"
-    await asyncio.sleep(0.2)
 
     resp = _httpx.get(
         f"http://127.0.0.1:{http_port}/invite",
