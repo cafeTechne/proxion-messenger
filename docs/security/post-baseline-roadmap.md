@@ -37,7 +37,7 @@ Return to security-primary rounds if any of the following occur:
 
 ---
 
-## R35 governance right-sizing (June 2026)
+## Governance right-sizing (June 2026)
 
 Removed 5 test-only governance modules with zero `src/` importers:
 `policy_state_machine`, `federation_attest`, `solid_oidc_conformance`,

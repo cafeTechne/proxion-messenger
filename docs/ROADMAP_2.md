@@ -1,4 +1,4 @@
-# Proxion Messenger — Roadmap 2: From Functional to Delightful
+# Proxion Messenger Roadmap 2: From Functional to Delightful
 
 `docs/ROADMAP.md` (Phases A–E) got the product **feature-complete and
 architecturally sound**: download-and-go distribution, relay reachability, the
@@ -40,7 +40,7 @@ open.
   Python sidecar remains deferred and is the largest open item.
 - **L (durability):** folded into `docs/ROADMAP.md` Phase E, done.
 
-## Current state — honest assessment
+## State at the start of this roadmap
 
 **Genuinely strong**
 - Deep feature set: rooms, DMs, reactions, edits, threads, pins, disappearing
@@ -98,7 +98,7 @@ A product feels trustworthy before a user reads a word. Pay down the visual debt
   states — skeleton loaders, friendly copy, illustrations. Replace ad-hoc
   "Loading…" strings with a consistent pattern.
 - **F4. Micro-interaction polish.** Consistent transitions, the reaction-pop
-  pattern (R48) extended tastefully, message-send optimism, scroll behavior — all
+  pattern extended tastefully, message-send optimism, scroll behavior — all
   behind `prefers-reduced-motion`.
 
 ## Phase G — Usability & cognitive-load reduction
@@ -140,7 +140,7 @@ impossible.
   keyboard navigation; SR labels/roles audit; contrast-check the color set
   (ties to F1); reduced-motion (started). Test with an actual screen reader.
 - **I2. Localization scaffolding.** Extract user-facing strings for i18n (the
-  R41 copy work is a start); the sovereignty audience is global.
+  earlier copy work is a start); the sovereignty audience is global.
 
 ## Phase J — Voice & calls excellence (finish D1 + room voice)
 
@@ -152,7 +152,7 @@ impossible.
 
 ## Phase K — Mobile as a first-class client (D2)
 
-Installable PWA polish (icons/splash, offline shell, push already wired in R47),
+Installable PWA polish (icons/splash, offline shell, push already wired),
 mobile-native interaction patterns (gestures, bottom-sheet, safe-area insets),
 and a Tauri-mobile/Capacitor wrapper. A mobile-first layout pass on the web UI.
 
@@ -199,16 +199,16 @@ L (durability)     ──► the long-term sovereignty promise
 - **Don't let Settings grow.** Every new toggle is a usability tax (Phase G is
   about shrinking it).
 
-## Suggested next rounds
+## Sequence
 
-| Round | Theme | Phase |
+| Step | Theme | Phase |
 |-------|-------|-------|
-| R49 | Token-driven design system + de-inline CSS | F1–F2 |
-| R50 | Empty/loading/error/offline state pass | F3 |
-| R51 | Settings triage + onboarding finish (A3.2/A4.1) | G1–G2 |
-| R52 | Cold-path bug sweep + AST free-name CI gate | H1 |
-| R53 | User-journey E2E + two-gateway federation harness | H2 |
-| R54 | WCAG 2.1 AA: focus, keyboard nav, contrast, SR | I1 |
-| R55 | Voice UX: speaking/level/getStats/PTT; room-voice decision | J1–J2 |
-| R56 | Mobile/PWA first-class | K |
-| R57+ | Durability (E1–E4) | L |
+| 1 | Token-driven design system + de-inline CSS | F1–F2 |
+| 2 | Empty/loading/error/offline state pass | F3 |
+| 3 | Settings triage + onboarding finish (A3.2/A4.1) | G1–G2 |
+| 4 | Cold-path bug sweep + AST free-name CI gate | H1 |
+| 5 | User-journey E2E + two-gateway federation harness | H2 |
+| 6 | WCAG 2.1 AA: focus, keyboard nav, contrast, SR | I1 |
+| 7 | Voice UX: speaking/level/getStats/PTT; room-voice decision | J1–J2 |
+| 8 | Mobile/PWA first-class | K |
+| 9+ | Durability (E1–E4) | L |

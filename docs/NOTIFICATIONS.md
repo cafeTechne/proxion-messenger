@@ -27,7 +27,7 @@ gateway that peers can reach. Decentralized does not mean zero-infrastructure. Y
 your own gateway, reachable, the same way you run your own pod. There is no central
 Proxion service in the path.
 
-The settings panel shows the honest status:
+The settings panel shows the actual status:
 
 - **Background notifications: on**: the app is served from a public origin, so the
   gateway is reachable and closed-app push is expected to work.

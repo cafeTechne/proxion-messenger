@@ -8,7 +8,7 @@ below are the rough edges a tester will hit.
 
 ## Status (updated)
 
-Sequenced and tracked in `PLAN_ROUND_106.md`. Resolved and deployed so far:
+Resolved and deployed so far:
 the silent DM loss (P0 item 1), the subpath PWA breakage (P1), click-to-copy
 for your own WebID (P1 gap), and gateway-free room join (P1, the request/approve
 handshake; a joiner reads and posts to the owner's room after approval, verified
@@ -146,7 +146,7 @@ Fixed:
   `podSoftDeleteChatMessageAt`, `podSetChatSeqAt`, `podWriteReactionActionAt`).
 - **`voice_hangup` before answer.** `_callPeerWebid` is now set at invite receipt,
   so declining or closing a ringing call routes the hangup in web mode too.
-- **First-contact DM authorship signing (R107).** The web-mode DM envelope now
+- **First-contact DM authorship signing.** The web-mode DM envelope now
   carries an Ed25519 signature over its canonical bytes (`from_webid`, message id,
   ciphertext, ratchet/key material, timestamp), signed by the sender's device
   `did:key` (`dmsig.js`). Each device publishes its signer identity at its own pod

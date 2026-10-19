@@ -1,6 +1,6 @@
 # Interoperability and server compatibility
 
-This is the honest, specific picture of what Proxion interoperates with, how, and
+This is the specific picture of what Proxion interoperates with, how, and
 where the edges are. Every capability listed here is backed by a test in the repo,
 named so you can run it yourself.
 
@@ -72,7 +72,7 @@ ignore what they do not understand; nothing is lost.
 
 | Server | Read/write Long Chat | Notifications | ACL model | Notes |
 |---|---|---|---|---|
-| Community Solid Server 7.x | Yes | Yes (WebSocketChannel2023, v0.3) | WAC | Primary target, fully exercised in tests |
+| Community Solid Server 7.x | Yes | Yes (WebSocketChannel2023, v0.3) | WAC or ACP | Primary target, fully exercised in tests |
 | solidcommunity.net (CSS) | Yes | Depends on deployment config | WAC | Same engine as above |
 | Inrupt PodSpaces (ESS) | Read/write expected (standard RDF) | Not via our client path | ACP | See caveats below |
 
@@ -83,9 +83,10 @@ Caveats worth stating:
   old-style negotiation gateway and reports CSS 7 as unsupported, while CSS advertises
   a subscription service in its storage description (the v0.3 model). Proxion speaks
   v0.3 directly, and falls back to polling on any server that offers no service.
-- **Access control: WAC, not ACP.** Proxion writes Web Access Control ACLs. Servers
-  that use only Access Control Policy (ACP) are not targeted for the participant-grant
-  flow yet.
+- **Access control: WAC or ACP.** Proxion reads the server's access-control model from
+  the resource's `Link` header and writes a WAC ACL or an ACP ACR to match
+  (`web/acl.js`, `podSetContainerAcl`). ACP authoring is verified live against CSS in ACP
+  mode ([SOLID_COMPLIANCE.md](SOLID_COMPLIANCE.md)).
 - **Identity: a pod-less user shows as an id.** A `did:key`-only identity has no
   dereferenceable WebID card, so other apps display the identifier rather than a name.
   That is the expected limit of interop for users who have not connected a pod.

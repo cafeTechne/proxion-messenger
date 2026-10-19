@@ -1,10 +1,10 @@
-# Proxion Messenger — Master Roadmap
+# Proxion Messenger Master Roadmap
 
 Strategic north star for architecture and development. Written June 2026
 after a full codebase review. This sits above the thematic roadmaps:
 - `docs/E2E_ENCRYPTION.md`: DM encryption protocol as implemented
-- `docs/security/post-baseline-roadmap.md` — security-governance
-- `docs/ARCHITECTURE.md` — protocol reference (Pod-centric; see Phase B.4)
+- `docs/security/post-baseline-roadmap.md`: security governance
+- `docs/ARCHITECTURE.md`: the as-built system reference
 
 ---
 
@@ -36,14 +36,13 @@ Solid-server support extended beyond CSS to JSS and NSS (auto-detected). The
 polish program (Phases F through L) lives in `docs/ROADMAP_2.md`, also largely
 complete; the largest remaining frontier is a native mobile client.
 
-**Solid ecosystem (R100, 2026-08).** A full per-requirement audit against the Solid
+**Solid ecosystem (2026-08).** A full per-requirement audit against the Solid
 spec suite is recorded in `docs/SOLID_COMPLIANCE.md`. Proxion is substantially
 conformant on what it uses (Protocol, Long Chat, Type Indexes, WebID Profile,
-Solid-OIDC + DPoP, WAC, Notifications v0.3). Shipped in R100: WebID Profile name
+Solid-OIDC + DPoP, WAC, Notifications v0.3). Shipped with the audit: WebID Profile name
 publishing, header-based ACL/ACR discovery, and ACP authoring routed by server
-model (built and unit-tested, live Inrupt ESS verification pending an account).
-The remaining low-value interop follow-ups the audit surfaced are tracked in
-`PLAN_ROUND_101` and the matrix's follow-up list.
+model (verified live against CSS in ACP mode). The follow-ups the audit surfaced
+are listed in `docs/SOLID_COMPLIANCE.md`.
 
 ## The product thesis (what we are actually building)
 
@@ -64,7 +63,10 @@ that matter most:
 
 ---
 
-## Current state — honest assessment
+## State at the June 2026 review
+
+This section records the codebase as it was reviewed; several weaknesses below
+have since been addressed (see the Status section above and `CHANGELOG.md`).
 
 **Strengths (genuinely strong):**
 - Mature messaging: rooms, DMs, reactions, edits, threads, pins, disappearing
@@ -86,7 +88,8 @@ that matter most:
 - **Over-built governance subsystem** with dead modules — large maintenance
   surface for near-zero user value at this scale.
 - **No mobile story.** PWA exists (`sw.js`) but no packaged mobile app.
-- **Hard 512 KB file limit** — below user expectations for photo sharing.
+- **Hard 512 KB file limit**, below user expectations for photo sharing. (Since
+  lifted: DM files transfer in chunks up to 25 MB, room files up to 2 MB.)
 - **Frontend has no test coverage** (5.9K LOC `main.js`, only a vitest stub).
 - **Architecture docs have drifted** from Pod-first to relay-first reality.
 
@@ -110,9 +113,9 @@ and reaches their friends with zero configuration.
   makes "it just works" true for the ~40% of routers where UPnP is off.
 - Optional one-click Cloudflare Tunnel / Tailscale Funnel integration that
   the app drives (today it only prints a command).
-- Decision needed: run a small Anthropic-of-Proxion-style default relay, or
-  ship a "bring your own relay" model. Lean toward an optional default relay
-  with sealed-sender so privacy is preserved.
+- Decision needed: run a small project-operated default relay, or ship a
+  "bring your own relay" model. (Outcome: bring your own. The sealed relay is
+  opt-in through `PROXION_RELAY_FALLBACK_URL` and unset by default.)
 
 **A3. Onboarding that never says "gateway" or ".env".**
 - Replace remaining technical language with outcomes ("Your friends can reach
@@ -177,7 +180,7 @@ scaffolding). Target 50 MB for photos/clips; chunk over relay, reassemble,
 E2E per chunk.
 
 **C3. Room history catch-up & pagination polish.** The REST `/room-history`
-endpoint (R34) is the foundation; add cursor pagination in the UI and a
+endpoint is the foundation; add cursor pagination in the UI and a
 "load older" affordance for federated members.
 
 **C4. did:web identity (optional).** Lets users have a human-readable identity
@@ -260,17 +263,18 @@ E (durability)       ──►  deliver the full sovereignty promise
 ## What to explicitly NOT build
 
 - SFU / large-room voice (40-person raids belong on TeamSpeak — confirmed).
-- Screen share (out of scope per product direction).
+- Screen share (out of scope per product direction at the time; later added to
+  1:1 calls, see `docs/CALLS.md`).
 - A central account system or directory (violates the thesis).
 - Crypto/token/blockchain anything.
 
-## Suggested next rounds
+## Sequence followed after the review
 
-| Round | Theme | Phase |
+| Step | Theme | Phase |
 |-------|-------|-------|
-| R35 | Governance right-sizing: delete dead modules, gate assurance behind a flag | B4 |
-| R36 | `local_store.py` decomposition behind a facade | B1 |
-| R37 | Signed installers + Tauri auto-update | A1 |
-| R38 | Sealed managed-relay fallback for non-UPnP networks | A2 |
-| R39 | Chunked large-file transfer | C2 |
-| R40 | `main.js` modularization + vitest harness | B3 |
+| 1 | Governance right-sizing: delete dead modules, gate assurance behind a flag | B4 |
+| 2 | `local_store.py` decomposition behind a facade | B1 |
+| 3 | Signed installers + Tauri auto-update | A1 |
+| 4 | Sealed managed-relay fallback for non-UPnP networks | A2 |
+| 5 | Chunked large-file transfer | C2 |
+| 6 | `main.js` modularization + vitest harness | B3 |

@@ -17,10 +17,11 @@ open.
 
 ## Status
 
-All four phases are implemented on branch `web-phase1` (not yet merged): the
-transport seam and static Pages build (R102), gateway-free DMs over a pod drop
-box (R103), heartbeat presence (R104), and 1:1 call signaling over the pod
-(R105). The web build reports the full feature set. Verification is layered:
+All four phases are implemented and the build is published at
+https://cafetechne.github.io/proxion-messenger/app/ (`.github/workflows/pages.yml`
+runs `web/scripts/build-web.mjs`): the transport seam and static Pages build,
+gateway-free DMs over a pod drop box, heartbeat presence, and 1:1 call signaling
+over the pod. The web build reports the full feature set. Verification is layered:
 unit tests for every engine, an automated live-CSS integration suite
 (`npm run test:integration`) covering rooms, DM delivery, presence, and call
 signaling against a real pod, and a browser smoke (`npm run smoke:web`) that
@@ -87,9 +88,9 @@ abstraction work is what de-risks everything after it.
 
 ## Phases
 
-Detailed, actionable plans live in the per-round files. This section is the map.
+This section is the map.
 
-### Phase 1: Static Pages build, pod-only features (`PLAN_ROUND_102.md`)
+### Phase 1: Static Pages build, pod-only features
 Visit a URL, sign in with a pod, use shared rooms and history. Zero install.
 Introduces the transport seam, a Solid-OIDC client identifier document hosted on
 the Pages origin, a web-specific service worker and CSP, and UI gating that
@@ -97,7 +98,7 @@ hides realtime-only affordances behind `transport.supports(...)`. Lights up:
 OIDC login, shared rooms (Long Chat read/write), history, invites (LDN),
 profiles, type index discovery. Shippable on its own.
 
-### Phase 2: DM-push without a gateway (`PLAN_ROUND_103.md`)
+### Phase 2: DM-push without a gateway
 Start and hold an E2E DM, delivered near-realtime, no gateway on either side.
 Publish prekey bundles to a public-read pod resource for X3DH init; deliver the
 ratchet-encrypted envelope (unchanged from `e2e.js`) to the recipient's pod DM
@@ -105,23 +106,23 @@ inbox; receive via a `notify.js` subscription to the local inbox. The pod stores
 only ciphertext. Wire-compatible with gateway-relayed DMs so web and desktop
 interoperate.
 
-### Phase 3: Presence without a gateway (`PLAN_ROUND_104.md`)
+### Phase 3: Presence without a gateway
 Presence as a public-read pod heartbeat resource plus per-contact subscription.
-Online / away / offline derived from heartbeat freshness. Honestly coarser than
+Online / away / offline derived from heartbeat freshness. Coarser than
 the desktop's socket presence, with a disclosed "last seen" fallback rather than
 a faked green dot.
 
-### Phase 4: Calls without a gateway (`PLAN_ROUND_105.md`)
+### Phase 4: Calls without a gateway
 1:1 voice, video, and screen-share with WebRTC signaling routed over the
 callee's pod inbox and delivered via `notify.js`. `callsec.js` already signs the
 DTLS fingerprint and refuses a MitM, so the untrusted pod-signaling path is safe
 by the same mechanism that protects against an untrusted gateway. STUN covers
 many networks with no server; symmetric-NAT peers need a TURN relay, which never
-sees plaintext media but is a server (the one honest asterisk on "zero server").
+sees plaintext media but is a server.
 
 ---
 
-## Honest limitations of the finished web build
+## Limitations of the web build
 
 - Presence is heartbeat-based and coarser than the desktop's socket presence.
 - Calls work over public STUN for many networks; restrictive NATs need a TURN

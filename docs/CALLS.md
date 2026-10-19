@@ -95,7 +95,7 @@ later call from them that arrives with no binding proof is treated as a downgrad
 stripped or withheld certificate) and refused, not quietly allowed. A contact we cannot
 confirm is capable is still allowed as Unverified, so peers on older clients are never
 blocked. This matters most when a gateway is shared or hosted rather than one you run
-yourself; see PLAN_ROUND_86 for the threat boundary.
+yourself; see [SECURITY-MODEL.md](SECURITY-MODEL.md#calls) for the threat boundary.
 
 ## Privacy of capture
 

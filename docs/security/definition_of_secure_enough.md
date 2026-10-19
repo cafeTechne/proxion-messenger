@@ -58,7 +58,7 @@ New backend security rounds require one of:
 - Major spec drift with breaking risk
 - Material architecture change
 
-## Maintenance Mode (R16)
+## Maintenance Mode
 
 When `evaluate_security_program_stability_gate` returns `recommendation="hold_line"` (all gates pass for 45 consecutive days, no critical events), transition to **monthly security maintenance cycle**:
 

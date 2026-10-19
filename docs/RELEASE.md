@@ -14,14 +14,14 @@ Microsoft**.
 
 You can ship a fully working, auto-updating, sovereign app using only the
 updater key. The OS prompt is a one-time "are you sure?", see the landing
-page copy for the honest per-OS story (Linux: none; Windows: More info → Run
+page copy for the per-OS steps (Linux: none; Windows: More info → Run
 anyway; macOS: right-click → Open).
 
 ## Install front door (GitHub Pages)
 
 `landing/index.html` is an OS-detecting page that reads the latest release via
 the GitHub API at view time (no rebuild per release) and serves the right
-asset with honest first-run instructions.
+asset with first-run instructions.
 
 One-time setup:
 1. Edit `landing/index.html`: set `const REPO = "<owner>/<repo>"`.

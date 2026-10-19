@@ -1,6 +1,6 @@
 # Solid specification compliance
 
-An honest, cited map of Proxion against the Solid specification suite
+A cited map of Proxion against the Solid specification suite
 (solidproject.org/TR). Each row is a client-facing requirement, its status, and the
 code or test that proves it. Statuses:
 
@@ -10,7 +10,7 @@ code or test that proves it. Statuses:
 - **N-A by design**: intentionally not done (stated, not a gap).
 
 Proxion is a client to the pod (plus its own relay); server-only obligations are out of
-scope. Reaching 100% is not the goal; an honest, cited picture is.
+scope.
 
 ## Summary (per spec)
 
@@ -46,10 +46,10 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | GET/HEAD for reads, PUT/POST/PATCH/DELETE for writes | Compliant | `pod.js`, `solid_client.py` |
 | Discover storage root (pim:storage / Link rel type Storage) | Compliant | `podStorageRoot`, storage description read for notifications |
 | text/turtle + application/ld+json | Compliant | reads/writes both |
-| PATCH format is N3 Patch (server advertises text/n3 in Accept-Patch) | Compliant | R101.3 + follow-up: `podRdfPatch` negotiates on `Accept-Patch` and sends N3 Patch (the mandated format) when advertised, else SPARQL Update. Applied to every RDF PATCH we issue: WebID-card writes, reaction actions, and the chat day-file append/edit/delete/seq patches (via `appendOps`/`editOps`/`deleteOps`/`seqOps` shared with the SPARQL builders). |
+| PATCH format is N3 Patch (server advertises text/n3 in Accept-Patch) | Compliant | `podRdfPatch` negotiates on `Accept-Patch` and sends N3 Patch (the mandated format) when advertised, else SPARQL Update. Applied to every RDF PATCH we issue: WebID-card writes, reaction actions, and the chat day-file append/edit/delete/seq patches (via `appendOps`/`editOps`/`deleteOps`/`seqOps` shared with the SPARQL builders). |
 | Container creation | Compliant | PUT creates intermediate containers on CSS |
 | Auth: Solid-OIDC / WebID-TLS | Compliant | browser uses `@inrupt/solid-client-authn` (Solid-OIDC); gateway uses Solid-OIDC client-credentials + DPoP |
-| Access control: WAC or ACP | **Partial** | WAC only; ACP not written (R100 A2, blocks ESS) |
+| Access control: WAC or ACP | Compliant | WAC ACLs, or an ACP ACR when the server advertises ACP (`podSetContainerAcl`, see B3) |
 
 ### Solid Chat / Long Chat (v1.0.0)
 | Requirement | Status | Evidence / note |
@@ -60,8 +60,8 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | Date-partitioned message files | Compliant | `podWriteLongChatMessage` layout |
 | Deletes (`schema:dateDeleted`) | Compliant | tombstone emitted; renders in SolidOS |
 | Edits | Compliant | in-place `sioc:content` swap (`buildEditPatch`), so any Long Chat reader shows the latest text; chosen deliberately over `dct:isReplacedBy` (unverified reader support), with `px:` keeping full history. `solidos-render-edits.test.js` |
-| Replies via `sioc:has_reply` | Compliant | R101.1: the pod append emits `<parent> sioc:has_reply <reply>` (parent timestamp threaded from the client so the parent's date-partitioned IRI is known), alongside the richer `px:` context. `longchat.test.js` |
-| Reactions via `schema:Action` subclasses | Compliant | R101: each reaction is mirrored into the chat day file as a `schema:LikeAction` (`schema:agent` reactor, `schema:target` message IRI, `sioc:content` emoji) via `podWriteReactionAction`, inserted on react and deleted on un-react, alongside the `px:` ReactionSet. `longchat.test.js`, `acl.test.js` |
+| Replies via `sioc:has_reply` | Compliant | The pod append emits `<parent> sioc:has_reply <reply>` (parent timestamp threaded from the client so the parent's date-partitioned IRI is known), alongside the richer `px:` context. `longchat.test.js` |
+| Reactions via `schema:Action` subclasses | Compliant | Each reaction is mirrored into the chat day file as a `schema:LikeAction` (`schema:agent` reactor, `schema:target` message IRI, `sioc:content` emoji) via `podWriteReactionAction`, inserted on react and deleted on un-react, alongside the `px:` ReactionSet. `longchat.test.js`, `acl.test.js` |
 
 ### Type Indexes (v1.0.0)
 | Requirement | Status | Evidence / note |
@@ -83,7 +83,7 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 |---|---|---|
 | Card is `foaf:Agent`, GET as turtle/JSON-LD, `pim:preferencesFile` | Compliant | CSS/JSS create the card; we read/augment it |
 | `solid:oidcIssuer`, `pim:storage` present | Compliant | provided by the pod's default card; not clobbered |
-| `foaf:name` so other apps show a name | Compliant | R100 A1 upsert (`podEnsureProfileName`); `profile-card.test.js` |
+| `foaf:name` so other apps show a name | Compliant | Upsert (`podEnsureProfileName`); `profile-card.test.js` |
 | `ldp:inbox` advertised | Compliant | we create + link an inbox for LDN invites (`inboxacl`, `ldn.js`) |
 | `solid:publicTypeIndex` linked | Compliant | `podEnsurePublicTypeIndex` (see B1) |
 | A did:key-only user is discoverable/named | N-A by design | no pod means no dereferenceable card; such a user shows as an id (documented in `INTEROP.md`) |
@@ -115,13 +115,13 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | `acl:accessTo` / `acl:default` (container inheritance) | Compliant | container ACLs use `acl:default`; rooms grant members |
 | `acl:mode` Read/Write/Append/Control; owner keeps Control | Compliant | owner Read/Write/Control on every resource we create |
 | Serve ACL as `text/turtle` | Compliant | all ACL writes are turtle |
-| Discover the ACL URL from `Link: rel=acl` (never derive by string) | Compliant | R100 A2.1 + R101.2: every ACL write site (`podSetContainerAcl`, `podGrantChatParticipants`, `ensureProxionContainer`, type index, inbox) reads the `Link` header via `discoverAccessControl` (`acl.js`), falling back to `.acl` only when the server advertises nothing. |
+| Discover the ACL URL from `Link: rel=acl` (never derive by string) | Compliant | Every ACL write site (`podSetContainerAcl`, `podGrantChatParticipants`, `ensureProxionContainer`, type index, inbox) reads the `Link` header via `discoverAccessControl` (`acl.js`), falling back to `.acl` only when the server advertises nothing. |
 
 ### Access Control Policy (v0.9.0)
 | Requirement | Status | Evidence / note |
 |---|---|---|
-| Author Access Control Resources (Policies + Matchers) to grant access | Compliant | R100 A2.2: `buildAcpAcr` authors an ACR (AccessControl + Policy + Matcher, owner control + member read, with `acp:memberAccessControl` for inheritance), and `podSetContainerAcl` routes to it when the server advertises ACP. **A2.3 verified live against CSS in ACP mode** (`config/file-acp.json`): CSS accepts and persists our ACR (HTTP 201). Verify yourself with `scripts/verify_ess_acp.mjs`. (Inrupt's free ESS/PodSpaces is gone as of 2026, now enterprise wallets, so CSS-ACP is the conformant ACP server we verify against.) |
-| Discover the ACR via the resource's `Link` header | Compliant | `accessControlUrl` reads the link; `detectAclModel` recognizes ACP via the `acp#accessControl` rel OR a `.acr` ACR advertised through `rel="acl"` (how CSS-ACP exposes it, found during A2.3 and fixed). |
+| Author Access Control Resources (Policies + Matchers) to grant access | Compliant | `buildAcpAcr` authors an ACR (AccessControl + Policy + Matcher, owner control + member read, with `acp:memberAccessControl` for inheritance), and `podSetContainerAcl` routes to it when the server advertises ACP. **Verified live against CSS in ACP mode** (`config/file-acp.json`): CSS accepts and persists our ACR (HTTP 201). Verify yourself with `scripts/verify_ess_acp.mjs`. (Inrupt's free ESS/PodSpaces is gone as of 2026, now enterprise wallets, so CSS-ACP is the conformant ACP server we verify against.) |
+| Discover the ACR via the resource's `Link` header | Compliant | `accessControlUrl` reads the link; `detectAclModel` recognizes ACP via the `acp#accessControl` rel OR a `.acr` ACR advertised through `rel="acl"` (how CSS-ACP exposes it, found during live verification and fixed). |
 
 ### Authorization Use Cases and Requirements (Editor's Draft)
 | Requirement | Status | Evidence / note |
@@ -129,10 +129,9 @@ scope. Reaching 100% is not the goal; an honest, cited picture is.
 | (requirements/use-cases document, not client-normative) | N-A | informational; nothing to implement |
 
 ## B3 verdict
-WAC is structurally compliant, with one real conformance gap (ACL discovery by `.acl`
-convention rather than the `Link: rel=acl` header). ACP is the biggest ecosystem gap and is
-the R100 A2 item: supporting Inrupt ESS needs BOTH ACP authoring AND header-based ACR
-discovery, not `.acl` guessing. This sharpens A2's scope.
+WAC is compliant, including ACL discovery from the `Link: rel=acl` header at every write
+site. ACP is supported: Proxion authors an ACR when the server advertises ACP and discovers
+it from the resource's `Link` header, verified live against CSS in ACP mode.
 
 ## B4. Notifications
 
@@ -150,7 +149,7 @@ discovery, not `.acl` guessing. This sharpens A2's scope.
 | WebSocketChannel2023 | Compliant | live-update subscription for new posts |
 | WebhookChannel2023 | Compliant | closed-app path: Webhook to gateway to Web Push (`NOTIFICATIONS.md`) |
 | LDNChannel2023 (LDN inbox) | Compliant | inbox invitations produced/consumed (`ldn.js`, `podcanonical-ldn-live`) |
-| StreamingHTTPChannel2023 | Compliant | R101.4: `subscribeStreamingHttp` + a streaming connector used as a fallback after WebSocket (`notify.js`); keeps real-time working if a server offers streaming but not WebSocket |
+| StreamingHTTPChannel2023 | Compliant | `subscribeStreamingHttp` + a streaming connector used as a fallback after WebSocket (`notify.js`); keeps real-time working if a server offers streaming but not WebSocket |
 | EventSourceChannel2023 | N-A | WebSocket covers the same need |
 
 ### Solid-PREP (Editor's Draft)
@@ -198,7 +197,7 @@ actionable gaps.
 Proxion is **substantially spec-conformant** on the parts of Solid it uses: Protocol CRUD,
 Long Chat, Type Indexes, WebID Profile, Solid-OIDC + DPoP, WAC (structure), and the
 Notifications Protocol with WebSocket/Webhook/LDN channels plus a polling fallback. The
-gaps are a small, honest set, and several are by design.
+gaps are a small set, and several are by design.
 
 ### Deeper normative review (2026-08)
 A second pass read the finer normative text of the core specs (not just the requirement
@@ -219,10 +218,10 @@ summaries) and found no new client MUSTs unmet:
 None outstanding. Every client-facing requirement Proxion exercises is Compliant or N-A by
 design; the deferred items below are emerging specs we intentionally do not build yet.
 
-Done since the audit: header-based ACL discovery at every write site (R101.2), replies in
-`sioc:has_reply` (R101.1), N3-Patch negotiation on the WebID-card writes (R101.3), the
-StreamingHTTPChannel2023 fallback (R101.4), reactions as `schema:LikeAction` (R101),
-ACP authoring + discovery verified live against CSS-ACP (A2.3, which also fixed ACP
+Done since the audit: header-based ACL discovery at every write site, replies in
+`sioc:has_reply`, N3-Patch negotiation on the WebID-card writes, the
+StreamingHTTPChannel2023 fallback, reactions as `schema:LikeAction`,
+ACP authoring + discovery verified live against CSS-ACP (which also fixed ACP
 detection of a `.acr` ACR advertised via `rel="acl"`), and N3-Patch negotiation extended to
 every RDF PATCH including the chat day-file writes.
 
@@ -232,7 +231,7 @@ dereferenceable card is a stated design limit.
 
 ## B2 verdict
 Identity and auth are compliant for pod-connected users (browser Solid-OIDC + DPoP, WebID
-card augmented with name/inbox/type-index). The one honest limit is by design: a did:key-only
+card augmented with name/inbox/type-index). The one limit is by design: a did:key-only
 user has no dereferenceable card, and Proxion's did:key identity diverges from the emerging
 did:solid method. No new actionable gaps beyond that strategic choice.
 

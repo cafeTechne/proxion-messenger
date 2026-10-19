@@ -108,7 +108,7 @@ keeps using `px:` for the things the shared vocabulary has no term for
 (reactions, forwarding, content-type nuance, cached reply snippets).
 
 **Rooms interoperate; direct messages deliberately do not.** This split is the
-honest consequence of end-to-end encryption. You cannot have bytes that a
+direct consequence of end-to-end encryption. You cannot have bytes that a
 third-party app can read *and* that no third party can read. Rooms are shared by
 design, so their history is plaintext and open. DMs are end-to-end encrypted, so
 they stay `px:`-only and are not third-party readable, on purpose.
@@ -555,7 +555,7 @@ An example room ACL:
 
 ## What is deliberately NOT on the pod
 
-Being honest about the boundary matters more than a tidy story:
+The boundary:
 
 - **End-to-end encrypted DM content, unless you opt in.** 1:1 DMs are E2E
   encrypted in transit, so by default their plaintext lives only in local device
@@ -595,8 +595,6 @@ No Proxion code, no gateway, and no Proxion account are involved: it is your dat
 in open formats, in your pod.
 
 ## Known rough edges
-
-In the spirit of an honest spec rather than a marketing one:
 
 - **Legacy plain-JSON mirror.** Older room message writes also produce a plain
   (non-JSON-LD) `.json` mirror and a `index.json` directly under

@@ -96,7 +96,7 @@ single resolver (`web/identity.js`, `createIdentityResolver`). It answers:
   a call (an event's `caller_webid`/`from_webid`, or the open thread's peer) to the
   account did of a known contact, or `''` when unknown.
 
-Call identity verification and the R86 call-binding capability consume the client resolver
+Call identity verification and the call-binding capability consume the client resolver
 today.
 
 On the gateway there is a matching reduction, `_authorized_relationship(from_webid)`, the
@@ -104,7 +104,7 @@ single gate that maps a relayed actor's identity to the relationship that author
 (returning the cert and OUR cert_id, or None for an unknown, revoked, or blocked actor).
 Every inbound relay handler that means "may this actor act on a DM with us" goes through
 it: react, edit, delete, pin, disappear-timer, presence, and typing. They agree on the
-answer instead of each repeating the check, which is where the R54 identity-conflation
+answer instead of each repeating the check, which is where earlier identity-conflation
 bugs lived.
 
 One inbound site deliberately does NOT use it: voice-signal relay authorizes on
@@ -113,7 +113,7 @@ friend) and keys on the sending GATEWAY did, so it is a genuinely different mode
 same reduction.
 
 The OUTBOUND counterpart is `_dm_client_for_target(target_webid)`: map a DM target to the
-pod client that can deliver to them. As of R90 the two kinds of pod client are stored
+pod client that can deliver to them. The two kinds of pod client are stored
 separately so a key means one thing: `dm_clients` holds relationship clients keyed by
 cert_id, and `own_pod_clients` holds our own pod client keyed by webid. The reducer checks
 `dm_clients[cert_id]` then `own_pod_clients[target_webid]`, with no type-ambiguous merged
@@ -126,15 +126,15 @@ Block enforcement is its own reduction, `_is_blocked_for(recipient_owner, sender
 this sender blocked FROM THE RECIPIENT'S point of view. It is scoped per owner (using the
 store's `is_blocked_by`), not a gateway-wide set, so on a multi-user gateway one account's
 block does not silence another's peer, and it canonicalizes both sides to one identity form
-(account did) so a block set by did matches a check made by pubkey hex (R90 B). Every
+(account did) so a block set by did matches a check made by pubkey hex. Every
 receive-path check goes through it, deriving the recipient owner from the relationship, the
 `to_webid`, or the pod account. The former gateway-wide `blocklist.json` file is no longer
 written by new blocks; it is read only as a legacy fallback (and for store-less gateways),
-so pre-R90 blocks keep enforcing without leaking a new block across owners.
+so older blocks keep enforcing without leaking a new block across owners.
 
 On the client, `identity.js` (`createIdentityResolver`) answers the client-side identity
-reductions: `contactForCall` (who is this call with), `peerBindsCalls` (R86),
-`serverMuteKey` (R87: which identity the gateway keys a mute by), and the multi-device
-fanout device-set selection `devicesForPeer` / `ownOtherDevices` (R89: which devices to
+reductions: `contactForCall` (who is this call with), `peerBindsCalls`,
+`serverMuteKey` (which identity the gateway keys a mute by), and the multi-device
+fanout device-set selection `devicesForPeer` / `ownOtherDevices` (which devices to
 seal a DM to, with the "never seal to this device" exclusion in one place). The resolver
 decides WHICH devices; the send path still owns sealing and Double Ratchet sessions.
