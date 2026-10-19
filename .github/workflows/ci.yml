@@ -203,6 +203,38 @@ jobs:
         if: failure()
         run: cat jss.log || true
 
+  desktop-linux:
+    # The desktop app's Linux-only code (proxion:// registration, the tray
+    # check behind the close button) is not compiled by any other job, and a
+    # compile error there would only surface when a release is tagged.
+    name: Desktop app (Linux compile + unit tests)
+    runs-on: ubuntu-22.04   # Tauri v1 needs libwebkit2gtk-4.0 (see release.yml)
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87  # stable (2026-09-03)
+
+      # tauri-build requires the externalBin sidecar to exist; the real one is
+      # built by the release job, an empty file is enough to compile.
+      - name: Sidecar placeholder
+        run: |
+          mkdir -p tauri-app/src-tauri/sidecar
+          touch tauri-app/src-tauri/sidecar/proxion-gateway-x86_64-unknown-linux-gnu
+
+      - name: cargo check
+        working-directory: tauri-app/src-tauri
+        run: cargo check --locked
+
+      - name: cargo test
+        working-directory: tauri-app/src-tauri
+        run: cargo test --locked --bin proxion-app
+
   reproducible-check:
     # Informational (E4): builds the sidecar twice and reports how reproducible
     # it is. Non-blocking (continue-on-error) until the sidecar is reliably
