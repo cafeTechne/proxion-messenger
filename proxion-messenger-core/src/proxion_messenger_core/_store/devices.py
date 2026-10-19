@@ -265,10 +265,18 @@ class DeviceStoreMixin(object):
                 return [r[0] for r in rows if r and r[0]]
             except Exception:
                 return []
+    def get_push_subscription_owner(self, subscription_id: str) -> str:
+        """The owner of a stored push subscription id, '' when there is none."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT owner_webid FROM push_subscriptions WHERE subscription_id=?",
+                (subscription_id,)).fetchone()
+        return (row["owner_webid"] or "") if row else ""
+
     def delete_push_subscription(
         self, subscription_id: str, owner_webid: Optional[str] = None
-    ) -> None:
-        """Delete a push subscription by id.
+    ) -> bool:
+        """Delete a push subscription by id. Returns whether a row was removed.
 
         When *owner_webid* is given the delete is scoped to that owner, so a
         caller cannot remove another owner's subscription by guessing its id.
@@ -276,17 +284,18 @@ class DeviceStoreMixin(object):
         with self._conn() as conn:
             try:
                 if owner_webid is not None:
-                    conn.execute(
+                    cur = conn.execute(
                         "DELETE FROM push_subscriptions WHERE subscription_id=? AND owner_webid=?",
                         (subscription_id, owner_webid),
                     )
                 else:
-                    conn.execute(
+                    cur = conn.execute(
                         "DELETE FROM push_subscriptions WHERE subscription_id=?",
                         (subscription_id,),
                     )
+                return (cur.rowcount or 0) > 0
             except Exception:
-                pass
+                return False
     def register_device(
         self,
         device_id: str,

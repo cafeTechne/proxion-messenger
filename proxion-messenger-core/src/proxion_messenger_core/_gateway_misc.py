@@ -15,9 +15,12 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 from datetime import datetime, timezone
 
 logger = logging.getLogger("proxion_messenger_core.gateway")
+
+_PUSH_SUB_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 class MiscHandlerMixin:
@@ -1848,6 +1851,16 @@ class MiscHandlerMixin:
             f"{owner_webid}|{endpoint}".encode()).hexdigest()[:24]
         p256dh_b64 = data.get("p256dh_b64", "")
         auth_b64 = data.get("auth_b64", "")
+        # The id names the pod file (push/<id>.json): keep it a plain token, and
+        # never take over an id another account already holds (the pod copy would
+        # overwrite theirs even though the local row is refused).
+        if not isinstance(subscription_id, str) or not _PUSH_SUB_ID_RE.fullmatch(subscription_id):
+            await websocket.send(json.dumps({"type": "error", "message": "invalid_subscription_id"}))
+            return
+        _sub_owner = self._store.get_push_subscription_owner(subscription_id)
+        if _sub_owner and _sub_owner != owner_webid:
+            await websocket.send(json.dumps({"type": "error", "message": "invalid_subscription_id"}))
+            return
         if not endpoint or not p256dh_b64 or not auth_b64:
             await websocket.send(json.dumps({"type": "error", "message": "missing_subscription_fields"}))
             return
@@ -1870,8 +1883,10 @@ class MiscHandlerMixin:
         subscription_id = data.get("subscription_id", "")
         owner_webid = self._client_webids.get(websocket, "")
         if self._store and subscription_id and owner_webid:
-            self._store.delete_push_subscription(subscription_id, owner_webid)
-            asyncio.create_task(self._delete_push_subscription_from_pod(subscription_id))
+            # The pod copy goes only when the caller owned the row: another
+            # account's id must not delete that account's pod record.
+            if self._store.delete_push_subscription(subscription_id, owner_webid):
+                asyncio.create_task(self._delete_push_subscription_from_pod(subscription_id))
         await websocket.send(json.dumps({"type": "push_unsubscribed", "subscription_id": subscription_id}))
 
     # ------------------------------------------------------------------
