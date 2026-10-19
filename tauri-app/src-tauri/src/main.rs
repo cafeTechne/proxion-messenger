@@ -391,6 +391,40 @@ fn shutdown_gateway(app: &AppHandle) {
     }
 }
 
+// ── Tray availability (Linux) ─────────────────────────────────────────────────
+
+/// gdbus prints `(true,)` when the queried bus name has an owner.
+#[cfg(any(target_os = "linux", test))]
+fn name_has_owner_reply(out: &str) -> bool {
+    out.trim() == "(true,)"
+}
+
+/// The Linux tray icon is a StatusNotifierItem, which only shows when a
+/// StatusNotifierWatcher runs on the session bus. KDE Plasma always has one
+/// (X11 and Wayland); GNOME only with an AppIndicator extension (Ubuntu ships
+/// one, stock GNOME does not). Without it there is no icon to bring a hidden
+/// window back, so the close button must quit instead. Checked on each close
+/// so enabling the extension later takes effect.
+#[cfg(target_os = "linux")]
+fn tray_available() -> bool {
+    std::process::Command::new("gdbus")
+        .args([
+            "call", "--session", "--timeout", "2",
+            "--dest", "org.freedesktop.DBus",
+            "--object-path", "/org/freedesktop/DBus",
+            "--method", "org.freedesktop.DBus.NameHasOwner",
+            "org.kde.StatusNotifierWatcher",
+        ])
+        .output()
+        .map(|o| o.status.success() && name_has_owner_reply(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn tray_available() -> bool {
+    true
+}
+
 fn hide_main_window(app: &AppHandle) {
     if let Some(win) = app.get_window("main") {
         win.hide().ok();
@@ -456,12 +490,19 @@ fn main() {
         .system_tray(build_tray())
         // The close button hides the window and the app keeps running in the tray,
         // so messages and calls still arrive. Quit in the tray menu stops it and
-        // the gateway; launching Proxion again brings the window back.
+        // the gateway; launching Proxion again brings the window back. With no
+        // tray to come back from (Linux without a StatusNotifierWatcher) the
+        // close button quits.
         .on_window_event(|event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event.event() {
                 if event.window().label() == "main" {
                     api.prevent_close();
                     event.window().hide().ok();
+                    if !tray_available() {
+                        let app = event.window().app_handle();
+                        shutdown_gateway(&app);
+                        app.exit(0);
+                    }
                 }
             }
         })
@@ -519,10 +560,15 @@ fn main() {
                 std::thread::spawn(register_url_scheme);
             }
 
-            // Hide window if launched with --autostart
+            // Launched with --autostart: start in the tray, or minimized when
+            // there is no tray to open it from.
             if app.state::<IsAutostartLaunch>().0 {
                 if let Some(win) = app.get_window("main") {
-                    win.hide().ok();
+                    if tray_available() {
+                        win.hide().ok();
+                    } else {
+                        win.minimize().ok();
+                    }
                 }
             }
 
@@ -628,7 +674,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        desktop_exec_quote, desktop_handler_entry, install_kind, parse_deep_link,
+        desktop_exec_quote, desktop_handler_entry, install_kind, name_has_owner_reply, parse_deep_link,
         parse_gateway_error, self_update_supported, updater_target_for,
         windows_scheme_command, InstallKind,
     };
@@ -662,6 +708,14 @@ mod tests {
         assert_eq!(install_kind("linux", d, None), InstallKind::LinuxPackage);
         assert_eq!(install_kind("linux", d, Some(OsStr::new(""))), InstallKind::LinuxPackage);
         assert_eq!(install_kind("macos", d, None), InstallKind::Other);
+    }
+
+    #[test]
+    fn tray_watcher_reply_is_parsed() {
+        assert!(name_has_owner_reply("(true,)\n"));
+        assert!(!name_has_owner_reply("(false,)\n"));
+        assert!(!name_has_owner_reply(""));
+        assert!(!name_has_owner_reply("Error: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown"));
     }
 
     #[test]

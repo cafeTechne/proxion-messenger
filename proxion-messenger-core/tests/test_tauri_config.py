@@ -172,6 +172,20 @@ def test_close_button_hides_to_tray_and_quit_still_stops_gateway():
     assert re.search(r"RunEvent::Exit = event \{\s*shutdown_gateway\(app\)", src)
 
 
+def test_close_quits_on_linux_without_a_tray():
+    """GNOME without an AppIndicator extension shows no tray icon, so hiding the
+    window on close would leave Proxion running with no way back to it."""
+    src = _read(_MAIN_RS)
+    m = re.search(r"\.on_window_event\(.*?\n        \}\)", src, re.S)
+    assert m and "if !tray_available()" in m.group(0)
+    assert "shutdown_gateway(&app)" in m.group(0) and "app.exit(0)" in m.group(0)
+    linux = re.search(r'#\[cfg\(target_os = "linux"\)\]\s*fn tray_available\(\).*?\n\}', src, re.S)
+    assert linux and "org.kde.StatusNotifierWatcher" in linux.group(0)
+    # Autostart without a tray starts minimized, not hidden.
+    auto = re.search(r"IsAutostartLaunch>\(\)\.0 \{(.*?)\n            \}", src, re.S)
+    assert auto and "tray_available()" in auto.group(1) and "minimize()" in auto.group(1)
+
+
 def test_updater_picks_the_installed_artifact():
     src = _read(_MAIN_RS)
     assert ".updater_target(" in src, "updater uses the manifest default for every install"
