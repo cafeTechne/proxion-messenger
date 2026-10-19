@@ -239,9 +239,9 @@ async def test_oversized_ws_message_rejected(tmp_path):
 # ── 11.6.7 — schema_version table exists after DB init ──────────────────────
 
 def test_schema_version_table_exists(tmp_path):
-    """R11.6.7: LocalStore creates schema_version table with a non-negative integer row."""
+    """R11.6.7: LocalStore creates schema_version table holding the current version."""
     store = LocalStore(str(tmp_path / "test.db"))
     with store._conn() as conn:
         row = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
     assert row is not None, "schema_version table is empty after init"
-    assert row["version"] >= 0, f"schema_version.version is negative: {row['version']}"
+    assert row["version"] == LocalStore._SCHEMA_VERSION

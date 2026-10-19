@@ -129,7 +129,8 @@ def test_handshake_produces_cert(alice, bob, store, alice_caps, bob_caps):
     assert valid, "Certificate signature should be valid"
     assert cert.issuer == _pub_bytes(alice["identity_priv"]).hex()
     assert cert.subject == _pub_bytes(bob["identity_priv"]).hex()
-    assert len(cert.capabilities) >= 0
+    # Bob echoed none of Alice's offer, so the cert grants nothing.
+    assert cert.capabilities == []
 
 
 def test_cert_delivery_to_bob(alice, bob, store, alice_caps, bob_caps):

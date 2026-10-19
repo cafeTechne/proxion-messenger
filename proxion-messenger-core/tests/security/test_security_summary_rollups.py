@@ -42,15 +42,24 @@ class TestSecuritySummaryRollups:
         summary = store.get_security_summary()
         assert summary["hours"] == 24  # Default should be 24
 
-    def test_security_summary_all_counters_non_negative(self, tmp_path):
+    def test_security_summary_counts_recorded_events(self, tmp_path):
         from proxion_messenger_core.local_store import LocalStore
         store = LocalStore(str(tmp_path / "test4.db"))
 
-        summary = store.get_security_summary(hours=24)
+        counters = ("rate_limits_triggered", "schema_rejects", "relay_replay_rejects",
+                    "auth_lockouts", "webhook_failures")
+        empty = store.get_security_summary(hours=24)
+        assert {k: empty[k] for k in counters} == dict.fromkeys(counters, 0)
 
-        # All counters should be non-negative
-        assert summary["rate_limits_triggered"] >= 0
-        assert summary["schema_rejects"] >= 0
-        assert summary["relay_replay_rejects"] >= 0
-        assert summary["auth_lockouts"] >= 0
-        assert summary["webhook_failures"] >= 0
+        store.save_audit_log("rate_limit_exceeded", "warning")
+        store.save_audit_log("relay_replay_rejected", "warning")
+        store.save_audit_log("relay_replay_rejected", "warning")
+        store.save_security_event("schema_reject", "info")
+        store.save_security_event("auth_lockout", "warning")
+        store.save_security_event("unrelated_event", "info")
+
+        summary = store.get_security_summary(hours=24)
+        assert {k: summary[k] for k in counters} == {
+            "rate_limits_triggered": 1, "schema_rejects": 1, "relay_replay_rejects": 2,
+            "auth_lockouts": 1, "webhook_failures": 0,
+        }

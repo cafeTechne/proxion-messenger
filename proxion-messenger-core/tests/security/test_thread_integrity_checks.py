@@ -74,7 +74,7 @@ class TestThreadIntegrityChecks:
         run(gateway._handle_get_local_history(ws, {"thread_id": room_id}))
         state = gw_store.get_thread_integrity_state(room_id)
         assert state is not None
-        assert state["last_seq_num"] >= 0
+        assert state["last_seq_num"] == 2
 
     def test_history_flags_seq_num_gap(self, gateway):
         """Non-monotonic seq_num triggers integrity_warning in response."""

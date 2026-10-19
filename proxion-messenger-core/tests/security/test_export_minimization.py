@@ -39,7 +39,7 @@ def test_minimized_export_truncates_large_content(store):
             content = msg.get("content", "")
             assert len(content.encode("utf-8")) <= 4096 + 10  # +10 for ellipsis chars
             return
-    pytest.skip("Message not found in export")
+    pytest.fail("msg-1 missing from the export")
 
 
 def test_full_export_preserves_full_content(store):
@@ -48,7 +48,7 @@ def test_full_export_preserves_full_content(store):
         if msg.get("message_id") == "msg-1":
             assert len(msg["content"]) == 8192
             return
-    pytest.skip("Message not found in export")
+    pytest.fail("msg-1 missing from the export")
 
 
 def test_minimized_export_redacts_token_fields(tmp_path):

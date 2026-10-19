@@ -38,7 +38,10 @@ class TestSpecDriftReportGeneratedWithRequiredFields:
         """spec-drift-summary.md must exist and contain structured content."""
         summary_path = REPO_ROOT / "artifacts" / "spec-drift-summary.md"
         if not summary_path.exists():
-            pytest.skip("Run test_spec_drift_report_generated_with_required_fields first")
+            # Generate it here rather than relying on the test above running first.
+            subprocess.run(["node", str(DRIFT_SCRIPT)], capture_output=True, text=True,
+                           cwd=str(REPO_ROOT), timeout=30)
+        assert summary_path.exists(), "spec_drift_watch.mjs did not write spec-drift-summary.md"
         content = summary_path.read_text()
         assert "Severity" in content or "severity" in content.lower()
         assert "Spec" in content

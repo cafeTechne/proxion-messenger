@@ -42,6 +42,13 @@ def _room(gw, ws):
     return room_id
 
 
+def _sent_filenames(ws) -> list:
+    """Filenames of the file messages broadcast to *ws*; fails on any error."""
+    events = [json.loads(c.args[0]) for c in ws.send.call_args_list]
+    assert not [e for e in events if e.get("type") == "error"], events
+    return [e["file"]["filename"] for e in events if e.get("file")]
+
+
 def _b64(data: bytes) -> str:
     return base64.b64encode(data).decode()
 
@@ -97,10 +104,7 @@ async def test_directory_traversal_filename_stripped(gateway):
         "mime_type": "image/png",
         "data_b64": _b64(png_magic),
     })
-    # Should succeed (PNG magic passes) and broadcast without the traversal
-    for call in gateway._local_rooms[room_id]["members"]:
-        pass  # we mainly care no exception was raised and no error sent
-    # Verify no 'error' type in sends (might not send if room not in local_rooms post-test)
+    assert _sent_filenames(ws) == ["passwd"]
 
 
 @pytest.mark.asyncio
@@ -115,7 +119,7 @@ async def test_windows_path_filename_stripped(gateway):
         "mime_type": "image/png",
         "data_b64": _b64(png_magic),
     })
-    # If an error is sent, it should not mention filename traversal success
+    assert _sent_filenames(ws) == ["evil.dll"]
 
 
 # ---------------------------------------------------------------------------

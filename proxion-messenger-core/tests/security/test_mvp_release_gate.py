@@ -18,15 +18,8 @@ def store(tmp_path):
 
 
 def test_mvp_working_gate_fails_when_critical_events_recent(store):
-    try:
-        store.record_security_event(
-            event_type="authn_bypass_confirmed",
-            severity="critical",
-            actor_webid="attacker",
-            detail={},
-        )
-    except Exception:
-        pytest.skip("record_security_event not available — skipping")
+    assert evaluate_mvp_working_gate(store)["pass"] is True
+    store.save_security_event("authn_bypass_confirmed", "critical", webid="attacker")
 
     result = evaluate_mvp_working_gate(store)
     assert result["pass"] is False
@@ -37,7 +30,9 @@ def test_mvp_security_gate_checks_schema_version(store):
     result = evaluate_mvp_security_gate(store)
     assert isinstance(result["pass"], bool)
     assert "reason" in result
-    assert result["pass"] is True or "schema_version" in result.get("detail", {})
+    # A fresh store is at the current schema, so the gate passes and says why.
+    assert result["pass"] is True
+    assert result["detail"]["schema_version"] == store._SCHEMA_VERSION
 
 
 def test_mvp_release_gate_passes_when_all_conditions_met(store):
