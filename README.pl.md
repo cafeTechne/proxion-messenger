@@ -125,7 +125,7 @@ uruchomić własną, stale działającą bramę (na przykład, aby skierować te
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # opcjonalne poświadczenia poda; zostaw puste dla trybu tylko lokalnego
 python run_gateway.py
-# otwórz http://localhost:8080
+# otwórz https://127.0.0.1:8080
 ```
 
 Zbuduj natywny instalator:
@@ -140,8 +140,9 @@ cd tauri-app && cargo tauri build # natywny instalator
 Uruchom testy:
 
 ```bash
-cd proxion-messenger-core && pytest    # backend
-cd web && npm test                     # frontend
+pip install -e "./proxion-messenger-core[gateway,test]"
+(cd proxion-messenger-core && pytest -m "not integration")   # backend
+(cd web && npm ci && npm test)                                # frontend
 ```
 
 **Jak to wszystko się łączy.** Frontend (w `web/`) jest serwowany przez małą **bramę** (w

@@ -122,7 +122,7 @@ için):
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # isteğe bağlı pod kimlik bilgileri; yalnızca yerel için boş bırakın
 python run_gateway.py
-# http://localhost:8080 adresini açın
+# https://127.0.0.1:8080 adresini açın
 ```
 
 Yerel bir yükleyici oluşturun:
@@ -137,8 +137,9 @@ cd tauri-app && cargo tauri build # yerel yükleyici
 Testleri çalıştırın:
 
 ```bash
-cd proxion-messenger-core && pytest    # arka uç
-cd web && npm test                     # ön uç
+pip install -e "./proxion-messenger-core[gateway,test]"
+(cd proxion-messenger-core && pytest -m "not integration")   # arka uç
+(cd web && npm ci && npm test)                                # ön uç
 ```
 
 **Her şey nasıl bir araya geliyor.** Ön uç (`web/` içinde), anahtarlarınızı tutan, pod'unuzla

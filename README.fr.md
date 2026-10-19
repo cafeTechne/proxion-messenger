@@ -128,7 +128,7 @@ téléphone vers votre ordinateur) :
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # identifiants de pod facultatifs ; laissez vide pour un usage local seul
 python run_gateway.py
-# ouvrez http://localhost:8080
+# ouvrez https://127.0.0.1:8080
 ```
 
 Construire un installeur natif :
@@ -143,8 +143,9 @@ cd tauri-app && cargo tauri build # installeur natif
 Lancer les tests :
 
 ```bash
-cd proxion-messenger-core && pytest    # backend
-cd web && npm test                     # frontend
+pip install -e "./proxion-messenger-core[gateway,test]"
+(cd proxion-messenger-core && pytest -m "not integration")   # backend
+(cd web && npm ci && npm test)                                # frontend
 ```
 
 **Comment tout s'articule.** Le frontend (dans `web/`) est servi par une petite **passerelle**

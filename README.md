@@ -49,8 +49,9 @@ screen sharing, files, reactions, replies, and more, on Windows, macOS, Linux, a
 
 Because Proxion is not signed by Apple or Microsoft (on purpose, so no gatekeeper sits
 between you and your own software), your OS shows a one-time prompt the first time you open
-it. On Windows choose *More info then Run anyway*; on macOS *right-click then Open*; Linux
-has no prompt.
+it. On Windows choose *More info then Run anyway*. On macOS 15 (Sequoia) and later, try to
+open it once, then go to *System Settings > Privacy & Security* and click *Open Anyway*;
+on earlier macOS, *right-click then Open*. Linux has no prompt.
 
 ## What you can do
 
@@ -59,8 +60,9 @@ has no prompt.
 - **Keep your history.** Everything lives in your pod, in an open format, so it is yours to
   keep, read with other tools, and take with you.
 - **Truly private conversations.** Direct messages are end-to-end encrypted, and you can
-  confirm you are really talking to your contact with a short safety phrase you read aloud
-  together. Calls are encrypted the same way.
+  confirm you are really talking to your contact by comparing a 30-digit safety number.
+  Calls are encrypted by WebRTC, and each side signs its call keys with its identity, so
+  a gateway in the middle cannot listen in.
 - **Reach anyone on Solid.** Find and invite people across the wider Solid ecosystem, not
   just other Proxion users.
 - **Use it anywhere.** Desktop, browser, and mobile, offline-capable, in 16 languages
@@ -79,7 +81,8 @@ read and join it.
 <img src="landing/assets/interop-sidebyside.png" alt="The same room shown side by side in Proxion and the SolidOS databrowser, with the same messages" width="900">
 
 - **Open a Proxion room in [SolidOS](https://solidos.org)** and every message is there.
-  This is checked against the real SolidOS in our tests, not just claimed.
+  `web/solidos-render.test.js` checks this by driving the real SolidOS databrowser
+  against a live pod.
 - **Find and invite people by their WebID.** Discover the chats someone hosts, or drop an
   invitation in their Solid inbox that any Solid app can read.
 - **See new messages and invitations in real time,** even reaching you when Proxion is
@@ -124,7 +127,7 @@ always-on gateway (for example to point a phone at your desktop):
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # optional pod credentials; leave blank for local-only
 python run_gateway.py
-# open http://localhost:8080
+# open https://127.0.0.1:8080 and accept the self-signed certificate once
 ```
 
 Build a native installer:
@@ -139,8 +142,9 @@ cd tauri-app && cargo tauri build # native installer
 Run the tests:
 
 ```bash
-cd proxion-messenger-core && pytest    # backend
-cd web && npm test                     # frontend
+pip install -e "./proxion-messenger-core[gateway,test]"
+(cd proxion-messenger-core && pytest -m "not integration")   # backend; integration needs a Solid server
+(cd web && npm ci && npm test)                                # frontend
 ```
 
 **How it fits together.** The frontend (in `web/`) is served by a small **gateway** (in
@@ -149,7 +153,8 @@ to your contacts' gateways. On desktop the gateway is bundled inside the app and
 with it, so you never see it or install Python. The gateway exists because Solid covers
 data and identity but not live delivery, presence, or call setup, the same role a
 homeserver plays for Matrix or an SMTP server plays for email. Details in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md); every
+setting is in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ## License
 

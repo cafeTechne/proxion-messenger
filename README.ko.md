@@ -115,7 +115,7 @@ Proxion은 오픈 소스이며 버그 신고부터 코드까지 기여를 진심
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # 선택적 팟 자격 증명; 로컬 전용이면 비워 두세요
 python run_gateway.py
-# http://localhost:8080 열기
+# https://127.0.0.1:8080 열기
 ```
 
 네이티브 설치 프로그램 빌드:
@@ -130,8 +130,9 @@ cd tauri-app && cargo tauri build # 네이티브 설치 프로그램
 테스트 실행:
 
 ```bash
-cd proxion-messenger-core && pytest    # 백엔드
-cd web && npm test                     # 프론트엔드
+pip install -e "./proxion-messenger-core[gateway,test]"
+(cd proxion-messenger-core && pytest -m "not integration")   # 백엔드
+(cd web && npm ci && npm test)                                # 프론트엔드
 ```
 
 **어떻게 맞물리는가.** 프런트엔드(`web/` 안)는 당신의 키를 보관하고 팟과 통신하며 연락처의

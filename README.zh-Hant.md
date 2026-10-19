@@ -108,7 +108,7 @@ Proxion 是開源的，我們真心歡迎各種貢獻，從錯誤回報到程式
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # 選用的 pod 憑證；僅本機使用時留空
 python run_gateway.py
-# 開啟 http://localhost:8080
+# 開啟 https://127.0.0.1:8080
 ```
 
 建置原生安裝程式：
@@ -123,8 +123,9 @@ cd tauri-app && cargo tauri build # 原生安裝程式
 執行測試：
 
 ```bash
-cd proxion-messenger-core && pytest    # 後端
-cd web && npm test                     # 前端
+pip install -e "./proxion-messenger-core[gateway,test]"
+(cd proxion-messenger-core && pytest -m "not integration")   # 後端
+(cd web && npm ci && npm test)                                # 前端
 ```
 
 **各部分如何協作。** 前端（在 `web/` 中）由一個小型**閘道**（在 `proxion-messenger-core/` 中）

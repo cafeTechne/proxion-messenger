@@ -125,7 +125,7 @@ gateway Anda sendiri yang selalu aktif (misalnya untuk mengarahkan ponsel ke des
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # kredensial pod opsional; biarkan kosong untuk mode lokal saja
 python run_gateway.py
-# buka http://localhost:8080
+# buka https://127.0.0.1:8080
 ```
 
 Bangun pemasang native:
@@ -140,8 +140,9 @@ cd tauri-app && cargo tauri build # pemasang native
 Jalankan pengujian:
 
 ```bash
-cd proxion-messenger-core && pytest    # backend
-cd web && npm test                     # frontend
+pip install -e "./proxion-messenger-core[gateway,test]"
+(cd proxion-messenger-core && pytest -m "not integration")   # backend
+(cd web && npm ci && npm test)                                # frontend
 ```
 
 **Bagaimana semuanya menyatu.** Frontend (di `web/`) dilayani oleh sebuah **gateway** kecil (di

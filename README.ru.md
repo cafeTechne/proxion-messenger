@@ -122,7 +122,7 @@ Solid и что-то не взаимодействует так, как вы о�
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # необязательные учётные данные pod; оставьте пустым для локального режима
 python run_gateway.py
-# откройте http://localhost:8080
+# откройте https://127.0.0.1:8080
 ```
 
 Собрать нативный установщик:
@@ -137,8 +137,9 @@ cd tauri-app && cargo tauri build # нативный установщик
 Запустить тесты:
 
 ```bash
-cd proxion-messenger-core && pytest    # бэкенд
-cd web && npm test                     # фронтенд
+pip install -e "./proxion-messenger-core[gateway,test]"
+(cd proxion-messenger-core && pytest -m "not integration")   # бэкенд
+(cd web && npm ci && npm test)                                # фронтенд
 ```
 
 **Как всё устроено.** Фронтенд (в `web/`) обслуживается небольшим **шлюзом** (в

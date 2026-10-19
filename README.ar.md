@@ -112,7 +112,7 @@ Proxion مفتوح المصدر والمساهمات مُرحَّب بها حق�
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # optional pod credentials; leave blank for local-only
 python run_gateway.py
-# open http://localhost:8080
+# open https://127.0.0.1:8080
 ```
 
 ابنِ مثبِّتاً أصلياً:
@@ -127,8 +127,9 @@ cd tauri-app && cargo tauri build # native installer
 شغّل الاختبارات:
 
 ```bash
-cd proxion-messenger-core && pytest    # backend
-cd web && npm test                     # frontend
+pip install -e "./proxion-messenger-core[gateway,test]"
+(cd proxion-messenger-core && pytest -m "not integration")   # backend
+(cd web && npm ci && npm test)                                # frontend
 ```
 
 **كيف يترابط كل شيء.** الواجهة الأمامية (في `web/`) تخدمها **بوابة** صغيرة (في

@@ -123,7 +123,7 @@ của riêng bạn (ví dụ để hướng một điện thoại tới máy tí
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # thông tin đăng nhập pod tùy chọn; để trống nếu chỉ dùng cục bộ
 python run_gateway.py
-# mở http://localhost:8080
+# mở https://127.0.0.1:8080
 ```
 
 Xây dựng trình cài đặt gốc:
@@ -138,8 +138,9 @@ cd tauri-app && cargo tauri build # trình cài đặt gốc
 Chạy các bài kiểm thử:
 
 ```bash
-cd proxion-messenger-core && pytest    # phần phụ trợ
-cd web && npm test                     # phần giao diện
+pip install -e "./proxion-messenger-core[gateway,test]"
+(cd proxion-messenger-core && pytest -m "not integration")   # phần phụ trợ
+(cd web && npm ci && npm test)                                # phần giao diện
 ```
 
 **Mọi thứ khớp với nhau ra sao.** Phần giao diện (trong `web/`) được phục vụ bởi một **cổng**

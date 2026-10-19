@@ -126,7 +126,7 @@ o seu próprio gateway sempre ativo (por exemplo, para apontar um celular para o
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # credenciais de pod opcionais; deixe em branco para uso só local
 python run_gateway.py
-# abra http://localhost:8080
+# abra https://127.0.0.1:8080
 ```
 
 Construir um instalador nativo:
@@ -141,8 +141,9 @@ cd tauri-app && cargo tauri build # instalador nativo
 Rodar os testes:
 
 ```bash
-cd proxion-messenger-core && pytest    # backend
-cd web && npm test                     # frontend
+pip install -e "./proxion-messenger-core[gateway,test]"
+(cd proxion-messenger-core && pytest -m "not integration")   # backend
+(cd web && npm ci && npm test)                                # frontend
 ```
 
 **Como tudo se encaixa.** O frontend (em `web/`) é servido por um pequeno **gateway** (em

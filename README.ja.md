@@ -115,7 +115,7 @@ Proxion はオープンソースで、バグ報告からコードまで、貢献
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # ポッドの認証情報は任意。ローカルのみなら空欄のままで
 python run_gateway.py
-# http://localhost:8080 を開く
+# https://127.0.0.1:8080 を開く
 ```
 
 ネイティブインストーラーをビルドする:
@@ -130,8 +130,9 @@ cd tauri-app && cargo tauri build # ネイティブインストーラー
 テストを実行する:
 
 ```bash
-cd proxion-messenger-core && pytest    # バックエンド
-cd web && npm test                     # フロントエンド
+pip install -e "./proxion-messenger-core[gateway,test]"
+(cd proxion-messenger-core && pytest -m "not integration")   # バックエンド
+(cd web && npm ci && npm test)                                # フロントエンド
 ```
 
 **どう組み合わさっているか。** フロントエンド（`web/` 内）は、鍵を保持し、ポッドと通信し、
