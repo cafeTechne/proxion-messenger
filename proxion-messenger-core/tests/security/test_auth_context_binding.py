@@ -34,9 +34,9 @@ def run(coro):
 
 
 class TestAuthContextBinding:
-    def test_auth_challenge_stores_ctx(self, gateway):
+    def test_auth_challenge_stores_ctx(self, monkeypatch, gateway):
         import os
-        os.environ["PROXION_REQUIRE_AUTH"] = "1"
+        monkeypatch.setenv("PROXION_REQUIRE_AUTH", "1")
         ws = make_ws()
         gateway._session_meta[ws] = {"ip_addr": "1.2.3.4", "user_agent_hash": "abc"}
         run(gateway._handle_register(ws, {
@@ -51,7 +51,6 @@ class TestAuthContextBinding:
         assert "auth_ctx" in pending
         assert isinstance(pending["auth_ctx"], str)
         assert len(pending["auth_ctx"]) == 64  # sha256 hex
-        os.environ.pop("PROXION_REQUIRE_AUTH", None)
 
     def test_auth_response_accepted_on_matching_context(self, gateway):
         """Auth succeeds when IP/UA hash matches stored context."""

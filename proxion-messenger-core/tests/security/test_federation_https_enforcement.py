@@ -30,9 +30,9 @@ def run(coro):
 
 
 class TestFederationHttpsEnforcement:
-    def test_friend_request_rejects_http_endpoint_by_default(self, gateway):
+    def test_friend_request_rejects_http_endpoint_by_default(self, monkeypatch, gateway):
         """send_friend_request rejects http:// target unless override env set."""
-        os.environ.pop("PROXION_ALLOW_INSECURE_FEDERATION", None)
+        monkeypatch.delenv("PROXION_ALLOW_INSECURE_FEDERATION", raising=False)
         ws = make_ws()
         identity = "did:key:z6MkSomeKey123456789012345678901234567890123456"
         gateway._client_webids[ws] = "did:key:z6MkCallerKey"
@@ -52,9 +52,9 @@ class TestFederationHttpsEnforcement:
         errors = [c for c in calls if c.get("message") == "insecure_federation_endpoint"]
         assert len(errors) >= 1
 
-    def test_friend_request_allows_https_by_default(self, gateway):
+    def test_friend_request_allows_https_by_default(self, monkeypatch, gateway):
         """send_friend_request does not reject https:// endpoints."""
-        os.environ.pop("PROXION_ALLOW_INSECURE_FEDERATION", None)
+        monkeypatch.delenv("PROXION_ALLOW_INSECURE_FEDERATION", raising=False)
         ws = make_ws()
         gateway._client_webids[ws] = "did:key:z6MkCallerKey"
         gateway._session_meta[ws] = {"ip_addr": "127.0.0.1"}
@@ -72,9 +72,9 @@ class TestFederationHttpsEnforcement:
         insecure_errors = [c for c in calls if c.get("message") == "insecure_federation_endpoint"]
         assert len(insecure_errors) == 0
 
-    def test_http_allowed_when_override_env_set(self, gateway):
+    def test_http_allowed_when_override_env_set(self, monkeypatch, gateway):
         """With PROXION_ALLOW_INSECURE_FEDERATION=1, http:// endpoints pass the HTTPS check."""
-        os.environ["PROXION_ALLOW_INSECURE_FEDERATION"] = "1"
+        monkeypatch.setenv("PROXION_ALLOW_INSECURE_FEDERATION", "1")
         ws = make_ws()
         gateway._client_webids[ws] = "did:key:z6MkCallerKey"
         gateway._session_meta[ws] = {"ip_addr": "127.0.0.1"}
@@ -91,11 +91,10 @@ class TestFederationHttpsEnforcement:
         calls = [json.loads(c.args[0]) for c in ws.send.call_args_list if c.args]
         insecure_errors = [c for c in calls if c.get("message") == "insecure_federation_endpoint"]
         assert len(insecure_errors) == 0
-        os.environ.pop("PROXION_ALLOW_INSECURE_FEDERATION", None)
 
-    def test_invite_post_rejects_http_hint_by_default(self, gateway):
+    def test_invite_post_rejects_http_hint_by_default(self, monkeypatch, gateway):
         """_handle_invite_post rejects inbound invites with http:// endpoint hints."""
-        os.environ.pop("PROXION_ALLOW_INSECURE_FEDERATION", None)
+        monkeypatch.delenv("PROXION_ALLOW_INSECURE_FEDERATION", raising=False)
         from proxion_messenger_core.federation import FederationInvite, Capability
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
         from proxion_messenger_core.didkey import pub_key_to_did

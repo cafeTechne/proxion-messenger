@@ -30,8 +30,8 @@ def run(coro):
 
 
 class TestSingleSessionMode:
-    def test_new_login_revokes_prior_sessions_when_enabled(self, gateway):
-        os.environ["PROXION_SINGLE_SESSION"] = "1"
+    def test_new_login_revokes_prior_sessions_when_enabled(self, monkeypatch, gateway):
+        monkeypatch.setenv("PROXION_SINGLE_SESSION", "1")
         identity = "did:key:z6MkTestIdentity"
         ws1 = make_ws()
         ws2 = make_ws()
@@ -51,10 +51,9 @@ class TestSingleSessionMode:
         revoked = [c for c in calls if c.get("type") == "session_revoked"]
         assert len(revoked) >= 1
         assert revoked[0]["reason"] == "single_session_enforced"
-        os.environ.pop("PROXION_SINGLE_SESSION", None)
 
-    def test_single_session_mode_noop_when_disabled(self, gateway):
-        os.environ.pop("PROXION_SINGLE_SESSION", None)
+    def test_single_session_mode_noop_when_disabled(self, monkeypatch, gateway):
+        monkeypatch.delenv("PROXION_SINGLE_SESSION", raising=False)
         identity = "did:key:z6MkTestIdentityB"
         ws1 = make_ws()
         ws2 = make_ws()
@@ -72,8 +71,8 @@ class TestSingleSessionMode:
         revoked = [c for c in calls if c.get("type") == "session_revoked"]
         assert len(revoked) == 0
 
-    def test_revoked_session_receives_reason_single_session_enforced(self, gateway):
-        os.environ["PROXION_SINGLE_SESSION"] = "1"
+    def test_revoked_session_receives_reason_single_session_enforced(self, monkeypatch, gateway):
+        monkeypatch.setenv("PROXION_SINGLE_SESSION", "1")
         identity = "did:key:z6MkTestIdentityC"
         ws1 = make_ws()
         ws2 = make_ws()
@@ -89,4 +88,3 @@ class TestSingleSessionMode:
         calls = [json.loads(c.args[0]) for c in ws1.send.call_args_list if c.args]
         revoked = [c for c in calls if c.get("type") == "session_revoked"]
         assert revoked[0]["reason"] == "single_session_enforced"
-        os.environ.pop("PROXION_SINGLE_SESSION", None)
