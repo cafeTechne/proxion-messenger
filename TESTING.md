@@ -2,12 +2,19 @@
 
 ## Quick single-user test (no pod, local only)
 
+Automated suites are described in [CONTRIBUTING.md](CONTRIBUTING.md) and
+[web/README.md](web/README.md). This guide is the manual walk-through.
+
+Use a scratch data dir and blank pod settings so a test never touches a real pod:
+
 ```powershell
-$env:PROXION_HTTP_PORT = "8080"
+$env:PROXION_DATA_DIR = "$env:TEMP\proxion-test"
+$env:PROXION_CSS_URL = ""; $env:PROXION_CSS_EMAIL = ""; $env:PROXION_CSS_PASSWORD = ""
 python run_gateway.py
 ```
 
-Open `http://127.0.0.1:8080/`. Onboarding flow:
+Open `https://127.0.0.1:8080/` and accept the self-signed certificate (or set
+`$env:PROXION_AUTO_TLS = "0"` first and use `http://`). Onboarding flow:
 1. Welcome → Continue
 2. Display name → Continue
 3. Set presence → Continue
@@ -24,7 +31,7 @@ Voice calls require a second browser tab (see below).
 
 Same gateway, two browser tabs. Tests local relay.
 
-1. Both tabs: `http://127.0.0.1:8080/` — complete onboarding with different display names
+1. Both tabs: `https://127.0.0.1:8080/`, complete onboarding with different display names
 2. Tab A: copy DID from Settings → share with Tab B
 3. Tab B: click ＋ Add Contact → paste Tab A's DID → DM opens
 4. Send messages in both directions
@@ -34,35 +41,46 @@ Same gateway, two browser tabs. Tests local relay.
 
 ## Two-user test (separate gateways, federation)
 
+Two loopback gateways cannot verify each other's self-signed certificates, so run
+them on plain http/ws with loopback relaying allowed (the same settings the
+two-gateway smokes use, see `scripts/run_test_gateway.py`):
+
 ```powershell
+# both terminals
+$env:PROXION_AUTO_TLS="0"; $env:PROXION_HOST="127.0.0.1"; $env:PROXION_REQUIRE_AUTH="0"
+$env:PROXION_ALLOW_PRIVATE_RELAY="1"; $env:PROXION_ALLOW_INSECURE_FEDERATION="1"
+$env:PROXION_CSS_URL=""; $env:PROXION_PUBLIC_URL=""
+
 # Terminal A
-$env:PROXION_HTTP_PORT="8080"; $env:PROXION_WS_PORT="7474"
-$env:PROXION_PUBLIC_URL="ws://localhost:7474"; python run_gateway.py
+$env:PROXION_DATA_DIR="$env:TEMP\proxion-a"; $env:PROXION_HTTP_PORT="8080"; $env:PROXION_WS_PORT="7474"
+python run_gateway.py
 
 # Terminal B
-$env:PROXION_HTTP_PORT="8081"; $env:PROXION_WS_PORT="7475"
-$env:PROXION_PUBLIC_URL="ws://localhost:7475"; python run_gateway.py
+$env:PROXION_DATA_DIR="$env:TEMP\proxion-b"; $env:PROXION_HTTP_PORT="8081"; $env:PROXION_WS_PORT="7475"
+python run_gateway.py
 ```
 
-Alice at `http://localhost:8080`, Bob at `http://localhost:8081`.
-Bob: Add Contact → paste `{alice_did}@http://localhost:8080`.
+Alice at `http://127.0.0.1:8080`, Bob at `http://127.0.0.1:8081`.
+Bob: Add Contact → paste Alice's address (Settings shows it, `did:key:…@http://127.0.0.1:8080`).
+`npm run smoke:cross-gateway` in `web/` automates this.
 
 ---
 
 ## Solid OIDC flow (requires internet + a Solid pod account)
 
-1. Open `http://127.0.0.1:8080/` in a fresh private window (no localStorage)
+1. Open `https://127.0.0.1:8080/` in a fresh private window (no localStorage)
 2. Onboarding steps 1–3 (name + presence)
 3. Step 4: click **Sign in with solidcommunity.net**
-4. Authenticate at solidcommunity.net → confirm redirect back to `http://127.0.0.1:8080/`
+4. Authenticate at solidcommunity.net → confirm redirect back to `https://127.0.0.1:8080/`
 5. Verify:
    - Onboarding auto-advances to step 5 (join/create room)
    - Pod-connect banner is hidden
 6. Create a room, send a message
 7. Navigate to your pod in a browser tab:
-   `https://yourname.solidcommunity.net/proxion/rooms/{room_id}/messages/{msg_id}.json`
-   — confirm the JSON file exists
-8. Refresh `http://127.0.0.1:8080/` — session restores, no re-login prompt
+   `https://yourname.solidcommunity.net/proxion/rooms/{room_id}/YYYY/MM/DD/chat.ttl`
+   (today's Long Chat file; layout in [docs/POD_DATA_MODEL.md](docs/POD_DATA_MODEL.md))
+   and confirm your message is in it
+8. Refresh `https://127.0.0.1:8080/`: session restores, no re-login prompt
 9. Open Settings → Pod section → confirm WebID shown and "● Connected"
 10. Click "Sign out of Pod" → pod-connect banner reappears; settings shows disconnected
 
@@ -98,54 +116,52 @@ Two browser tabs on the same gateway. After completing onboarding in both tabs:
 
 ## E2E encryption (full Double Ratchet)
 
-Both tabs must be on the same gateway (two-user test above). After adding each other as contacts and exchanging at least one plaintext DM (so both sides cache the peer's X25519 pub key):
+Both tabs on the same gateway (two-user test above), contacts added both ways. The
+protocol is specified in [docs/E2E_ENCRYPTION.md](docs/E2E_ENCRYPTION.md).
 
-### Setup verification
+### First message
 
-1. Tab A opens DM thread with Tab B — look for the `🔓 E2E` badge in the chat header.
-2. Tab A sends a message. Gateway WS frame should have `"e2e":true,"ratchet_pub":"...","pn":0`.
-3. Tab B receives and decrypts automatically — message text is plaintext in the feed.
-4. Badge in Tab A's header becomes `🔒 E2E` after first encrypted exchange? No — badge is 🔓 until manually verified. The lock/unlock only changes via the Verify button.
-5. DevTools → Application → Local Storage: `proxion_e2e_state_<peerId>` key is present.
+1. Tab A opens the DM with Tab B and sends. The client fetches B's key from the
+   gateway's device roster before the first send; there is no plaintext first
+   message. The WS frame carries `"e2e":true` and ratchet header fields.
+2. Tab B decrypts automatically.
+3. If no key can be found the message is not sent: the text stays in the composer
+   and a notice explains why (an agent without an X25519 key, for example, can be
+   messaged unencrypted only after choosing "Send unencrypted").
 
 ### Multi-round ratchet
 
-6. Send 5 messages A → B, then 5 messages B → A. All should decrypt correctly with no errors.
-7. Alternate: A sends 1, B sends 1, A sends 1, etc. — DH ratchet steps trigger on each direction change. All decrypt correctly.
+4. Send 5 messages A → B, then 5 B → A. All decrypt with no errors.
+5. Alternate one message each way several times. Each direction change is a DH
+   ratchet step; all decrypt.
+6. Edit a message, react to one, and attach a file. The gateway frames carry
+   ciphertext for the edit and file, and an opaque `~…` token for the reaction;
+   Tab B shows the real text, emoji and file.
 
 ### Safety number verification
 
-8. Tab A: click **Verify** button in DM header → verify modal opens.
-9. Modal shows a 30-digit safety number (6 groups of 5 digits, e.g. `12345 67890 ...`).
-10. Tab B: open same modal — safety number must be **identical** (it's symmetric by design).
-11. Tab A: click **Mark as Verified** → badge changes to `🔒 Verified`.
-12. Reload Tab A → verified state persists (stored in localStorage).
-
-### Plaintext fallback (first contact)
-
-13. Clear all `proxion_e2e_*` localStorage keys in Tab A only. Reload Tab A.
-14. Tab A sends a message — no peer pub key yet → message sent in plaintext (no `"e2e":true` in WS frame).
-15. Tab B receives and decrypts as plaintext (no error).
-16. Tab A's outgoing message includes `x25519_pub` — Tab B caches it.
-17. Tab B sends a reply — still no pub for A yet from B's perspective → plaintext.
-18. After one round-trip both sides have each other's pub → next send from either side is encrypted.
+7. Tab A: open the verify dialog from the DM header.
+8. It shows a 30-digit safety number (6 groups of 5 digits).
+9. Tab B: open the same dialog; the number must be **identical** (it is symmetric).
+10. Tab A: click **Mark as verified**; the header shows Verified.
+11. Reload Tab A; the verified state persists.
 
 ### Ratchet state persistence
 
-19. Exchange 3 encrypted messages. Close Tab A completely (not just reload — close the tab).
-20. Reopen `http://127.0.0.1:8080/` in a new tab. Re-register (DID auto-loaded from localStorage).
-21. Send an encrypted message — should work without any re-init prompt.
+12. Exchange 3 encrypted messages. Close Tab A completely (not just reload — close the tab).
+13. Reopen `https://127.0.0.1:8080/` in a new tab. Re-register (DID auto-loaded from localStorage).
+14. Send an encrypted message — should work without any re-init prompt.
 
 ### E2E unit tests
 
 ```powershell
-cd web && npm test          # 39 tests: 15 pod.js + 24 e2e.js
+cd web; npm test            # includes e2e.test.js and the other crypto suites
 ```
 
 ### Python interop tests
 
 ```powershell
-python -m pytest proxion-messenger-core/tests/test_e2e_crypto.py -v   # 28 tests
+python -m pytest proxion-messenger-core/tests/test_e2e_crypto.py -v
 ```
 
 Verifies HKDF-SHA256 salt/info strings, HMAC chain constants, AES-256-GCM wire format,
@@ -157,7 +173,7 @@ the JS implementation in `web/e2e.js`.
 ## Resetting state
 
 ```powershell
-Remove-Item -Recurse -Force ./data   # wipe gateway SQLite
+Remove-Item -Recurse -Force $env:PROXION_DATA_DIR   # wipe the test gateway's keys and database
 ```
 
 To also clear browser session: DevTools → Application → Clear Storage → Clear site data.
