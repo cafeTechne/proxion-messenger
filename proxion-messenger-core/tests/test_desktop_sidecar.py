@@ -374,3 +374,39 @@ def test_frozen_default_data_dir_is_not_the_pyinstaller_temp_dir(tmp_path):
     data_dir = Path(out.stdout.strip().splitlines()[-1])
     assert meipass not in data_dir.parents and data_dir != meipass
     assert data_dir == home / ".proxion" / "data"
+
+
+def test_mcp_client_connects_to_a_direct_run_gateway(sidecars, tmp_path):
+    """The MCP server's GatewayClient reaches `python run_gateway.py` over
+    wss:// by trusting the gateway's own self-signed cert, with verification on."""
+    from proxion_messenger_core.gateway_client import GatewayClient
+    from proxion_messenger_core.persist import AgentState
+    sc = sidecars("mcp", extra_env={"PROXION_AUTO_TLS": "1",
+                                    "PROXION_PUBLIC_URL": "",
+                                    "PROXION_HOST": "127.0.0.1"})
+    sc.wait_ready()
+    cert = tmp_path / "mcp" / "data" / "tls" / "cert.pem"
+
+    async def _go():
+        c = GatewayClient(f"wss://127.0.0.1:{sc.ws_port}", AgentState.generate(),
+                          display_name="Agent", cafile=str(cert))
+        await c.connect()
+        try:
+            return await c.whoami()
+        finally:
+            await c.close()
+
+    who = _run(_go())
+    assert who["did"].startswith("did:key:")
+
+
+def test_mcp_server_finds_the_gateway_cert(tmp_path, monkeypatch):
+    from proxion_messenger_core import mcp_server
+    monkeypatch.delenv("PROXION_GATEWAY_CAFILE", raising=False)
+    monkeypatch.setenv("PROXION_DATA_DIR", str(tmp_path))
+    assert mcp_server._gateway_cafile() is None
+    (tmp_path / "tls").mkdir()
+    (tmp_path / "tls" / "cert.pem").write_text("x")
+    assert mcp_server._gateway_cafile() == str(tmp_path / "tls" / "cert.pem")
+    monkeypatch.setenv("PROXION_GATEWAY_CAFILE", "/elsewhere.pem")
+    assert mcp_server._gateway_cafile() == "/elsewhere.pem"

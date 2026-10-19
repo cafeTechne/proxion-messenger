@@ -12,6 +12,11 @@ Run it (stdio transport, for Claude Desktop / Claude Code):
     pip install -e ".[gateway,mcp]"
     PROXION_GATEWAY_URL=ws://127.0.0.1:7474 proxion-mcp
 
+The desktop app's gateway listens on plain ws://127.0.0.1:7474 (the default).
+A gateway started with ``python run_gateway.py`` serves TLS with a self-signed
+cert: use wss://127.0.0.1:7474 and set PROXION_GATEWAY_CAFILE to its
+``<data dir>/tls/cert.pem`` (found automatically when PROXION_DATA_DIR is set).
+
 Identity: set PROXION_AGENT_STATE (path to an agent.json, plus
 PROXION_AGENT_PASSPHRASE if it is encrypted) to run as a persistent identity;
 otherwise a fresh ephemeral identity is generated for the session. Configure
@@ -48,6 +53,20 @@ def _load_agent() -> AgentState:
     return agent
 
 
+def _gateway_cafile() -> str | None:
+    """The PEM to trust for a wss:// gateway: PROXION_GATEWAY_CAFILE, else the
+    self-signed cert run_gateway.py writes under PROXION_DATA_DIR."""
+    explicit = os.environ.get("PROXION_GATEWAY_CAFILE")
+    if explicit:
+        return explicit
+    data_dir = os.environ.get("PROXION_DATA_DIR")
+    if data_dir:
+        cert = os.path.join(data_dir, "tls", "cert.pem")
+        if os.path.isfile(cert):
+            return cert
+    return None
+
+
 def build_server():
     """Construct the FastMCP server. Imported lazily so the rest of the package
     (and its tests) never hard-depend on the optional ``mcp`` SDK."""
@@ -66,7 +85,7 @@ def build_server():
     async def client() -> GatewayClient:
         async with _connect_lock:
             if _state["client"] is None:
-                c = GatewayClient(url, agent, display_name=name)
+                c = GatewayClient(url, agent, display_name=name, cafile=_gateway_cafile())
                 await c.connect()
                 _log(f"connected to {url} as {c.did}")
                 _state["client"] = c

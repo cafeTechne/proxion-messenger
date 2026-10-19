@@ -29,6 +29,22 @@ from .persist import AgentState
 from .didkey import pub_key_to_did
 
 
+def gateway_ssl_context(cafile: str | None = None):
+    """TLS context for a ``wss://`` gateway: system roots, plus ``cafile``.
+
+    Verification stays on. A self-signed gateway cert is trusted by pointing
+    ``cafile`` at it, never by turning checks off.
+    """
+    import ssl
+    ctx = ssl.create_default_context()
+    if cafile:
+        ctx.load_verify_locations(cafile=cafile)
+        # The self-signed gateway cert is a leaf used as its own trust anchor;
+        # strict mode (default since Python 3.13) rejects that shape.
+        ctx.verify_flags &= ~getattr(ssl, "VERIFY_X509_STRICT", 0)
+    return ctx
+
+
 class GatewayError(RuntimeError):
     """A gateway command returned an ``error`` event or auth failed."""
 
@@ -39,15 +55,22 @@ class GatewayClient:
     Parameters
     ----------
     url:
-        WebSocket URL of the gateway, e.g. ``ws://127.0.0.1:8765``.
+        WebSocket URL of the gateway: ``ws://127.0.0.1:7474`` for the desktop
+        app's gateway, ``wss://127.0.0.1:7474`` for ``python run_gateway.py``
+        (which serves TLS with a self-signed cert by default).
     agent:
         The :class:`AgentState` whose Ed25519 identity this client registers as.
     display_name:
         Human-readable name announced on register (truncated to 100 chars).
+    cafile:
+        For a ``wss://`` URL, a PEM file to trust in addition to the system
+        roots, e.g. the gateway's self-signed ``<data dir>/tls/cert.pem``.
     """
 
-    def __init__(self, url: str, agent: AgentState, display_name: str = "Proxion Agent"):
+    def __init__(self, url: str, agent: AgentState, display_name: str = "Proxion Agent",
+                 cafile: str | None = None):
         self._url = url
+        self._cafile = cafile
         self._agent = agent
         self._display_name = display_name
         self._ws = None
@@ -60,7 +83,10 @@ class GatewayClient:
     async def connect(self, timeout: float = 10.0) -> None:
         """Open the socket and complete registration (signing the challenge)."""
         import websockets
-        self._ws = await websockets.connect(self._url)
+        kwargs = {}
+        if self._url.startswith("wss://"):
+            kwargs["ssl"] = gateway_ssl_context(self._cafile)
+        self._ws = await websockets.connect(self._url, **kwargs)
 
         # The gateway greets every client with a ``config`` event first.
         first = await self._raw_recv(timeout)
