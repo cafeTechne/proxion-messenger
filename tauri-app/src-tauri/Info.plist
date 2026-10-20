@@ -16,8 +16,8 @@
     </dict>
   </array>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Proxion needs microphone access for voice messages.</string>
+  <string>Proxion uses the microphone for calls and voice messages.</string>
   <key>NSCameraUsageDescription</key>
-  <string>Proxion needs camera access for QR code scanning.</string>
+  <string>Proxion uses the camera for video calls and to scan QR codes.</string>
 </dict>
 </plist>

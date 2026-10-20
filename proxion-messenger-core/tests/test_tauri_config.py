@@ -217,3 +217,13 @@ def test_proxion_scheme_is_registered_on_every_platform():
     assert re.search(r"<key>CFBundleURLSchemes</key>\s*<array>\s*<string>proxion</string>", plist)
     # Tauri v1 never ran this NSIS hook file (and it named the wrong exe).
     assert not os.path.exists(os.path.join(_TAURI, "nsis-hooks.nsh"))
+
+
+def test_macos_permission_prompts_name_calls():
+    """macOS shows these strings when asking for the mic and camera; both are
+    used by calls (voice, video, screen share), not just voice notes and QR."""
+    plist = _read(os.path.join(_TAURI, "Info.plist"))
+    mic = re.search(r"<key>NSMicrophoneUsageDescription</key>\s*<string>([^<]+)</string>", plist)
+    cam = re.search(r"<key>NSCameraUsageDescription</key>\s*<string>([^<]+)</string>", plist)
+    assert mic and "call" in mic.group(1).lower()
+    assert cam and "video call" in cam.group(1).lower()
