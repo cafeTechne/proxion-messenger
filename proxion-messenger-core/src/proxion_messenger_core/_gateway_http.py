@@ -412,7 +412,6 @@ class HttpEndpointsMixin:
             return "400 Bad Request", '{"error":"invalid signature"}'
         
         # Check not expired
-        import time
         if invite.expires_at < time.time():
             return "400 Bad Request", '{"error":"expired"}'
 

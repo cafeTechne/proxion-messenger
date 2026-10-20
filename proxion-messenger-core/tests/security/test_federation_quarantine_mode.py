@@ -107,3 +107,25 @@ def test_quarantine_list_owner_only():
             gateway_owner_did="did:key:owner",
         )
         assert not decision.allow, f"{cmd} should be owner-only"
+
+
+@pytest.mark.asyncio
+async def test_invite_post_in_quarantine_mode_stores_the_item(tmp_path, monkeypatch):
+    # The handler used `time` before a later function-local `import time`, so
+    # the store call raised UnboundLocalError, which was swallowed: the peer was
+    # told "quarantined" and nothing was kept for the owner to review.
+    import json
+    from proxion_messenger_core.gateway import ProxionGateway, GatewayConfig
+    from proxion_messenger_core.persist import AgentState
+
+    monkeypatch.setenv("PROXION_FEDERATION_QUARANTINE", "1")
+    gw = ProxionGateway(
+        agent=AgentState.generate(), dm_clients={}, room_memberships={},
+        config=GatewayConfig(host="127.0.0.1", db_path=str(tmp_path / "q.db")),
+    )
+    body = json.dumps({"@type": "FederationInvite", "issuer": {"did": "did:key:zPeer"}}).encode()
+    status, resp = await gw._handle_invite_post(body)
+    assert status.startswith("202")
+    items = gw._store.list_quarantine_items()
+    assert [i["item_type"] for i in items] == ["invite"]
+    assert items[0]["source_identity"] == "did:key:zPeer"
