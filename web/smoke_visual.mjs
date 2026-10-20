@@ -112,7 +112,8 @@ async function send(page, text) {
 // reflects layout and colour only.
 const FREEZE_CSS =
   '*, *::before, *::after { animation: none !important; transition: none !important; caret-color: transparent !important; }' +
-  '#history-skeleton, #nat-warning-banner, #toast-container, #typing-indicator > * { display: none !important; }' +
+  '#history-skeleton, #nat-warning-banner, #toast-container { display: none !important; }' +
+  '#typing-indicator { visibility: hidden !important; }' +
   '.avatar-presence, .dot { animation: none !important; }';
 async function normalize(page) {
   await page.evaluate(() => {
@@ -121,6 +122,7 @@ async function normalize(page) {
     set('.id-suffix', '·0000');
     set('#settings-did, #settings-proxion-address, #my-address-short, #fingerprint-words, #profile-webid', '-');
     set('.date-divider, .day-divider', 'Today');
+    set('.dm-item-ts', 'now');
     for (const e of document.querySelectorAll('.avatar.placeholder, .dm-avatar, .room-avatar, .member-avatar')) {
       if (e.style.background) e.style.background = 'hsl(210, 55%, var(--webid-l))';
     }
