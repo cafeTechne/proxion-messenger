@@ -51,6 +51,9 @@ jobs:
       - name: Spacing scale
         working-directory: web
         run: npm run check:spacing
+      - name: Type scale
+        working-directory: web
+        run: npm run check:type
       - name: No color literals in JS
         working-directory: web
         run: npm run check:js-colors

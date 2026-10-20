@@ -167,7 +167,27 @@
     --text-base: .9375rem;
     --text-lg: 1.125rem;
     --text-xl: 1.5rem;
+    --weight-regular: 400;
     --weight-medium: 500;
+    /* Line height: none for glyph-only controls, tight for headings and
+       titles, snug for single-line controls and compact rows, normal for body
+       text and messages, loose for spaced lists. */
+    --leading-none: 1;
+    --leading-tight: 1.25;
+    --leading-snug: 1.4;
+    --leading-normal: 1.45;
+    --leading-loose: 1.8;
+    /* Uppercase labels and badges. */
+    --tracking-caps: 0.05em;
+
+    /* Control, icon-button and avatar sizes shared by the components below. */
+    --control-h: 36px;
+    --icon-btn: 32px;
+    --avatar-sm: 24px;
+    --avatar-md: 28px;
+    --avatar-lg: 40px;
+    /* Right-hand drawers (pinned, saved, contact profile, members overlay). */
+    --drawer-w: 300px;
     --weight-semibold: 600;
     --weight-bold: 700;
 
@@ -335,7 +355,7 @@
 
 @layer reset {
 * { box-sizing: border-box; }
-h1, h2, h3, h4 { line-height: 1.2; }
+h1, h2, h3, h4 { line-height: var(--leading-tight); }
 /* Form controls do not inherit the page font by default (monospace textarea,
    Arial buttons). */
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -348,7 +368,7 @@ body {
     margin: 0;
     padding: 0;
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    line-height: 1.45;
+    line-height: var(--leading-normal);
     background: var(--surface-0);
     color: var(--text-primary);
     /* dvh is the visible viewport: on phones 100vh is the height with the
@@ -469,7 +489,7 @@ nav h2 {
     text-transform: uppercase;
     font-size: var(--text-xs);
     font-weight: var(--weight-semibold);
-    letter-spacing: 0.05em;
+    letter-spacing: var(--tracking-caps);
     color: var(--text-secondary);
     /* Inset matches the row padding below so headings line up with row text. */
     margin: 0;
@@ -520,8 +540,8 @@ nav li.dm-item > svg { flex: 0 0 16px; }
     background: transparent;
     color: var(--text-secondary);
     border-radius: var(--radius-sm);
-    font-weight: normal;
-    line-height: 1;
+    font-weight: var(--weight-regular);
+    line-height: var(--leading-none);
 }
 .dm-close-btn:hover, .dm-close-btn:focus-visible {
     background: var(--tint-hover);
@@ -800,7 +820,7 @@ main { background: var(--surface-0); }
     user-select: none;
     display: block;
     text-align: center;
-    line-height: 1.6;
+    line-height: calc(var(--text-base) * var(--leading-normal));
     width: 40px;
     white-space: nowrap;
 }
@@ -827,7 +847,7 @@ main { background: var(--surface-0); }
 .msg-content {
     color: var(--text-primary);
     font-size: var(--text-base);
-    line-height: 1.5;
+    line-height: var(--leading-normal);
     /* anywhere (not break-word) also lowers the min-content width, so one
        unbroken token can never widen the flex column it sits in. */
     overflow-wrap: anywhere;
@@ -1022,7 +1042,7 @@ main.no-view :is(#message-form, #pin-panel-btn, #typing-indicator) { display: no
     color: var(--text-secondary);
     padding: 0;
     line-height: 0;
-    font-weight: normal;
+    font-weight: var(--weight-regular);
     transition: color var(--transition-fast), background var(--transition-fast);
 }
 .voice-record-btn:hover,
@@ -1071,7 +1091,7 @@ main.no-view :is(#message-form, #pin-panel-btn, #typing-indicator) { display: no
     color: var(--text-primary);
     outline: none;
     resize: none;
-    line-height: 1.4;
+    line-height: var(--leading-snug);
 }
 /* The composer is focused most of the time, so an accent ring would sit on
    screen permanently and read as an error. Focus thickens the border to the
@@ -1605,7 +1625,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
 .media-spoiler:not(.revealed) { overflow: hidden; border-radius: 6px; }
 .media-spoiler-label {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    color: var(--color-on-accent); font-size: var(--text-xs); font-weight: var(--weight-semibold); letter-spacing: 0.04em;
+    color: var(--color-on-accent); font-size: var(--text-xs); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-caps);
     text-shadow: 0 1px 4px rgba(0,0,0,.8); pointer-events: none;
 }
 .media-spoiler.revealed .media-spoiler-label { display: none; }
@@ -1940,7 +1960,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             background: var(--accent);
             color: var(--color-on-accent);
             text-align: center;
-            line-height: 24px;
+            line-height: var(--avatar-sm);
             font-size: var(--text-xs);
             font-weight: var(--weight-bold);
         }
@@ -1969,6 +1989,8 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             margin-top: var(--space-2);
             flex-wrap: wrap;
         }
+        /* No reactions yet: no box, so its top margin does not pad every message. */
+        .reactions:empty { display: none; }
         .reaction {
             background: var(--tint-active);
             padding: 2px var(--space-2);
@@ -1996,7 +2018,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         .reaction.reaction-add {
             display: inline-flex; align-items: center; gap: 2px;
             background: var(--tint-hover); color: var(--text-secondary);
-            font: inherit; font-size: var(--text-sm); font-weight: 400; line-height: inherit;
+            font: inherit; font-size: var(--text-sm); font-weight: var(--weight-regular); line-height: inherit;
         }
         .reaction.reaction-add:hover,
         .reaction.reaction-add:focus-visible {
@@ -2089,7 +2111,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             background: transparent;
             border: none;
             color: inherit;
-            line-height: 1;
+            line-height: var(--leading-none);
         }
         .emoji-picker button:hover,
         .emoji-picker button:focus-visible { background: var(--tint-active); }
@@ -2105,8 +2127,8 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         }
         .gif-glyph {
             border: 1.5px solid currentColor; border-radius: 4px;
-            padding: 0 var(--space-1); line-height: 1.3;
-            font-size: var(--text-2xs); font-weight: var(--weight-bold); letter-spacing: 0.03em;
+            padding: 0 var(--space-1); line-height: var(--leading-tight);
+            font-size: var(--text-2xs); font-weight: var(--weight-bold); letter-spacing: var(--tracking-caps);
         }
         .gif-tray-btn:hover, .gif-tray-btn[aria-expanded="true"] { color: var(--text-primary); background: var(--tint-hover); }
         #gif-tray {
@@ -2118,7 +2140,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         }
         .gif-tray-title {
             margin: 0 0 var(--space-2); font-size: var(--text-xs); color: var(--text-secondary);
-            text-transform: uppercase; letter-spacing: 0.05em; font-weight: var(--weight-semibold);
+            text-transform: uppercase; letter-spacing: var(--tracking-caps); font-weight: var(--weight-semibold);
         }
         .gif-tray-motion {
             display: inline-flex; align-items: center; gap: var(--space-1);
@@ -2159,7 +2181,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         }
         .composer-emoji-panel button {
             background: transparent; border: none; cursor: pointer;
-            font-size: 1.25em; padding: var(--space-1); border-radius: 4px; line-height: 1;
+            font-size: 1.25em; padding: var(--space-1); border-radius: 4px; line-height: var(--leading-none);
             min-width: 32px; min-height: 32px;
         }
         .composer-emoji-panel button:hover,
@@ -2211,7 +2233,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             display: block; width: 100%; box-sizing: border-box; resize: none;
             padding: var(--space-2) var(--space-2); border-radius: var(--radius-sm);
             border: 1px solid var(--border); background: var(--slate-900);
-            color: var(--text-primary); font: inherit; line-height: 1.4;
+            color: var(--text-primary); font: inherit; line-height: var(--leading-snug);
             overflow-y: auto;
         }
         .edit-actions {
@@ -2278,7 +2300,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         .preview-title { font-weight: var(--weight-semibold); color: var(--accent-text); }
         .preview-title a { color: inherit; text-decoration: none; }
         .preview-title a:hover { text-decoration: underline; }
-        .preview-desc { color: var(--text-secondary); font-size: var(--text-xs); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .preview-desc { color: var(--text-secondary); font-size: var(--text-xs); line-height: var(--leading-snug); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
         .preview-url { font-size: var(--text-2xs); color: var(--text-secondary); }
 
         /* â"€â"€ Round 31: Messaging Fundamentals â"€â"€ */
@@ -2370,7 +2392,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         .solidchat-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .solidchat-item-role { font-size: var(--text-2xs); color: var(--text-secondary); flex-shrink: 0; }
         .solidchat-empty { list-style: none; padding: var(--space-2) var(--space-2); font-size: var(--text-sm); color: var(--text-secondary); }
-        .solidchat-badge { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.04em;
+        .solidchat-badge { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-caps);
             background: var(--slate-700); color: var(--slate-200);
             padding: 2px var(--space-2); border-radius: 10px; flex-shrink: 0; }
         .solidchat-msg { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--space-3); max-width: 78%; }
@@ -2423,7 +2445,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             align-items: center;
             justify-content: center;
             font-weight: var(--weight-bold);
-            font-size: 16px;
+            font-size: var(--text-base);
             color: var(--color-on-accent);
             position: relative;
         }
@@ -2534,7 +2556,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             display: flex; align-items: center; gap: var(--space-2);
             width: 100%; min-height: 32px; padding: var(--space-2) var(--space-4);
             background: none; border: none; color: var(--slate-50);
-            cursor: pointer; text-align: start; font-size: var(--text-md); font-weight: normal; white-space: nowrap;
+            cursor: pointer; text-align: start; font-size: var(--text-md); font-weight: var(--weight-regular); white-space: nowrap;
         }
         @media (hover: hover) {
             :is(.menu, .ctx-menu, .delete-submenu, .member-context-menu) button:hover { background: var(--slate-700); }
@@ -2557,7 +2579,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         }
 
         /* Round 64: Role badges */
-        .role-badge { font-size: var(--text-2xs); font-weight: var(--weight-bold); border-radius: 3px; padding: 1px var(--space-2); margin-inline-start: var(--space-1); letter-spacing: 0.04em; vertical-align: middle; }
+        .role-badge { font-size: var(--text-2xs); font-weight: var(--weight-bold); border-radius: 3px; padding: 1px var(--space-2); margin-inline-start: var(--space-1); letter-spacing: var(--tracking-caps); vertical-align: middle; }
         .role-badge.role-admin { background: var(--role-admin); color: var(--color-on-accent); }
         .role-badge.role-mod { background: var(--role-mod); color: var(--color-on-accent); }
 
@@ -2585,7 +2607,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         .schedule-picker label { font-size: var(--text-md); color: var(--text-secondary); }
 
         /* Round 70: Bot/Webhook */
-        .bot-badge { font-size: var(--text-2xs); font-weight: var(--weight-bold); background: var(--accent); color: var(--color-on-accent); border-radius: 3px; padding: 1px var(--space-2); margin-inline-start: var(--space-2); vertical-align: middle; letter-spacing: 0.05em; }
+        .bot-badge { font-size: var(--text-2xs); font-weight: var(--weight-bold); background: var(--accent); color: var(--color-on-accent); border-radius: 3px; padding: 1px var(--space-2); margin-inline-start: var(--space-2); vertical-align: middle; letter-spacing: var(--tracking-caps); }
         .copyable-code { display: block; background: var(--slate-900); padding: var(--space-3); border-radius: 6px; font-size: var(--text-md); word-break: break-all; margin: var(--space-2) 0; -webkit-user-select: all; user-select: all; font-family: var(--font-mono); border: 1px solid var(--slate-700); }
         .room-integrations-btn { background: transparent; border: none; color: var(--text-secondary); font-size: 1em; cursor: pointer; padding: 0 var(--space-1); }
         .room-integrations-btn:hover, .room-integrations-btn:focus-visible { background: var(--surface-2); }
@@ -2624,7 +2646,7 @@ button:is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; opacity: 0.5
 }
 .btn-row { display: flex; gap: var(--space-2); justify-content: flex-end; }
 .field-divider { border-color: var(--slate-700); margin: var(--space-4) 0 var(--space-3); }
-.section-label { margin: 0 0 var(--space-2); font-size: var(--text-sm); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; font-weight: var(--weight-semibold); }
+.section-label { margin: 0 0 var(--space-2); font-size: var(--text-sm); color: var(--text-secondary); text-transform: uppercase; letter-spacing: var(--tracking-caps); font-weight: var(--weight-semibold); }
 /* Outline variant: secondary actions next to a filled .btn. */
 .btn--outline { background: transparent; border: 1px solid var(--slate-600); color: var(--slate-50); }
 /* .btn resets border, so restore .btn-danger's tinted border when combined. */
@@ -2692,7 +2714,7 @@ button:is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; opacity: 0.5
 .settings-readout--small { font-size: var(--text-2xs); }
 .settings-readout--copy { cursor: pointer; margin-bottom: var(--space-1); }
 .settings-muted { color: var(--slate-500); }
-.settings-hint { display: block; margin: 2px 0 0; font-size: var(--text-xs); color: var(--slate-500); line-height: 1.5; }
+.settings-hint { display: block; margin: 2px 0 0; font-size: var(--text-xs); color: var(--slate-500); line-height: var(--leading-normal); }
 .settings-hint--block { margin: 0 0 var(--space-2); }
 .settings-hint[hidden], .settings-inline [hidden] { display: none; }
 .settings-save-status { min-height: 1.2em; margin: calc(-1 * var(--space-2)) 0 var(--space-2); font-size: var(--text-xs); color: var(--color-success-soft); }
@@ -2701,8 +2723,8 @@ button:is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; opacity: 0.5
 .settings-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0 0 var(--space-3); }
 .settings-actions .btn { font-size: var(--text-md); }
 .settings-list { min-height: 24px; margin: 0 0 var(--space-2); font-size: var(--text-md); color: var(--text-secondary); }
-.settings-list--loose { line-height: 1.8; }
-.settings-result { margin: 0 0 var(--space-3); font-size: var(--text-md); line-height: 1.5; }
+.settings-list--loose { line-height: var(--leading-loose); }
+.settings-result { margin: 0 0 var(--space-3); font-size: var(--text-md); line-height: var(--leading-normal); }
 .settings-about-name { margin: 0 0 2px; font-size: var(--text-md); color: var(--slate-50); }
 .settings-toggle {
     display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
@@ -2732,7 +2754,7 @@ button:is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; opacity: 0.5
     margin-top: var(--space-4); padding: var(--space-3) 0 var(--space-1);
     background: transparent; border: none; border-top: 1px solid var(--slate-700);
     color: var(--text-secondary); font-size: var(--text-sm); font-weight: var(--weight-semibold);
-    text-transform: uppercase; letter-spacing: 0.05em; text-align: start; cursor: pointer;
+    text-transform: uppercase; letter-spacing: var(--tracking-caps); text-align: start; cursor: pointer;
 }
 /* Phones: the Advanced fold grows open instead of snapping (JS flips its inline
    display). interpolate-size lets height transition from 0 to auto; engines
@@ -3049,7 +3071,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
     display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
     padding-block: var(--space-2); padding-inline: var(--space-4) var(--space-2);
     border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
-    font-size: var(--text-md); line-height: 1.4;
+    font-size: var(--text-md); line-height: var(--leading-snug);
     background: var(--surface-2); color: var(--slate-50);
     pointer-events: auto; cursor: pointer;
     transition: opacity var(--dur-2) var(--ease-out), transform var(--dur-3) var(--ease-spring);
@@ -3095,7 +3117,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 .banner {
     display: flex; align-items: center; gap: var(--space-3);
     padding: var(--space-2) var(--space-4); flex-shrink: 0;
-    font-size: var(--text-md); line-height: 1.5;
+    font-size: var(--text-md); line-height: var(--leading-normal);
 }
 .banner__text { flex: 1; min-width: 0; }
 /* The NAT banner expands into several lines of steps; its close button stays
@@ -3135,7 +3157,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
     display: flex; align-items: flex-start; justify-content: space-between;
     gap: var(--space-3); margin: 0 0 var(--space-3);
 }
-.modal__title { margin: 0 0 var(--space-3); font-size: var(--text-lg); font-weight: var(--weight-semibold); line-height: 1.35; }
+.modal__title { margin: 0 0 var(--space-3); font-size: var(--text-lg); font-weight: var(--weight-semibold); line-height: var(--leading-tight); }
 .modal__header .modal__title { margin: 0; }
 .modal__desc { margin: 0 0 var(--space-3); font-size: var(--text-md); color: var(--text-secondary); }
 .modal__close {
@@ -3202,7 +3224,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 .picker-item {
     display: flex; align-items: center; width: 100%; min-height: 32px;
     padding: var(--space-2) var(--space-2); background: none; border: none; border-radius: var(--radius-sm);
-    color: var(--slate-50); text-align: start; font-size: var(--text-md); font-weight: normal; cursor: pointer;
+    color: var(--slate-50); text-align: start; font-size: var(--text-md); font-weight: var(--weight-regular); cursor: pointer;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .picker-item:hover, .picker-item:focus-visible { background: var(--slate-700); outline-offset: -2px; }
@@ -3237,7 +3259,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 } /* utilities */
 @layer components {
 /* Short id shown after a display name (sidebar rows, message headers). */
-.id-suffix { color: var(--slate-600); font-size: var(--text-2xs); font-weight: 400; margin-inline-start: var(--space-1); }
+.id-suffix { color: var(--slate-600); font-size: var(--text-2xs); font-weight: var(--weight-regular); margin-inline-start: var(--space-1); }
 .mute-icon { font-size: var(--text-xs); color: var(--slate-600); margin-inline-start: var(--space-1); flex-shrink: 0; }
 .sidebar-icon-btn {
     background: transparent; border: none; color: var(--slate-600); cursor: pointer;
@@ -3304,13 +3326,13 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 .ac-option {
     display: flex; align-items: center; gap: var(--space-2);
     padding: var(--space-1) var(--space-2); border-radius: var(--radius-md);
-    font-size: var(--text-md); line-height: 1.4; cursor: pointer;
+    font-size: var(--text-md); line-height: var(--leading-snug); cursor: pointer;
     white-space: nowrap;
 }
 .ac-option:hover { background: var(--tint-hover); }
 .ac-option.focused { background: var(--surface-3); }
 .ac-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ac-glyph { font-size: var(--text-lg); line-height: 1; flex-shrink: 0; }
+.ac-glyph { font-size: var(--text-lg); line-height: var(--leading-none); flex-shrink: 0; }
 .ac-option .custom-emoji { flex-shrink: 0; }
 .mo-avatar {
     width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
