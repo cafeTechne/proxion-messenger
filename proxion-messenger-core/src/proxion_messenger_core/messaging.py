@@ -55,6 +55,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from .attenuation import derive_token
+from .command_validation import seq_int
 from .certtoken import issue_from_certificate
 from .federation import RelationshipCertificate
 from .solid_client import SolidClient, SolidError
@@ -137,7 +138,7 @@ class Message:
             reply_to_id=reply_id,
             message_type=d.get("message_type") or "text",
             signature=d["signature"],
-            seq_num=int(d.get("seq_num") or 0),
+            seq_num=seq_int(d.get("seq_num") or 0),
             prev_hash=d.get("prev_hash") or "",
         )
 

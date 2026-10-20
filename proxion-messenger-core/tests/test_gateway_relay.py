@@ -276,8 +276,9 @@ async def test_relay_endpoint_stores_for_offline_target(gateway):
 
     status, _ = await gateway._handle_relay_post(body)
     assert status.startswith("202")
-    # Stored under the recipient's (bob's) thread_id when target is offline
-    stored = gateway._store.get_messages(bob_did)
+    # Stored under the sender's (alice's) thread, the one a live delivery and the
+    # queued drain both name, so it shows up in that conversation's history.
+    stored = gateway._store.get_messages(alice_did)
     assert any(m["message_id"] == msg_id for m in stored)
 
 

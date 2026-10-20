@@ -288,6 +288,9 @@ class SchemaError(ValueError):
     """Raised when a command payload violates the declared schema."""
 
 
+_MAX_SQL_INT = 2 ** 63 - 1
+
+
 def validate_command_payload(cmd: str, data: dict) -> None:
     """Raise SchemaError if *data* violates the schema for *cmd*.
 
@@ -295,6 +298,23 @@ def validate_command_payload(cmd: str, data: dict) -> None:
     Only validates fields that are declared in _SCHEMA; extra fields are ignored.
     Schema tuples: (expected_type, max_len_or_None[, validator_fn])
     """
+    # Reject floats masquerading as integers for integer fields
+    _INT_FIELDS = frozenset({"limit", "duration_ms", "ms", "max_uses", "expires_hours", "seq_num",
+                             "since_seq", "last_seq"})
+    for _ifield in _INT_FIELDS:
+        if _ifield in data:
+            _v = data[_ifield]
+            if isinstance(_v, bool):
+                raise SchemaError(f"{cmd}.{_ifield}: must be integer, not bool")
+            if isinstance(_v, float):
+                raise SchemaError(f"{cmd}.{_ifield}: must be integer, not float")
+            # Handlers int() these; anything else used to surface as E_INTERNAL.
+            # A short digit string is still accepted (and normalized) for old clients.
+            if isinstance(_v, str) and _re.fullmatch(r"-?\d{1,18}", _v.strip()):
+                data[_ifield] = _v = int(_v)
+            if _v is not None and (not isinstance(_v, int) or abs(_v) > _MAX_SQL_INT):
+                raise SchemaError(f"{cmd}.{_ifield}: must be a 64-bit integer")
+
     schema = _SCHEMA.get(cmd)
     if schema is None:
         return
@@ -303,16 +323,6 @@ def validate_command_payload(cmd: str, data: dict) -> None:
     for field in _TEXT_FIELDS:
         if field in data and isinstance(data.get(field), str):
             data[field] = normalize_text_field(data[field])
-
-    # Reject floats masquerading as integers for integer fields
-    _INT_FIELDS = frozenset({"limit", "duration_ms", "ms", "max_uses", "expires_hours", "seq_num"})
-    for _ifield in _INT_FIELDS:
-        if _ifield in data:
-            _v = data[_ifield]
-            if isinstance(_v, bool):
-                raise SchemaError(f"{cmd}.{_ifield}: must be integer, not bool")
-            if isinstance(_v, float):
-                raise SchemaError(f"{cmd}.{_ifield}: must be integer, not float")
 
     # Reject non-bool for boolean toggle fields
     _BOOL_FIELDS = frozenset({"enabled"})
@@ -350,3 +360,15 @@ def validate_command_payload(cmd: str, data: dict) -> None:
                 or not _PATH_SAFE_ID_RE.match(_idv)
                 or _idv.startswith(".")):
             raise SchemaError(f"{cmd}.{_idf}: unsafe id")
+
+
+def seq_int(value) -> int:
+    """A seq_num from a client, peer gateway or pod as a storable integer.
+    Anything that is not a 64-bit whole number counts as absent (0)."""
+    if isinstance(value, bool):
+        return 0
+    try:
+        n = int(value) if isinstance(value, (int, str)) and len(str(value)) <= 19 else 0
+    except ValueError:
+        return 0
+    return n if abs(n) <= _MAX_SQL_INT else 0

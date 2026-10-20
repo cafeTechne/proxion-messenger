@@ -81,6 +81,39 @@ class SecurityStoreMixin(object):
                 return row[0] if row else 0
             except Exception:
                 return 0
+    # Append-only event/log tables and the column that dates each row. Rows
+    # older than the retention cutoff are dead weight. Literal names only.
+    _EVENT_LOG_TABLES = (
+        ("relay_delivery_chain", "created_at"),
+        ("webhook_delivery_logs", "created_at"),
+        ("notification_fallback_events", "created_at"),
+        ("credential_anomalies", "created_at"),
+        ("wg_connectivity_events", "created_at"),
+        ("dm_session_recovery_attempts", "updated_at"),
+        ("security_slo_snapshots", "evaluated_at"),
+        ("security_drill_results", "executed_at"),
+        ("peer_gateway_change_requests", "observed_at"),
+    )
+
+    def prune_event_logs(self, cutoff_ts: float) -> int:
+        """Delete event/log rows older than *cutoff_ts*, finished hole-punch
+        attempts, and scheduled messages that were already sent or cancelled
+        (they still held their plaintext). Returns the number of rows removed."""
+        deleted = 0
+        with self._conn() as conn:
+            stmts = [(f"DELETE FROM {t} WHERE {c} < ?", (cutoff_ts,))
+                     for t, c in self._EVENT_LOG_TABLES]
+            stmts.append(("DELETE FROM hole_punch_attempts WHERE state IN"
+                          " ('succeeded', 'failed', 'expired') AND initiated_at < ?",
+                          (cutoff_ts,)))
+            stmts.append(("DELETE FROM scheduled_messages WHERE cancelled = 1", ()))
+            for sql, args in stmts:
+                try:
+                    conn.execute(sql, args)
+                    deleted += conn.execute("SELECT changes()").fetchone()[0]
+                except Exception:
+                    pass
+        return deleted
     def prune_room_join_attempts(self, cutoff_ts: float) -> int:
         """Delete join-attempt rows older than *cutoff_ts*. Returns number deleted.
 

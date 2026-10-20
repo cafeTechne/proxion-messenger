@@ -16,6 +16,7 @@ from collections import deque
 from datetime import datetime, timezone
 
 from .relay import _validate_relay_target as _is_safe_gateway_url
+from .command_validation import seq_int
 from ._gateway_mailbox import relay_node_enabled, relay_fallback_url
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,19 @@ def _relay_reply_to_id(data) -> str | None:
     else None (a malformed pointer is dropped, the message itself still delivers)."""
     v = data.get("reply_to_id") if isinstance(data, dict) else None
     return v if isinstance(v, str) and _REPLY_TO_ID_RE.match(v) else None
+
+
+def _utc_iso(ts) -> str:
+    """A peer-supplied ISO timestamp as UTC ISO text. History is ordered and
+    compared as text, so "+05:00" offsets sorted wrong. A naive time is taken
+    as UTC; an unparseable one becomes now."""
+    try:
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return datetime.now(timezone.utc).isoformat()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat()
 
 
 def _relay_body_is_file_chunk(body: bytes) -> bool:
@@ -1230,6 +1244,8 @@ class HttpEndpointsMixin:
 
         # A verified relay from this gateway means it is up.
         self._note_peer_contact(from_webid, origin_gateway)
+        # Signature checked against the sender's text; store and show UTC.
+        timestamp = _utc_iso(timestamp)
 
         # R12.1.1 — reject relay from revoked senders
         if from_webid in self._revoked_dids:
@@ -1323,7 +1339,7 @@ class HttpEndpointsMixin:
                         message_id, cert_id or from_webid, "relay",
                         from_webid, display_name or None, content, timestamp,
                         reply_to_id=reply_to_id,
-                        seq_num=int(data.get("seq_num") or 0),
+                        seq_num=seq_int(data.get("seq_num") or 0),
                         prev_hash=str(data.get("prev_hash") or ""),
                         e2e=bool(data.get("e2e")),
                     )
@@ -1388,11 +1404,12 @@ class HttpEndpointsMixin:
                 queue_entry[_k] = data[_k]
         queue.append(queue_entry)
         if self._store:
+            # Same thread as a live delivery and the queued drain: the sender.
             self._store.save_message(
-                message_id, cert_id or to_webid, "relay",
+                message_id, cert_id or from_webid, "relay",
                 from_webid, display_name or None, content, timestamp,
                 reply_to_id=reply_to_id,
-                seq_num=int(data.get("seq_num") or 0),
+                seq_num=seq_int(data.get("seq_num") or 0),
                 prev_hash=str(data.get("prev_hash") or ""),
                 e2e=bool(data.get("e2e")),
             )

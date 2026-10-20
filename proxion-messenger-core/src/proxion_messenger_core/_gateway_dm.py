@@ -13,6 +13,7 @@ import json
 import logging
 import re as _re
 from datetime import datetime, timezone
+from .command_validation import seq_int
 
 logger = logging.getLogger("proxion_messenger_core.gateway")
 
@@ -447,7 +448,7 @@ class DmHandlerMixin:
             if self._store:
                 self._store.save_message(message_id, cert_id, "local_dm",
                                          sender_webid, sender_name, _summary, ts,
-                                         seq_num=int(data.get("seq_num") or 0),
+                                         seq_num=seq_int(data.get("seq_num") or 0),
                                          prev_hash=str(data.get("prev_hash") or ""))
             # Echo to all sender tabs
             own_echo_file = json.dumps({**event, "own": True})
@@ -711,7 +712,7 @@ class DmHandlerMixin:
                 message_id, thread_id, "dm",
                 sender_webid, sender_name, content, ts,
                 reply_to_id=data.get("reply_to_id"),
-                seq_num=int(data.get("seq_num") or 0),
+                seq_num=seq_int(data.get("seq_num") or 0),
                 prev_hash=str(data.get("prev_hash") or ""),
                 e2e=bool(data.get("e2e")),
             )

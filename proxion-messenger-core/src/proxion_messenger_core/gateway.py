@@ -1034,6 +1034,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             self._auth_fail_counts.pop(websocket, None)
             webid = self._client_webids.pop(websocket, None)
             self._session_device_did.pop(websocket, None)
+            self._session_signing_did.pop(websocket, None)
             # Drop any pairing session this socket was part of (primary or new device).
             for _pc in [
                 _c for _c, _s in self._pairing_sessions.items()
@@ -2846,6 +2847,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             if from_webid not in _known:
                 return "403 Forbidden", '{"error":"sender_not_member"}'
 
+        from ._gateway_http import _utc_iso
+        timestamp = _utc_iso(timestamp)
         event = {
             "type": "message",
             "source": "relay",
@@ -3491,49 +3494,71 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
     # _handle_invite_post / _handle_invite_accept_post: moved to
     # _gateway_http.py (HttpEndpointsMixin).
 
+    # First purge shortly after start: a gateway restarted more often than once
+    # a day never reached the 24 h tick, so nothing was ever purged.
+    _RETENTION_FIRST_RUN_DELAY = 300
+
     async def _retention_purge_loop(self) -> None:
-        """Purge old audit logs, security events, and expired DM sessions every 24 hours."""
-        import os as _os_rp
+        """Purge old logs, events and expired rows soon after start, then daily."""
+        await asyncio.sleep(self._RETENTION_FIRST_RUN_DELAY)
         while True:
+            if self._store:
+                await asyncio.get_running_loop().run_in_executor(None, self._run_retention_purge)
             await asyncio.sleep(86400)
-            if not self._store:
-                continue
+
+    def _run_retention_purge(self) -> None:
+        import os as _os_rp
+        try:
+            audit_days = int(_os_rp.environ.get("PROXION_AUDIT_RETENTION_DAYS", "90"))
+            sec_days = int(_os_rp.environ.get("PROXION_SECURITY_EVENT_RETENTION_DAYS", "90"))
+            dm_session_days = int(_os_rp.environ.get("PROXION_DM_SESSION_RETENTION_DAYS", "90"))
+            audit_cutoff = time.time() - audit_days * 86400
+            sec_cutoff = time.time() - sec_days * 86400
+            audit_purged = self._store.purge_old_audit_logs(audit_cutoff)
+            sec_purged = self._store.purge_old_security_events(sec_cutoff)
+            sessions_purged = self._store.prune_expired_dm_sessions(
+                max_age_seconds=dm_session_days * 86400
+            )
+            idempotency_hours = int(_os_rp.environ.get("PROXION_IDEMPOTENCY_RETENTION_HOURS", "72"))
+            idempotency_pruned = self._store.prune_expired_idempotency_ops(retention_hours=idempotency_hours)
+            # Rate-limit feeder tables append on unauthenticated, IP-driven paths
+            # and their windows are seconds; a 1-day cutoff keeps everything the
+            # COUNT() checks need while stopping unbounded growth (disk DoS).
+            _rl_cutoff = time.time() - 86400
             try:
-                audit_days = int(_os_rp.environ.get("PROXION_AUDIT_RETENTION_DAYS", "90"))
-                sec_days = int(_os_rp.environ.get("PROXION_SECURITY_EVENT_RETENTION_DAYS", "90"))
-                dm_session_days = int(_os_rp.environ.get("PROXION_DM_SESSION_RETENTION_DAYS", "90"))
-                audit_cutoff = time.time() - audit_days * 86400
-                sec_cutoff = time.time() - sec_days * 86400
-                audit_purged = self._store.purge_old_audit_logs(audit_cutoff)
-                sec_purged = self._store.purge_old_security_events(sec_cutoff)
-                sessions_purged = self._store.prune_expired_dm_sessions(
-                    max_age_seconds=dm_session_days * 86400
-                )
-                idempotency_hours = int(_os_rp.environ.get("PROXION_IDEMPOTENCY_RETENTION_HOURS", "72"))
-                idempotency_pruned = self._store.prune_expired_idempotency_ops(retention_hours=idempotency_hours)
-                # Rate-limit feeder tables append on unauthenticated, IP-driven paths
-                # and their windows are seconds; a 1-day cutoff keeps everything the
-                # COUNT() checks need while stopping unbounded growth (disk DoS).
-                _rl_cutoff = time.time() - 86400
+                join_pruned = self._store.prune_room_join_attempts(_rl_cutoff)
+                rl_pruned = self._store.prune_rate_limit_buckets(_rl_cutoff)
+                if join_pruned or rl_pruned:
+                    logger.info("Retention purge: %d join attempts, %d rate-limit buckets removed",
+                                join_pruned, rl_pruned)
+            except Exception as _rl_exc:
+                logger.warning("Rate-limit table prune failed: %s", _rl_exc)
+            # Expiring rows whose prune helpers existed but were never called,
+            # plus the append-only event logs (kept as long as security events).
+            for _name, _call in (
+                ("dpop jti", lambda: self._store.prune_dpop_jti(_rl_cutoff)),
+                ("peer attestations", self._store.prune_expired_peer_attestations),
+                ("stun sessions", self._store.prune_expired_stun_sessions),
+                ("trust revocations", lambda: self._store.expire_trust_revocations(time.time())),
+                ("event logs", lambda: self._store.prune_event_logs(sec_cutoff)),
+            ):
                 try:
-                    join_pruned = self._store.prune_room_join_attempts(_rl_cutoff)
-                    rl_pruned = self._store.prune_rate_limit_buckets(_rl_cutoff)
-                    if join_pruned or rl_pruned:
-                        logger.info("Retention purge: %d join attempts, %d rate-limit buckets removed",
-                                    join_pruned, rl_pruned)
-                except Exception as _rl_exc:
-                    logger.warning("Rate-limit table prune failed: %s", _rl_exc)
-                if audit_purged or sec_purged:
-                    logger.info("Retention purge: %d audit logs, %d security events removed",
-                                audit_purged, sec_purged)
-                if sessions_purged:
-                    logger.info("Retention purge: %d expired DM sessions removed", sessions_purged)
-                if idempotency_pruned:
-                    logger.info("Retention purge: %d expired idempotency records removed", idempotency_pruned)
-                self._metrics["audit_logs_purged"] = self._metrics.get("audit_logs_purged", 0) + audit_purged
-                self._metrics["security_events_purged"] = self._metrics.get("security_events_purged", 0) + sec_purged
-            except Exception as exc:
-                logger.warning("Retention purge failed: %s", exc)
+                    _n = _call()
+                    if _n:
+                        logger.info("Retention purge: %s, %d rows", _name, _n)
+                except Exception as _p_exc:
+                    logger.warning("Retention purge of %s failed: %s", _name, _p_exc)
+            if audit_purged or sec_purged:
+                logger.info("Retention purge: %d audit logs, %d security events removed",
+                            audit_purged, sec_purged)
+            if sessions_purged:
+                logger.info("Retention purge: %d expired DM sessions removed", sessions_purged)
+            if idempotency_pruned:
+                logger.info("Retention purge: %d expired idempotency records removed", idempotency_pruned)
+            self._metrics["audit_logs_purged"] = self._metrics.get("audit_logs_purged", 0) + audit_purged
+            self._metrics["security_events_purged"] = self._metrics.get("security_events_purged", 0) + sec_purged
+        except Exception as exc:
+            logger.warning("Retention purge failed: %s", exc)
 
     async def _prekey_replenishment_loop(self) -> None:
         """Check prekey pool depth and SPK age for connected users every 15 minutes."""

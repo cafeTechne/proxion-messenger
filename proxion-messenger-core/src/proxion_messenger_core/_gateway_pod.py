@@ -15,6 +15,7 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
+from .command_validation import seq_int
 from typing import Optional
 
 import httpx
@@ -972,7 +973,7 @@ class PodSyncMixin:
                             from_display_name=None,
                             content=entry.message.content,
                             timestamp=ts_iso,
-                            seq_num=int(getattr(entry.message, "seq_num", None) or 0),
+                            seq_num=seq_int(getattr(entry.message, "seq_num", None) or 0),
                             prev_hash=str(getattr(entry.message, "prev_hash", None) or ""),
                         )
                     except Exception as exc:
@@ -1298,7 +1299,7 @@ class PodSyncMixin:
                                 m.get("from_webid", ""), m.get("from_display_name"),
                                 m.get("content", ""), m.get("timestamp", ""),
                                 reply_to_id=m.get("reply_to_id"),
-                                seq_num=int(m.get("seq_num") or 0),
+                                seq_num=seq_int(m.get("seq_num") or 0),
                                 prev_hash=str(m.get("prev_hash") or ""),
                             )
                         except Exception:
@@ -1439,7 +1440,7 @@ class PodSyncMixin:
                             from_display_name=None,
                             content=msg.content,
                             timestamp=ts_iso,
-                            seq_num=int(msg.seq_num or 0),
+                            seq_num=seq_int(msg.seq_num or 0),
                             prev_hash=str(msg.prev_hash or ""),
                         )
                         restored += 1
@@ -1766,7 +1767,7 @@ class PodSyncMixin:
                         content=msg.get("content", ""),
                         timestamp=msg.get("timestamp", ""),
                         reply_to_id=msg.get("reply_to_id"),
-                        seq_num=int(msg.get("seq_num") or 0),
+                        seq_num=seq_int(msg.get("seq_num") or 0),
                         prev_hash=str(msg.get("prev_hash") or ""),
                     )
                     restored += 1

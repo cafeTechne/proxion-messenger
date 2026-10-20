@@ -23,6 +23,7 @@ import secrets
 import time
 from collections import deque
 from datetime import datetime, timezone
+from .command_validation import seq_int
 from typing import Optional
 
 from .room import RoomMembership
@@ -538,6 +539,7 @@ class RoomHandlerMixin:
             key = (webid, room_id)
             async with self._rate_lock:
                 now = datetime.now(timezone.utc).timestamp()
+                self._prune_room_rate_counters(now)
                 if key not in self._rate_counters:
                     self._rate_counters[key] = deque()
 
@@ -550,6 +552,21 @@ class RoomHandlerMixin:
                 self._rate_counters[key].append(now)
 
         return None
+
+    # Slow-mode slots are keyed (sender, room) and were never reclaimed; relayed
+    # senders make the key space remote-driven. Drop idle ones once it grows.
+    _ROOM_RATE_PRUNE_AT = 1024
+    _ROOM_RATE_IDLE_S = 86400
+
+    def _prune_room_rate_counters(self, now: float) -> None:
+        rc = self._rate_counters
+        if len(rc) < self._ROOM_RATE_PRUNE_AT:
+            return
+        stale = [k for k, v in rc.items()
+                 if isinstance(k, tuple) and isinstance(v, deque)
+                 and (not v or now - v[-1] >= self._ROOM_RATE_IDLE_S)]
+        for k in stale:
+            rc.pop(k, None)
 
     def _check_room_permission(self, websocket, room_id: str, role: str = "member") -> bool:
         """Verify caller role in a room. Returns True if permitted."""
@@ -696,7 +713,7 @@ class RoomHandlerMixin:
                     message_id, room_id, "room",
                     sender_webid, sender_name, content, ts,
                     reply_to_id=data.get("reply_to_id"),
-                    seq_num=int(data.get("seq_num") or 0),
+                    seq_num=seq_int(data.get("seq_num") or 0),
                     prev_hash=str(data.get("prev_hash") or ""),
                 )
                 self._store.set_last_read(sender_webid, room_id)
@@ -871,7 +888,7 @@ class RoomHandlerMixin:
                                     m.get("content", ""),
                                     m.get("timestamp", ""),
                                     reply_to_id=m.get("reply_to_id"),
-                                    seq_num=int(m.get("seq_num") or 0),
+                                    seq_num=seq_int(m.get("seq_num") or 0),
                                     prev_hash=str(m.get("prev_hash") or ""),
                                 )
                             except Exception:
@@ -1315,7 +1332,7 @@ class RoomHandlerMixin:
                 new_msg_id, target_thread_id,
                 "local_room" if target_thread_id in self._local_rooms else "local_dm",
                 actor, display_name, event["content"], ts,
-                seq_num=int(data.get("seq_num") or 0),
+                seq_num=seq_int(data.get("seq_num") or 0),
                 prev_hash=str(data.get("prev_hash") or ""),
             )
 
@@ -3377,9 +3394,6 @@ class RoomHandlerMixin:
         }
         if self._store:
             self._store.save_scheduled_message(sched)
-        if not hasattr(self, '_scheduled_messages'):
-            self._scheduled_messages = []
-        self._scheduled_messages.append(sched)
         await websocket.send(json.dumps({
             "type": "message_scheduled",
             "id": sched_id,
