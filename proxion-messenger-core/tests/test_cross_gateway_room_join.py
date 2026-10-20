@@ -186,3 +186,68 @@ def test_codeless_mirror_room_is_not_joinable_by_empty_code(tmp_path):
                          GatewayConfig(host="127.0.0.1", db_path=db), ReadState())
     assert "mirror-1" in gw2._local_rooms
     assert "" not in gw2._room_codes
+
+
+@pytest.mark.asyncio
+async def test_guest_voice_join_reaches_the_host_channel(tmp_path):
+    """Two users on B joined A's room through B. Their voice joins must go to
+    A's channel (B keeps the room as a mirror in _local_rooms), and the two
+    guests must still meet each other on B."""
+    from proxion_messenger_core.persist import AgentState
+    from proxion_messenger_core.didkey import pub_key_to_did
+
+    gw_a, loop_a, http_a = _start(AgentState.generate(), tmp_path, "a")
+    gw_b, loop_b, http_b = _start(AgentState.generate(), tmp_path, "b")
+    alice, bob, carol = (pub_key_to_did(AgentState.generate().identity_pub_bytes)
+                         for _ in range(3))
+    room_id, code = "room-xgw-voice", "f00d" * 8
+    alice_sock, bob_sock, carol_sock = AsyncMock(), AsyncMock(), AsyncMock()
+
+    def _setup_a():
+        _host_room(gw_a, room_id, alice, code, http_a)
+        gw_a._client_webids[alice_sock] = alice
+        gw_a._local_rooms[room_id]["members"].add(alice_sock)
+
+    def _setup_b():
+        gw_b._client_webids[bob_sock] = bob
+        gw_b._client_webids[carol_sock] = carol
+    loop_a.call_soon_threadsafe(_setup_a)
+    loop_b.call_soon_threadsafe(_setup_b)
+    await asyncio.sleep(0.2)
+
+    link = f"http://127.0.0.1:{http_a}/?join={code}"
+    for sock in (bob_sock, carol_sock):
+        asyncio.run_coroutine_threadsafe(
+            gw_b._handle_join_remote_room(sock, {"url": link}), loop_b).result(timeout=15)
+    assert room_id in gw_b._local_rooms
+
+    def _voice(gw, loop, sock):
+        asyncio.run_coroutine_threadsafe(gw._handle_join_voice_channel(
+            sock, {"channel_id": room_id}), loop).result(timeout=5)
+
+    def _has(sock, typ, peer):
+        return any(e.get("type") == typ and e.get("peer_webid") == peer for e in _sent(sock))
+
+    _voice(gw_a, loop_a, alice_sock)
+    _voice(gw_b, loop_b, bob_sock)
+    assert await _wait(lambda: _has(alice_sock, "voice_peer_joined", bob)), \
+        "the host never heard about the guest's voice join"
+    assert await _wait(lambda: _has(bob_sock, "voice_peer_present", alice)), \
+        "the guest never learned the host member is in the call"
+
+    _voice(gw_b, loop_b, carol_sock)
+    assert await _wait(lambda: _has(alice_sock, "voice_peer_joined", carol))
+    assert await _wait(lambda: _has(carol_sock, "voice_peer_present", alice))
+    # The two guests on B meet each other: bob (already in) calls carol.
+    assert await _wait(lambda: _has(bob_sock, "voice_peer_joined", carol))
+    assert await _wait(lambda: _has(carol_sock, "voice_peer_present", bob))
+    await asyncio.sleep(0.5)
+    assert not _has(bob_sock, "voice_peer_present", bob)
+    assert not _has(carol_sock, "voice_peer_present", carol)
+    assert set(gw_a._voice_channels[room_id]["members"]) == {alice, bob, carol}
+
+    # A guest leaving reaches the host.
+    asyncio.run_coroutine_threadsafe(gw_b._handle_leave_voice_channel(
+        bob_sock, {"channel_id": room_id}), loop_b).result(timeout=5)
+    assert await _wait(lambda: _has(alice_sock, "voice_peer_left", bob))
+    assert await _wait(lambda: bob not in gw_a._voice_channels[room_id]["members"])

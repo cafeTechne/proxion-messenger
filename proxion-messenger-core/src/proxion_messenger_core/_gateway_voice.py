@@ -143,11 +143,31 @@ class VoiceHandlerMixin:
         # A channel mirrored for a room hosted elsewhere only exists for our local
         # users; once none is left, drop it with its remote routing entries.
         if not channel["members"] or (
-            channel_id not in self._local_rooms
+            not self._hosts_voice_channel(channel_id)
             and not any((m.get("ws") if isinstance(m, dict) else m)
                         for m in channel["members"].values())):
             self._voice_channels.pop(channel_id, None)
         await self._broadcast_voice_channel_state(channel_id)
+
+    def _mirrored_room_host(self, room_id: str) -> "str | None":
+        """Host gateway URL of a room this gateway only mirrors, else None.
+
+        A room joined from another gateway (join_remote_room) sits in
+        _local_rooms here too, but its creator is a federated member living on
+        the host. Its voice channel belongs to the host, so joins go there."""
+        room = self._local_rooms.get(room_id) if room_id else None
+        creator = room.get("creator_webid", "") if room else ""
+        if not creator or not self._store or self._relay_identity_is_local(creator, room_id):
+            return None
+        own = (self._gateway_http_url() or "").rstrip("/")
+        for m in self._store.get_federated_room_members(room_id) or []:
+            gw = (m.get("gateway_url") or "").rstrip("/")
+            if m.get("member_did") == creator and gw and gw != own:
+                return gw
+        return None
+
+    def _hosts_voice_channel(self, channel_id: str) -> bool:
+        return channel_id in self._local_rooms and not self._mirrored_room_host(channel_id)
 
     def _voice_channel_participants(self, channel_id: str) -> list:
         ch = self._voice_channels.get(channel_id) or {}
@@ -232,7 +252,7 @@ class VoiceHandlerMixin:
         paths to their own membership gates."""
         ch = getattr(self, "_voice_channels", {}).get(channel_id)
         host = ch.get("host_gateway_url") if ch else None
-        if not host or channel_id in self._local_rooms:
+        if not host or self._hosts_voice_channel(channel_id):
             return True
         signer = data.get("relay_sig_did", "")
         if not signer:
@@ -790,9 +810,10 @@ class VoiceHandlerMixin:
         # is always a room's: with no local room and no known host there is
         # nothing to join, so refuse instead of opening an ad-hoc channel under
         # any id a client names.
-        if channel_id not in self._local_rooms:
-            _host_gw = None
-            if self._store:
+        _mirror_host = self._mirrored_room_host(channel_id)
+        if channel_id not in self._local_rooms or _mirror_host:
+            _host_gw = _mirror_host
+            if self._store and not _host_gw:
                 # The host recorded for this room at federation time first.
                 _hosts = {m.get("gateway_url") for m in
                           (self._store.get_federated_room_members(channel_id) or [])
@@ -822,6 +843,19 @@ class VoiceHandlerMixin:
                 # the joiner never learned who else was present and the mesh never
                 # formed for cross-gateway group calls.
                 channel = self._voice_channels.setdefault(channel_id, {"members": {}})
+                # Other local users already in this mirrored channel meet the joiner
+                # here; the host only tells us about members on other gateways.
+                for _peer, _info in list(channel["members"].items()):
+                    _pws = _info.get("ws") if isinstance(_info, dict) else _info
+                    if not _pws or _peer == joiner_webid:
+                        continue
+                    for _to, _evt in ((_pws, {"type": "voice_peer_joined", "peer_webid": joiner_webid}),
+                                      (websocket, {"type": "voice_peer_present", "peer_webid": _peer})):
+                        try:
+                            await _to.send(json.dumps({**_evt, "channel_id": channel_id,
+                                                       "gateway_url": ""}))
+                        except Exception:
+                            pass
                 channel["members"][joiner_webid] = {"ws": websocket, "gateway_url": None}
                 channel["host_gateway_url"] = _host_gw
                 # Pin the channel's accepted signer(s) to the KNOWN host gateway so an
@@ -912,6 +946,9 @@ class VoiceHandlerMixin:
         # LOCAL join path checks this (e913357); the relay path didn't.
         if self._store and self._store.is_room_banned(channel_id, from_webid):
             return "403 Forbidden", '{"error":"banned_from_room"}'
+        if self._mirrored_room_host(channel_id):
+            # A mirror of a room hosted elsewhere: its channel lives on the host.
+            return "403 Forbidden", '{"error":"not_room_host"}'
         if channel_id in self._local_rooms and self._store:
             _members = set(self._store.get_room_members(channel_id))
             _members |= {m.get("member_did") for m in self._store.get_federated_room_members(channel_id)}
@@ -945,9 +982,25 @@ class VoiceHandlerMixin:
                 except Exception:
                     pass
 
+        # Gateways of other remote members learn about the joiner; the joiner's
+        # own gateway already introduced its local members to each other.
+        _told = {origin_gw}
+        for member_webid, member_info in existing.items():
+            member_gw = member_info.get("gateway_url") if isinstance(member_info, dict) else None
+            if member_gw and member_gw not in _told:
+                _told.add(member_gw)
+                asyncio.create_task(self._relay_ephemeral(member_gw, {
+                    "content_type": "voice_channel_peer_joined",
+                    "channel_id": channel_id,
+                    "peer_webid": from_webid,
+                    "peer_gateway_url": origin_gw,
+                }))
+
         # Tell the remote joiner who is already in the channel
         for member_webid, member_info in existing.items():
             member_gw = (member_info.get("gateway_url") if isinstance(member_info, dict) else None) or own_gw
+            if member_gw == origin_gw:
+                continue
             asyncio.create_task(self._relay_ephemeral(origin_gw, {
                 "content_type": "voice_channel_peer_present",
                 "channel_id": channel_id,
@@ -1004,7 +1057,7 @@ class VoiceHandlerMixin:
         # inject a ghost peer the victim then opens WebRTC to. The joiner side (a
         # channel that is NOT a local room here) has no membership records; its
         # signer is authorized as a channel gateway at the /relay dispatch.
-        if channel_id in self._local_rooms and not self._relay_from_is_room_member(channel_id, peer_webid):
+        if self._hosts_voice_channel(channel_id) and not self._relay_from_is_room_member(channel_id, peer_webid):
             return "200 OK", '{"status":"received"}'
         # Record the peer + its gateway in the local channel roster so voice_signal
         # to that peer can resolve a gateway (channel-scoped, not global routing)
@@ -1051,7 +1104,7 @@ class VoiceHandlerMixin:
         # inject a ghost peer the victim then opens WebRTC to. The joiner side (a
         # channel that is NOT a local room here) has no membership records; its
         # signer is authorized as a channel gateway at the /relay dispatch.
-        if channel_id in self._local_rooms and not self._relay_from_is_room_member(channel_id, peer_webid):
+        if self._hosts_voice_channel(channel_id) and not self._relay_from_is_room_member(channel_id, peer_webid):
             return "200 OK", '{"status":"received"}'
         event = json.dumps({
             "type": "voice_peer_present",
@@ -1067,9 +1120,9 @@ class VoiceHandlerMixin:
                 _existing = _ch["members"].get(peer_webid)
                 if not (isinstance(_existing, dict) and _existing.get("ws")):
                     _ch["members"][peer_webid] = {"ws": None, "gateway_url": peer_gw or None}
-            for info in list(_ch["members"].values()):
+            for _wid, info in list(_ch["members"].items()):
                 ws = info.get("ws") if isinstance(info, dict) else info
-                if ws:
+                if ws and _wid != peer_webid:
                     try:
                         await ws.send(event)
                     except Exception:
