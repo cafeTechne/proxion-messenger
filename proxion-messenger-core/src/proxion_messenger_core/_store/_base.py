@@ -253,8 +253,9 @@ class _StoreBase(object):
         """Flush the WAL to the main database file (call before shutdown)."""
         with self._conn() as conn:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    _SCHEMA_VERSION = 62
+    _SCHEMA_VERSION = 63
     _integrity_ok: bool = True
+    _migration_error: str = ""
     def _init_db(self) -> None:
         with self._conn() as conn:
             conn.executescript("""
@@ -1575,6 +1576,32 @@ class _StoreBase(object):
             [
                 "INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')",
             ],
+            # 63: relay_delivery_chain keyed by its own row id. With relay_id as
+            # the key, INSERT OR IGNORE kept only a relay's first status.
+            {
+                "rebuild": "relay_delivery_chain",
+                "temp": "relay_delivery_chain_v63",
+                "pre": [
+                    "DROP TABLE IF EXISTS relay_delivery_chain_v63",
+                    """CREATE TABLE relay_delivery_chain_v63 (
+                        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                        relay_id   TEXT NOT NULL,
+                        peer_did   TEXT NOT NULL,
+                        status     TEXT NOT NULL,
+                        prev_hash  TEXT NOT NULL DEFAULT '',
+                        entry_hash TEXT NOT NULL,
+                        created_at REAL NOT NULL
+                    )""",
+                ],
+                "copy": """INSERT INTO relay_delivery_chain_v63
+                           (relay_id, peer_did, status, prev_hash, entry_hash, created_at)
+                           SELECT relay_id, peer_did, status, prev_hash, entry_hash, created_at
+                           FROM relay_delivery_chain ORDER BY created_at""",
+                "post": [
+                    "CREATE INDEX IF NOT EXISTS idx_relay_delivery_chain_peer"
+                    " ON relay_delivery_chain(peer_did, created_at)",
+                ],
+            },
         ]
 
         for version, migration in enumerate(migrations, start=1):
@@ -1608,8 +1635,12 @@ class _StoreBase(object):
                     conn.execute("UPDATE schema_version SET version = ?", (version,))
                 current = version
             except Exception as exc:
-                import logging as _log
-                _log.getLogger(__name__).warning("Migration %d failed: %s", version, exc)
+                # The code expects the full schema, so a half-migrated database is
+                # treated like a failed integrity check: writes are refused
+                # (E_DB_INTEGRITY) and /health reports it, instead of failing later
+                # in unrelated places.
+                logger.error("Migration %d failed, database writes are blocked: %s", version, exc)
+                self._migration_error = f"migration {version}: {exc}"
                 break
 
         self._ensure_query_indexes(conn)
@@ -1617,7 +1648,14 @@ class _StoreBase(object):
         # R8: startup integrity check — sets _integrity_ok; callers may gate writes on this
         try:
             result = conn.execute("PRAGMA integrity_check").fetchone()
-            if result and result[0] == "ok":
+            if getattr(self, "_migration_error", ""):
+                self._integrity_ok = False
+                try:
+                    self.save_security_event("db_migration_failed", "critical",
+                                             details=self._migration_error[:500])
+                except Exception:
+                    pass
+            elif result and result[0] == "ok":
                 self._integrity_ok = True
             else:
                 self._integrity_ok = False

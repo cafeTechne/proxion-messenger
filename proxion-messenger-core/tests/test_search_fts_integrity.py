@@ -98,7 +98,7 @@ def test_migration_rebuilds_a_corrupted_index(tmp_path):
     assert _fts_token_hits(s, "alpha")  # stale entry present
     s2 = LocalStore(db)
     with sqlite3.connect(db) as conn:
-        assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == 62
+        assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == LocalStore._SCHEMA_VERSION
     assert _fts_token_hits(s2, "alpha") == []
     assert _ids(s2.search_messages("nothing")) == ["m1"]
     s2.update_message("m1", "fresh words")

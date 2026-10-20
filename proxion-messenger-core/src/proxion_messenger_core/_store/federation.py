@@ -471,7 +471,8 @@ class FederationStoreMixin(object):
         import hashlib as _hl
         with self._conn() as conn:
             prev_row = conn.execute(
-                "SELECT entry_hash FROM relay_delivery_chain WHERE peer_did = ? ORDER BY created_at DESC LIMIT 1",
+                "SELECT entry_hash FROM relay_delivery_chain WHERE peer_did = ?"
+                " ORDER BY created_at DESC, id DESC LIMIT 1",
                 (peer_did,),
             ).fetchone()
             prev_hash = prev_row[0] if prev_row else ""
@@ -480,7 +481,7 @@ class FederationStoreMixin(object):
             entry_hash = _hl.sha256(raw.encode()).hexdigest()
             try:
                 conn.execute(
-                    """INSERT OR IGNORE INTO relay_delivery_chain
+                    """INSERT INTO relay_delivery_chain
                        (relay_id, peer_did, status, prev_hash, entry_hash, created_at)
                        VALUES (?, ?, ?, ?, ?, ?)""",
                     (relay_id, peer_did, status, prev_hash, entry_hash, now),
@@ -492,12 +493,14 @@ class FederationStoreMixin(object):
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT relay_id, peer_did, status, prev_hash, entry_hash, created_at "
-                "FROM relay_delivery_chain WHERE peer_did = ? ORDER BY created_at ASC LIMIT ?",
+                "FROM relay_delivery_chain WHERE peer_did = ? ORDER BY created_at ASC, id ASC LIMIT ?",
                 (peer_did, limit),
             ).fetchall()
         if not rows:
             return {"valid": True, "entries": 0, "broken_at": None}
-        prev_hash = ""
+        # Retention prunes the oldest entries, so the chain starts at whatever
+        # the first kept entry links to; each later link is still checked.
+        prev_hash = rows[0][3]
         for i, row in enumerate(rows):
             raw = f"{row[0]}|{row[1]}|{row[2]}|{row[3]}|{row[5]}"
             expected = _hl.sha256(raw.encode()).hexdigest()
