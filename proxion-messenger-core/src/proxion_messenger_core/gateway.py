@@ -2402,13 +2402,9 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         from .pop import fingerprint as _fp
         gw_did = _p2d(self.agent.identity_pub_bytes)
         _gw_version = _read_version_txt()
-        _env_auth = os.environ.get("PROXION_REQUIRE_AUTH", "")
-        _loopback_or_wildcard = self.config.host in (
-            "127.0.0.1", "localhost", "::1", "", "0.0.0.0", "::")
-        _require_auth_flag = (
-            _env_auth == "1" or
-            (_env_auth != "0" and not _loopback_or_wildcard)
-        )
+        # Report what registration enforces (a wildcard bind and a live tunnel
+        # both require auth), not a separate guess at it.
+        _require_auth_flag = self._auth_enforced()
         data = {
             "proxion_version": "0.1",
             "gateway_version": _gw_version,

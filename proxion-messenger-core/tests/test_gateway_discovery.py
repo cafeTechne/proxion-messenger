@@ -276,3 +276,17 @@ async def test_get_invite_without_param_still_returns_html(tmp_path):
     assert resp.status_code == 200
     assert "text/html" in resp.headers.get("content-type", "")
 
+
+
+@pytest.mark.parametrize("host,env,force", [
+    ("0.0.0.0", "", False), ("::", "", False), ("", "", False),
+    ("127.0.0.1", "", False), ("localhost", "", False), ("192.168.1.5", "", False),
+    ("0.0.0.0", "0", False), ("127.0.0.1", "1", False), ("127.0.0.1", "", True),
+])
+def test_well_known_require_auth_matches_enforcement(monkeypatch, host, env, force):
+    """Discovery must report what registration actually enforces: a wildcard
+    bind requires auth, and so does a live tunnel."""
+    monkeypatch.setenv("PROXION_REQUIRE_AUTH", env)
+    gateway, _ = _make_gateway(host=host)
+    gateway._force_auth = force
+    assert gateway._build_discovery_data()["require_auth"] is gateway._auth_enforced()
