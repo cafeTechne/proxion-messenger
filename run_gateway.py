@@ -41,6 +41,7 @@ def _data_dir() -> Path:
 
 # Exit status when a port cannot be bound (the desktop app reports it).
 EXIT_BIND_FAILED = 3
+EXIT_BAD_CONFIG = 2
 
 
 def _auto_tls_enabled() -> bool:
@@ -52,6 +53,15 @@ async def main():
     from proxion_messenger_core.persist import AgentState
     from proxion_messenger_core.readstate import ReadState
     from proxion_messenger_core.logging_config import configure_logging
+
+    from proxion_messenger_core.lifecycle import check_numeric_env
+    _env_problems = check_numeric_env()
+    if _env_problems:
+        for _p in _env_problems:
+            print(f"Proxion gateway could not start: {_p}.", file=sys.stderr, flush=True)
+        # Machine-readable line for the desktop app, like the bind failure below.
+        print("PROXION_GATEWAY_ERROR bad_config " + _env_problems[0].split()[0], flush=True)
+        return EXIT_BAD_CONFIG
 
     _log_fmt = os.environ.get("PROXION_LOG_FORMAT", "text")
     _log_level = os.environ.get("PROXION_LOG_LEVEL", "INFO")

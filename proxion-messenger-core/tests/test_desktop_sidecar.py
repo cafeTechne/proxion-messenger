@@ -412,3 +412,30 @@ def test_mcp_server_finds_the_gateway_cert(tmp_path, monkeypatch):
     assert mcp_server._gateway_cafile() == str(tmp_path / "tls" / "cert.pem")
     monkeypatch.setenv("PROXION_GATEWAY_CAFILE", "/elsewhere.pem")
     assert mcp_server._gateway_cafile() == "/elsewhere.pem"
+
+
+@pytest.mark.parametrize("var,value", [
+    ("PROXION_HTTP_PORT", "abc"), ("PROXION_WS_PORT", "80800"),
+    ("PROXION_MAX_CLIENTS", "lots"), ("PROXION_BIND_WAIT", "soon"),
+])
+def test_bad_numeric_env_is_a_clean_error(sidecars, var, value):
+    sc = sidecars(extra_env={var: value})
+    code = sc.wait_exit(60)
+    out = sc.output()
+    assert code not in (None, 0), out
+    assert "Traceback" not in out, out
+    assert var in out and value in out, out
+    assert "PROXION_GATEWAY_READY" not in out
+
+
+def test_every_numeric_env_read_is_checked_at_startup():
+    """Each int()/float() of a PROXION_* env var in the gateway is covered by
+    the startup check, so a typo never surfaces later as a traceback."""
+    from proxion_messenger_core.lifecycle import NUMERIC_ENV
+    names = set()
+    for path in list(SRC.rglob("*.py")) + [REPO / "run_gateway.py"]:
+        names |= set(re.findall(
+            r"""(?:int|float)\([^()]*(?:environ\.get|getenv)\(\s*["'](PROXION_[A-Z0-9_]+)["']""",
+            path.read_text(encoding="utf-8")))
+    assert names, "regex found nothing; it is stale"
+    assert names <= set(NUMERIC_ENV), sorted(names - set(NUMERIC_ENV))

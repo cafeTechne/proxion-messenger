@@ -98,3 +98,54 @@ def watch_stdin_for_shutdown(stream, on_shutdown: Callable[[], None]) -> threadi
     t = threading.Thread(target=_run, name="proxion-stdin-watch", daemon=True)
     t.start()
     return t
+
+
+# Numeric settings read from the environment, as (kind, min, max, empty_ok).
+# They are parsed with int()/float() wherever they are used, often long after
+# start, so a typo used to end the process in a traceback. check_numeric_env
+# reports them all up front instead. A test keeps this list in step with the code.
+_PORT = ("int", 1, 65535, True)
+NUMERIC_ENV: dict = {
+    "PROXION_HTTP_PORT": _PORT,
+    "PROXION_WS_PORT": _PORT,
+    "PROXION_PORT": _PORT,
+    "PROXION_BIND_WAIT": ("float", 0, 3600, True),
+    "PROXION_EXPIRE_TICK_S": ("float", 0, None, False),
+    "PROXION_SPK_MAX_AGE_SECONDS": ("float", 0, None, False),
+    "PROXION_ASSURANCE_INTERVAL_S": ("int", 0, None, False),
+    "PROXION_AUDIT_RETENTION_DAYS": ("int", 0, None, False),
+    "PROXION_AUTH_TIMEOUT_SECONDS": ("int", 0, None, False),
+    "PROXION_CHECKSUM_INTERVAL": ("int", 0, None, False),
+    "PROXION_DM_SESSION_RETENTION_DAYS": ("int", 0, None, False),
+    "PROXION_IDEMPOTENCY_RETENTION_HOURS": ("int", 0, None, False),
+    "PROXION_MAX_CLIENTS": ("int", 0, None, False),
+    "PROXION_MAX_CONNECTIONS_PER_IP": ("int", 0, None, False),
+    "PROXION_MAX_TOKEN_AGE_S": ("int", 0, None, False),
+    "PROXION_PREKEY_LOW_THRESHOLD": ("int", 0, None, False),
+    "PROXION_SECURITY_EVENT_RETENTION_DAYS": ("int", 0, None, False),
+    "PROXION_SESSION_IDLE_TIMEOUT_S": ("int", 0, None, False),
+    "PROXION_SOLID_CUTOVER_STAGE": ("int", 0, None, False),
+}
+
+
+def check_numeric_env(environ=None) -> list:
+    """Return one readable problem per numeric setting that is set but invalid."""
+    env = os.environ if environ is None else environ
+    problems = []
+    for name, (kind, lo, hi, empty_ok) in NUMERIC_ENV.items():
+        raw = env.get(name)
+        if raw is None or (empty_ok and not raw.strip()):
+            continue
+        what = "a whole number" if kind == "int" else "a number"
+        if hi is not None:
+            what += f" from {lo} to {hi}"
+        elif lo is not None:
+            what += f" of at least {lo}"
+        try:
+            value = int(raw) if kind == "int" else float(raw)
+        except ValueError:
+            problems.append(f"{name} must be {what} (got {raw!r})")
+            continue
+        if (lo is not None and value < lo) or (hi is not None and value > hi):
+            problems.append(f"{name} must be {what} (got {raw!r})")
+    return problems
