@@ -197,6 +197,23 @@ describe('forceReconnect', () => {
   });
 });
 
+describe('dead sockets', () => {
+  it('drop their handlers so each reconnect does not leave four more behind', () => {
+    const c = make();
+    c.connect();
+    const first = made[0];
+    first.readyState = FakeWS.OPEN;
+    first.close();             // drop: onclose schedules an instant retry
+    vi.advanceTimersByTime(1);
+    const second = made[1];
+    expect(second).toBeTruthy();
+    for (const h of ['onopen', 'onmessage', 'onerror', 'onclose']) expect(first[h]).toBeNull();
+    c.forceReconnect();        // superseded while connecting
+    for (const h of ['onopen', 'onmessage', 'onerror', 'onclose']) expect(second[h]).toBeNull();
+    expect(hostSocket).toBe(made[2]);
+  });
+});
+
 describe('normalizeGatewayUrl', () => {
   it('keeps ws and wss addresses', () => {
     expect(normalizeGatewayUrl('ws://127.0.0.1:7474')).toBe('ws://127.0.0.1:7474');

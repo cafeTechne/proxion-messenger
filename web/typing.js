@@ -62,7 +62,8 @@ export function createTyping({ getSocket, getActiveView, resolveName }) {
         inputEl.addEventListener("input", () => {
             const socket = getSocket();
             const activeView = getActiveView();
-            if (!socket || !activeView || state.typingThrottled) return;
+            // send() throws while the socket is CONNECTING; typing is best-effort.
+            if (!socket || socket.readyState !== 1 || !activeView || state.typingThrottled) return;
             const payload = { cmd: "typing" };
             if (activeView.type === "dm" || activeView.type === "local_dm") {
                 payload.cert_id = activeView.id;

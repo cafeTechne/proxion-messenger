@@ -373,6 +373,12 @@ export function createConnection({
         }
     }
 
+    // A finished socket keeps its four handler closures (and what they hold)
+    // alive; drop them so reconnects do not pile up listeners.
+    function _detach(ws) {
+        try { ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null; } catch (_) { /* ignore */ }
+    }
+
     // Drop the current socket, whatever its state, and connect fresh.
     function _restart() {
         if (state._reconnectTimer) { clearInterval(state._reconnectTimer); state._reconnectTimer = null; }
@@ -384,6 +390,7 @@ export function createConnection({
         if (oldSocket) {
             _requeueHeld(oldSocket);
             try { oldSocket.close(); } catch(e) {}
+            _detach(oldSocket);
             const dot = document.querySelector(".dot");
             if (dot) dot.className = "dot offline";
         }
@@ -511,6 +518,7 @@ export function createConnection({
 
         ws.onclose = () => {
             clearTimeout(_connectTimeout);
+            _detach(ws);
             if (getSocket() !== ws) return; // superseded — don't clobber state or schedule reconnect
             _stopHeartbeat();
             _requeueHeld(ws);

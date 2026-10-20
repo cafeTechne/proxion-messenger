@@ -15,7 +15,7 @@ function mkEl(over = {}) {
 beforeEach(() => {
   els = {};
   sent = [];
-  socket = { send: (m) => sent.push(JSON.parse(m)) };
+  socket = { readyState: 1, send: (m) => sent.push(JSON.parse(m)) };
   view = { type: 'room', id: 'room-1' };
   global.document = { getElementById: (id) => (id in els ? els[id] : null) };
   vi.useFakeTimers();
@@ -78,6 +78,19 @@ describe('attach (outgoing typing)', () => {
     t.attach(input);
     handler();
     expect(sent[0]).toEqual({ cmd: 'typing', cert_id: 'cert-9' });
+  });
+  it('does not send (or throw) while the socket is still connecting', () => {
+    socket = { readyState: 0, send: () => { throw new Error('InvalidStateError'); } };
+    const input = mkEl();
+    let handler;
+    input.addEventListener = (ev, fn) => { if (ev === 'input') handler = fn; };
+    const t = make();
+    t.attach(input);
+    expect(() => handler()).not.toThrow();
+    // Not throttled by the dropped attempt: the next keystroke after connect sends.
+    socket = { readyState: 1, send: (m) => sent.push(JSON.parse(m)) };
+    handler();
+    expect(sent).toEqual([{ cmd: 'typing', room_id: 'room-1' }]);
   });
   it('does not send when there is no active view', () => {
     view = null;
