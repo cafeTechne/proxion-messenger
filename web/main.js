@@ -2066,7 +2066,7 @@ import { createAccountSync } from './account-sync.js';
                         badge.className = "relay-pending-badge";
                         badge.title = t('relay.queuedHint');
                         _setStatusBadge(badge, 'clock', t('relay.queued'));
-                        el.appendChild(badge);
+                        _statusHost(el).appendChild(badge);
                     }
                     break;
                 }
@@ -2095,7 +2095,7 @@ import { createAccountSync } from './account-sync.js';
                             || (() => {
                                 const b = document.createElement("span");
                                 b.className = "relay-pending-badge";
-                                msgEl.appendChild(b);
+                                _statusHost(msgEl).appendChild(b);
                                 return b;
                             })();
                         _setStatusBadge(badge, 'exclamation-triangle', t('relay.failedShort'));
@@ -2307,7 +2307,7 @@ import { createAccountSync } from './account-sync.js';
                             // A DM delivered straight away never got a queued badge.
                             if (!badge && messageMap[event.message_id]?.from_webid === selfWebId) {
                                 badge = document.createElement("span");
-                                msgEl.appendChild(badge);
+                                _statusHost(msgEl).appendChild(badge);
                             }
                             if (badge) {
                                 _setStatusBadge(badge, 'check-double', t('receipt.read'));
@@ -4035,6 +4035,11 @@ import { createAccountSync } from './account-sync.js';
         // read out literally).
         function _setStatusBadge(el, name, label) {
             el.innerHTML = icon(name, { size: 12 }) + `<span class="sr-only">${escHtml(label)}</span>`;
+        }
+        // Relay status sits at the end of the message text, where the sent tick
+        // is, not as a loose item at the far edge of the message row.
+        function _statusHost(msgEl) {
+            return msgEl.querySelector('.msg-content, .audio-message') || msgEl;
         }
 
         // -- Round 60: Read receipt helpers --

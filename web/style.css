@@ -1161,6 +1161,17 @@ button {
     background: var(--surface-1);
     border-inline-start: 1px solid var(--border);
 }
+/* Between phone and wide desktop the column squeezed the conversation
+   (a 900px window left the feed about 400px wide). There the panel floats
+   over the feed's edge instead of taking a column. */
+@media (min-width: 769px) and (max-width: 1100px) {
+    #app { position: relative; }
+    #members-panel {
+        position: absolute; inset-block: 0; inset-inline-end: 0;
+        width: 260px; z-index: 50;
+        box-shadow: var(--shadow-md);
+    }
+}
 .drawer {
     position: fixed; inset-inline-end: 0; top: 0; bottom: 0;
     width: var(--drawer-w);
@@ -1488,6 +1499,9 @@ button {
 .relay-pending-badge { margin-inline-start: var(--space-1); font-size: var(--text-xs); opacity: 0.7; vertical-align: middle; }
 .revoked-badge { margin-inline-start: var(--space-1); color: var(--color-danger-soft); }
 .relay-pending-badge svg, .relay-read svg, .revoked-badge svg, .read-receipt svg { width: 13px; height: 13px; }
+.relay-read { margin-inline-start: var(--space-1); color: var(--color-success-soft); }
+/* A relay status (queued, delivered, read, failed) says more than the sent tick. */
+:is(.msg-content, .audio-message):has(.relay-pending-badge, .relay-read) > .read-receipt { display: none; }
 .relay-pending-badge.relay-failed { color: var(--color-danger-soft); opacity: 0.9; cursor: help; }
 } /* components */
 
@@ -2014,6 +2028,9 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
         .avatar-presence.busy {
             background: var(--color-danger);  /* busy (red) */
         }
+        /* While this client is disconnected nobody's presence is known, so the
+           last-seen green dots go grey instead of claiming people are online. */
+        :root:has(#self-presence .dot.offline) :is(.avatar-presence, .profile-status-dot, .mo-presence) { background: var(--slate-500); }
         .reactions {
             display: flex;
             gap: var(--space-1);
