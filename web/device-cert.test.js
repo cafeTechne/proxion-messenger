@@ -106,3 +106,42 @@ describe('verifyDeviceCert', () => {
         expect(got).toBe(VEC.account_did);
     });
 });
+
+describe('device cert lifetime cap', () => {
+    const DAY = 86400;
+    // A correctly signed cert with an arbitrary lifetime, so only the TTL cap
+    // can reject it.
+    async function signedCert(lifetimeDays) {
+        const key = await importAccountKey();
+        const issued = VEC.issued_at;
+        const expires = issued + lifetimeDays * DAY;
+        const canon = _internals._canonical(VEC.account_did, VEC.device_did, issued, expires);
+        const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', key, canon));
+        let s = ''; for (const b of sig) s += String.fromCharCode(b);
+        return {
+            '@type': 'ProxionDeviceCert', version: 1,
+            account_did: VEC.account_did, device_did: VEC.device_did,
+            issued_at: issued, expires_at: expires, signature: btoa(s),
+        };
+    }
+
+    it('accepts a cert at the 400-day cap', async () => {
+        const cert = await signedCert(400);
+        expect(await verifyDeviceCert(cert, { now: VEC.issued_at + DAY })).toBe(VEC.account_did);
+    });
+
+    it('rejects a validly signed cert that lives longer than 400 days', async () => {
+        const cert = await signedCert(401);
+        expect(await verifyDeviceCert(cert, { now: VEC.issued_at + DAY })).toBeNull();
+        const forever = await signedCert(100 * 365);
+        expect(await verifyDeviceCert(forever, { now: VEC.issued_at + DAY })).toBeNull();
+    });
+
+    it('refuses to issue a cert past the cap or with no lifetime', async () => {
+        const key = await importAccountKey();
+        await expect(issueDeviceCert(key, VEC.account_did, VEC.device_did, { ttlDays: 401 })).rejects.toThrow(/ttlDays/);
+        await expect(issueDeviceCert(key, VEC.account_did, VEC.device_did, { ttlDays: 0 })).rejects.toThrow(/ttlDays/);
+        const ok = await issueDeviceCert(key, VEC.account_did, VEC.device_did, { ttlDays: 400, now: VEC.issued_at });
+        expect(ok.expires_at - ok.issued_at).toBe(400 * DAY);
+    });
+});

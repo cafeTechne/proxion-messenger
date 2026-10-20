@@ -179,6 +179,37 @@ describe('dmsig legacy-signature shim', () => {
         expect(await verifyFanoutSig({ ...fEnv, signer: id.did, sig: _b64(sig) })).toBe(true);
     });
 
+    it('rejects a legacy-signed fanout copy once the payload carries e2e (no downgrade)', async () => {
+        // The legacy fanout canonical omits payload.e2e, so without the guard an
+        // attacker could add or flip it on a legacy-signed copy and still verify.
+        const id = await makeIdentity();
+        const fEnv = {
+            from_webid: 'https://alice.pod/profile/card#me', message_id: 'm1', to_device_id: 'bob-A',
+            payload: { content: 'CIPHER', nonce: 'N', msg_num: 2, pn: 0, ratchet_pub: 'RP', x25519_pub: 'XP' },
+        };
+        const p = fEnv.payload;
+        const bytes = legacyCanonical(LEGACY_FANOUT_FIELDS, {
+            from_webid: fEnv.from_webid, message_id: fEnv.message_id, to_device_id: fEnv.to_device_id,
+            content: p.content, nonce: p.nonce, msg_num: p.msg_num, pn: p.pn, ratchet_pub: p.ratchet_pub, x25519_pub: p.x25519_pub,
+        });
+        const sig = _b64(new Uint8Array(await crypto.subtle.sign('Ed25519', id.priv, bytes)));
+        expect(await verifyFanoutSig({ ...fEnv, signer: id.did, sig })).toBe(true);
+        for (const e2e of [true, false, 'x']) {
+            expect(await verifyFanoutSig({ ...fEnv, payload: { ...p, e2e }, signer: id.did, sig })).toBe(false);
+        }
+    });
+
+    it('a current-scheme fanout copy carrying e2e still verifies, and e2e is bound', async () => {
+        const id = await makeIdentity();
+        const fEnv = {
+            from_webid: 'https://alice.pod/profile/card#me', message_id: 'm1', to_device_id: 'bob-A',
+            payload: { content: 'CIPHER', nonce: 'N', msg_num: 2, pn: 0, ratchet_pub: 'RP', x25519_pub: 'XP', e2e: true },
+        };
+        const s = await signFanout(fEnv, id.priv, id.did);
+        expect(await verifyFanoutSig({ ...fEnv, ...s })).toBe(true);
+        expect(await verifyFanoutSig({ ...fEnv, ...s, payload: { ...fEnv.payload, e2e: false } })).toBe(false);
+    });
+
     it('still rejects a truly bad signature under both schemes', async () => {
         const id = await makeIdentity();
         const other = await makeIdentity();
