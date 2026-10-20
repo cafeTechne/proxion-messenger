@@ -1,0 +1,30 @@
+# Python lint gate (CI runs `ruff check .` from the repo root).
+#
+# Bug classes only, not style: the code is not formatted with ruff and these
+# rules are chosen so a hit is almost always a real defect. Unused imports
+# (F401) and the like are left out on purpose; they are noise, not bugs.
+target-version = "py312"
+extend-exclude = [
+    "web/node_modules",
+    "tauri-app",
+    "landing",
+    # Narrative example kept for reference; it predates the current API.
+    "proxion-messenger-core/docs",
+]
+
+[lint]
+select = [
+    "E9",    # syntax errors
+    "F63",   # invalid comparisons (`is` with a literal, ...)
+    "F7",    # misplaced break/continue/return/yield/await
+    "F82",   # undefined names, including a name used before a local import shadows it
+    "F50",   # %-format string errors
+    "F52",   # str.format errors
+    "F60",   # duplicate dict keys
+    "F70",   # misplaced statements
+    "B006",  # mutable default argument
+    "B015",  # comparison whose result is thrown away
+    "B018",  # useless expression
+    "B025",  # duplicate except clause
+    "PLE",   # pylint errors
+]

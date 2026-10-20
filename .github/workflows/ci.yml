@@ -113,12 +113,18 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
+      # mcp: tests/test_mcp_server.py drives the MCP tool layer (skipped without it).
       - name: Install dependencies
         working-directory: proxion-messenger-core
-        run: pip install -e ".[gateway,cli,test]"
+        run: pip install -e ".[gateway,cli,test,mcp]"
 
       - name: Cold-path undefined-name gate (H1)
         run: python scripts/check_cold_paths.py
+
+      # Bug-class rules only (see ruff.toml). Platform-independent, so one OS.
+      - name: Ruff
+        if: runner.os == 'Linux'
+        run: ruff check .
 
       - name: Run unit tests
         working-directory: proxion-messenger-core
