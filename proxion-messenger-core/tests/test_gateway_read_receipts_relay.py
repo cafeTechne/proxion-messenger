@@ -5,7 +5,6 @@ R10.3.2: POST /relay/receipt delivers a read_receipt WebSocket event to the reci
 """
 import asyncio
 import json
-import socket
 import time
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -34,10 +33,7 @@ def _mock_ws():
     return ws
 
 
-def _free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+from gwharness import free_port as _free_port
 
 
 # ── R10.3.1: mark_read with cert DM attempts relay receipt POST ────────────

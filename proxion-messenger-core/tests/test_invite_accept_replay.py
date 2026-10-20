@@ -8,7 +8,6 @@ them. The owner re-adding someone (a new request, then their accept) still works
 """
 import asyncio
 import json
-import socket
 import time
 from unittest.mock import AsyncMock, patch
 
@@ -196,10 +195,7 @@ def test_restored_tombstone_cancels_only_older_requests(tmp_path):
 
 # ── HTTP level: the replay over a real socket ────────────────────────────────
 
-def _free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+from gwharness import free_port as _free_port
 
 
 def _post(port, path, body):

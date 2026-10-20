@@ -5,7 +5,6 @@ audio; the UI's download truncated messages over 4 KiB; and import stamped every
 row with the gateway's DID instead of the account it belonged to.
 """
 import json
-import socket
 import sqlite3
 from unittest.mock import AsyncMock
 
@@ -138,10 +137,7 @@ def test_import_cannot_add_members_to_an_existing_room(tmp_path):
     assert dst.get_all_rooms()[0]["name"] == "Mine"
 
 
-def _free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+from gwharness import free_port as _free_port
 
 
 def _ws():

@@ -23,6 +23,7 @@ import pytest
 pytest.importorskip("websockets")
 import websockets
 from gwharness import free_port, start_gateway
+from gwharness import register as _gw_register
 
 _DELIVER_TIMEOUT = 15.0
 
@@ -120,9 +121,8 @@ async def test_send_dm_with_pod_client_keeps_ratchet_header(tmp_path):
 
     async with websockets.connect(f"ws://127.0.0.1:{ws_a}") as conn_a, \
                websockets.connect(f"ws://127.0.0.1:{ws_b}") as conn_b:
-        await conn_a.send(json.dumps({"cmd": "register", "did": did_a}))
-        await conn_b.send(json.dumps({"cmd": "register", "did": did_b}))
-        await asyncio.sleep(0.15)
+        await _gw_register(conn_a, did_a)
+        await _gw_register(conn_b, did_b)
         await _drain(conn_a)
         await _drain(conn_b)
 

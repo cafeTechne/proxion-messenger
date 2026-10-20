@@ -13,6 +13,7 @@ import pytest
 pytest.importorskip("websockets")
 import websockets
 from gwharness import free_port as _free_port, start_gateway as _serve
+from gwharness import register as _gw_register
 
 
 # Wall-clock budget for "poll until the message arrives" loops below. Every such
@@ -84,9 +85,8 @@ async def test_relay_delivers_dm(tmp_path):
     async with websockets.connect(f"ws://127.0.0.1:{ws_a}") as conn_a, \
                websockets.connect(f"ws://127.0.0.1:{ws_b}") as conn_b:
 
-        await conn_a.send(json.dumps({"cmd": "register", "did": did_a}))
-        await conn_b.send(json.dumps({"cmd": "register", "did": did_b}))
-        await asyncio.sleep(0.15)
+        await _gw_register(conn_a, did_a)
+        await _gw_register(conn_b, did_b)
 
         await _drain(conn_a)
         await _drain(conn_b)
@@ -158,9 +158,8 @@ async def test_send_dm_relay_fallback(tmp_path):
     async with websockets.connect(f"ws://127.0.0.1:{ws_a}") as conn_a, \
                websockets.connect(f"ws://127.0.0.1:{ws_b}") as conn_b:
 
-        await conn_a.send(json.dumps({"cmd": "register", "did": did_a}))
-        await conn_b.send(json.dumps({"cmd": "register", "did": did_b}))
-        await asyncio.sleep(0.15)
+        await _gw_register(conn_a, did_a)
+        await _gw_register(conn_b, did_b)
         await _drain(conn_a)
         await _drain(conn_b)
 
@@ -223,9 +222,8 @@ async def test_full_invite_accept_dm_flow(tmp_path):
     async with websockets.connect(f"ws://127.0.0.1:{ws_a}") as conn_a, \
                websockets.connect(f"ws://127.0.0.1:{ws_b}") as conn_b:
 
-        await conn_a.send(json.dumps({"cmd": "register", "did": did_a}))
-        await conn_b.send(json.dumps({"cmd": "register", "did": did_b}))
-        await asyncio.sleep(0.15)
+        await _gw_register(conn_a, did_a)
+        await _gw_register(conn_b, did_b)
         await _drain(conn_a)
         await _drain(conn_b)
 
@@ -331,9 +329,8 @@ async def test_full_invite_accept_dm_flow(tmp_path):
     async with websockets.connect(f"ws://127.0.0.1:{ws_a}") as conn_a2, \
                websockets.connect(f"ws://127.0.0.1:{ws_b}") as conn_b2:
 
-        await conn_a2.send(json.dumps({"cmd": "register", "did": did_a}))
-        await conn_b2.send(json.dumps({"cmd": "register", "did": did_b}))
-        await asyncio.sleep(0.15)
+        await _gw_register(conn_a2, did_a)
+        await _gw_register(conn_b2, did_b)
         await _drain(conn_a2)
         await _drain(conn_b2)
 

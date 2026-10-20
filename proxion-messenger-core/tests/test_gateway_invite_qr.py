@@ -1,7 +1,6 @@
 """Tests for short invite token, QR share, and well-known version — R17.5 / R18.4."""
 import asyncio
 import json
-import socket
 import pytest
 
 pytest.importorskip("websockets")
@@ -12,12 +11,10 @@ from proxion_messenger_core.persist import AgentState
 from proxion_messenger_core.gateway import ProxionGateway, GatewayConfig
 from proxion_messenger_core.readstate import ReadState
 from gwharness import start_gateway as _serve_gw
+from gwharness import register as _gw_register
 
 
-def _free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+from gwharness import free_port as _free_port
 
 
 def _start_gateway(tmp_path):
@@ -98,8 +95,7 @@ async def test_my_address_includes_short_invite_url(tmp_path):
     my_did = pub_key_to_did(gw.agent.identity_pub_bytes)
 
     async with websockets.connect(f"ws://127.0.0.1:{ws_port}") as conn:
-        await conn.send(json.dumps({"cmd": "register", "did": my_did}))
-        await asyncio.sleep(0.1)
+        await _gw_register(conn, my_did)
         await conn.send(json.dumps({"cmd": "get_my_address"}))
 
         deadline = asyncio.get_event_loop().time() + 3.0

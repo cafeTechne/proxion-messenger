@@ -8,7 +8,6 @@ gateway, must not stay listed as a ghost participant.
 """
 import asyncio
 import json
-import socket
 import time
 from unittest.mock import AsyncMock
 
@@ -133,10 +132,7 @@ async def test_closing_an_idle_tab_keeps_the_tab_in_the_call(tmp_path):
 
 # ---------------------------------------------------------------- cross-gateway
 
-def _free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+from gwharness import free_port as _free_port
 
 
 def _start(tmp_path, name):

@@ -14,6 +14,7 @@ import pytest
 pytest.importorskip("websockets")
 import websockets
 from gwharness import free_port, start_gateway
+from gwharness import register as _gw_register
 
 from proxion_messenger_core.didkey import pub_key_to_did
 from proxion_messenger_core.gateway import GatewayConfig, ProxionGateway
@@ -59,8 +60,7 @@ async def _wait_for(conn, pred, timeout=15.0):
 
 async def _get_dms(ws_port, did, name):
     async with websockets.connect(f"ws://127.0.0.1:{ws_port}") as conn:
-        await conn.send(json.dumps({"cmd": "register", "did": did, "display_name": name}))
-        await asyncio.sleep(0.2)
+        await _gw_register(conn, did, display_name=name)
         await conn.send(json.dumps({"cmd": "get_dms"}))
         msg = await _wait_for(conn, lambda m: m.get("type") == "dms")
     assert msg is not None, "no dms reply"
@@ -83,9 +83,8 @@ async def test_cross_gateway_dm_survives_reconnect_and_restart(tmp_path):
 
     async with websockets.connect(f"ws://127.0.0.1:{h_a.ws_port}") as conn_a, \
                websockets.connect(f"ws://127.0.0.1:{h_b.ws_port}") as conn_b:
-        await conn_a.send(json.dumps({"cmd": "register", "did": did_a, "display_name": "Alice"}))
-        await conn_b.send(json.dumps({"cmd": "register", "did": did_b, "display_name": "Bob"}))
-        await asyncio.sleep(0.2)
+        await _gw_register(conn_a, did_a, display_name="Alice")
+        await _gw_register(conn_b, did_b, display_name="Bob")
         await conn_a.send(json.dumps({"cmd": "send_dm", "cert_id": CERT_ID,
                                       "content": "hello across gateways"}))
         got = await _wait_for(conn_b, lambda m: m.get("type") == "message"

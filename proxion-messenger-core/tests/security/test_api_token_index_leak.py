@@ -13,7 +13,6 @@ F9: the legacy PROXION_API_TOKEN is compared with hmac.compare_digest at the rec
 gate, matching the admin-token path.
 """
 import asyncio
-import socket
 import time
 import types
 
@@ -26,10 +25,7 @@ from proxion_messenger_core.persist import AgentState
 from proxion_messenger_core.readstate import ReadState
 
 
-def _free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+from gwharness import free_port as _free_port
 
 
 def _make_gateway(tmp_path):

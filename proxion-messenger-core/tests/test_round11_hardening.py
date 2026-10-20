@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import socket
 import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -22,10 +21,7 @@ from proxion_messenger_core.didkey import fingerprint_words, did_to_pub_key
 from gwharness import start_gateway as _serve_gw
 
 
-def _free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+from gwharness import free_port as _free_port
 
 
 def _make_gateway(tmp_path, host="127.0.0.1"):

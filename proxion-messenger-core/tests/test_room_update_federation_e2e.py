@@ -2,7 +2,6 @@
 signed /relay path, and the member gateway refuses one from a non-admin."""
 import asyncio
 import json
-import socket
 import time
 
 import pytest
@@ -12,10 +11,7 @@ import websockets  # noqa: F401  (gateway import path expects it)
 from gwharness import start_gateway as _serve_gw
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+from gwharness import free_port as _free_port
 
 
 def _start_gateway(agent, ws_port: int, http_port: int, db_path: str):

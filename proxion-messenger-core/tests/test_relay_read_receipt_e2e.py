@@ -4,7 +4,6 @@ Uses two in-process gateways (same pattern as test_relay_e2e.py).
 """
 import asyncio
 import json
-import socket
 import time
 
 import pytest
@@ -15,12 +14,10 @@ import websockets
 from proxion_messenger_core.persist import AgentState
 from proxion_messenger_core.didkey import pub_key_to_did
 from gwharness import start_gateway as _serve_gw
+from gwharness import register as _gw_register
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+from gwharness import free_port as _free_port
 
 
 def _start_gateway(agent, ws_port: int, http_port: int, db_path: str):
@@ -89,9 +86,8 @@ async def test_relay_read_receipt_e2e(tmp_path):
         websockets.connect(f"ws://127.0.0.1:{ws_a}") as conn_a,
         websockets.connect(f"ws://127.0.0.1:{ws_b}") as conn_b,
     ):
-        await conn_a.send(json.dumps({"cmd": "register", "did": did_a}))
-        await conn_b.send(json.dumps({"cmd": "register", "did": did_b}))
-        await asyncio.sleep(0.15)
+        await _gw_register(conn_a, did_a)
+        await _gw_register(conn_b, did_b)
         await _drain(conn_a)
         await _drain(conn_b)
 

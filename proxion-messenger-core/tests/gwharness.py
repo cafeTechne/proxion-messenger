@@ -25,6 +25,7 @@ This harness fixes both:
 from __future__ import annotations
 
 import asyncio
+import json
 import socket
 import threading
 import time
@@ -46,8 +47,10 @@ STARTUP_TIMEOUT = 15.0
 def free_port() -> int:
     """Return a currently-free localhost TCP port.
 
-    Inherently racy (the port is released before the caller binds it), so
-    serve_gateway retries on collision rather than trusting this outright.
+    Inherently racy: the port is released before the caller binds it. For the
+    WebSocket port prefer ``ws_port=0`` to serve_gateway, which binds an
+    OS-assigned port and reports it on the handle. The HTTP port still needs
+    this, because the gateway builds its own URLs from config.http_port.
     """
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -104,6 +107,8 @@ def serve_gateway(gw, ws_port: int, http_port: int, *, serve_http: bool = True,
     """
     handle = GatewayHandle(gw, ws_port, http_port)
     loop = asyncio.new_event_loop()
+    # ws_port=0: the server binds an OS-assigned port; read it from
+    # handle.ws_port (and gw.config.port, when that was 0 too) once this returns.
     handle.loop = loop
 
     def _run():
@@ -112,7 +117,13 @@ def serve_gateway(gw, ws_port: int, http_port: int, *, serve_http: bool = True,
         async def _serve():
             stop = asyncio.Event()
             handle._stop_event = stop
-            async with websockets.serve(gw.handle_client, "127.0.0.1", ws_port):
+            async with websockets.serve(gw.handle_client, "127.0.0.1", ws_port) as server:
+                if ws_port == 0:
+                    # Bound by the OS, so no other process can take it between
+                    # picking and binding. Keep the gateway's config in step.
+                    handle.ws_port = server.sockets[0].getsockname()[1]
+                    if getattr(getattr(gw, "config", None), "port", None) == 0:
+                        gw.config.port = handle.ws_port
                 http_task = None
                 if serve_http:
                     http_task = asyncio.create_task(gw._serve_http(web_dir, http_port))
@@ -185,3 +196,27 @@ def shutdown_all(timeout: float = 5.0) -> int:
         except Exception:
             pass
     return stopped
+
+
+REGISTER_TIMEOUT = 10.0
+
+
+async def register(conn, did: str, timeout: float = REGISTER_TIMEOUT, **fields) -> dict:
+    """Send ``register`` on a live socket and wait for the gateway to confirm it.
+
+    Returns the ``registered`` frame. Replaces a fixed sleep after sending
+    register, which was either wasted time or, on a slow runner, too short.
+    Frames that arrive before the confirmation (config, snapshots) are dropped.
+    """
+    await conn.send(json.dumps({"cmd": "register", "did": did, **fields}))
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        left = deadline - loop.time()
+        if left <= 0:
+            raise AssertionError(f"no 'registered' reply for {did} within {timeout}s")
+        msg = json.loads(await asyncio.wait_for(conn.recv(), timeout=left))
+        if msg.get("type") == "registered":
+            return msg
+        if msg.get("type") in ("auth_challenge", "error"):
+            raise AssertionError(f"register for {did} got {msg!r} instead of 'registered'")

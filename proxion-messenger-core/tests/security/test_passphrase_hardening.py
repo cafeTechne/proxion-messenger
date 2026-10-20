@@ -2,7 +2,6 @@
 /backup and /restore endpoints."""
 import asyncio
 import json
-import socket
 import pytest
 
 pytest.importorskip("websockets")
@@ -13,10 +12,7 @@ from proxion_messenger_core.readstate import ReadState
 from gwharness import start_gateway as _serve_gw
 
 
-def _free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+from gwharness import free_port as _free_port
 
 
 def _start_gateway(tmp_path):

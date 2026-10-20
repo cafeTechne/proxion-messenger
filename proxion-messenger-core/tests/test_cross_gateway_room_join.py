@@ -2,7 +2,6 @@
 POST /room-join), the room lands on B, and messages relay both ways."""
 import asyncio
 import json
-import socket
 import time
 from unittest.mock import AsyncMock
 
@@ -12,10 +11,7 @@ pytest.importorskip("websockets")
 from gwharness import start_gateway as _serve_gw
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+from gwharness import free_port as _free_port
 
 
 def _start(agent, tmp_path, name):

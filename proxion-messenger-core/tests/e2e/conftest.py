@@ -19,10 +19,11 @@ def live_gateway(tmp_path_factory):
     handlers run their auth-enforced branches, which unit tests mostly skip.
     Yields a dict with "url" (ws://127.0.0.1:port) and "gateway" instance.
     """
-    from gwharness import free_port, start_gateway
+    from gwharness import start_gateway
 
-    port = free_port()
-    url = f"ws://127.0.0.1:{port}"
+    # Port 0: the OS assigns a free port at bind time and the harness writes it
+    # back into config.port, so nothing can grab it between pick and bind.
+    port = 0
 
     agent = AgentState.generate()
     agent.webid = "https://gateway.test/profile/card#me"
@@ -45,6 +46,8 @@ def live_gateway(tmp_path_factory):
     gateway._force_auth = True
 
     handle = start_gateway(gateway, port, 0, serve_http=False, auto_shutdown=False)
+    url = f"ws://127.0.0.1:{handle.ws_port}"
+    assert gateway.config.port == handle.ws_port != 0
     try:
         yield {"url": url, "gateway": gateway}
     finally:

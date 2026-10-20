@@ -18,6 +18,7 @@ import pytest
 pytest.importorskip("websockets")
 import websockets
 from gwharness import free_port, start_gateway
+from gwharness import register as _gw_register
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
@@ -131,9 +132,8 @@ async def _queue_dm_while_peer_down(tmp_path, monkeypatch, *, sealed):
 
     conn_a = await websockets.connect(f"ws://127.0.0.1:{ws_a}")
     other = await websockets.connect(f"ws://127.0.0.1:{ws_a}")
-    await conn_a.send(json.dumps({"cmd": "register", "did": browser_did}))
-    await other.send(json.dumps({"cmd": "register", "did": other_did}))
-    await asyncio.sleep(0.2)
+    await _gw_register(conn_a, browser_did)
+    await _gw_register(other, other_did)
     await _drain(conn_a)
     await _drain(other)
 
@@ -163,8 +163,7 @@ async def test_dm_queued_during_long_outage_is_delivered_and_sender_told(tmp_pat
     try:
         start_gateway(s.gw_b, s.ws_b, s.http_b)  # B comes back an hour later
         async with websockets.connect(f"ws://127.0.0.1:{s.ws_b}") as conn_b:
-            await conn_b.send(json.dumps({"cmd": "register", "did": s.did_b}))
-            await asyncio.sleep(0.2)
+            await _gw_register(conn_b, s.did_b)
             await _drain(conn_b)
 
             await _run_on(s.h_a, s.gw_a._relay_retry_pass())
@@ -199,8 +198,7 @@ async def test_queue_flushes_when_peer_makes_contact(tmp_path, monkeypatch):
                       (time.time(),))
         start_gateway(s.gw_b, s.ws_b, s.http_b)
         async with websockets.connect(f"ws://127.0.0.1:{s.ws_b}") as conn_b:
-            await conn_b.send(json.dumps({"cmd": "register", "did": s.did_b}))
-            await asyncio.sleep(0.2)
+            await _gw_register(conn_b, s.did_b)
             await _drain(conn_b)
             # B's user writes to A: a verified inbound relay from B's gateway.
             await conn_b.send(json.dumps({

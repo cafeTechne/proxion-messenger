@@ -5,7 +5,6 @@ relationships.revoked flag, so restoring a backup authorized removed contacts
 again. Import also skipped the max-validity clamp save_relationship applies.
 """
 import json
-import socket
 import time
 
 import httpx
@@ -121,10 +120,7 @@ def test_import_clamps_an_over_long_cert_expiry(tmp_path):
     assert stored <= now + MAX_CERT_VALIDITY_SECONDS
 
 
-def _free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+from gwharness import free_port as _free_port
 
 
 def test_http_import_applies_revocations_without_a_restart(tmp_path):

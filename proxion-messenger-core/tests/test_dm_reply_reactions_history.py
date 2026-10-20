@@ -16,6 +16,7 @@ pytest.importorskip("websockets")
 import websockets
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from gwharness import free_port, start_gateway
+from gwharness import register as _gw_register
 
 from proxion_messenger_core.didkey import pub_key_to_did
 from proxion_messenger_core.gateway import GatewayConfig, ProxionGateway
@@ -94,9 +95,8 @@ async def test_cross_gateway_dm_reply_keeps_reply_to_id(tmp_path, sealed):
 
     async with websockets.connect(f"ws://127.0.0.1:{ws_a}") as conn_a, \
             websockets.connect(f"ws://127.0.0.1:{ws_b}") as conn_b:
-        await conn_a.send(json.dumps({"cmd": "register", "did": browser_a}))
-        await conn_b.send(json.dumps({"cmd": "register", "did": did_b}))
-        await asyncio.sleep(0.2)
+        await _gw_register(conn_a, browser_a)
+        await _gw_register(conn_b, did_b)
         await _drain(conn_a)
         await _drain(conn_b)
 

@@ -5,7 +5,6 @@ import asyncio
 import json
 import os
 import platform
-import socket
 import stat
 import time
 from pathlib import Path
@@ -22,12 +21,10 @@ from proxion_messenger_core.local_store import LocalStore
 from proxion_messenger_core.readstate import ReadState
 from proxion_messenger_core.relay import sign_relay_message, verify_relay_message
 from gwharness import start_gateway as _serve_gw
+from gwharness import register as _gw_register
 
 
-def _free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+from gwharness import free_port as _free_port
 
 
 def _make_gateway(tmp_path, host="127.0.0.1"):
@@ -79,8 +76,7 @@ async def test_rate_limit_61st_command_rejected(tmp_path):
 
     async with websockets.connect(f"ws://127.0.0.1:{ws_port}") as conn:
         # Register (exempt — doesn't count against limit)
-        await conn.send(json.dumps({"cmd": "register", "did": "did:key:ratelimituser"}))
-        await asyncio.sleep(0.15)
+        await _gw_register(conn, "did:key:ratelimituser")
         # Drain registration responses
         while True:
             try:

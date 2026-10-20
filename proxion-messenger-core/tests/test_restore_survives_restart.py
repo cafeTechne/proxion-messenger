@@ -46,10 +46,7 @@ _TLS_CTX.check_hostname = False
 _TLS_CTX.verify_mode = ssl.CERT_NONE
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+from gwharness import free_port as _free_port
 
 
 class _GatewayProcess:

@@ -8,7 +8,6 @@ that carries proxy headers or a non-local Host is now remote, and a gateway with
 public hostname configured needs the provisioned token for these endpoints.
 """
 import asyncio
-import socket
 import types
 
 import pytest
@@ -21,10 +20,7 @@ from proxion_messenger_core.readstate import ReadState
 from gwharness import start_gateway as _serve_gw
 
 
-def _free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+from gwharness import free_port as _free_port
 
 
 def _start_gateway(tmp_path, public_url=None):

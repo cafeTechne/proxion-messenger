@@ -12,6 +12,7 @@ from proxion_messenger_core.readstate import ReadState
 from proxion_messenger_core.relay import sign_relay_message
 from proxion_messenger_core.didkey import pub_key_to_did
 from gwharness import start_gateway as _serve_gw
+from gwharness import register as _gw_register
 
 
 def _make_gateway(tmp_path):
@@ -271,8 +272,7 @@ async def test_admin_revoke_contact_broadcasts_event(tmp_path):
 
     async def _ws_session():
         async with websockets.connect(f"ws://127.0.0.1:{ws_port}") as conn:
-            await conn.send(json.dumps({"cmd": "register", "did": my_did}))
-            await asyncio.sleep(0.1)
+            await _gw_register(conn, my_did)
             # POST admin revoke
             resp = httpx.post(
                 f"http://127.0.0.1:{http_port}/admin/revoke_contact",
