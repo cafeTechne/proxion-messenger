@@ -32,11 +32,19 @@ beforeEach(() => {
   };
   vi.useFakeTimers();
 });
-// Connections from earlier tests share hostSocket: drop their timers.
-afterEach(() => { vi.clearAllTimers(); });
+// Connections from earlier tests share hostSocket: stop them for good (a
+// stopped connection never reconnects, whatever timer or event fires later)
+// and drop their timers, so no test depends on which ones ran before it.
+let conns = [];
+afterEach(() => {
+  for (const c of conns) c.shutdown();
+  conns = [];
+  vi.clearAllTimers();
+  vi.useRealTimers();
+});
 
 function make(over = {}) {
-  return createConnection({
+  const c = createConnection({
     wsUrl: 'ws://test/gw',
     getSocket: () => hostSocket,
     setSocket: (s) => { hostSocket = s; },
@@ -45,6 +53,8 @@ function make(over = {}) {
     handleEventAsync: vi.fn(),
     ...over,
   });
+  conns.push(c);
+  return c;
 }
 
 describe('connect', () => {

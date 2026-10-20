@@ -42,6 +42,14 @@ jobs:
       - name: Run vitest
         working-directory: web
         run: npm test
+      # Same suite in a shuffled order so no test leans on state an earlier one
+      # left behind. The seed changes per run and is printed, so a failure can
+      # be replayed locally with --sequence.seed.
+      - name: Run vitest (shuffled order)
+        working-directory: web
+        run: |
+          echo "vitest shuffle seed: ${{ github.run_number }}"
+          npx vitest run --sequence.shuffle --sequence.seed=${{ github.run_number }}
       - name: i18n keys and pseudo-locale
         working-directory: web
         run: npm run check:i18n

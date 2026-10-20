@@ -39,6 +39,26 @@ beforeEach(() => {
   };
 });
 
+// A minimal RTCPeerConnection so initWebRTC runs to completion. Every test that
+// reaches initWebRTC installs it itself: relying on an earlier test to have set
+// the global made results depend on run order.
+function installRTC() {
+  class FakePC {
+    constructor() { this.iceConnectionState = 'new'; }
+    addTrack() {}
+    addTransceiver() { return { sender: { replaceTrack() { return Promise.resolve(); } } }; }
+    getSenders() { return []; }
+    async createOffer() { return { type: 'offer', sdp: 'o' }; }
+    async createAnswer() { return { type: 'answer', sdp: 'a' }; }
+    async setLocalDescription() {}
+    async setRemoteDescription() {}
+    restartIce() {}
+    close() {}
+  }
+  global.RTCPeerConnection = FakePC;
+  global.WebSocket = { OPEN: 1 };
+}
+
 function makeVoice(over = {}) {
   const sent = [];
   const socket = { send: (s) => sent.push(JSON.parse(s)), readyState: 1 };
@@ -172,23 +192,6 @@ describe('handleVoicePeerLeft cleanup', () => {
 
 describe('ICE-failure handling (silent-drop regressions)', () => {
   const flush = () => new Promise((r) => setTimeout(r, 0));
-
-  function installRTC() {
-    class FakePC {
-      constructor() { this.iceConnectionState = 'new'; }
-      addTrack() {}
-      addTransceiver() { return { sender: { replaceTrack() { return Promise.resolve(); } } }; }
-      getSenders() { return []; }
-      async createOffer() { return { type: 'offer', sdp: 'o' }; }
-      async createAnswer() { return { type: 'answer', sdp: 'a' }; }
-      async setLocalDescription() {}
-      async setRemoteDescription() {}
-      restartIce() {}
-      close() {}
-    }
-    global.RTCPeerConnection = FakePC;
-    global.WebSocket = { OPEN: 1 };
-  }
 
   it('the caller names the session it invites with', async () => {
     installRTC();
@@ -518,18 +521,20 @@ describe('_callerDisplayName resolves via injected lookups', () => {
 describe('cross-gateway fingerprint binding uses the account identity (CF1)', () => {
   it('callee binds to the caller ACCOUNT WebID while routing uses the gateway did', async () => {
     const { voice } = makeVoice({ activeView: { peerWebid: 'did:key:zAlice' } });
+    installRTC();
     voice.state.currentCall = { caller_gateway: 'did:key:zGATEWAY', caller_webid: 'did:key:zAlice' };
     voice.state.localStream = { getTracks: () => [{ stop() {} }] };   // skip getUserMedia
-    try { await voice.initWebRTC('cert1', 'sess1', false); } catch { /* later RTC steps irrelevant */ }
+    await voice.initWebRTC('cert1', 'sess1', false);
     expect(voice.state._callPeerWebid).toBe('did:key:zGATEWAY');   // routing
     expect(voice.state._callPeerIdentity).toBe('did:key:zAlice');  // identity the fp binds to
   });
 
   it('same-gateway callee collapses routing and identity to the account did', async () => {
     const { voice } = makeVoice({ activeView: { peerWebid: 'did:key:zAlice' } });
+    installRTC();
     voice.state.currentCall = { caller_webid: 'did:key:zAlice' };   // no separate gateway hop
     voice.state.localStream = { getTracks: () => [{ stop() {} }] };
-    try { await voice.initWebRTC('cert1', 'sess1', false); } catch { /* ignore */ }
+    await voice.initWebRTC('cert1', 'sess1', false);
     expect(voice.state._callPeerWebid).toBe('did:key:zAlice');
     expect(voice.state._callPeerIdentity).toBe('did:key:zAlice');
   });
