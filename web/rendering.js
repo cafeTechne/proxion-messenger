@@ -172,7 +172,7 @@ export function attachmentHtml(file) {
     // The link reads "Download"; the accessible name keeps the filename.
     const _dlLink = `<a href="data:application/octet-stream;base64,${_b64}" download="${safeFilename}"
                aria-label="${escHtml(t('file.downloadNamed', { filename: _rawFilename }))}"
-               style="color:var(--accent-text);font-size:0.8em;display:block;margin-top:3px;">${t('file.download')}</a>`;
+               class="attachment-download">${t('file.download')}</a>`;
     if (_kind === 'image') {
         // R13.7: inline image preview (+R60C: sender-marked spoiler
         // renders blurred under a reveal cover — one-way, like text
@@ -213,7 +213,7 @@ export function attachmentHtml(file) {
     // Force octet-stream to prevent data URI MIME injection
     return `<div class="attachment">${icon('paperclip', { size: 18 })} ${safeFilename} (${escHtml(formatFileSize(file.size))})
             <a href="data:application/octet-stream;base64,${_b64}" download="${safeFilename}"
-               style="color:var(--accent-text);margin-inline-start:10px;">${t('file.download')}</a></div>`;
+               class="attachment-download attachment-download--inline">${t('file.download')}</a></div>`;
 }
 
 // Scroll anchoring (pure, exported for tests). "At bottom" uses the same 60px
@@ -693,10 +693,10 @@ export function createRendering({
                               presenceData.status === "busy" ? "busy" : "";
 
         const avatarBase = msg.from_avatar_b64
-            ? `<img src="data:image/png;base64,${b64attr(msg.from_avatar_b64)}" class="avatar" alt="" style="width:40px;height:40px;border-radius:50%;">`
-            : `<div class="avatar placeholder" style="background:${avatarColor};color:var(--avatar-initial);width:40px;height:40px;line-height:40px;font-size:16px;font-weight:bold;text-align:center;border-radius:50%;">${escHtml(avatarInitial(name))}</div>`;
-        const presenceDot = `<div class="avatar-presence ${presenceClass}" title="${escHtml(presenceLabel(presenceData.status))}" style="bottom:-1px;inset-inline-end:-1px;"></div>`;
-        const avatarHtml = `<div style="position:relative;display:inline-block;cursor:pointer;" data-profile-avatar data-msg-action="profile" data-webid="${escHtml(msg.from_webid || '')}" data-name="${escHtml(name)}">${avatarBase}${presenceDot}</div>`;
+            ? `<img src="data:image/png;base64,${b64attr(msg.from_avatar_b64)}" class="avatar avatar--lg" alt="">`
+            : `<div class="avatar placeholder avatar--lg" style="background:${avatarColor}">${escHtml(avatarInitial(name))}</div>`;
+        const presenceDot = `<div class="avatar-presence ${presenceClass}" title="${escHtml(presenceLabel(presenceData.status))}"></div>`;
+        const avatarHtml = `<div class="avatar-wrap is-clickable" data-profile-avatar data-msg-action="profile" data-webid="${escHtml(msg.from_webid || '')}" data-name="${escHtml(name)}">${avatarBase}${presenceDot}</div>`;
 
         // Render text with Markdown and mention highlighting
         let rawText = msg.snippet || msg.content || "";

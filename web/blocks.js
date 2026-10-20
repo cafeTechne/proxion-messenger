@@ -68,20 +68,20 @@ export function createBlocks({ getSocket, showToast, onAfterChange }) {
         list.innerHTML = '';
         if (!blocked.size) {
             const p = document.createElement('p');
-            p.style.cssText = 'color:var(--text-secondary);font-size:0.85em;margin:4px 0;';
+            p.className = 'state-msg state-msg--start';
             p.textContent = t('blocks.none');
             list.appendChild(p);
             return;
         }
         for (const webid of blocked) {
             const row = document.createElement('div');
-            row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--slate-700);';
+            row.className = 'list-row';
             const label = document.createElement('code');
-            label.style.cssText = 'flex:1;font-size:0.78em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+            label.className = 'list-row__main list-row__code';
             label.textContent = webid;
             const btn = document.createElement('button');
             btn.textContent = t('blocks.unblock');
-            btn.style.cssText = 'background:transparent;border:1px solid var(--slate-600);color:var(--slate-50);padding:3px 10px;border-radius:4px;cursor:pointer;font-size:0.78em;flex-shrink:0;';
+            btn.className = 'btn btn--outline btn--sm';
             btn.addEventListener('click', () => { unblock(webid); renderBlockedList(); });
             row.appendChild(label);
             row.appendChild(btn);

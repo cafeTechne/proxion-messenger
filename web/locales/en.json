@@ -307,6 +307,7 @@
   "ui.messages": "Messages",
   "ui.scrollLatestMessages": "Scroll to latest messages",
   "ui.moreActions": "More actions",
+  "ui.cancelReply": "Cancel reply",
   "ui.cancelVoiceRecording": "Cancel voice recording",
   "ui.typeMessageShiftEnter": "Type a message… (Shift+Enter for newline)",
   "ui.holdRecordVoiceMessage": "Record a voice message (tap or hold)",

@@ -3937,12 +3937,12 @@ import { createAccountSync } from './account-sync.js';
                     badge.appendChild(srCount);
                     badge.id = `unread-${id}`;
                     li.querySelector("[data-roving-target]")?.setAttribute("aria-describedby", badge.id);
-                    li.style.fontWeight = "600";
+                    li.classList.add("has-unread");
                 } else {
                     if (badge) badge.remove();
                     li.querySelector("[data-roving-target]")?.removeAttribute("aria-describedby");
                     unreadMentions.delete(id); // thread read → clear its mention flag
-                    li.style.fontWeight = "normal";
+                    li.classList.remove("has-unread");
                 }
             }
             updatePageTitle();
@@ -7169,7 +7169,6 @@ import { createAccountSync } from './account-sync.js';
                     const popover = document.createElement("div");
                     popover.className = "edit-history-popover";
                     popover.innerHTML = inlineNotice(t('common.loadingEllipsis'), "loading");
-                    badge.style.position = "relative";
                     badge.appendChild(popover);
                     // DM history comes from this device's cache: the gateway holds
                     // an E2E DM's earlier versions only as ciphertext.

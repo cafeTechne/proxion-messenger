@@ -54,6 +54,9 @@ jobs:
       - name: Type scale
         working-directory: web
         run: npm run check:type
+      - name: No inline styles
+        working-directory: web
+        run: npm run check:inline-styles
       - name: No color literals in JS
         working-directory: web
         run: npm run check:js-colors

@@ -151,8 +151,6 @@ export function createRecovery({ showToast, showPromptModal, showConfirm }) {
         const btn = document.getElementById('recovery-download-btn');
         if (!btn) return;
         btn.disabled = !on;
-        btn.style.opacity = on ? '1' : '0.45';
-        btn.style.cursor = on ? 'pointer' : 'not-allowed';
     }
 
     // ── Verify (dry-run restore: proves the kit + code decrypt, no key change) ──

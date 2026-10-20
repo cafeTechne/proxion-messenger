@@ -73,13 +73,11 @@ export function createE2EStatus() {
         wordsEl.textContent = sn;
         if (isPeerVerified(peerId)) {
             verifyBtn.textContent = '✓ ' + t('e2e.verified');
-            verifyBtn.style.background = "var(--color-success-tint)";
-            verifyBtn.style.color = "var(--color-success-soft)";
+            verifyBtn.classList.add("is-verified");
             verifyBtn.disabled = true;
         } else {
             verifyBtn.textContent = t('e2e.markVerified');
-            verifyBtn.style.background = "var(--surface-2)";
-            verifyBtn.style.color = "var(--text-secondary)";
+            verifyBtn.classList.remove("is-verified");
             verifyBtn.disabled = false;
         }
         bar.style.display = "flex";

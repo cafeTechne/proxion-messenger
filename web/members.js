@@ -34,7 +34,7 @@ export function createMembers({ getActiveView, requestRoomMembers }) {
         const initial = escHtml(avatarInitial(displayName));
         const presenceClass = m.status === "online" ? "online" : m.status === "away" ? "away" : m.status === "busy" ? "busy" : "";
         const fedBadge = m.federated
-            ? `<span title="${escHtml(t('members.federatedTitle', { gateway: m.gateway || t('members.remoteGateway') }))}" style="color:var(--slate-600);margin-inline-start:4px;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg></span>`
+            ? `<span title="${escHtml(t('members.federatedTitle', { gateway: m.gateway || t('members.remoteGateway') }))}" class="member-fed"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg></span>`
             : "";
         // Member display names are peer-chosen and can collide. When a name is
         // shown, append the stable short id inline so same-named members stay
@@ -45,8 +45,8 @@ export function createMembers({ getActiveView, requestRoomMembers }) {
             ? `<span class="member-id-suffix id-suffix">·${escHtml(didIdTag(m.webid))}</span>`
             : "";
         return `<div class="member-item" role="button" tabindex="-1" data-msg-action="profile" data-webid="${escHtml(m.webid)}" data-name="${escHtml(displayName)}">
-                <div style="position:relative;display:inline-block;margin-inline-end:8px;">
-                    <div class="avatar placeholder" style="background:${color};color:var(--avatar-initial);width:28px;height:28px;line-height:28px;font-size:12px;font-weight:bold;text-align:center;">${initial}</div>
+                <div class="avatar-wrap avatar-wrap--member">
+                    <div class="avatar placeholder avatar--md" style="background:${color}">${initial}</div>
                     <div class="avatar-presence ${presenceClass}" title="${escHtml(presenceLabel(m.status))}"></div>
                 </div>
                 <span class="member-label"><span class="member-line"><span class="member-name${name ? "" : " member-name--unnamed"}" dir="auto">${escHtml(name || t('members.unnamed'))}</span>${fedBadge}</span>${idTag}</span>

@@ -155,9 +155,9 @@ export function createStatusBanners() {
                 const envLine = `PROXION_PUBLIC_URL=http://YOUR_EXTERNAL_IP:${port}`;
                 guide = `<strong>${t('nat.title')}</strong>
                     ${t('nat.subtitle')}
-                    <details style="margin-top:6px;cursor:pointer;">
+                    <details class="banner-details">
                       <summary><strong>${t('nat.howToFix')}</strong></summary>
-                      <div style="margin-top:8px;line-height:1.9;padding:0 4px;">
+                      <div class="banner-details__body">
                         <strong>${t('nat.opt1Title')}</strong> ${t('nat.opt1Note')}<br>
                         ${t('nat.opt1Body', { port: code(port), ip: code(localIp), env: code(envLine) })}
                         &nbsp;<a href="https://portforward.com" target="_blank" rel="noopener" class="link-inherit">portforward.com</a> ${t('nat.opt1Guides')}<br><br>

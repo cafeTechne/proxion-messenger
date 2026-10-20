@@ -108,8 +108,8 @@ export function createModals({ getSocket, getActiveView, sendCmd, showToast, get
         box.className = 'modal__panel modal__panel--md';
         box.innerHTML =
             '<div class="modal__header"><h3 id="integrations-title" class="modal__title"></h3>' + closeButtonHtml() + '</div>' +
-            '<div id="webhook-list-area" style="margin-bottom:12px;min-height:40px;"></div>' +
-            '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+            '<div id="webhook-list-area" class="scroll-list mb-3"></div>' +
+            '<div class="settings-actions">' +
             '<button type="button" id="ci-incoming-btn" class="btn btn--slate"></button>' +
             '<button type="button" id="ci-outgoing-btn" class="btn btn--slate"></button>' +
             '</div>' +

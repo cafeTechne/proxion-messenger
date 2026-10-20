@@ -14,7 +14,9 @@ import { createE2EStatus } from './e2e-status.js';
 
 let els, store;
 function mkEl(over = {}) {
-  return { style: {}, dataset: {}, textContent: '', innerHTML: '', title: '', value: '', disabled: false, ...over };
+  const classes = new Set();
+  const classList = { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) };
+  return { style: {}, dataset: {}, classList, textContent: '', innerHTML: '', title: '', value: '', disabled: false, ...over };
 }
 beforeEach(() => {
   els = {};
@@ -102,6 +104,9 @@ describe('_updateIdentityFingerprint', () => {
     await e._updateIdentityFingerprint('did:key:zCarol');
     expect(els['fingerprint-verify-btn'].disabled).toBe(true);
     expect(els['fingerprint-verify-btn'].textContent).toContain('e2e.verified');
+    // The verified look is a class in style.css, not inline colors.
+    expect(els['fingerprint-verify-btn'].classList.contains('is-verified')).toBe(true);
+    expect(els['fingerprint-verify-btn'].style.background).toBeUndefined();
   });
   it('ignores the old gateway-computed mark', async () => {
     store['proxion_e2e_peer_pub_did:key:zCarol'] = 'CAROLPUB';
@@ -109,6 +114,7 @@ describe('_updateIdentityFingerprint', () => {
     const e = createE2EStatus();
     await e._updateIdentityFingerprint('did:key:zCarol');
     expect(els['fingerprint-verify-btn'].disabled).toBe(false);
+    expect(els['fingerprint-verify-btn'].classList.contains('is-verified')).toBe(false);
   });
 });
 

@@ -91,25 +91,25 @@ export function createRoomEmoji({ getSocket, getActiveView, showToast, showPromp
         const names = Object.keys(emoji).sort();
         if (!names.length) {
             const p = document.createElement('p');
-            p.style.cssText = 'color:var(--text-secondary);font-size:0.85em;margin:4px 0;';
+            p.className = 'state-msg state-msg--start';
             p.textContent = t('roomEmoji.none');
             list.appendChild(p);
             return;
         }
         for (const name of names) {
             const row = document.createElement('div');
-            row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--slate-700);';
+            row.className = 'list-row';
             const img = document.createElement('img');
             img.className = 'custom-emoji';
             img.src = `data:${emoji[name].mime};base64,${emoji[name].data_b64}`;
             img.alt = '';
             const label = document.createElement('code');
-            label.style.cssText = 'flex:1;font-size:0.85em;';
+            label.className = 'list-row__main list-row__code';
             label.textContent = `:${name}:`;
             const del = document.createElement('button');
             del.innerHTML = icon('x-mark', { size: 14 });
             del.setAttribute('aria-label', t('roomEmoji.removeNamed', { name }));
-            del.style.cssText = 'background:transparent;border:none;color:var(--color-danger-soft);cursor:pointer;min-width:24px;min-height:24px;line-height:0;';
+            del.className = 'btn btn--icon btn--sm btn--danger-text';
             del.addEventListener('click', () => {
                 getSocket()?.send(JSON.stringify({ cmd: 'remove_room_emoji', room_id: roomId, name }));
             });

@@ -41,6 +41,7 @@ npm run check:i18n       # referenced keys exist, no markup in strings
 npm run check:contrast   # WCAG contrast of the palette
 npm run check:spacing    # padding, margin and gap on the --space-* scale
 npm run check:type       # font sizes, line heights, weights on the type scale
+npm run check:inline-styles  # markup and scripts use classes, not style=""
 npm run smoke:ci         # browser smokes against real gateways (what CI runs)
 ```
 

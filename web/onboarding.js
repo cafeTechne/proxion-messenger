@@ -173,8 +173,6 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         document.getElementById("ob-pod-status").textContent = "";
         const cont = document.getElementById("ob-pod-continue-btn");
         cont.disabled = true;
-        cont.style.opacity = "0.45";
-        cont.style.cursor = "not-allowed";
     }
 
     // The chosen pod server URL: the custom input when "My own server" was
@@ -217,8 +215,6 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
                 statusEl.textContent = '✓ ' + t('onboarding.podReadySignIn');
                 statusEl.style.color = "var(--color-success-soft)";
                 contBtn.disabled = false;
-                contBtn.style.opacity = "1";
-                contBtn.style.cursor = "pointer";
                 // R16.3.2: persist to OS keychain if running in Tauri
                 if (window.__TAURI__?.invoke) {
                     window.__TAURI__.invoke('store_pod_credentials', { cssUrl, email, password }).catch(() => {});

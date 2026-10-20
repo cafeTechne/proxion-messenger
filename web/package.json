@@ -12,6 +12,7 @@
     "check:i18n": "node scripts/i18n_check.mjs",
     "check:spacing": "node scripts/check_spacing.mjs",
     "check:type": "node scripts/check_type.mjs",
+    "check:inline-styles": "node scripts/check_inline_styles.mjs",
     "check:js-colors": "node scripts/check_js_colors.mjs",
     "gen:pseudo": "node scripts/gen_pseudo_locale.mjs",
     "smoke:browser": "node smoke_browser.mjs",

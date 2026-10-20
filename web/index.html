@@ -38,7 +38,7 @@
     <!-- Profile Card Popover (B2) -->
     <div id="profile-card" class="profile-popover">
         <div class="profile-header">
-            <div id="profile-avatar-el" class="profile-avatar" style="background:var(--slate-600);">?</div>
+            <div id="profile-avatar-el" class="profile-avatar">?</div>
             <div class="profile-info">
                 <div class="profile-name" id="profile-name"></div>
                 <div class="profile-webid" id="profile-webid"></div>
@@ -107,7 +107,7 @@
       <div class="modal__panel modal__panel--sm">
         <div class="modal__header">
           <h3 id="forward-modal-title" class="modal__title" data-i18n="heading.forward">Forward to…</h3>
-          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" data-i18n-attr="aria-label:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" title="Close" data-i18n-attr="aria-label:btn.close;title:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
         </div>
         <div id="forward-thread-list" class="picker-list"></div>
         <div class="btn-row modal__footer">
@@ -120,7 +120,7 @@
       <div class="modal__panel modal__panel--md">
         <div class="modal__header">
           <h3 id="webhook-created-title" class="modal__title" data-i18n="heading.webhookCreated">Webhook created</h3>
-          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" data-i18n-attr="aria-label:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" title="Close" data-i18n-attr="aria-label:btn.close;title:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
         </div>
         <p class="modal__desc" data-i18n="webhook.postHint">POST JSON to this URL to send messages to the room:</p>
         <code id="webhook-url-display" class="copyable-code"></code>
@@ -138,8 +138,8 @@
     <div id="confirm-modal" class="modal modal--stacked" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-msg" style="display:none;">
       <div class="modal__panel modal__panel--sm">
         <h3 id="confirm-title" class="modal__title" data-i18n="confirm.title">Are you sure?</h3>
-        <p id="confirm-msg" style="margin:0;font-size:var(--text-base);"></p>
-        <label id="confirm-check-row" class="check-row" hidden style="margin:var(--space-4) 0 0;">
+        <p class="modal__body" id="confirm-msg"></p>
+        <label id="confirm-check-row" class="check-row check-row--spaced" hidden>
           <input type="checkbox" id="confirm-check">
           <span id="confirm-check-label"></span>
         </label>
@@ -155,10 +155,10 @@
       <div class="modal__panel modal__panel--md">
         <div class="modal__header">
           <h3 id="copy-modal-title" class="modal__title" data-i18n="heading.copy">Copy</h3>
-          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" data-i18n-attr="aria-label:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" title="Close" data-i18n-attr="aria-label:btn.close;title:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
         </div>
         <label for="copy-modal-text" class="sr-only" data-i18n="heading.copy">Copy</label>
-        <textarea id="copy-modal-text" class="input" readonly style="font-size:var(--text-md);resize:none;min-height:80px;margin:0;"></textarea>
+        <textarea id="copy-modal-text" class="input input--area" readonly></textarea>
         <div class="btn-row modal__footer">
           <button type="button" id="copy-modal-close-btn" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.close">Close</button>
           <button type="button" id="copy-modal-copy-btn" class="btn btn--accent btn--lg" data-i18n="heading.copy">Copy</button>
@@ -170,9 +170,9 @@
     <div id="deeplink-confirm-modal" class="modal modal--stacked" role="dialog" aria-modal="true" aria-labelledby="deeplink-confirm-title" style="display:none;">
       <div class="modal__panel modal__panel--sm">
         <h3 id="deeplink-confirm-title" class="modal__title" data-i18n="heading.addContactViaLink">Add contact via link?</h3>
-        <p style="margin:0 0 var(--space-2);font-size:var(--text-md);color:var(--text-secondary);" data-i18n="contactLink.askingToAdd">Proxion received a link asking to add:</p>
-        <p id="deeplink-confirm-address" style="margin:0 0 var(--space-4);font-size:var(--text-sm);color:var(--slate-200);word-break:break-all;background:var(--slate-900);padding:var(--space-2) var(--space-3);border-radius:4px;"></p>
-        <p style="margin:0;font-size:var(--text-sm);color:var(--slate-500);" data-i18n="contactLink.outsideWarning">This link came from outside the app. Continue only if you recognise this address.</p>
+        <p class="prose-muted mb-2" data-i18n="contactLink.askingToAdd">Proxion received a link asking to add:</p>
+        <p class="readout" id="deeplink-confirm-address"></p>
+        <p class="prose-muted prose-muted--sm mb-0" data-i18n="contactLink.outsideWarning">This link came from outside the app. Continue only if you recognise this address.</p>
         <div class="btn-row modal__footer">
           <button type="button" id="deeplink-confirm-cancel" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
           <button type="button" id="deeplink-confirm-ok" class="btn btn--accent btn--lg" data-i18n="btn.addContact">Add contact</button>
@@ -190,13 +190,12 @@
         <p id="add-peer-error" class="field-error" role="alert"></p>
         <!-- R17.3: QR scan -->
         <div>
-          <button type="button" id="scan-qr-btn" style="display:inline-flex;align-items:center;gap:var(--space-2);cursor:pointer;border:none;font:inherit;
-                 background:var(--slate-700);padding:var(--space-2) var(--space-4);border-radius:4px;font-size:var(--text-md);color:var(--slate-50);">
+          <button class="btn btn--slate" type="button" id="scan-qr-btn">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="16" height="16" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 3.75 9.375v-4.5ZM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 0 1-1.125-1.125v-4.5ZM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 13.5 9.375v-4.5ZM6.75 6.75h.75v.75h-.75v-.75ZM6.75 16.5h.75v.75h-.75v-.75ZM16.5 6.75h.75v.75h-.75v-.75ZM13.5 13.5h.75v.75h-.75v-.75ZM13.5 19.5h.75v.75h-.75v-.75ZM19.5 13.5h.75v.75h-.75v-.75ZM19.5 19.5h.75v.75h-.75v-.75ZM16.5 16.5h.75v.75h-.75v-.75Z"/></svg>
             <span data-i18n="btn.scanQr">Scan QR code</span>
           </button>
           <input type="file" id="scan-qr-input" accept="image/*" capture="environment" hidden>
-          <span id="scan-qr-error" style="display:none;color:var(--color-danger-soft);font-size:var(--text-sm);margin-inline-start:var(--space-2);"></span>
+          <span class="inline-error" id="scan-qr-error" style="display:none;"></span>
         </div>
         <div class="btn-row modal__footer">
           <button type="button" id="add-peer-cancel-btn" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
@@ -207,37 +206,30 @@
     </div>
 
     <!-- R17.1: QR share panel -->
-    <div id="qr-share-panel" style="display:none;position:fixed;z-index:1010;
-         background:var(--slate-800);border:1px solid var(--slate-700);border-radius:10px;padding:var(--space-5);
-         box-shadow:var(--shadow-lg);min-width:260px;text-align:center;">
-      <p style="margin:0 0 var(--space-3);font-size:var(--text-md);color:var(--text-secondary);" data-i18n="qr.scanToAdd">Scan to add me on Proxion</p>
-      <div id="my-qr" style="width:200px;height:200px;border-radius:6px;background:#fff;display:flex;align-items:center;justify-content:center;margin:0 auto var(--space-3);overflow:hidden;"></div>
-      <div style="display:flex;flex-direction:column;gap:var(--space-2);">
-        <button id="qr-download-btn"
-                style="background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-4);border-radius:4px;cursor:pointer;font-size:var(--text-md);" data-i18n="btn.downloadQr">
+    <div class="popover-panel" id="qr-share-panel" style="display:none;">
+      <p class="prose-muted" data-i18n="qr.scanToAdd">Scan to add me on Proxion</p>
+      <div class="qr-box" id="my-qr"></div>
+      <div class="btn-stack">
+        <button class="btn btn--slate" id="qr-download-btn" data-i18n="btn.downloadQr">
           Download QR
         </button>
-        <button id="qr-share-invite-btn" type="button" hidden data-share-from="proxionInviteLink"
-                style="background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-4);border-radius:4px;cursor:pointer;font-size:var(--text-md);" data-i18n="btn.shareInviteLink">
+        <button class="btn btn--slate" id="qr-share-invite-btn" type="button" hidden data-share-from="proxionInviteLink" data-i18n="btn.shareInviteLink">
           Share invite link
         </button>
-        <button id="qr-copy-invite-btn"
-                style="background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-4);border-radius:4px;cursor:pointer;font-size:var(--text-md);" data-i18n="btn.copyInviteLink">
+        <button class="btn btn--slate" id="qr-copy-invite-btn" data-i18n="btn.copyInviteLink">
           Copy invite link
         </button>
-        <button id="qr-copy-short-btn"
-                style="background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-4);border-radius:4px;cursor:pointer;font-size:var(--text-md);" data-i18n="btn.copyShortLink">
+        <button class="btn btn--slate" id="qr-copy-short-btn" data-i18n="btn.copyShortLink">
           Copy short link
         </button>
       </div>
-      <hr class="field-divider" style="margin:var(--space-4) 0 var(--space-2);">
+      <hr class="field-divider">
       <button id="qr-connect-phone-btn"
-              class="btn btn--accent" style="width:100%;font-size:var(--text-md);" data-i18n="btn.connectPhone">
+              class="btn btn--accent btn--block" data-i18n="btn.connectPhone">
         Connect a phone
       </button>
-      <p id="tunnel-status-line" style="display:none;margin:var(--space-2) 0 0;font-size:var(--text-xs);color:var(--text-secondary);word-break:break-all;"></p>
-      <button id="qr-close-btn"
-              style="margin-top:var(--space-3);background:transparent;border:none;color:var(--slate-500);cursor:pointer;font-size:var(--text-sm);" data-i18n="btn.close">
+      <p class="prose-muted prose-muted--xs mt-2 mb-0 u-break" id="tunnel-status-line" style="display:none;"></p>
+      <button class="btn btn--link mt-3" id="qr-close-btn" data-i18n="btn.close">
         Close
       </button>
     </div>
@@ -263,24 +255,19 @@
       <div class="modal__panel modal__panel--md">
         <div class="modal__header">
           <h3 id="room-invite-title" class="modal__title" data-i18n="heading.inviteRoom">Invite to room</h3>
-          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" data-i18n-attr="aria-label:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" title="Close" data-i18n-attr="aria-label:btn.close;title:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
         </div>
-        <p class="modal__desc" style="margin-bottom:var(--space-4);" data-i18n="invite.modalDesc">Share the link or code with anyone you want to join.</p>
-        <label style="display:block;margin-bottom:var(--space-1);font-size:var(--text-md);color:var(--text-secondary);" data-i18n="label.inviteLink">Invite link</label>
-        <div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-4);">
-          <div id="invite-modal-url"
-               style="flex:1;font-size:var(--text-xs);color:var(--text-secondary);word-break:break-all;padding:var(--space-2);background:var(--slate-900);border-radius:4px;user-select:all;cursor:text;"></div>
-          <button id="invite-modal-copy-url"
-                  style="flex-shrink:0;background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-3);border-radius:4px;cursor:pointer;font-size:var(--text-sm);" data-i18n="heading.copy">Copy</button>
-          <button id="invite-modal-share-url" type="button" hidden data-share-from="#invite-modal-url"
-                  style="flex-shrink:0;background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-3);border-radius:4px;cursor:pointer;font-size:var(--text-sm);" data-i18n="btn.share">Share</button>
+        <p class="modal__desc mb-4" data-i18n="invite.modalDesc">Share the link or code with anyone you want to join.</p>
+        <label class="field-label" data-i18n="label.inviteLink">Invite link</label>
+        <div class="input-row mb-4">
+          <div class="readout prose-muted--xs" id="invite-modal-url"></div>
+          <button class="btn btn--slate btn--sm" id="invite-modal-copy-url" data-i18n="heading.copy">Copy</button>
+          <button class="btn btn--slate btn--sm" id="invite-modal-share-url" type="button" hidden data-share-from="#invite-modal-url" data-i18n="btn.share">Share</button>
         </div>
-        <label style="display:block;margin-bottom:var(--space-1);font-size:var(--text-md);color:var(--text-secondary);" data-i18n="label.roomCodePasteInto">Room code (paste into "Join room")</label>
-        <div style="display:flex;gap:var(--space-2);">
-          <div id="invite-modal-code"
-               style="flex:1;font-size:var(--text-md);font-family:monospace;letter-spacing:0.05em;color:var(--slate-50);padding:var(--space-2);background:var(--slate-900);border-radius:4px;user-select:all;cursor:text;"></div>
-          <button id="invite-modal-copy-code"
-                  style="flex-shrink:0;background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-3);border-radius:4px;cursor:pointer;font-size:var(--text-sm);" data-i18n="heading.copy">Copy</button>
+        <label class="field-label" data-i18n="label.roomCodePasteInto">Room code (paste into "Join room")</label>
+        <div class="input-row">
+          <div class="readout readout--mono" id="invite-modal-code"></div>
+          <button class="btn btn--slate btn--sm" id="invite-modal-copy-code" data-i18n="heading.copy">Copy</button>
         </div>
         <div class="btn-row modal__footer">
           <button type="button" id="invite-modal-close" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.done">Done</button>
@@ -301,7 +288,7 @@
       <div id="backup-nudge" class="banner banner--warning" role="status">
         <span class="banner__text" data-i18n="ui.backupNudge">Back up your identity before you lose access.</span>
         <button type="button" id="backup-nudge-action" class="banner__action" data-i18n="btn.backUpNow">Back up now</button>
-        <button type="button" id="backup-nudge-dismiss" class="banner__close" aria-label="Dismiss backup reminder" data-i18n-attr="aria-label:ui.dismissBackupReminder"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+        <button type="button" id="backup-nudge-dismiss" class="banner__close" aria-label="Dismiss backup reminder" title="Dismiss backup reminder" data-i18n-attr="aria-label:ui.dismissBackupReminder;title:ui.dismissBackupReminder"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
       </div>
 
       <!-- Persistent indicator: a ?join= room request is awaiting the owner's
@@ -310,11 +297,11 @@
            request fails, or the user dismisses it. -->
       <div id="join-pending-banner" class="banner banner--info" role="status" aria-live="polite">
         <span id="join-pending-text" class="banner__text" data-i18n="join.pendingApproval">Waiting for the room owner to approve your join request.</span>
-        <button type="button" id="join-pending-dismiss" class="banner__close" aria-label="Dismiss" data-i18n-attr="aria-label:ui.dismiss"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+        <button type="button" id="join-pending-dismiss" class="banner__close" aria-label="Dismiss" title="Dismiss" data-i18n-attr="aria-label:ui.dismiss;title:ui.dismiss"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
       </div>
 
       <div id="pod-connect-banner" class="banner banner--info" role="status" style="display:none;">
-        <span id="pod-banner-text" class="banner__text" style="cursor:pointer;">
+        <span id="pod-banner-text" class="banner__text is-clickable">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15a4.5 4.5 0 0 0 4.5 4.5H18a3.75 3.75 0 0 0 1.332-7.257 3 3 0 0 0-3.758-3.848 5.25 5.25 0 0 0-10.233 2.33A4.502 4.502 0 0 0 2.25 15Z"/></svg> <span data-i18n="ui.podBanner">Connect a Solid Pod to sync messages across devices</span>
         </span>
         <button type="button" id="pod-banner-connect-btn" class="banner__action" data-i18n="btn.connect">Connect</button>
@@ -323,20 +310,20 @@
     </div>
 
     <!-- R13.7: image lightbox -->
-    <div id="lightbox" role="dialog" aria-modal="true" aria-label="Image preview" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:var(--z-modal-stacked);align-items:center;justify-content:center;" data-i18n-attr="aria-label:ui.imagePreview">
-      <img id="lightbox-img" alt="Full-size image" style="max-width:90vw;max-height:90vh;max-height:90dvh;border-radius:6px;box-shadow:0 4px 32px rgba(0,0,0,.8);">
-      <button id="lightbox-close" data-modal-cancel aria-label="Close image preview" style="position:absolute;top:16px;inset-inline-end:20px;background:transparent;border:none;color:#fff;cursor:pointer;line-height:0;padding:var(--space-1);" data-i18n-attr="aria-label:ui.closeImagePreview"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="24" height="24" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+    <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Image preview" style="display:none;" data-i18n-attr="aria-label:ui.imagePreview">
+      <img class="lightbox__img" id="lightbox-img" alt="Full-size image">
+      <button class="btn btn--icon lightbox__close" id="lightbox-close" data-modal-cancel aria-label="Close image preview" title="Close image preview" data-i18n-attr="aria-label:ui.closeImagePreview;title:ui.closeImagePreview"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="24" height="24" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
     </div>
 
     <div id="app">
         <aside id="sidebar" aria-label="Sidebar" data-i18n-attr="aria-label:ui.sidebar">
             <header>
-                <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div class="row-between">
                     <h1 class="app-title">Proxion</h1>
-                    <div style="display: flex; gap: var(--space-2);">
-                        <button id="sound-toggle" aria-label="Toggle notification sound" title="Toggle sound" style="line-height: 0;" data-i18n-attr="title:ui.toggleSound;aria-label:ui.toggleNotificationSound"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="20" height="20" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 0 1 0 12.728M16.463 8.288a5.25 5.25 0 0 1 0 7.424M6.75 8.25l4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.009 9.009 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75Z"/></svg></button>
-                        <button id="desktop-notif-toggle" aria-label="Toggle desktop notifications" aria-pressed="true" title="Toggle desktop notifications" style="line-height: 0;" data-i18n-attr="title:ui.toggleDesktopNotifications;aria-label:ui.toggleDesktopNotifications2"></button>
-                        <button id="settings-btn" aria-label="Settings" title="Settings" data-i18n-attr="aria-label:control.settings;title:control.settings" style="line-height: 0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg></button>
+                    <div class="row">
+                        <button id="sound-toggle" aria-label="Toggle notification sound" title="Toggle sound" data-i18n-attr="title:ui.toggleSound;aria-label:ui.toggleNotificationSound"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="20" height="20" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 0 1 0 12.728M16.463 8.288a5.25 5.25 0 0 1 0 7.424M6.75 8.25l4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.009 9.009 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75Z"/></svg></button>
+                        <button id="desktop-notif-toggle" aria-label="Toggle desktop notifications" aria-pressed="true" title="Toggle desktop notifications" data-i18n-attr="title:ui.toggleDesktopNotifications;aria-label:ui.toggleDesktopNotifications2"></button>
+                        <button id="settings-btn" aria-label="Settings" title="Settings" data-i18n-attr="aria-label:control.settings;title:control.settings"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg></button>
                     </div>
                 </div>
             </header>
@@ -345,16 +332,12 @@
                     <span class="dot offline"></span>
                     <span id="username">Connecting…</span>
                 </div>
-                <div id="my-address-bar"
-                     style="display:none; align-items:center; padding:2px var(--space-3) var(--space-2); font-size:var(--text-2xs); color:var(--slate-600);
-                            white-space:nowrap;">
-                  <span id="my-address-short" style="cursor:pointer; user-select:all; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;"
+                <div class="address-bar" id="my-address-bar" style="display:none;">
+                  <span class="address-bar__text" id="my-address-short"
                         title="Click to copy your Proxion address" data-i18n-attr="title:ui.clickCopyProxionAddress"></span>
-                  <button id="copy-addr-btn" aria-label="Copy your address" title="Copy your address"
-                          data-i18n-attr="aria-label:ui.copyAddress;title:ui.copyAddress"
-                          style="background:transparent; border:none; color:var(--slate-600); cursor:pointer; flex-shrink:0;
-                                 display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; padding:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75"/></svg></button>
-                  <button id="share-invite-btn" aria-label="Share invite link" title="Share invite link" style="flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;background:transparent;border:none;color:var(--slate-600);cursor:pointer;" data-i18n-attr="aria-label:ui.shareInviteLink;title:ui.shareInviteLink"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg></button>
+                  <button class="btn btn--icon btn--sm" id="copy-addr-btn" aria-label="Copy your address" title="Copy your address"
+                          data-i18n-attr="aria-label:ui.copyAddress;title:ui.copyAddress"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75"/></svg></button>
+                  <button class="btn btn--icon btn--sm" id="share-invite-btn" aria-label="Share invite link" title="Share invite link" data-i18n-attr="aria-label:ui.shareInviteLink;title:ui.shareInviteLink"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg></button>
                 </div>
             </div>
             <nav aria-label="Conversations" data-i18n-attr="aria-label:ui.conversations">
@@ -363,12 +346,11 @@
                     <p id="search-hint" class="search-hint" role="status" aria-live="polite"></p>
                 </div>
                 <section>
-                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <div class="row-between">
                         <h2 data-i18n="sidebar.rooms">Rooms</h2>
-                        <div style="display:flex;gap:2px;">
-                            <button id="join-room-btn" title="Join room with invite link or code"
-                                    style="background:transparent;border:none;color:var(--text-secondary);cursor:pointer;font-size:var(--text-base);padding:2px var(--space-2);" data-i18n-attr="title:ui.joinRoomWithInvite" data-i18n="btn.join">Join</button>
-                            <button id="create-room-btn" aria-label="Create room" title="Create room" data-i18n-attr="aria-label:control.createRoom;title:control.createRoom" style="background:transparent;border:none;color:var(--text-secondary);cursor:pointer;padding:2px var(--space-2);line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
+                        <div class="row row--tight">
+                            <button class="btn btn--quiet" id="join-room-btn" title="Join room with invite link or code" data-i18n-attr="title:ui.joinRoomWithInvite" data-i18n="btn.join">Join</button>
+                            <button class="btn btn--icon btn--sm" id="create-room-btn" aria-label="Create room" title="Create room" data-i18n-attr="aria-label:control.createRoom;title:control.createRoom"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
                         </div>
                     </div>
                     <ul id="room-list"></ul>
@@ -378,53 +360,53 @@
                     <ul id="friend-request-list"></ul>
                 </section>
                 <section id="contacts-section" style="display:none;">
-                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <div class="row-between">
                         <h2 data-i18n="sidebar.contacts">Contacts</h2>
                     </div>
                     <ul id="contacts-list"></ul>
                 </section>
                 <section>
-                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <div class="row-between">
                         <h2 data-i18n="sidebar.dms">DMs</h2>
-                        <button id="add-peer-btn" aria-label="Add contact by invite link or address" title="Add contact by invite link or address" style="background:transparent;border:none;color:var(--text-secondary);cursor:pointer;padding:2px var(--space-2);line-height:0;" data-i18n-attr="title:ui.addPeerByDid;aria-label:ui.addContactByAddress"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
+                        <button class="btn btn--icon btn--sm" id="add-peer-btn" aria-label="Add contact by invite link or address" title="Add contact by invite link or address" data-i18n-attr="title:ui.addPeerByDid;aria-label:ui.addContactByAddress"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
                     </div>
                     <ul id="dm-list"></ul>
                 </section>
                 <section id="solidchat-section">
-                    <div style="display:flex;align-items:center;justify-content:space-between;">
-                        <div style="display:flex;align-items:center;gap:var(--space-2);min-width:0;">
+                    <div class="row-between">
+                        <div class="row">
                             <h2 data-i18n="sidebar.solidChats">Solid chats</h2>
-                            <span id="solidchat-invite-badge" role="status" aria-live="polite" hidden style="background:var(--accent);color:var(--color-on-accent);border-radius:10px;font-size:var(--text-2xs);font-weight:var(--weight-semibold);padding:1px var(--space-2);min-width:18px;text-align:center;line-height:1.6;"></span>
+                            <span class="badge badge--accent" id="solidchat-invite-badge" role="status" aria-live="polite" hidden></span>
                         </div>
-                        <button id="solidchat-new-btn" aria-label="New Solid conversation" title="New Solid conversation" data-i18n-attr="title:solidchat.new;aria-label:solidchat.new" style="background:transparent;border:none;color:var(--text-secondary);cursor:pointer;padding:2px var(--space-2);line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
+                        <button class="btn btn--icon btn--sm" id="solidchat-new-btn" aria-label="New Solid conversation" title="New Solid conversation" data-i18n-attr="title:solidchat.new;aria-label:solidchat.new"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
                     </div>
                     <ul id="solidchat-list"></ul>
                 </section>
             </nav>
             <!-- Voice widget — shown only during a call -->
             <div id="voice-widget" style="display:none;">
-                <div style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) var(--space-2);margin-bottom:var(--space-2);overflow:hidden;">
-                    <span class="dot online" style="flex-shrink:0;"></span>
-                    <div style="display:flex;flex-direction:column;gap:1px;overflow:hidden;min-width:0;">
-                        <span id="vw-peer-name" style="font-size:var(--text-sm);font-weight:var(--weight-semibold);color:var(--slate-50);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
-                        <span id="vw-status" style="font-size:var(--text-xs);color:var(--color-success-soft);white-space:nowrap;" data-i18n="voice.inCall">In call</span>
+                <div class="vw-head">
+                    <span class="dot online"></span>
+                    <div class="vw-head__text">
+                        <span class="vw-head__name" id="vw-peer-name"></span>
+                        <span class="vw-head__status" id="vw-status" data-i18n="voice.inCall">In call</span>
                     </div>
-                    <span id="vw-conn" class="status-dot" role="status" aria-live="polite" title="" style="display:none;margin-inline-start:auto;flex-shrink:0;font-size:var(--text-2xs);"></span>
-                    <span id="vw-verified" role="status" aria-live="polite" title="" style="display:none;flex-shrink:0;font-size:var(--text-2xs);padding:1px var(--space-2);border-radius:10px;background:var(--slate-800);color:var(--slate-200);"></span>
+                    <span id="vw-conn" class="status-dot vw-head__conn" role="status" aria-live="polite" title="" style="display:none;"></span>
+                    <span class="badge badge--muted vw-head__verified" id="vw-verified" role="status" aria-live="polite" title="" style="display:none;"></span>
                 </div>
                 <!-- Video surfaces: remote fills, local self-view is a small overlay.
                      Hidden until a live video track is present (voice-only shows nothing). -->
-                <div id="vw-video-area" style="position:relative;margin-bottom:var(--space-2);">
-                    <video id="vw-remote-video" autoplay playsinline style="display:none;width:100%;max-height:220px;background:#000;border-radius:8px;object-fit:contain;"></video>
-                    <video id="vw-local-video" autoplay playsinline muted style="display:none;position:absolute;inset-inline-end:8px;bottom:8px;width:88px;max-height:66px;background:#000;border:1px solid var(--slate-600);border-radius:6px;object-fit:cover;"></video>
+                <div class="vw-video-area" id="vw-video-area">
+                    <video class="call-video" id="vw-remote-video" autoplay playsinline style="display:none;"></video>
+                    <video class="call-video call-video--pip" id="vw-local-video" autoplay playsinline muted style="display:none;"></video>
                 </div>
-                <p id="vw-capture-indicator" class="status-dot" role="status" aria-live="polite" style="display:none;margin:0 0 var(--space-2);font-size:var(--text-2xs);color:var(--color-danger-soft);"></p>
+                <p id="vw-capture-indicator" class="status-dot vw-capture" role="status" aria-live="polite" style="display:none;"></p>
                 <div class="vw-controls">
                     <button id="mute-btn" aria-pressed="false" aria-label="Mute or unmute microphone" title="Mute / unmute" data-i18n-attr="title:ui.muteUnmute;aria-label:ui.muteUnmuteMicrophone"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z"/></svg></button>
                     <button id="camera-btn" aria-label="Turn camera on or off" title="Camera on / off" aria-pressed="false" style="display:none;" data-i18n-attr="title:ui.cameraToggle;aria-label:ui.cameraToggle"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h8.25a2.25 2.25 0 0 0 2.25-2.25V7.5a2.25 2.25 0 0 0-2.25-2.25H4.5A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z"/></svg></button>
                     <button id="screenshare-btn" aria-pressed="false" aria-label="Share screen" title="Share screen" style="display:none;" data-i18n-attr="title:ui.shareScreen;aria-label:ui.shareScreen2"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0H3"/></svg></button>
                     <button id="vw-fullscreen-btn" aria-label="Fullscreen" title="Fullscreen" style="display:none;" data-i18n-attr="title:ui.fullscreen;aria-label:ui.fullscreen"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"/></svg></button>
-                    <select id="vw-quality" aria-label="Video quality" title="Video quality" data-i18n-attr="title:quality.label;aria-label:quality.label" style="background:var(--slate-800);color:var(--slate-100);border:1px solid var(--slate-600);border-radius:6px;font-size:var(--text-xs);padding:2px var(--space-1);">
+                    <select class="vc-quality" id="vw-quality" aria-label="Video quality" title="Video quality" data-i18n-attr="title:quality.label;aria-label:quality.label">
                         <option value="auto" data-i18n="quality.auto">Auto</option>
                         <option value="high" data-i18n="quality.high">High</option>
                         <option value="standard" data-i18n="quality.standard">Standard</option>
@@ -435,41 +417,40 @@
             </div>
         </aside>
 
-        <main class="no-view" style="flex:1; display:flex; flex-direction:column; overflow:hidden; position:relative;">
+        <main class="no-view">
             <!-- Solid conversation view: overlays the normal feed when a shared
                  Solid chat is open. Distinct from E2E DMs and rooms, plaintext. -->
-            <section id="solidchat-panel" aria-label="Solid conversation" data-i18n-attr="aria-label:solidchat.conversation"
-                     style="display:none;position:absolute;inset:0;z-index:20;background:var(--surface-0);flex-direction:column;">
-              <header style="display:flex;align-items:center;gap:var(--space-2);padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--border);flex-shrink:0;">
-                <button id="solidchat-back-btn" aria-label="Back" title="Back" data-i18n-attr="aria-label:ui.back;title:ui.back" style="background:transparent;border:none;color:inherit;cursor:pointer;line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="22" height="22" class="icon icon-dir"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5"/></svg></button>
-                <h2 id="solidchat-title" style="flex:1;margin:0;font-size:1em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Conversation</h2>
+            <section class="solidchat-panel" id="solidchat-panel" aria-label="Solid conversation" data-i18n-attr="aria-label:solidchat.conversation" style="display:none;">
+              <header class="solidchat-panel__head">
+                <button class="btn btn--icon" id="solidchat-back-btn" aria-label="Back" title="Back" data-i18n-attr="aria-label:ui.back;title:ui.back"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="22" height="22" class="icon icon-dir"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5"/></svg></button>
+                <h2 class="solidchat-panel__title" id="solidchat-title">Conversation</h2>
                 <span class="solidchat-badge" title="Shared plaintext, not end-to-end encrypted" data-i18n-attr="title:solidchat.plaintextHint" data-i18n="solidchat.plaintext">Plaintext</span>
               </header>
-              <div id="solidchat-feed" role="log" aria-label="Solid conversation messages" aria-live="polite" aria-relevant="additions" data-i18n-attr="aria-label:solidchat.messages" style="flex:1;overflow-y:auto;padding:var(--space-3) var(--space-4);"></div>
-              <form id="solidchat-form" style="display:flex;gap:var(--space-2);padding:var(--space-3) var(--space-4);border-top:1px solid var(--border);flex-shrink:0;">
+              <div class="solidchat-panel__feed" id="solidchat-feed" role="log" aria-label="Solid conversation messages" aria-live="polite" aria-relevant="additions" data-i18n-attr="aria-label:solidchat.messages"></div>
+              <form class="solidchat-panel__form" id="solidchat-form">
                 <label for="solidchat-input" class="sr-only" data-i18n="label.message">Message</label>
-                <textarea id="solidchat-input" dir="auto" rows="1" placeholder="Type a message…" data-i18n-attr="placeholder:ui.typeMessage" autocomplete="off" style="flex:1;resize:none;background:var(--slate-900);border:1px solid var(--slate-700);color:inherit;border-radius:6px;padding:var(--space-2) var(--space-3);"></textarea>
-                <button type="submit" data-i18n="btn.send" class="btn btn--accent" style="padding:0 var(--space-4);border-radius:6px;cursor:pointer;">Send</button>
+                <textarea class="input solidchat-panel__input" id="solidchat-input" dir="auto" rows="1" placeholder="Type a message…" data-i18n-attr="placeholder:ui.typeMessage" autocomplete="off"></textarea>
+                <button type="submit" data-i18n="btn.send" class="btn btn--accent">Send</button>
               </form>
             </section>
 
-            <header id="chat-header" style="display: flex; align-items: center;">
-                <button id="menu-toggle" aria-label="Open menu" style="padding-inline-end: var(--space-4); line-height: 0;" data-i18n-attr="aria-label:ui.openMenu"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="24" height="24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg></button>
+            <header id="chat-header">
+                <button id="menu-toggle" aria-label="Open menu" title="Open menu" data-i18n-attr="aria-label:ui.openMenu;title:ui.openMenu"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="24" height="24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg></button>
                 <div id="chat-header-title" class="chat-header-title">
                     <h2 id="chat-header-name" data-i18n="heading.welcome">Welcome</h2>
                     <div id="chat-header-subtitle" class="chat-header-subtitle" hidden></div>
                 </div>
-                <div id="chat-header-actions" style="display:flex;align-items:center;flex-shrink:0;"><span id="dm-e2e-status" style="display:none;font-size:var(--text-2xs);padding:2px var(--space-2);border-radius:3px;margin-inline-start:var(--space-2);" title="End-to-end encrypted" data-i18n-attr="title:ui.endEndEncrypted"></span>
-                <button id="dm-e2e-verify-btn" title="Verify contact identity" style="display:none;background:transparent;border:none;color:var(--color-success-soft);font-size:var(--text-xs);cursor:pointer;margin-inline-start:2px;padding:2px var(--space-2);" data-i18n-attr="title:ui.verifyContactIdentity" data-i18n="btn.verify">Verify</button>
-                <span id="pod-sync-indicator" style="display:none;font-size:var(--text-xs);color:var(--slate-500);margin-inline-start:var(--space-2);"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15a4.5 4.5 0 0 0 4.5 4.5H18a3.75 3.75 0 0 0 1.332-7.257 3 3 0 0 0-3.758-3.848 5.25 5.25 0 0 0-10.233 2.33A4.502 4.502 0 0 0 2.25 15Z"/></svg> <span data-i18n="ui.podSyncing">Syncing…</span></span>
-                <button id="invite-btn" aria-label="Copy room invite link" title="Copy room invite link" style="display:none;line-height:0;" data-i18n-attr="title:ui.copyRoomInviteLink;aria-label:ui.copyRoomInviteLink"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg></button>
-                <button id="pin-panel-btn" aria-label="Pinned messages" title="Pinned messages" style="line-height:0;" data-i18n-attr="title:ui.pinnedMessages;aria-label:ui.pinnedMessages"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M12 17v5M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg></button>
+                <div id="chat-header-actions"><span class="badge e2e-badge" id="dm-e2e-status" style="display:none;" title="End-to-end encrypted" data-i18n-attr="title:ui.endEndEncrypted"></span>
+                <button class="btn btn--quiet btn--success-text" id="dm-e2e-verify-btn" title="Verify contact identity" style="display:none;" data-i18n-attr="title:ui.verifyContactIdentity" data-i18n="btn.verify">Verify</button>
+                <span class="header-note" id="pod-sync-indicator" style="display:none;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15a4.5 4.5 0 0 0 4.5 4.5H18a3.75 3.75 0 0 0 1.332-7.257 3 3 0 0 0-3.758-3.848 5.25 5.25 0 0 0-10.233 2.33A4.502 4.502 0 0 0 2.25 15Z"/></svg> <span data-i18n="ui.podSyncing">Syncing…</span></span>
+                <button id="invite-btn" aria-label="Copy room invite link" title="Copy room invite link" style="display:none;" data-i18n-attr="title:ui.copyRoomInviteLink;aria-label:ui.copyRoomInviteLink"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg></button>
+                <button id="pin-panel-btn" aria-label="Pinned messages" title="Pinned messages" data-i18n-attr="title:ui.pinnedMessages;aria-label:ui.pinnedMessages"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M12 17v5M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg></button>
                 <!-- R59E: saved messages (private, local-only) -->
-                <button id="saved-panel-btn" aria-label="Saved messages" title="Saved messages" style="line-height:0;" data-i18n-attr="title:ui.savedMessages;aria-label:ui.savedMessages"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0ZM12 7v6m3-3H9"/></svg></button>
+                <button id="saved-panel-btn" aria-label="Saved messages" title="Saved messages" data-i18n-attr="title:ui.savedMessages;aria-label:ui.savedMessages"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0ZM12 7v6m3-3H9"/></svg></button>
                 <!-- Round 70: Integrations button -->
                 <button id="integrations-btn" aria-label="Room integrations" class="room-integrations-btn" title="Room integrations" style="display:none;" data-i18n-attr="title:ui.roomIntegrations;aria-label:ui.roomIntegrations2"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M14.25 6.087c0-.355.186-.676.401-.959.221-.29.349-.634.349-1.003 0-1.036-1.007-1.875-2.25-1.875s-2.25.84-2.25 1.875c0 .369.128.713.349 1.003.215.283.401.604.401.959v0a.64.64 0 0 1-.657.643 48.39 48.39 0 0 1-4.163-.3c.186 1.613.293 3.25.315 4.907a.656.656 0 0 1-.658.663v0c-.355 0-.676-.186-.959-.401a1.647 1.647 0 0 0-1.003-.349c-1.036 0-1.875 1.007-1.875 2.25s.84 2.25 1.875 2.25c.369 0 .713-.128 1.003-.349.283-.215.604-.401.959-.401v0c.31 0 .555.26.532.57a48.039 48.039 0 0 1-.642 5.056c1.518.19 3.058.309 4.616.354a.64.64 0 0 0 .657-.643v0c0-.355-.186-.676-.401-.959a1.647 1.647 0 0 1-.349-1.003c0-1.035 1.008-1.875 2.25-1.875 1.243 0 2.25.84 2.25 1.875 0 .369-.128.713-.349 1.003-.215.283-.4.604-.4.959v0c0 .333.277.599.61.58a48.1 48.1 0 0 0 5.427-.63 48.05 48.05 0 0 0 .582-4.717.532.532 0 0 0-.533-.57v0c-.355 0-.676.186-.959.401-.29.221-.634.349-1.003.349-1.035 0-1.875-1.007-1.875-2.25s.84-2.25 1.875-2.25c.37 0 .713.128 1.003.349.283.215.604.401.96.401v0a.656.656 0 0 0 .658-.663 48.422 48.422 0 0 0-.37-5.36c-1.886.342-3.81.574-5.766.689a.578.578 0 0 1-.61-.58v0Z"/></svg></button>
                 <!-- Round 47: Members toggle, leave, delete buttons -->
-                <button id="members-toggle" aria-label="Room members" style="display:none;font-size:var(--text-md);" title="Room members" data-i18n-attr="title:ui.roomMembers;aria-label:ui.roomMembers"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></svg></button>
+                <button id="members-toggle" aria-label="Room members" style="display:none;" title="Room members" data-i18n-attr="title:ui.roomMembers;aria-label:ui.roomMembers"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></svg></button>
                 <!-- Room options: leave / delete live in a small overflow menu -->
                 <div class="room-options">
                 <button id="room-options-btn" class="room-options-btn" aria-label="Room options" title="Room options" aria-haspopup="menu" aria-expanded="false" aria-controls="room-options-menu" style="display:none;" data-i18n-attr="title:ui.roomOptions;aria-label:ui.roomOptions"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"/></svg></button>
@@ -487,7 +468,7 @@
                 <button id="delete-room-btn" role="menuitem" class="danger" style="display:none;" data-i18n="ui.deleteRoom">Delete room</button>
                 </div>
                 </div>
-                <button id="leave-voice-channel-btn" style="display:none;background:var(--color-danger-strong);border:none;color:var(--color-on-status);padding:var(--space-1) var(--space-3);border-radius:4px;cursor:pointer;font-size:var(--text-sm);margin-inline-end:var(--space-1);" title="Leave voice channel" data-i18n-attr="title:ui.leaveVoiceChannel"><span aria-hidden="true">&#x1F50A;</span> <span class="btn-label" data-i18n="ui.leaveChannel">Leave channel</span></button>
+                <button class="btn btn--danger btn--sm" id="leave-voice-channel-btn" style="display:none;" title="Leave voice channel" data-i18n-attr="title:ui.leaveVoiceChannel"><span aria-hidden="true">&#x1F50A;</span> <span class="btn-label" data-i18n="ui.leaveChannel">Leave channel</span></button>
                 <button id="join-voice-btn" style="display:none;" title="Join this room's voice channel" data-i18n-attr="title:ui.joinVoiceTitle"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z"/></svg> <span class="btn-label" data-i18n="ui.joinVoice">Join voice</span> <span id="join-voice-count" class="voice-count" hidden></span></button>
                 <button id="start-call-btn" style="display:none;" title="Voice call" data-i18n-attr="title:ui.voiceCall"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.176.42l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.175l-1.106-4.423a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z"/></svg> <span class="btn-label" data-i18n="ui.call">Call</span></button>
                 <button id="start-video-call-btn" style="display:none;" aria-label="Start video call" title="Video call" data-i18n-attr="title:ui.videoCall;aria-label:ui.videoCall"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h8.25a2.25 2.25 0 0 0 2.25-2.25V7.5a2.25 2.25 0 0 0-2.25-2.25H4.5A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z"/></svg> <span class="btn-label" data-i18n="ui.video">Video</span></button></div>
@@ -510,15 +491,15 @@
                 </div>
               </div>
               <div id="voice-channel-participants" class="vc-tiles" role="list" aria-label="In the voice channel" data-i18n-attr="aria-label:voice.tilesLabel"></div>
-              <div id="voice-channel-videos" style="display:none;gap:var(--space-2);flex-wrap:wrap;align-items:center;">
-                <video id="vc-local-video" autoplay playsinline muted style="display:none;width:160px;max-height:120px;background:#000;border:1px solid var(--slate-600);border-radius:6px;object-fit:cover;transform:scaleX(-1);"></video>
+              <div id="voice-channel-videos" style="display:none;">
+                <video class="call-video call-video--tile call-video--mirror" id="vc-local-video" autoplay playsinline muted style="display:none;"></video>
               </div>
             </div>
             <!-- R11.2.2: Safety number bar (DM only) -->
-            <div id="fingerprint-bar" style="display:none;padding:var(--space-2) var(--space-4);background:var(--slate-900);border-bottom:1px solid var(--slate-800);font-size:var(--text-xs);color:var(--slate-500);align-items:center;gap:var(--space-2);flex-wrap:wrap;">
-              <span style="color:var(--slate-600);font-size:var(--text-md);text-transform:uppercase;letter-spacing:0.05em;" data-i18n="e2e.safetyNumber">Safety number</span>
-              <span id="fingerprint-words" style="font-family:monospace;letter-spacing:0.08em;color:var(--text-secondary);"></span>
-              <button id="fingerprint-verify-btn" style="background:var(--color-success-tint);border:none;color:var(--color-success-soft);padding:2px var(--space-3);border-radius:3px;cursor:pointer;font-size:var(--text-md);margin-inline-start:auto;" data-i18n="btn.markAsVerified">Mark as verified</button>
+            <div class="fingerprint-bar" id="fingerprint-bar" style="display:none;">
+              <span class="eyebrow" data-i18n="e2e.safetyNumber">Safety number</span>
+              <span class="fingerprint-words" id="fingerprint-words"></span>
+              <button class="btn btn--slate btn--sm ms-auto" id="fingerprint-verify-btn" data-i18n="btn.markAsVerified">Mark as verified</button>
             </div>
             <!-- Round 65: Disappear timer banner -->
             <div id="disappear-banner" class="disappear-banner">
@@ -534,26 +515,26 @@
                     </div>
                 </div>
             </div>
-            <button id="scroll-bottom-btn" aria-label="Scroll to latest messages" data-i18n-attr="aria-label:ui.scrollLatestMessages"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg> <span id="scroll-bottom-count"></span></button>
-            <div id="typing-indicator" aria-live="polite" style="font-size: var(--text-sm); color: var(--text-secondary); height: 1.5em;"></div>
+            <button id="scroll-bottom-btn" aria-label="Scroll to latest messages" title="Scroll to latest messages" data-i18n-attr="aria-label:ui.scrollLatestMessages;title:ui.scrollLatestMessages"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg> <span id="scroll-bottom-count"></span></button>
+            <div id="typing-indicator" aria-live="polite"></div>
             <div id="reply-bar">
                 <span class="reply-preview" id="reply-text">Replying to…</span>
-                <button type="button" class="cancel-reply" id="cancel-reply-btn" aria-label="Cancel reply"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+                <button type="button" class="cancel-reply" id="cancel-reply-btn" aria-label="Cancel reply" title="Cancel reply" data-i18n-attr="aria-label:ui.cancelReply;title:ui.cancelReply"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
             </div>
             <!-- Round 62: Voice recording bar -->
             <div id="voice-recording-bar" class="voice-recording-bar">
                 <span class="recording-dot" aria-hidden="true">●</span>
                 <span id="recording-timer">0:00</span>
-                <span style="color:var(--text-secondary);font-size:var(--text-md);" data-i18n="voiceMsg.recordingHint">Recording… tap the mic to send, × to cancel</span>
-                <button id="voice-record-cancel" aria-label="Cancel voice recording" style="margin-inline-start:auto;background:transparent;border:none;color:var(--text-secondary);cursor:pointer;line-height:0;" data-i18n-attr="aria-label:ui.cancelVoiceRecording"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+                <span class="voice-recording-bar__hint" data-i18n="voiceMsg.recordingHint">Recording… tap the mic to send, × to cancel</span>
+                <button class="btn btn--icon ms-auto" id="voice-record-cancel" aria-label="Cancel voice recording" title="Cancel voice recording" data-i18n-attr="aria-label:ui.cancelVoiceRecording;title:ui.cancelVoiceRecording"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
             </div>
             <!-- Round 69: Schedule picker -->
             <div id="schedule-picker" class="schedule-picker" style="display:none;">
                 <label data-i18n="label.sendAt">Send at</label>
                 <input type="datetime-local" id="schedule-datetime-input">
-                <button id="schedule-confirm-btn" class="btn btn--accent" style="padding:var(--space-2) var(--space-4);border-radius:4px;cursor:pointer;" data-i18n="btn.schedule">Schedule</button>
-                <button id="schedule-cancel-btn" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-4);border-radius:4px;cursor:pointer;" data-i18n="btn.cancel">Cancel</button>
-                <div id="scheduled-msgs-list" hidden style="margin-top:var(--space-2);max-height:120px;overflow-y:auto;font-size:var(--text-md);color:var(--text-secondary);"></div>
+                <button id="schedule-confirm-btn" class="btn btn--accent" data-i18n="btn.schedule">Schedule</button>
+                <button class="btn btn--slate" id="schedule-cancel-btn" data-i18n="btn.cancel">Cancel</button>
+                <div id="scheduled-msgs-list" hidden></div>
             </div>
             <form id="message-form">
                 <!-- Mobile only: a single "+" disclosure collapses the secondary
@@ -583,14 +564,14 @@
               <p class="gif-tray-title" data-i18n="gif.trayTitle">Your GIF tray</p>
               <div id="gif-tray-grid" class="gif-tray-grid"></div>
               <!-- R60B: meme generator entry -->
-              <button id="meme-btn" type="button" style="margin-top:var(--space-2);background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-4);border-radius:4px;cursor:pointer;font-size:var(--text-md);" data-i18n="btn.makeMeme">Make a meme…</button>
+              <button class="btn btn--slate mt-2" id="meme-btn" type="button" data-i18n="btn.makeMeme">Make a meme…</button>
               <input type="file" id="meme-file-input" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" style="display:none">
             </div>
             <!-- R60B: meme editor modal -->
             <div id="meme-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="meme-modal-title" style="display:none;">
               <div class="modal__panel modal__panel--md">
                 <h3 id="meme-modal-title" class="modal__title" data-i18n="heading.memeEditor">Meme editor</h3>
-                <canvas id="meme-canvas" style="display:block;max-width:100%;height:auto;border-radius:6px;border:1px solid var(--slate-600);margin-bottom:var(--space-3);"></canvas>
+                <canvas class="meme-canvas" id="meme-canvas"></canvas>
                 <label for="meme-top" class="field-label" data-i18n="meme.topLabel">Top text</label>
                 <input id="meme-top" class="input" type="text" maxlength="120" placeholder="Top text" data-i18n-attr="placeholder:ui.memeTop">
                 <label for="meme-bottom" class="field-label" data-i18n="meme.bottomLabel">Bottom text</label>
@@ -604,12 +585,12 @@
         </main>
 
         <!-- Members panel (right sidebar for room member list) -->
-        <aside id="members-panel" style="display:none;width:220px;background:var(--slate-800);border-inline-start:1px solid var(--slate-700);overflow-y:auto;flex-shrink:0;">
-          <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--slate-700);">
-            <span style="font-size:var(--text-sm);color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;font-weight:var(--weight-semibold);" data-i18n="ui.members">Members</span>
-            <button id="members-panel-close" aria-label="Close members" title="Close members" style="background:transparent;border:none;color:var(--text-secondary);cursor:pointer;line-height:0;" data-i18n-attr="title:ui.closeMembers;aria-label:ui.closeMembers"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+        <aside id="members-panel" style="display:none;">
+          <div class="panel-head">
+            <span class="eyebrow" data-i18n="ui.members">Members</span>
+            <button class="btn btn--icon" id="members-panel-close" aria-label="Close members" title="Close members" data-i18n-attr="title:ui.closeMembers;aria-label:ui.closeMembers"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
           </div>
-          <div id="members-list" style="padding:var(--space-2) 0;"></div>
+          <div id="members-list"></div>
         </aside>
     </div>
 
@@ -621,9 +602,9 @@
           <label for="room-name-input" class="field-label" data-i18n="label.roomName">Room name</label>
           <input id="room-name-input" enterkeyhint="go" class="input" type="text" placeholder="e.g. general" aria-describedby="room-create-error" data-i18n-attr="placeholder:ui.eGGeneral">
           <p id="room-create-error" class="field-error" role="alert"></p>
-          <label class="check-row" style="margin:0;">
+          <label class="check-row check-row--flush">
             <input type="checkbox" id="room-history-toggle">
-            <span style="color:var(--text-secondary);" data-i18n="room.shareHistory">Share message history with new members</span>
+            <span class="text-secondary" data-i18n="room.shareHistory">Share message history with new members</span>
           </label>
           <div class="btn-row modal__footer">
             <button type="button" id="room-create-cancel-btn" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
@@ -631,13 +612,11 @@
           </div>
         </form>
         <div id="room-invite-result" style="display:none;">
-          <p style="margin:0 0 var(--space-2); color:var(--color-success); font-weight:var(--weight-semibold);" data-i18n="room.created">Room created.</p>
-          <label style="display:block; margin-bottom:var(--space-1); font-size:var(--text-md);" data-i18n="label.inviteLinkClickCopy">Invite link (click to copy)</label>
-          <div id="room-invite-url"
-               style="font-size:var(--text-sm); color:var(--text-secondary); word-break:break-all; padding:var(--space-2); background:var(--slate-900); border-radius:4px; cursor:pointer; user-select:all; margin-bottom:var(--space-3);"></div>
-          <button id="room-invite-share-btn" type="button" hidden data-share-from="#room-invite-url"
-                  style="background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-4);border-radius:4px;cursor:pointer;font-size:var(--text-md);margin-bottom:var(--space-3);" data-i18n="btn.shareInviteLink">Share invite link</button>
-          <p style="font-size:var(--text-sm); color:var(--text-secondary); margin:0 0 var(--space-3);" data-i18n="room.createdShareHint">Share this link with a friend. When they open it, Proxion adds you automatically. If they don't have Proxion yet, they are asked to install it first.</p>
+          <p class="result-ok" data-i18n="room.created">Room created.</p>
+          <label class="field-label" data-i18n="label.inviteLinkClickCopy">Invite link (click to copy)</label>
+          <div class="readout readout--copy" id="room-invite-url"></div>
+          <button class="btn btn--slate mb-3" id="room-invite-share-btn" type="button" hidden data-share-from="#room-invite-url" data-i18n="btn.shareInviteLink">Share invite link</button>
+          <p class="prose-muted prose-muted--sm" data-i18n="room.createdShareHint">Share this link with a friend. When they open it, Proxion adds you automatically. If they don't have Proxion yet, they are asked to install it first.</p>
           <div class="btn-row modal__footer">
             <button type="button" id="room-create-done-btn" data-modal-cancel class="btn btn--accent btn--lg" data-i18n="btn.done">Done</button>
           </div>
@@ -649,7 +628,7 @@
          one scrolling pane on the right. Mobile: a single column in the same order,
          with the rarely used sections (Calls, Connection, About) folded under
          Advanced. Everything applies immediately; Done only closes. -->
-    <div id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" style="display:none; position:fixed; inset:0; background:var(--scrim); z-index:var(--z-modal); align-items:center; justify-content:center;">
+    <div id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" style="display:none;">
       <div class="settings-panel">
         <div class="settings-header">
           <div class="settings-title">
@@ -886,8 +865,8 @@
     <div id="file-confirm-modal" class="modal modal--stacked" role="dialog" aria-modal="true" aria-labelledby="file-confirm-title" aria-describedby="file-confirm-msg" style="display:none;">
       <div class="modal__panel modal__panel--sm">
         <h3 id="file-confirm-title" class="modal__title" data-i18n="ui.sendFile">Send file</h3>
-        <p id="file-confirm-msg" style="margin:0 0 var(--space-3);font-size:var(--text-base);"></p>
-        <label id="file-confirm-spoiler-row" class="check-row" style="margin:0;">
+        <p class="modal__body" id="file-confirm-msg"></p>
+        <label id="file-confirm-spoiler-row" class="check-row check-row--flush">
           <input type="checkbox" id="file-confirm-spoiler">
           <span data-i18n="file.spoilerOption">Mark as spoiler (blurred until revealed)</span>
         </label>
@@ -903,7 +882,7 @@
       <div class="modal__panel modal__panel--sm">
         <div class="modal__header">
           <h3 id="room-emoji-title" class="modal__title" data-i18n="heading.customRoomEmoji">Custom room emoji</h3>
-          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" data-i18n-attr="aria-label:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" title="Close" data-i18n-attr="aria-label:btn.close;title:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
         </div>
         <p class="modal__desc" data-i18n="roomEmoji.hint">
           Up to 50 small images (64 KB max) usable as :name: in this room.
@@ -964,8 +943,8 @@
         <form id="poll-form" novalidate>
         <h3 id="poll-modal-title" class="modal__title" data-i18n="heading.createPoll">Create a poll</h3>
         <label for="poll-question" class="field-label" data-i18n="poll.questionLabel">Question</label>
-        <input id="poll-question" class="input" type="text" maxlength="200" placeholder="Ask a question…" data-i18n-attr="placeholder:ui.pollQuestion" style="margin-bottom:var(--space-3);">
-        <fieldset style="border:none;margin:0;padding:0;">
+        <input id="poll-question" class="input mb-3" type="text" maxlength="200" placeholder="Ask a question…" data-i18n-attr="placeholder:ui.pollQuestion">
+        <fieldset class="field-group">
           <legend class="field-label" data-i18n="poll.optionsLabel">Options</legend>
           <input id="poll-opt-1" class="input" type="text" maxlength="100" placeholder="Option 1" aria-label="Option 1" data-i18n-attr="placeholder:ui.pollOption1;aria-label:ui.pollOption1">
           <input id="poll-opt-2" class="input" type="text" maxlength="100" placeholder="Option 2" aria-label="Option 2" data-i18n-attr="placeholder:ui.pollOption2;aria-label:ui.pollOption2">
@@ -990,14 +969,14 @@
           This code encrypts your recovery kit. Write it down and keep it somewhere
           safe. You will need it to restore your identity, and it is shown only once.
         </p>
-        <p id="recovery-code-display" style="margin:0 0 var(--space-2);font-family:monospace;font-size:var(--text-lg);letter-spacing:1px;text-align:center;padding:var(--space-3) var(--space-2);background:var(--slate-900);border:1px solid var(--slate-600);border-radius:6px;user-select:all;"></p>
-        <button type="button" id="recovery-copy-btn" class="btn btn--slate btn--sm" style="margin-bottom:var(--space-4);" data-i18n="btn.copyCode">Copy code</button>
-        <label class="check-row" style="margin:0;">
+        <p class="readout readout--code mb-2" id="recovery-code-display"></p>
+        <button type="button" id="recovery-copy-btn" class="btn btn--slate btn--sm mb-4" data-i18n="btn.copyCode">Copy code</button>
+        <label class="check-row check-row--flush">
           <input type="checkbox" id="recovery-confirm-saved">
           <span data-i18n="recovery.confirmSaved">I have written down my recovery code</span>
         </label>
-        <div class="btn-row modal__footer" style="align-items:center;">
-          <a id="recovery-custom-pp" href="#" style="margin-inline-end:auto;font-size:var(--text-sm);color:var(--text-secondary);text-decoration:underline;" data-i18n="recovery.useCustom">Use my own passphrase instead</a>
+        <div class="btn-row modal__footer">
+          <a class="link-quiet me-auto" id="recovery-custom-pp" href="#" data-i18n="recovery.useCustom">Use my own passphrase instead</a>
           <button type="button" id="recovery-cancel-btn" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
           <button type="button" id="recovery-download-btn" disabled class="btn btn--accent btn--lg" data-i18n="btn.downloadRecoveryKit">Download recovery kit</button>
         </div>
@@ -1006,15 +985,15 @@
 
     <!-- Multi-device: primary shows a pairing QR/code, then approves the new device -->
     <div id="device-link-modal" class="modal modal--stacked" role="dialog" aria-modal="true" aria-labelledby="device-link-title" style="display:none;">
-      <div class="modal__panel modal__panel--sm" style="text-align:center;">
+      <div class="modal__panel modal__panel--sm modal__panel--center">
         <h3 id="device-link-title" class="modal__title" data-i18n="heading.linkDevice">Link a device</h3>
-        <div id="device-link-qr" style="width:200px;height:200px;border-radius:6px;background:#fff;display:flex;align-items:center;justify-content:center;margin:0 auto var(--space-3);overflow:hidden;"></div>
-        <p style="margin:0 0 var(--space-1);font-size:var(--text-sm);color:var(--text-secondary);">Pairing code</p>
-        <p id="device-link-code" style="margin:0 0 var(--space-3);font-family:monospace;font-size:var(--text-base);word-break:break-all;"></p>
-        <p id="device-link-status" style="margin:0 0 var(--space-3);font-size:var(--text-md);color:var(--text-secondary);"></p>
-        <div id="device-link-approve-row" style="display:none;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-3);">
-          <p id="device-link-safety" style="margin:0;font-family:monospace;font-size:1.3em;letter-spacing:2px;color:var(--color-success-soft);"></p>
-          <div class="btn-row" style="justify-content:center;">
+        <div class="qr-box" id="device-link-qr"></div>
+        <p class="prose-muted prose-muted--sm mb-1" data-i18n="ui.pairingCode">Pairing code</p>
+        <p class="readout readout--mono" id="device-link-code"></p>
+        <p class="prose-muted" id="device-link-status"></p>
+        <div class="btn-stack mb-3" id="device-link-approve-row" style="display:none;">
+          <p class="code-success mb-0" id="device-link-safety"></p>
+          <div class="btn-row btn-row--center">
             <button type="button" id="device-link-deny" class="btn btn--slate btn--lg" data-i18n="btn.deny">Deny</button>
             <button type="button" id="device-link-approve" class="btn btn--accent btn--lg" data-i18n="btn.approve">Approve</button>
           </div>
@@ -1031,11 +1010,11 @@
         <h3 id="pair-device-title" class="modal__title" data-i18n="heading.linkThisDevice">Link this device</h3>
         <p class="modal__desc" data-i18n="pairing.joinHint">On your other device, open Settings → Link a device, then enter the code shown there (or scan its QR).</p>
         <label for="pair-code-input" class="field-label" data-i18n="ui.pairingCode">Pairing code</label>
-        <input id="pair-code-input" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" class="input" type="text" placeholder="Pairing code" autocomplete="off" style="font-family:var(--font-mono);" data-i18n-attr="placeholder:ui.pairingCode">
-        <button type="button" id="pair-scan-btn" class="btn btn--ghost btn--sm" style="margin-bottom:var(--space-2);" data-i18n="btn.scanQr">Scan QR code</button>
+        <input id="pair-code-input" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" class="input input--mono" type="text" placeholder="Pairing code" autocomplete="off" data-i18n-attr="placeholder:ui.pairingCode">
+        <button type="button" id="pair-scan-btn" class="btn btn--ghost btn--sm mb-2" data-i18n="btn.scanQr">Scan QR code</button>
         <input type="file" id="pair-scan-input" accept="image/*" capture="environment" hidden>
-        <p id="pair-device-status" style="margin:var(--space-2) 0;font-size:var(--text-md);color:var(--text-secondary);"></p>
-        <p id="pair-device-safety" style="margin:0 0 var(--space-3);font-family:monospace;font-size:1.3em;letter-spacing:2px;color:var(--color-success-soft);text-align:center;"></p>
+        <p class="prose-muted" id="pair-device-status"></p>
+        <p class="code-success" id="pair-device-safety"></p>
         <div class="btn-row modal__footer">
           <button type="button" id="pair-device-cancel" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
           <button type="button" id="pair-device-submit" class="btn btn--accent btn--lg" data-i18n="heading.linkThisDevice">Link this device</button>
@@ -1047,15 +1026,15 @@
     <div id="call-preview" class="modal" role="dialog" aria-modal="true" aria-labelledby="call-preview-title" style="display:none;">
       <div class="modal__panel modal__panel--sm">
         <h3 id="call-preview-title" class="modal__title" data-i18n="preview.title">Check your camera and microphone</h3>
-        <video id="preview-video" autoplay playsinline muted style="width:100%;max-height:220px;background:#000;border-radius:8px;object-fit:cover;transform:scaleX(-1);"></video>
-        <div style="display:flex;align-items:center;gap:var(--space-2);margin:var(--space-2) 0;">
-          <span style="font-size:var(--text-xs);color:var(--text-secondary);min-width:32px;" data-i18n="preview.mic">Mic</span>
-          <div style="flex:1;height:8px;background:var(--slate-900);border-radius:4px;overflow:hidden;"><div id="preview-mic-level" role="meter" aria-label="Microphone level" data-i18n-attr="aria-label:preview.micLevel" style="height:100%;width:0;background:var(--color-success);transition:width .08s;"></div></div>
+        <video class="call-video call-video--cover call-video--mirror" id="preview-video" autoplay playsinline muted></video>
+        <div class="row my-2">
+          <span class="meter-label" data-i18n="preview.mic">Mic</span>
+          <div class="meter"><div class="meter__fill" id="preview-mic-level" role="meter" aria-label="Microphone level" data-i18n-attr="aria-label:preview.micLevel"></div></div>
         </div>
-        <label for="preview-camera" style="display:block;font-size:var(--text-xs);margin-bottom:var(--space-1);color:var(--text-secondary)" data-i18n="preview.camera">Camera</label>
-        <select id="preview-camera" class="input" style="margin-bottom:var(--space-2);"></select>
-        <label for="preview-mic" style="display:block;font-size:var(--text-xs);margin-bottom:var(--space-1);color:var(--text-secondary)" data-i18n="preview.microphone">Microphone</label>
-        <select id="preview-mic" class="input" style="margin:0;"></select>
+        <label class="field-label" for="preview-camera" data-i18n="preview.camera">Camera</label>
+        <select id="preview-camera" class="input"></select>
+        <label class="field-label" for="preview-mic" data-i18n="preview.microphone">Microphone</label>
+        <select id="preview-mic" class="input mb-0"></select>
         <div class="btn-row modal__footer">
           <button id="preview-cancel" data-modal-cancel type="button" class="btn btn--slate btn--lg" data-i18n="btn.cancel">Cancel</button>
           <button id="preview-join" type="button" class="btn btn--accent btn--lg" data-i18n="preview.join">Join call</button>
@@ -1068,29 +1047,29 @@
       <div class="modal__panel modal__panel--md">
         <div class="modal__header">
           <h3 id="solidchat-dialog-title" class="modal__title" data-i18n="solidchat.new">New Solid conversation</h3>
-          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" data-i18n-attr="aria-label:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" title="Close" data-i18n-attr="aria-label:btn.close;title:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
         </div>
-        <p class="modal__desc" style="margin-bottom:var(--space-4);" data-i18n="solidchat.newHint">Talk to anyone with a Solid pod, in any Solid chat app. These messages are shared plaintext, not end-to-end encrypted.</p>
-        <label style="display:block;font-size:var(--text-sm);margin-bottom:var(--space-1);color:var(--text-secondary)" data-i18n="solidchat.invitationsLabel">Invitations</label>
-        <ul id="solidchat-invites-list" aria-label="Chat invitations" data-i18n-attr="aria-label:solidchat.invitationsLabel" style="list-style:none;margin:0 0 var(--space-4);padding:0;max-height:140px;overflow:auto;"></ul>
-        <label for="solidchat-host-title" style="display:block;font-size:var(--text-sm);margin-bottom:var(--space-1);color:var(--text-secondary)" data-i18n="solidchat.hostLabel">Host a new conversation</label>
-        <div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-2);">
-          <input id="solidchat-host-title" class="input" type="text" placeholder="Conversation name" data-i18n-attr="placeholder:solidchat.namePlaceholder" style="flex:1;margin:0;">
+        <p class="modal__desc mb-4" data-i18n="solidchat.newHint">Talk to anyone with a Solid pod, in any Solid chat app. These messages are shared plaintext, not end-to-end encrypted.</p>
+        <label class="field-label" data-i18n="solidchat.invitationsLabel">Invitations</label>
+        <ul class="plain-list" id="solidchat-invites-list" aria-label="Chat invitations" data-i18n-attr="aria-label:solidchat.invitationsLabel"></ul>
+        <label class="field-label" for="solidchat-host-title" data-i18n="solidchat.hostLabel">Host a new conversation</label>
+        <div class="input-row">
+          <input id="solidchat-host-title" class="input" type="text" placeholder="Conversation name" data-i18n-attr="placeholder:solidchat.namePlaceholder">
           <button id="solidchat-host-submit" type="button" class="btn btn--accent" data-i18n="solidchat.host">Host</button>
         </div>
-        <input id="solidchat-host-participant" autocapitalize="off" autocorrect="off" spellcheck="false" class="input" list="solidchat-contacts" type="url" inputmode="url" placeholder="Invite a WebID (optional)" aria-label="Invite a WebID (optional)" data-i18n-attr="placeholder:solidchat.participantPlaceholder;aria-label:solidchat.participantPlaceholder" style="margin-bottom:var(--space-4);">
-        <label for="solidchat-join-url" style="display:block;font-size:var(--text-sm);margin-bottom:var(--space-1);color:var(--text-secondary)" data-i18n="solidchat.joinLabel">Join with a link</label>
-        <div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-4);">
-          <input id="solidchat-join-url" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" class="input" type="url" inputmode="url" placeholder="https://…/chat/" data-i18n-attr="placeholder:solidchat.linkPlaceholder" style="flex:1;margin:0;">
+        <input id="solidchat-host-participant" autocapitalize="off" autocorrect="off" spellcheck="false" class="input mb-4" list="solidchat-contacts" type="url" inputmode="url" placeholder="Invite a WebID (optional)" aria-label="Invite a WebID (optional)" data-i18n-attr="placeholder:solidchat.participantPlaceholder;aria-label:solidchat.participantPlaceholder">
+        <label class="field-label" for="solidchat-join-url" data-i18n="solidchat.joinLabel">Join with a link</label>
+        <div class="input-row mb-4">
+          <input id="solidchat-join-url" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" class="input" type="url" inputmode="url" placeholder="https://…/chat/" data-i18n-attr="placeholder:solidchat.linkPlaceholder">
           <button id="solidchat-join-submit" type="button" class="btn btn--slate" data-i18n="solidchat.join">Join</button>
         </div>
-        <label for="solidchat-discover-webid" style="display:block;font-size:var(--text-sm);margin-bottom:var(--space-1);color:var(--text-secondary)" data-i18n="solidchat.discoverLabel">Find someone's chats by WebID</label>
-        <div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-2);">
-          <input id="solidchat-discover-webid" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" class="input" list="solidchat-contacts" type="url" inputmode="url" placeholder="https://…/profile/card#me" data-i18n-attr="placeholder:solidchat.webidPlaceholder" style="flex:1;margin:0;">
+        <label class="field-label" for="solidchat-discover-webid" data-i18n="solidchat.discoverLabel">Find someone's chats by WebID</label>
+        <div class="input-row">
+          <input id="solidchat-discover-webid" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" class="input" list="solidchat-contacts" type="url" inputmode="url" placeholder="https://…/profile/card#me" data-i18n-attr="placeholder:solidchat.webidPlaceholder">
           <datalist id="solidchat-contacts"></datalist>
           <button id="solidchat-discover-btn" type="button" class="btn btn--slate" data-i18n="solidchat.find">Find</button>
         </div>
-        <ul id="solidchat-discover-list" aria-label="Discovered chats" data-i18n-attr="aria-label:solidchat.discoveredChats" style="list-style:none;margin:0 0 var(--space-4);padding:0;max-height:180px;overflow:auto;"></ul>
+        <ul class="plain-list" id="solidchat-discover-list" aria-label="Discovered chats" data-i18n-attr="aria-label:solidchat.discoveredChats"></ul>
         <div class="btn-row">
           <button id="solidchat-dialog-close" data-modal-cancel type="button" class="btn btn--slate btn--lg" data-i18n="btn.close">Close</button>
         </div>
@@ -1101,9 +1080,9 @@
       <div class="modal__panel modal__panel--md">
         <div class="modal__header">
           <h3 id="shortcut-modal-title" class="modal__title" data-i18n="kbd.title">Keyboard shortcuts</h3>
-          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" data-i18n-attr="aria-label:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" title="Close" data-i18n-attr="aria-label:btn.close;title:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
         </div>
-        <table style="width:100%; border-collapse:collapse;">
+        <table class="kbd-table">
           <tr><td><kbd>Ctrl+K</kbd></td><td data-i18n="kbd.focusSearch">Focus search</td></tr>
           <tr><td><kbd>Ctrl+/</kbd></td><td data-i18n="kbd.showHelp">Show this help</td></tr>
           <tr><td><kbd>Alt+↑ / ↓</kbd></td><td data-i18n="kbd.prevNextThread">Previous / next thread</td></tr>
@@ -1123,52 +1102,52 @@
     </div>
 
     <!-- Web build sign-in (shown in gateway-less browser mode instead of the wizard) -->
-    <div id="web-signin-modal" class="modal modal--gate" data-modal-persistent role="dialog" aria-modal="true" aria-labelledby="web-signin-title" style="display:none;background:rgba(0,0,0,.7);">
+    <div id="web-signin-modal" class="modal modal--gate modal--opaque" data-modal-persistent role="dialog" aria-modal="true" aria-labelledby="web-signin-title" style="display:none;">
       <div class="modal__panel modal__panel--md">
         <form id="web-signin-form" novalidate>
-        <h2 id="web-signin-title" class="modal__title" style="font-size:1.35rem;" data-i18n="web.signin.title">Welcome to Proxion Web</h2>
-        <p id="web-signin-invite" hidden style="background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:var(--space-3); font-size:var(--text-md); margin:0 0 var(--space-4);" data-i18n="web.signin.invited">You have been invited to a room. Sign in with your Solid pod, or get a free one below, to join.</p>
-        <p style="color:var(--text-secondary); font-size:var(--text-md); margin:0 0 var(--space-3);" data-i18n="web.signin.what">
+        <h2 id="web-signin-title" class="modal__title modal__title--xl" data-i18n="web.signin.title">Welcome to Proxion Web</h2>
+        <p class="card prose-muted" id="web-signin-invite" hidden data-i18n="web.signin.invited">You have been invited to a room. Sign in with your Solid pod, or get a free one below, to join.</p>
+        <p class="prose-muted" data-i18n="web.signin.what">
           Proxion is an end-to-end encrypted messenger. Your messages live in your own Solid pod, a personal data store that only you control.
         </p>
-        <p style="color:var(--text-secondary); font-size:var(--text-md); margin:0 0 var(--space-4);" data-i18n="web.signin.body">
+        <p class="prose-muted mb-4" data-i18n="web.signin.body">
           Have a Solid pod? Enter your provider to sign in.
         </p>
         <label for="web-signin-url" class="field-label" data-i18n="web.signin.provider">Pod provider</label>
         <input id="web-signin-url" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" class="input" type="url" required value="https://solidcommunity.net" autocomplete="url" aria-describedby="web-signin-error">
         <p id="web-signin-error" class="field-error" role="alert"></p>
-        <button type="submit" id="web-signin-btn" class="btn btn--accent btn--lg" style="width:100%;padding:var(--space-3) var(--space-5);font-size:1em;" data-i18n="web.signin.button">Sign in</button>
-        <p style="margin:var(--space-4) 0 0; font-size:var(--text-sm); color:var(--text-secondary);">
+        <button type="submit" id="web-signin-btn" class="btn btn--accent btn--lg btn--hero btn--block" data-i18n="web.signin.button">Sign in</button>
+        <p class="prose-muted prose-muted--sm mt-4 mb-0">
           <span data-i18n="web.signin.noPod">New to Solid? Get a free pod in about a minute at</span>
-          <a href="https://solidcommunity.net/.account/login/password/register/" target="_blank" rel="noopener" style="color:var(--accent-text);">solidcommunity.net</a>.
+          <a class="link" href="https://solidcommunity.net/.account/login/password/register/" target="_blank" rel="noopener">solidcommunity.net</a>.
         </p>
         </form>
       </div>
     </div>
 
     <!-- Onboarding wizard -->
-    <div id="onboarding-modal" class="modal modal--gate" data-modal-persistent role="dialog" aria-modal="true" aria-label="Welcome to Proxion" style="display:none;background:rgba(0,0,0,.7);" data-i18n-attr="aria-label:ui.welcomeProxion">
-      <div class="modal__panel modal__panel--md" style="padding:var(--space-6);">
+    <div id="onboarding-modal" class="modal modal--gate modal--opaque" data-modal-persistent role="dialog" aria-modal="true" aria-label="Welcome to Proxion" style="display:none;" data-i18n-attr="aria-label:ui.welcomeProxion">
+      <div class="modal__panel modal__panel--md modal__panel--roomy">
         <p id="ob-progress" class="ob-progress"></p>
         <div id="ob-step-1">
           <h2 data-i18n="heading.welcomeProxion">Welcome to Proxion</h2>
-          <p style="color:var(--text-secondary);font-size:var(--text-md);margin:0 0 var(--space-3);" data-i18n="onboarding.welcomeBody">
+          <p class="prose-muted" data-i18n="onboarding.welcomeBody">
             A private messenger where your conversations belong to you, not a company.
             You can start right now, no signup needed, and connect your own storage
             later if you want to sync across devices.
           </p>
-          <div id="ob-invite-notice" role="note" hidden style="margin:0 0 var(--space-4);padding:var(--space-3);border:1px solid var(--slate-700);border-radius:6px;">
-            <p id="ob-invite-notice-text" style="margin:0 0 var(--space-2);font-size:var(--text-md);color:var(--text-secondary);"></p>
+          <div class="card" id="ob-invite-notice" role="note" hidden>
+            <p class="prose-muted mb-2" id="ob-invite-notice-text"></p>
             <button id="ob-copy-landing-invite" type="button" class="btn" data-i18n="onboarding.copyInviteLink">Copy invite link</button>
           </div>
-          <button id="ob-start-btn" class="btn btn--accent" style="padding:var(--space-3) var(--space-5);border-radius:4px;cursor:pointer;font-size:1em;" data-i18n="btn.getStarted">Get started</button>
-          <p style="margin:var(--space-4) 0 0;font-size:var(--text-md);color:var(--text-secondary);">
+          <button id="ob-start-btn" class="btn btn--accent btn--hero" data-i18n="btn.getStarted">Get started</button>
+          <p class="prose-muted mt-4 mb-0">
             <span data-i18n="onboarding.usingElsewhere">Already using Proxion elsewhere?</span>
-            <a id="ob-link-device" href="#" style="color:var(--accent-text);" data-i18n="ui.linkThisDevice">Link this device</a>
+            <a class="link" id="ob-link-device" href="#" data-i18n="ui.linkThisDevice">Link this device</a>
           </p>
-          <p style="margin:var(--space-2) 0 0;font-size:var(--text-md);color:var(--text-secondary);">
+          <p class="prose-muted mt-2 mb-0">
             <span data-i18n="onboarding.haveKit">Have a recovery kit from a previous install?</span>
-            <a id="ob-restore-kit" href="#" style="color:var(--accent-text);" data-i18n="onboarding.restoreKit">Restore your identity</a>
+            <a class="link" id="ob-restore-kit" href="#" data-i18n="onboarding.restoreKit">Restore your identity</a>
           </p>
         </div>
         <div id="ob-step-2" style="display:none">
@@ -1176,89 +1155,68 @@
           <label for="ob-name" class="field-label" data-i18n="ui.displayName">Display name</label>
           <input id="ob-name" enterkeyhint="next" class="input" maxlength="64" placeholder="Display name" autocomplete="nickname" aria-describedby="ob-name-error" data-i18n-attr="placeholder:ui.displayName">
           <p id="ob-name-error" class="field-error" role="alert"></p>
-          <button id="ob-step2-btn" class="btn btn--accent" style="padding:var(--space-3) var(--space-5);border-radius:4px;cursor:pointer;font-size:1em;" data-i18n="btn.continue">Continue</button>
+          <button id="ob-step2-btn" class="btn btn--accent btn--hero" data-i18n="btn.continue">Continue</button>
         </div>
         <!-- Step 4: Connect Solid Pod (R16) -->
         <div id="ob-step-4" style="display:none">
-          <h2 style="margin:0 0 var(--space-2);" data-i18n="heading.whereShouldDataLive">Where should your data live?</h2>
-          <p style="color:var(--text-secondary);font-size:var(--text-md);margin:0 0 var(--space-4);" data-i18n="onboarding.podStepIntro">
+          <h2 class="mt-0 mb-2" data-i18n="heading.whereShouldDataLive">Where should your data live?</h2>
+          <p class="prose-muted mb-4" data-i18n="onboarding.podStepIntro">
             Your messages live on your own Solid Pod, a personal data store you control.
             Pick a provider and choose an email and password. If you are new, we create your
             pod for you. A pod is also what lets you chat with people on other Solid apps.
           </p>
 
           <!-- Provider selection cards -->
-          <div id="ob-pod-providers" style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-1);width:100%;">
-            <button class="ob-provider-card" data-css="https://solidcommunity.net"
-                    style="background:#1a56db;border:none;color:#fff;padding:var(--space-3) var(--space-4);border-radius:6px;
-                           cursor:pointer;font-size:var(--text-md);text-align:start;line-height:1.4;">
+          <div class="btn-stack mb-1" id="ob-pod-providers">
+            <button class="ob-provider-card ob-provider-card--solidcommunity" data-css="https://solidcommunity.net">
               <strong>solidcommunity.net</strong>
-              <span style="display:block;font-size:var(--text-sm);opacity:0.85;margin-top:2px;" data-i18n="onboarding.provider.solidcommunity">Free. Run by the Solid community.</span>
+              <span class="ob-provider-card__hint" data-i18n="onboarding.provider.solidcommunity">Free. Run by the Solid community.</span>
             </button>
-            <button class="ob-provider-card" data-css="https://inrupt.net"
-                    style="background:#0f766e;border:none;color:#fff;padding:var(--space-3) var(--space-4);border-radius:6px;
-                           cursor:pointer;font-size:var(--text-md);text-align:start;line-height:1.4;">
+            <button class="ob-provider-card ob-provider-card--inrupt" data-css="https://inrupt.net">
               <strong>Inrupt PodSpaces</strong>
-              <span style="display:block;font-size:var(--text-sm);opacity:0.85;margin-top:2px;" data-i18n="onboarding.provider.inrupt">Free tier. Founded by Tim Berners-Lee.</span>
+              <span class="ob-provider-card__hint" data-i18n="onboarding.provider.inrupt">Free tier. Founded by Tim Berners-Lee.</span>
             </button>
-            <button class="ob-provider-card" data-css="custom"
-                    style="background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-3) var(--space-4);border-radius:6px;
-                           cursor:pointer;font-size:var(--text-md);text-align:start;line-height:1.4;">
+            <button class="ob-provider-card ob-provider-card--own" data-css="custom">
               <strong data-i18n="onboarding.provider.ownServer">My own server</strong>
-              <span style="display:block;font-size:var(--text-sm);opacity:0.85;margin-top:2px;" data-i18n="onboarding.provider.ownServerHint">Self-hosted Community Solid Server.</span>
+              <span class="ob-provider-card__hint" data-i18n="onboarding.provider.ownServerHint">Self-hosted Community Solid Server.</span>
             </button>
           </div>
 
           <!-- Credential form (hidden until provider selected) -->
-          <div id="ob-pod-cred-form" style="display:none;margin-top:var(--space-4);">
-            <div id="ob-pod-provider-label" style="font-size:var(--text-sm);color:var(--text-secondary);margin-bottom:var(--space-2);"></div>
-            <input id="ob-pod-css-url" autocapitalize="off" autocorrect="off" type="url" placeholder="Pod server URL (e.g. https://solidcommunity.net)"
-                   autocomplete="off" spellcheck="false"
-                   style="display:none;width:100%;box-sizing:border-box;padding:var(--space-2);border-radius:4px;
-                          border:1px solid var(--slate-700);background:var(--slate-900);color:var(--slate-50);font-size:var(--text-md);margin-bottom:var(--space-2);" data-i18n-attr="placeholder:ui.podServerUrlE">
-            <input id="ob-pod-email" type="email" placeholder="Email address"
-                   autocomplete="email"
-                   style="width:100%;box-sizing:border-box;padding:var(--space-2);border-radius:4px;
-                          border:1px solid var(--slate-700);background:var(--slate-900);color:var(--slate-50);font-size:var(--text-md);margin-bottom:var(--space-2);" data-i18n-attr="placeholder:ui.emailAddress">
-            <div style="position:relative;margin-bottom:var(--space-2);">
-              <input id="ob-pod-password" enterkeyhint="done" type="password" placeholder="Password"
-                     autocomplete="current-password"
-                     style="width:100%;box-sizing:border-box;padding:var(--space-2) 36px var(--space-2) var(--space-2);border-radius:4px;
-                            border:1px solid var(--slate-700);background:var(--slate-900);color:var(--slate-50);font-size:var(--text-md);" data-i18n-attr="placeholder:ui.password">
-              <button id="ob-pod-pw-toggle" type="button"
-                      style="position:absolute;inset-inline-end:6px;top:50%;transform:translateY(-50%);
-                             background:none;border:none;color:var(--slate-500);cursor:pointer;font-size:var(--text-md);padding:2px var(--space-1);" data-i18n="btn.show">
+          <div class="mt-4" id="ob-pod-cred-form" style="display:none;">
+            <div class="prose-muted prose-muted--sm mb-2" id="ob-pod-provider-label"></div>
+            <input class="input" id="ob-pod-css-url" autocapitalize="off" autocorrect="off" type="url" placeholder="Pod server URL (e.g. https://solidcommunity.net)"
+                   autocomplete="off" spellcheck="false" style="display:none;" data-i18n-attr="placeholder:ui.podServerUrlE">
+            <input class="input" id="ob-pod-email" type="email" placeholder="Email address"
+                   autocomplete="email" data-i18n-attr="placeholder:ui.emailAddress">
+            <div class="input-wrap">
+              <input class="input" id="ob-pod-password" enterkeyhint="done" type="password" placeholder="Password"
+                     autocomplete="current-password" data-i18n-attr="placeholder:ui.password">
+              <button class="btn btn--quiet input-wrap__action" id="ob-pod-pw-toggle" type="button" data-i18n="btn.show">
                 Show
               </button>
             </div>
-            <div id="ob-pod-status" role="status" aria-live="polite" style="min-height:20px;font-size:var(--text-sm);margin-bottom:var(--space-2);"></div>
-            <div style="display:flex;gap:var(--space-2);">
-              <button id="ob-pod-test-btn"
-                      style="flex:1;padding:var(--space-2);background:var(--slate-700);border:none;color:var(--slate-50);
-                             border-radius:4px;cursor:pointer;font-size:var(--text-md);" data-i18n="btn.testConnection">
+            <div class="ob-status" id="ob-pod-status" role="status" aria-live="polite"></div>
+            <div class="row">
+              <button class="btn btn--slate grow" id="ob-pod-test-btn" data-i18n="btn.testConnection">
                 Test connection
               </button>
-              <button id="ob-pod-continue-btn" class="btn btn--accent" disabled
-                      style="flex:1;padding:var(--space-2);
-                             border-radius:4px;cursor:not-allowed;opacity:0.45;font-size:var(--text-md);" data-i18n="onboarding.signIn">
+              <button id="ob-pod-continue-btn" class="btn btn--accent grow" disabled data-i18n="onboarding.signIn">
                 Sign in to your pod
               </button>
             </div>
-            <p id="ob-pod-hint" style="font-size:var(--text-sm);color:var(--slate-500);margin:var(--space-2) 0 0;" data-i18n="onboarding.podTwoStep">Test the connection, then sign in through your pod provider. That browser sign-in is what unlocks cross-app chat, and you will come right back here.</p>
-            <button id="ob-pod-back-btn"
-                    style="margin-top:var(--space-2);background:transparent;border:none;color:var(--slate-500);
-                           cursor:pointer;font-size:var(--text-sm);padding:var(--space-1) 0;text-decoration:underline;" data-i18n="btn.chooseDifferentProvider">
+            <p class="prose-muted prose-muted--sm mt-2 mb-0" id="ob-pod-hint" data-i18n="onboarding.podTwoStep">Test the connection, then sign in through your pod provider. That browser sign-in is what unlocks cross-app chat, and you will come right back here.</p>
+            <button class="btn btn--link mt-2" id="ob-pod-back-btn" data-i18n="btn.chooseDifferentProvider">
               ← Choose a different provider
             </button>
           </div>
 
           <!-- Start-now option: a first-class choice, not hidden. -->
-          <div style="margin-top:var(--space-4);padding-top:var(--space-4);border-top:1px solid var(--slate-700);text-align:center;">
-            <button id="ob-skip-pod" type="button"
-                    style="background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-4);border-radius:6px;cursor:pointer;font-size:var(--text-md);" data-i18n="onboarding.startNow">
+          <div class="ob-alt">
+            <button class="btn btn--slate" id="ob-skip-pod" type="button" data-i18n="onboarding.startNow">
               Start now, no account needed
             </button>
-            <p style="margin:var(--space-2) 0 0;font-size:var(--text-xs);color:var(--text-secondary);" data-i18n="onboarding.startNowHint">
+            <p class="prose-muted prose-muted--xs mt-2 mb-0" data-i18n="onboarding.startNowHint">
               Try Proxion right away on this device. You can connect storage later to sync
               across devices and reach people on other Solid apps.
             </p>
@@ -1267,13 +1225,13 @@
         <!-- Step 5: Join or create a room (was step 4) -->
         <div id="ob-step-5" style="display:none">
           <h2 data-i18n="heading.joinCreateRoom">Join or create a room</h2>
-          <button id="ob-step5-create" class="btn btn--accent" style="padding:var(--space-3) var(--space-5);border-radius:4px;cursor:pointer;margin-inline-end:var(--space-2);" data-i18n="heading.createRoom">Create a room</button>
+          <button id="ob-step5-create" class="btn btn--accent btn--hero" data-i18n="heading.createRoom">Create a room</button>
           <br><br>
-          <p style="margin:var(--space-2) 0 var(--space-1);" data-i18n="onboarding.orJoinCode">Or join with an invite code:</p>
+          <p class="mt-2 mb-1" data-i18n="onboarding.orJoinCode">Or join with an invite code:</p>
           <input id="ob-invite-code" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" class="input" placeholder="prx1_…" aria-label="Invite code" aria-describedby="ob-join-error" data-i18n-attr="placeholder:ui.prx1;aria-label:onboarding.inviteCodeLabel">
           <p id="ob-join-error" class="field-error" role="alert"></p>
-          <button id="ob-step5-join" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-4);border-radius:4px;cursor:pointer;" data-i18n="btn.joinCode">Join with code</button>
-          <p style="margin:var(--space-4) 0 0;">
+          <button class="btn btn--slate" id="ob-step5-join" data-i18n="btn.joinCode">Join with code</button>
+          <p class="mt-4 mb-0">
             <button id="ob-step5-skip" type="button" class="ob-skip-link" data-i18n="onboarding.skipForNow">Skip for now</button>
           </p>
         </div>
@@ -1281,46 +1239,37 @@
         <div id="ob-step-6" style="display:none">
           <h2 data-i18n="heading.reAllSet">You're all set!</h2>
           <p data-i18n="onboarding.startChatting">Start chatting with your Proxion network.</p>
-          <div id="ob-my-addr-section" style="margin-bottom:var(--space-4);padding:var(--space-3);background:var(--slate-900);border-radius:6px;border:1px solid var(--slate-700);">
-            <p style="margin:0 0 var(--space-1);font-size:var(--text-sm);color:var(--text-secondary);" data-i18n="onboarding.yourAddress">Your Proxion address. Share it so people can add you:</p>
-            <code id="ob-my-addr" style="font-size:var(--text-sm);color:var(--slate-200);word-break:break-all;">(connecting…)</code>
-            <p style="margin:var(--space-2) 0 0;font-size:var(--text-xs);color:var(--slate-500);" data-i18n="onboarding.yourAddressHint">
+          <div class="card" id="ob-my-addr-section">
+            <p class="prose-muted prose-muted--sm mb-1" data-i18n="onboarding.yourAddress">Your Proxion address. Share it so people can add you:</p>
+            <code class="readout-inline" id="ob-my-addr">(connecting…)</code>
+            <p class="prose-muted prose-muted--xs mt-2 mb-0" data-i18n="onboarding.yourAddressHint">
               Anyone can add you with this address to start a private conversation.
             </p>
           </div>
-          <div id="ob-invite-display" style="display:none; margin-bottom:var(--space-3);">
-            <p style="margin:0 0 var(--space-1); font-size:var(--text-md); color:var(--text-secondary);" data-i18n="onboarding.shareInviteLink">
+          <div class="mb-3" id="ob-invite-display" style="display:none;">
+            <p class="prose-muted mb-1" data-i18n="onboarding.shareInviteLink">
               Share this invite link with a contact:
             </p>
-            <div id="ob-room-invite-url"
-                 style="font-size:var(--text-xs); color:var(--text-secondary); word-break:break-all; padding:var(--space-2);
-                        background:var(--slate-900); border-radius:4px; cursor:pointer; user-select:all;
-                        margin-bottom:var(--space-2);"></div>
-            <button id="ob-copy-invite-btn"
-                    style="background:var(--slate-700); border:none; color:var(--slate-50); padding:var(--space-2) var(--space-4);
-                           border-radius:4px; cursor:pointer; font-size:var(--text-md);" data-i18n="btn.copyInviteLink">
+            <div class="readout readout--copy prose-muted--xs mb-2" id="ob-room-invite-url"></div>
+            <button class="btn btn--slate" id="ob-copy-invite-btn" data-i18n="btn.copyInviteLink">
               Copy invite link
             </button>
-            <button id="ob-share-invite-btn" type="button" hidden data-share-from="#ob-room-invite-url"
-                    style="background:var(--slate-700); border:none; color:var(--slate-50); padding:var(--space-2) var(--space-4);
-                           border-radius:4px; cursor:pointer; font-size:var(--text-md);" data-i18n="btn.shareInviteLink">
+            <button class="btn btn--slate" id="ob-share-invite-btn" type="button" hidden data-share-from="#ob-room-invite-url" data-i18n="btn.shareInviteLink">
               Share invite link
             </button>
           </div>
           <!-- E1: identity is device-local until backed up — offer the kit before the wizard closes -->
-          <div style="margin-bottom:var(--space-4);padding:var(--space-3);background:var(--slate-900);border-radius:6px;border:1px solid var(--slate-700);">
-            <p style="margin:0 0 var(--space-2);font-size:var(--text-sm);color:var(--text-secondary);" data-i18n="onboarding.saveKitHint">
+          <div class="card">
+            <p class="prose-muted prose-muted--sm mb-2" data-i18n="onboarding.saveKitHint">
               Your identity lives only on this device. If you lose it without a
               recovery kit, your identity is gone with it.
             </p>
-            <button id="ob-save-kit-btn" style="background:var(--slate-700);border:none;color:var(--slate-50);padding:var(--space-2) var(--space-4);border-radius:4px;cursor:pointer;font-size:var(--text-md);" data-i18n="onboarding.saveKit">
+            <button class="btn btn--slate" id="ob-save-kit-btn" data-i18n="onboarding.saveKit">
               Download your recovery kit
             </button>
           </div>
-          <button id="ob-finish-btn" class="btn btn--accent" style="padding:var(--space-3) var(--space-5);border-radius:4px;cursor:pointer;font-size:1em;" data-i18n="btn.openProxion">Open Proxion</button>
-          <button id="ob-finish-skip"
-                  style="display:none;background:transparent;border:none;color:var(--slate-500);cursor:pointer;
-                         font-size:var(--text-md);padding:var(--space-2) 0 0;text-decoration:underline;" data-i18n="btn.skip">
+          <button id="ob-finish-btn" class="btn btn--accent btn--hero" data-i18n="btn.openProxion">Open Proxion</button>
+          <button class="btn btn--link" id="ob-finish-skip" style="display:none;" data-i18n="btn.skip">
             Skip
           </button>
         </div>
@@ -1332,9 +1281,9 @@
       <div class="modal__panel modal__panel--md">
         <div class="modal__header">
           <h3 id="room-bans-title" class="modal__title" data-i18n="heading.bannedMembers">Banned members</h3>
-          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" data-i18n-attr="aria-label:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+          <button type="button" class="modal__close" data-modal-cancel aria-label="Close" title="Close" data-i18n-attr="aria-label:btn.close;title:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
         </div>
-        <div id="room-bans-list" style="min-height:40px;max-height:300px;overflow-y:auto;"></div>
+        <div class="scroll-list" id="room-bans-list"></div>
         <div class="btn-row modal__footer">
           <button type="button" id="room-bans-close" data-modal-cancel class="btn btn--slate btn--lg" data-i18n="btn.close">Close</button>
         </div>
@@ -1343,35 +1292,33 @@
 
     <!-- Pin panel -->
     <!-- Contact profile panel (R29) -->
-    <div id="contact-profile-panel" style="display:none; position:fixed; inset-inline-end:0; top:0; bottom:0; width:300px; background:var(--bg-secondary); box-shadow:var(--shadow-md); z-index:900; overflow-y:auto; padding:var(--space-4); padding-top:calc(var(--space-4) + env(safe-area-inset-top, 0px));">
-      <button id="contact-profile-close" aria-label="Close" data-i18n-attr="aria-label:btn.close" style="position:absolute;top:12px;inset-inline-end:12px;background:transparent;border:none;color:var(--text-secondary);cursor:pointer;line-height:0;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
-      <div id="contact-profile-avatar" style="width:56px;height:56px;border-radius:50%;background:var(--slate-700);display:flex;align-items:center;justify-content:center;font-size:var(--text-xl);color:var(--slate-50);margin:0 auto var(--space-3);"></div>
-      <p id="contact-profile-name" style="text-align:center;font-weight:var(--weight-semibold);color:var(--slate-50);margin:0 0 var(--space-1);"></p>
-      <p id="contact-profile-status" style="text-align:center;font-size:var(--text-sm);color:var(--text-secondary);margin:0 0 var(--space-3);"></p>
-      <hr style="border-color:var(--slate-700);margin:0 0 var(--space-3);">
-      <p style="font-size:var(--text-xs);color:var(--slate-500);margin:0 0 2px;text-transform:uppercase;letter-spacing:.05em;">DID</p>
-      <p id="contact-profile-did" style="font-size:var(--text-xs);color:var(--text-secondary);word-break:break-all;margin:0 0 var(--space-2);cursor:pointer;" title="Click to copy" data-i18n-attr="title:ui.clickCopy"></p>
-      <p id="contact-profile-gateway-label" style="font-size:var(--text-xs);color:var(--slate-500);margin:0 0 2px;text-transform:uppercase;letter-spacing:.05em;">Gateway</p>
-      <p id="contact-profile-gateway" style="font-size:var(--text-sm);color:var(--text-secondary);word-break:break-all;margin:0 0 var(--space-2);"></p>
-      <p id="contact-profile-fingerprint-label" style="font-size:var(--text-xs);color:var(--slate-500);margin:0 0 2px;text-transform:uppercase;letter-spacing:.05em;">Fingerprint</p>
-      <p id="contact-profile-fingerprint" style="font-size:var(--text-xs);color:var(--text-secondary);word-break:break-all;margin:0 0 var(--space-2);font-family:monospace;" title="Verify out-of-band" data-i18n-attr="title:ui.verifyOutBand"></p>
-      <p id="contact-profile-status-msg" style="font-size:var(--text-sm);color:var(--slate-500);font-style:italic;margin:0 0 var(--space-3);"></p>
-      <button id="contact-profile-dm-btn" class="btn btn--accent" style="padding:var(--space-2) var(--space-4);border-radius:4px;cursor:pointer;width:100%;font-size:var(--text-md);" data-i18n="btn.sendDm">Send DM</button>
+    <div class="drawer" id="contact-profile-panel" style="display:none;">
+      <button class="btn btn--icon drawer__close" id="contact-profile-close" aria-label="Close" title="Close" data-i18n-attr="aria-label:btn.close;title:btn.close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+      <div class="contact-avatar" id="contact-profile-avatar"></div>
+      <p class="contact-name" id="contact-profile-name"></p>
+      <p class="prose-muted prose-muted--sm text-center mb-3" id="contact-profile-status"></p>
+      <hr class="divider">
+      <p class="eyebrow drawer-label">DID</p>
+      <p class="drawer-value is-clickable" id="contact-profile-did" title="Click to copy" data-i18n-attr="title:ui.clickCopy"></p>
+      <p class="eyebrow drawer-label" id="contact-profile-gateway-label">Gateway</p>
+      <p class="drawer-value" id="contact-profile-gateway"></p>
+      <p class="eyebrow drawer-label" id="contact-profile-fingerprint-label">Fingerprint</p>
+      <p class="drawer-value mono" id="contact-profile-fingerprint" title="Verify out-of-band" data-i18n-attr="title:ui.verifyOutBand"></p>
+      <p class="drawer-note" id="contact-profile-status-msg"></p>
+      <button id="contact-profile-dm-btn" class="btn btn--accent btn--block" data-i18n="btn.sendDm">Send DM</button>
       <!-- Fix: remove/revoke a contact (revoke_contact had no UI) -->
-      <button id="contact-profile-remove-btn" style="background:transparent;border:1px solid var(--slate-600);color:var(--color-danger-soft);padding:var(--space-2) var(--space-4);border-radius:4px;cursor:pointer;width:100%;font-size:var(--text-md);margin-top:var(--space-2);" data-i18n="btn.removeContact">Remove contact</button>
+      <button class="btn btn--ghost btn--block btn--danger-text mt-2" id="contact-profile-remove-btn" data-i18n="btn.removeContact">Remove contact</button>
     </div>
 
     <!-- R59E: saved-messages panel (mirror of the pin panel) -->
-    <div id="saved-panel" style="display:none; position:fixed; inset-inline-end:0; top:0; bottom:0; width:300px; background:var(--bg-secondary); box-shadow:var(--shadow-md); z-index:900; overflow-y:auto; padding:var(--space-4); padding-top:calc(var(--space-4) + env(safe-area-inset-top, 0px));">
-      <h3 style="color:var(--text-primary); margin:0 0 var(--space-3);" data-i18n="heading.savedMessages">Saved messages</h3>
-      <button id="saved-panel-close" aria-label="Close saved messages"
-              style="position:absolute;top:12px;inset-inline-end:12px;background:transparent;border:none;color:var(--text-secondary);cursor:pointer;line-height:0;" data-i18n-attr="aria-label:ui.closeSavedMessages"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+    <div class="drawer" id="saved-panel" style="display:none;">
+      <h3 class="drawer__title" data-i18n="heading.savedMessages">Saved messages</h3>
+      <button class="btn btn--icon drawer__close" id="saved-panel-close" aria-label="Close saved messages" title="Close saved messages" data-i18n-attr="aria-label:ui.closeSavedMessages;title:ui.closeSavedMessages"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
       <div id="saved-list"></div>
     </div>
-    <div id="pin-panel" style="display:none; position:fixed; inset-inline-end:0; top:0; bottom:0; width:300px; background:var(--bg-secondary); box-shadow:var(--shadow-md); z-index:900; overflow-y:auto; padding:var(--space-4); padding-top:calc(var(--space-4) + env(safe-area-inset-top, 0px));">
-      <h3 style="color:var(--text-primary); margin:0 0 var(--space-3);" data-i18n="heading.pinnedMessages">Pinned messages</h3>
-      <button id="pin-panel-close" aria-label="Close pinned messages"
-              style="position:absolute;top:12px;inset-inline-end:12px;background:transparent;border:none;color:var(--text-secondary);cursor:pointer;line-height:0;" data-i18n-attr="aria-label:ui.closePinnedMessages"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+    <div class="drawer" id="pin-panel" style="display:none;">
+      <h3 class="drawer__title" data-i18n="heading.pinnedMessages">Pinned messages</h3>
+      <button class="btn btn--icon drawer__close" id="pin-panel-close" aria-label="Close pinned messages" title="Close pinned messages" data-i18n-attr="aria-label:ui.closePinnedMessages;title:ui.closePinnedMessages"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="18" height="18" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
       <div id="pin-list"></div>
     </div>
     <!-- Composer suggestion popups (autocomplete.js places them by the input). -->
@@ -1387,11 +1334,11 @@
     <div id="e2e-verify-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="e2e-verify-title" style="display:none;">
       <div class="modal__panel modal__panel--sm">
         <h3 id="e2e-verify-title" class="modal__title" data-i18n="heading.verifyContact">Verify contact</h3>
-        <p class="modal__desc" style="margin-bottom:var(--space-4);" data-i18n="e2e.verifyHint">Compare this number with your contact in person or on a call. If it matches on both screens, mark them as verified. It is the same number shown under the chat header.</p>
-        <div id="e2e-modal-safety-number" style="font-family:monospace;font-size:1.25em;letter-spacing:.12em;text-align:center;padding:var(--space-4);background:var(--slate-900);border-radius:var(--radius-sm);margin-bottom:var(--space-4);">— — — —</div>
-        <div style="font-size:var(--text-xs);color:var(--text-secondary);">
-          <div><span data-i18n="e2e.yourKey">Your key</span>: <span id="e2e-modal-my-key" style="font-family:var(--font-mono);"></span></div>
-          <div><span data-i18n="e2e.theirKey">Their key</span>: <span id="e2e-modal-their-key" style="font-family:var(--font-mono);"></span></div>
+        <p class="modal__desc mb-4" data-i18n="e2e.verifyHint">Compare this number with your contact in person or on a call. If it matches on both screens, mark them as verified. It is the same number shown under the chat header.</p>
+        <div class="readout readout--code mb-4" id="e2e-modal-safety-number">— — — —</div>
+        <div class="prose-muted prose-muted--xs">
+          <div><span data-i18n="e2e.yourKey">Your key</span>: <span class="mono" id="e2e-modal-my-key"></span></div>
+          <div><span data-i18n="e2e.theirKey">Their key</span>: <span class="mono" id="e2e-modal-their-key"></span></div>
         </div>
         <input type="hidden" id="e2e-modal-current-peer" value="">
         <div class="btn-row modal__footer">

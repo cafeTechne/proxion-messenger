@@ -308,9 +308,7 @@ export function createView({
         li.id = `nav-${roomId}`;
         li.setAttribute("data-name", name);
         _markIfOpen(li, roomId);
-        li.style.display = "flex";
-        li.style.alignItems = "center";
-        li.style.gap = "6px";
+        li.classList.add("nav-row");
         li.innerHTML = `
             <div class="room-item-body">
                 <div class="room-item-name" title="${escHtml(name)}"><bdi>${escHtml(name)}</bdi></div>
@@ -375,12 +373,10 @@ export function createView({
             li.id = `nav-${id}`;
             li.setAttribute("data-name", name);
             _markIfOpen(li, id);
-            li.style.display = "flex";
-            li.style.alignItems = "center";
-            li.style.justifyContent = "space-between";
+            li.classList.add("nav-row");
             const nameSpan = document.createElement("span");
             nameSpan.className = "nav-label";
-            nameSpan.style.flex = "1";
+            nameSpan.classList.add("grow");
             nameSpan.textContent = name;
             li.appendChild(nameSpan);
             const _openThread = () => {
