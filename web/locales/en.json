@@ -104,7 +104,6 @@
   "contact.requestAccepted": "Friend request accepted, waiting for certificate…",
   "contact.connected": "Contact connected: {peer}",
   "contact.revoked": "A contact has been revoked.",
-  "contact.revokedBadge": "Contact revoked",
   "contact.removedByPeer": "A contact removed you. Their conversation is closed.",
   "contact.connectedWith": "Connected with {peer}",
   "contact.expiresInDays.one": "Your connection with {peer} expires in {count} day.",
