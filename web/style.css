@@ -618,7 +618,7 @@ main { background: var(--surface-0); }
 }
 /* Room options ("⋯") button; its dropdown is a .ctx-menu opened by menu.js. */
 .room-options { display: inline-flex; }
-.room-options-menu button[hidden] { display: none; }
+.room-options-menu button[hidden], #sidebar-ctx-menu button[hidden] { display: none; }
 #contact-profile-panel [hidden], .profile-popover [hidden] { display: none; }
 .settings-actions [hidden] { display: none; }
 #room-options-btn {
@@ -2401,6 +2401,9 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
             font-size: var(--text-sm); white-space: pre; display: block; }
         .inline-code { background: var(--slate-800); border-radius: 3px; padding: 1px var(--space-1);
             font-family: var(--font-mono); font-size: var(--text-md); }
+        .md-quote { margin: var(--space-1) 0; padding-inline-start: var(--space-2);
+            border-inline-start: 3px solid var(--border-strong); color: var(--text-secondary); }
+        .md-list { margin: var(--space-1) 0; padding-inline-start: var(--space-5); }
 
         /* Scroll-to-bottom button */
         #scroll-bottom-btn {

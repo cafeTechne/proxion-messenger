@@ -293,6 +293,26 @@ describe('renderMarkdown code spans, autolinks and underscores', () => {
   it('keeps newlines inside fenced code blocks', () => {
     expect(renderMarkdown('```\na_b_c\nx\n```')).toBe('<pre class="code-block"><code>a_b_c\nx</code></pre>');
   });
+  it('drops the language tag on an opening fence', () => {
+    expect(renderMarkdown('```js\nconst a = 1;\n```')).toBe('<pre class="code-block"><code>const a = 1;</code></pre>');
+    expect(renderMarkdown('```one line```')).toBe('<pre class="code-block"><code>one line</code></pre>');
+  });
+  it('renders "> " lines as one blockquote, escaped', () => {
+    expect(renderMarkdown('> a **b**\n> <c>\nafter'))
+      .toBe('<blockquote class="md-quote">a <b>b</b><br>&lt;c&gt;</blockquote>after');
+  });
+  it('renders bullet and numbered lists', () => {
+    expect(renderMarkdown('intro\n- one\n* *two*')).toBe('intro<ul class="md-list"><li>one</li><li><i>two</i></li></ul>');
+    expect(renderMarkdown('1. a\n2. b')).toBe('<ol class="md-list"><li>a</li><li>b</li></ol>');
+    expect(renderMarkdown('3) c')).toBe('<ol class="md-list" start="3"><li>c</li></ol>');
+  });
+  it('leaves list-like text without the space alone', () => {
+    expect(renderMarkdown('-1 degrees\n*bold*')).toBe('-1 degrees<br><i>bold</i>');
+  });
+  it('drops quote and list markers from previews', () => {
+    expect(markdownToPlain('> quoted\n- item')).toBe('quoted item');
+    expect(markdownToPlain('```js\nx = 1\n```')).toBe('x = 1');
+  });
   it('does not italicise snake_case text', () => {
     expect(renderMarkdown('call my_var_name now')).toBe('call my_var_name now');
     expect(renderMarkdown('a __init__ method')).toBe('a <b>init</b> method');

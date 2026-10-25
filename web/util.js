@@ -201,13 +201,30 @@ function _trimUrl(url) {
 // code spans and URLs are pulled out of the raw text into placeholders first
 // (each escaped on its own), the rest is escaped, formatting then runs on the
 // escaped text only, and the placeholders are restored last.
+// Inline formatting on one escaped line: bold, italic, strikethrough, spoilers.
+function _inlineMarkdown(s) {
+    // Bold
+    s = s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+    s = s.replace(/(?<!\w)__(?=\S)(.+?)(?<=\S)__(?!\w)/g, '<b>$1</b>');
+    // Italic (underscores only at word boundaries, so snake_case is left alone)
+    s = s.replace(/\*([^*\n]+)\*/g, '<i>$1</i>');
+    s = s.replace(/(?<!\w)_(?=\S)([^_\n]+?)(?<=\S)_(?!\w)/g, '<i>$1</i>');
+    // Strikethrough
+    s = s.replace(/~~(.+?)~~/g, '<s>$1</s>');
+    // R59D: spoilers — ||text|| hidden until activated (click/Enter/Space via
+    // the feed's delegated handler). No nesting; content is already escaped.
+    return s.replace(/\|\|([^|\n]+)\|\|/g, (_, inner) =>
+        `<span class="spoiler" role="button" tabindex="0" aria-label="${t('msg.spoilerReveal')}">${inner}</span>`);
+}
+
 export function renderMarkdown(text) {
     if (!text) return "";
     const tokens = [];
     const hold = (html) => `${tokens.push(html) - 1}`;
     let s = String(text).replace(/[]/g, "");
-    // Code blocks
-    s = s.replace(/```([\s\S]*?)```/g, (_, code) =>
+    // Code blocks. A language tag on the opening fence (```js) is dropped:
+    // there is no highlighter, and it is not part of the code.
+    s = s.replace(/```(?:[\w+#.-]+(?=\n))?([\s\S]*?)```/g, (_, code) =>
         hold(`<pre class="code-block"><code>${_escText(code.trim())}</code></pre>`));
     // Inline code
     s = s.replace(/`([^`\n]+)`/g, (_, code) => hold(`<code class="inline-code">${_escText(code)}</code>`));
@@ -220,20 +237,27 @@ export function renderMarkdown(text) {
         return hold(`<a href="${e}" rel="noopener noreferrer" target="_blank">${e}</a>`) + m.slice(url.length);
     });
     s = _escText(s);
-    // Bold
-    s = s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
-    s = s.replace(/(?<!\w)__(?=\S)(.+?)(?<=\S)__(?!\w)/g, '<b>$1</b>');
-    // Italic (underscores only at word boundaries, so snake_case is left alone)
-    s = s.replace(/\*([^*\n]+)\*/g, '<i>$1</i>');
-    s = s.replace(/(?<!\w)_(?=\S)([^_\n]+?)(?<=\S)_(?!\w)/g, '<i>$1</i>');
-    // Strikethrough
-    s = s.replace(/~~(.+?)~~/g, '<s>$1</s>');
-    // R59D: spoilers — ||text|| hidden until activated (click/Enter/Space via
-    // the feed's delegated handler). No nesting; content is already escaped.
-    s = s.replace(/\|\|([^|\n]+)\|\|/g, (_, inner) =>
-        `<span class="spoiler" role="button" tabindex="0" aria-label="${t('msg.spoilerReveal')}">${inner}</span>`);
-    // Newlines (code blocks are still placeholders here, so they keep theirs)
-    s = s.replace(/\n/g, '<br>');
+    // Block structure, one level deep: "> " quotes and "- ", "* ", "1. " lists.
+    // Other lines keep their breaks (code blocks are still placeholders here,
+    // so they keep theirs).
+    const groups = [];
+    for (const line of s.split('\n')) {
+        let kind = null, body = line, start = 1, m;
+        if ((m = /^&gt; ?(.*)$/.exec(line))) { kind = 'quote'; body = m[1]; }
+        else if ((m = /^[-*] (.*)$/.exec(line))) { kind = 'ul'; body = m[1]; }
+        else if ((m = /^(\d{1,9})[.)] (.*)$/.exec(line))) { kind = 'ol'; body = m[2]; start = Number(m[1]); }
+        const last = groups[groups.length - 1];
+        if (last && last.kind === kind) last.lines.push(body);
+        else groups.push({ kind, start, lines: [body] });
+    }
+    s = groups.map(({ kind, start, lines }) => {
+        const inl = lines.map(_inlineMarkdown);
+        if (kind === 'quote') return `<blockquote class="md-quote">${inl.join('<br>')}</blockquote>`;
+        const items = inl.map(l => `<li>${l}</li>`).join('');
+        if (kind === 'ul') return `<ul class="md-list">${items}</ul>`;
+        if (kind === 'ol') return `<ol class="md-list"${start !== 1 ? ` start="${start}"` : ''}>${items}</ol>`;
+        return inl.join('<br>');
+    }).join('');
     return s.replace(/(\d+)/g, (_, i) => tokens[Number(i)]);
 }
 
@@ -242,7 +266,7 @@ export function renderMarkdown(text) {
 // not reveal them) and folds line breaks into spaces.
 export function markdownToPlain(text) {
     return String(text || "")
-        .replace(/```([\s\S]*?)```/g, (_, code) => code.trim())
+        .replace(/```(?:[\w+#.-]+(?=\n))?([\s\S]*?)```/g, (_, code) => code.trim())
         .replace(/`([^`\n]+)`/g, "$1")
         .replace(/\|\|[^|\n]+\|\|/g, "•••")
         .replace(/\*\*(.+?)\*\*/g, "$1")
@@ -250,6 +274,7 @@ export function markdownToPlain(text) {
         .replace(/\*([^*\n]+)\*/g, "$1")
         .replace(/(?<!\w)_(?=\S)([^_\n]+?)(?<=\S)_(?!\w)/g, "$1")
         .replace(/~~(.+?)~~/g, "$1")
+        .replace(/^(?:>|[-*]|\d{1,9}[.)]) /gm, "")
         .replace(/\s+/g, " ")
         .trim();
 }
