@@ -12,7 +12,7 @@ const src = readFileSync(fileURLToPath(new URL('./main.js', import.meta.url)), '
 describe('main.js message-id selector lookups', () => {
   it('wraps every data-message-id selector value in CSS.escape', () => {
     const escaped = src.match(/data-message-id="\$\{CSS\.escape\(event\.message_id\)\}"/g) || [];
-    expect(escaped.length).toBe(4);
+    expect(escaped.length).toBe(5);
   });
   it('leaves no raw event.message_id interpolation in a selector', () => {
     expect(src).not.toMatch(/data-message-id="\$\{event\.message_id\}"/);
