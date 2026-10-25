@@ -110,7 +110,7 @@ try {
   // straight away and her newest message gets the Seen by row.
   await alice.evaluate(() => {
     const i = document.getElementById('message-input');
-    i.value = 'seen check'; i.dispatchEvent(new Event('input'));
+    i.value = '> seen check\n- one\n- two'; i.dispatchEvent(new Event('input'));
   });
   await alice.focus('#message-input');
   await alice.keyboard.press('Enter');
@@ -119,6 +119,24 @@ try {
     const row = msgs[msgs.length - 1]?.querySelector('.seen-by-row')?.textContent || '';
     return row.includes('Bob') && row.includes('Carol');
   }, null, 8000), 'no "Seen by Bob, Carol" under the newest message');
+  check(await bob.evaluate(() => {
+    const msgs = [...document.querySelectorAll('#message-feed .message')];
+    const last = msgs[msgs.length - 1];
+    return last?.querySelector('.md-quote')?.textContent === 'seen check'
+      && last.querySelectorAll('ul.md-list li').length === 2;
+  }), 'quote and list not rendered as Markdown');
+
+  step = 'mute-from-menu';
+  await click(bob, '#room-options-btn');
+  await sleep(150);
+  await click(bob, '#room-opt-mute');
+  check(await bob.evaluate(() => JSON.parse(localStorage.getItem('proxion_muted_threads') || '[]').length === 1),
+    'Mute in the options menu did not mute the room');
+  await click(bob, '#room-options-btn');
+  await sleep(150);
+  check(await bob.evaluate(() => document.getElementById('room-opt-mute').textContent) === 'Unmute',
+    'options menu does not offer Unmute for a muted room');
+  await click(bob, '#room-opt-mute');
 
   step = 'leave';
   await click(carol, '#room-options-btn');
