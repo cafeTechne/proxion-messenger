@@ -93,3 +93,43 @@ async def test_non_member_cannot_get_readers(gateway):
 
     sent = json.loads(ws.send.call_args[0][0])
     assert sent["readers"] == []
+
+
+def _room_msgs(store, room_id, ids):
+    for i, mid in enumerate(ids):
+        store.save_message(mid, room_id, "room", "did:key:zAlice", "Alice", "hi",
+                           f"2026-06-05T10:0{i}:00+00:00")
+
+
+def test_room_readers_since_counts_later_reads(store):
+    """Reading a later message in the room means the earlier one was seen;
+    a receipt for an earlier message does not count."""
+    _room_msgs(store, "room-s", ["m1", "m2", "m3"])
+    store.save_message_receipt("m3", "did:key:zBob", "2026-06-05T10:05:00Z")
+    store.save_message_receipt("m1", "did:key:zCarol", "2026-06-05T10:05:00Z")
+    since = {r["receiver_webid"] for r in store.get_room_readers_since("room-s", "m2")}
+    assert since == {"did:key:zBob"}
+
+
+def test_room_readers_since_ignores_room_read_state(store):
+    """room_read_receipts is written even for readers with receipts off, so it
+    must not feed Seen by."""
+    _room_msgs(store, "room-o", ["m1", "m2"])
+    store.mark_room_read("room-o", "did:key:zDave", "m2", "2026-06-05T10:05:00Z")
+    assert store.get_room_readers_since("room-o", "m1") == []
+
+
+@pytest.mark.asyncio
+async def test_get_message_readers_includes_later_room_reads(gateway):
+    ws = _ws()
+    room_id = "room-seen-2"
+    gateway._client_webids[ws] = "did:key:zAlice"
+    gateway._local_rooms[room_id] = {"name": "T", "members": {ws}}
+    gateway.clients.add(ws)
+    _room_msgs(gateway._store, room_id, ["a1", "a2"])
+    gateway._store.save_message_receipt("a2", "did:key:zBob", "2026-06-05T10:05:00Z")
+
+    await gateway._handle_get_message_readers(ws, {"message_id": "a1"})
+
+    sent = json.loads(ws.send.call_args[0][0])
+    assert [r["receiver_webid"] for r in sent["readers"]] == ["did:key:zBob"]

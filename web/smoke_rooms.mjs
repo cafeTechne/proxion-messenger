@@ -105,6 +105,21 @@ try {
   check(await until(alice, () => document.querySelectorAll('#members-list .member-item').length === 3, null, 6000),
     `owner's member list did not update live: ${JSON.stringify(await memberNames(alice))}`);
 
+  step = 'seen-by';
+  // Bob and Carol have the room open, so a new message from Alice is read
+  // straight away and her newest message gets the Seen by row.
+  await alice.evaluate(() => {
+    const i = document.getElementById('message-input');
+    i.value = 'seen check'; i.dispatchEvent(new Event('input'));
+  });
+  await alice.focus('#message-input');
+  await alice.keyboard.press('Enter');
+  check(await until(alice, () => {
+    const msgs = [...document.querySelectorAll('#message-feed .message')];
+    const row = msgs[msgs.length - 1]?.querySelector('.seen-by-row')?.textContent || '';
+    return row.includes('Bob') && row.includes('Carol');
+  }, null, 8000), 'no "Seen by Bob, Carol" under the newest message');
+
   step = 'leave';
   await click(carol, '#room-options-btn');
   await sleep(200);

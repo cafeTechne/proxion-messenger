@@ -2633,6 +2633,11 @@ class RoomHandlerMixin:
             await websocket.send(json.dumps({"type": "message_readers", "message_id": message_id, "readers": []}))
             return
         readers = self._store.get_message_readers(message_id)
+        # In a room, reading any later message also means this one was seen.
+        if _thread_id and _thread_id in self._local_rooms:
+            _seen = {r["receiver_webid"] for r in readers}
+            readers += [r for r in self._store.get_room_readers_since(_thread_id, message_id)
+                        if r["receiver_webid"] not in _seen]
         for r in readers:
             r["display_name"] = self._store.get_display_name(r["receiver_webid"]) or r["receiver_webid"][:12]
         await websocket.send(json.dumps({"type": "message_readers", "message_id": message_id, "readers": readers}))

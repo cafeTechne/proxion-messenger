@@ -1917,6 +1917,7 @@ import { createAccountSync } from './account-sync.js';
                 case "message": {
                     const msg = normalizeRelayThreadId(event);
                     const id = msg.thread_id;
+                    if (activeView && id === activeView.id) _refreshSeenBy();
                     // The gateway stored our DM under another id (another account
                     // here already uses the one we picked): follow it there.
                     if (msg.own && msg.client_thread_id && msg.client_thread_id !== id) {
@@ -1997,6 +1998,11 @@ import { createAccountSync } from './account-sync.js';
                         && document.visibilityState === "visible"
                         && socket?.readyState === WebSocket.OPEN) {
                         socket.send(JSON.stringify({cmd: "mark_read", thread_id: id, message_id: msg.message_id}));
+                    }
+                    // Same for a room, batched: one mark_read a second at most.
+                    if (activeView && activeView.id === id && (activeView.type === "local_room" || activeView.type === "room")
+                        && !msg.own && msg.message_id && msg.from_webid !== selfWebId) {
+                        _markRoomSeen(id, msg.message_id);
                     }
 
                     // Update unread badges + DM last-message preview
@@ -2302,6 +2308,7 @@ import { createAccountSync } from './account-sync.js';
                     handleReactionEvent(event, "remove");
                     break;
                 case "read_receipt":
+                    if (activeView && event.thread_id === activeView.id) _refreshSeenBy();
                     // R10.2.2: upgrade delivery badge to ✓✓
                     (function() {
                         if (!event.message_id) return;
@@ -2490,6 +2497,7 @@ import { createAccountSync } from './account-sync.js';
                             _newMsgs.forEach(m => { messageMap[m.message_id] = m; });
                             renderMessages();
                         }
+                        _refreshSeenBy();
                         _rhFeed.removeAttribute("aria-busy");
                     }
                     break;
@@ -2839,6 +2847,11 @@ import { createAccountSync } from './account-sync.js';
                             }
                             msgs.forEach(m => renderMessage(m));
                             if (!hadMessages) rendering.scrollToUnread();
+                            _refreshSeenBy();
+                            if (activeView.type === "local_room" || activeView.type === "room") {
+                                const lastOther = [...msgs].reverse().find(m => m.message_id && !m.own && m.from_webid !== selfWebId);
+                                if (lastOther) _markRoomSeen(tid, lastOther.message_id);
+                            }
                         } else {
                             maybeShowEmptyState();
                         }
@@ -3530,10 +3543,21 @@ import { createAccountSync } from './account-sync.js';
                     break;
                 }
                 case "message_readers": {
-                    const el = document.querySelector(`.seen-by-row[data-msg-id="${event.message_id}"]`);
-                    if (!el) break;
+                    // Only the message _refreshSeenBy last asked about (a late
+                    // reply for an older message must not put a row back there).
+                    if (event.message_id !== _seenByMsgId) break;
+                    const msgEl = document.querySelector(`#message-feed [data-message-id="${CSS.escape(event.message_id)}"]`);
+                    if (!msgEl) break;
                     const seen = seenByText(event.readers, selfWebId);
-                    if (seen) el.textContent = seen;
+                    let row = msgEl.querySelector(".seen-by-row");
+                    if (!seen) { row?.remove(); break; }
+                    if (!row) {
+                        row = document.createElement("div");
+                        row.className = "seen-by-row";
+                        row.dataset.msgId = event.message_id;
+                        _statusHost(msgEl).insertAdjacentElement("afterend", row);
+                    }
+                    row.textContent = seen;
                     break;
                 }
                 case "import_complete":
@@ -4046,6 +4070,52 @@ import { createAccountSync } from './account-sync.js';
         // is, not as a loose item at the far edge of the message row.
         function _statusHost(msgEl) {
             return msgEl.querySelector('.msg-content, .audio-message') || msgEl;
+        }
+
+        // Rooms send their read position with the newest message seen (the
+        // gateway turns it into read receipts for its sender). Batched to one
+        // mark_read a second; held while the window is hidden.
+        let _roomSeenTimer = null;
+        let _roomSeenPending = null;
+        function _markRoomSeen(threadId, messageId) {
+            _roomSeenPending = { threadId, messageId };
+            if (_roomSeenTimer) return;
+            _roomSeenTimer = setTimeout(_flushRoomSeen, 1000);
+        }
+        function _flushRoomSeen() {
+            _roomSeenTimer = null;
+            const p = _roomSeenPending;
+            if (!p || activeView?.id !== p.threadId) { _roomSeenPending = null; return; }
+            if (document.visibilityState !== "visible") return;   // sent on the next visibilitychange
+            _roomSeenPending = null;
+            if (socket?.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ cmd: "mark_read", thread_id: p.threadId, message_id: p.messageId }));
+            }
+        }
+        document.addEventListener("visibilitychange", () => {
+            if (document.visibilityState === "visible" && _roomSeenPending && !_roomSeenTimer) _flushRoomSeen();
+        });
+
+        // "Seen by" under your latest sent message in a room. The gateway
+        // counts everyone who has read that message or a later one.
+        let _seenByTimer = null;
+        let _seenByMsgId = "";
+        function _refreshSeenBy() {
+            clearTimeout(_seenByTimer);
+            _seenByTimer = setTimeout(() => {
+                const feed = document.getElementById("message-feed");
+                if (!feed) return;
+                const inRoom = activeView?.type === "local_room" || activeView?.type === "room";
+                const receipts = inRoom
+                    ? feed.querySelectorAll(".message:not(.msg-pending):not(.msg-failed) .read-receipt[data-msg-id]") : [];
+                _seenByMsgId = receipts.length ? receipts[receipts.length - 1].dataset.msgId : "";
+                feed.querySelectorAll(".seen-by-row").forEach(el => {
+                    if (el.dataset.msgId !== _seenByMsgId) el.remove();
+                });
+                if (_seenByMsgId && socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ cmd: "get_message_readers", message_id: _seenByMsgId }));
+                }
+            }, 300);
         }
 
         // -- Round 60: Read receipt helpers --

@@ -353,6 +353,30 @@ class RoomStoreMixin(object):
                 )
             except Exception:
                 pass
+    def get_room_readers_since(self, room_id: str, message_id: str) -> list:
+        """Readers who sent a receipt for this message or a later one in the
+        room, in history order (timestamp, then received_at). Built on
+        message_receipts, which only holds rows for readers with receipts on
+        (room_read_receipts is written for everyone)."""
+        with self._conn() as conn:
+            try:
+                rows = conn.execute(
+                    """SELECT mr.receiver_webid, MAX(mr.read_at)
+                       FROM message_receipts mr
+                       JOIN messages lm ON lm.message_id = mr.message_id
+                       JOIN messages m ON m.message_id = ?
+                       WHERE m.thread_id = ? AND lm.thread_id = m.thread_id
+                         AND mr.read_at IS NOT NULL
+                         AND (lm.timestamp > m.timestamp
+                              OR (lm.timestamp = m.timestamp
+                                  AND COALESCE(lm.received_at, '') >= COALESCE(m.received_at, '')))
+                       GROUP BY mr.receiver_webid
+                       ORDER BY MAX(mr.read_at)""",
+                    (message_id, room_id),
+                ).fetchall()
+            except Exception:
+                return []
+        return [{"receiver_webid": r[0], "read_at": r[1]} for r in rows]
     def get_room_last_read(self, room_id: str, member_webid: str) -> Optional[dict]:
         with self._conn() as conn:
             try:

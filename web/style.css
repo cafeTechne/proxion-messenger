@@ -2583,6 +2583,7 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
            costing its own line. */
         .read-receipt { margin-inline-start: var(--space-2); font-size: var(--text-2xs); color: var(--slate-600); user-select: none; }
         .read-receipt.read { color: var(--color-success-soft); }
+        .seen-by-row { margin-top: var(--space-1); font-size: var(--text-2xs); color: var(--text-secondary); }
 
         /* Round 62: Voice Messages */
         .voice-record-btn.recording { color: var(--accent); }
