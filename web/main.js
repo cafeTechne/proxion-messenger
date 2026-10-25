@@ -2544,8 +2544,9 @@ import { createAccountSync } from './account-sync.js';
                             .catch(console.warn);
                     } else {
                         voice.showVoiceBanner(event);
-                        showOsNotification('Incoming Call',
-                            `${event.display_name || 'Someone'} is calling`);
+                        const _caller = event.display_name || resolvePeerName(event.caller_webid)
+                            || dmFallbackName(event.caller_webid);
+                        showOsNotification(t('voice.incomingFrom', { name: _caller }), '');
                     }
                     break;
                 case "voice_answer":
@@ -5431,7 +5432,7 @@ import { createAccountSync } from './account-sync.js';
             ta.focus(); ta.select();
             let ok = false;
             try { ok = document.execCommand("copy"); } catch (_) {}
-            showToast(ok ? "Copied" : "Press Ctrl+C to copy");
+            showToast(ok ? t('common.copied') : t('copy.pressToCopy'));
         });
         document.getElementById("ob-name").addEventListener("keydown", e => {
             if (e.key === "Enter") obStep2();
@@ -6525,8 +6526,8 @@ import { createAccountSync } from './account-sync.js';
             attachListener('#ob-pod-pw-toggle', 'click', () => {
                 const pw = document.getElementById('ob-pod-password');
                 const btn = document.getElementById('ob-pod-pw-toggle');
-                if (pw.type === 'password') { pw.type = 'text'; btn.textContent = 'Hide'; }
-                else { pw.type = 'password'; btn.textContent = 'Show'; }
+                if (pw.type === 'password') { pw.type = 'text'; btn.textContent = t('btn.hide'); }
+                else { pw.type = 'password'; btn.textContent = t('btn.show'); }
             });
 
             // Click your WebID to copy it, so you can share it and be messaged.
