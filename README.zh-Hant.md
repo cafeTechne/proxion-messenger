@@ -43,16 +43,17 @@ Proxion 是一款和你已經在用的通訊工具很像的應用程式，但有
 - **在瀏覽器中：** Proxion 也可作為可安裝的網頁應用程式執行。
 
 由於 Proxion 沒有經過 Apple 或 Microsoft 簽署（這是刻意為之，好讓你和你自己的軟體之間沒有任何
-把關者），你的系統會在首次開啟時顯示一次性提示。在 Windows 上選擇 *更多資訊，然後仍要執行*；在
-macOS 上*按右鍵，然後開啟*；Linux 不會有任何提示。
+把關者），你的系統會在首次開啟時顯示一次性提示。在 Windows 上選擇 *更多資訊，然後仍要執行*。在
+macOS 15 (Sequoia) 及更新版本上，先嘗試開啟一次，然後前往 *系統設定 > 隱私權與安全性* 並點選
+*強制打開*；在較早的 macOS 上*按右鍵，然後開啟*。Linux 不會有任何提示。
 
 ## 你可以做什麼
 
 - **傳訊與通話。** 群組聊天室與私密的一對一聊天，還有帶螢幕分享的點對點語音與視訊通話。
 - **保留你的紀錄。** 一切都以開放格式儲存在你的 pod 中，因此它屬於你，可以保存、用其他工具讀取
   並隨身帶走。
-- **真正私密的對話。** 私訊是端對端加密的，你可以透過一起大聲讀出的一句簡短安全短語，確認你真的
-  在和你的聯絡人通話。通話也以同樣的方式加密。
+- **真正私密的對話。** 私訊是端對端加密的，你可以透過比對一組 30 位數的安全碼，確認你真的在和你的
+  聯絡人通話。通話由 WebRTC 加密，雙方都用自己的身分簽署通話金鑰，所以中間的閘道無法竊聽。
 - **觸及 Solid 上的任何人。** 在更廣闊的 Solid 生態系中尋找並邀請他人，而不只是其他 Proxion
   使用者。
 - **隨處可用。** 桌面、瀏覽器與行動裝置，支援離線，支援包括由右至左的阿拉伯文在內的 16 種語言，並
@@ -69,8 +70,8 @@ Proxion 是一個良好的 Solid 公民，而不是一個只是在底層用了 S
 
 <img src="landing/assets/interop-sidebyside.png" alt="同一個聊天室在 Proxion 與 SolidOS 資料瀏覽器中並排顯示，訊息完全相同" width="900">
 
-- **在 [SolidOS](https://solidos.org) 中開啟一個 Proxion 聊天室**，每則訊息都在那裡。這在我們的
-  測試中是針對真實的 SolidOS 驗證過的，而不只是聲稱。
+- **在 [SolidOS](https://solidos.org) 中開啟一個 Proxion 聊天室**，每則訊息都在那裡。
+  `web/solidos-render.test.js` 會針對一個執行中的 pod 操作真實的 SolidOS databrowser 來驗證這一點。
 - **透過 WebID 尋找並邀請他人。** 探索某人所主持的聊天室，或把一份任何 Solid 應用程式都能讀取的
   邀請放進他們的 Solid 收件匣。
 - **即時看到新訊息與邀請，** 即使 Proxion 已關閉也能收到。
@@ -108,7 +109,7 @@ Proxion 是開源的，我們真心歡迎各種貢獻，從錯誤回報到程式
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # 選用的 pod 憑證；僅本機使用時留空
 python run_gateway.py
-# 開啟 https://127.0.0.1:8080
+# 開啟 https://127.0.0.1:8080，並接受一次自簽憑證
 ```
 
 建置原生安裝程式：
@@ -133,7 +134,7 @@ pip install -e "./proxion-messenger-core[gateway,test]"
 用程式內部並隨應用程式一起啟動，因此你永遠看不到它，也不用安裝 Python。閘道之所以存在，是因為
 Solid 涵蓋了資料與身分，卻不涵蓋即時傳遞、上線狀態或通話建立，這與 homeserver 之於 Matrix、或
 SMTP 伺服器之於電子郵件所扮演的角色相同。詳情見 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 與
-[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md)。
+[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md)。所有設定見 [docs/CONFIGURATION.md](docs/CONFIGURATION.md)。
 
 ## 授權條款
 

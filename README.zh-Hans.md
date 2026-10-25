@@ -42,16 +42,17 @@ Proxion 是一款和你已经在用的通讯工具很像的应用，但有一个
 - **在浏览器中：** Proxion 也可作为可安装的网页应用运行。
 
 由于 Proxion 没有经过 Apple 或 Microsoft 签名（这是有意为之，好让你和你自己的软件之间没有任何
-把关者），你的系统会在首次打开时显示一次性提示。在 Windows 上选择 *更多信息，然后仍要运行*；在
-macOS 上*右键点击，然后打开*；Linux 不会有任何提示。
+把关者），你的系统会在首次打开时显示一次性提示。在 Windows 上选择 *更多信息，然后仍要运行*。在
+macOS 15 (Sequoia) 及更高版本上，先尝试打开一次，然后前往 *系统设置 > 隐私与安全性* 并点击
+*仍要打开*；在更早的 macOS 上*右键点击，然后打开*。Linux 不会有任何提示。
 
 ## 你可以做什么
 
 - **发消息和通话。** 群组房间和私密的一对一聊天，还有带屏幕共享的点对点语音和视频通话。
 - **保留你的历史记录。** 一切都以开放格式保存在你的 pod 中，因此它属于你，可以保存、用其他工具
   读取并随身带走。
-- **真正私密的对话。** 私信是端到端加密的，你可以通过一起大声读出的一句简短安全短语，确认你真的
-  在和你的联系人通话。通话也以同样的方式加密。
+- **真正私密的对话。** 私信是端到端加密的，你可以通过比对一个 30 位的安全码，确认你真的在和你的
+  联系人通话。通话由 WebRTC 加密，双方都用自己的身份签署通话密钥，所以中间的网关无法窃听。
 - **触达 Solid 上的任何人。** 在更广阔的 Solid 生态中查找并邀请他人，而不仅仅是其他 Proxion
   用户。
 - **随处可用。** 桌面、浏览器和移动端，支持离线，支持包括从右到左的阿拉伯语在内的 16 种语言，并且
@@ -68,8 +69,8 @@ Proxion 是一个良好的 Solid 公民，而不是一个只是在底层用了 S
 
 <img src="landing/assets/interop-sidebyside.png" alt="同一个房间在 Proxion 和 SolidOS 数据浏览器中并排显示，消息完全相同" width="900">
 
-- **在 [SolidOS](https://solidos.org) 中打开一个 Proxion 房间**，每条消息都在那里。这在我们的
-  测试中是针对真实的 SolidOS 验证过的，而不只是声称。
+- **在 [SolidOS](https://solidos.org) 中打开一个 Proxion 房间**，每条消息都在那里。
+  `web/solidos-render.test.js` 会针对一个运行中的 pod 驱动真实的 SolidOS databrowser 来验证这一点。
 - **通过 WebID 查找并邀请他人。** 发现某人托管的房间，或者把一份任何 Solid 应用都能读取的邀请放
   进他们的 Solid 收件箱。
 - **实时看到新消息和邀请，** 即使 Proxion 已关闭也能收到。
@@ -106,7 +107,7 @@ Proxion 是开源的，我们真心欢迎各种贡献，从错误报告到代码
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # 可选的 pod 凭据；仅本地使用时留空
 python run_gateway.py
-# 打开 https://127.0.0.1:8080
+# 打开 https://127.0.0.1:8080，并接受一次自签名证书
 ```
 
 构建原生安装程序：
@@ -131,7 +132,7 @@ pip install -e "./proxion-messenger-core[gateway,test]"
 用内部并随应用一起启动，因此你永远看不到它，也不用安装 Python。网关之所以存在，是因为 Solid 涵盖
 了数据和身份，却不涵盖实时投递、在线状态或通话建立，这与 homeserver 之于 Matrix、或 SMTP 服务器
 之于电子邮件所扮演的角色相同。详情见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 和
-[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md)。
+[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md)。所有设置见 [docs/CONFIGURATION.md](docs/CONFIGURATION.md)。
 
 ## 许可证
 

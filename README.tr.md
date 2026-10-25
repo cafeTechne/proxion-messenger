@@ -48,8 +48,10 @@ Linux ve web üzerinde.
 
 Proxion, Apple veya Microsoft tarafından imzalanmadığı için (sizinle kendi yazılımınız arasına
 hiçbir bekçi girmesin diye bilerek), sistemi ilk açtığınızda tek seferlik bir uyarı gösterir.
-Windows'ta *Ek bilgi, ardından Yine de çalıştır*; macOS'te *sağ tıklayın, ardından Aç* seçin;
-Linux hiçbir uyarı göstermez.
+Windows'ta *Ek bilgi, ardından Yine de çalıştır* seçin. macOS 15 (Sequoia) ve sonrasında
+uygulamayı bir kez açmayı deneyin, ardından *Sistem Ayarları > Gizlilik ve Güvenlik* bölümüne
+gidip *Yine de Aç*'a tıklayın; daha eski macOS'te *sağ tıklayın, ardından Aç* seçin. Linux
+hiçbir uyarı göstermez.
 
 ## Neler yapabilirsiniz
 
@@ -57,9 +59,10 @@ Linux hiçbir uyarı göstermez.
   eşten eşe sesli ve görüntülü görüşmeler.
 - **Geçmişinizi saklayın.** Her şey açık bir biçimde pod'unuzda yaşar, bu yüzden saklamak, başka
   araçlarla okumak ve yanınızda taşımak üzere sizindir.
-- **Gerçekten özel konuşmalar.** Doğrudan mesajlar uçtan uca şifrelenir ve birlikte yüksek sesle
-  okuduğunuz kısa bir güvenlik ifadesiyle gerçekten kişinizle konuştuğunuzu doğrulayabilirsiniz.
-  Aramalar da aynı şekilde şifrelenir.
+- **Gerçekten özel konuşmalar.** Doğrudan mesajlar uçtan uca şifrelenir ve 30 haneli bir
+  güvenlik numarasını karşılaştırarak gerçekten kişinizle konuştuğunuzu doğrulayabilirsiniz.
+  Aramaları WebRTC şifreler ve her taraf arama anahtarlarını kendi kimliğiyle imzalar, böylece
+  aradaki bir ağ geçidi dinleyemez.
 - **Solid üzerindeki herkese ulaşın.** Yalnızca diğer Proxion kullanıcılarına değil, daha geniş
   Solid ekosistemindeki kişilere ulaşın ve onları davet edin.
 - **Her yerde kullanın.** Masaüstü, tarayıcı ve telefon; çevrimdışı çalışabilen, sağdan sola
@@ -78,8 +81,9 @@ uygulamaları onu okuyabilir ve ona katılabilir.
 
 <img src="landing/assets/interop-sidebyside.png" alt="Aynı oda Proxion'da ve SolidOS veri tarayıcısında yan yana, aynı mesajlarla gösteriliyor" width="900">
 
-- **Bir Proxion odasını [SolidOS](https://solidos.org) içinde açın** ve her mesaj oradadır. Bu,
-  yalnızca iddia edilmez, testlerimizde gerçek SolidOS'e karşı doğrulanır.
+- **Bir Proxion odasını [SolidOS](https://solidos.org) içinde açın** ve her mesaj oradadır.
+  `web/solidos-render.test.js` bunu gerçek SolidOS databrowser'ını çalışan bir pod'a karşı
+  kullanarak doğrular.
 - **Kişileri WebID'leriyle bulun ve davet edin.** Birinin barındırdığı odaları keşfedin ya da
   herhangi bir Solid uygulamasının okuyabileceği bir daveti onun Solid gelen kutusuna bırakın.
 - **Yeni mesajları ve davetleri gerçek zamanlı görün,** Proxion kapalıyken bile size ulaşırlar.
@@ -122,7 +126,7 @@ için):
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # isteğe bağlı pod kimlik bilgileri; yalnızca yerel için boş bırakın
 python run_gateway.py
-# https://127.0.0.1:8080 adresini açın
+# https://127.0.0.1:8080 adresini açın ve kendinden imzalı sertifikayı bir kez kabul edin
 ```
 
 Yerel bir yükleyici oluşturun:
@@ -149,7 +153,7 @@ ve onunla başlar, bu yüzden onu hiç görmez ve Python kurmazsınız. Ağ geç
 veriyi ve kimliği kapsar ama canlı iletimi, çevrimiçi durumu ya da arama kurulumunu kapsamaz; bu,
 Matrix için bir homeserver'ın ya da e-posta için bir SMTP sunucusunun oynadığı rolün aynısıdır.
 Ayrıntılar [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ve
-[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) içinde.
+[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) içinde. Tüm ayarlar [docs/CONFIGURATION.md](docs/CONFIGURATION.md) içinde.
 
 ## Lisans
 

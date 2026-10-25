@@ -50,7 +50,9 @@ dijalankan.
 Karena Proxion tidak ditandatangani oleh Apple maupun Microsoft (secara sengaja, agar tidak ada
 penjaga gerbang di antara Anda dan perangkat lunak Anda sendiri), sistem Anda menampilkan
 peringatan sekali saja saat pertama kali membukanya. Di Windows pilih *Info selengkapnya lalu
-Tetap jalankan*; di macOS *klik kanan lalu Buka*; Linux tidak menampilkan peringatan apa pun.
+Tetap jalankan*. Di macOS 15 (Sequoia) dan yang lebih baru, coba buka sekali, lalu buka
+*Pengaturan Sistem > Privasi & Keamanan* dan klik *Tetap Buka*; di macOS yang lebih lama, *klik
+kanan lalu Buka*. Linux tidak menampilkan peringatan apa pun.
 
 ## Yang bisa Anda lakukan
 
@@ -59,8 +61,9 @@ Tetap jalankan*; di macOS *klik kanan lalu Buka*; Linux tidak menampilkan pering
 - **Simpan riwayat Anda.** Semuanya berada di pod Anda, dalam format terbuka, jadi itu milik Anda
   untuk disimpan, dibaca dengan alat lain, dan dibawa serta.
 - **Percakapan yang benar-benar pribadi.** Pesan langsung dienkripsi ujung ke ujung, dan Anda
-  bisa memastikan bahwa Anda benar-benar berbicara dengan kontak Anda melalui frasa keamanan
-  singkat yang Anda baca bersama dengan lantang. Panggilan dienkripsi dengan cara yang sama.
+  bisa memastikan bahwa Anda benar-benar berbicara dengan kontak Anda dengan membandingkan nomor
+  keamanan 30 digit. Panggilan dienkripsi oleh WebRTC, dan setiap sisi menandatangani kunci
+  panggilannya dengan identitasnya, jadi gateway di tengah tidak bisa menyadap.
 - **Jangkau siapa pun di Solid.** Temukan dan undang orang di seluruh ekosistem Solid yang lebih
   luas, bukan hanya sesama pengguna Proxion.
 - **Pakai di mana saja.** Desktop, peramban, dan ponsel, mampu bekerja luring, dalam 16 bahasa
@@ -79,8 +82,9 @@ Solid lain dapat membaca dan bergabung dengannya.
 
 <img src="landing/assets/interop-sidebyside.png" alt="Ruang yang sama ditampilkan berdampingan di Proxion dan di penjelajah data SolidOS, dengan pesan yang sama" width="900">
 
-- **Buka ruang Proxion di [SolidOS](https://solidos.org)** dan setiap pesan ada di sana. Ini
-  diverifikasi terhadap SolidOS yang sebenarnya dalam pengujian kami, bukan sekadar klaim.
+- **Buka ruang Proxion di [SolidOS](https://solidos.org)** dan setiap pesan ada di sana.
+  `web/solidos-render.test.js` memeriksanya dengan menjalankan databrowser SolidOS yang asli
+  terhadap pod yang aktif.
 - **Temukan dan undang orang lewat WebID mereka.** Temukan ruang yang dihosting seseorang, atau
   jatuhkan undangan ke kotak masuk Solid mereka yang dapat dibaca aplikasi Solid mana pun.
 - **Lihat pesan dan undangan baru secara langsung,** yang tetap sampai kepada Anda bahkan saat
@@ -125,7 +129,7 @@ gateway Anda sendiri yang selalu aktif (misalnya untuk mengarahkan ponsel ke des
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # kredensial pod opsional; biarkan kosong untuk mode lokal saja
 python run_gateway.py
-# buka https://127.0.0.1:8080
+# buka https://127.0.0.1:8080 dan terima sertifikat swatanda sekali
 ```
 
 Bangun pemasang native:
@@ -152,7 +156,7 @@ bersamanya, jadi Anda tidak pernah melihatnya atau memasang Python. Gateway ada 
 mencakup data dan identitas tetapi tidak mencakup pengiriman langsung, kehadiran, atau
 penyiapan panggilan, peran yang sama seperti yang dimainkan homeserver untuk Matrix atau server
 SMTP untuk surel. Detailnya di [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) dan
-[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
+[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md). Semua pengaturan ada di [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ## Lisensi
 

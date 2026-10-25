@@ -46,11 +46,13 @@ web.
 - **macOS avec [Homebrew](https://brew.sh) :** `brew install cafeTechne/proxion/proxion`
 - **Dans votre navigateur :** Proxion fonctionne aussi comme une application web installable.
 
-Comme Proxion n'est pas signé par Apple ni par Microsoft (volontairement, pour qu'aucun gardien
-ne se place entre vous et votre propre logiciel), votre système affiche un avertissement unique
-la première fois que vous l'ouvrez. Sur Windows choisissez *Informations complémentaires puis
-Exécuter quand même* ; sur macOS *clic droit puis Ouvrir* ; Linux n'affiche aucun
-avertissement.
+Comme Proxion n'est pas signé par Apple ni par Microsoft (volontairement, pour qu'aucun
+gardien ne se place entre vous et votre propre logiciel), votre système affiche un
+avertissement unique à la première ouverture. Sur Windows, choisissez *Informations
+complémentaires puis Exécuter quand même*. Sur macOS 15 (Sequoia) et ultérieur, essayez
+d'ouvrir l'app une fois, puis allez dans *Réglages Système > Confidentialité et sécurité* et
+cliquez sur *Ouvrir quand même* ; sur les macOS plus anciens, *clic droit puis Ouvrir*. Linux
+n'affiche aucun avertissement.
 
 ## Ce que vous pouvez faire
 
@@ -59,8 +61,9 @@ avertissement.
 - **Garder votre historique.** Tout vit dans votre pod, dans un format ouvert, il est donc à
   vous : à conserver, à lire avec d'autres outils et à emporter avec vous.
 - **Des conversations vraiment privées.** Les messages directs sont chiffrés de bout en bout,
-  et vous pouvez confirmer que vous parlez bien à votre contact grâce à une courte phrase de
-  sécurité que vous lisez à voix haute ensemble. Les appels sont chiffrés de la même façon.
+  et vous pouvez confirmer que vous parlez bien à votre contact en comparant un numéro de
+  sécurité à 30 chiffres. Les appels sont chiffrés par WebRTC, et chaque côté signe ses clés
+  d'appel avec son identité, si bien qu'une passerelle au milieu ne peut pas écouter.
 - **Joindre n'importe qui sur Solid.** Trouvez et invitez des personnes dans tout l'écosystème
   Solid, pas seulement d'autres utilisateurs de Proxion.
 - **L'utiliser partout.** Ordinateur, navigateur et mobile, capable de fonctionner hors ligne,
@@ -80,7 +83,8 @@ d'autres applications Solid peuvent le lire et le rejoindre.
 <img src="landing/assets/interop-sidebyside.png" alt="Le même salon affiché côte à côte dans Proxion et dans le navigateur de données SolidOS, avec les mêmes messages" width="900">
 
 - **Ouvrez un salon Proxion dans [SolidOS](https://solidos.org)** et chaque message y est.
-  C'est vérifié contre le vrai SolidOS dans nos tests, pas seulement affirmé.
+  `web/solidos-render.test.js` le vérifie en pilotant le vrai databrowser SolidOS sur un pod
+  en fonctionnement.
 - **Trouvez et invitez des personnes par leur WebID.** Découvrez les salons que quelqu'un
   héberge, ou déposez une invitation dans sa boîte de réception Solid que n'importe quelle
   application Solid peut lire.
@@ -128,7 +132,7 @@ téléphone vers votre ordinateur) :
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # identifiants de pod facultatifs ; laissez vide pour un usage local seul
 python run_gateway.py
-# ouvrez https://127.0.0.1:8080
+# ouvrez https://127.0.0.1:8080 et acceptez une fois le certificat autosigné
 ```
 
 Construire un installeur natif :
@@ -155,7 +159,7 @@ l'application et démarre avec elle, vous ne la voyez donc jamais et n'installez
 passerelle existe parce que Solid couvre les données et l'identité mais pas la livraison en
 direct, la présence ni l'établissement des appels, le même rôle qu'un homeserver joue pour
 Matrix ou qu'un serveur SMTP joue pour le courrier électronique. Détails dans
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) et [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) et [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md). Tous les réglages sont dans [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ## Licence
 

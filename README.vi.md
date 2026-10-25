@@ -48,8 +48,9 @@ Linux và web.
 
 Vì Proxion không được Apple hay Microsoft ký (một cách có chủ đích, để không có người gác cổng
 nào đứng giữa bạn và phần mềm của chính bạn), hệ thống sẽ hiện một lời nhắc một lần trong lần mở
-đầu tiên. Trên Windows chọn *Thông tin thêm rồi Vẫn chạy*; trên macOS *nhấp chuột phải rồi Mở*;
-Linux không hiện lời nhắc nào.
+đầu tiên. Trên Windows chọn *Thông tin thêm rồi Vẫn chạy*. Trên macOS 15 (Sequoia) trở lên, hãy
+thử mở ứng dụng một lần, rồi vào *Cài đặt hệ thống > Quyền riêng tư & Bảo mật* và nhấp *Vẫn
+mở*; trên macOS cũ hơn, *nhấp chuột phải rồi Mở*. Linux không hiện lời nhắc nào.
 
 ## Bạn có thể làm gì
 
@@ -58,8 +59,9 @@ Linux không hiện lời nhắc nào.
 - **Giữ lịch sử của bạn.** Mọi thứ nằm trong pod của bạn, ở định dạng mở, nên nó là của bạn để
   lưu giữ, đọc bằng công cụ khác và mang theo bên mình.
 - **Trò chuyện thực sự riêng tư.** Tin nhắn trực tiếp được mã hóa đầu cuối, và bạn có thể xác
-  nhận mình thật sự đang nói chuyện với người liên hệ bằng một cụm từ an toàn ngắn mà cả hai cùng
-  đọc to. Cuộc gọi cũng được mã hóa theo cách tương tự.
+  nhận mình thật sự đang nói chuyện với người liên hệ bằng cách so sánh một mã an toàn 30 chữ
+  số. Cuộc gọi được WebRTC mã hóa, và mỗi bên ký khóa cuộc gọi bằng danh tính của mình, nên một
+  cổng nằm giữa không thể nghe lén.
 - **Kết nối bất kỳ ai trên Solid.** Tìm và mời mọi người trên khắp hệ sinh thái Solid rộng lớn
   hơn, không chỉ những người dùng Proxion khác.
 - **Dùng ở bất cứ đâu.** Máy tính, trình duyệt và điện thoại, có thể hoạt động ngoại tuyến, bằng
@@ -78,9 +80,9 @@ Solid khác có thể đọc và tham gia nó.
 
 <img src="landing/assets/interop-sidebyside.png" alt="Cùng một phòng hiển thị cạnh nhau trong Proxion và trong trình duyệt dữ liệu SolidOS, với cùng các tin nhắn" width="900">
 
-- **Mở một phòng Proxion trong [SolidOS](https://solidos.org)** và mọi tin nhắn đều ở đó. Điều
-  này được kiểm chứng với SolidOS thật trong các bài kiểm thử của chúng tôi, không chỉ là lời
-  tuyên bố.
+- **Mở một phòng Proxion trong [SolidOS](https://solidos.org)** và mọi tin nhắn đều ở đó.
+  `web/solidos-render.test.js` kiểm tra điều này bằng cách điều khiển databrowser SolidOS thật
+  trên một pod đang chạy.
 - **Tìm và mời mọi người bằng WebID của họ.** Khám phá các phòng mà ai đó lưu trữ, hoặc để lại
   một lời mời trong hộp thư Solid của họ mà bất kỳ ứng dụng Solid nào cũng đọc được.
 - **Xem tin nhắn và lời mời mới theo thời gian thực,** chúng đến với bạn ngay cả khi Proxion đã
@@ -123,7 +125,7 @@ của riêng bạn (ví dụ để hướng một điện thoại tới máy tí
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # thông tin đăng nhập pod tùy chọn; để trống nếu chỉ dùng cục bộ
 python run_gateway.py
-# mở https://127.0.0.1:8080
+# mở https://127.0.0.1:8080 và chấp nhận chứng chỉ tự ký một lần
 ```
 
 Xây dựng trình cài đặt gốc:
@@ -150,7 +152,7 @@ và khởi động cùng nó, nên bạn không bao giờ thấy nó hay phải 
 bao quát dữ liệu và danh tính nhưng không bao quát việc chuyển phát trực tiếp, trạng thái hiện
 diện hay thiết lập cuộc gọi, cùng vai trò mà một homeserver đảm nhận cho Matrix hay một máy chủ
 SMTP đảm nhận cho email. Chi tiết trong [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) và
-[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
+[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md). Mọi thiết lập đều có trong [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ## Giấy phép
 

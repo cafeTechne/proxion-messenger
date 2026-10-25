@@ -47,9 +47,11 @@ macOS, Linux e na web.
 - **No seu navegador:** o Proxion também roda como um aplicativo web instalável.
 
 Como o Proxion não é assinado pela Apple nem pela Microsoft (de propósito, para que nenhum
-porteiro fique entre você e o seu próprio software), o seu sistema mostra um aviso único na
+porteiro fique entre você e o seu próprio software), o sistema mostra um aviso único na
 primeira vez que você o abre. No Windows escolha *Mais informações e depois Executar assim
-mesmo*; no macOS *clique com o botão direito e depois Abrir*; o Linux não mostra aviso nenhum.
+mesmo*. No macOS 15 (Sequoia) e posteriores, tente abri-lo uma vez, depois vá em *Ajustes do
+Sistema > Privacidade e Segurança* e clique em *Abrir Mesmo Assim*; em versões anteriores do
+macOS, *clique com o botão direito e depois Abrir*. O Linux não mostra aviso nenhum.
 
 ## O que você pode fazer
 
@@ -58,8 +60,9 @@ mesmo*; no macOS *clique com o botão direito e depois Abrir*; o Linux não most
 - **Guardar seu histórico.** Tudo fica no seu pod, em formato aberto, então é seu para guardar,
   ler com outras ferramentas e levar com você.
 - **Conversas de verdade privadas.** As mensagens diretas têm criptografia de ponta a ponta, e
-  você pode confirmar que está mesmo falando com o seu contato por uma frase de segurança curta
-  que vocês leem em voz alta juntos. As chamadas são criptografadas da mesma forma.
+  você pode confirmar que está mesmo falando com o seu contato comparando um número de
+  segurança de 30 dígitos. As chamadas são criptografadas pelo WebRTC, e cada lado assina suas
+  chaves de chamada com a própria identidade, então um gateway no meio não consegue escutar.
 - **Alcance qualquer pessoa no Solid.** Encontre e convide pessoas de todo o ecossistema Solid,
   não só outros usuários do Proxion.
 - **Use em qualquer lugar.** Desktop, navegador e celular, com funcionamento offline, em 16
@@ -78,8 +81,9 @@ aplicativos Solid conseguem lê-la e entrar nela.
 
 <img src="landing/assets/interop-sidebyside.png" alt="A mesma sala mostrada lado a lado no Proxion e no navegador de dados do SolidOS, com as mesmas mensagens" width="900">
 
-- **Abra uma sala do Proxion no [SolidOS](https://solidos.org)** e cada mensagem está lá. Isso é
-  verificado contra o SolidOS real nos nossos testes, não apenas afirmado.
+- **Abra uma sala do Proxion no [SolidOS](https://solidos.org)** e cada mensagem está lá.
+  `web/solidos-render.test.js` verifica isso controlando o databrowser real do SolidOS contra
+  um pod em funcionamento.
 - **Encontre e convide pessoas pelo WebID delas.** Descubra as salas que alguém hospeda, ou
   deixe um convite na caixa de entrada Solid da pessoa que qualquer aplicativo Solid consegue
   ler.
@@ -126,7 +130,7 @@ o seu próprio gateway sempre ativo (por exemplo, para apontar um celular para o
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # credenciais de pod opcionais; deixe em branco para uso só local
 python run_gateway.py
-# abra https://127.0.0.1:8080
+# abra https://127.0.0.1:8080 e aceite uma vez o certificado autoassinado
 ```
 
 Construir um instalador nativo:
@@ -153,7 +157,7 @@ com ele, então você nunca o vê nem instala o Python. O gateway existe porque 
 dados e identidade, mas não a entrega ao vivo, a presença ou o estabelecimento de chamadas, o
 mesmo papel que um homeserver cumpre para o Matrix ou um servidor SMTP cumpre para o e-mail.
 Detalhes em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) e
-[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
+[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md). Todas as configurações estão em [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ## Licença
 

@@ -45,8 +45,9 @@ Proxion은 당신이 이미 쓰고 있는 것과 비슷한 메신저이지만, �
 
 Proxion은 Apple이나 Microsoft의 서명을 받지 않았기 때문에(당신과 당신의 소프트웨어 사이에
 아무런 문지기도 두지 않으려는 의도적인 선택입니다), 처음 열 때 운영체제가 한 번만 경고를
-표시합니다. Windows에서는 *추가 정보 후 실행*을, macOS에서는 *마우스 오른쪽 클릭 후 열기*를
-선택하세요. Linux에서는 아무 경고도 없습니다.
+표시합니다. Windows에서는 *추가 정보 후 실행*을 선택하세요. macOS 15(Sequoia) 이상에서는 한 번
+열어 본 다음 *시스템 설정 > 개인정보 보호 및 보안*에서 *그래도 열기*를 클릭하고, 그 이전
+macOS에서는 *마우스 오른쪽 클릭 후 열기*를 선택하세요. Linux에서는 아무 경고도 없습니다.
 
 ## 할 수 있는 것
 
@@ -54,9 +55,9 @@ Proxion은 Apple이나 Microsoft의 서명을 받지 않았기 때문에(당신�
   및 영상 통화.
 - **기록 보관.** 모든 것이 개방형 형식으로 당신의 팟에 저장되므로, 보관하고 다른 도구로 읽고
   가지고 다닐 수 있습니다.
-- **정말로 비공개인 대화.** 다이렉트 메시지는 종단 간 암호화되며, 함께 소리 내어 읽는 짧은
-  보안 문구로 정말로 상대와 이야기하고 있음을 확인할 수 있습니다. 통화도 같은 방식으로 암호화
-  됩니다.
+- **정말로 비공개인 대화.** 다이렉트 메시지는 종단 간 암호화되며, 30자리 안전 번호를 비교해
+  정말로 상대와 이야기하고 있음을 확인할 수 있습니다. 통화는 WebRTC로 암호화되고, 양쪽이 각자의
+  ID로 통화 키에 서명하므로 중간의 게이트웨이가 엿들을 수 없습니다.
 - **Solid의 누구에게나 연결.** Proxion 사용자뿐 아니라 더 넓은 Solid 생태계의 사람들을 찾아
   초대할 수 있습니다.
 - **어디서나 사용.** 데스크톱, 브라우저, 모바일, 오프라인 지원, 오른쪽에서 왼쪽으로 쓰는
@@ -74,7 +75,8 @@ Proxion은 내부에서 Solid를 쓰기만 하는 담장 친 정원이 아니라
 <img src="landing/assets/interop-sidebyside.png" alt="Proxion과 SolidOS 데이터브라우저에 나란히 표시된 같은 방, 같은 메시지" width="900">
 
 - **[SolidOS](https://solidos.org)에서 Proxion 방 열기**, 그러면 모든 메시지가 그대로
-  있습니다. 이것은 주장이 아니라 우리 테스트에서 실제 SolidOS를 상대로 검증됩니다.
+  있습니다. `web/solidos-render.test.js`가 실행 중인 pod를 대상으로 실제 SolidOS databrowser를
+  조작해 이를 확인합니다.
 - **WebID로 사람 찾고 초대하기.** 누군가 호스팅하는 방을 발견하거나, 어떤 Solid 앱이든 읽을
   수 있는 초대를 그 사람의 Solid 편지함에 넣으세요.
 - **새 메시지와 초대를 실시간으로,** Proxion이 닫혀 있어도 도착합니다.
@@ -115,7 +117,7 @@ Proxion은 오픈 소스이며 버그 신고부터 코드까지 기여를 진심
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # 선택적 팟 자격 증명; 로컬 전용이면 비워 두세요
 python run_gateway.py
-# https://127.0.0.1:8080 열기
+# https://127.0.0.1:8080 열고 자체 서명 인증서를 한 번 수락
 ```
 
 네이티브 설치 프로그램 빌드:
@@ -141,7 +143,7 @@ pip install -e "./proxion-messenger-core[gateway,test]"
 설치하지도 않습니다. 게이트웨이가 존재하는 이유는 Solid가 데이터와 신원은 다루지만 실시간
 전달, 접속 상태, 통화 설정은 다루지 않기 때문이며, 이는 Matrix의 홈서버나 이메일의 SMTP
 서버와 같은 역할입니다. 자세한 내용은 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)와
-[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md)에 있습니다.
+[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md)에 있습니다. 모든 설정은 [docs/CONFIGURATION.md](docs/CONFIGURATION.md)에 있습니다.
 
 ## 라이선스
 

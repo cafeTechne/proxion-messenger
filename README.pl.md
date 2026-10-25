@@ -48,8 +48,10 @@ oraz w sieci.
 
 Ponieważ Proxion nie jest podpisany przez Apple ani Microsoft (celowo, aby żaden strażnik nie
 stał między Tobą a Twoim własnym oprogramowaniem), system pokazuje jednorazowe ostrzeżenie przy
-pierwszym otwarciu. W Windows wybierz *Więcej informacji, a potem Uruchom mimo to*; w macOS
-*kliknij prawym przyciskiem, a potem Otwórz*; Linux nie pokazuje żadnego ostrzeżenia.
+pierwszym otwarciu. W Windows wybierz *Więcej informacji, a potem Uruchom mimo to*. W macOS 15
+(Sequoia) i nowszych spróbuj raz otworzyć aplikację, potem przejdź do *Ustawienia systemowe >
+Prywatność i ochrona* i kliknij *Otwórz mimo to*; w starszych macOS *kliknij prawym
+przyciskiem, a potem Otwórz*. Linux nie pokazuje żadnego ostrzeżenia.
 
 ## Co możesz robić
 
@@ -58,8 +60,9 @@ pierwszym otwarciu. W Windows wybierz *Więcej informacji, a potem Uruchom mimo 
 - **Zachowaj swoją historię.** Wszystko żyje w Twoim podzie, w otwartym formacie, więc jest
   Twoje: możesz je przechowywać, czytać innymi narzędziami i zabrać ze sobą.
 - **Naprawdę prywatne rozmowy.** Wiadomości bezpośrednie są szyfrowane end-to-end, a to, że
-  rozmawiasz naprawdę ze swoim kontaktem, możesz potwierdzić krótką frazą bezpieczeństwa, którą
-  odczytujecie na głos razem. Połączenia są szyfrowane tak samo.
+  rozmawiasz naprawdę ze swoim kontaktem, możesz potwierdzić, porównując 30-cyfrowy numer
+  bezpieczeństwa. Połączenia szyfruje WebRTC, a każda strona podpisuje swoje klucze połączenia
+  własną tożsamością, więc brama pośrodku nie może podsłuchiwać.
 - **Dotrzyj do każdego w Solid.** Znajduj i zapraszaj osoby z całego ekosystemu Solid, nie tylko
   innych użytkowników Proxion.
 - **Używaj wszędzie.** Komputer, przeglądarka i telefon, z działaniem offline, w 16
@@ -78,8 +81,9 @@ inne aplikacje Solid mogą go czytać i do niego dołączać.
 
 <img src="landing/assets/interop-sidebyside.png" alt="Ten sam pokój pokazany obok siebie w Proxion i w przeglądarce danych SolidOS, z tymi samymi wiadomościami" width="900">
 
-- **Otwórz pokój Proxion w [SolidOS](https://solidos.org)** i każda wiadomość tam jest. Jest to
-  sprawdzane wobec prawdziwego SolidOS w naszych testach, a nie tylko deklarowane.
+- **Otwórz pokój Proxion w [SolidOS](https://solidos.org)** i każda wiadomość tam jest.
+  `web/solidos-render.test.js` sprawdza to, sterując prawdziwym databrowserem SolidOS na
+  działającym podzie.
 - **Znajduj i zapraszaj osoby po ich WebID.** Odkrywaj pokoje, które ktoś hostuje, albo zostaw
   zaproszenie w jego skrzynce Solid, które może odczytać dowolna aplikacja Solid.
 - **Zobacz nowe wiadomości i zaproszenia na bieżąco,** docierają do Ciebie nawet przy zamkniętym
@@ -125,7 +129,7 @@ uruchomić własną, stale działającą bramę (na przykład, aby skierować te
 pip install -e ./proxion-messenger-core[gateway]
 cp .env.example .env   # opcjonalne poświadczenia poda; zostaw puste dla trybu tylko lokalnego
 python run_gateway.py
-# otwórz https://127.0.0.1:8080
+# otwórz https://127.0.0.1:8080 i raz zaakceptuj certyfikat z własnym podpisem
 ```
 
 Zbuduj natywny instalator:
@@ -152,7 +156,7 @@ razem z nią, więc nigdy jej nie widzisz ani nie instalujesz Pythona. Brama ist
 Solid obejmuje dane i tożsamość, ale nie dostarczanie na żywo, obecność czy nawiązywanie
 połączeń, tę samą rolę pełni homeserver dla Matrix albo serwer SMTP dla poczty e-mail.
 Szczegóły w [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) i
-[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
+[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md). Wszystkie ustawienia są w [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ## Licencja
 
