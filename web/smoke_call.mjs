@@ -149,11 +149,11 @@ try {
 
   step = 'open-dms';
   for (const [pg, who] of [[bob, 'bob'], [alice, 'alice']]) {
-    await pg.waitForFunction(() => document.querySelector('#contacts-list li, #dm-list li'), { timeout: 20000 })
+    await pg.waitForFunction(() => document.querySelector('#dm-list li.dm-item'), { timeout: 20000 })
       .catch(() => fail(`contact never appeared for ${who}`));
     if (process.exitCode) throw new Error('stop');
     await sleep(400);
-    await pg.evaluate(() => document.querySelector('#dm-list li, #contacts-list li').click());
+    await pg.evaluate(() => document.querySelector('#dm-list li.dm-item').click());
     await pg.waitForFunction(() => { const h = document.getElementById('chat-header-name'); return h && !/welcome/i.test(h.textContent || ''); }, { timeout: 8000 })
       .catch(() => fail(`${who} could not open the DM thread`));
     if (process.exitCode) throw new Error('stop');
@@ -275,9 +275,9 @@ try {
     await pg.goto(url, { waitUntil: 'load', timeout: 20000 });
     await pg.evaluate(() => { const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none'; });
     const ok = await until(pg, () => document.querySelector('.dot')?.classList.contains('online')
-      && document.querySelector('#dm-list li, #contacts-list li'), null, 20000);
+      && document.querySelector('#dm-list li.dm-item'), null, 20000);
     if (!ok) { fail(`${who} did not come back online with the contact`); throw new Error('stop'); }
-    await pg.evaluate(() => document.querySelector('#dm-list li, #contacts-list li').click());
+    await pg.evaluate(() => document.querySelector('#dm-list li.dm-item').click());
     if (!(await until(pg, () => { const b = document.getElementById('start-call-btn'); return b && b.offsetParent !== null; }, null, 8000))) {
       fail(`${who} could not reopen the DM`); throw new Error('stop');
     }

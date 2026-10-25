@@ -9,7 +9,7 @@
 // resetDateDivider() pokes rendering.state._lastRenderedDate = null (the render
 // cursor lives in rendering.js); all other cross-module calls are injected.
 
-import { escHtml, didIdTag } from './util.js';
+import { escHtml } from './util.js';
 import { podWriteReadState } from './pod.js';
 
 import { t, bidiIsolate } from './i18n.js';
@@ -102,8 +102,6 @@ export function createView({
     // Called after a conversation opens (composer placeholder, header subtitle).
     onViewOpened = () => {},
     getActiveView = () => null,
-    // Right-click / context-menu key on a contact row (contact details + remove).
-    onContactMenu = null,
 }) {
     // The contacts as last rendered, by peer did, for openContactByDid.
     const _contactsByDid = new Map();
@@ -145,50 +143,22 @@ export function createView({
     function renderContacts(contacts) {
         const peerDidToCertId = getPeerDidToCertId();
         const _threadNames = getThreadNames();
-        const list = document.getElementById("contacts-list");
-        const section = document.getElementById("contacts-section");
-        if (!list || !section) return;
-        list.innerHTML = "";
         _contactsByDid.clear();
-        if (!contacts || contacts.length === 0) { section.style.display = "none"; return; }
-        section.style.display = "";
+        if (!contacts || contacts.length === 0) return;
         for (const k in peerDidToCertId) delete peerDidToCertId[k]; // reset (mutate in place)
         // R86: which contacts advertise call binding (authenticated, from their signed
         // relationship). Rebuilt from the server's contacts list each time.
         const certCapable = getCertCapableContacts ? getCertCapableContacts() : null;
         if (certCapable) certCapable.clear();
+        // Contacts are listed as DM conversations (main.js merges them into the
+        // DM list); here they only feed the lookups the rest of the client uses.
         contacts.forEach(c => {
             if (c.peer_did && c.certificate_id) peerDidToCertId[c.peer_did] = c.certificate_id;
             if (certCapable && c.peer_did && c.binds_calls) certCapable.add(c.peer_did);
             if (c.certificate_id) {
                 _threadNames[c.certificate_id] = c.display_name || (c.peer_did || '').slice(8, 22) + '…';
             }
-        });
-        contacts.forEach(c => {
-            const shortId = (c.peer_did || "").slice(8, 22) + "…";
-            const label = c.display_name || shortId;
-            const li = document.createElement("li");
-            li.className = "dm-item";
-            li.title = c.peer_did || "";
-            // Display names are peer-chosen, so two contacts can share one. When a
-            // name is shown, append the stable short id inline (not only in title=,
-            // which is hover-only and absent on touch) so the rows stay distinct.
-            const idTag = c.display_name && didIdTag(c.peer_did)
-                ? ` <span class="dm-id-suffix id-suffix">·${escHtml(didIdTag(c.peer_did))}</span>`
-                : "";
-            li.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25z"/></svg><span class="contact-item-label"><span class="contact-item-name" dir="auto">' + escHtml(label) + '</span>' + idTag + '</span>';
-            _makeRowOperable(li, () => openContactThread(c));
             if (c.peer_did) _contactsByDid.set(c.peer_did, c);
-            if (onContactMenu) {
-                li.addEventListener("contextmenu", (e) => { e.preventDefault(); onContactMenu(c); });
-                li.addEventListener("keydown", (e) => {
-                    if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
-                        e.preventDefault();
-                        onContactMenu(c);
-                    }
-                });
-            }
-            list.appendChild(li);
         });
     }
 

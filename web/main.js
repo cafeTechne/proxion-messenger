@@ -229,7 +229,6 @@ import { createAccountSync } from './account-sync.js';
             onDelete: (li) => li.querySelector(".dm-close-btn")?.click(),
             onContextMenu: _sidebarRowMenu,
         });
-        makeListNavigable(document.getElementById("contacts-list"));
         // Message feed: one tab stop, arrows move between messages, Enter or the
         // ContextMenu/Shift+F10 key opens that message's actions (react / reply /
         // edit / delete / pin) — the hover action bar is otherwise mouse-only.
@@ -963,7 +962,6 @@ import { createAccountSync } from './account-sync.js';
             openSidebarCtx, resetDateDivider: () => { rendering.state._lastRenderedDate = null; rendering.resetUnread(); },
             onViewOpened: () => _onViewOpened(),
             getActiveView: () => activeView,
-            onContactMenu: (c) => showContactProfile(c.peer_did, c.display_name || ''),
         });
         // Invite-link carry-through (A4): capture now (survives reload/first-run),
         // consume on the "registered" event via the deep-link confirm modal.
@@ -1126,6 +1124,16 @@ import { createAccountSync } from './account-sync.js';
         // and requestRoomMembers: moved to members.js + rooms.js.
 
         // ── DM sidebar with last message preview + recency sort ──
+        // A contact is a DM conversation (one with no messages yet included),
+        // listed once in the DM list rather than again in a list of its own.
+        function _mergeContactsIntoDms(contacts) {
+            const dms = (contacts || []).filter(c => c.certificate_id).map(c => ({
+                cert_id: c.certificate_id, display_name: c.display_name || null,
+                peer_webid: c.peer_did || null, local: false,
+            }));
+            if (mergeDmSnapshot(localDmPeers, dms)) renderDmSidebar();
+        }
+
         function renderDmSidebar() {
             const list = document.getElementById("dm-list");
             const entries = Object.entries(localDmPeers);
@@ -3065,12 +3073,14 @@ import { createAccountSync } from './account-sync.js';
                     document.querySelectorAll("[data-peer-did='" + (event.peer_did || "") + "']")
                         .forEach(el => el.remove());
                     refreshFriendRequestsBadge();
-                    showToast(t('contact.connectedWith', { peer: (event.peer_did || "peer").slice(8, 22) + "…" }));
+                    showToast(t('contact.connectedWith', {
+                        peer: resolvePeerName(event.peer_did) || dmFallbackName(event.peer_did || "") }));
                     if (socket && socket.readyState === WebSocket.OPEN)
                         socket.send(JSON.stringify({cmd: "get_relationships"}));
                     break;
                 case "relationships":
                     renderContacts(event.contacts);
+                    _mergeContactsIntoDms(event.contacts);
                     const _openAfter = sessionStorage.getItem("proxion_open_cert_after_load");
                     if (_openAfter) {
                         sessionStorage.removeItem("proxion_open_cert_after_load");
@@ -4664,18 +4674,6 @@ import { createAccountSync } from './account-sync.js';
             btn.style.display = any ? "" : "none";
             if (!any) _closeRoomOptionsMenu();
         }
-        // The call widget lives at the foot of the sidebar, which is an
-        // off-canvas drawer on phones: mid-call there was no visible way to mute
-        // or hang up. On phones it sits at the top of the conversation instead.
-        const _vwHome = document.getElementById("voice-widget")?.parentElement || null;
-        function _placeVoiceWidget() {
-            const vw = document.getElementById("voice-widget");
-            const main = document.querySelector("main");
-            if (!vw || !main || !_vwHome) return;
-            const target = _phoneQuery.matches ? main : _vwHome;
-            if (vw.parentElement === target) return;
-            if (target === main) main.prepend(vw); else _vwHome.appendChild(vw);
-        }
         // Keyboard (arrows, Home/End, Escape/Tab back to the button) and roles
         // come from menu.js, like the other popup menus.
         function _closeRoomOptionsMenu(restoreFocus) {
@@ -4723,8 +4721,6 @@ import { createAccountSync } from './account-sync.js';
                 const _main = document.querySelector("main");
                 if (_main) _obs.observe(_main, { attributes: true, attributeFilter: ["class"] });
                 _phoneQuery.addEventListener("change", _syncRoomOptionsBtn);
-                _phoneQuery.addEventListener("change", _placeVoiceWidget);
-                _placeVoiceWidget();
                 _roMenu.addEventListener("click", (e) => {
                     const item = e.target.closest("[data-proxy-for]");
                     if (item) document.getElementById(item.dataset.proxyFor)?.click();
@@ -5464,6 +5460,7 @@ import { createAccountSync } from './account-sync.js';
             document.getElementById("sctx-invite").hidden = !!localDmPeers[threadId] || !roomInviteUrls[threadId];
             document.getElementById("sctx-leave").hidden = !isLocalRoom;
             document.getElementById("sctx-block").hidden = !peer;
+            document.getElementById("sctx-profile").hidden = !peer;
             _setBlockLabel(document.getElementById("sctx-block-label"), peer);
             document.getElementById("sctx-remove-contact").hidden = !(peer && peerDidToCertId[peer]);
             const menu = document.getElementById("sidebar-ctx-menu");
@@ -5516,6 +5513,11 @@ import { createAccountSync } from './account-sync.js';
         }
         document.getElementById("sctx-invite").onclick = () => _sctxRunInView("invite-btn");
         document.getElementById("sctx-leave").onclick = () => _sctxRunInView("leave-room-btn");
+        document.getElementById("sctx-profile").onclick = () => {
+            const p = localDmPeers[_sctxTargetId];
+            closeMenu(document.getElementById("sidebar-ctx-menu"));
+            if (p?.peer_webid) showContactProfile(p.peer_webid, p.display_name || '');
+        };
         document.getElementById("sctx-block").onclick = () => {
             const peer = localDmPeers[_sctxTargetId]?.peer_webid;
             closeMenu(document.getElementById("sidebar-ctx-menu"));
@@ -5740,7 +5742,7 @@ import { createAccountSync } from './account-sync.js';
                 const certs = await podReadContacts();
                 if (certs.length && socket?.readyState === WebSocket.OPEN) {
                     socket.send(JSON.stringify({ cmd: 'restore_contacts', certs }));
-                    renderContacts(certs.map(c => {
+                    const _podContacts = certs.map(c => {
                         // subject is a raw hex public key — convert to did:key for routing
                         let peerDid = c.peer_did || c.subject || '';
                         if (peerDid && !peerDid.startsWith('did:')) {
@@ -5750,7 +5752,9 @@ import { createAccountSync } from './account-sync.js';
                             } catch (_) { /* keep raw value */ }
                         }
                         return { certificate_id: c.certificate_id, peer_did: peerDid, display_name: c.display_name || null };
-                    }));
+                    });
+                    renderContacts(_podContacts);
+                    _mergeContactsIntoDms(_podContacts);
                 }
 
                 // 2. Pending invites
@@ -6874,15 +6878,6 @@ import { createAccountSync } from './account-sync.js';
             // replaced by the members PANEL, so the block was dead code — and it
             // held the last native prompt() calls. Moderation lives in the member
             // context menu on #members-list below.)
-
-            // Event delegation: #contacts-list — member-item profile cards
-            document.getElementById('contacts-list')?.addEventListener('click', e => {
-                const item = e.target.closest('[data-msg-action="profile"]');
-                if (item) {
-                    showProfileCard(item.dataset.webid, item.dataset.name, e.clientX, e.clientY);
-                    showContactProfile(item.dataset.webid, item.dataset.name);
-                }
-            });
 
             // Round 64: member-context-menu — right-click on member items to assign roles
             document.getElementById('members-list')?.addEventListener('contextmenu', e => {

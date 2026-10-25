@@ -418,11 +418,12 @@ body {
 } /* base */
 
 @layer layout {
+/* In-call widget: a bar across the top of the conversation. */
 #voice-widget {
     flex-direction: column;
     flex-shrink: 0;
-    padding: var(--space-3);
-    border-top: 1px solid var(--border);
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--border);
     background: var(--surface-0);
 }
 
@@ -1213,12 +1214,6 @@ button {
        drawer's containing block and clip its overflow, so the parked drawer is
        hidden and animates in from the clip region on .mobile-open. */
     #app { position: relative; overflow-x: hidden; }
-    /* In-call widget, moved to the top of the conversation on phones. */
-    main > #voice-widget {
-        border-top: none;
-        border-bottom: 1px solid var(--border);
-        padding: var(--space-2) var(--space-3);
-    }
     #members-panel {
         display: block !important;
         position: absolute;
@@ -1454,7 +1449,7 @@ button {
     flex-wrap: wrap;
     gap: var(--space-1);
 }
-/* The sidebar is 260px: mute, camera, screen, fullscreen and hang-up share the
+/* Narrow screens: mute, camera, screen, fullscreen and hang-up share the
    first row and the quality picker takes its own row underneath, so the
    hang-up button can never be pushed out of view. */
 .vw-controls > #vw-quality {
@@ -1462,6 +1457,7 @@ button {
     flex: 1 0 100%;
     min-width: 0;
 }
+
 .vw-controls button {
     flex: 1;
     min-width: 0;
@@ -1487,6 +1483,18 @@ button {
 #end-call:hover {
     background: color-mix(in srgb, var(--color-danger) 15%, transparent);
     color: var(--color-danger);
+}
+/* Wider screens: who you are talking to and the controls share one row
+   (hang-up at the far end), with any video full width underneath. */
+@media (min-width: 769px) {
+    #voice-widget { flex-flow: row wrap; align-items: center; gap: var(--space-2) var(--space-4); }
+    #voice-widget .vw-head { flex: 1 1 auto; min-width: 0; margin-bottom: 0; }
+    #voice-widget .vw-controls { flex-wrap: nowrap; }
+    #voice-widget .vw-controls button { flex: 0 0 auto; min-width: var(--control-h); }
+    #voice-widget .vw-controls > #vw-quality { order: 0; flex: 0 0 auto; }
+    #end-call { margin-inline-start: var(--space-2); }
+    #voice-widget :is(.vw-video-area, .vw-capture) { flex: 1 0 100%; order: 1; }
+    #vw-remote-video { max-height: 360px; }
 }
 } /* components */
 @layer utilities {
@@ -2583,6 +2591,10 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
            costing its own line. */
         .read-receipt { margin-inline-start: var(--space-2); font-size: var(--text-2xs); color: var(--slate-600); user-select: none; }
         .read-receipt.read { color: var(--color-success-soft); }
+        /* Text that ends in a list, quote or code block: keep the tick beside
+           the block's last line instead of alone on a line under it. */
+        .msg-content:has(> .msg-text > :is(ul, ol, blockquote, pre):last-child) { display: flex; align-items: flex-end; }
+        .msg-text > :is(ul, ol, blockquote, pre):last-child { margin-bottom: 0; }
         .seen-by-row { margin-top: var(--space-1); font-size: var(--text-2xs); color: var(--text-secondary); }
 
         /* Round 62: Voice Messages */

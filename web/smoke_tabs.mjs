@@ -102,14 +102,14 @@ async function befriend(alice, bob) {
   await alice.evaluate(() => document.getElementById('add-peer-submit-btn').click());
   await bob.waitForFunction(() => document.querySelector('#friend-request-list li [data-fr-action="accept"]'), { timeout: 20000 });
   await bob.evaluate(() => document.querySelector('#friend-request-list li [data-fr-action="accept"]').click());
-  for (const p of [bob, alice]) await p.waitForFunction(() => document.querySelector('#contacts-list li, #dm-list li'), { timeout: 20000 });
+  for (const p of [bob, alice]) await p.waitForFunction(() => document.querySelector('#dm-list li.dm-item'), { timeout: 20000 });
   await sleep(800);
 }
 async function openDm(p) {
-  const has = await p.waitForFunction(() => document.querySelector('#dm-list li, #contacts-list li'), { timeout: 15000 }).then(() => true, () => false);
+  const has = await p.waitForFunction(() => document.querySelector('#dm-list li.dm-item'), { timeout: 15000 }).then(() => true, () => false);
   if (!has) throw new Error('no DM entry: ' + await p.evaluate(() => JSON.stringify({ dm: document.getElementById('dm-list')?.innerHTML.slice(0, 300), contacts: document.getElementById('contacts-list')?.innerHTML.slice(0, 300), feed: document.getElementById('message-feed')?.textContent.slice(0, 200) })));
   await p.evaluate(() => { const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none'; });
-  await p.evaluate(() => document.querySelector('#dm-list li, #contacts-list li').click());
+  await p.evaluate(() => document.querySelector('#dm-list li.dm-item').click());
   await p.waitForFunction(() => { const h = document.getElementById('chat-header-name'); return h && !/welcome/i.test(h.textContent || ''); }, { timeout: 8000 });
   await sleep(500);
 }

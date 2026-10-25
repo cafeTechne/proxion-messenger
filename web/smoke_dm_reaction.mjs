@@ -158,11 +158,11 @@ try {
   step = 'bob-open-dm';
   // Bob must be *viewing* the DM thread, else an incoming relay DM is just an
   // unread badge on an inactive thread, not feed content.
-  await bob.waitForFunction(() => document.querySelector('#contacts-list li, #dm-list li'),
+  await bob.waitForFunction(() => document.querySelector('#dm-list li.dm-item'),
     { timeout: 20000 }).catch(() => fail('Alice never appeared as a contact/DM on Bob after acceptance'));
   if (process.exitCode) throw new Error('stop');
   await sleep(500);
-  await bob.evaluate(() => (document.querySelector('#dm-list li, #contacts-list li')).click());
+  await bob.evaluate(() => (document.querySelector('#dm-list li.dm-item')).click());
   await bob.waitForFunction(() => {
     const h = document.getElementById('chat-header-name'); return h && !/welcome/i.test(h.textContent || '');
   }, { timeout: 8000 }).catch(() => fail('Bob could not open the DM thread with Alice'));
@@ -170,11 +170,11 @@ try {
 
   step = 'alice-open-dm';
   // After acceptance + cert exchange, Bob shows up as a contact/DM on Alice's side.
-  await alice.waitForFunction(() => document.querySelector('#contacts-list li, #dm-list li'),
+  await alice.waitForFunction(() => document.querySelector('#dm-list li.dm-item'),
     { timeout: 20000 }).catch(() => fail('Bob never appeared as a contact/DM on Alice after acceptance'));
   if (process.exitCode) throw new Error('stop');
   await sleep(500);
-  await alice.evaluate(() => (document.querySelector('#dm-list li, #contacts-list li')).click());
+  await alice.evaluate(() => (document.querySelector('#dm-list li.dm-item')).click());
   // Wait until a DM thread is actually open (header leaves "Welcome").
   await alice.waitForFunction(() => {
     const h = document.getElementById('chat-header-name'); return h && !/welcome/i.test(h.textContent || '');
@@ -324,11 +324,11 @@ try {
     await p.waitForFunction(() => document.querySelector('.dot')?.classList.contains('online'), { timeout: 15000 })
       .catch(() => fail(`${label} did not reconnect after reload`));
     if (process.exitCode) throw new Error('stop');
-    await p.waitForFunction(() => document.querySelector('#contacts-list li, #dm-list li'), { timeout: 15000 })
+    await p.waitForFunction(() => document.querySelector('#dm-list li.dm-item'), { timeout: 15000 })
       .catch(() => fail(`DM gone from ${label} after reload`));
     if (process.exitCode) throw new Error('stop');
     await sleep(500);
-    await p.evaluate(() => (document.querySelector('#dm-list li, #contacts-list li')).click());
+    await p.evaluate(() => (document.querySelector('#dm-list li.dm-item')).click());
     await p.waitForFunction((t) => document.getElementById('message-feed')?.textContent.includes(t),
       { timeout: 10000, polling: 250 }, REPLY).catch(() => fail(`${label}: DM history missing after reload`));
     if (process.exitCode) throw new Error('stop');

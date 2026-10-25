@@ -108,9 +108,9 @@ async function openClient(ctx, url, label) {
 
 const feedHas = (page, t) => page.evaluate((x) => (document.getElementById('message-feed')?.textContent || '').includes(x), t);
 async function openFirstDm(page, who) {
-  await page.waitForFunction(() => document.querySelector('#contacts-list li, #dm-list li'), { timeout: 20000 });
+  await page.waitForFunction(() => document.querySelector('#dm-list li.dm-item'), { timeout: 20000 });
   await sleep(400);
-  await page.evaluate(() => (document.querySelector('#dm-list li, #contacts-list li')).click());
+  await page.evaluate(() => (document.querySelector('#dm-list li.dm-item')).click());
   await page.waitForFunction(() => {
     const h = document.getElementById('chat-header-name'); return h && !/welcome/i.test(h.textContent || '');
   }, { timeout: 8000 });

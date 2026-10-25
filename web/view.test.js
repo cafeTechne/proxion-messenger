@@ -116,58 +116,17 @@ describe('openLocalDmThread', () => {
 });
 
 describe('renderContacts', () => {
-  it('resets peerDidToCertId in place and rebuilds the map + list', () => {
+  it('resets peerDidToCertId in place and rebuilds the map', () => {
     const original = host.peerDidToCertId;
     make().renderContacts([{ certificate_id: 'c1', peer_did: 'did:key:zA', display_name: 'A' }]);
     expect(host.peerDidToCertId).toBe(original);          // same object (mutated in place)
     expect(host.peerDidToCertId).toEqual({ 'did:key:zA': 'c1' });
     expect(host.peerDidToCertId.stale).toBeUndefined();   // cleared
-    expect(els['contacts-list']._children).toHaveLength(1);
   });
-  it('hides the section when there are no contacts', () => {
-    els['contacts-section'] = mkEl({ style: { display: '' } });
-    make().renderContacts([]);
-    expect(els['contacts-section'].style.display).toBe('none');
-  });
-  it('appends a stable short id beside a display name so same-named contacts are distinct', () => {
-    make().renderContacts([
-      { certificate_id: 'c1', peer_did: 'did:key:zRealAlice', display_name: 'Alice' },
-      { certificate_id: 'c2', peer_did: 'did:key:zFakeAlice', display_name: 'Alice' },
-    ]);
-    const [row1, row2] = els['contacts-list']._children;
-    // Both rows show "Alice" but the inline id keeps the rendered rows different.
-    expect(row1.innerHTML).toContain('Alice');
-    expect(row2.innerHTML).toContain('Alice');
-    expect(row1.innerHTML).not.toBe(row2.innerHTML);
-    expect(row1.innerHTML).toContain('RealAlice'.slice(0, 6));
-  });
-  it('wraps the name in its own element so CSS can truncate it and keep the id', () => {
-    make().renderContacts([{ certificate_id: 'c1', peer_did: 'did:key:zRealAlice', display_name: '<b>Al</b>' }]);
-    const html = els['contacts-list']._children[0].innerHTML;
-    expect(html).toMatch(/<span class="contact-item-label"><span class="contact-item-name" dir="auto">&lt;b&gt;Al&lt;\/b&gt;<\/span> <span class="dm-id-suffix id-suffix">/);
-  });
-  it('opens contact details from a right-click or the context-menu key on the row', () => {
-    // The contact details panel (with Remove contact) had no way in from the list.
-    global.document.createElement = () => {
-      const el = mkEl();
-      el._ls = {};
-      el.addEventListener = (type, fn) => { (el._ls[type] = el._ls[type] || []).push(fn); };
-      return el;
-    };
-    const opened = [];
-    const v = createView({ getSocket: () => host.socket,
-      setActiveView: (x) => { host.activeView = x; }, setMessageMap: () => {}, setAllMessages: () => {},
-      setCurrentRoomMembers: () => {}, getAllMessages: () => [],
-      getPeerDidToCertId: () => host.peerDidToCertId, getThreadNames: () => host.threadNames,
-      getUnreadCounts: () => host.unreadCounts, getMutedThreads: () => host.mutedThreads,
-      updateE2EStatus() {}, updateIdentityFingerprint() {}, updateSidebarBadge() {},
-      onContactMenu: (c) => opened.push(c.peer_did) });
-    v.renderContacts([{ certificate_id: 'c1', peer_did: 'did:key:zA', display_name: 'A' }]);
-    const row = els['contacts-list']._children[0];
-    row._ls.contextmenu.forEach(fn => fn({ preventDefault() {} }));
-    row._ls.keydown.forEach(fn => fn({ key: 'ContextMenu', preventDefault() {} }));
-    row._ls.keydown.forEach(fn => fn({ key: 'a', preventDefault() {} }));
-    expect(opened).toEqual(['did:key:zA', 'did:key:zA']);
+  it('names the contact thread and renders no list of its own (contacts are DM rows)', () => {
+    make().renderContacts([{ certificate_id: 'c1', peer_did: 'did:key:zA', display_name: 'A' }]);
+    expect(host.threadNames.c1).toBe('A');
+    expect(els['contacts-list']?._children?.length ?? 0).toBe(0);
   });
   it('openContactByDid opens a listed contact and reports an unknown one', () => {
     const v = make();
