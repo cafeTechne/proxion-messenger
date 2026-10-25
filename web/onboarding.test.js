@@ -53,6 +53,38 @@ describe('obGoto', () => {
   });
 });
 
+describe('obBack', () => {
+  it('returns to the step the user came from, and hides Back on the first', () => {
+    const { ob } = make();
+    els['ob-back-btn'] = mkEl({ hidden: true });
+    ob.obGoto(1);
+    expect(els['ob-back-btn'].hidden).toBe(true);
+    ob.obGoto(2);
+    expect(els['ob-back-btn'].hidden).toBe(false);
+    ob.obGoto(4);
+    ob.obBack();
+    expect(els['ob-step-2'].style.display).toBe('block');
+    ob.obBack();
+    expect(els['ob-step-1'].style.display).toBe('block');
+    expect(els['ob-back-btn'].hidden).toBe(true);
+  });
+  it('offers no Back to a returning user dropped onto a step', () => {
+    const { ob } = make();
+    els['ob-back-btn'] = mkEl({ hidden: true });
+    ob.obGoto(2);
+    ob.obGoto(4, { returning: true });
+    expect(els['ob-back-btn'].hidden).toBe(true);
+  });
+  it('has no Back on the last step', () => {
+    const { ob } = make();
+    els['ob-back-btn'] = mkEl({ hidden: true });
+    ob.obGoto(1);
+    ob.obGoto(5);
+    ob.obGoto(6);
+    expect(els['ob-back-btn'].hidden).toBe(true);
+  });
+});
+
 describe('wizard progress', () => {
   it('counts only the visible steps (1, 2, 4, 5, 6)', () => {
     expect(OB_STEPS).toEqual([1, 2, 4, 5, 6]);

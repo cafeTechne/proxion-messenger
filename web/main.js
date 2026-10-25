@@ -609,7 +609,7 @@ import { createAccountSync } from './account-sync.js';
         const {
             openSettingsToPod, obPodMode, showOnboarding, obGoto, obStep2,
             finishOnboarding, obSkipPod, obSelectProvider, obPodTestConnection,
-            obPodSignIn, copyObInviteUrl, obStep4Create, obStep4Join,
+            obPodSignIn, copyObInviteUrl, obStep4Create, obStep4Join, obBack,
         } = createOnboarding({
             getSocket: () => socket, setPodBanner, showToast, showCopyModal, showConfirm,
         });
@@ -6272,6 +6272,7 @@ import { createAccountSync } from './account-sync.js';
 
             // Onboarding: Step 1 - Get Started
             attachListener('#ob-start-btn', 'click', () => obGoto(2));
+            attachListener('#ob-back-btn', 'click', obBack);
 
             // Onboarding: Step 2 - Continue
             attachListener('#ob-step2-btn', 'click', obStep2);

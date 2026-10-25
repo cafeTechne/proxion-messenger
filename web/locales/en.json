@@ -918,6 +918,7 @@
   "onboarding.skipForNow": "Skip for now",
   "onboarding.usingElsewhere": "Already using Proxion elsewhere?",
   "onboarding.orJoinCode": "Or join with an invite code:",
+  "onboarding.podUrlLabel": "Pod server URL",
   "onboarding.startChatting": "Start chatting with your Proxion network.",
   "onboarding.shareInviteLink": "Share this invite link with a contact:",
   "onboarding.addressPending": "(connecting…)",

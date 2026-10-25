@@ -73,7 +73,29 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         }
     }
 
+    // Steps the user moved forward through, for Back. A returning user dropped
+    // straight onto a step (opts.returning, or a fresh page load) has none.
+    const _obHistory = [];
+    function _currentStep() {
+        return OB_STEPS.find(n => {
+            const el = document.getElementById(`ob-step-${n}`);
+            return el && el.style.display !== "none";
+        }) || null;
+    }
+    function _syncBack(step) {
+        const back = document.getElementById("ob-back-btn");
+        // No Back from the last step: by then the pod or room choice is done.
+        if (back) back.hidden = !_obHistory.length || step === OB_STEPS[OB_STEPS.length - 1];
+    }
+    function obBack() {
+        const prev = _obHistory.pop();
+        if (prev) obGoto(prev, { fromBack: true });
+    }
+
     function obGoto(step, opts = {}) {
+        const from = _currentStep();
+        if (opts.returning) _obHistory.length = 0;
+        else if (!opts.fromBack && from && from !== step && OB_STEPS.indexOf(step) > OB_STEPS.indexOf(from)) _obHistory.push(from);
         for (let i = 1; i <= 6; i++) {
             const el = document.getElementById(`ob-step-${i}`);
             if (el) el.style.display = "none";
@@ -81,6 +103,7 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         const target = document.getElementById(`ob-step-${step}`);
         if (target) target.style.display = "block";
         _setProgress(step);
+        _syncBack(step);
         _setError("ob-name-error", "");
         _setError("ob-join-error", "");
         if (step === 6) {
@@ -159,13 +182,16 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         form.style.display = "block";
         const label = document.getElementById("ob-pod-provider-label");
         const urlInput = document.getElementById("ob-pod-css-url");
+        const urlLabel = document.getElementById("ob-pod-css-url-label");
         if (cssUrl === "custom") {
             label.textContent = t('onboarding.enterCssManual');
             urlInput.style.display = "block";
+            if (urlLabel) urlLabel.style.display = "block";
             urlInput.value = "";
         } else {
             label.textContent = t('onboarding.enterCssAccount', { url: cssUrl });
             urlInput.style.display = "none";
+            if (urlLabel) urlLabel.style.display = "none";
             urlInput.value = cssUrl;
         }
         document.getElementById("ob-pod-email").value = "";
@@ -297,6 +323,6 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
     return {
         openSettingsToPod, obPodMode, showOnboarding, obGoto, obStep2,
         finishOnboarding, obSkipPod, obSelectProvider, obPodTestConnection,
-        obPodSignIn, copyObInviteUrl, obStep4Create, obStep4Join,
+        obPodSignIn, copyObInviteUrl, obStep4Create, obStep4Join, obBack,
     };
 }

@@ -3253,7 +3253,10 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 .field-error { margin: 0 0 var(--space-3); min-height: 1.2em; font-size: var(--text-md); color: var(--color-danger-soft); }
 .field-error:empty { margin-bottom: var(--space-2); }
 /* Onboarding wizard: progress label and the quiet "Skip for now" link. */
-.ob-progress { margin: 0 0 var(--space-2); font-size: var(--text-sm); color: var(--text-secondary); }
+.ob-topbar { display: flex; align-items: center; gap: var(--space-3); margin: 0 0 var(--space-2); }
+.ob-progress { margin: 0; font-size: var(--text-sm); color: var(--text-secondary); }
+.ob-back { min-height: 0; padding: 0; }
+.ob-back[hidden] { display: none; }
 .ob-skip-link {
     background: transparent;
     border: none;

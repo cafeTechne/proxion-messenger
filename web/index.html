@@ -1135,7 +1135,10 @@
     <!-- Onboarding wizard -->
     <div id="onboarding-modal" class="modal modal--gate modal--opaque" data-modal-persistent role="dialog" aria-modal="true" aria-label="Welcome to Proxion" style="display:none;" data-i18n-attr="aria-label:ui.welcomeProxion">
       <div class="modal__panel modal__panel--md modal__panel--roomy">
-        <p id="ob-progress" class="ob-progress"></p>
+        <div class="ob-topbar">
+          <button type="button" id="ob-back-btn" class="btn btn--link ob-back" hidden data-i18n="ui.back">Back</button>
+          <p id="ob-progress" class="ob-progress"></p>
+        </div>
         <div id="ob-step-1">
           <h2 data-i18n="heading.welcomeProxion">Welcome to Proxion</h2>
           <p class="prose-muted" data-i18n="onboarding.welcomeBody">
@@ -1192,13 +1195,15 @@
           <!-- Credential form (hidden until provider selected) -->
           <div class="mt-4" id="ob-pod-cred-form" style="display:none;">
             <div class="prose-muted prose-muted--sm mb-2" id="ob-pod-provider-label"></div>
+            <label for="ob-pod-css-url" id="ob-pod-css-url-label" class="field-label" style="display:none;" data-i18n="onboarding.podUrlLabel">Pod server URL</label>
             <input class="input" id="ob-pod-css-url" autocapitalize="off" autocorrect="off" type="url" placeholder="Pod server URL (e.g. https://solidcommunity.net)"
                    autocomplete="off" spellcheck="false" style="display:none;" data-i18n-attr="placeholder:ui.podServerUrlE">
-            <input class="input" id="ob-pod-email" type="email" placeholder="Email address"
-                   autocomplete="email" data-i18n-attr="placeholder:ui.emailAddress">
+            <label for="ob-pod-email" class="field-label" data-i18n="ui.emailAddress">Email address</label>
+            <input class="input" id="ob-pod-email" type="email" autocomplete="email">
+            <label for="ob-pod-password" class="field-label" data-i18n="ui.password">Password</label>
             <div class="input-wrap">
-              <input class="input" id="ob-pod-password" enterkeyhint="done" type="password" placeholder="Password"
-                     autocomplete="current-password" data-i18n-attr="placeholder:ui.password">
+              <input class="input" id="ob-pod-password" enterkeyhint="done" type="password"
+                     autocomplete="current-password">
               <button class="btn btn--quiet input-wrap__action" id="ob-pod-pw-toggle" type="button" data-i18n="btn.show">
                 Show
               </button>
@@ -1233,9 +1238,8 @@
         <div id="ob-step-5" style="display:none">
           <h2 data-i18n="heading.joinCreateRoom">Join or create a room</h2>
           <button id="ob-step5-create" class="btn btn--accent btn--hero" data-i18n="heading.createRoom">Create a room</button>
-          <br><br>
-          <p class="mt-2 mb-1" data-i18n="onboarding.orJoinCode">Or join with an invite code:</p>
-          <input id="ob-invite-code" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" class="input" placeholder="prx1_…" aria-label="Invite code" aria-describedby="ob-join-error" data-i18n-attr="placeholder:ui.prx1;aria-label:onboarding.inviteCodeLabel">
+          <label for="ob-invite-code" class="field-label mt-4" data-i18n="onboarding.orJoinCode">Or join with an invite code:</label>
+          <input id="ob-invite-code" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" class="input" placeholder="prx1_…" aria-describedby="ob-join-error" data-i18n-attr="placeholder:ui.prx1">
           <p id="ob-join-error" class="field-error" role="alert"></p>
           <button class="btn btn--slate" id="ob-step5-join" data-i18n="btn.joinCode">Join with code</button>
           <p class="mt-4 mb-0">
