@@ -893,6 +893,17 @@ export function createRendering({
         return m && m.timestamp ? _dateLabelForTimestamp(m.timestamp) : null;
     }
 
+    // A system note (join, ban ...) belongs under the same date heading as
+    // the messages around it: put the heading in first when the day changed.
+    function ensureDateDivider(timestamp) {
+        const feed = document.getElementById("message-feed");
+        if (!feed || !timestamp) return;
+        const label = _dateLabelForTimestamp(timestamp);
+        if (label === state._lastRenderedDate) return;
+        state._lastRenderedDate = label;
+        feed.appendChild(_dateDividerEl(label));
+    }
+
     function _dateDividerEl(label) {
         const d = document.createElement("div");
         d.className = "date-divider";
@@ -1196,7 +1207,7 @@ export function createRendering({
 
     return {
         renderMessages, renderMessage, _renderThreaded, scrollToBottom,
-        _renderMessageEl, _dateLabelForTimestamp,
+        _renderMessageEl, _dateLabelForTimestamp, ensureDateDivider,
         markUnread, setUnreadBefore, scrollToUnread, clearUnreadDivider, resetUnread,
         removeMessage, fillAttachment,
         mergeOlderHistory, rerenderKeepingAnchor, revealMessage, attach, state,

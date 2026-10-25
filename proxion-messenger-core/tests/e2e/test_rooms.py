@@ -37,6 +37,8 @@ async def test_room_join(live_gateway, alice_agent, bob_agent):
     # Alice should receive room_member_joined notification
     member_evt = await alice.recv_type("room_member_joined", timeout=5.0)
     assert member_evt.get("room_id") == room_id
+    # Named, so the room can say who joined rather than "Someone".
+    assert member_evt.get("display_name") == "Bob"
 
     await alice.ws.close()
     await bob.ws.close()

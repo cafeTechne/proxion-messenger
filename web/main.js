@@ -2512,12 +2512,8 @@ import { createAccountSync } from './account-sync.js';
                         }
                     }
                     if (activeView && activeView.id === event.room_id) {
-                        const feed = document.getElementById("message-feed");
-                        const el = document.createElement("div");
-                        el.className = "system-msg";
-                        el.textContent = t('room.someoneJoined');
-                        feed.appendChild(el);
-                        feed.scrollTop = feed.scrollHeight;
+                        const _jn = event.display_name || resolvePeerName(event.webid);
+                        _appendSystemMsg(_jn ? t('room.memberJoined', { name: _jn }) : t('room.someoneJoined'));
                     }
                     // Refresh the member list (panel, @-mentions, header count)
                     // so the newcomer can be seen and moderated right away.
@@ -5295,6 +5291,7 @@ import { createAccountSync } from './account-sync.js';
             const el = document.createElement("div");
             el.className = "system-msg";
             el.textContent = text;
+            rendering.ensureDateDivider(new Date().toISOString());
             feed.appendChild(el);
             feed.scrollTop = feed.scrollHeight;
         }

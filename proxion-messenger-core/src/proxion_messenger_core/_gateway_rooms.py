@@ -2372,6 +2372,7 @@ class RoomHandlerMixin:
                 "room_id": room_id,
                 "name": room["name"],
                 "webid": self._client_webids.get(websocket, ""),
+                "display_name": self._name_for(websocket, self._client_webids.get(websocket, "")),
             }
             for ws in list(room["members"]):
                 if ws != websocket and ws in self.clients:
@@ -4100,7 +4101,8 @@ class RoomHandlerMixin:
             "code": "", "invite_url": raw, "federated": True,
         }))
         _evt = json.dumps({"type": "room_member_joined", "room_id": room_id,
-                           "name": name, "webid": caller})
+                           "name": name, "webid": caller,
+                           "display_name": self._name_for(websocket, caller)})
         for ws in list(self._local_rooms[room_id]["members"]):
             if ws is not websocket and ws in self.clients:
                 try:
