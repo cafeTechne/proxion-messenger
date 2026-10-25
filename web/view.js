@@ -307,6 +307,7 @@ export function createView({
         const li = document.createElement("li");
         li.id = `nav-${roomId}`;
         li.setAttribute("data-name", name);
+        li.dataset.viewType = "local_room";
         _markIfOpen(li, roomId);
         li.classList.add("nav-row");
         li.innerHTML = `
@@ -374,6 +375,7 @@ export function createView({
             li.setAttribute("data-name", name);
             _markIfOpen(li, id);
             li.classList.add("nav-row");
+            li.dataset.viewType = type;
             const nameSpan = document.createElement("span");
             nameSpan.className = "nav-label";
             nameSpan.classList.add("grow");

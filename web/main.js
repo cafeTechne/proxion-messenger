@@ -1250,7 +1250,7 @@ import { createAccountSync } from './account-sync.js';
                 const b = document.getElementById(id);
                 if (b) b.style.display = "none";
             }
-            for (const id of ["room-opt-disappear", "room-opt-bans"]) {
+            for (const id of ["room-opt-disappear", "room-opt-bans", "room-opt-mute", "room-opt-block", "room-opt-remove-contact"]) {
                 const item = document.getElementById(id);
                 if (item) item.hidden = true;
             }
@@ -2195,6 +2195,10 @@ import { createAccountSync } from './account-sync.js';
                             socket.send(JSON.stringify({cmd: "get_rooms"}));
                             socket.send(JSON.stringify({cmd: "get_dms"}));
                             socket.send(JSON.stringify({cmd: "get_identity"}));
+                            // The address bar, QR share and invite link all read
+                            // my_address; without this they stay empty until
+                            // Settings is opened.
+                            socket.send(JSON.stringify({cmd: "get_my_address"}));
                             socket.send(JSON.stringify({cmd: "list_friend_requests"}));
                             socket.send(JSON.stringify({cmd: "get_relationships"}));
                             blocks.requestBlocks();   // R65: hydrate block state
@@ -2905,8 +2909,10 @@ import { createAccountSync } from './account-sync.js';
                         const obAddr = document.getElementById("ob-my-addr");
                         if (obAddr) obAddr.textContent = event.proxion_address;
                     }
-                    // R28: NAT warning banner (shown once per session)
-                    if (!sessionStorage.getItem('proxion_nat_warned')) {
+                    // R28: NAT warning banner (shown once per session, never
+                    // over the onboarding wizard on first launch)
+                    if (!sessionStorage.getItem('proxion_nat_warned')
+                        && document.getElementById('onboarding-modal')?.style.display !== 'flex') {
                         fetch(gatewayUrl('/.well-known/proxion')).then(r => r.json()).then(d => {
                             if (d.nat_warning) {
                                 sessionStorage.setItem('proxion_nat_warned', '1');
@@ -4464,7 +4470,28 @@ import { createAccountSync } from './account-sync.js';
 
         // Disappearing messages: a room's owner or either side of a DM may set
         // it. The current value drives the banner, so load it on every open.
+        // Mute for any conversation; Block and Remove contact in a DM. Labels
+        // follow the current state, so this also runs when the menu opens.
+        function _dmViewPeer() {
+            if (activeView?.type !== "dm" && activeView?.type !== "local_dm") return null;
+            return activeView.peerWebid || activeView.peerDid || localDmPeers[activeView.id]?.peer_webid || null;
+        }
+        function _syncConversationOptions() {
+            const muteItem = document.getElementById("room-opt-mute");
+            if (muteItem) {
+                muteItem.hidden = !activeView?.id;
+                const key = activeView?.id && mutedThreads.has(activeView.id) ? "sctx.unmute" : "sctx.mute";
+                muteItem.dataset.i18n = key;
+                muteItem.textContent = t(key);
+            }
+            const peer = _dmViewPeer();
+            const blockItem = document.getElementById("room-opt-block");
+            if (blockItem) { blockItem.hidden = !peer; _setBlockLabel(blockItem, peer); }
+            const removeItem = document.getElementById("room-opt-remove-contact");
+            if (removeItem) removeItem.hidden = !(peer && peerDidToCertId[peer]);
+        }
         function _syncDisappearOption() {
+            _syncConversationOptions();
             const item = document.getElementById("room-opt-disappear");
             const type = activeView?.type;
             const canSet = type === "local_dm" || type === "dm" ||
@@ -4566,7 +4593,7 @@ import { createAccountSync } from './account-sync.js';
             const any = ["leave-room-btn", "delete-room-btn"].some(id => {
                 const b = document.getElementById(id);
                 return b && b.style.display && b.style.display !== "none";
-            }) || !!document.querySelector("#room-options-menu [data-proxy-for]:not([hidden]), #room-opt-disappear:not([hidden]), #room-opt-bans:not([hidden]), #room-opt-edit:not([hidden])");
+            }) || !!document.querySelector("#room-options-menu [data-proxy-for]:not([hidden]), #room-opt-disappear:not([hidden]), #room-opt-bans:not([hidden]), #room-opt-edit:not([hidden]), #room-opt-mute:not([hidden])");
             btn.style.display = any ? "" : "none";
             if (!any) _closeRoomOptionsMenu();
         }
@@ -4592,6 +4619,7 @@ import { createAccountSync } from './account-sync.js';
             const menu = document.getElementById("room-options-menu");
             const btn = document.getElementById("room-options-btn");
             if (!menu || !btn) return;
+            _syncConversationOptions();
             btn.setAttribute("aria-expanded", "true");
             const r = btn.getBoundingClientRect();
             openMenu(menu, { x: r.left, y: r.bottom + 4, opener: btn,
@@ -5351,6 +5379,7 @@ import { createAccountSync } from './account-sync.js';
 
         // --------------- Sidebar Context Menu ---------------
         let _sctxTargetId = null;
+        let _sctxTargetLi = null;
         function openSidebarCtx(e, threadId) {
             e.preventDefault();
             e.stopPropagation();
@@ -5361,6 +5390,14 @@ import { createAccountSync } from './account-sync.js';
             // R59G: custom emoji is a room feature — hide for DM threads
             const _sctxEmoji = document.getElementById("sctx-emoji");
             if (_sctxEmoji) _sctxEmoji.style.display = localDmPeers[threadId] ? "none" : "";
+            _sctxTargetLi = e.currentTarget instanceof Element ? e.currentTarget : null;
+            const peer = localDmPeers[threadId]?.peer_webid || null;
+            const isLocalRoom = _sctxTargetLi?.dataset.viewType === "local_room";
+            document.getElementById("sctx-invite").hidden = !!localDmPeers[threadId] || !roomInviteUrls[threadId];
+            document.getElementById("sctx-leave").hidden = !isLocalRoom;
+            document.getElementById("sctx-block").hidden = !peer;
+            _setBlockLabel(document.getElementById("sctx-block-label"), peer);
+            document.getElementById("sctx-remove-contact").hidden = !(peer && peerDidToCertId[peer]);
             const menu = document.getElementById("sidebar-ctx-menu");
             openMenu(menu, { x: e.clientX, y: e.clientY, opener: document.activeElement });
         }
@@ -5382,6 +5419,44 @@ import { createAccountSync } from './account-sync.js';
         document.getElementById("sctx-unmute").onclick = () => {
             if (_sctxTargetId) { unmuteThread(_sctxTargetId); _sendServerMute(_sctxTargetId, false); }
             closeMenu(document.getElementById("sidebar-ctx-menu"));
+        };
+        // Block and Remove contact, shared by the sidebar menu and the open
+        // conversation's options menu.
+        function _setBlockLabel(el, webid) {
+            if (!el) return;
+            const key = webid && blocks.isBlocked(webid) ? 'btn.unblock' : 'btn.block';
+            el.dataset.i18n = key;
+            el.textContent = t(key);
+        }
+        function _confirmRemoveContact(webid, onRemoved) {
+            const certId = webid ? peerDidToCertId[webid] : null;
+            if (!certId || !socket) { showToast(t('contact.removeUnavailable')); return; }
+            showConfirm(t('confirm.removeContact'), () => {
+                socket.send(JSON.stringify({ cmd: 'revoke_contact', cert_id: certId }));
+                onRemoved?.();
+                showToast(t('contact.removed'));
+            }, null, { title: t('confirm.removeContact.title'), confirmLabel: t('btn.removeContact'), danger: true });
+        }
+        // Invite and Leave act on the open room: open the row's conversation
+        // first, then run the header's own action.
+        function _sctxRunInView(headerBtnId) {
+            const li = _sctxTargetLi;
+            closeMenu(document.getElementById("sidebar-ctx-menu"));
+            if (!li || !_sctxTargetId) return;
+            if (activeView?.id !== _sctxTargetId) li.click();
+            if (activeView?.id === _sctxTargetId) document.getElementById(headerBtnId)?.click();
+        }
+        document.getElementById("sctx-invite").onclick = () => _sctxRunInView("invite-btn");
+        document.getElementById("sctx-leave").onclick = () => _sctxRunInView("leave-room-btn");
+        document.getElementById("sctx-block").onclick = () => {
+            const peer = localDmPeers[_sctxTargetId]?.peer_webid;
+            closeMenu(document.getElementById("sidebar-ctx-menu"));
+            if (peer) blocks.toggle(peer);
+        };
+        document.getElementById("sctx-remove-contact").onclick = () => {
+            const peer = localDmPeers[_sctxTargetId]?.peer_webid;
+            closeMenu(document.getElementById("sidebar-ctx-menu"));
+            if (peer) _confirmRemoveContact(peer);
         };
         document.getElementById("sctx-mark-read").onclick = () => {
             if (_sctxTargetId) {
@@ -5865,13 +5940,9 @@ import { createAccountSync } from './account-sync.js';
             // Fix: remove/revoke a contact (revoke_contact had no UI).
             attachListener('#contact-profile-remove-btn', 'click', () => {
                 const webid = document.getElementById('contact-profile-dm-btn')?.dataset.webid;
-                const certId = webid ? peerDidToCertId[webid] : null;
-                if (!certId || !socket) { showToast(t('contact.removeUnavailable')); return; }
-                showConfirm(t('confirm.removeContact'), () => {
-                    socket.send(JSON.stringify({ cmd: 'revoke_contact', cert_id: certId }));
+                _confirmRemoveContact(webid, () => {
                     document.getElementById('contact-profile-panel').style.display = 'none';
-                    showToast(t('contact.removed'));
-                }, null, { title: t('confirm.removeContact.title'), confirmLabel: t('btn.removeContact'), danger: true });
+                });
             });
 
             // Message feed: Scroll to bottom button
@@ -5986,6 +6057,22 @@ import { createAccountSync } from './account-sync.js';
                 }
             });
             attachListener('#voice-record-cancel', 'click', () => stopVoiceRecording(false));
+
+            attachListener('#room-opt-mute', 'click', () => {
+                const id = activeView?.id;
+                if (!id) return;
+                const muted = !mutedThreads.has(id);
+                if (muted) muteThread(id); else unmuteThread(id);
+                _sendServerMute(id, muted);
+            });
+            attachListener('#room-opt-block', 'click', () => {
+                const peer = _dmViewPeer();
+                if (peer) blocks.toggle(peer);
+            });
+            attachListener('#room-opt-remove-contact', 'click', () => {
+                const peer = _dmViewPeer();
+                if (peer) _confirmRemoveContact(peer);
+            });
 
             // Round 65: Disappearing messages, set from the options menu
             attachListener('#room-opt-disappear', 'click', () => {
@@ -6180,8 +6267,20 @@ import { createAccountSync } from './account-sync.js';
             attachListener('#share-invite-btn', 'click', shareInviteLink);
 
             // R17.1: QR share panel buttons
-            attachListener('#qr-close-btn', 'click', () => {
+            const _closeQrPanel = () => {
                 document.getElementById('qr-share-panel').style.display = 'none';
+            };
+            attachListener('#qr-close-btn', 'click', _closeQrPanel);
+            // The panel is a popover: Escape or a click outside it closes it.
+            document.addEventListener('keydown', (e) => {
+                const panel = document.getElementById('qr-share-panel');
+                if (e.key === 'Escape' && panel && panel.style.display !== 'none') _closeQrPanel();
+            });
+            document.addEventListener('click', (e) => {
+                const panel = document.getElementById('qr-share-panel');
+                if (!panel || panel.style.display === 'none') return;
+                if (panel.contains(e.target) || e.target.closest('#share-invite-btn')) return;
+                _closeQrPanel();
             });
             attachListener('#qr-download-btn', 'click', () => {
                 const canvas = document.querySelector('#my-qr canvas');
