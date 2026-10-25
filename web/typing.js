@@ -32,6 +32,7 @@ export function typingText(webids, resolveName) {
 export function createTyping({ getSocket, getActiveView, resolveName }) {
     const state = {
         typingUsers: {},      // webid -> timestamp of last "typing" event
+        typingViewId: null,   // the view typingUsers belongs to
         typingThrottled: false,
     };
 
@@ -39,11 +40,18 @@ export function createTyping({ getSocket, getActiveView, resolveName }) {
         const id = event.room_id || event.cert_id;
         const activeView = getActiveView();
         if (!activeView || activeView.id !== id) return;
+        if (state.typingViewId !== id) { state.typingUsers = {}; state.typingViewId = id; }
         state.typingUsers[event.from_webid] = Date.now();
         updateTypingDisplay();
     }
 
     function updateTypingDisplay() {
+        // Typists belong to one view: switching rooms must not carry the
+        // previous room's "X is typing" over for the rest of its 4 s.
+        if (state.typingViewId !== (getActiveView()?.id ?? null)) {
+            state.typingUsers = {};
+            state.typingViewId = null;
+        }
         const now = Date.now();
         const activeTyping = Object.keys(state.typingUsers).filter(
             (uid) => now - state.typingUsers[uid] < 4000

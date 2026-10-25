@@ -49,6 +49,17 @@ describe('handleTyping / updateTypingDisplay', () => {
     t.updateTypingDisplay();
     expect(els['typing-indicator'].innerText).toBe('');
   });
+  it('drops the typists of the previous view after switching views', () => {
+    els['typing-indicator'] = mkEl();
+    const t = make();
+    t.handleTyping({ room_id: 'room-1', from_webid: 'did:key:zAlice' });
+    view = { type: 'room', id: 'room-2' };
+    t.updateTypingDisplay();
+    expect(els['typing-indicator'].innerText).toBe('');
+    view = { type: 'room', id: 'room-1' };
+    t.updateTypingDisplay();
+    expect(els['typing-indicator'].innerText).toBe('');
+  });
   it('updateTypingDisplay is a no-op when the indicator element is absent', () => {
     const t = make();
     expect(() => t.updateTypingDisplay()).not.toThrow();
