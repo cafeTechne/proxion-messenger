@@ -28,7 +28,7 @@ function shortWebId(webid) {
 // English fallbacks, param-interpolated. Production injects i18n's real `t`; unit tests
 // use the default so they can assert on stable English without loading a locale.
 const _EN = {
-    'solidchat.emptyList': 'No Solid conversations yet. Tap + to host one, discover a contact’s chats by WebID, or invite someone to their Solid inbox.',
+    'solidchat.emptyList': 'No Solid conversations yet. Use + to host one, discover a contact’s chats by WebID, or invite someone to their Solid inbox.',
     'solidchat.created': 'Conversation created. Share its link to invite others.',
     'solidchat.joined': 'Joined the conversation.',
     'solidchat.noChatsFound': 'No chats found for that WebID.',
