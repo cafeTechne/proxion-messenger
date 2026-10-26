@@ -131,11 +131,33 @@ export function createTabLock({
         add(win, 'pageshow');
     }
 
+    // Leaving for another site (a pod's sign-in page) can park this page in the
+    // back/forward cache with the lock still held, and the page that comes back
+    // from sign-in then waits behind the notice for a tab that is not there. So
+    // the lock goes with pagehide, and a page restored from that cache reloads
+    // rather than resume without it.
+    let releasedOnHide = false;
+    function _watchPageLifecycle() {
+        if (!win || typeof win.addEventListener !== 'function') return;
+        win.addEventListener('pagehide', () => {
+            if (!leader) return;
+            leader = false;
+            releasedOnHide = true;
+            if (releaseHeld) { const r = releaseHeld; releaseHeld = null; r(); }
+        });
+        win.addEventListener('pageshow', (ev) => {
+            if (ev && ev.persisted && releasedOnHide) {
+                try { win.location.reload(); } catch (_) { /* no location in tests */ }
+            }
+        });
+    }
+
     // Resolve once this tab is the leader. onFollower runs (once) when another
     // tab holds the lock, to show the notice.
     async function claim({ onFollower } = {}) {
         if (!supported) { leader = true; return; }
         _openChannel();
+        _watchPageLifecycle();
         if (await _acquire({ ifAvailable: true })) return;
         const waiting = new Promise((r) => { claimResolve = r; });
         if (leader) return; // granted in between

@@ -195,6 +195,26 @@ describe('tab lock', () => {
         expect(gotC).toEqual([]);
     });
 
+    it('a page parked in the back/forward cache lets go, so sign-in can come back', async () => {
+        const locks = makeLockManager(); const bus = makeBus();
+        const handlers = {};
+        const reload = vi.fn();
+        const win = { addEventListener: (type, fn) => { handlers[type] = fn; }, location: { reload } };
+        const a = tab(locks, bus, { win });
+        await a.claim();
+        handlers.pagehide({ persisted: true });
+        await tick(5);
+        expect(a.isLeader()).toBe(false);
+        expect(locks.held).toBe(false);
+        const b = tab(locks, bus);
+        const onFollower = vi.fn();
+        await b.claim({ onFollower });
+        expect(b.isLeader()).toBe(true);
+        expect(onFollower).not.toHaveBeenCalled();
+        handlers.pageshow({ persisted: true });
+        expect(reload).toHaveBeenCalled();
+    });
+
     it('without navigator.locks the tab runs on its own', async () => {
         const t1 = createTabLock({ locks: undefined, doc: null, win: null });
         await t1.claim();
