@@ -6370,10 +6370,10 @@ import { createAccountSync } from './account-sync.js';
                 if (!link) return;
                 navigator.clipboard.writeText(link).then(() => showToast(t('onboarding.inviteCopied')));
             });
-            // Invite links also get a Share button where the platform has a
-            // share sheet (phones, some desktops). Elsewhere it stays hidden and
-            // Copy is the only action, so the layout is unchanged.
-            if (canShareLinks()) {
+            // Invite links also get a Share button on phones and tablets. On a
+            // desktop the share sheet is a detour (and Windows drops the link
+            // from its Copy), so Copy is the only action there.
+            if (canShareLinks() && isCoarsePointer()) {
                 document.querySelectorAll('button[data-share-from]').forEach((btn) => {
                     btn.hidden = false;
                     btn.addEventListener('click', async () => {
@@ -6504,6 +6504,7 @@ import { createAccountSync } from './account-sync.js';
 
             // Room invite URL click to copy
             attachListener('#room-invite-url', 'click', copyRoomInviteFromModal);
+            attachListener('#room-invite-copy-btn', 'click', copyRoomInviteFromModal);
 
             // R32: Room bans panel
             attachListener('#room-bans-close', 'click', () => {

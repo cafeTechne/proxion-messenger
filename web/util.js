@@ -149,11 +149,11 @@ export function canShareLinks(nav = globalThis.navigator) {
 
 // Open the share sheet for a link. Resolves to 'shared', 'cancelled' (the user
 // closed the sheet, nothing to do), 'unsupported' or 'failed' (the caller
-// falls back to copying).
+// falls back to copying). The link goes inside the text: given both text and
+// url, the Windows sheet's Copy and many apps keep only the text.
 export async function shareLink(url, { title, text } = {}, nav = globalThis.navigator) {
-    const data = { url };
+    const data = { text: text ? `${text} ${url}` : url };
     if (title) data.title = title;
-    if (text) data.text = text;
     if (!canShareLinks(nav)) return 'unsupported';
     try {
         if (typeof nav.canShare === 'function' && !nav.canShare(data)) return 'unsupported';

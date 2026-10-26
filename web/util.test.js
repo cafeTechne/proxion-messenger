@@ -52,12 +52,14 @@ describe('canShareLinks / shareLink (Web Share)', () => {
     expect(canShareLinks(undefined)).toBe(false);
     expect(await shareLink('https://x.test/i', {}, {})).toBe('unsupported');
   });
-  it('passes url, title and text to the share sheet', async () => {
+  it('passes the title and the text with the link in it to the share sheet', async () => {
     const calls = [];
     const nav = { share: async (d) => { calls.push(d); } };
     expect(canShareLinks(nav)).toBe(true);
     expect(await shareLink('https://x.test/i', { title: 'T', text: 'Join' }, nav)).toBe('shared');
-    expect(calls).toEqual([{ url: 'https://x.test/i', title: 'T', text: 'Join' }]);
+    expect(calls).toEqual([{ title: 'T', text: 'Join https://x.test/i' }]);
+    await shareLink('https://x.test/i', {}, nav);
+    expect(calls[1]).toEqual({ text: 'https://x.test/i' });
   });
   it('a closed sheet is a cancel, other errors and canShare=false fall back', async () => {
     const abort = Object.assign(new Error('x'), { name: 'AbortError' });

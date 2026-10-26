@@ -148,6 +148,19 @@ try {
     .then(() => ok('created a room, it appears in the sidebar'))
     .catch(() => fail('created room did not appear in the sidebar'));
 
+  // The dialog's Copy button puts the link itself on the clipboard (the
+  // desktop share sheet used to hand over only the "Join me" text).
+  step = 'invite-copy';
+  await browser.defaultBrowserContext().overridePermissions(origin, ['clipboard-read', 'clipboard-write', 'clipboard-sanitized-write']);
+  await page.waitForSelector('#room-invite-copy-btn', { visible: true, timeout: 10000 });
+  const shown = await page.evaluate(() => document.getElementById('room-invite-url').textContent.trim());
+  await page.click('#room-invite-copy-btn');
+  await new Promise((r) => setTimeout(r, 300));
+  const copied = await page.evaluate(() => navigator.clipboard.readText()).catch(() => '');
+  const shareShown = await page.evaluate(() => !document.getElementById('room-invite-share-btn').hidden);
+  if (/^https?:\/\//.test(copied) && copied === shown && !shareShown) ok('Copy invite link copies the link; no share sheet button on desktop');
+  else fail(`invite copy: shown=${JSON.stringify(shown)} copied=${JSON.stringify(copied)} shareShown=${shareShown}`);
+
   // Close the "Room created" step (it shows the invite link) so the composer
   // is reachable, then open the room so the composer sends into it.
   await page.evaluate(() => document.getElementById('room-create-done-btn')?.click());
