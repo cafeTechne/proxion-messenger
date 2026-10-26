@@ -76,6 +76,14 @@ describe('PodSocket', () => {
         });
     });
 
+    it('send_room echoes only after the sender has drawn its pending bubble', async () => {
+        const { sock, events } = harness();
+        const routed = sock._route({ cmd: 'send_room', room_id: 'a', message_id: 'm1', content: 'hi' });
+        expect(events).toEqual([]);   // still in the sender's call stack
+        await routed;
+        expect(events).toHaveLength(1);
+    });
+
     it('local_dm drops the envelope and echoes to clear pending', async () => {
         const events = [];
         const dropped = [];

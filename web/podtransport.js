@@ -112,6 +112,10 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, joi
                     // The send handler already wrote this message to the pod; echo
                     // it back so the optimistic render is confirmed (pending cleared)
                     // and the pod order hint is stamped. Same-thread, so no unread.
+                    // The sender draws and tracks the optimistic bubble right after
+                    // this send returns, so the echo waits for that, or it would
+                    // confirm nothing and the bubble would later fail.
+                    await null;
                     handleEvent({
                         type: 'message',
                         message_id: cmd.message_id,
