@@ -5,7 +5,7 @@ import {
     e2eScopedKey,
 } from './e2e.js';
 import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetContainerAcl,
-         ensureProxionContainer, podWriteProfile, podReadProfile,
+         ensureProxionContainer, podWriteProfile, podReadProfile, podResolveWebIdName,
          podWriteMessageJsonLd, podDeleteMessage, podWriteRoomMembers,
          podWriteReactions, podWriteReadState,
          podUploadFile,
@@ -5848,11 +5848,13 @@ import { createAccountSync } from './account-sync.js';
             ensureProxionContainer().catch(() => {});
             // R62: hydrate opt-in synced settings + bookmarks from the pod
             hydratePodSyncedData().catch(() => {});
-            // Restore display name from pod if missing from localStorage
+            // Restore display name from pod if missing from localStorage. A
+            // first sign-in has no Proxion name yet, so take the name on the
+            // Solid profile itself rather than show the WebID.
             const savedName = localStorage.getItem('proxion_display_name');
             if (!savedName) {
-                podReadProfile().then(p => {
-                    const name = p?.['px:displayName'];
+                podReadProfile().then(async p => {
+                    const name = p?.['px:displayName'] || await podResolveWebIdName(webId);
                     if (name) {
                         localStorage.setItem('proxion_display_name', name);
                         if (socket?.readyState === WebSocket.OPEN) {

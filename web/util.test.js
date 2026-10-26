@@ -166,7 +166,9 @@ describe('dmFallbackName', () => {
   });
   it('keeps a short id whole and clips a long non-did one', () => {
     expect(dmFallbackName('peer-1')).toBe('peer-1');
-    expect(dmFallbackName('https://alice.example/profile/card#me')).toBe('https://alice.example/p…');
+    expect(dmFallbackName('https://alice.solidcommunity.net/profile/card#me')).toBe('alice');
+    expect(dmFallbackName('http://localhost:3000/alice/profile/card#me')).toBe('alice');
+    expect(dmFallbackName('https://alice.example/profile/card#me')).toBe('alice.example');
     expect(dmFallbackName('')).toBe('');
   });
 });
@@ -178,6 +180,10 @@ describe('didIdTag', () => {
   it('ends with the message-header suffix so rows match their messages', () => {
     const id = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK';
     expect(didIdTag(id).endsWith(didSuffix(id))).toBe(true);
+  });
+  it('is the server for an https WebID, not the shared /profile/card#me tail', () => {
+    expect(didIdTag('https://alice.solidcommunity.net/profile/card#me')).toBe('alice.solidcommunity.net');
+    expect(didIdTag('http://localhost:3000/alice/profile/card#me')).toBe('localhost:3000');
   });
   it('is empty for a missing or short id', () => {
     expect(didIdTag('')).toBe('');

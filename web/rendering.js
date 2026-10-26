@@ -20,7 +20,7 @@
 //   renderWindow, scrollBatch,
 // })
 
-import { didIdTag, escHtml, presenceLabel, webidColor, avatarInitial, renderMarkdown, expireLabel as _expireLabel, b64attr, formatFileSize, gatewayUrl } from './util.js';
+import { didIdTag, dmFallbackName, escHtml, presenceLabel, webidColor, avatarInitial, renderMarkdown, expireLabel as _expireLabel, b64attr, formatFileSize, gatewayUrl } from './util.js';
 import { parsePoll } from './polls.js';
 import { applyRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { t, tn, getLocale } from './i18n.js';
@@ -102,12 +102,19 @@ export function replySnippet(parent) {
     return "";
 }
 
+// Who sent a message that carries no display name. A WebID's first twelve
+// characters are only its scheme and part of a host, so it shows its account name.
+function _fallbackName(id) {
+    if (/^https?:\/\//i.test(id || "")) return dmFallbackName(id);
+    return (id || "").slice(0, 12);
+}
+
 // Inner HTML of the one-line reply quote: author then snippet, both escaped.
 export function replyQuoteHtml(parent) {
     if (parent && parent.deleted) {
         return `<span class="reply-snippet reply-deleted">${escHtml(replySnippet(parent))}</span>`;
     }
-    const name = parent.from_display_name || (parent.from_webid || "").slice(0, 12);
+    const name = parent.from_display_name || _fallbackName(parent.from_webid);
     return `<b class="reply-author" style="color:${webidColor(parent.from_webid)}">${escHtml(name)}</b> <span class="reply-snippet">${escHtml(replySnippet(parent))}</span>`;
 }
 
@@ -676,7 +683,7 @@ export function createRendering({
         // R11.1.3: expiry tracking
         if (msgExpiresAt !== null) div.dataset.expiresAt = String(msgExpiresAt);
 
-        const name = msg.from_display_name || (msg.from_webid || "").slice(0, 12) || (msg.from_pub_hex || "").slice(0, 12);
+        const name = msg.from_display_name || _fallbackName(msg.from_webid) || (msg.from_pub_hex || "").slice(0, 12);
         // Same ten-character tag as the member, contact and DM rows.
         const suffix = didIdTag(msg.from_webid || msg.from_pub_hex || "");
         // A11y: each message is an article with an accessible name of

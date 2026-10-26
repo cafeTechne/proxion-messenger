@@ -36,7 +36,27 @@ export function gatewayUrl(path, loc = _pageLocation()) {
 // It ends with that suffix, so a row still visibly matches its messages.
 export function didIdTag(id) {
     if (!id || id.length < 10) return "";
+    // An https WebID always ends in "/profile/card#me" or the like; the server
+    // it lives on is what tells two of them apart.
+    const web = _parseWebId(id);
+    if (web) return web.host;
     return id.slice(-10);
+}
+
+function _parseWebId(id) {
+    if (!/^https?:\/\//i.test(id)) return null;
+    try { return new URL(id); } catch { return null; }
+}
+
+// The account name inside a WebID: the pod subdomain
+// (https://alice.solidcommunity.net/profile/card#me) or the first path segment
+// (https://pod.example/alice/profile/card#me).
+function _webIdAccount(url) {
+    const seg = url.pathname.split("/").filter(Boolean);
+    if (seg.length > 1 && seg[0] !== "profile") return decodeURIComponent(seg[0]);
+    const labels = url.hostname.split(".");
+    if (labels.length > 2) return labels[0];
+    return url.hostname;
 }
 
 // Label for a DM whose peer has not told us a name yet. "did:key:z6Mk…" says
@@ -44,6 +64,8 @@ export function didIdTag(id) {
 export function dmFallbackName(id) {
     if (!id) return "";
     if (id.startsWith("did:key:") && didIdTag(id)) return "did:key:…" + didIdTag(id);
+    const web = _parseWebId(id);
+    if (web) return _webIdAccount(web);
     return id.length > 24 ? id.slice(0, 23) + "…" : id;
 }
 
