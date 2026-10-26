@@ -908,7 +908,8 @@ main { background: var(--surface-0); }
 .gate-no-reactions #ctx-react,
 .gate-no-pins [data-msg-action="pin"],
 .gate-no-pins #ctx-pin,
-.gate-no-delete #ctx-delete { display: none !important; }
+.gate-no-delete #ctx-delete,
+.gate-no-room-voice #join-voice-btn { display: none !important; }
 
 /* Icon buttons inside the action bar. */
 .icon-btn {

@@ -144,12 +144,14 @@ describe('UI gating', () => {
             'export-data-btn',
             'import-data-label',
             'settings-federation-section',
+            'settings-address-row',
         ]);
     });
 
     it('marks the document root to hide the dynamic message controls in the web build', () => {
         expect(gatedRootClasses(createPodTransport())).toEqual([
             'gate-no-edit', 'gate-no-reactions', 'gate-no-pins', 'gate-no-delete',
+            'gate-no-room-voice',
         ]);
     });
 
@@ -177,6 +179,7 @@ describe('UI gating', () => {
         expect(els['pin-panel-btn']['aria-hidden']).toBe('true');
         expect([...classes]).toEqual([
             'gate-no-edit', 'gate-no-reactions', 'gate-no-pins', 'gate-no-delete',
+            'gate-no-room-voice',
         ]);
     });
 

@@ -146,6 +146,8 @@ const _FEATURE_CONTROLS = {
     delete: ['delete-for-everyone-btn'],
     'settings-data': ['export-data-btn', 'import-data-label'],
     federation: ['settings-federation-section'],
+    // A Proxion address names a gateway; in the web build you are your WebID.
+    address: ['settings-address-row'],
 };
 
 // Message-action buttons are rendered per message (rendering.js) with no stable
@@ -159,6 +161,9 @@ const _FEATURE_ROOT_CLASSES = {
     reactions: 'gate-no-reactions',
     pins: 'gate-no-pins',
     delete: 'gate-no-delete',
+    // Room voice runs through the gateway; the pod carries only 1:1 call
+    // signaling. Its button is shown per room, so it is hidden by class.
+    'room-voice': 'gate-no-room-voice',
 };
 
 // Pure: the element ids to hide for this transport, given what it supports.
