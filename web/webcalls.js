@@ -22,7 +22,7 @@ export const SIGNAL_CMDS = new Set(['voice_invite', 'voice_answer', 'ice_candida
 // client dispatch.
 const RECV_TYPES = SIGNAL_CMDS;
 
-export function createWebCalls({ pod, notify, handleEvent, getSelfWebId, getDisplayName, peerPodRoot }) {
+export function createWebCalls({ pod, notify, handleEvent, getSelfWebId, getDisplayName, peerPodRoot, isBlocked }) {
     let _unsub = null;
     let _draining = false;
     let _drainAgain = false;
@@ -58,7 +58,9 @@ export function createWebCalls({ pod, notify, handleEvent, getSelfWebId, getDisp
                 const sigs = await pod.podReadSignals();
                 for (const { url, signal } of sigs) {
                     try {
-                        if (signal && RECV_TYPES.has(signal.type)) handleEvent(signal);
+                        // A blocked caller never rings: drop their signals unread.
+                        const blocked = !!(signal && isBlocked && (isBlocked(signal.from_webid) || isBlocked(signal.caller_webid)));
+                        if (signal && !blocked && RECV_TYPES.has(signal.type)) handleEvent(signal);
                     } catch (err) {
                         console.warn('[webcalls] signal handling failed:', err);
                     }

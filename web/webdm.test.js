@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createWebDm, peerPodRootFromWebId, envelopeFromDmPayload } from './webdm.js';
+import { createWebDm, peerPodRootFromWebId, envelopeFromDmPayload, isDmPeerWebId } from './webdm.js';
 
 describe('peerPodRootFromWebId', () => {
     it('derives the pod root from a CSS-style WebID', () => {
@@ -28,7 +28,7 @@ describe('envelopeFromDmPayload', () => {
     });
 });
 
-function harness({ drops = [], myDevice = 'dev-me', persistMessage, signEnvelope, verifySender } = {}) {
+function harness({ drops = [], myDevice = 'dev-me', persistMessage, signEnvelope, verifySender, isBlocked } = {}) {
     const events = [];
     const dropped = [];
     const deleted = [];
@@ -49,7 +49,7 @@ function harness({ drops = [], myDevice = 'dev-me', persistMessage, signEnvelope
         getSelfWebId: () => 'https://me/profile/card#me', getDisplayName: () => 'Me',
         getMyDeviceId: () => myDevice,
         persistMessage: persistMessage && ((m) => { persisted.push(m); return persistMessage(m); }),
-        signEnvelope, verifySender,
+        signEnvelope, verifySender, isBlocked,
     });
     return { dm, pod, e2e, notify, events, dropped, deleted, persisted };
 }
@@ -257,5 +257,46 @@ describe('createWebDm receive', () => {
         expect(pod.podEnsureDmInbox).toHaveBeenCalled();
         expect(pod.podReadDmDrops).toHaveBeenCalled();
         expect(notify.watchResource).toHaveBeenCalledWith('https://me/proxion/dm-inbox/', expect.any(Function));
+    });
+});
+
+describe('isDmPeerWebId', () => {
+    it('accepts https WebIDs and http only on a loopback host', () => {
+        expect(isDmPeerWebId('https://pod.example/alice/profile/card#me')).toBe(true);
+        expect(isDmPeerWebId('http://localhost:3000/alice/profile/card#me')).toBe(true);
+        expect(isDmPeerWebId('http://127.0.0.1:3000/alice/profile/card#me')).toBe(true);
+        expect(isDmPeerWebId('http://pod.example/alice/profile/card#me')).toBe(false);
+        expect(isDmPeerWebId('https://pod.example/a b')).toBe(false);
+        expect(isDmPeerWebId('https://pod.example/<x>')).toBe(false);
+        expect(isDmPeerWebId('room-123')).toBe(false);
+        expect(isDmPeerWebId('')).toBe(false);
+        expect(isDmPeerWebId(null)).toBe(false);
+        expect(isDmPeerWebId('https://' + 'a'.repeat(3000))).toBe(false);
+    });
+});
+
+describe('createWebDm blocks', () => {
+    it('drops a DM from a blocked WebID unread, without decrypting it', async () => {
+        const from = 'https://pod.example/eve/profile/card#me';
+        const { dm, e2e, events, deleted } = harness({
+            drops: [{ url: 'u1', envelope: { from_webid: from, message_id: 'm1', content: 'CT', e2e: true, nonce: 'N' } },
+                { url: 'u2', envelope: { kind: 'fanout', from_webid: from, message_id: 'm2', to_device_id: 'dev-me', payload: {} } }],
+            verifySender: async () => 'verified',
+            isBlocked: (w) => w === from,
+        });
+        await dm.drainOnce();
+        expect(e2e.ratchetDecrypt).not.toHaveBeenCalled();
+        expect(events).toEqual([]);
+        expect(deleted).toEqual(['u1', 'u2']);
+    });
+
+    it('still delivers from a WebID that is not blocked', async () => {
+        const { dm, events } = harness({
+            drops: [{ url: 'u1', envelope: { from_webid: 'https://pod.example/bob/profile/card#me', message_id: 'm1', content: 'hi' } }],
+            verifySender: async () => 'verified',
+            isBlocked: () => false,
+        });
+        await dm.drainOnce();
+        expect(events).toHaveLength(1);
     });
 });

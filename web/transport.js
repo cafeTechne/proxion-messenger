@@ -33,6 +33,8 @@ export const FEATURES = ['rooms', 'history', 'invites', 'dm', 'presence', 'calls
 // those commands, so offering the controls would fake success or lose data.
 // Wiring these to the pod (podEditChatMessageAt / podSoftDeleteChatMessageAt /
 // reaction writes exist for room messages) is a separate future task.
+// Attachments, voice messages and disappearing messages ('files',
+// 'voice-messages', 'disappear') are gateway-only for the same reason.
 const _WEB_ONLY_SUPPORTED = new Set(['rooms', 'history', 'invites', 'dm', 'presence', 'calls']);
 
 export class NotSupported extends Error {
@@ -148,6 +150,10 @@ const _FEATURE_CONTROLS = {
     federation: ['settings-federation-section'],
     // A Proxion address names a gateway; in the web build you are your WebID.
     address: ['settings-address-row'],
+    // Attachments (send_file, also the GIF tray) and voice messages
+    // (send_voice_message) are gateway commands with no pod path yet.
+    files: ['attach-btn', 'gif-tray-btn'],
+    'voice-messages': ['voice-record-btn'],
 };
 
 // Message-action buttons are rendered per message (rendering.js) with no stable

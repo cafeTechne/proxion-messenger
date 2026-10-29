@@ -1,4 +1,4 @@
-import { solidSession, initSolidAuth, solidLogin, solidLogout, podStorageRoot, discoverStorageRoot } from './auth.js';
+import { solidSession, initSolidAuth, solidLogin, solidLogout, podStorageRoot, discoverStorageRoot, accountDbName } from './auth.js';
 import {
     initE2E, e2eSupported, isE2EEnabled, isPeerVerified, markPeerVerified, myX25519PubB64u, cachePeerPub, onPeerPubChanged,
     ratchetEncrypt, ratchetDecrypt, ratchetIdle, fetchAndCachePeerPub, E2EDecryptError, safetyNumber, hasRatchetSession,
@@ -74,7 +74,7 @@ import { createInvite, contactAddressFromInput, addressIsOnHost, stashPendingJoi
 import { createPush, closedAppPushStatus } from './push.js';
 import { subscribeWebhook, watchResource } from './notify.js';
 import { isPeerPodRootAllowed } from './ssrf.js';
-import { createWebDm, createSenderVerifier, peerPodRootFromWebId } from './webdm.js';
+import { createWebDm, createSenderVerifier, peerPodRootFromWebId, isDmPeerWebId } from './webdm.js';
 import { resolveDmSendMode, canScheduleInView, primaryKeyFromDevices, createDeviceKeyWaiter, isPlaintextOptedIn, setPlaintextOptIn, DmKeyMissingError } from './dmkey.js';
 import { createWebPresence } from './webpresence.js';
 import { createWebCalls } from './webcalls.js';
@@ -306,6 +306,7 @@ import { createAccountSync } from './account-sync.js';
         const RENDER_WINDOW = 100;
         const SCROLL_BATCH = 50;
         let allMessages = [];
+        const _webRoomCache = {};      // web build: room id -> messages shown when last open
         // --- Client identity -------------------------------------------------------
         // Each browser generates its own Ed25519 keypair on first use (WebCrypto).
         // The resulting did:key is stable across sessions on this device and never
@@ -945,7 +946,7 @@ import { createAccountSync } from './account-sync.js';
             addRoomToSidebar, renameRoomInSidebar, populateSidebar, _navigateToThread,
         } = createView({
             getSocket: () => socket,
-            setActiveView: (v) => { activeView = v; },
+            setActiveView: (v) => { _stashWebRoom(); activeView = v; },
             setMessageMap: (m) => { messageMap = m; },
             setAllMessages: (a) => { allMessages = a; },
             setCurrentRoomMembers: (c) => { currentRoomMembers = c; },
@@ -1157,6 +1158,29 @@ import { createAccountSync } from './account-sync.js';
                 peer_webid: c.peer_did || null, local: false,
             }));
             if (mergeDmSnapshot(localDmPeers, dms)) renderDmSidebar();
+        }
+
+        // Give a DM thread that has no name yet the one its peer chose (sent with
+        // a message, or on their profile), and show it where the thread is open.
+        function _nameDmPeer(id, name) {
+            const peer = localDmPeers[id];
+            if (!peer || peer.display_name || !name) return;
+            peer.display_name = name;
+            renderDmSidebar();
+            if (activeView?.id === id) {
+                activeView.name = name;
+                const hdr = document.getElementById("chat-header-name");
+                if (hdr) { hdr.textContent = "@ " + name; hdr.title = hdr.textContent; }
+                const inp = document.getElementById("message-input");
+                if (inp && !inp.disabled) inp.placeholder = t('composer.placeholderDm', { name });
+                updatePageTitle();
+            }
+        }
+
+        // Web build: name a contact from their WebID profile (foaf:name / vcard:fn).
+        function _adoptWebProfileName(webid) {
+            if (!isPeerPodRootAllowed(peerPodRootFromWebId(webid), podStorageRoot())) return;
+            podResolveWebIdName(webid).then((n) => _nameDmPeer(webid, n)).catch(() => {});
         }
 
         function renderDmSidebar() {
@@ -1948,6 +1972,13 @@ import { createAccountSync } from './account-sync.js';
             }
             switch (event.type) {
                 case "message": {
+                    // Web build: our own DM came back from the pod drop. It carries
+                    // no content (the payload was ciphertext), so it only confirms
+                    // the optimistic plaintext copy and must not replace it.
+                    if (event._podEcho) {
+                        if (event.message_id) sendStatus.confirm(event.message_id);
+                        break;
+                    }
                     const msg = normalizeRelayThreadId(event);
                     const id = msg.thread_id;
                     if (activeView && id === activeView.id) _refreshSeenBy();
@@ -2005,21 +2036,18 @@ import { createAccountSync } from './account-sync.js';
                     if ((msg.source === "relay" || _newLocalDm) && !document.getElementById("nav-" + id)) {
                         localDmPeers[id] = { display_name: msg.from_display_name || null, peer_webid: msg.from_webid || id };
                         renderDmSidebar();
+                        // Web build: keep the thread across reloads and watch the
+                        // sender's heartbeat, as Add contact does.
+                        if (transport.mode === 'web' && _newLocalDm && msg.sender_verified === true) {
+                            _podUpdateDmIndex(id, true).catch(() => {});
+                            window.proxionWebPresence?.subscribeContact(msg.from_webid);
+                        }
                     } else if (!msg.own && msg.from_display_name && localDmPeers[id]
-                        && !localDmPeers[id].display_name && localDmPeers[id].peer_webid === msg.from_webid) {
+                        && localDmPeers[id].peer_webid === msg.from_webid) {
                         // A thread we opened by address had no name yet; take the one the
                         // peer sent. The row shows the id tag beside it, as for any
                         // peer-chosen name.
-                        localDmPeers[id].display_name = msg.from_display_name;
-                        renderDmSidebar();
-                        if (activeView?.id === id) {
-                            activeView.name = msg.from_display_name;
-                            const hdr = document.getElementById("chat-header-name");
-                            if (hdr) { hdr.textContent = "@ " + msg.from_display_name; hdr.title = hdr.textContent; }
-                            const inp = document.getElementById("message-input");
-                            if (inp && !inp.disabled) inp.placeholder = t('composer.placeholderDm', { name: msg.from_display_name });
-                            updatePageTitle();
-                        }
+                        _nameDmPeer(id, msg.from_display_name);
                     }
 
                     renderMessage(msg, { live: true });
@@ -3712,6 +3740,34 @@ import { createAccountSync } from './account-sync.js';
             document.getElementById("reply-bar").style.display = "none";
         }
 
+        // Web build: what get_local_history answers from (the PodSocket has no
+        // gateway store). A DM reads this device's plaintext cache; a room reads
+        // the messages it showed when last open, so a reopen inside the pod-read
+        // debounce is not blank. Rooms only keep this for the session.
+        function _stashWebRoom() {
+            if (transport.mode !== 'web' || activeView?.type !== 'local_room' || !allMessages.length) return;
+            _webRoomCache[activeView.id] = allMessages.slice(-200).map((m) => ({ ...m }));
+        }
+        async function _webCachedHistory(threadId, limit) {
+            // Only the open thread: an answer for another would count it as unread.
+            if (!threadId || !activeView || activeView.id !== threadId) return [];
+            if (_isDmThread(threadId)) return (await dmHistoryLoad(threadId, limit || 100)).map((m) => ({ ...m, e2e: false }));
+            return (_webRoomCache[threadId] || []).slice(-(limit || 100)).map((m) => ({ ...m }));
+        }
+        // Web build: the block list, per account, in this browser.
+        const _webBlockKey = () => accountDbName('proxion_web_blocks');
+        const _webBlockStore = {
+            load() {
+                try {
+                    const v = JSON.parse(localStorage.getItem(_webBlockKey()) || '[]');
+                    return Array.isArray(v) ? v.filter((w) => typeof w === 'string') : [];
+                } catch (_) { return []; }
+            },
+            save(list) {
+                try { localStorage.setItem(_webBlockKey(), JSON.stringify(list)); } catch (_) { /* private mode */ }
+            },
+        };
+
         let _historyTimeout = null;
         function loadLocalHistory(threadId, limit) {
             const feed = document.getElementById("message-feed");
@@ -3745,7 +3801,13 @@ import { createAccountSync } from './account-sync.js';
                     feed.setAttribute("aria-busy", "false");
                     showFeedNotice(feed, t('feed.loadFailed'), {
                         retryLabel: t('btn.retry'),
-                        onRetry: () => { if (activeView) loadRoomHistory(activeView.id, limit); },
+                        // An explicit retry reads the pod now, past the debounce.
+                        onRetry: () => {
+                            if (!activeView) return;
+                            delete _podReadLastFetch[activeView.id];
+                            delete _podReadLastFetch['dm:' + activeView.id];
+                            loadRoomHistory(activeView.id, limit);
+                        },
                     });
                 }, 10000);
             }
@@ -3757,6 +3819,9 @@ import { createAccountSync } from './account-sync.js';
         function loadRoomHistory(threadId, limit) {
             loadLocalHistory(threadId, limit);
             if (!solidSession.info.isLoggedIn) return;
+            // A web DM's history is the local cache plus the DM archive, both read
+            // by the local_history answer; there is no room log to read for it.
+            if (transport.mode === 'web' && _isDmThread(threadId)) return;
             const now = Date.now();
             const last = _podReadLastFetch[threadId] || 0;
             if ((now - last) < POD_READ_DEBOUNCE_MS) return;
@@ -3797,6 +3862,7 @@ import { createAccountSync } from './account-sync.js';
                     Object.keys(messageMap).forEach(k => delete messageMap[k]);
                     for (const m of allMessages) messageMap[m.message_id] = m;
                     renderMessages();
+                    _stashWebRoom();
                 })
                 .catch(() => setPodSyncIndicator(false));
         }
@@ -4626,8 +4692,9 @@ import { createAccountSync } from './account-sync.js';
             _syncConversationOptions();
             const item = document.getElementById("room-opt-disappear");
             const type = activeView?.type;
-            const canSet = type === "local_dm" || type === "dm" ||
-                ((type === "local_room" || type === "room") && roomCreatorOf.has(activeView.id));
+            // set_disappear_timer is a gateway command (not in the web build).
+            const canSet = transport.supports('disappear') && (type === "local_dm" || type === "dm" ||
+                ((type === "local_room" || type === "room") && roomCreatorOf.has(activeView.id)));
             if (item) item.hidden = !canSet;
             // Unbanning lives in the Banned members dialog, opened from here.
             // Banned members and Name and topic are open to admins too, as on the gateway.
@@ -4927,7 +4994,7 @@ import { createAccountSync } from './account-sync.js';
         const _deviceKeyWaiter = createDeviceKeyWaiter();
         async function _obtainPeerKey(peerId) {
             if (transport.mode === 'web') {
-                if (peerId.startsWith('https://')) await fetchAndCachePeerPub(peerId, peerPodRootFromWebId(peerId));
+                if (isDmPeerWebId(peerId)) await fetchAndCachePeerPub(peerId, peerPodRootFromWebId(peerId));
                 return;
             }
             let devices = _peerDeviceKeys[peerId];
@@ -5264,6 +5331,9 @@ import { createAccountSync } from './account-sync.js';
         }
 
         async function confirmAndSend(file, batch = null) {
+            // The web build has no file path (send_file is a gateway command), and
+            // its attach controls are hidden; paste and drop stop here too.
+            if (!transport.supports('files')) return;
             // Downscale first, so the confirm shows the file that will be sent
             // and a photo that cannot be made to fit is refused before it.
             if (activeView && needsDownscale(file, activeView.type)) {
@@ -5295,6 +5365,7 @@ import { createAccountSync } from './account-sync.js';
 
         // R58: paste an image into the composer → confirm → send as attachment.
         document.getElementById("message-input")?.addEventListener("paste", (e) => {
+            if (!transport.supports('files')) return;   // a pasted image stays unsent
             const items = e.clipboardData?.items || [];
             for (const item of items) {
                 if (item.kind === "file" && item.type.startsWith("image/")) {
@@ -5310,7 +5381,9 @@ import { createAccountSync } from './account-sync.js';
         // R58: drag-drop onto the conversation → confirm → send. Document-level
         // guards stop the browser from navigating away on a stray drop.
         {
-            const _dropTargets = ["message-feed", "message-form"].map(id => document.getElementById(id)).filter(Boolean);
+            // No drop targets where files cannot be sent (the web build).
+            const _dropTargets = transport.supports('files')
+                ? ["message-feed", "message-form"].map(id => document.getElementById(id)).filter(Boolean) : [];
             document.addEventListener("dragover", (e) => e.preventDefault());
             document.addEventListener("drop", (e) => e.preventDefault());
             // Every dropped file goes through the shared confirm (R60C), one
@@ -5385,16 +5458,20 @@ import { createAccountSync } from './account-sync.js';
                 if (raw.startsWith('http')) {
                     try { const p = new URL(raw).searchParams.get('from'); if (p) raw = p; } catch (_) {}
                 }
-                if (!raw.startsWith('https://')) { errEl.textContent = t('contact.enterAddress'); return; }
+                if (!isDmPeerWebId(raw)) { errEl.textContent = t('contact.enterAddress'); return; }
                 const webid = raw;
                 if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = t('contact.lookingUp'); }
                 await fetchAndCachePeerPub(webid, peerPodRootFromWebId(webid)).catch(() => {});
-                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = t('contact.sendRequest'); }
-                const name = webid.replace(/^https?:\/\//, '').split('/')[0];
-                localDmPeers[webid] = { display_name: name, peer_webid: webid };
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = t('btn.add'); }
+                // No name until the peer's profile or first message gives one; the
+                // row shows the account name from the WebID meanwhile.
+                if (!localDmPeers[webid]) localDmPeers[webid] = { display_name: null, peer_webid: webid };
+                const name = localDmPeers[webid].display_name || dmFallbackName(webid);
                 renderDmSidebar();
                 openLocalDmThread(webid, name, webid);
+                _podUpdateDmIndex(webid, true).catch(() => {});
                 window.proxionWebPresence?.subscribeContact(webid);   // watch their heartbeat
+                _adoptWebProfileName(webid);
                 document.getElementById("add-peer-modal").style.display = "none";
                 return;
             }
@@ -5840,9 +5917,14 @@ import { createAccountSync } from './account-sync.js';
                 for (const tid of threadIds) {
                     if (!localDmPeers[tid]) {
                         localDmPeers[tid] = { display_name: null, peer_webid: tid };
+                        if (transport.mode === 'web' && isDmPeerWebId(tid)) _adoptWebProfileName(tid);
                     }
                 }
-                if (threadIds.length) renderDmSidebar();
+                if (threadIds.length) {
+                    renderDmSidebar();
+                    // Web build: presence watches the restored contacts.
+                    window.proxionWebPresence?.syncContacts();
+                }
             } catch (err) {
                 console.warn('[syncFromPod] error:', err);
             }
@@ -7468,6 +7550,8 @@ import { createAccountSync } from './account-sync.js';
                         }),
                         // A first-contact drop we could not verify: show that it
                         // arrived, without its content, in the claimed sender's thread.
+                        // A blocked sender's DMs are dropped unread.
+                        isBlocked: (w) => blocks.isBlocked(w) || _webBlockStore.load().includes(w),
                         onUnverifiedDrop: (info) => {
                             _handleEventAsync({
                                 type: 'message',
@@ -7487,6 +7571,7 @@ import { createAccountSync } from './account-sync.js';
                         getSelfWebId: () => selfWebId,
                         getDisplayName: () => localStorage.getItem('proxion_display_name') || '',
                         peerPodRoot: (webid) => peerPodRootFromWebId(webid),
+                        isBlocked: (w) => blocks.isBlocked(w) || _webBlockStore.load().includes(w),
                     });
                     // R106: gateway-free room join. Owner approves a join request
                     // (granting the joiner ACL on the room container); the joiner
@@ -7509,6 +7594,8 @@ import { createAccountSync } from './account-sync.js';
                         calls: webCalls,
                         join: webJoin,
                         makeRoomInvite: (roomId) => makeInvite(roomId, selfWebId, window.location.href),
+                        history: _webCachedHistory,
+                        blockStore: _webBlockStore,
                     });
                     document.querySelector(".dot").className = "dot online";
                     _handleEventAsync({ type: 'registered' });

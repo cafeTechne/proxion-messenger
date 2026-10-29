@@ -19,6 +19,18 @@ export function peerPodRootFromWebId(webId) {
     try { return new URL(webId).origin + '/'; } catch { return null; }
 }
 
+// A WebID a web DM can be addressed to: https, or http only on a loopback host
+// (a local test pod). Also the shape DM thread ids take in the web build.
+const _LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
+export function isDmPeerWebId(id) {
+    if (typeof id !== 'string' || id.length > 2048) return false;
+    if (/[<>"{}|\\^`\s]/.test(id)) return false;
+    let u;
+    try { u = new URL(id); } catch { return false; }
+    if (u.protocol === 'https:') return true;
+    return u.protocol === 'http:' && _LOOPBACK.has(u.hostname);
+}
+
 // Build the wire envelope from an (already-encrypted) DM command payload.
 export function envelopeFromDmPayload(payload, selfWebId, displayName = '') {
     return {
@@ -70,7 +82,7 @@ export function createSenderVerifier({ verifyDmSig, verifyFanoutSig, fetchSigner
     };
 }
 
-export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDisplayName, getMyDeviceId, persistMessage, signEnvelope, verifySender, onUnverifiedDrop }) {
+export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDisplayName, getMyDeviceId, persistMessage, signEnvelope, verifySender, onUnverifiedDrop, isBlocked }) {
     let _unsub = null;
 
     // Drop an (already-encrypted) DM to the recipient's pod inbox.
@@ -133,6 +145,13 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
     async function _handleEnvelope(url, env) {
         const from = env && env.from_webid;
         if (!from) return;
+        // A blocked sender's drop is removed unread, before any verify or decrypt.
+        if (isBlocked && isBlocked(from)) {
+            if (env.kind !== 'fanout' || !getMyDeviceId || !env.to_device_id || env.to_device_id === getMyDeviceId()) {
+                await pod.podDeleteDmDrop(url);
+            }
+            return;
+        }
         // Multi-device fanout copy: only the one addressed to THIS device is ours
         // (devices share a pod inbox). Leave a sibling's copy for that device to
         // claim. Reuse the app's dm_fanout handler for the per-device decrypt.

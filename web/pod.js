@@ -8,7 +8,7 @@ import {
     reactionActionTriples, reactionCancelTriples,
 } from './longchat.js';
 import { signLongChat, signLongChatDelete, signLongChatReaction, signLongChatCancel } from './dmsig.js';
-import { peerPodRootFromWebId } from './webdm.js';
+import { peerPodRootFromWebId, isDmPeerWebId } from './webdm.js';
 import {
     buildEmptyTypeIndex, buildRegisterPatch, buildDeregisterPatch,
     parsePublicTypeIndex, parseRegisteredContainers,
@@ -2090,13 +2090,15 @@ async function _writePxDoc(path, type, props) {
 
 // --- Generic index helpers ---
 
-async function _readIndex(indexUrl) {
+const _isSafeId = (id) => SAFE_ID_RE.test(id);
+
+async function _readIndex(indexUrl, isValid = _isSafeId) {
     try {
         const res = await solidSession.fetch(indexUrl, { headers: { Accept: 'application/ld+json' } });
         if (!res.ok) return [];
         const raw = await res.json();
         const ids = raw?.['px:ids'] ?? raw?.ids ?? [];
-        return Array.isArray(ids) ? ids.filter(id => typeof id === 'string' && SAFE_ID_RE.test(id)) : [];
+        return Array.isArray(ids) ? ids.filter(id => typeof id === 'string' && isValid(id)) : [];
     } catch { return []; }
 }
 
@@ -2117,16 +2119,16 @@ async function _writeIndex(indexUrl, ids) {
     }
 }
 
-async function _addToIndex(indexUrl, id) {
-    const ids = await _readIndex(indexUrl);
+async function _addToIndex(indexUrl, id, isValid = _isSafeId) {
+    const ids = await _readIndex(indexUrl, isValid);
     if (!ids.includes(id)) {
         ids.push(id);
         await _writeIndex(indexUrl, ids);
     }
 }
 
-async function _removeFromIndex(indexUrl, id) {
-    const ids = await _readIndex(indexUrl);
+async function _removeFromIndex(indexUrl, id, isValid = _isSafeId) {
+    const ids = await _readIndex(indexUrl, isValid);
     const filtered = ids.filter(i => i !== id);
     if (filtered.length !== ids.length) await _writeIndex(indexUrl, filtered);
 }
@@ -2257,6 +2259,10 @@ export async function _podUpdateRoomIndex(roomId, add = true) {
 }
 
 // --- DM thread index ---
+//
+// Gateway DM threads are keyed by a safe id (cert id); web-build threads by the
+// peer's WebID. Both are valid entries.
+const _isDmThreadId = (id) => SAFE_ID_RE.test(id) || isDmPeerWebId(id);
 
 export async function podWriteDmIndex(threadIds) {
     const root = podStorageRoot();
@@ -2267,15 +2273,16 @@ export async function podWriteDmIndex(threadIds) {
 export async function podReadDmIndex() {
     const root = podStorageRoot();
     if (!root || !solidSession.info.isLoggedIn) return [];
-    return _readIndex(`${root}proxion/dm/index.jsonld`);
+    return _readIndex(`${root}proxion/dm/index.jsonld`, _isDmThreadId);
 }
 
 export async function _podUpdateDmIndex(threadId, add = true) {
     const root = podStorageRoot();
     if (!root || !solidSession.info.isLoggedIn) return;
+    if (typeof threadId !== 'string' || !_isDmThreadId(threadId)) return;
     const indexUrl = `${root}proxion/dm/index.jsonld`;
-    if (add) await _addToIndex(indexUrl, threadId);
-    else await _removeFromIndex(indexUrl, threadId);
+    if (add) await _addToIndex(indexUrl, threadId, _isDmThreadId);
+    else await _removeFromIndex(indexUrl, threadId, _isDmThreadId);
 }
 
 // --- Opt-in DM archive (R61) ---

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createWebCalls, SIGNAL_CMDS } from './webcalls.js';
 
-function harness({ signals = [] } = {}) {
+function harness({ signals = [], isBlocked } = {}) {
     const events = [];
     const dropped = [];
     const deleted = [];
@@ -16,6 +16,7 @@ function harness({ signals = [] } = {}) {
         pod, notify, handleEvent: (e) => events.push(e),
         getSelfWebId: () => 'https://me/profile/card#me', getDisplayName: () => 'Me',
         peerPodRoot: (w) => w.replace(/profile\/card#me$/, ''),
+        isBlocked,
     });
     return { calls, pod, notify, events, dropped, deleted };
 }
@@ -90,5 +91,21 @@ describe('createWebCalls receive', () => {
         expect(pod.podEnsureCallInbox).toHaveBeenCalled();
         expect(pod.podReadSignals).toHaveBeenCalled();
         expect(notify.watchResource).toHaveBeenCalledWith('https://me/proxion/call-inbox/', expect.any(Function));
+    });
+});
+
+describe('createWebCalls blocks', () => {
+    it('drops call signals from a blocked WebID without ringing', async () => {
+        const eve = 'https://eve.example/profile/card#me';
+        const { calls, events, deleted } = harness({
+            signals: [
+                { url: 's1', signal: { type: 'voice_invite', from_webid: eve, caller_webid: eve } },
+                { url: 's2', signal: { type: 'voice_invite', from_webid: 'https://bob.example/profile/card#me' } },
+            ],
+            isBlocked: (w) => w === eve,
+        });
+        await calls.drainOnce();
+        expect(events.map((e) => e.from_webid)).toEqual(['https://bob.example/profile/card#me']);
+        expect(deleted).toEqual(['s1', 's2']);
     });
 });

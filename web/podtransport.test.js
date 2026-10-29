@@ -166,4 +166,61 @@ describe('PodSocket', () => {
         expect(() => sock.send('not json')).not.toThrow();
         expect(events).toEqual([]);
     });
+
+    it('a DM echo never carries the ciphertext (the plaintext copy must stay)', async () => {
+        const events = [];
+        const sock = createPodSocket({
+            getSelfWebId: () => 'https://me', handleEvent: (e) => events.push(e),
+            pod: { podListOwnedRoomDescriptors: vi.fn() },
+            dm: { dropDm: vi.fn(async () => true), dropFanout: vi.fn(async () => true) },
+        });
+        await sock._route({ cmd: 'local_dm', target_webid: 'https://bob', message_id: 'm1', content: 'CT', e2e: true });
+        await sock._route({ cmd: 'send_dm_fanout', message_id: 'm2', fanout: [] });
+        expect(events).toHaveLength(2);
+        for (const e of events) {
+            expect(e._podEcho).toBe(true);
+            expect('content' in e).toBe(false);
+        }
+    });
+
+    it('get_local_history answers with the stored history', async () => {
+        const events = [];
+        const history = vi.fn(async (tid, limit) => [{ message_id: 'a', thread_id: tid, content: 'hi', limit }]);
+        const sock = createPodSocket({
+            getSelfWebId: () => 'https://me', handleEvent: (e) => events.push(e),
+            pod: { podListOwnedRoomDescriptors: vi.fn() }, history,
+        });
+        await sock._route({ cmd: 'get_local_history', thread_id: 'https://bob', limit: 50 });
+        expect(history).toHaveBeenCalledWith('https://bob', 50);
+        expect(events).toEqual([{ type: 'local_history', thread_id: 'https://bob', last_read_ts: 0,
+            messages: [{ message_id: 'a', thread_id: 'https://bob', content: 'hi', limit: 50 }] }]);
+    });
+
+    it('get_local_history still answers (empty) when the store fails', async () => {
+        const events = [];
+        const sock = createPodSocket({
+            getSelfWebId: () => 'https://me', handleEvent: (e) => events.push(e),
+            pod: { podListOwnedRoomDescriptors: vi.fn() },
+            history: async () => { throw new Error('idb'); },
+        });
+        await sock._route({ cmd: 'get_local_history', thread_id: 'r1' });
+        expect(events).toEqual([{ type: 'local_history', thread_id: 'r1', last_read_ts: 0, messages: [] }]);
+    });
+
+    it('block / unblock / list_blocks keep the block list in the given store', async () => {
+        const events = [];
+        let saved = ['https://old'];
+        const blockStore = { load: () => saved.slice(), save: (a) => { saved = a.slice(); } };
+        const sock = createPodSocket({
+            getSelfWebId: () => 'https://me', handleEvent: (e) => events.push(e),
+            pod: { podListOwnedRoomDescriptors: vi.fn() }, blockStore,
+        });
+        await sock._route({ cmd: 'block', webid: 'https://eve' });
+        await sock._route({ cmd: 'block', webid: 'https://eve' });
+        expect(saved).toEqual(['https://old', 'https://eve']);
+        await sock._route({ cmd: 'unblock', webid: 'https://old' });
+        expect(saved).toEqual(['https://eve']);
+        await sock._route({ cmd: 'list_blocks' });
+        expect(events).toEqual([{ type: 'blocks', webids: ['https://eve'] }]);
+    });
 });

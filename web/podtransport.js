@@ -14,6 +14,8 @@
 //   chat_room_create    -> mint an id, emit `room_created` (handler persists)
 //   send_room           -> emit the `message` echo (clears optimistic-pending)
 //   get_dms             -> emit empty `dms` (no gateway DMs in web mode)
+//   get_local_history   -> emit `local_history` from what this device holds
+//   block / unblock / list_blocks -> the block list, kept in blockStore
 //   (anything else)     -> ignored; UI gating hides those entry points
 //
 // DMs, presence, and calls arrive in R103–R105.
@@ -45,20 +47,29 @@ const _SIGNAL_CMDS = new Set(['voice_invite', 'voice_answer', 'ice_candidate', '
 
 import { parseInvite } from './webjoin.js';
 
-export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, join, makeRoomInvite }) {
+export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, join, makeRoomInvite, history, blockStore }) {
     // Echo a just-sent DM back so its optimistic render is confirmed (pending
-    // cleared) and dedups by message_id. No `local` flag: the ciphertext content
-    // must not reach the DM preview; the plaintext optimistic copy already shows.
+    // cleared). It carries no content: the payload is ciphertext, and the
+    // plaintext optimistic copy already shows (main.js only confirms on
+    // _podEcho, so the ciphertext can never replace it or reach the preview).
     function _echoDm(cmd) {
         handleEvent({
             type: 'message',
             message_id: cmd.message_id,
             thread_id: cmd.target_webid || cmd.cert_id,
             from_webid: getSelfWebId(),
-            content: cmd.content,
             timestamp: new Date().toISOString(),
             source: 'local_dm',
+            _podEcho: true,
         });
+    }
+
+    // The block list (web mode has no gateway list_blocks); stored by blockStore.
+    function _blocks() {
+        try { return (blockStore && blockStore.load()) || []; } catch { return []; }
+    }
+    function _saveBlocks(list) {
+        try { if (blockStore) blockStore.save(list); } catch { /* storage unavailable */ }
     }
 
     async function route(cmd) {
@@ -136,6 +147,26 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, joi
                     else handleEvent({ type: 'join_invalid_invite' });
                     break;
                 }
+                case 'get_local_history': {
+                    // History this device already holds (DM plaintext cache, the
+                    // last pod read of a room). Always answer, even empty, so the
+                    // loading skeleton clears; the pod read fills in the rest.
+                    let messages = [];
+                    try { messages = (history && await history(cmd.thread_id, cmd.limit)) || []; } catch { messages = []; }
+                    handleEvent({ type: 'local_history', thread_id: cmd.thread_id, messages, last_read_ts: 0 });
+                    break;
+                }
+                case 'block':
+                case 'unblock': {
+                    if (typeof cmd.webid !== 'string' || !cmd.webid) break;
+                    const list = _blocks().filter((w) => w !== cmd.webid);
+                    if (cmd.cmd === 'block') list.push(cmd.webid);
+                    _saveBlocks(list);
+                    break;
+                }
+                case 'list_blocks':
+                    handleEvent({ type: 'blocks', webids: _blocks() });
+                    break;
                 case 'get_dms':
                     handleEvent({ type: 'dms', dms: [] });
                     handleEvent({ type: 'local_dms', dms: [] });

@@ -145,7 +145,19 @@ describe('UI gating', () => {
             'import-data-label',
             'settings-federation-section',
             'settings-address-row',
+            'attach-btn',
+            'gif-tray-btn',
+            'voice-record-btn',
         ]);
+    });
+
+    it('web mode does not offer attachments, voice messages or disappearing messages', () => {
+        // send_file, send_voice_message and set_disappear_timer have no pod path.
+        const t = createPodTransport();
+        for (const f of ['files', 'voice-messages', 'disappear']) expect(t.supports(f)).toBe(false);
+        const connection = { socketSendOrQueue: () => {} };
+        const g = createGatewayTransport({ connection });
+        for (const f of ['files', 'voice-messages', 'disappear']) expect(g.supports(f)).toBe(true);
     });
 
     it('marks the document root to hide the dynamic message controls in the web build', () => {
