@@ -55,6 +55,7 @@ const SHELL = [
   "webpresence.js",
   "webcalls.js",
   "webjoin.js",
+  "webrooms.js",
   "clientid.jsonld",
   "rendering.js",
   "view.js",

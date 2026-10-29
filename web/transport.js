@@ -35,6 +35,11 @@ export const FEATURES = ['rooms', 'history', 'invites', 'dm', 'presence', 'calls
 // reaction writes exist for room messages) is a separate future task.
 // Attachments, voice messages and disappearing messages ('files',
 // 'voice-messages', 'disappear') are gateway-only for the same reason.
+//
+// Room administration is not in the set either ('room-admin': name and topic,
+// disappearing messages, bans, and the member moderation menu), nor is an owner
+// leaving their own room ('owner-leave'; the owner deletes it instead). The
+// room options menu checks these when it decides what to offer.
 const _WEB_ONLY_SUPPORTED = new Set(['rooms', 'history', 'invites', 'dm', 'presence', 'calls']);
 
 export class NotSupported extends Error {

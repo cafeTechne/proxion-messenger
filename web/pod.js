@@ -117,6 +117,9 @@ async function _fetchOnePodMessage(url) {
             typeof msg?.from_webid !== 'string'
         ) return null;
         if (!SAFE_ID_RE.test(msg.message_id)) return null;
+        // Older writes named the field display_name; the reader and renderer use
+        // from_display_name.
+        if (!msg.from_display_name && typeof msg.display_name === 'string') msg.from_display_name = msg.display_name;
         return msg;
     } catch {
         return null;
@@ -1567,6 +1570,104 @@ export async function podDeletePendingJoin(roomId, ownerWebId) {
     try {
         await solidSession.fetch(root + await _pendingJoinPath(roomId, ownerWebId), { method: 'DELETE' });
     } catch { /* best-effort cleanup */ }
+}
+
+// --- Joined rooms (web build) ---
+// A room we joined lives on its owner's pod, and nothing in our own pod pointed
+// at it, so it vanished on reload. This owner-only record lists the rooms we
+// joined ({ roomId, owner, ownerPodRoot, container, title }) so every device can
+// re-register them. The caller re-validates each entry before using it.
+const JOINED_ROOMS_PATH = 'proxion/joined-rooms.jsonld';
+const MAX_JOINED_ROOMS = 200;
+
+/** The joined-room records, [] when there are none, or null if the read failed. */
+export async function podReadJoinedRooms() {
+    const root = podStorageRoot();
+    if (!root || !solidSession?.info?.isLoggedIn) return null;
+    try {
+        const res = await solidSession.fetch(root + JOINED_ROOMS_PATH, { headers: { Accept: 'application/ld+json' } });
+        if (res && res.status === 404) return [];
+        if (!res || !res.ok) return null;
+        const text = await res.text();
+        if (text.length > MAX_POD_LISTING_BYTES) return null;
+        const doc = JSON.parse(text);
+        const list = doc && doc['px:rooms'];
+        return Array.isArray(list) ? list.slice(0, MAX_JOINED_ROOMS) : [];
+    } catch (err) {
+        console.warn('[pod] podReadJoinedRooms failed:', err);
+        return null;
+    }
+}
+
+/** Replace the joined-room records. Returns success. */
+export async function podWriteJoinedRooms(list) {
+    const root = podStorageRoot();
+    if (!root || !solidSession?.info?.isLoggedIn) return false;
+    try {
+        const res = await solidSession.fetch(root + JOINED_ROOMS_PATH, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/ld+json' },
+            body: JSON.stringify({
+                '@context': { px: 'https://proxion.dev/vocab/v1#' },
+                '@type': 'px:JoinedRooms',
+                'px:rooms': (list || []).slice(0, MAX_JOINED_ROOMS),
+                'px:updatedAt': new Date().toISOString(),
+            }),
+        });
+        return !!(res && res.ok);
+    } catch (err) {
+        console.warn('[pod] podWriteJoinedRooms failed:', err);
+        return false;
+    }
+}
+
+/**
+ * The member list a room's owner keeps next to its Long Chat (members.jsonld in
+ * the chat container), readable by every participant. For display only: members
+ * hold Append on that container, so this is not an authority for access.
+ * Returns [{ webid, role }], or null when it cannot be read.
+ */
+export async function podReadRoomMembersAt(containerUrl) {
+    if (!_isValidChatContainer(containerUrl) || !_peerRootAllowed(containerUrl) || !solidSession?.info?.isLoggedIn) return null;
+    try {
+        const doc = await _fetchJsonCapped(containerUrl + 'members.jsonld',
+            { headers: { Accept: 'application/ld+json' }, redirect: 'error' }, MAX_POD_JSON_BYTES);
+        const raw = doc && doc['px:members'];
+        if (!Array.isArray(raw)) return null;
+        const out = [];
+        const seen = new Set();
+        for (const m of raw.slice(0, 500)) {
+            const webid = m && typeof m.webid === 'string' ? m.webid : '';
+            if (!/^https?:\/\//.test(webid) || seen.has(webid)) continue;
+            seen.add(webid);
+            out.push({ webid, role: typeof m.role === 'string' ? m.role : 'member' });
+        }
+        return out;
+    } catch (err) {
+        console.warn('[pod] podReadRoomMembersAt failed:', err);
+        return null;
+    }
+}
+
+/**
+ * Delete a room we own from the web build's point of view: drop its type-index
+ * registration (which is what lists it on reload), its descriptor, and its entry
+ * in the room index. The Long Chat history stays in the pod. Returns success.
+ */
+export async function podDeleteOwnedRoom(roomId) {
+    if (!SAFE_ID_RE.test(roomId || '') || !solidSession?.info?.isLoggedIn) return false;
+    const root = podStorageRoot();
+    if (!root) return false;
+    const dereg = await podDeregisterRoomChat(roomId).catch(() => false);
+    let descOk = false;
+    try {
+        const res = await solidSession.fetch(`${root}rooms/${roomId}/room.json`, { method: 'DELETE' });
+        descOk = !!(res && (res.ok || res.status === 404));
+    } catch (err) {
+        console.warn('[pod] podDeleteOwnedRoom failed:', err);
+    }
+    await _podUpdateRoomIndex(roomId, false).catch(() => {});
+    return !!dereg && descOk;
 }
 
 /** Read a room descriptor from a specific owner's pod (not our own). */

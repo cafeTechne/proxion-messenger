@@ -90,7 +90,7 @@ describe('main.js persistent join-pending banner', () => {
   it('shows the banner (not just the toast) when a join request is sent', () => {
     const body = src.slice(src.indexOf('case "join_request_sent":'), src.indexOf('case "join_invalid_invite":'));
     expect(body).toContain("showToast(t('join.requestSent'));");
-    expect(body).toContain('_showJoinPendingBanner();');
+    expect(body).toContain('_showJoinPendingBanner(');
   });
   it('clears the banner on an invalid invite and on room_joined', () => {
     const invalid = src.slice(src.indexOf('case "join_invalid_invite":'), src.indexOf('case "room_joined":'));
@@ -106,7 +106,7 @@ describe('main.js persistent join-pending banner', () => {
   it('clears the banner once a gateway-free (pod) join is approved', () => {
     const fn = src.slice(src.indexOf('async function _onWebJoinApproved'), src.indexOf('async function mergeDmLocalHistory'));
     expect(fn).toContain("showToast(t('join.joined'");
-    expect(fn).toContain('_clearJoinPendingBanner();');
+    expect(fn).toContain('_clearJoinPendingBanner(roomId);');
   });
   it('toggles the banner element via the .visible class, driven by the join-pending-dismiss button', () => {
     expect(src).toMatch(/document\.getElementById\("join-pending-banner"\)\?\.classList\.add\("visible"\)/);

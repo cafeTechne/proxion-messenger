@@ -129,7 +129,9 @@ export function createView({
         show("start-video-call-btn", callsOk, "inline-flex");
         show("invite-btn", !isDm && !!getRoomInviteUrls()[view.id], "inline-block");
         show("members-toggle", isLocalRoom, "inline-block");
-        show("leave-room-btn", isLocalRoom, "inline-block");
+        // The browser build cannot hand a room on, so its owner deletes instead.
+        const ownerLeaveOk = !window.proxionTransport || window.proxionTransport.supports("owner-leave");
+        show("leave-room-btn", isLocalRoom && (ownerLeaveOk || !getRoomCreatorOf().has(view.id)), "inline-block");
         show("delete-room-btn", isLocalRoom && getRoomCreatorOf().has(view.id), "inline-block");
         if (!isLocalRoom) {
             const mp = document.getElementById("members-panel");

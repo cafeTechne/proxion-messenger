@@ -10,8 +10,11 @@
 // pod, the send handler writes each message to the pod, and loadRoomHistory
 // reads history straight from the pod. So the PodSocket only needs to:
 //   register            -> emit `registered` (drives the app's post-auth init)
-//   get_rooms           -> read owned room descriptors, emit `rooms`
-//   chat_room_create    -> mint an id, emit `room_created` (handler persists)
+//   get_rooms           -> read owned room descriptors + joined-room records, emit `rooms`
+//   chat_room_create    -> mint an id, list it in the type index, emit `room_created`
+//   leave_local_room    -> forget a joined room, emit `left_room`
+//   delete_room         -> unlist + delete an owned room, emit `room_deleted`
+//   get_room_members    -> read the member list, emit `room_members`
 //   send_room           -> emit the `message` echo (clears optimistic-pending)
 //   get_dms             -> emit empty `dms` (no gateway DMs in web mode)
 //   get_local_history   -> emit `local_history` from what this device holds
@@ -29,14 +32,28 @@ export function genRoomId() {
     return 'r' + Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-// Map pod room descriptors to the shape the `rooms` event handler expects.
-export function roomsFromDescriptors(descs, selfWebId) {
+// Map pod room descriptors to the shape the `rooms` event handler expects. The
+// invite link is rebuilt for each room we own, so it survives a reload.
+export function roomsFromDescriptors(descs, selfWebId, makeRoomInvite = null) {
     return (descs || []).map((d) => ({
         id: d.room_id,
         name: d.title || d.room_id,
-        invite_url: '',
+        invite_url: makeRoomInvite ? makeRoomInvite(d.room_id) : '',
         local: true,
         creator_webid: d.owner || selfWebId,
+    }));
+}
+
+// Map joined-room records (rooms on someone else's pod) to `rooms` entries. The
+// record rides along as `remote` so the handler can re-register the room.
+export function roomsFromJoined(records) {
+    return (records || []).map((r) => ({
+        id: r.roomId,
+        name: r.title || r.roomId,
+        invite_url: '',
+        local: true,
+        creator_webid: r.owner,
+        remote: r,
     }));
 }
 
@@ -47,7 +64,7 @@ const _SIGNAL_CMDS = new Set(['voice_invite', 'voice_answer', 'ice_candidate', '
 
 import { parseInvite } from './webjoin.js';
 
-export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, join, makeRoomInvite, history, blockStore }) {
+export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, join, rooms, makeRoomInvite, history, blockStore }) {
     // Echo a just-sent DM back so its optimistic render is confirmed (pending
     // cleared). It carries no content: the payload is ciphertext, and the
     // plaintext optimistic copy already shows (main.js only confirms on
@@ -102,11 +119,19 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, joi
                 case 'get_rooms': {
                     const self = getSelfWebId();
                     const descs = self ? await pod.podListOwnedRoomDescriptors(self) : [];
-                    handleEvent({ type: 'rooms', rooms: roomsFromDescriptors(descs, self) });
+                    const owned = roomsFromDescriptors(descs, self, makeRoomInvite);
+                    const ownedIds = new Set(owned.map((r) => r.id));
+                    const joined = (self && rooms && rooms.listJoined) ? await rooms.listJoined() : [];
+                    const others = roomsFromJoined(joined).filter((r) => !ownedIds.has(r.id));
+                    handleEvent({ type: 'rooms', rooms: [...owned, ...others] });
                     break;
                 }
                 case 'chat_room_create': {
                     const roomId = genRoomId();
+                    // List the room in our type index now, not on its first
+                    // message: get_rooms lists from there, so an empty room would
+                    // otherwise be gone after a reload.
+                    if (pod.podRegisterRoomChat) await pod.podRegisterRoomChat(roomId).catch(() => {});
                     // The room_created handler writes the descriptor, ACL, members,
                     // and room index to the pod and opens the room. The invite link
                     // (room id + our WebID) lets someone request to join (R106).
@@ -143,7 +168,7 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, joi
                     // The invite code is a web invite (room id + owner WebID).
                     // Drop a join request into the owner's pod; approval arrives async.
                     const inv = join && cmd.code ? parseInvite(cmd.code) : null;
-                    if (inv) { await join.requestJoin(inv.roomId, inv.ownerWebId); handleEvent({ type: 'join_request_sent', room_id: inv.roomId }); }
+                    if (inv) { await join.requestJoin(inv.roomId, inv.ownerWebId); handleEvent({ type: 'join_request_sent', room_id: inv.roomId, owner_webid: inv.ownerWebId }); }
                     else handleEvent({ type: 'join_invalid_invite' });
                     break;
                 }
@@ -167,6 +192,25 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, joi
                 case 'list_blocks':
                     handleEvent({ type: 'blocks', webids: _blocks() });
                     break;
+                case 'leave_local_room': {
+                    // Only a joined room can be left here; the owner deletes instead.
+                    if (rooms && rooms.leave && cmd.room_id && await rooms.leave(cmd.room_id)) {
+                        handleEvent({ type: 'left_room', room_id: cmd.room_id });
+                    }
+                    break;
+                }
+                case 'delete_room': {
+                    if (rooms && rooms.deleteOwned && cmd.room_id && await rooms.deleteOwned(cmd.room_id)) {
+                        handleEvent({ type: 'room_deleted', room_id: cmd.room_id });
+                    }
+                    break;
+                }
+                case 'get_room_members': {
+                    if (!rooms || !rooms.members || !cmd.room_id) break;
+                    const members = await rooms.members(cmd.room_id);
+                    if (members) handleEvent({ type: 'room_members', room_id: cmd.room_id, members, from_pod: true });
+                    break;
+                }
                 case 'get_dms':
                     handleEvent({ type: 'dms', dms: [] });
                     handleEvent({ type: 'local_dms', dms: [] });

@@ -7,6 +7,8 @@
 //   3. The owner (when online) is prompted; on approve it grants the joiner ACL
 //      on the room container and drops a `join_approved` back to the joiner.
 //   4. The joiner reads the room from the owner's pod and adds it locally.
+//   On decline the owner drops a `join_declined` instead, so the joiner stops
+//   waiting.
 //
 // This module owns only the drop/receive mechanics and the invite encoding; the
 // app supplies the owner-side approve action and the joiner-side registration
@@ -14,10 +16,22 @@
 
 const SEP = '~';
 
-/** Encode an invite the owner can share: an ?join= link plus the raw token. */
-export function makeInvite(roomId, ownerWebId, appUrl = '') {
+/** Encode an invite the owner can share: an ?join= link plus the raw token.
+ *  The link is built from the app's origin + path, so a query or #fragment on the
+ *  owner's current URL never ends up inside the token. `webMode` adds mode=web,
+ *  so a copy of the app served without the web-build meta tag still opens the
+ *  link in the browser build. */
+export function makeInvite(roomId, ownerWebId, appUrl = '', { webMode = false } = {}) {
     const token = encodeURIComponent(roomId) + SEP + encodeURIComponent(ownerWebId);
-    return appUrl ? (appUrl.split('?')[0] + '?join=' + token) : token;
+    if (!appUrl) return token;
+    let base;
+    try {
+        const u = new URL(appUrl);
+        base = u.origin + u.pathname;
+    } catch {
+        base = String(appUrl).split(/[?#]/)[0];
+    }
+    return base + '?join=' + token + (webMode ? '&mode=web' : '');
 }
 
 /** Parse an invite (a full ?join= URL or a raw token) to { roomId, ownerWebId }. */
@@ -42,9 +56,15 @@ export function parseInvite(str) {
 
 export function createWebJoin({
     pod, notify, getSelfWebId, getDisplayName, getSelfPodRoot, peerPodRoot,
-    onJoinRequest, onApproved,
+    onJoinRequest, onApproved, onDeclined,
 }) {
     let _unsub = null;
+    // Drops being handled right now, and drops already consumed. A notification
+    // drain can overlap the start() drain (or another notification), and both
+    // list the same request: without these the owner would be prompted twice
+    // for one request, or prompted again after answering, before the delete lands.
+    const _inFlight = new Set();
+    const _done = new Set();
 
     // Joiner: ask an owner to let us into a room.
     async function requestJoin(roomId, ownerWebId) {
@@ -81,23 +101,49 @@ export function createWebJoin({
         });
     }
 
+    // Owner: tell a joiner the request was declined, so they stop waiting.
+    async function sendDecline(toWebId, roomId) {
+        const root = peerPodRoot(toWebId);
+        if (!root) return false;
+        return pod.podDropJoin(root, {
+            kind: 'join_declined',
+            room_id: roomId,
+            owner_webid: getSelfWebId(),
+        });
+    }
+
+    async function _handle(url, msg) {
+        // Default: remove a handled or unrecognized message. A handler that
+        // returns exactly `false` (e.g. the owner's room descriptor is not
+        // readable yet, or the owner closed the tab without answering) keeps the
+        // message so a later drain can retry, rather than silently consuming a
+        // request the owner never got to act on.
+        let consumed = true;
+        try {
+            if (msg && msg.kind === 'join_request' && onJoinRequest) consumed = (await onJoinRequest(msg)) !== false;
+            else if (msg && msg.kind === 'join_approved' && onApproved) consumed = (await onApproved(msg)) !== false;
+            else if (msg && msg.kind === 'join_declined' && onDeclined) consumed = (await onDeclined(msg)) !== false;
+        } catch (err) {
+            console.warn('[webjoin] handling failed:', err);
+            consumed = false;
+        }
+        if (consumed) {
+            _done.add(url);
+            await pod.podDeleteJoin(url);
+        }
+    }
+
+    // Handles every drop concurrently, so a join prompt waiting on the owner does
+    // not hold up an approval behind it. The app queues its prompts one at a time.
     async function drainOnce() {
         const joins = await pod.podReadJoins();
+        const work = [];
         for (const { url, msg } of joins) {
-            // Default: remove a handled or unrecognized message. A handler that
-            // returns exactly `false` (e.g. the owner's room descriptor is not
-            // readable yet) keeps the message so a later drain can retry, rather
-            // than silently consuming a request the owner never got to act on.
-            let consumed = true;
-            try {
-                if (msg && msg.kind === 'join_request' && onJoinRequest) consumed = (await onJoinRequest(msg)) !== false;
-                else if (msg && msg.kind === 'join_approved' && onApproved) consumed = (await onApproved(msg)) !== false;
-            } catch (err) {
-                console.warn('[webjoin] handling failed:', err);
-                consumed = false;
-            }
-            if (consumed) await pod.podDeleteJoin(url);
+            if (_inFlight.has(url) || _done.has(url)) continue;
+            _inFlight.add(url);
+            work.push(_handle(url, msg).finally(() => _inFlight.delete(url)));
         }
+        await Promise.all(work);
     }
 
     async function start() {
@@ -113,5 +159,5 @@ export function createWebJoin({
         if (_unsub) { try { _unsub(); } catch { /* ignore */ } _unsub = null; }
     }
 
-    return { requestJoin, sendApproval, drainOnce, start, stop };
+    return { requestJoin, sendApproval, sendDecline, drainOnce, start, stop };
 }
