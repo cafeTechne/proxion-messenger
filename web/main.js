@@ -1686,7 +1686,9 @@ import { createAccountSync } from './account-sync.js';
             // someone whose Proxion lives on another gateway. Say so on the
             // welcome step (with the link to copy into their own app) and hold
             // the join until they choose to set up here.
-            const _freshHere = () => !localStorage.getItem("proxion_display_name");
+            // The browser build has no gateway to be "elsewhere" from: signing in
+            // to the pod is the account, and a new pod may not have a name yet.
+            const _freshHere = () => proxionMode !== 'web' && !localStorage.getItem("proxion_display_name");
             if (code && _freshHere()) {
                 const link = window.location.origin + "/?join=" + encodeURIComponent(code);
                 const notice = document.getElementById("ob-invite-notice");
