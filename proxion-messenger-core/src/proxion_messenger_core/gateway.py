@@ -1327,6 +1327,12 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             _owner_did_pol = pub_key_to_did(self.agent.identity_pub_bytes)
         except Exception:
             _owner_did_pol = ""
+        # The local browser registers under its own session DID, not the account
+        # DID, so for tunnel control the owner proof is _is_tunnel_owner (account
+        # DID, or genuine non-proxied loopback while auth is not enforced).
+        if (cmd in self._TUNNEL_CONTROL_COMMANDS and _owner_did_pol
+                and self._is_tunnel_owner(websocket)):
+            _caller_webid_pol = _owner_did_pol
         _pol_decision = get_policy().evaluate_ws_command(cmd, _caller_webid_pol, _owner_did_pol)
         if not _pol_decision.allow:
             await websocket.send(json.dumps({
@@ -2541,6 +2547,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             self._tunnel_lock = lock
         return lock
 
+    _TUNNEL_CONTROL_COMMANDS = frozenset({"start_tunnel", "stop_tunnel"})
+
     def _is_tunnel_owner(self, websocket) -> bool:
         """Whether *websocket* may control or read the public tunnel.
 
@@ -2562,6 +2570,12 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             owner_did = ""
         caller = self._client_webids.get(websocket, "")
         if owner_did and caller == owner_did:
+            return True
+        # The connection that opened the live tunnel passed this check before
+        # auth was forced on; it stays the owner for its lifetime so it can
+        # still stop the tunnel it started. A new connection gets no such pass.
+        tunnel_ws = getattr(self, "_tunnel_owner_ws", None)
+        if tunnel_ws is not None and websocket is tunnel_ws and self._tunnel_active():
             return True
         if not self._auth_enforced():
             # A reverse proxy also connects from loopback; its callers are remote.

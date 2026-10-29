@@ -354,10 +354,11 @@ class HttpEndpointsMixin:
     <h1>Proxion</h1>
     <p class="tag">You've been invited to a private, sovereign chat.</p>
     {from_block}
-    <a class="btn primary" href="{web_href}">Open in browser</a>
-    <a class="btn secondary" href="{app_href}">Open the desktop app</a>
-    <a class="btn ghost" href="{_INVITE_DOWNLOAD_URL}" target="_blank" rel="noopener">Get Proxion for desktop</a>
-    <p class="hint">No account or install needed - "Open in browser" just works.</p>
+    <a class="btn primary" href="{app_href}">Open the desktop app</a>
+    <a class="btn secondary" href="{_INVITE_DOWNLOAD_URL}" target="_blank" rel="noopener">Get Proxion for desktop</a>
+    <a class="btn ghost" href="{web_href}">Open in browser</a>
+    <p class="hint">Already use Proxion? Paste this page's link into Add contact in your app.
+    "Open in browser" starts a new account on the inviter's gateway.</p>
   </div>
 </body></html>"""
         return html_doc.encode("utf-8")
@@ -2063,7 +2064,15 @@ class HttpEndpointsMixin:
                     else:
                         _enum_entry[0] += 1
                     token = path[3:]
-                    if token == self._short_invite_token:
+                    if token == self._short_invite_token and b"application/json" in headers_raw.get(b"accept", b""):
+                        # A gateway resolving a pasted short link for Add contact:
+                        # hand back the address the landing page would carry.
+                        _inv_body = json.dumps({"from": self._proxion_address()}).encode()
+                        writer.write(
+                            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                            b"Content-Length: " + str(len(_inv_body)).encode() + b"\r\n\r\n" + _inv_body
+                        )
+                    elif token == self._short_invite_token:
                         # A4.1: serve the invite landing page (branch app/web/download)
                         # instead of bouncing straight into the web app, carrying the
                         # inviter's address through every path.

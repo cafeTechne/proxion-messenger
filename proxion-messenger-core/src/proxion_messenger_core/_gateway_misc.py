@@ -331,6 +331,7 @@ class MiscHandlerMixin:
             port = self.config.http_port or 8080
             st = await mgr.start(port)
             if st.get("state") == "running":
+                self._tunnel_owner_ws = websocket
                 self.config.public_url = st["url"]
                 logger.info("Public tunnel up at %s (auth forced on)", st["url"])
                 await websocket.send(json.dumps({
@@ -379,6 +380,7 @@ class MiscHandlerMixin:
             if self._tunnel is not None:
                 mgr = self._tunnel
                 self._tunnel = None
+                self._tunnel_owner_ws = None
                 await mgr.stop()
                 self.config.public_url = self._tunnel_prev_public_url
                 self._force_auth = self._tunnel_prev_force_auth
@@ -2877,7 +2879,9 @@ class MiscHandlerMixin:
             }))
             return
 
-        result = await self._discover_peer_gateway(address)
+        if self._is_short_invite_url(address):
+            address = await self._resolve_short_invite(address)
+        result = await self._discover_peer_gateway(address) if address else None
         if not result:
             await websocket.send(json.dumps({
                 "type": "error", "code": "peer_not_found",
@@ -2901,7 +2905,54 @@ class MiscHandlerMixin:
             "display_name": result.get("display_name") or discovered_did[:20],
             "fingerprint": fp,
             "x25519_pub": result.get("x25519_pub", ""),
+            "address": address,
         }))
+
+    _SHORT_INVITE_PATH = re.compile(r"^/i/[0-9a-fA-F]{8,64}/?$")
+    _ADDRESS_IN_LANDING = re.compile(r'proxion://invite\?from=([^"&<>\s]+)')
+
+    @classmethod
+    def _is_short_invite_url(cls, address: str) -> bool:
+        """Whether *address* is a gateway's short invite link (https://gw/i/<token>)."""
+        from urllib.parse import urlparse
+        try:
+            u = urlparse(address)
+        except ValueError:
+            return False
+        return (u.scheme in ("http", "https") and bool(u.netloc)
+                and bool(cls._SHORT_INVITE_PATH.match(u.path or "")))
+
+    async def _resolve_short_invite(self, url: str) -> str:
+        """Ask the inviting gateway which address its short link stands for.
+
+        Same SSRF-safe transport as discovery. The answer is only a hint: the
+        DID in it is checked against that gateway's /.well-known/proxion by
+        _discover_peer_gateway. Older gateways answer with the landing page,
+        whose deep link carries the same address. Returns "" when unresolved."""
+        from urllib.parse import unquote
+        from .network import async_safe_get, NetworkError
+        try:
+            raw = await async_safe_get(
+                url.rstrip("/"), timeout=5, max_bytes=65536,
+                headers={"Accept": "application/json", "User-Agent": "Proxion/0.1"})
+        except NetworkError as exc:
+            logger.debug("short invite %s: %s", url, exc)
+            return ""
+        text = raw.decode("utf-8", errors="replace")
+        addr = ""
+        try:
+            data = json.loads(text)
+            if isinstance(data, dict) and isinstance(data.get("from"), str):
+                addr = data["from"]
+        except ValueError:
+            m = self._ADDRESS_IN_LANDING.search(text)
+            if m:
+                addr = unquote(m.group(1))
+        from .relay import parse_proxion_address
+        did, gw_url = parse_proxion_address(addr) if addr else ("", None)
+        if not did.startswith("did:") or not gw_url or len(addr) > 2048:
+            return ""
+        return addr
 
     async def _handle_announce_room_join(self, websocket, data: dict) -> None:
         """Remote user announces they want to federate a local room to their home gateway."""

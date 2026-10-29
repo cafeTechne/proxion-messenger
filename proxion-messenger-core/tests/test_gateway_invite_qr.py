@@ -182,3 +182,51 @@ async def test_short_invite_token_stable_in_session(tmp_path):
     assert r1.status_code == 200
     assert r2.status_code == 200
     assert r1.text == r2.text
+
+
+# ── Add contact: a pasted short link resolves to the inviter's address ───────
+
+
+@pytest.mark.asyncio
+async def test_short_invite_answers_json_for_gateways(tmp_path):
+    gw, http_port, _, ready = _start_gateway(tmp_path)
+    assert ready.wait(timeout=5), "gateway failed to start"
+    token = gw._short_invite_token
+    r = httpx.get(f"http://127.0.0.1:{http_port}/i/{token}",
+                  headers={"Accept": "application/json"}, timeout=5)
+    assert r.status_code == 200
+    assert r.json() == {"from": gw._proxion_address()}
+    bad = httpx.get(f"http://127.0.0.1:{http_port}/i/0000000000000000",
+                    headers={"Accept": "application/json"}, timeout=5)
+    assert bad.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_discover_peer_resolves_a_short_invite_link(tmp_path, monkeypatch):
+    """Add contact with "Copy short link" output: the invitee's gateway asks the
+    inviter's gateway for the address, then discovers it with the usual DID check."""
+    from unittest.mock import AsyncMock, MagicMock
+    from proxion_messenger_core.didkey import pub_key_to_did
+    monkeypatch.setenv("PROXION_ALLOW_PRIVATE_RELAY", "1")
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    gw_a, http_port, _, ready = _start_gateway(tmp_path / "a")
+    assert ready.wait(timeout=5), "gateway failed to start"
+    gw_b = ProxionGateway(
+        agent=AgentState.generate(), dm_clients={}, room_memberships={},
+        config=GatewayConfig(host="127.0.0.1", port=_free_port(),
+                             db_path=str(tmp_path / "b" / "gw.db")),
+        read_state=ReadState())
+    ws = MagicMock()
+    ws.send = AsyncMock()
+    short = f"http://127.0.0.1:{http_port}/i/{gw_a._short_invite_token}"
+    await gw_b._handle_discover_peer(ws, {"address": short})
+    msg = json.loads(ws.send.call_args[0][0])
+    assert msg["type"] == "peer_discovered", msg
+    assert msg["did"] == pub_key_to_did(gw_a.agent.identity_pub_bytes)
+    assert msg["address"] == gw_a._proxion_address()
+
+    ws.send.reset_mock()
+    await gw_b._handle_discover_peer(ws, {"address": f"http://127.0.0.1:{http_port}/i/00000000deadbeef"})
+    msg = json.loads(ws.send.call_args[0][0])
+    assert msg.get("code") == "peer_not_found"
