@@ -110,7 +110,7 @@ try {
   // (the live-subscription-vs-poll behaviour is exercised by the other smokes).
   const drainUntil = async (page, check, tries = 12) => {
     for (let i = 0; i < tries; i++) {
-      try { await page.evaluate(() => window.proxionWebJoin && window.proxionWebJoin.drainOnce()); } catch { /**/ }
+      try { await page.evaluate(() => { if (window.proxionWebJoin) window.proxionWebJoin.drainOnce(); }); } catch { /**/ }
       if (await page.evaluate(check).catch(() => false)) return true;
       await new Promise((r) => setTimeout(r, 1500));
     }
