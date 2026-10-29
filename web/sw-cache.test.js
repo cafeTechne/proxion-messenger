@@ -93,13 +93,14 @@ describe('service worker fetch handler', () => {
         expect(sw.puts).toEqual([]);
     });
 
-    it('strips the OIDC query when caching a navigation', async () => {
+    it('never caches a navigation (so never the OIDC callback URL)', async () => {
         const { responded } = await dispatch(sw.listeners, {
             url: ORIGIN + '/?code=abc123&state=xyz', mode: 'navigate',
         });
         expect(responded).toBe(true);
-        // Cached under the bare path — never the callback URL with its code/state.
-        expect(sw.puts.map((p) => p.key)).toEqual([ORIGIN + '/']);
+        // The offline shell is the one cached at install; a navigation written
+        // into the cache would pair new HTML with old assets.
+        expect(sw.puts).toEqual([]);
     });
 
     it('never intercepts gateway API / websocket paths', async () => {
@@ -117,12 +118,19 @@ describe('service worker install', () => {
         const listeners = {};
         const added = [];
         let skipped = false;
+        // The worker passes absolute Requests; record them as shell paths.
+        const rel = (r) => (r.url === ORIGIN + '/' ? './' : r.url.slice(ORIGIN.length + 1));
+        const cacheModes = [];
         const cache = {
-            addAll: async (urls) => {
+            addAll: async (reqs) => {
+                const urls = reqs.map(rel);
+                cacheModes.push(...reqs.map((r) => r.cache));
                 for (const u of urls) if (failing.has(u)) throw new TypeError('bad response: ' + u);
                 added.push(...urls);
             },
-            add: async (u) => {
+            add: async (r) => {
+                const u = rel(r);
+                cacheModes.push(r.cache);
                 if (failing.has(u)) throw new TypeError('bad response: ' + u);
                 added.push(u);
             },
@@ -142,7 +150,7 @@ describe('service worker install', () => {
             listeners.install({ waitUntil: (x) => { p = x; } });
             await p;
         };
-        return { run, added, skipped: () => skipped };
+        return { run, added, cacheModes, skipped: () => skipped };
     }
 
     it('installs when an optional asset fails, caching everything else', async () => {
@@ -155,9 +163,123 @@ describe('service worker install', () => {
         expect(sw.added).not.toContain('clientid.jsonld');
     });
 
+    it('installs from the network, not the HTTP cache (no stale main.js beside a new page)', async () => {
+        const sw = loadForInstall(new Set());
+        await sw.run();
+        expect(sw.added).toContain('./');
+        expect(sw.cacheModes.length).toBeGreaterThan(4);
+        expect(new Set(sw.cacheModes)).toEqual(new Set(['reload']));
+    });
+
     it('still fails the install when the page itself cannot be cached', async () => {
         const sw = loadForInstall(new Set(['index.html']));
         await expect(sw.run()).rejects.toThrow(/index\.html/);
         expect(sw.skipped()).toBe(false);
+    });
+});
+
+// After a deploy the active worker's cache still holds the old scripts. A page
+// whose HTML came fresh from the network must not be handed those: it would
+// run new HTML with old JS (a removed element id makes old main.js throw).
+describe('service worker version consistency', () => {
+    function loadWithCache(shellHtml) {
+        const listeners = {};
+        const store = new Map([[ORIGIN + '/index.html', shellHtml], [ORIGIN + '/main.js', 'js-v1']]);
+        const puts = [];
+        const fetches = [];
+        const key = (r) => (typeof r === 'string' ? new URL(r, ORIGIN + '/').href : r.url);
+        const resp = (body) => ({ ok: true, body, clone() { return resp(body); }, text: async () => body });
+        const cache = {
+            match: async (r) => (store.has(key(r)) ? resp(store.get(key(r))) : undefined),
+            put: async (r) => { puts.push(key(r)); },
+        };
+        const caches = { open: async () => cache, match: (r) => cache.match(r), keys: async () => [], delete: async () => true };
+        let network = { '/index.html': 'html-v2', '/': 'html-v2', '/main.js': 'js-v2' };
+        const fetchStub = async (req, init) => {
+            const u = new URL(key(req));
+            fetches.push({ path: u.pathname, cache: init && init.cache });
+            return resp(network[u.pathname] ?? '');
+        };
+        const self = {
+            location: new URL(ORIGIN + '/'),
+            addEventListener: (type, fn) => { listeners[type] = fn; },
+            skipWaiting: () => {}, clients: { claim: () => {}, matchAll: async () => [] },
+            registration: { showNotification: async () => {} },
+        };
+        new Function('self', 'caches', 'fetch', 'URL', 'Request', 'indexedDB', SRC)(
+            self, caches, fetchStub, URL, Request, undefined,
+        );
+        async function get({ path, mode = 'same-origin', clientId = '', resultingClientId = '' }) {
+            let p = null;
+            listeners.fetch({
+                request: { url: ORIGIN + path, method: 'GET', mode },
+                clientId, resultingClientId,
+                respondWith: (x) => { p = x; },
+            });
+            const r = await p;
+            return r && r.body;
+        }
+        return { get, puts, fetches, setNetwork: (n) => { network = n; } };
+    }
+
+    it('a page whose HTML is newer than the cache gets its scripts from the network', async () => {
+        const sw = loadWithCache('html-v1');
+        expect(await sw.get({ path: '/', mode: 'navigate', resultingClientId: 'tab1' })).toBe('html-v2');
+        expect(await sw.get({ path: '/main.js', clientId: 'tab1' })).toBe('js-v2');
+        // Revalidated past the HTTP cache, and the old cache generation is untouched.
+        expect(sw.fetches.at(-1)).toEqual({ path: '/main.js', cache: 'no-cache' });
+        expect(sw.puts).toEqual([]);
+    });
+
+    it('a page matching the cached shell keeps serving scripts from the cache', async () => {
+        const sw = loadWithCache('html-v1');
+        sw.setNetwork({ '/': 'html-v1', '/main.js': 'js-v2' });
+        expect(await sw.get({ path: '/', mode: 'navigate', resultingClientId: 'tab1' })).toBe('html-v1');
+        expect(await sw.get({ path: '/main.js', clientId: 'tab1' })).toBe('js-v1');
+    });
+
+    it('only the fresh page bypasses the cache, not other open tabs', async () => {
+        const sw = loadWithCache('html-v1');
+        await sw.get({ path: '/', mode: 'navigate', resultingClientId: 'tab-new' });
+        expect(await sw.get({ path: '/main.js', clientId: 'tab-old' })).toBe('js-v1');
+    });
+
+    it('offline, a navigation falls back to the cached shell', async () => {
+        const sw = loadWithCache('html-v1');
+        sw.setNetwork(null);
+        // A throwing fetch: network[...] on null throws inside the stub.
+        expect(await sw.get({ path: '/', mode: 'navigate', resultingClientId: 'tab1' })).toBe('html-v1');
+    });
+});
+
+// The page's memory cache reuses a script under its CDN max-age without asking
+// the worker again, which would bring back the old script after a deploy.
+describe('service worker responses', () => {
+    it('serves cached assets marked for revalidation, keeping status and type', async () => {
+        const listeners = {};
+        const cached = new Response('js-v1', { headers: { 'Cache-Control': 'max-age=600', 'Content-Type': 'text/javascript' } });
+        const caches = {
+            open: async () => ({ match: async () => undefined, put: async () => {} }),
+            match: async () => cached,
+        };
+        const self = {
+            location: new URL(ORIGIN + '/'),
+            addEventListener: (type, fn) => { listeners[type] = fn; },
+            skipWaiting: () => {}, clients: { claim: () => {}, matchAll: async () => [] },
+            registration: { showNotification: async () => {} },
+        };
+        new Function('self', 'caches', 'fetch', 'URL', 'Request', 'indexedDB', SRC)(
+            self, caches, async () => { throw new Error('no network'); }, URL, Request, undefined,
+        );
+        let p = null;
+        listeners.fetch({
+            request: { url: ORIGIN + '/main.js', method: 'GET', mode: 'no-cors' },
+            clientId: 'tab', respondWith: (x) => { p = x; },
+        });
+        const r = await p;
+        expect(r.status).toBe(200);
+        expect(r.headers.get('Cache-Control')).toBe('no-cache');
+        expect(r.headers.get('Content-Type')).toBe('text/javascript');
+        expect(await r.text()).toBe('js-v1');
     });
 });

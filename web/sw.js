@@ -49,6 +49,7 @@ const SHELL = [
   "connection.js",
   "transport.js",
   "podtransport.js",
+  "web-account.js",
   "webdm.js",
   "dmkey.js",
   "webpresence.js",
@@ -134,14 +135,58 @@ const STATIC_ASSET = /\.(?:js|jsonld|css|svg|png|ico|woff2|json|webmanifest)$/;
 // no push over the tunnel.
 const SHELL_REQUIRED = ["./", "index.html", "style.css", "main.js"];
 
+// Install fetches bypass the HTTP cache: a CDN max-age would otherwise let the
+// new cache hold a new index.html next to a stale main.js.
+const fresh = (u) => new Request(new URL(u, self.location).href, { cache: "reload" });
+
 self.addEventListener("install", (e) => {
   if (IS_LOCAL) { self.skipWaiting(); return; }
   e.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll(SHELL_REQUIRED).then(() =>
-      Promise.allSettled(SHELL.filter((u) => !SHELL_REQUIRED.includes(u)).map((u) => c.add(u)))
+    caches.open(CACHE).then((c) => c.addAll(SHELL_REQUIRED.map(fresh)).then(() =>
+      Promise.allSettled(SHELL.filter((u) => !SHELL_REQUIRED.includes(u)).map((u) => c.add(fresh(u))))
     )).then(() => self.skipWaiting())
   );
 });
+
+// A page must never run new HTML with old scripts. Navigations go to the
+// network (so auth redirects work), but the shell assets are cache-first from
+// this worker's cache, which predates a deploy until the new worker activates.
+// So when a navigation's HTML differs from the cached shell, that page's
+// assets come from the network as well. Keyed by client id, bounded.
+const FRESH_CLIENTS = new Set();
+const MAX_FRESH_CLIENTS = 64;
+
+function markFresh(clientId) {
+  if (!clientId) return;
+  if (FRESH_CLIENTS.size >= MAX_FRESH_CLIENTS) FRESH_CLIENTS.delete(FRESH_CLIENTS.values().next().value);
+  FRESH_CLIENTS.add(clientId);
+}
+
+// The page's memory cache would otherwise keep reusing an asset under its
+// CDN max-age without asking this worker again, so a page could still pair new
+// HTML with old scripts. What the worker serves is marked for revalidation,
+// which only costs a cache lookup here.
+function revalidate(r) {
+  if (!r || !r.headers || r.type === "opaque" || r.type === "opaqueredirect") return r;
+  try {
+    const headers = new Headers(r.headers);
+    headers.set("Cache-Control", "no-cache");
+    return new Response(r.body, { status: r.status, statusText: r.statusText, headers });
+  } catch (_) {
+    return r;
+  }
+}
+
+async function matchesShell(response) {
+  try {
+    const cached = await (await caches.open(CACHE)).match("index.html");
+    if (!cached || !response.ok) return false;
+    const [a, b] = await Promise.all([response.clone().text(), cached.text()]);
+    return a === b;
+  } catch (_) {
+    return false;
+  }
+}
 
 self.addEventListener("activate", (e) => {
   e.waitUntil(
@@ -166,19 +211,26 @@ self.addEventListener("fetch", (e) => {
   // On localhost: always go to the network so code changes are immediate.
   if (IS_LOCAL) return;
 
-  // Network-first for navigations (so auth redirects work); cache fallback
+  // Network-first for navigations (so auth redirects work); the offline
+  // fallback is the shell cached at install, the same generation as its
+  // assets. A navigation is never written to the cache: that would pair new
+  // HTML with old assets offline (and could persist an OIDC callback URL).
   if (e.request.mode === "navigate") {
     e.respondWith(
       fetch(e.request)
-        .then((r) => {
-          const clone = r.clone();
-          // Cache under the bare path, dropping the query so the OIDC callback
-          // (?code=…&state=…) is never persisted and navigations don't pile up.
-          caches.open(CACHE).then((c) => c.put(new Request(url.origin + url.pathname), clone));
+        .then(async (r) => {
+          if (!(await matchesShell(r))) markFresh(e.resultingClientId);
           return r;
         })
         .catch(() => caches.match("index.html"))
     );
+    return;
+  }
+
+  // A page whose HTML is newer than this cache: its assets from the network,
+  // revalidated, and not stored (the cache stays one consistent generation).
+  if (FRESH_CLIENTS.has(e.clientId)) {
+    e.respondWith(fetch(e.request, { cache: "no-cache" }).catch(() => caches.match(e.request)).then(revalidate));
     return;
   }
 
@@ -196,7 +248,7 @@ self.addEventListener("fetch", (e) => {
           }
           return r;
         })
-    )
+    ).then(revalidate)
   );
 });
 
