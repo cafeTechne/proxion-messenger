@@ -26,6 +26,7 @@
     "smoke:web-signedin": "node smoke_web_signedin.mjs",
     "smoke:web-join": "node smoke_web_join.mjs",
     "smoke:web-join-link": "node smoke_web_join_link.mjs",
+    "smoke:web-dm": "node smoke_web_dm.mjs",
     "smoke:federation": "node smoke_federation.mjs",
     "smoke:pairing": "node smoke_pairing.mjs",
     "smoke:dmhistory": "node smoke_dm_history.mjs",
