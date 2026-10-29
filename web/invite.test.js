@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createInvite } from './invite.js';
+import {
+  createInvite, contactAddressFromInput, addressIsOnHost,
+  stashPendingJoin, readPendingJoin, PENDING_JOIN_KEY, PENDING_JOIN_MAX_AGE_MS,
+} from './invite.js';
 
 let store, search, replaced, socketOpen, captured;
 beforeEach(() => {
@@ -70,5 +73,46 @@ describe('consumePendingInvite', () => {
   });
   it('is a no-op when there is no pending invite', () => {
     expect(make().consumePendingInvite()).toBeNull();
+  });
+});
+
+describe('contactAddressFromInput', () => {
+  const addr = 'did:key:zBob@https://gw.example:8443';
+  it('passes a bare address through', () => {
+    expect(contactAddressFromInput(` ${addr} `)).toEqual({ address: addr, shortLink: false });
+  });
+  it('reads ?from= from https and proxion:// links', () => {
+    const q = encodeURIComponent(addr);
+    expect(contactAddressFromInput(`https://gw.example/invite?from=${q}`).address).toBe(addr);
+    expect(contactAddressFromInput(`proxion://invite?from=${q}`).address).toBe(addr);
+    const nested = encodeURIComponent(`https://gw.example/invite?from=${q}`);
+    expect(contactAddressFromInput(`https://gw.example/?from=${nested}`).address).toBe(addr);
+  });
+  it('flags a short link for the gateway to resolve', () => {
+    expect(contactAddressFromInput('https://gw.example:8443/i/0123456789abcdef'))
+      .toEqual({ address: 'https://gw.example:8443/i/0123456789abcdef', shortLink: true });
+  });
+  it('leaves other URLs alone', () => {
+    expect(contactAddressFromInput('https://gw.example/other').shortLink).toBe(false);
+  });
+});
+
+describe('addressIsOnHost', () => {
+  it('matches the gateway host and port only', () => {
+    expect(addressIsOnHost('did:key:zA@https://127.0.0.1:8080', '127.0.0.1:8080')).toBe(true);
+    expect(addressIsOnHost('did:key:zA@https://127.0.0.1:8081', '127.0.0.1:8080')).toBe(false);
+    expect(addressIsOnHost('garbage', '127.0.0.1:8080')).toBe(false);
+  });
+});
+
+describe('pending join stash', () => {
+  it('returns a recent code and drops a stale or undated one', () => {
+    stashPendingJoin(localStorage, 'ABC', 1000);
+    expect(readPendingJoin(localStorage, 1000 + 60_000)).toBe('ABC');
+    expect(readPendingJoin(localStorage, 1000 + PENDING_JOIN_MAX_AGE_MS + 1)).toBe('');
+    expect(store[PENDING_JOIN_KEY]).toBeUndefined();
+    store[PENDING_JOIN_KEY] = 'OLDCODE';
+    expect(readPendingJoin(localStorage)).toBe('');
+    expect(store[PENDING_JOIN_KEY]).toBeUndefined();
   });
 });

@@ -98,4 +98,16 @@ describe('shareInviteLink', () => {
     addr.shareInviteLink();
     expect(els['qr-share-panel'].style.display).toBe('block');
   });
+  it('encodes an https link a phone camera can open, never proxion://', () => {
+    const texts = [];
+    global.window = { proxionInviteLink: 'https://gw.example/invite?from=x', proxionShortInviteUrl: 'https://gw.example/i/abcd', proxionAddress: 'did:key:zAbc@https://gw.example' };
+    global.QRCode = function (_el, opts) { texts.push(opts.text); }; global.QRCode.CorrectLevel = { M: 0 };
+    els['qr-share-panel'] = mkEl({ style: { display: 'none' } });
+    els['my-qr'] = mkEl();
+    make().shareInviteLink();
+    expect(texts).toEqual(['https://gw.example/i/abcd']);
+    global.window.proxionShortInviteUrl = '';
+    make().shareInviteLink();
+    expect(texts[1]).toBe('https://gw.example/invite?from=x');
+  });
 });

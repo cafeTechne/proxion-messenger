@@ -52,3 +52,56 @@ export function createInvite({ getSocket, onPendingInvite }) {
 
     return { capturePendingInvite, consumePendingInvite };
 }
+
+// What to look up for an Add contact input. Accepts a bare address, any
+// http(s) or proxion:// link carrying ?from= (unwrapping one nested invite
+// URL), and a gateway's short link https://gw/i/<token>, which carries no
+// address: shortLink tells the caller to let the gateway resolve it.
+export function contactAddressFromInput(raw) {
+    const s = String(raw || '').trim();
+    if (/^(https?|proxion):\/\//i.test(s)) {
+        try {
+            const u = new URL(s);
+            let from = u.searchParams.get('from');
+            if (from && /^https?:\/\//i.test(from)) {
+                try { from = new URL(from).searchParams.get('from') || from; } catch { /* keep */ }
+            }
+            if (from) return { address: from.trim(), shortLink: false };
+            if (/^https?:$/i.test(u.protocol) && /^\/i\/[0-9a-f]{8,64}\/?$/i.test(u.pathname)) {
+                return { address: u.origin + u.pathname.replace(/\/$/, ''), shortLink: true };
+            }
+        } catch { /* not a URL */ }
+    }
+    return { address: s, shortLink: false };
+}
+
+// Whether a Proxion address (did@https://host) names the gateway at *host*,
+// i.e. the page's own gateway: an invite from it cannot add anyone.
+export function addressIsOnHost(addr, host) {
+    const at = String(addr || '').lastIndexOf('@');
+    if (at < 0 || !host) return false;
+    try { return new URL(addr.slice(at + 1)).host === host; } catch { return false; }
+}
+
+// A room code stashed across a sign-in round trip. It only counts while
+// recent, so a link opened long ago on an origin the user never set up on is
+// not joined when they finally do.
+export const PENDING_JOIN_KEY = 'proxion_pending_join';
+export const PENDING_JOIN_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+export function stashPendingJoin(storage, code, now = Date.now()) {
+    try { storage.setItem(PENDING_JOIN_KEY, JSON.stringify({ code, ts: now })); } catch { /* private mode */ }
+}
+
+export function readPendingJoin(storage, now = Date.now()) {
+    let raw = null;
+    try { raw = storage.getItem(PENDING_JOIN_KEY); } catch { return ''; }
+    if (!raw) return '';
+    try {
+        const v = JSON.parse(raw);
+        if (v && typeof v.code === 'string' && typeof v.ts === 'number'
+                && now - v.ts >= 0 && now - v.ts < PENDING_JOIN_MAX_AGE_MS) return v.code;
+    } catch { /* an old undated stash */ }
+    try { storage.removeItem(PENDING_JOIN_KEY); } catch { /* ignore */ }
+    return '';
+}

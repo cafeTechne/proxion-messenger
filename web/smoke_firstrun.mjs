@@ -25,6 +25,7 @@ const CHROME = [
 if (!CHROME) { console.error('No Chrome/Edge found; set PROXION_CHROME.'); process.exit(2); }
 
 const REPO = resolve(fileURLToPath(new URL('..', import.meta.url)));
+const EN = JSON.parse(readFileSync(resolve(REPO, 'web/locales/en.json'), 'utf8'));
 const VERSION = readFileSync(resolve(REPO, 'version.txt'), 'utf8').trim();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // The gateway's NAT/WebSocket chatter is environment noise, not a page bug.
@@ -83,6 +84,12 @@ try {
   await page.click('#confirm-ok');
   await sleep(200);
   check(await shownStep(page) === 5, 'start without a pod goes to the room step');
+  // Leaving now must not lose the rest of the wizard (address, recovery kit).
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => getComputedStyle(document.getElementById('onboarding-modal')).display !== 'none', { timeout: 15000 })
+    .catch(() => {});
+  check(await shownStep(page) === 5 && await display(page, 'onboarding-modal') !== 'none',
+    'a reload after skipping the pod reopens the wizard at the room step');
   await page.click('#ob-step5-join');
   check((await page.$eval('#ob-join-error', (e) => e.textContent)).trim() !== '', 'an empty invite code is explained');
   await page.click('#ob-step5-skip');
@@ -92,6 +99,46 @@ try {
   await page.click('#ob-finish-btn');
   await sleep(300);
   check(await display(page, 'onboarding-modal') === 'none', 'Open Proxion closes the wizard');
+
+  console.log('share panel');
+  await page.evaluate(() => {
+    const Orig = window.QRCode;
+    window.__qrTexts = [];
+    window.QRCode = function (el, opts) { window.__qrTexts.push(opts.text); return new Orig(el, opts); };
+    window.QRCode.CorrectLevel = Orig.CorrectLevel;
+  });
+  await page.waitForFunction(() => !!window.proxionInviteLink, { timeout: 10000 }).catch(() => {});
+  await page.click('#share-invite-btn');
+  await page.waitForSelector('#qr-share-panel', { visible: true });
+  const qrText = await page.evaluate(() => window.__qrTexts.at(-1) || '');
+  check(/^https:\/\//.test(qrText), `the invite QR encodes an https link a phone can open ("${qrText}")`);
+  await page.click('#qr-connect-phone-btn');
+  const tunnelLine = await page.waitForFunction((starting) => {
+    const t = document.getElementById('tunnel-status-line')?.textContent || '';
+    return t && t !== starting ? t : null;
+  }, { timeout: 8000 }, EN['tunnel.starting']).then((h) => h.jsonValue()).catch(() => EN['tunnel.starting']);
+  if (tunnelLine === EN['tunnel.starting'] || /trycloudflare/.test(tunnelLine)) {
+    console.log('  skip connect-a-phone check: cloudflared is installed here');
+  } else {
+    check(tunnelLine === EN['tunnel.absent'], `Connect a phone shows the install hint without cloudflared ("${tunnelLine}")`);
+  }
+  await page.click('#qr-close-btn');
+
+  console.log('add contact');
+  const toastsBefore = await page.$$eval('#toast-container > *', (ts) => ts.map((t) => t.textContent));
+  await page.click('#add-peer-btn');
+  await page.waitForSelector('#add-peer-input', { visible: true });
+  await page.type('#add-peer-input', 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK@https://127.0.0.1:1');
+  const t0 = Date.now();
+  await page.click('#add-peer-submit-btn');
+  const notFound = await page.waitForFunction((want) => document.getElementById('add-peer-error')?.textContent === want,
+    { timeout: 8000 }, EN['error.fr.delivery_failed']).then(() => true).catch(() => false);
+  const took = Date.now() - t0;
+  check(notFound && took < 5000, `an unreachable address is reported inline quickly (${took} ms)`);
+  const toastsAfter = await page.$$eval('#toast-container > *', (ts) => ts.map((t) => t.textContent));
+  check(!toastsAfter.slice(toastsBefore.length).some((t) => t.includes(EN['error.generic'])),
+    'no generic error toast for an unreachable address');
+  await page.evaluate(() => { document.getElementById('add-peer-modal').style.display = 'none'; });
 
   console.log('settings');
   const soundBefore = await page.$eval('#sound-toggle', (e) => e.getAttribute('aria-pressed'));
@@ -151,6 +198,26 @@ try {
   }));
   check(added.open && added.value === inviter, 'confirming an invite link fills the Add contact dialog');
   await ctx.close();
+
+  // A stranger opening this gateway owner's own contact invite: say the link is
+  // for their own app, and do not offer to add the owner from the owner's gateway.
+  const ownAddr = await page.evaluate(() => localStorage.getItem('proxion_my_address') || '');
+  const ctx2 = await browser.createBrowserContext();
+  const stranger = await ctx2.newPage();
+  watch(stranger, 'stranger');
+  await stranger.goto(`${gw.url}?from=${encodeURIComponent(ownAddr)}`, { waitUntil: 'load' });
+  await stranger.waitForFunction(() => getComputedStyle(document.getElementById('onboarding-modal')).display !== 'none', { timeout: 15000 });
+  await sleep(1500);
+  const seen = await stranger.evaluate(() => ({
+    notice: !document.getElementById('ob-invite-notice').hidden,
+    text: document.getElementById('ob-invite-notice-text').textContent,
+    confirm: !!document.querySelector('#deeplink-confirm-ok') && getComputedStyle(document.querySelector('#deeplink-confirm-ok')).display !== 'none'
+      && document.querySelector('#deeplink-confirm-ok').offsetParent !== null,
+  }));
+  check(ownAddr.includes('@') && seen.notice && /Add contact/.test(seen.text),
+    'the owner\'s own invite link tells a stranger to use their own app');
+  check(!seen.confirm, 'no offer to add the gateway owner from their own gateway');
+  await ctx2.close();
 } finally {
   await browser.close();
   await gw.stop();

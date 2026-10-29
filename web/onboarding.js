@@ -22,6 +22,22 @@ export function obProgress(step) {
     return i < 0 ? null : { n: i + 1, total: OB_STEPS.length };
 }
 
+// Set when the user skips the pod, holding the wizard step they are on, so a
+// reload before the last step brings them back there. Cleared on finish.
+export const OB_AFTER_SKIP_KEY = 'proxion_ob_after_skip';
+
+// Which wizard step to reopen on a gateway with no pod connected, or null to
+// leave the wizard closed. A finished wizard or a linked device (it holds a
+// delegation cert from the account's primary) never sees it again.
+export function obReopenStep(storage) {
+    const get = (k) => { try { return storage.getItem(k); } catch { return null; } };
+    if (get('proxion_wizard_done') || get('proxion_delegation_cert')) return null;
+    if (!get('proxion_display_name')) return 1;
+    if (!get('proxion_pod_setup_skipped')) return 4;
+    const step = Number(get(OB_AFTER_SKIP_KEY));
+    return step === 5 || step === 6 ? step : null;
+}
+
 export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyModal, showConfirm }) {
 
     function openSettingsToPod() {
@@ -102,6 +118,9 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         }
         const target = document.getElementById(`ob-step-${step}`);
         if (target) target.style.display = "block";
+        if ((step === 5 || step === 6) && localStorage.getItem(OB_AFTER_SKIP_KEY)) {
+            localStorage.setItem(OB_AFTER_SKIP_KEY, String(step));
+        }
         _setProgress(step);
         _syncBack(step);
         _setError("ob-name-error", "");
@@ -154,6 +173,7 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
             window.__TAURI__.invoke('plugin:autostart|enable').catch(() => {});
         }
         localStorage.setItem('proxion_wizard_done', '1');
+        localStorage.removeItem(OB_AFTER_SKIP_KEY);
     }
 
     function obSkipPod() {
@@ -165,6 +185,7 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
             // banner for a week instead of showing it straight away.
             localStorage.setItem(POD_BANNER_SNOOZE_KEY, String(Date.now() + POD_BANNER_SNOOZE_MS));
             setPodBanner(true);
+            localStorage.setItem(OB_AFTER_SKIP_KEY, "5");
             obGoto(5);
         };
         // Styled in-app confirm (native window.confirm looked out of place at the

@@ -158,7 +158,10 @@ try {
   await alice.waitForFunction(() => {
     const m = document.getElementById('add-peer-modal'); return m && getComputedStyle(m).display !== 'none';
   }, { timeout: 5000 });
-  await alice.type('#add-peer-input', bobAddr);
+  // Use what "Copy short link" hands out: https://gw/i/<token>, no address in it.
+  const bobShort = await bob.evaluate(() => window.proxionShortInviteUrl || '');
+  if (!/\/i\/[0-9a-f]+$/.test(bobShort)) { fail(`Bob has no short invite link (got: ${bobShort})`); throw new Error('no short link'); }
+  await alice.type('#add-peer-input', bobShort);
   await alice.evaluate(() => document.getElementById('add-peer-submit-btn').click());
 
   step = 'bob-accept-request';

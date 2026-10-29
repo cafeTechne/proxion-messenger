@@ -46,7 +46,7 @@ import { createSecondaryCrypto, createReactionTokens, isSealedPlain, sealedState
 import { createVoice, CallState, audioLevel } from './voice.js';
 import { mapDevices, preferredDeviceId, mediaConstraints } from './devices.js';
 import { createNotifications } from './notifications.js';
-import { createOnboarding } from './onboarding.js';
+import { createOnboarding, obReopenStep } from './onboarding.js';
 import { createReactions } from './reactions.js';
 import { createPins } from './pins.js';
 import { createMedia } from './media.js';
@@ -70,7 +70,7 @@ import { createTransport, detectMode, applyTransportGating } from './transport.j
 import { createPodSocket } from './podtransport.js';
 import { createRendering, replyQuoteHtml } from './rendering.js';
 import { createView, appendSidebarEmpty, mergeDmSnapshot } from './view.js';
-import { createInvite } from './invite.js';
+import { createInvite, contactAddressFromInput, addressIsOnHost, stashPendingJoin, readPendingJoin, PENDING_JOIN_KEY } from './invite.js';
 import { createPush, closedAppPushStatus } from './push.js';
 import { subscribeWebhook, watchResource } from './notify.js';
 import { isPeerPodRootAllowed } from './ssrf.js';
@@ -967,9 +967,34 @@ import { createAccountSync } from './account-sync.js';
         // consume on the "registered" event via the deep-link confirm modal.
         const invite = createInvite({
             getSocket: () => socket,
-            onPendingInvite: (addr) => _handleDeepLinkUrl('proxion://invite?from=' + encodeURIComponent(addr)),
+            onPendingInvite: (addr) => {
+                // An invite from this very gateway cannot add anyone: it is the
+                // inviter's own page, opened by someone with no account here.
+                if (proxionMode !== 'web' && addressIsOnHost(addr, window.location.host)) return;
+                _handleDeepLinkUrl('proxion://invite?from=' + encodeURIComponent(addr));
+            },
         });
-        invite.capturePendingInvite();
+        {
+            const _from = invite.capturePendingInvite();
+            // Someone with no account on this gateway opened a contact invite
+            // (?from=) for its owner: point them at their own app, as the
+            // room-link notice does, before they start an account here.
+            if (_from && proxionMode !== 'web' && !localStorage.getItem("proxion_display_name")
+                    && addressIsOnHost(_from, window.location.host)) {
+                const link = window.location.origin + "/?from=" + encodeURIComponent(_from);
+                const notice = document.getElementById("ob-invite-notice");
+                const text = document.getElementById("ob-invite-notice-text");
+                if (notice && text) {
+                    text.textContent = t('onboarding.contactInviteElsewhere', { host: window.location.host });
+                    notice.hidden = false;
+                    document.getElementById("ob-copy-landing-invite")?.addEventListener("click", () => {
+                        navigator.clipboard.writeText(link)
+                            .then(() => showToast(t('common.copied')))
+                            .catch(() => showCopyModal(link));
+                    });
+                }
+            }
+        }
         // WebPush subscription (D4): registered with the gateway on connect so
         // messages arrive with the window closed.
         const push = createPush({ getSocket: () => socket });
@@ -1676,12 +1701,10 @@ import { createAccountSync } from './account-sync.js';
             // In the browser build, signing in is an OIDC redirect that strips the
             // ?join= param, so an invitee's join would be lost. Stash the code on the
             // first load and pick it back up after the round-trip.
-            const STASH = "proxion_pending_join";
-            if (code) {
-                try { localStorage.setItem(STASH, code); } catch (_) { /* ignore */ }
-            } else {
-                try { code = localStorage.getItem(STASH) || ""; } catch (_) { /* ignore */ }
-            }
+            // The stash expires after a day (readPendingJoin), so a link
+            // opened long ago is not joined when the user finally sets up here.
+            if (code) stashPendingJoin(localStorage, code);
+            else code = readPendingJoin(localStorage);
             // No account on this origin yet: the link may have been opened by
             // someone whose Proxion lives on another gateway. Say so on the
             // welcome step (with the link to copy into their own app) and hold
@@ -1709,7 +1732,7 @@ import { createAccountSync } from './account-sync.js';
                     if (_freshHere()) { setTimeout(tryJoin, 1000); return; }
                     if (socket && socket.readyState === WebSocket.OPEN) {
                         socket.send(JSON.stringify({cmd: "join_room", code: code}));
-                        try { localStorage.removeItem(STASH); } catch (_) { /* ignore */ }
+                        try { localStorage.removeItem(PENDING_JOIN_KEY); } catch (_) { /* ignore */ }
                         // Clean URL without reload
                         history.replaceState(null, "", window.location.pathname);
                     } else {
@@ -2129,7 +2152,16 @@ import { createAccountSync } from './account-sync.js';
                 case "tunnel_ready": {
                     // R97: gateway is now reachable over HTTPS. Point the QR at the
                     // tunnel URL so a phone can scan it and load the app.
+                    _tunnelRequestPending = false;
                     renderMyQR(event.url);
+                    // The address and invite links now use the tunnel URL; fetch
+                    // them so Copy invite / Copy short link hand out reachable links.
+                    if (event.address) {
+                        window.proxionAddress = event.address;
+                        localStorage.setItem("proxion_my_address", event.address);
+                        updateMyAddressBar(event.address);
+                    }
+                    socketSendOrQueue({ cmd: 'get_my_address' });
                     const line = document.getElementById('tunnel-status-line');
                     if (line) {
                         line.style.display = 'block';
@@ -2138,10 +2170,11 @@ import { createAccountSync } from './account-sync.js';
                     break;
                 }
                 case "tunnel_status": {
+                    if (event.state !== 'starting') _tunnelRequestPending = false;
                     const line = document.getElementById('tunnel-status-line');
                     if (line) {
                         line.style.display = 'block';
-                        if (event.state === 'absent') line.textContent = event.install_hint || t('tunnel.absent');
+                        if (event.state === 'absent') line.textContent = t('tunnel.absent');
                         else if (event.state === 'failed') line.textContent = t('tunnel.failed');
                         else if (event.state === 'stopped') line.textContent = '';
                         else line.textContent = t('tunnel.starting');
@@ -2250,14 +2283,16 @@ import { createAccountSync } from './account-sync.js';
                         // a live Solid session (pod ops run via solidSession.fetch directly).
                         if (solidSession.info.isLoggedIn) break;
                         localStorage.removeItem("proxion_pod_connected");
-                        const hasName = localStorage.getItem("proxion_display_name");
-                        const skipped = localStorage.getItem("proxion_pod_setup_skipped");
                         const bannerDismissed = localStorage.getItem("proxion_pod_banner_dismissed");
-                        if (hasName && !skipped) {
+                        // Reopen an unfinished wizard where it was left: no name
+                        // (step 1), pod not chosen (4), or pod skipped but not
+                        // finished (5 or 6). Finished or linked devices skip it.
+                        const _reopen = obReopenStep(localStorage);
+                        if (_reopen === 1) {
                             showOnboarding();
-                            obGoto(4, { returning: true });
-                        } else if (!hasName) {
+                        } else if (_reopen) {
                             showOnboarding();
+                            obGoto(_reopen, { returning: true });
                         } else if (!bannerDismissed) {
                             setPodBanner(true);
                         }
@@ -3200,6 +3235,14 @@ import { createAccountSync } from './account-sync.js';
                         }
                         sendStatus.fail(event.message_id);
                     }
+                    // A contact lookup that the gateway could not resolve: show
+                    // the inline not-found note now, not after the 8 s timeout.
+                    if (_peerDiscoveredResolve && (event.code === "peer_not_found" || event.code === "missing_address")) {
+                        const _r = _peerDiscoveredResolve;
+                        _peerDiscoveredResolve = null;
+                        _r(null);
+                        break;
+                    }
                     if (_pendingFriendRequest && (event.message in _friendRequestErrors || event.message === "delivery_failed" || event.message === "invalid_address")) {
                         _pendingFriendRequest = false;
                         const _sb2 = document.getElementById("add-peer-submit-btn");
@@ -3207,6 +3250,14 @@ import { createAccountSync } from './account-sync.js';
                         const _errEl = document.getElementById("add-peer-error");
                         if (_errEl) _errEl.style.color = "";
                         if (_errEl) _errEl.textContent = _friendRequestErrors[event.message] ? t(_friendRequestErrors[event.message]) : (event.detail || event.message);
+                        break;
+                    }
+                    // A refused "Connect a phone": end the status line instead
+                    // of leaving the "Opening a secure link" text up behind a toast.
+                    if (_tunnelRequestPending && event.message === "gateway_owner_only") {
+                        _tunnelRequestPending = false;
+                        const _tl = document.getElementById('tunnel-status-line');
+                        if (_tl) { _tl.style.display = 'block'; _tl.textContent = t('tunnel.failed'); }
                         break;
                     }
                     // Friendly, translated text for known backend errors
@@ -4234,6 +4285,8 @@ import { createAccountSync } from './account-sync.js';
 
         // peer_discovered response handler — used by the Add Contact modal
         let _peerDiscoveredResolve = null;
+        // A start_tunnel sent from the QR panel that has had no answer yet.
+        let _tunnelRequestPending = false;
         function handlePeerDiscovered(event) {
             if (_peerDiscoveredResolve) {
                 _peerDiscoveredResolve(event);
@@ -5348,35 +5401,39 @@ import { createAccountSync } from './account-sync.js';
             if (!socket || socket.readyState !== WebSocket.OPEN) {
                 errEl.textContent = t('conn.notConnectedGateway'); return;
             }
-            // R8.3.3: if value starts with http, extract the ?from= param
-            if (raw.startsWith('http')) {
-                try {
-                    const u = new URL(raw);
-                    const extracted = u.searchParams.get('from');
-                    if (extracted) raw = extracted;
-                } catch (_) {}
-            }
+            // An invite link (https or proxion://) carries the address in
+            // ?from=; a short link (https://gw/i/<token>) is resolved by the gateway.
+            const _parsed = contactAddressFromInput(raw);
+            raw = _parsed.address;
             errEl.textContent = "";
             errEl.style.color = "";
             // Neither an address (did@gateway) nor a bare did:key: say so here
             // rather than closing the dialog on a generic error toast.
-            if (!raw.includes("@") && !raw.startsWith("did:key:")) {
+            if (!_parsed.shortLink && !raw.includes("@") && !raw.startsWith("did:key:")) {
                 errEl.textContent = t('error.fr.invalid_address');
                 return;
             }
 
             // If address looks like a cross-gateway Proxion address, discover peer first
-            if (raw.includes("@") && (raw.includes("http") || raw.startsWith("did:"))) {
+            if (_parsed.shortLink || (raw.includes("@") && (raw.includes("http") || raw.startsWith("did:")))) {
                 if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = t('contact.lookingUp'); }
                 const discovered = await new Promise(resolve => {
                     _peerDiscoveredResolve = resolve;
                     socket.send(JSON.stringify({ cmd: "discover_peer", address: raw }));
-                    setTimeout(() => { _peerDiscoveredResolve = null; resolve(null); }, 8000);
+                    setTimeout(() => {
+                        if (_peerDiscoveredResolve === resolve) _peerDiscoveredResolve = null;
+                        resolve(null);
+                    }, 8000);
                 });
                 if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = t('contact.sendRequest'); }
                 if (!discovered) {
                     errEl.textContent = t('error.fr.delivery_failed');
                     return;
+                }
+                if (_parsed.shortLink) {
+                    raw = discovered.address
+                        || (discovered.did && discovered.gateway_http_url ? `${discovered.did}@${discovered.gateway_http_url}` : "");
+                    if (!raw.includes("@")) { errEl.textContent = t('error.fr.delivery_failed'); return; }
                 }
                 // Show discovered info briefly, then send friend request
                 errEl.style.color = "var(--color-success-soft)";
@@ -6292,7 +6349,7 @@ import { createAccountSync } from './account-sync.js';
 
             // Onboarding: Step 6 - Finish (Open Proxion)
             attachListener('#ob-finish-btn', 'click', () => {
-                document.getElementById('onboarding-modal').style.display = 'none';
+                finishOnboarding();
                 // Auto-select the first room so the user lands in a channel, not a blank view
                 setTimeout(() => {
                     const firstRoom = document.querySelector('#room-list li');
@@ -6370,7 +6427,9 @@ import { createAccountSync } from './account-sync.js';
             attachListener('#qr-copy-invite-btn', 'click', () => {
                 const link = window.proxionInviteLink || '';
                 if (!link) return;
-                navigator.clipboard.writeText(link).then(() => showToast(t('onboarding.inviteCopied')));
+                navigator.clipboard.writeText(link)
+                    .then(() => showToast(t('onboarding.inviteCopied')))
+                    .catch(() => showCopyModal(link));
             });
             // Invite links also get a Share button on phones and tablets. On a
             // desktop the share sheet is a detour (and Windows drops the link
@@ -6397,12 +6456,15 @@ import { createAccountSync } from './account-sync.js';
             attachListener('#qr-copy-short-btn', 'click', () => {
                 const link = window.proxionShortInviteUrl || window.proxionInviteLink || '';
                 if (!link) return;
-                navigator.clipboard.writeText(link).then(() => showToast(t('invite.shortLinkCopied')));
+                navigator.clipboard.writeText(link)
+                    .then(() => showToast(t('invite.shortLinkCopied')))
+                    .catch(() => showCopyModal(link));
             });
             // R97: open a public tunnel so a phone can reach this gateway over HTTPS.
             attachListener('#qr-connect-phone-btn', 'click', () => {
                 const line = document.getElementById('tunnel-status-line');
                 if (line) { line.style.display = 'block'; line.textContent = t('tunnel.starting'); }
+                _tunnelRequestPending = true;
                 socketSendOrQueue({ cmd: 'start_tunnel' });
             });
 

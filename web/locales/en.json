@@ -461,6 +461,7 @@
   "onboarding.restoreKit": "Restore your identity",
   "onboarding.inviteElsewhere": "This link invites you to a room hosted on {host}. If you already use Proxion on another gateway, copy the link and paste it into Join a room in your own app, and the room will appear there with your account. Continue here only to start a new account on this gateway.",
   "onboarding.copyInviteLink": "Copy invite link",
+  "onboarding.contactInviteElsewhere": "This link invites you to chat with the person who runs {host}. If you already use Proxion, copy the link and paste it into Add contact in your own app. Continue here only to start a new account on this gateway.",
   "onboarding.saveKit": "Download your recovery kit",
   "onboarding.saveKitHint": "Your identity lives only on this device. If you lose it without a recovery kit, your identity is gone with it.",
   "onboarding.welcomeBody": "A private messenger where your conversations belong to you, not a company. You can start right now, no signup needed, and connect your own storage later if you want to sync across devices.",

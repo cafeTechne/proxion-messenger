@@ -53,13 +53,9 @@ export function createAddress({ showToast, showCopyModal }) {
         if (!link) { showToast(t('address.noInviteLink')); return; }
         const panel = document.getElementById('qr-share-panel');
         if (!panel) return;
-        // R17.4.5: encode proxion:// deep-link so scanning on a device with the app installed
-        // opens it directly; fall back to HTTP short/invite URL on devices without the app.
-        const addr = window.proxionAddress || localStorage.getItem('proxion_my_address');
-        const qrUrl = addr
-            ? `proxion://invite?from=${encodeURIComponent(addr)}`
-            : (window.proxionShortInviteUrl || link);
-        renderMyQR(qrUrl);
+        // A phone camera cannot open a proxion:// link, so the QR carries the
+        // https invite. Its landing page offers "Open the desktop app" itself.
+        renderMyQR(window.proxionShortInviteUrl || link);
         // position near the top inline-end corner
         panel.style.top = '64px';
         panel.style.insetInlineEnd = '12px';

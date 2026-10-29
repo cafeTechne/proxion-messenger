@@ -151,6 +151,11 @@ export function createPairing({
         if (ev.history_bundle && importHistoryBundle) {
             try { await importHistoryBundle(ev.history_bundle); } catch (e) { /* ignore */ }
         }
+        // This device now belongs to an existing account: the first-run wizard
+        // is done for it, so the reload must not walk it through setup again.
+        try { localStorage.setItem('proxion_wizard_done', '1'); } catch (e) { /* ignore */ }
+        const _ob = document.getElementById('onboarding-modal');
+        if (_ob) _ob.style.display = 'none';
         _text('pair-device-status', 'Linked! Reloading…');
         _text('pair-device-safety', '');
         showToast(t('pairing.thisDeviceLinked'), 'success');

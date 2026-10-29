@@ -151,6 +151,16 @@ try {
   // It reloads ~1.2s after approval; wait for the reload to settle + reconnect.
   await new Promise(r => setTimeout(r, 2000));
   await online(pageN).catch(() => fail('new device did not reconnect after relink'));
+  // A linked device belongs to an existing account: no first-run wizard, now
+  // or after another reload.
+  const wizardOpen = () => pageN.evaluate(() =>
+    getComputedStyle(document.getElementById('onboarding-modal')).display !== 'none');
+  await new Promise(r => setTimeout(r, 1500));
+  if (await wizardOpen()) fail('the linked device was sent through the first-run wizard');
+  await pageN.reload({ waitUntil: 'load' });
+  await online(pageN).catch(() => fail('new device did not reconnect after a reload'));
+  await new Promise(r => setTimeout(r, 1500));
+  if (await wizardOpen()) fail('the linked device got the first-run wizard after a reload');
 
   // ── Primary refreshes Linked Devices; the new device must appear ──
   step = 'assert-linked-list';

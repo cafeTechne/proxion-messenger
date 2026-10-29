@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // real solid-authn bundle trying to redirect.
 vi.mock('./auth.js', () => ({ solidLogin: vi.fn(() => Promise.resolve()) }));
 import { solidLogin } from './auth.js';
-import { createOnboarding, obProgress, OB_STEPS } from './onboarding.js';
+import { createOnboarding, obProgress, OB_STEPS, obReopenStep, OB_AFTER_SKIP_KEY } from './onboarding.js';
 
 // Flexible element stub: every getElementById returns a fresh fake element that
 // records whatever the wizard sets on it.
@@ -42,6 +42,38 @@ function make(over = {}) {
   });
   return { ob, sent, setPodBanner };
 }
+
+describe('obReopenStep', () => {
+  const set = (o) => Object.entries(o).forEach(([k, v]) => localStorage.setItem(k, v));
+  it('starts a brand-new user at step 1 and a named one at the pod step', () => {
+    expect(obReopenStep(localStorage)).toBe(1);
+    set({ proxion_display_name: 'Ann' });
+    expect(obReopenStep(localStorage)).toBe(4);
+  });
+  it('never reopens for a finished wizard or a linked device', () => {
+    set({ proxion_display_name: 'Ann', proxion_wizard_done: '1' });
+    expect(obReopenStep(localStorage)).toBe(null);
+    localStorage.removeItem('proxion_wizard_done');
+    localStorage.removeItem('proxion_display_name');
+    set({ proxion_delegation_cert: '{}' });
+    expect(obReopenStep(localStorage)).toBe(null);
+  });
+  it('returns a user who skipped the pod to the step they left', () => {
+    const { ob } = make();
+    set({ proxion_display_name: 'Ann' });
+    ob.obSkipPod();
+    expect(obReopenStep(localStorage)).toBe(5);
+    ob.obGoto(6);
+    expect(obReopenStep(localStorage)).toBe(6);
+    ob.finishOnboarding();
+    expect(localStorage.getItem(OB_AFTER_SKIP_KEY)).toBe(null);
+    expect(obReopenStep(localStorage)).toBe(null);
+  });
+  it('leaves an older install that skipped the pod alone', () => {
+    set({ proxion_display_name: 'Ann', proxion_pod_setup_skipped: '1' });
+    expect(obReopenStep(localStorage)).toBe(null);
+  });
+});
 
 describe('obGoto', () => {
   it('shows the target step and hides the others', () => {
