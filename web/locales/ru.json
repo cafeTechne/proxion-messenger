@@ -400,7 +400,7 @@
   "btn.sign": "Войти",
   "btn.exportData": "Экспортировать данные",
   "btn.clearDmHistoryThis": "Очистить историю ЛС на этом устройстве",
-  "btn.resetAllLocalData": "Сбросить все локальные данные (сменить аккаунт)",
+  "btn.resetAllLocalData": "Сбросить все локальные данные",
   "btn.viewProjectWebsite": "Открыть сайт проекта",
   "btn.downloadIdentityBackup": "Скачать резервную копию личности",
   "btn.restoreFromBackup": "Восстановить из резервной копии",

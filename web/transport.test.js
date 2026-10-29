@@ -148,6 +148,8 @@ describe('UI gating', () => {
             'attach-btn',
             'gif-tray-btn',
             'voice-record-btn',
+            'settings-sec-devices',
+            'settings-sec-connection',
         ]);
     });
 
@@ -158,6 +160,28 @@ describe('UI gating', () => {
         const connection = { socketSendOrQueue: () => {} };
         const g = createGatewayTransport({ connection });
         for (const f of ['files', 'voice-messages', 'disappear']) expect(g.supports(f)).toBe(true);
+    });
+
+    it('web mode hides the gateway-only Settings sections and their nav entries', () => {
+        const t = createPodTransport();
+        expect(t.supports('sessions')).toBe(false);
+        expect(t.supports('gateway-connection')).toBe(false);
+        const mk = () => ({ style: {}, setAttribute() {} });
+        const els = { 'settings-sec-devices': mk(), 'settings-sec-connection': mk() };
+        const navs = { 'settings-sec-devices': mk(), 'settings-sec-profile': mk() };
+        const doc = {
+            getElementById: (id) => els[id] || null,
+            querySelectorAll: (sel) => {
+                const id = (sel.match(/data-settings-target="([^"]+)"/) || [])[1];
+                return navs[id] ? [navs[id]] : [];
+            },
+            documentElement: { classList: { add() {} } },
+        };
+        applyTransportGating(t, doc);
+        expect(els['settings-sec-devices'].style.display).toBe('none');
+        expect(els['settings-sec-connection'].style.display).toBe('none');
+        expect(navs['settings-sec-devices'].style.display).toBe('none');
+        expect(navs['settings-sec-profile'].style.display).toBeUndefined();
     });
 
     it('marks the document root to hide the dynamic message controls in the web build', () => {

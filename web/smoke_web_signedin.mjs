@@ -21,6 +21,7 @@ import { join, extname, normalize, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
 import { startCss, provisionAccount } from './scripts/css-harness.mjs';
+import { settleName } from './scripts/e2e-signin.mjs';
 
 const HERE = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const CHROME = [
@@ -134,6 +135,15 @@ try {
   }));
   if (booted.mode === 'web' && booted.hasWebDm === 'object' && booted.signin === 'none') ok('signed in: the signed-in boot ran (PodSocket + engines installed)');
   else fail(`signed-in boot incomplete: ${JSON.stringify(booted)}`);
+
+  // A new account has no name: it is asked once, and the header then shows it.
+  step = 'name';
+  if (await settleName(page, 'Signed In')) ok('the new account was asked for a name');
+  else fail('the new account was not asked for a name');
+  await new Promise((r) => setTimeout(r, 300));
+  const hdr = await page.evaluate(() => document.getElementById('username').textContent.trim());
+  if (hdr === 'Signed In') ok('the header shows the chosen name');
+  else fail(`header: ${JSON.stringify(hdr)}`);
 
   // ── Create a room and post a message ──
   step = 'room';

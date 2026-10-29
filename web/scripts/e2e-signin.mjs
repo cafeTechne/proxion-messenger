@@ -74,7 +74,7 @@ export async function buildAndServeHttps(webDir, buildWebScript) {
 // Drive a page from the app through the full OIDC + consent flow to signed-in.
 // `cookies` are the account's CSS cookies (from provisionAccount). Resolves once
 // the app is back and logged in (PodSocket installed), throws on failure.
-export async function signIn(page, { appOrigin, cssUrl, cookies }) {
+export async function signIn(page, { appOrigin, cssUrl, cookies, name }) {
   const cssHost = new URL(cssUrl).hostname;
   for (const [name, value] of Object.entries(cookies)) await page.setCookie({ name, value, domain: cssHost, path: '/' });
   await page.goto(appOrigin + '?mode=web', { waitUntil: 'networkidle2', timeout: 30000 });
@@ -88,4 +88,24 @@ export async function signIn(page, { appOrigin, cssUrl, cookies }) {
   ]);
   await page.waitForFunction(() => !location.href.includes('/consent') && !location.href.includes('/.oidc/'), { timeout: 30000 });
   await page.waitForFunction(() => typeof window.proxionWebDm === 'object', { timeout: 20000 });
+  return settleName(page, name);
+}
+
+// A new pod account with no name is asked for one once, in the Settings name
+// field. Wait for that check; if it asked, enter `name` (when given) and close
+// Settings so the smoke can carry on. Resolves to whether it asked.
+export async function settleName(page, name) {
+  await page.waitForFunction(() => window.proxionNameCheck !== undefined, { timeout: 20000 });
+  const asked = await page.evaluate(async () => {
+    await window.proxionNameCheck;
+    const m = document.getElementById('settings-modal');
+    return !!m && m.style.display === 'flex';
+  });
+  if (!asked) return false;
+  if (name) {
+    await page.focus('#settings-display-name');
+    await page.keyboard.type(name);
+  }
+  await page.evaluate(() => document.getElementById('settings-save-btn').click());
+  return true;
 }

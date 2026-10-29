@@ -396,7 +396,7 @@
   "btn.sign": "Anmelden",
   "btn.exportData": "Daten exportieren",
   "btn.clearDmHistoryThis": "DM-Verlauf auf diesem Gerät löschen",
-  "btn.resetAllLocalData": "Alle lokalen Daten zurücksetzen (Konto wechseln)",
+  "btn.resetAllLocalData": "Alle lokalen Daten zurücksetzen",
   "btn.viewProjectWebsite": "Projektwebsite ansehen",
   "btn.downloadIdentityBackup": "Identitätssicherung herunterladen",
   "btn.restoreFromBackup": "Aus Sicherung wiederherstellen",

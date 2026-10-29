@@ -396,7 +396,7 @@
   "btn.sign": "Se connecter",
   "btn.exportData": "Exporter les données",
   "btn.clearDmHistoryThis": "Effacer l'historique des MP sur cet appareil",
-  "btn.resetAllLocalData": "Réinitialiser toutes les données locales (changer de compte)",
+  "btn.resetAllLocalData": "Réinitialiser toutes les données locales",
   "btn.viewProjectWebsite": "Voir le site du projet",
   "btn.downloadIdentityBackup": "Télécharger la sauvegarde d'identité",
   "btn.restoreFromBackup": "Restaurer depuis une sauvegarde",

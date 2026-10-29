@@ -396,7 +396,7 @@
   "btn.sign": "Đăng nhập",
   "btn.exportData": "Xuất dữ liệu",
   "btn.clearDmHistoryThis": "Xóa lịch sử tin nhắn riêng trên thiết bị này",
-  "btn.resetAllLocalData": "Đặt lại toàn bộ dữ liệu cục bộ (chuyển tài khoản)",
+  "btn.resetAllLocalData": "Đặt lại toàn bộ dữ liệu cục bộ",
   "btn.viewProjectWebsite": "Xem trang web dự án",
   "btn.downloadIdentityBackup": "Tải bản sao lưu danh tính",
   "btn.restoreFromBackup": "Khôi phục từ bản sao lưu",

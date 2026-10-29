@@ -13,15 +13,16 @@ const WEB = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 const GROUPS = {
   // Single gateway: page boots clean, media path, core journey, rooms, a11y,
-  // i18n, first-run setup and settings.
+  // i18n, first-run setup and settings, and the service worker deploy check.
   ui: ['smoke_browser.mjs', 'smoke_webrtc.mjs', 'smoke_journey.mjs', 'smoke_rooms.mjs', 'smoke_voice_channel.mjs', 'smoke_a11y.mjs',
-       'smoke_keyboard.mjs', 'smoke_pseudo.mjs', 'smoke_firstrun.mjs'],
+       'smoke_keyboard.mjs', 'smoke_pseudo.mjs', 'smoke_firstrun.mjs', 'smoke_sw_update.mjs'],
   // Two gateways talking to each other: friend requests, E2E DMs, reactions,
   // linked devices, calls, two tabs of one account.
   'cross-gateway': ['smoke_federation.mjs', 'smoke_dm_history.mjs', 'smoke_dm_reaction.mjs',
                     'smoke_multidevice_dm.mjs', 'smoke_call.mjs', 'smoke_pairing.mjs', 'smoke_tabs.mjs'],
   // The gateway-less web build against a local Solid server (fetched with npx).
-  pod: ['smoke_web_nogw.mjs', 'smoke_web_signedin.mjs', 'smoke_web_join.mjs', 'smoke_web_join_link.mjs', 'smoke_web_dm.mjs'],
+  pod: ['smoke_web_nogw.mjs', 'smoke_web_signedin.mjs', 'smoke_web_join.mjs', 'smoke_web_join_link.mjs',
+        'smoke_web_dm.mjs', 'smoke_web_account.mjs'],
   // Pixel baselines depend on the machine's font rendering, so local only.
   visual: ['smoke_visual.mjs'],
 };

@@ -396,7 +396,7 @@
   "btn.sign": "Accedi",
   "btn.exportData": "Esporta dati",
   "btn.clearDmHistoryThis": "Cancella la cronologia DM su questo dispositivo",
-  "btn.resetAllLocalData": "Reimposta tutti i dati locali (cambia account)",
+  "btn.resetAllLocalData": "Reimposta tutti i dati locali",
   "btn.viewProjectWebsite": "Visita il sito del progetto",
   "btn.downloadIdentityBackup": "Scarica il backup dell'identità",
   "btn.restoreFromBackup": "Ripristina da un backup",

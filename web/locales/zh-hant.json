@@ -396,7 +396,7 @@
   "btn.sign": "登入",
   "btn.exportData": "匯出資料",
   "btn.clearDmHistoryThis": "清除此裝置上的私訊紀錄",
-  "btn.resetAllLocalData": "重設所有本機資料（切換帳戶）",
+  "btn.resetAllLocalData": "重設所有本機資料",
   "btn.viewProjectWebsite": "查看專案網站",
   "btn.downloadIdentityBackup": "下載身分備份",
   "btn.restoreFromBackup": "從備份復原",

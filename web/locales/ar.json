@@ -403,7 +403,7 @@
   "btn.sign": "تسجيل الدخول",
   "btn.exportData": "تصدير البيانات",
   "btn.clearDmHistoryThis": "مسح سجل الرسائل المباشرة على هذا الجهاز",
-  "btn.resetAllLocalData": "إعادة تعيين كل البيانات المحلية (تبديل الحساب)",
+  "btn.resetAllLocalData": "إعادة تعيين كل البيانات المحلية",
   "btn.viewProjectWebsite": "عرض موقع المشروع",
   "btn.downloadIdentityBackup": "تنزيل النسخة الاحتياطية للهوية",
   "btn.restoreFromBackup": "الاستعادة من نسخة احتياطية",

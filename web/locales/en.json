@@ -407,7 +407,7 @@
   "btn.sign": "Sign in",
   "btn.exportData": "Export data",
   "btn.clearDmHistoryThis": "Clear DM history on this device",
-  "btn.resetAllLocalData": "Reset all local data (switch account)",
+  "btn.resetAllLocalData": "Reset all local data",
   "btn.viewProjectWebsite": "View project website",
   "btn.downloadIdentityBackup": "Download identity backup",
   "btn.restoreFromBackup": "Restore from backup",

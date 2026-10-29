@@ -396,7 +396,7 @@
   "btn.sign": "로그인",
   "btn.exportData": "데이터 내보내기",
   "btn.clearDmHistoryThis": "이 기기의 DM 기록 지우기",
-  "btn.resetAllLocalData": "모든 로컬 데이터 재설정(계정 전환)",
+  "btn.resetAllLocalData": "모든 로컬 데이터 재설정",
   "btn.viewProjectWebsite": "프로젝트 웹사이트 보기",
   "btn.downloadIdentityBackup": "신원 백업 다운로드",
   "btn.restoreFromBackup": "백업에서 복원",

@@ -396,7 +396,7 @@
   "btn.sign": "サインイン",
   "btn.exportData": "データをエクスポート",
   "btn.clearDmHistoryThis": "このデバイスの DM 履歴を消去",
-  "btn.resetAllLocalData": "すべてのローカルデータをリセット（アカウント切り替え）",
+  "btn.resetAllLocalData": "すべてのローカルデータをリセット",
   "btn.viewProjectWebsite": "プロジェクトのウェブサイトを見る",
   "btn.downloadIdentityBackup": "アイデンティティのバックアップをダウンロード",
   "btn.restoreFromBackup": "バックアップから復元",

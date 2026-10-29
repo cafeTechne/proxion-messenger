@@ -396,7 +396,7 @@
   "btn.sign": "Masuk",
   "btn.exportData": "Ekspor data",
   "btn.clearDmHistoryThis": "Hapus riwayat DM di perangkat ini",
-  "btn.resetAllLocalData": "Setel ulang semua data lokal (ganti akun)",
+  "btn.resetAllLocalData": "Setel ulang semua data lokal",
   "btn.viewProjectWebsite": "Lihat situs web proyek",
   "btn.downloadIdentityBackup": "Unduh cadangan identitas",
   "btn.restoreFromBackup": "Pulihkan dari cadangan",

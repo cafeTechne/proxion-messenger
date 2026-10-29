@@ -8,6 +8,7 @@
 import { t } from './i18n.js';
 import { escHtml, gatewayUrl } from './util.js';
 import { icon } from './icons.js';
+import { webIdHostLabel } from './web-account.js';
 
 // ── Banner slot ─────────────────────────────────────────────────────────────
 // Every page-level banner lives in #banner-slot, and only the most important
@@ -122,7 +123,7 @@ export function createStatusBanners() {
             if (webidEl && webId) webidEl.textContent = webId;
             let dn = null;
             try { dn = localStorage.getItem('proxion_display_name'); } catch { /* private mode */ }
-            if (nameEl) nameEl.textContent = dn || (webId ? webId.replace(/^https?:\/\//, '').split('/')[0] : '');
+            if (nameEl) nameEl.textContent = dn || webIdHostLabel(webId);
         } else if (nameEl) {
             nameEl.textContent = t('conn.offline');
         }

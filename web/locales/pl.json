@@ -400,7 +400,7 @@
   "btn.sign": "Zaloguj się",
   "btn.exportData": "Eksportuj dane",
   "btn.clearDmHistoryThis": "Wyczyść historię wiadomości prywatnych na tym urządzeniu",
-  "btn.resetAllLocalData": "Zresetuj wszystkie dane lokalne (zmień konto)",
+  "btn.resetAllLocalData": "Zresetuj wszystkie dane lokalne",
   "btn.viewProjectWebsite": "Zobacz stronę projektu",
   "btn.downloadIdentityBackup": "Pobierz kopię zapasową tożsamości",
   "btn.restoreFromBackup": "Przywróć z kopii zapasowej",

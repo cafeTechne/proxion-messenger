@@ -68,6 +68,7 @@ import { createConnection, normalizeGatewayUrl, planThreadCatchUp, createRateRet
 import { createTabLock, showTabNotice, hideTabNotice } from './tablock.js';
 import { createTransport, detectMode, applyTransportGating } from './transport.js';
 import { createPodSocket } from './podtransport.js';
+import { purgeWebAccount, adoptWebAccount, shouldPromptForName, markNamePrompted } from './web-account.js';
 import { createRendering, replyQuoteHtml } from './rendering.js';
 import { createView, appendSidebarEmpty, mergeDmSnapshot } from './view.js';
 import { createInvite, contactAddressFromInput, addressIsOnHost, stashPendingJoin, readPendingJoin, PENDING_JOIN_KEY } from './invite.js';
@@ -968,10 +969,13 @@ import { createAccountSync } from './account-sync.js';
         // consume on the "registered" event via the deep-link confirm modal.
         const invite = createInvite({
             getSocket: () => socket,
+            // A ?from= link names a Proxion address, which is a gateway; the
+            // browser build has none to add the contact through, so drop it.
+            // An invite from this very gateway cannot add anyone either: it is
+            // the inviter's own page, opened by someone with no account here.
             onPendingInvite: (addr) => {
-                // An invite from this very gateway cannot add anyone: it is the
-                // inviter's own page, opened by someone with no account here.
-                if (proxionMode !== 'web' && addressIsOnHost(addr, window.location.host)) return;
+                if (!transport.supports('address')) return;
+                if (addressIsOnHost(addr, window.location.host)) return;
                 _handleDeepLinkUrl('proxion://invite?from=' + encodeURIComponent(addr));
             },
         });
@@ -1384,10 +1388,13 @@ import { createAccountSync } from './account-sync.js';
                 localStorage.getItem("proxion_my_address") || "(not connected)";
             // Fetch live status from gateway (will update the pre-populated state)
             if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({cmd: "get_my_address"}));
-                socket.send(JSON.stringify({cmd: "pod_status"}));
-                socket.send(JSON.stringify({cmd: "list_sessions"}));
-                socket.send(JSON.stringify({cmd: "list_devices"}));
+                // Gateway-only reads: the browser build hides the panels they fill.
+                if (transport.supports('address')) socket.send(JSON.stringify({cmd: "get_my_address"}));
+                if (transport.supports('federation')) socket.send(JSON.stringify({cmd: "pod_status"}));
+                if (transport.supports('sessions')) {
+                    socket.send(JSON.stringify({cmd: "list_sessions"}));
+                    socket.send(JSON.stringify({cmd: "list_devices"}));
+                }
                 blocks.requestBlocks();   // R65: refresh the blocked-users list
             }
             blocks.renderBlockedList();   // R65
@@ -5977,7 +5984,37 @@ import { createAccountSync } from './account-sync.js';
             }).catch(() => {});
         }
 
+        // Show our own name everywhere it appears: the header, the Settings name
+        // field and the name + ID readout.
+        function _showSelfName(name) {
+            const u = document.getElementById('username');
+            if (u) u.textContent = name;
+            const f = document.getElementById('settings-display-name');
+            if (f && document.activeElement !== f) f.value = name;
+            _renderSettingsDid();
+        }
+
+        // A new pod account has no name yet: open the Settings name field once,
+        // so it is not shown as the bare pod host. Saving goes through the usual
+        // name autosave, which also writes the name to the pod profile.
+        function _promptForName() {
+            const btn = document.getElementById('settings-btn');
+            if (!btn || document.getElementById('settings-modal')?.style.display === 'flex') return;
+            btn.click();
+            document.getElementById('settings-display-name')?.focus();
+        }
+
         async function onPodLoggedIn(webId) {
+            // Browser build: the pod account is the identity, so state another
+            // account left in this browser (its name, status, mutes) is dropped,
+            // here and in what boot already read into memory.
+            if (transport.mode === 'web' && adoptWebAccount(localStorage, webId)) {
+                mutedThreads.clear();
+                hiddenDms.clear();
+                callCapablePins.clear();
+                const _obName = document.getElementById('ob-name');
+                if (_obName) _obName.value = '';
+            }
             localStorage.setItem('proxion_pod_webid', webId);
             selfWebId = webId;
             setPodBanner(false);
@@ -5993,17 +6030,20 @@ import { createAccountSync } from './account-sync.js';
             // first sign-in has no Proxion name yet, so take the name on the
             // Solid profile itself rather than show the WebID.
             const savedName = localStorage.getItem('proxion_display_name');
-            if (!savedName) {
-                podReadProfile().then(async p => {
-                    const name = p?.['px:displayName'] || await podResolveWebIdName(webId);
-                    if (name) {
-                        localStorage.setItem('proxion_display_name', name);
-                        if (socket?.readyState === WebSocket.OPEN) {
-                            socket.send(JSON.stringify({ cmd: 'set_identity', display_name: name }));
-                        }
+            // Exposed so the browser smokes can wait for the name to settle.
+            window.proxionNameCheck = savedName ? Promise.resolve() : podReadProfile().then(async p => {
+                const name = p?.['px:displayName'] || await podResolveWebIdName(webId);
+                if (name) {
+                    localStorage.setItem('proxion_display_name', name);
+                    _showSelfName(name);
+                    if (socket?.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({ cmd: 'set_identity', display_name: name }));
                     }
-                }).catch(() => {});
-            }
+                } else if (transport.mode === 'web' && shouldPromptForName(localStorage, webId)) {
+                    markNamePrompted(localStorage, webId);
+                    _promptForName();
+                }
+            }).catch(() => {});
             const webidEl = document.getElementById('profile-webid');
             if (webidEl) webidEl.textContent = webId;
             const podWebidEl = document.getElementById('settings-pod-webid');
@@ -6703,6 +6743,15 @@ import { createAccountSync } from './account-sync.js';
             // Disconnect from the CSS/Solid pod without touching the local identity key or
             // room/message history. The user's DID, display name, and all rooms are preserved.
             async function _signOutOfPod() {
+                // Browser build: there is no gateway holding pod credentials. End
+                // the Solid session, forget this account here, and reload to the
+                // sign-in screen.
+                if (transport.mode === 'web') {
+                    try { await solidLogout(); } catch (_) {}
+                    purgeWebAccount(localStorage);
+                    window.location.reload();
+                    return;
+                }
                 if (window.__TAURI__?.invoke) {
                     window.__TAURI__.invoke('clear_pod_credentials').catch(() => {});
                 }
@@ -6745,8 +6794,10 @@ import { createAccountSync } from './account-sync.js';
                     window.__TAURI__.invoke('clear_pod_credentials').catch(() => {});
                 }
                 // Erase this account on the gateway too (its DMs, contacts, keys
-                // and room memberships). A linked device only wipes itself.
-                if (socket && socket.readyState === WebSocket.OPEN) {
+                // and room memberships). A linked device only wipes itself. The
+                // browser build has no gateway, so nothing would ever answer.
+                const _hasGateway = transport.mode !== 'web';
+                if (_hasGateway && socket && socket.readyState === WebSocket.OPEN) {
                     const _erased = await new Promise((resolve) => {
                         _accountDeleteWaiter = resolve;
                         socket.send(JSON.stringify({ cmd: 'delete_account', confirm: 'delete' }));
@@ -6755,7 +6806,9 @@ import { createAccountSync } from './account-sync.js';
                     _accountDeleteWaiter = null;
                     if (!_erased) console.warn('[Proxion] gateway did not confirm account deletion');
                 }
-                try { await fetch(gatewayUrl('/api/pod-disconnect'), { method: 'POST' }); } catch (_) {}
+                if (_hasGateway) {
+                    try { await fetch(gatewayUrl('/api/pod-disconnect'), { method: 'POST' }); } catch (_) {}
+                }
                 try { await solidLogout(); } catch (_) {}
                 localStorage.clear();
                 sessionStorage.clear();
@@ -7267,7 +7320,13 @@ import { createAccountSync } from './account-sync.js';
             // Wait here while another tab is the active one; nothing below
             // (pod sign-in, E2E init, the gateway socket) runs in a waiting tab.
             await tabLock.claim({
-                onFollower: () => showTabNotice({ t, onUseHere: () => { tabLock.takeover(); } }),
+                onFollower: () => {
+                    // This tab is not connecting while it waits, so do not leave
+                    // the "Connecting..." placeholder beside the notice.
+                    const _u = document.getElementById('username');
+                    if (_u) _u.textContent = localStorage.getItem('proxion_display_name') || '';
+                    showTabNotice({ t, onUseHere: () => { tabLock.takeover(); } });
+                },
             });
             hideTabNotice();
             const podWebId = await initSolidAuth();

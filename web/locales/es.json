@@ -396,7 +396,7 @@
   "btn.sign": "Iniciar sesión",
   "btn.exportData": "Exportar datos",
   "btn.clearDmHistoryThis": "Borrar historial de MD en este dispositivo",
-  "btn.resetAllLocalData": "Restablecer todos los datos locales (cambiar de cuenta)",
+  "btn.resetAllLocalData": "Restablecer todos los datos locales",
   "btn.viewProjectWebsite": "Ver el sitio web del proyecto",
   "btn.downloadIdentityBackup": "Descargar copia de seguridad de identidad",
   "btn.restoreFromBackup": "Restaurar desde copia de seguridad",

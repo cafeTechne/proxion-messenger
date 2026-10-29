@@ -154,6 +154,10 @@ const _FEATURE_CONTROLS = {
     // (send_voice_message) are gateway commands with no pod path yet.
     files: ['attach-btn', 'gif-tray-btn'],
     'voice-messages': ['voice-record-btn'],
+    // Sessions and linked devices are gateway records, and the Connection
+    // section configures the gateway socket; the browser build has neither.
+    sessions: ['settings-sec-devices'],
+    'gateway-connection': ['settings-sec-connection'],
 };
 
 // Message-action buttons are rendered per message (rendering.js) with no stable
@@ -206,6 +210,10 @@ export function applyTransportGating(transport, doc) {
             if (el.style) el.style.display = 'none';
             if (el.setAttribute) el.setAttribute('aria-hidden', 'true');
             hidden.push(id);
+        }
+        // A hidden Settings section takes its nav entry with it.
+        if (d.querySelectorAll) {
+            for (const nav of d.querySelectorAll(`[data-settings-target="${id}"]`)) { if (nav.style) nav.style.display = 'none'; }
         }
     }
     const root = d.documentElement;

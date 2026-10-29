@@ -396,7 +396,7 @@
   "btn.sign": "登录",
   "btn.exportData": "导出数据",
   "btn.clearDmHistoryThis": "清除此设备上的私信记录",
-  "btn.resetAllLocalData": "重置所有本地数据（切换账户）",
+  "btn.resetAllLocalData": "重置所有本地数据",
   "btn.viewProjectWebsite": "查看项目网站",
   "btn.downloadIdentityBackup": "下载身份备份",
   "btn.restoreFromBackup": "从备份恢复",

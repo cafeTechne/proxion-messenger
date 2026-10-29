@@ -396,7 +396,7 @@
   "btn.sign": "Giriş yap",
   "btn.exportData": "Verileri dışa aktar",
   "btn.clearDmHistoryThis": "Bu cihazdaki DM geçmişini temizle",
-  "btn.resetAllLocalData": "Tüm yerel verileri sıfırla (hesap değiştir)",
+  "btn.resetAllLocalData": "Tüm yerel verileri sıfırla",
   "btn.viewProjectWebsite": "Proje web sitesini görüntüle",
   "btn.downloadIdentityBackup": "Kimlik yedeğini indir",
   "btn.restoreFromBackup": "Yedekten geri yükle",
