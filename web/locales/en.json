@@ -361,6 +361,7 @@
   "label.displayName": "Display name",
   "label.customStatusMax100": "Custom status (max 100 characters)",
   "settings.nameRequired": "Your name can't be empty. Your old name is kept.",
+  "settings.languageChangedElsewhere": "Language changed on another device. It applies the next time the app opens.",
   "settings.gatewayUrlInvalid": "Enter a gateway address, like ws://127.0.0.1:7474 or wss://example.com.",
   "settings.gatewayUrlServed": "This page comes from your gateway, so it always connects to it. To use another gateway, open that gateway's address instead.",
   "label.gatewayWebsocketUrl": "Gateway WebSocket URL",

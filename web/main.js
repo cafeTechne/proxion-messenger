@@ -898,6 +898,7 @@ import { createAccountSync } from './account-sync.js';
             },
             onPrefs: _applySyncedPrefs,
         });
+        let _syncedLocaleNoted = '';
         function _applySyncedPrefs(keys) {
             if (keys.includes('proxion_theme')) {
                 const pref = readThemePref();
@@ -915,7 +916,12 @@ import { createAccountSync } from './account-sync.js';
             }
             if (keys.includes('proxion_locale')) {
                 const loc = localStorage.getItem('proxion_locale');
-                if (loc && loc !== getLocale()) { try { setLocale(loc); } catch (_) { /* stays on reload */ } }
+                // Already stored by account sync. Never reload under the user
+                // (a call, a half-typed message): it applies on the next start.
+                if (loc && loc !== getLocale() && loc !== _syncedLocaleNoted) {
+                    _syncedLocaleNoted = loc;
+                    showToast(t('settings.languageChangedElsewhere'));
+                }
             }
         }
         // Another tab took over: stop the socket, let in-flight ratchet work save

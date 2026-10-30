@@ -70,4 +70,13 @@ describe('UI wiring', () => {
         expect(routes.size).toBeGreaterThan(50);
         expect(unrouted).toEqual([]);
     });
+
+    it('a language change synced from another device never reloads the page', () => {
+        const main = sources['main.js'].replace(/\r\n/g, '\n');
+        const start = main.indexOf('function _applySyncedPrefs(');
+        expect(start).toBeGreaterThan(0);
+        const body = main.slice(start, main.indexOf('\n        }\n', start));
+        expect(body).toContain("'proxion_locale'");
+        expect(body).not.toMatch(/setLocale\(|location\.reload/);
+    });
 });
