@@ -897,6 +897,21 @@ class MiscHandlerMixin:
         for room_id, room in list(self._local_rooms.items()):
             if websocket in room.get("members", ()) or webid in self._store.get_room_members(room_id):
                 await self._handle_leave_local_room(websocket, {"room_id": room_id})
+        # Tell each contact's gateway the relationship is over, as removing them
+        # one by one does, so their messages do not land in a later account here.
+        _removed_at = datetime.now(timezone.utc).isoformat()
+        for _rel in self._store.list_relationships(owner_webid=webid, include_ownerless=False):
+            _peer = _rel.get("peer_did", "")
+            if not _peer or self._sockets_for(_peer):
+                continue
+            _pg = self._resolve_peer_gateway(_peer)
+            if _pg:
+                asyncio.create_task(self._relay_ephemeral(_pg, {
+                    "content_type": "contact_removed",
+                    "from_webid": self._own_gateway_did(),
+                    "to_webid": _peer,
+                    "timestamp": _removed_at,
+                }))
         counts = self._store.delete_account_data(webid)
         self._user_presence.pop(webid, None)
         self._relay_queue.pop(webid, None)

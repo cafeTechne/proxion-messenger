@@ -192,6 +192,24 @@ async def _flow(tmp_path):
         assert mine and mine[0]["from_webid"] == ca2
 
 
+def test_delete_account_tells_contacts(tmp_path):
+    """Reset ends each relationship on the contact's side too."""
+    async def run():
+        a, b = _gateway(tmp_path, "ra"), _gateway(tmp_path, "rb")
+        async with websockets.connect(f"ws://127.0.0.1:{a[2]}") as conn_a, \
+                websockets.connect(f"ws://127.0.0.1:{b[2]}") as conn_b:
+            await _reg(conn_a, _client_did(), "Alice")
+            await _reg(conn_b, _client_did(), "Bob")
+            await _befriend(a, b, conn_a, conn_b)
+            await conn_a.send(json.dumps({"cmd": "delete_account", "confirm": "delete"}))
+            assert await _wait(conn_a, lambda m: m.get("type") == "account_deleted")
+            assert await _wait(conn_b, lambda m: m.get("type") == "contact_removed_by_peer")
+            await conn_b.send(json.dumps({"cmd": "get_relationships"}))
+            rels = await _wait(conn_b, lambda m: m.get("type") == "relationships")
+            assert rels["contacts"] == []
+    asyncio.run(run())
+
+
 def test_unproven_gateway_change_stays_pending(tmp_path):
     """A URL change without a signed claim never redirects a contact's traffic."""
     from proxion_messenger_core.gateway import GatewayConfig, ProxionGateway
