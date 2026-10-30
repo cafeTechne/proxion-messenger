@@ -6621,8 +6621,8 @@ import { createAccountSync } from './account-sync.js';
             // Non-blocking pod sync — contacts, invites, and thread indexes
             syncFromPod().catch(() => {});
             // D3: flush any room pod writes queued while offline / logged out.
-            flushPodQueue();
-            _restorePodQueueNotes().catch(() => {});
+            // Notes first, so a write the flush lands is not marked again after.
+            _restorePodQueueNotes().catch(() => {}).then(() => flushPodQueue());
             if (_podHealth) _podHealth.markSignedIn();
             // B2: rehydrate rooms we own to a gateway that may have lost them.
             rehostOwnedRooms();
