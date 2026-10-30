@@ -3,7 +3,8 @@
 // state across a thread switch and goes out when the network is back), a DM
 // whose drop fails and is resent after a reload, a pod that answers 401 (banner,
 // queued room write flushed once the pod works again), and a session that ends
-// (sign-in-again banner, the room message queued and written after signing in).
+// (sign-in-again banner, the room message queued and written after signing in,
+// the draft kept). Also: cancelling consent at the provider is explained.
 //
 //   node web/smoke_web_session.mjs
 // Needs Chrome (or PROXION_CHROME), openssl, and npx (for CSS). Self-skips if the
@@ -106,6 +107,19 @@ try {
   const pageB = await (await browser.createBrowserContext()).newPage();
   const errs = [];
   for (const [tag, p] of [['A', pageA], ['B', pageB]]) p.on('pageerror', (e) => errs.push(`${tag}: ${e.message}`));
+
+  // ── Cancelling consent at the identity provider says so on the sign-in screen ──
+  step = 'cancel-consent';
+  const pageX = await (await browser.createBrowserContext()).newPage();
+  for (const [n, v] of Object.entries(alice.cookies)) await pageX.setCookie({ name: n, value: v, domain: new URL(css.url).hostname, path: '/' });
+  await pageX.goto(served.origin + '?mode=web', { waitUntil: 'networkidle2', timeout: 30000 });
+  await sleep(500);
+  await pageX.evaluate((u) => { window.proxionWebLogin(u); }, css.url).catch(() => {});
+  await pageX.waitForSelector('#cancel', { timeout: 25000 });
+  await Promise.all([pageX.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => null), pageX.click('#cancel')]);
+  if (await waitFor(pageX, () => /cancel/i.test(document.getElementById('web-signin-error')?.textContent || ''), null, 15000)) ok('a cancelled consent is explained on the sign-in screen');
+  else fail(`no message after cancelling consent: ${JSON.stringify(await pageX.evaluate(() => document.getElementById('web-signin-error')?.textContent))}`);
+  await pageX.close();
 
   step = 'signin';
   await signIn(pageA, { appOrigin: served.origin, cssUrl: css.url, cookies: alice.cookies, name: 'Alice' });
