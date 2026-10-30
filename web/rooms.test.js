@@ -93,6 +93,27 @@ describe('copyRoomInvite', () => {
     expect(els['invite-modal-code'].textContent).toBe('ABC123');
     expect(els['room-invite-modal'].style.display).toBe('flex');
   });
+  it('offers a new link to the owner of a gateway room only', () => {
+    class FakeWS { send(s) { this.sent.push(JSON.parse(s)); } }
+    FakeWS.OPEN = 1;
+    global.WebSocket = FakeWS;
+    const ws = Object.assign(new FakeWS(), { readyState: 1, sent: [] });
+    const urls = { 'room-1': 'https://gw.example/?join=ABC123' };
+    const own = make({ socket: ws, roomCreatorOf: new Set(['room-1']), roomInviteUrls: urls });
+    own.rooms.copyRoomInvite();
+    expect(els['invite-modal-renew'].hidden).toBe(false);
+    own.rooms.renewRoomInvite();
+    expect(ws.sent).toContainEqual({ cmd: 'new_room_invite', room_id: 'room-1' });
+    own.rooms.applyRenewedInvite({ room_id: 'room-1', code: 'NEW9', invite_url: 'https://gw.example/?join=NEW9' });
+    expect(urls['room-1']).toBe('https://gw.example/?join=NEW9');
+    expect(els['invite-modal-code'].textContent).toBe('NEW9');
+
+    make({ socket: ws, roomInviteUrls: urls }).rooms.copyRoomInvite();
+    expect(els['invite-modal-renew'].hidden).toBe(true);
+    // A pod-only (browser build) socket has no gateway invite to replace.
+    make({ roomCreatorOf: new Set(['room-1']), roomInviteUrls: urls }).rooms.copyRoomInvite();
+    expect(els['invite-modal-renew'].hidden).toBe(true);
+  });
 });
 
 describe('submitJoinRoom', () => {

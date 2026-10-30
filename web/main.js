@@ -2021,7 +2021,9 @@ import { createAccountSync } from './account-sync.js';
         }
 
         function normalizeRelayThreadId(event) {
-            if (event.source !== "relay") return event;
+            // A relayed room message already names its room; never remap it into
+            // a DM thread even if its sender is also a contact.
+            if (event.source !== "relay" || event.room_id) return event;
             // A relayed DM carries the SENDER's cert_id, which is meaningless to us:
             // each side holds its own cert_id for the same relationship. Map by the
             // sender's DID to OUR cert_id first so the message lands in the thread we
@@ -2173,7 +2175,7 @@ import { createAccountSync } from './account-sync.js';
                         }
                     }
                     // Track last message for DM/room preview
-                    if (msg.local && (msg.source === "local_dm" || msg.source === "relay")) {
+                    if (msg.local && !msg.room_id && (msg.source === "local_dm" || msg.source === "relay")) {
                         // A message still sealed here (our own, sent from another
                         // device) has no plaintext to preview.
                         dmLastMessages[id] = {
@@ -2187,7 +2189,10 @@ import { createAccountSync } from './account-sync.js';
                         renderDmSidebar();
                     }
                     // local_room: the browser build's echo of our own room send.
-                    if (msg.local && (msg.source === "room" || msg.source === "local_room")) {
+                    // A room message from a member on another gateway arrives as
+                    // source "relay" with its room_id and no local flag.
+                    if ((msg.local && (msg.source === "room" || msg.source === "local_room"))
+                            || (msg.source === "relay" && msg.room_id && msg.room_id === id)) {
                         roomLastMessages[id] = {
                             message_id: msg.message_id,
                             snippet: markdownToPlain(msg.content).slice(0, 40),

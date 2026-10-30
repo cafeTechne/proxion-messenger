@@ -132,7 +132,7 @@ export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoo
         // Only the owner can replace the link (the gateway checks this too).
         // Pod-only rooms have no gateway invite to replace.
         const renewBtn = document.getElementById("invite-modal-renew");
-        const onGateway = typeof WebSocket !== 'undefined' && getSocket() instanceof WebSocket;
+        const onGateway = typeof WebSocket === 'function' && getSocket() instanceof WebSocket;
         if (renewBtn) renewBtn.hidden = !onGateway || !getRoomCreatorOf().has(activeView.id);
         document.getElementById("room-invite-modal").style.display = "flex";
     }
