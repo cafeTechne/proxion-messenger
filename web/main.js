@@ -71,7 +71,7 @@ import { createTransport, detectMode, applyTransportGating } from './transport.j
 import { createPodSocket } from './podtransport.js';
 import { purgeWebAccount, adoptWebAccount, shouldPromptForName, markNamePrompted } from './web-account.js';
 import { createRendering, replyQuoteHtml } from './rendering.js';
-import { createView, appendSidebarEmpty, mergeDmSnapshot } from './view.js';
+import { createView, appendSidebarEmpty, mergeDmSnapshot, dropSupersededContactRows } from './view.js';
 import { createInvite, contactAddressFromInput, addressIsOnHost, stashPendingJoin, readPendingJoin, PENDING_JOIN_KEY } from './invite.js';
 import { createPush, closedAppPushStatus } from './push.js';
 import { subscribeWebhook, watchResource } from './notify.js';
@@ -1049,6 +1049,9 @@ import { createAccountSync } from './account-sync.js';
         let _threadNames = {};         // thread_id -> display_name (for tray unread menu)
         const _announceThrottle = {};  // thread_id -> last SR-announce time (ms)
         let _pendingFriendRequest = false;
+        // Invitation ids the gateway last listed as still pending (its full list,
+        // sent on connect); null until then and in the browser build.
+        let _gatewayPendingInvites = null;
         let hiddenDms = new Set(JSON.parse(localStorage.getItem("proxion_hidden_dms") || "[]"));
         localStorage.removeItem("theme"); // stale key from removed light-mode feature
         const _local_rooms = {};
@@ -1167,7 +1170,8 @@ import { createAccountSync } from './account-sync.js';
                 cert_id: c.certificate_id, display_name: c.display_name || null,
                 peer_webid: c.peer_did || null, local: false,
             }));
-            if (mergeDmSnapshot(localDmPeers, dms)) renderDmSidebar();
+            const merged = mergeDmSnapshot(localDmPeers, dms);
+            if (dropSupersededContactRows(localDmPeers, contacts) || merged) renderDmSidebar();
         }
 
         // Give a DM thread that has no name yet the one its peer chose (sent with
@@ -1344,6 +1348,7 @@ import { createAccountSync } from './account-sync.js';
         function hideDm(threadId) {
             hiddenDms.add(threadId);
             localStorage.setItem("proxion_hidden_dms", JSON.stringify([...hiddenDms]));
+            _clearUnread(threadId);
             renderDmSidebar();
             if (activeView && activeView.id === threadId) {
                 activeView = null; updatePageTitle();
@@ -2123,8 +2128,10 @@ import { createAccountSync } from './account-sync.js';
                         _markRoomSeen(id, msg.message_id);
                     }
 
-                    // Update unread badges + DM last-message preview
-                    if (!activeView || activeView.id !== id) {
+                    // Update unread badges + DM last-message preview. Our own message,
+                    // sent from another tab or device, is never unread here.
+                    const _fromMe = msg.own || (!!selfWebId && msg.from_webid === selfWebId);
+                    if (!_fromMe && (!activeView || activeView.id !== id)) {
                         if (!mutedThreads.has(id)) {
                             unreadCounts[id] = (unreadCounts[id] || 0) + 1;
                             updateSidebarBadge(id);
@@ -3180,6 +3187,9 @@ import { createAccountSync } from './account-sync.js';
                             delete localDmPeers[certId];
                             renderDmSidebar();
                         }
+                        // Its unread count goes too, or the title and tray keep
+                        // counting messages in a row that no longer exists.
+                        if (certId) _clearUnread(certId);
                         if (certId && activeView && activeView.id === certId) {
                             activeView = null; updatePageTitle();
                             _showThreadClosed(t('contact.removed'));
@@ -3225,7 +3235,26 @@ import { createAccountSync } from './account-sync.js';
                     });
                     break;
                 case "friend_requests":
+                    if (event.complete) {
+                        // The gateway's full list of requests still waiting: a card
+                        // not on it (restored from the pod, or answered on another
+                        // device while this one was offline) is over.
+                        _gatewayPendingInvites = new Set((event.pending || []).map(p => p.invitation_id));
+                        document.querySelectorAll("#friend-request-list li.fr-card").forEach(li => {
+                            const _iid = li.id.slice(4);
+                            if (!_gatewayPendingInvites.has(_iid)) {
+                                li.remove();
+                                podDeleteInvite(_iid).catch(() => {});
+                            }
+                        });
+                        refreshFriendRequestsBadge();
+                    }
                     (event.pending || []).forEach(renderPendingInvite);
+                    break;
+                case "thread_read":
+                    // Read on another tab or device of ours.
+                    if (event.thread_id && (unreadCounts[event.thread_id] || unreadMentions.has(event.thread_id)))
+                        _clearUnread(event.thread_id);
                     break;
                 case "friend_request_dismissed":
                     // Ignored here or on another device, or the person we asked
@@ -3334,6 +3363,20 @@ import { createAccountSync } from './account-sync.js';
                         _peerDiscoveredResolve = null;
                         _r(null);
                         break;
+                    }
+                    // An accept that was refused: a request that is no longer
+                    // waiting (answered elsewhere, or a stale copy) loses its card;
+                    // otherwise its Accept button works again.
+                    if (event.invitation_id) {
+                        const _card = document.getElementById("fri-" + event.invitation_id);
+                        if (_card && event.message === "invite_not_found") {
+                            _card.remove();
+                            refreshFriendRequestsBadge();
+                            podDeleteInvite(event.invitation_id).catch(() => {});
+                        } else if (_card) {
+                            const _ab = _card.querySelector('[data-fr-action="accept"]');
+                            if (_ab) _ab.disabled = false;
+                        }
                     }
                     if (_pendingFriendRequest && (event.message in _friendRequestErrors || event.message === "delivery_failed" || event.message === "invalid_address")) {
                         _pendingFriendRequest = false;
@@ -4385,6 +4428,14 @@ import { createAccountSync } from './account-sync.js';
             }
             updatePageTitle();
             _syncTrayUnread();
+        }
+
+        // A thread read elsewhere, removed or hidden: no unread count or mention
+        // flag left for it in the badge, title or tray.
+        function _clearUnread(id) {
+            delete unreadCounts[id];
+            unreadMentions.delete(id);
+            updateSidebarBadge(id);
         }
 
         // Title names the open conversation; the favicon gets an unread dot
@@ -6182,9 +6233,18 @@ import { createAccountSync } from './account-sync.js';
                 // 2. Pending invites
                 const invites = await podReadInvites();
                 invites.forEach(inv => {
-                    if (inv?.invitation_id) renderPendingInvite({
+                    if (!inv?.invitation_id) return;
+                    // Already off the gateway's list: answered on another device.
+                    if (_gatewayPendingInvites && !_gatewayPendingInvites.has(inv.invitation_id)) {
+                        podDeleteInvite(inv.invitation_id).catch(() => {});
+                        return;
+                    }
+                    // Saved from the friend_request_received event (from_did,
+                    // display_name); older copies hold the invite itself (issuer).
+                    renderPendingInvite({
                         invitation_id: inv.invitation_id,
-                        from_did: inv.issuer?.did || inv.issuer?.public_key || '',
+                        from_did: inv.from_did || inv.issuer?.did || inv.issuer?.public_key || '',
+                        display_name: inv.display_name || inv.issuer?.display_name || '',
                         endpoint_hints: inv.endpoint_hints || [],
                     });
                 });
@@ -7343,7 +7403,7 @@ import { createAccountSync } from './account-sync.js';
                 const btn = e.target.closest('[data-fr-action]');
                 if (!btn) return;
                 const { frAction, invId } = btn.dataset;
-                if (frAction === 'accept') acceptFriendRequest(invId);
+                if (frAction === 'accept') acceptFriendRequest(invId, btn);
                 else if (frAction === 'dismiss') {
                     document.getElementById(`fri-${invId}`)?.remove();
                     refreshFriendRequestsBadge();

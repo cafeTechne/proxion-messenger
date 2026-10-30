@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('./pod.js', () => ({ podWriteReadState: vi.fn(() => Promise.resolve()) }));
 
-import { createView, appendSidebarEmpty, mergeDmSnapshot } from './view.js';
+import { createView, appendSidebarEmpty, mergeDmSnapshot, dropSupersededContactRows } from './view.js';
 
 let els, host, sent, calls;
 function mkEl(over = {}) {
@@ -127,6 +127,13 @@ describe('renderContacts', () => {
     make().renderContacts([{ certificate_id: 'c1', peer_did: 'did:key:zA', display_name: 'A' }]);
     expect(host.threadNames.c1).toBe('A');
     expect(els['contacts-list']?._children?.length ?? 0).toBe(0);
+  });
+  it('an empty list (last contact removed) leaves nobody mapped', () => {
+    const v = make();
+    v.renderContacts([{ certificate_id: 'c1', peer_did: 'did:key:zA', display_name: 'A' }]);
+    v.renderContacts([]);
+    expect(host.peerDidToCertId).toEqual({});
+    expect(v.openContactByDid('did:key:zA')).toBe(false);
   });
   it('openContactByDid opens a listed contact and reports an unknown one', () => {
     const v = make();
@@ -358,5 +365,27 @@ describe('mergeDmSnapshot (get_dms reply)', () => {
     expect(peers.a.display_name).toBe('Known');
     expect(peers.b).toEqual({ display_name: 'Bea', peer_webid: 'did:key:zB', cert: true });
     expect(Object.keys(peers)).toEqual(['a', 'b']);
+  });
+});
+
+describe('dropSupersededContactRows', () => {
+  it('keeps one contact row per person, the first one listed', () => {
+    const peers = {
+      old: { display_name: 'Alice', peer_webid: 'did:key:zAlice', cert: true },
+      'local-x': { display_name: 'X', peer_webid: 'did:key:zAlice' },
+    };
+    mergeDmSnapshot(peers, [{ cert_id: 'new', peer_webid: 'did:key:zAlice', local: false }]);
+    const changed = dropSupersededContactRows(peers, [
+      { certificate_id: 'new', peer_did: 'did:key:zAlice' },
+      { certificate_id: 'old', peer_did: 'did:key:zAlice' },
+    ]);
+    expect(changed).toBe(true);
+    expect(Object.keys(peers).sort()).toEqual(['local-x', 'new']);
+  });
+  it('changes nothing when every person has one row', () => {
+    const peers = { c1: { peer_webid: 'did:key:zA', cert: true } };
+    expect(dropSupersededContactRows(peers, [{ certificate_id: 'c1', peer_did: 'did:key:zA' }])).toBe(false);
+    expect(dropSupersededContactRows(peers, [])).toBe(false);
+    expect(Object.keys(peers)).toEqual(['c1']);
   });
 });

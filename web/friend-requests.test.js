@@ -74,8 +74,22 @@ describe('acceptFriendRequest', () => {
   });
   it('does nothing when the socket is closed', () => {
     socket.readyState = 3;
-    make().acceptFriendRequest('inv9');
+    expect(make().acceptFriendRequest('inv9')).toBe(false);
     expect(sent).toHaveLength(0);
+  });
+  it('sends once while the Accept button is in flight', () => {
+    const btn = { disabled: false };
+    const fr = make();
+    expect(fr.acceptFriendRequest('inv9', btn)).toBe(true);
+    expect(btn.disabled).toBe(true);
+    expect(fr.acceptFriendRequest('inv9', btn)).toBe(false);
+    expect(sent).toHaveLength(1);
+  });
+  it('leaves the button usable when nothing was sent', () => {
+    socket.readyState = 3;
+    const btn = { disabled: false };
+    make().acceptFriendRequest('inv9', btn);
+    expect(btn.disabled).toBe(false);
   });
 });
 

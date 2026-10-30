@@ -47,10 +47,16 @@ export function createFriendRequests({ getSocket }) {
         refreshFriendRequestsBadge();
     }
 
-    function acceptFriendRequest(invitationId) {
+    // button: the card's Accept button, disabled while the accept is in flight
+    // so a second click cannot send a second accept. The host re-enables it
+    // when the gateway refuses. Returns whether the accept was sent.
+    function acceptFriendRequest(invitationId, button = null) {
+        if (button?.disabled) return false;
         const socket = getSocket();
-        if (!socket || socket.readyState !== WebSocket.OPEN) return;
+        if (!socket || socket.readyState !== WebSocket.OPEN) return false;
         socket.send(JSON.stringify({ cmd: "accept_friend_request", invitation_id: invitationId }));
+        if (button) button.disabled = true;
+        return true;
     }
 
     return { renderPendingInvite, acceptFriendRequest, refreshFriendRequestsBadge };

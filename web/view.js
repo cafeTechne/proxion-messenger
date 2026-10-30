@@ -89,6 +89,24 @@ export function mergeDmSnapshot(peers, dms) {
     return changed;
 }
 
+// A person reached through two relationships (both sent a request, or a re-add
+// the other side never saw end) is one conversation: keep the first contact row
+// listed for each peer (the gateway lists the newest first) and drop the other
+// contact rows for that peer. Returns true on change.
+export function dropSupersededContactRows(peers, contacts) {
+    const keep = new Map();
+    for (const c of contacts || []) {
+        if (c && c.peer_did && c.certificate_id && !keep.has(c.peer_did)) keep.set(c.peer_did, c.certificate_id);
+    }
+    let changed = false;
+    for (const [id, p] of Object.entries(peers)) {
+        if (!p || !p.cert) continue;
+        const keeper = keep.get(p.peer_webid);
+        if (keeper && keeper !== id) { delete peers[id]; changed = true; }
+    }
+    return changed;
+}
+
 export function createView({
     getSocket,
     setActiveView, setMessageMap, setAllMessages, setCurrentRoomMembers, getAllMessages,
@@ -146,12 +164,14 @@ export function createView({
         const peerDidToCertId = getPeerDidToCertId();
         const _threadNames = getThreadNames();
         _contactsByDid.clear();
-        if (!contacts || contacts.length === 0) return;
-        for (const k in peerDidToCertId) delete peerDidToCertId[k]; // reset (mutate in place)
+        // Reset (mutate in place) before the empty check: after the last contact
+        // is removed, the map must not keep them mapped to the revoked cert.
+        for (const k in peerDidToCertId) delete peerDidToCertId[k];
         // R86: which contacts advertise call binding (authenticated, from their signed
         // relationship). Rebuilt from the server's contacts list each time.
         const certCapable = getCertCapableContacts ? getCertCapableContacts() : null;
         if (certCapable) certCapable.clear();
+        if (!contacts || contacts.length === 0) return;
         // Contacts are listed as DM conversations (main.js merges them into the
         // DM list); here they only feed the lookups the rest of the client uses.
         contacts.forEach(c => {
