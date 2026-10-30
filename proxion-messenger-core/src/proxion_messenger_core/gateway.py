@@ -93,6 +93,11 @@ def invite_decline_signing_input(invitation_id: str, from_did: str, ts: str) -> 
     return f"proxion-invite-decline|{invitation_id}|{from_did}|{ts}".encode()
 
 
+# content_type of a queued friend-request decline: it is retried to the peer's
+# /invite/decline (re-signed each time), not to /relay.
+INVITE_DECLINE_RELAY = "invite_decline"
+
+
 def invite_issuer_did(invite: dict) -> str:
     """The did of a stored invite's issuer ('' when it cannot be told)."""
     issuer = invite.get("issuer") if isinstance(invite, dict) else None
@@ -783,6 +788,20 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         """Send a message to all connected sockets for an identity, skipping broken ones.
         exact=True skips the gateway-DID fallback (see _sockets_for_exact)."""
         for ws in (self._sockets_for_exact(identity) if exact else self._sockets_for(identity)):
+            try:
+                await ws.send(payload)
+            except Exception:
+                pass
+
+    async def _notify_thread_read(self, websocket, reader: str, thread_id: str) -> None:
+        """The reader opened thread_id on this socket: clear its unread badge on
+        their other tabs and devices too."""
+        if not reader or not thread_id:
+            return
+        payload = json.dumps({"type": "thread_read", "thread_id": thread_id})
+        for ws in self._sockets_for_exact(reader):
+            if ws is websocket:
+                continue
             try:
                 await ws.send(payload)
             except Exception:
@@ -1995,16 +2014,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if endpoint:
             http_base = endpoint.replace("wss://", "https://").replace("ws://", "http://").rstrip("/")
             if _is_safe_gateway_url(http_base):
-                import base64 as _b64
-                own = self._own_gateway_did()
-                ts = datetime.now(timezone.utc).isoformat()
-                sig = _b64.urlsafe_b64encode(self.agent.identity_key.sign(
-                    invite_decline_signing_input(invitation_id, own, ts))).rstrip(b"=").decode()
-                from .network import async_safe_post
-                asyncio.create_task(async_safe_post(http_base + "/invite/decline", {
-                    "invitation_id": invitation_id, "from_did": own,
-                    "timestamp": ts, "signature": sig,
-                }))
+                asyncio.create_task(self._send_invite_decline(
+                    http_base, invitation_id, invite_issuer_did(invite)))
         _caller = self._client_webids.get(websocket, "")
         _evt = json.dumps({"type": "friend_request_dismissed", "invitation_id": invitation_id})
         if _caller:
@@ -2036,9 +2047,16 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             await websocket.send(json.dumps({"type": "error", "message": "no_store"}))
             return
 
-        invite_dict = self._store.get_pending_invite(invitation_id)
-        if not invite_dict:
-            await websocket.send(json.dumps({"type": "error", "message": "invite_not_found"}))
+        # Only a still-pending request someone else sent us: a request this gateway
+        # issued (listed beside the inbound ones) or one already accepted, ignored
+        # or cancelled must not create a relationship, so a double-click or a
+        # stale card cannot add a second, one-sided contact.
+        _row = self._store.get_pending_invite_row(str(invitation_id or ""))
+        invite_dict = (_row or {}).get("invite") or {}
+        if (not _row or _row.get("status") != "pending" or not invite_dict
+                or invite_issuer_did(invite_dict) == self._own_gateway_did()):
+            await websocket.send(json.dumps({"type": "error", "message": "invite_not_found",
+                                             "invitation_id": invitation_id}))
             return
 
         from .federation import (
@@ -2061,7 +2079,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             return
 
         if invite.expires_at < time.time():
-            await websocket.send(json.dumps({"type": "error", "message": "expired"}))
+            await websocket.send(json.dumps({"type": "error", "message": "expired",
+                                             "invitation_id": invitation_id}))
             return
 
         # Extract requester identity
@@ -2075,6 +2094,13 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
         bob_pub_hex = self.agent.identity_pub_bytes.hex()
         bob_did = pub_key_to_did(self.agent.identity_pub_bytes)
+        if alice_did == bob_did:
+            await websocket.send(json.dumps({"type": "error", "message": "invite_not_found",
+                                             "invitation_id": invitation_id}))
+            return
+        # Taken now, before anything that yields, so a second accept of the same
+        # request finds it no longer pending.
+        self._store.mark_invite_status(invitation_id, "accepted")
 
         # Build RelationshipCertificate (Bob is issuer, Alice is subject)
         # R86: mark that we (issuer) bind calls, and mark the subject too when their
@@ -2122,8 +2148,9 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if pod_client:
             self.dm_clients[cert.certificate_id] = (cert, pod_client)
 
-        # Mark invite as accepted
-        self._store.mark_invite_status(invitation_id, "accepted")
+        # Any other request between us and this person (they asked twice, or we
+        # asked each other) is settled by this relationship.
+        await self._settle_other_invites_for_peer(alice_did, invitation_id)
 
         # POST acceptance back to requester's gateway so Alice creates her side too
         if requester_gw_ws:
@@ -2157,6 +2184,51 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             "certificate": cert.to_dict(),
             "peer_did": alice_did,
         }))
+
+    def _signed_invite_decline(self, invitation_id: str) -> dict:
+        """The signed body of a POST /invite/decline, stamped now."""
+        import base64 as _b64
+        own = self._own_gateway_did()
+        ts = datetime.now(timezone.utc).isoformat()
+        sig = _b64.urlsafe_b64encode(self.agent.identity_key.sign(
+            invite_decline_signing_input(invitation_id, own, ts))).rstrip(b"=").decode()
+        return {"invitation_id": invitation_id, "from_did": own,
+                "timestamp": ts, "signature": sig}
+
+    async def _send_invite_decline(self, http_base: str, invitation_id: str,
+                                   requester_did: str) -> bool:
+        """Tell the requester's gateway their request was ignored. When it is
+        down the notice goes on the outbound relay queue and is retried (see
+        _attempt_pending_relay), so the sender does not wait on it forever."""
+        from .network import async_safe_post
+        if await async_safe_post(http_base + "/invite/decline",
+                                 self._signed_invite_decline(invitation_id)):
+            return True
+        if self._store:
+            try:
+                self._store.enqueue_relay(
+                    f"invite_decline:{invitation_id}"[:128], requester_did or "", http_base,
+                    {"content_type": INVITE_DECLINE_RELAY, "to_webid": requester_did or "",
+                     "invitation_id": invitation_id, "_q_sender": ""})
+            except Exception:
+                logger.warning("Could not queue the invite decline for retry", exc_info=True)
+        return False
+
+    async def _settle_other_invites_for_peer(self, peer_did: str, keep_id: str = "") -> None:
+        """A relationship with peer_did now exists: mark every other request still
+        pending to or from them accepted and drop their cards, so neither side can
+        accept a second request and end up with two relationships."""
+        if not self._store or not peer_did:
+            return
+        try:
+            ids = self._store.settle_pending_invites_for_peer(peer_did, "accepted",
+                                                              exclude_id=keep_id)
+        except Exception:
+            logger.debug("settling pending invites failed", exc_info=True)
+            return
+        for _iid in ids:
+            await self._send_to_identity(self._own_gateway_did(), json.dumps({
+                "type": "friend_request_dismissed", "invitation_id": _iid}))
 
     def _save_peer_name_if_unknown(self, peer_did: str, name) -> None:
         """Remember a new contact's self-chosen display name, never replacing one
@@ -2271,6 +2343,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
     async def _handle_list_friend_requests(self, websocket, data: dict):
         """Handle list_friend_requests command."""
         pending = []
+        sent = []
         relationships = []
         caller_did = self._client_webids.get(websocket, "")
         from .didkey import pub_key_to_did as _p2d
@@ -2278,15 +2351,28 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         owner_pub_hex = self.agent.identity_pub_bytes.hex()
 
         if self._store:
-            # Only show pending invites to the gateway owner (both sent and received)
+            # Only show pending invites to the gateway owner. Received requests go
+            # in "pending" (what the client renders as cards), the ones this
+            # gateway sent in "sent", so a sent request never looks incoming.
             if caller_did == owner_did:
                 pending_invites = self._store.list_pending_invites("pending")
                 for inv_dict in pending_invites:
-                    pending.append({
-                        "invitation_id": inv_dict.get("invitation_id"),
-                        "target_did": inv_dict.get("issuer", {}).get("did"),
-                        "status": "pending"
-                    })
+                    _iid = inv_dict.get("invitation_id")
+                    _from = invite_issuer_did(inv_dict)
+                    if _from == owner_did:
+                        _row = self._store.get_pending_invite_row(_iid) or {}
+                        sent.append({
+                            "invitation_id": _iid,
+                            "target_did": _row.get("target_did", ""),
+                            "status": "pending",
+                        })
+                    elif _from:
+                        pending.append({
+                            "invitation_id": _iid,
+                            "from_did": _from,
+                            "display_name": (inv_dict.get("issuer") or {}).get("display_name"),
+                            "status": "pending",
+                        })
 
             # Scope relationships to the calling identity
             rels = self._store.list_relationships(owner_webid=caller_did)
@@ -2300,6 +2386,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         await websocket.send(json.dumps({
             "type": "friend_requests",
             "pending": pending,
+            "sent": sent,
             "relationships": relationships
         }))
 

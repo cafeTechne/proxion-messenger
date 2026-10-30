@@ -1891,6 +1891,7 @@ class RoomHandlerMixin:
 
         if self._store and reader_webid and thread_id:
             self._store.set_last_read(reader_webid, thread_id)
+            await self._notify_thread_read(websocket, reader_webid, thread_id)
             # Same pod flush as update_last_read, so opening a thread needs one command.
             _rp = getattr(self, "_dirty_read_positions", None)
             if _rp is not None:
@@ -2004,6 +2005,7 @@ class RoomHandlerMixin:
         channel_id = data.get("channel_id", "")
         if reader_webid and channel_id and self._store:
             self._store.set_last_read(reader_webid, channel_id)
+            await self._notify_thread_read(websocket, reader_webid, channel_id)
             # Mark dirty for pod flush (flushed every 30 s by _read_position_flush_loop)
             _rp = getattr(self, "_dirty_read_positions", None)
             if _rp is not None:

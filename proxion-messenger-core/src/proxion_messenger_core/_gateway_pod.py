@@ -733,12 +733,30 @@ class PodSyncMixin:
             except Exception:
                 pass
 
+    async def _attempt_queued_invite_decline(self, relay: dict, stored: dict) -> bool:
+        """Retry a queued friend-request decline to the requester's gateway,
+        signed afresh so the receiver's timestamp window still accepts it."""
+        from .network import async_safe_post
+        try:
+            delivered = await async_safe_post(
+                relay["to_gateway_url"].rstrip("/") + "/invite/decline",
+                self._signed_invite_decline(str(stored.get("invitation_id") or "")))
+        except Exception:
+            delivered = False
+        if delivered:
+            self._store.mark_relay_delivered(relay["id"])
+        else:
+            self._store.increment_relay_attempt(relay["id"])
+        return delivered
+
     async def _attempt_pending_relay(self, relay: dict) -> bool:
         """Try one queued relay now. Returns True when it was delivered."""
         try:
             stored = json.loads(relay["payload_json"])
         except Exception:
             stored = {}
+        if stored.get("content_type") == "invite_decline":
+            return await self._attempt_queued_invite_decline(relay, stored)
         sender = self._queued_relay_sender(stored)
         peer_did = stored.get("to_webid", "") or ""
         payload: dict = {}

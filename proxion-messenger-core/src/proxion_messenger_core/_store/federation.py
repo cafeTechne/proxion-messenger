@@ -232,6 +232,26 @@ class FederationStoreMixin(object):
         with self._conn() as conn:
             cur = conn.execute(sql, args)
             return cur.rowcount or 0
+    def settle_pending_invites_for_peer(self, peer_did: str, status: str,
+                                        exclude_id: str = "") -> list[str]:
+        """Set every still-pending invite to or from peer_did (target_did holds
+        the peer for both directions) to ``status``, except ``exclude_id``.
+        Returns the invitation ids it changed."""
+        if not peer_did:
+            return []
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT invitation_id FROM pending_invites "
+                "WHERE target_did = ? AND status = 'pending' AND invitation_id != ?",
+                (peer_did, exclude_id or ""),
+            ).fetchall()
+            ids = [r["invitation_id"] for r in rows]
+            for iid in ids:
+                conn.execute(
+                    "UPDATE pending_invites SET status = ? WHERE invitation_id = ?",
+                    (status, iid),
+                )
+        return ids
     def mark_invite_status(self, invitation_id: str, status: str) -> None:
         """UPDATE status."""
         with self._conn() as conn:

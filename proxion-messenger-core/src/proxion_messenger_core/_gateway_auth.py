@@ -549,9 +549,17 @@ class AuthHandlerMixin:
                 all_last_reads = self._store.get_all_last_reads(identity)
                 from .federation import cert_dict_peer_binds_calls
                 owner_hex = self.agent.identity_pub_bytes.hex()
+                _seen_peers: set = set()
                 for cert_dict in self._store.list_relationships():
                     cert_id = cert_dict.get("certificate_id")
                     peer_did = cert_dict.get("peer_did") or ""
+                    # One row per person, by the newest cert, as get_relationships
+                    # lists them: a second relationship with the same peer would
+                    # otherwise show them twice in the DM list.
+                    if peer_did:
+                        if peer_did in _seen_peers:
+                            continue
+                        _seen_peers.add(peer_did)
                     lr_ts = all_last_reads.get(cert_id, 0)
                     unread = self._store.count_messages_after(cert_id, lr_ts)
                     # R86: the peer is whichever party is not us; report whether their
@@ -571,28 +579,27 @@ class AuthHandlerMixin:
                 if rel_list:
                     await websocket.send(json.dumps({"type": "relationships", "contacts": rel_list}))
 
-                # Push pending friend requests (inbound invites awaiting acceptance)
-                pending_invites = self._store.list_pending_invites("pending")
-                if pending_invites:
-                    pending_list = []
-                    for inv in pending_invites:
-                        issuer = inv.get("issuer", {})
-                        from_did = issuer.get("did", "")
-                        if not from_did:
-                            pub_hex = issuer.get("public_key", "")
-                            if pub_hex:
-                                try:
-                                    from .didkey import pub_key_to_did as _p2d
-                                    from_did = _p2d(bytes.fromhex(pub_hex))
-                                except Exception:
-                                    pass
-                        pending_list.append({
-                            "invitation_id": inv.get("invitation_id"),
-                            "from_did": from_did,
-                            "display_name": issuer.get("display_name"),
-                            "endpoint_hints": inv.get("endpoint_hints", []),
-                        })
-                    await websocket.send(json.dumps({
-                        "type": "friend_requests",
-                        "pending": pending_list,
-                    }))
+                # Push pending friend requests (inbound invites awaiting acceptance).
+                # The table also holds the requests this gateway sent; those are
+                # left out, or the sender sees their own request as incoming.
+                # Sent even when empty: it is the full list, so the client can drop
+                # a request restored from the pod that is no longer pending.
+                from .gateway import invite_issuer_did
+                _own_did = self._own_gateway_did()
+                pending_list = []
+                for inv in self._store.list_pending_invites("pending"):
+                    from_did = invite_issuer_did(inv)
+                    if not from_did or from_did == _own_did:
+                        continue
+                    issuer = inv.get("issuer", {})
+                    pending_list.append({
+                        "invitation_id": inv.get("invitation_id"),
+                        "from_did": from_did,
+                        "display_name": issuer.get("display_name"),
+                        "endpoint_hints": inv.get("endpoint_hints", []),
+                    })
+                await websocket.send(json.dumps({
+                    "type": "friend_requests",
+                    "pending": pending_list,
+                    "complete": True,
+                }))

@@ -469,6 +469,16 @@ class HttpEndpointsMixin:
         _owner_did = self._own_gateway_did()
         if from_did and self._is_blocked_for(_owner_did, from_did):
             return "200 OK", '{"status":"received"}'
+        # Without enforced auth the owner's sessions register under their own
+        # client dids, and a block of someone who is not a contact yet is stored
+        # under that did with no relationship row to lead back to it. Every local
+        # session is the owner then, so any of their blocks applies.
+        if from_did and self._store and not self._auth_enforced():
+            try:
+                if self._store.is_blocked_by_anyone(self._canonical_block_id(from_did)):
+                    return "200 OK", '{"status":"received"}'
+            except Exception:
+                pass
 
         # Save pending invite if store is available
         if self._store:
@@ -691,6 +701,7 @@ class HttpEndpointsMixin:
             asyncio.create_task(self._sync_cert_to_pod(cert.to_dict()))
             if invitation_id:
                 self._store.mark_invite_status(invitation_id, "accepted")
+            await self._settle_other_invites_for_peer(expected_did, invitation_id)
 
         # Register acceptor's gateway URL so relay routing works immediately
         acceptor_gw_http = data.get("from_gateway_http_url", "")
