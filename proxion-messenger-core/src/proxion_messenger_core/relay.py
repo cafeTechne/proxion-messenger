@@ -355,6 +355,50 @@ def verify_relay_envelope(payload: dict,
         return False
 
 
+# ── Gateway URL claim ─────────────────────────────────────────────────────────
+#
+# The plain DM relay signature does not cover origin_gateway_url. A gateway that
+# moved (restored on a new computer) proves its new address by signing it with
+# its identity key, so a contact can follow the move without trusting a URL any
+# on-path party could have rewritten.
+
+_URL_CLAIM_WINDOW = timedelta(minutes=15)
+
+
+def _url_claim_bytes(did: str, url: str, ts: str) -> bytes:
+    return f"proxion-gateway-url-v1|{did}|{url}|{ts}".encode("utf-8")
+
+
+def sign_gateway_url_claim(identity_key: "Ed25519PrivateKey", did: str, url: str) -> dict:
+    """Fields to add to a relay payload: a fresh signed claim that *did* is at *url*."""
+    ts = datetime.now(timezone.utc).isoformat()
+    sig = identity_key.sign(_url_claim_bytes(did, url, ts))
+    return {
+        "origin_gateway_url_ts": ts,
+        "origin_gateway_url_sig": base64.urlsafe_b64encode(sig).rstrip(b"=").decode(),
+    }
+
+
+def verify_gateway_url_claim(did: str, url: str, payload: dict) -> bool:
+    """Whether *payload* carries a fresh claim, signed by *did*'s key, that it is at *url*."""
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        from .didkey import did_to_pub_key
+        ts = str(payload.get("origin_gateway_url_ts") or "")
+        sig = str(payload.get("origin_gateway_url_sig") or "")
+        if not (did and url and ts and sig) or not did.startswith("did:key:"):
+            return False
+        msg_ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if msg_ts.tzinfo is None or abs(datetime.now(timezone.utc) - msg_ts) > _URL_CLAIM_WINDOW:
+            return False
+        raw = base64.urlsafe_b64decode(sig + "=" * (-len(sig) % 4))
+        Ed25519PublicKey.from_public_bytes(did_to_pub_key(did)).verify(
+            raw, _url_claim_bytes(did, url, ts))
+        return True
+    except Exception:
+        return False
+
+
 # ── HTTP relay delivery ───────────────────────────────────────────────────────
 
 async def post_relay(target_url: str, payload: dict, timeout: float = 10.0) -> bool:

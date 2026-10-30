@@ -1053,6 +1053,14 @@ class HttpEndpointsMixin:
             # A verified relay from this gateway means it is up: send it whatever
             # we queued for it while it was down.
             self._note_peer_contact(_signer, data.get("origin_gateway_url", ""))
+            # The envelope signature covers origin_gateway_url, so it proves where
+            # the signer is now: follow a pinned peer that moved gateways.
+            _env_origin = data.get("origin_gateway_url") or ""
+            if (_env_origin and isinstance(_env_origin, str) and self._store
+                    and _is_safe_gateway_url(_env_origin)):
+                _env_pin = self._store.get_peer_gateway_pin(_signer)
+                if _env_pin and _env_pin.get("pinned_gateway_url") != _env_origin:
+                    self._record_peer_gateway(_signer, _env_origin, proven=True)
             if _ct == "file_chunk" and not self._file_relay_bytes_ok(_signer, data.get("data"), now):
                 return "429 Too Many Requests", '{"error":"rate limit exceeded"}'
 
@@ -1274,7 +1282,10 @@ class HttpEndpointsMixin:
         # Record the sender's gateway URL — validate first to prevent SSRF pinning
         if origin_gateway and from_webid:
             if _is_safe_gateway_url(origin_gateway):
-                self._record_peer_gateway(from_webid, origin_gateway)
+                from .relay import verify_gateway_url_claim
+                self._record_peer_gateway(
+                    from_webid, origin_gateway,
+                    proven=verify_gateway_url_claim(from_webid, origin_gateway, data))
             else:
                 logger.debug("relay: rejected unsafe origin_gateway_url from %s: %s",
                              from_webid, origin_gateway)
@@ -2869,6 +2880,7 @@ class HttpEndpointsMixin:
                             elif self._store is not None:
                                 self._store.rewrap_secrets(new_agent.db_wrap_key())
                             self.agent = new_agent
+                            self._identity_replaced()
                             await self.broadcast({"type": "identity_restored"})
                             # R7: Save restore provenance
                             if self._store:
@@ -3068,6 +3080,15 @@ class HttpEndpointsMixin:
                         else:
                             from .didkey import pub_key_to_did as _p2d_imp
                             _import_owner = _ticket_owner or _p2d_imp(self.agent.identity_pub_bytes)
+                            # Contacts are certificates of the identity in the
+                            # recovery kit. When none of them names this gateway's
+                            # identity, the kit was not restored yet: importing now
+                            # would silently drop every contact.
+                            if self._store.import_needs_other_identity(
+                                    import_data, self.agent.identity_pub_bytes.hex()):
+                                await _write_json(writer, 409, {"error": "restore_kit_first"})
+                                await writer.drain()
+                                return
                             counts = self._store.import_data(
                                 import_data,
                                 owner_pub_hex=self.agent.identity_pub_bytes.hex(),

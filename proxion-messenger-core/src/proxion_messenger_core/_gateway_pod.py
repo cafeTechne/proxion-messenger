@@ -190,15 +190,39 @@ class PodSyncMixin:
             cache[peer_did] = ([], now)  # negative-cache failures too
             return []
 
-    def _record_peer_gateway(self, did: str, gateway_url: str) -> None:
+    def _record_peer_gateway(self, did: str, gateway_url: str, proven: bool = False) -> None:
         """Store a peer gateway URL in memory and (if available) SQLite.
 
         R8: First-seen URL becomes the trust pin. Subsequent changes create a
-        pending change request and queue outbound relay until approved.
+        pending change request and queue outbound relay until approved, unless
+        *proven*: the new URL came with a fresh claim signed by the pinned DID's
+        own key (a contact who restored on a new computer), which is followed.
         """
         now = time.time()
         if self._store:
             pin = self._store.get_peer_gateway_pin(did)
+            if pin is not None and proven and pin["pinned_gateway_url"] != gateway_url:
+                self._store.upsert_peer_gateway_pin(
+                    peer_did=did,
+                    pinned_gateway_url=gateway_url,
+                    pinned_at=now,
+                    last_seen_gateway_url=gateway_url,
+                    last_seen_at=now,
+                    pending_change=False,
+                )
+                try:
+                    self._store.approve_pending_peer_gateway_changes(did)
+                    self._store.retarget_pending_relays(did, gateway_url)
+                    self._store.save_security_event(
+                        "peer_gateway_moved", "info",
+                        details=f"peer_did={did} old={pin['pinned_gateway_url']} new={gateway_url}",
+                    )
+                except Exception:
+                    logger.debug("peer gateway move bookkeeping failed", exc_info=True)
+                self._peer_gateway_urls[did] = gateway_url
+                self._store.save_peer_gateway(did, gateway_url)
+                asyncio.create_task(self._sync_peer_gateway_to_pod(did, gateway_url))
+                return
             if pin is None:
                 # First seen — pin it
                 self._store.upsert_peer_gateway_pin(
@@ -631,6 +655,17 @@ class PodSyncMixin:
             pass
         return sender
 
+    def _with_gateway_url_claim(self, p: dict) -> dict:
+        """*p* plus a signed claim of our gateway URL, for a payload about to be
+        sealed. Only sealed payloads carry it: older receivers reject unknown
+        top-level relay fields but never check the fields inside a seal."""
+        own = self._own_gateway_did()
+        url = p.get("origin_gateway_url") or ""
+        if not url or p.get("from_webid") != own:
+            return p
+        from .relay import sign_gateway_url_claim
+        return {**p, **sign_gateway_url_claim(self.agent.identity_key, own, url)}
+
     def _resign_queued_relay(self, p: dict) -> dict:
         """Re-sign a queued relay this gateway signed, so it verifies now."""
         from .relay import sign_relay_envelope, sign_relay_message
@@ -686,6 +721,7 @@ class PodSyncMixin:
             if pub:
                 try:
                     from .sealed_relay import seal_relay_payload as _seal
+                    p = self._with_gateway_url_claim(p)
                     p = {
                         "content_type": "sealed_dm",
                         "to_webid": peer,
@@ -2886,6 +2922,9 @@ class PodSyncMixin:
             if "signature" not in payload and getattr(self, "agent", None) is not None:
                 import secrets as _sec
                 payload.setdefault("relay_sig_did", self._own_gateway_did())
+                # Signed with the rest, so a contact can follow us to a new address.
+                if not payload.get("origin_gateway_url") and self._gateway_http_url():
+                    payload["origin_gateway_url"] = self._gateway_http_url()
                 payload.setdefault("relay_ts", datetime.now(timezone.utc).isoformat())
                 payload.setdefault("relay_nonce", _sec.token_hex(8))
                 payload["signature"] = sign_relay_envelope(self.agent.identity_key, payload)

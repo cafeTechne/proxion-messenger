@@ -195,15 +195,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         self._ip_connection_counts: dict = {}  # remote_ip -> active connection count
         self._revoked_sessions: set = set()  # websockets awaiting close after revocation
         # Stable per-instance HMAC key for invite code hashing (derived from identity key)
-        import hashlib as _hl
-        try:
-            _pub = self.agent.identity_pub_bytes
-            if isinstance(_pub, bytes):
-                self._invite_hmac_key: bytes = _hl.blake2b(_pub, digest_size=32).digest()
-            else:
-                self._invite_hmac_key = secrets.token_bytes(32)
-        except Exception:
-            self._invite_hmac_key = secrets.token_bytes(32)
+        self._derive_invite_hmac_key()
 
         # Lightweight stash for invites and notifications, kept in the data dir
         # next to the database so separate gateways never share invite codes.
@@ -388,6 +380,21 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # Derive a stable X25519 keypair for sealed relay (derived from Ed25519 identity key)
         self._own_x25519_priv: Optional[bytes] = None
         self._own_x25519_pub_b64: str = ""
+        self._derive_seal_keypair()
+
+    def _derive_invite_hmac_key(self) -> None:
+        import hashlib as _hl
+        try:
+            _pub = self.agent.identity_pub_bytes
+            if isinstance(_pub, bytes):
+                self._invite_hmac_key: bytes = _hl.blake2b(_pub, digest_size=32).digest()
+            else:
+                self._invite_hmac_key = secrets.token_bytes(32)
+        except Exception:
+            self._invite_hmac_key = secrets.token_bytes(32)
+
+    def _derive_seal_keypair(self) -> None:
+        agent = self.agent
         try:
             from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey as _X25519Priv
             from cryptography.hazmat.primitives.kdf.hkdf import HKDF as _HKDF_gw
@@ -406,6 +413,14 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 self._store.migrate_seal_keys_out_of_x25519_pubs(_gw_did_x, self._own_x25519_pub_b64)
         except Exception as _xe:
             logger.debug("X25519 keypair derivation failed: %s", _xe)
+
+    def _identity_replaced(self) -> None:
+        """Re-derive everything computed from the identity key after /restore
+        swaps self.agent, so the running gateway signs, seals and unseals as the
+        restored identity without a restart."""
+        self._own_gateway_did_cache = None
+        self._derive_invite_hmac_key()
+        self._derive_seal_keypair()
 
     def _make_turn_creds(self, identity: str) -> Optional[dict]:
         """Return coturn-compatible time-limited TURN credentials, or None if not configured."""

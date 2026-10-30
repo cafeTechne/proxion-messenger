@@ -84,6 +84,7 @@ export function importErrorKey(status, code) {
     if (status === 429) return 'recovery.tooManyAttempts';
     if (status === 403) return 'import.localOnly';
     if (code === 'invalid_import_file') return 'import.notAnExport';
+    if (code === 'restore_kit_first') return 'import.restoreKitFirst';
     return 'import.failedGeneric';
 }
 

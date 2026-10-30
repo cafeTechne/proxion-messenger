@@ -125,6 +125,7 @@
   "import.completeEvent": "Import complete: {count} messages imported.",
   "import.complete": "Import complete: {count} messages",
   "import.notAnExport": "That file isn't a Proxion export.",
+  "import.restoreKitFirst": "This export belongs to another identity. Restore your recovery kit first, then import again.",
   "import.localOnly": "Import only works on this computer, not over a shared link.",
   "import.failedGeneric": "Import didn't work. Try the file again.",
   "import.importing": "Importing…",

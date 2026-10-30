@@ -1009,6 +1009,12 @@ class SecurityStoreMixin(object):
             thread_mutes = _rows("SELECT owner_webid, mute_key, updated_at FROM thread_mutes",
                                  "owner_webid", {owner_webid})
             dm_timers = _rows("SELECT thread_id, ms FROM dm_disappear_timers", "thread_id", _threads)
+            # Where each contact's gateway is, and its seal key, so a restore on a
+            # new computer can still reach them.
+            _peers = {r["peer_did"] for r in relationships if r.get("peer_did")}
+            _peers.update(t["peer_webid"] for t in dm_threads if t.get("peer_webid"))
+            peer_gateways = _rows("SELECT did, gateway_url FROM peer_gateways", "did", _peers)
+            seal_keys = _rows("SELECT did, pub_b64u FROM gateway_seal_keys", "did", _peers)
 
         if minimize:
             _REDACTED = "[redacted]"
@@ -1030,6 +1036,9 @@ class SecurityStoreMixin(object):
             "version": 1,
             "exported_at": datetime.now(timezone.utc).isoformat(),
             "minimized": minimize,
+            # The account this export belongs to, so an import from a new
+            # browser can map it to the account restoring it.
+            "account": owner_webid or "",
             "messages": messages,
             "relationships": relationships,
             "dm_threads": dm_threads,
@@ -1046,6 +1055,8 @@ class SecurityStoreMixin(object):
             "reactions": reactions,
             "thread_mutes": thread_mutes,
             "dm_disappear_timers": dm_timers,
+            "peer_gateways": peer_gateways,
+            "gateway_seal_keys": seal_keys,
         }
     def import_data(
         self, data: dict, owner_pub_hex: str = "", owner_webid: str = "",
@@ -1088,7 +1099,8 @@ class SecurityStoreMixin(object):
         _CONTENT_TYPES = {"text", "audio", "e2e"}
         from .identity import stored_cert_expiry
         counts = {"messages": 0, "relationships": 0, "dm_threads": 0, "display_names": 0,
-                  "revocations": 0, "blocks": 0, "relationships_skipped_revoked": 0}
+                  "revocations": 0, "blocks": 0, "relationships_skipped_revoked": 0,
+                  "relationships_skipped_other_identity": 0, "peer_gateways": 0}
         _touched_threads: set = set()
         _new_threads: set = set()
         # A row keeps the account it belongs to when that account is one of
@@ -1096,6 +1108,8 @@ class SecurityStoreMixin(object):
         # is replaced by the importing owner, so a backup cannot create rows
         # under an account that does not exist here.
         _local_owners = self.local_account_owners()
+        if owner_webid and not operator:
+            data = self._map_import_account(data, owner_webid, _local_owners)
         if owner_webid:
             _local_owners.add(owner_webid)
 
@@ -1210,6 +1224,10 @@ class SecurityStoreMixin(object):
                     # owner_pub_hex the owner filter is skipped but the issuer
                     # signature is still verified.
                     if not cert_authorizes_owner(cert, owner_pub_hex, _ed25519_verify):
+                        if owner_pub_hex and owner_pub_hex not in (cert.issuer, cert.subject):
+                            # Made by another identity: usually the recovery kit
+                            # has not been restored on this gateway yet.
+                            counts["relationships_skipped_other_identity"] += 1
                         continue
                     # Derive the peer identity from the verified cert, never the
                     # sibling JSON.
@@ -1245,6 +1263,40 @@ class SecurityStoreMixin(object):
                         _import_owners.add(_row_owner(rel))
                 except Exception:
                     pass
+            # Contacts' gateway URLs and seal keys, only for contacts the
+            # importer has, and never replacing a URL or key already known here.
+            if _import_owners:
+                _ph_pg = ",".join("?" * len(_import_owners))
+                _contacts = {r[0] for r in conn.execute(
+                    f"SELECT peer_did FROM relationships WHERE revoked = 0 AND owner_webid IN ({_ph_pg})",
+                    tuple(_import_owners)).fetchall()}
+            else:
+                _contacts = set()
+            _now_pg = time.time()
+            for pg in (data.get("peer_gateways") or [])[:_MAX_IMPORT_RELATIONSHIPS]:
+                if not isinstance(pg, dict):
+                    continue
+                _pdid, _url = pg.get("did"), pg.get("gateway_url")
+                if (_pdid not in _contacts or not isinstance(_url, str) or len(_url) > 2048
+                        or not _url.startswith(("https://", "http://"))):
+                    continue
+                conn.execute(
+                    "INSERT OR IGNORE INTO peer_gateways (did, gateway_url, updated_at) VALUES (?,?,?)",
+                    (_pdid, _url, _now_pg))
+                if conn.execute("SELECT changes()").fetchone()[0]:
+                    counts["peer_gateways"] += 1
+                    conn.execute(
+                        "INSERT OR IGNORE INTO peer_gateway_pins (peer_did, pinned_gateway_url, pinned_at, "
+                        "last_seen_gateway_url, last_seen_at, pending_change) VALUES (?,?,?,?,?,0)",
+                        (_pdid, _url, _now_pg, _url, _now_pg))
+            for sk in (data.get("gateway_seal_keys") or [])[:_MAX_IMPORT_RELATIONSHIPS]:
+                if not isinstance(sk, dict):
+                    continue
+                _pdid, _pub = sk.get("did"), sk.get("pub_b64u")
+                if _pdid in _contacts and _ok_id(_pub) and len(_pub) <= 64:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO gateway_seal_keys (did, pub_b64u, updated_at) VALUES (?,?,?)",
+                        (_pdid, _pub, int(_now_pg)))
             _total_msg_imported = 0
             for msg in data.get("messages", []):
                 if _total_msg_imported >= _MAX_IMPORT_MESSAGES:
@@ -1340,6 +1392,73 @@ class SecurityStoreMixin(object):
             except Exception:
                 pass
         return counts
+
+    @staticmethod
+    def import_needs_other_identity(data, owner_pub_hex: str) -> bool:
+        """True when *data* has contacts and none of them is a certificate of
+        *owner_pub_hex*: the export belongs to another gateway identity (its
+        recovery kit has not been restored here)."""
+        from ..federation import RelationshipCertificate
+        rels = data.get("relationships") if isinstance(data, dict) else None
+        if not owner_pub_hex or not isinstance(rels, list):
+            return False
+        seen = False
+        for rel in rels[:2000]:
+            if not isinstance(rel, dict):
+                continue
+            try:
+                raw = rel.get("cert_json", "{}")
+                cert = RelationshipCertificate.from_dict(json.loads(raw) if isinstance(raw, str) else raw)
+            except Exception:
+                continue
+            seen = True
+            if owner_pub_hex in (cert.issuer, cert.subject):
+                return False
+        return seen
+
+    # Row fields that name a person; the account mapping rewrites only these.
+    _IMPORT_IDENTITY_FIELDS = ("owner_webid", "from_webid", "peer_webid", "creator_webid",
+                               "webid", "sender_webid", "pinned_by", "banned_by", "muted_by")
+
+    @classmethod
+    def _map_import_account(cls, data: dict, owner_webid: str, local_owners: set) -> dict:
+        """Map the account an export belongs to onto the account importing it.
+
+        A new computer has a new browser identity, so an export's rooms, own
+        messages, pins and scheduled sends name an account that does not exist
+        here. When that account is not one of this gateway's, every row naming
+        it is rewritten to *owner_webid*. An account that lives here is left
+        alone, so one account can never take over another's rows.
+        """
+        if not isinstance(data, dict):
+            return data
+        old = data.get("account") if isinstance(data.get("account"), str) else ""
+        if not old:
+            # Older exports: the single owner of its DM threads and contacts.
+            owners = {r.get("owner_webid") for key in ("dm_threads", "relationships")
+                      for r in (data.get(key) or []) if isinstance(r, dict)}
+            owners.discard(None)
+            owners.discard("")
+            old = owners.pop() if len(owners) == 1 else ""
+        if not old or old == owner_webid or old in local_owners:
+            return data
+        # Never map a contact onto the importer.
+        if any(isinstance(r, dict) and old in (r.get("peer_did"), r.get("peer_webid"))
+               for key in ("dm_threads", "relationships") for r in (data.get(key) or [])):
+            return data
+        out = dict(data)
+        for key, rows in data.items():
+            if not isinstance(rows, list):
+                continue
+            mapped = []
+            for r in rows:
+                if isinstance(r, dict) and any(r.get(f) == old for f in cls._IMPORT_IDENTITY_FIELDS):
+                    r = {k: (owner_webid if k in cls._IMPORT_IDENTITY_FIELDS and v == old else v)
+                         for k, v in r.items()}
+                mapped.append(r)
+            out[key] = mapped
+        out["account"] = owner_webid
+        return out
 
     @staticmethod
     def _import_rooms_and_threads(conn, data, owner_webid, operator, new_threads,

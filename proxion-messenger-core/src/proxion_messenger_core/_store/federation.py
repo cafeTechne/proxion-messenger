@@ -453,6 +453,22 @@ class FederationStoreMixin(object):
                    VALUES (?, ?, ?, ?, ?)""",
                 (id, peer_did, old_gateway_url, new_gateway_url, observed_at),
             )
+    def approve_pending_peer_gateway_changes(self, peer_did: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE peer_gateway_change_requests SET approved = 1, approved_at = ? "
+                "WHERE peer_did = ? AND approved = 0",
+                (time.time(), peer_did),
+            )
+
+    def retarget_pending_relays(self, to_webid: str, gateway_url: str) -> None:
+        """Send relays still queued for *to_webid* to its new gateway URL."""
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE pending_relays SET to_gateway_url = ? WHERE to_webid = ? AND status = 'pending'",
+                (gateway_url.rstrip("/"), to_webid),
+            )
+
     def approve_peer_gateway_change(self, peer_did: str) -> bool:
         """Approve the pending gateway change for peer_did. Returns True if a pin was updated."""
         with self._conn() as conn:

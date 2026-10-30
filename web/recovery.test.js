@@ -205,6 +205,7 @@ describe('backup / restore error copy', () => {
 describe('importErrorKey', () => {
     it('never passes the server text through', () => {
         expect(importErrorKey(400, 'invalid_import_file')).toBe('import.notAnExport');
+        expect(importErrorKey(409, 'restore_kit_first')).toBe('import.restoreKitFirst');
         expect(importErrorKey(403, 'recovery_forbidden_over_tunnel')).toBe('import.localOnly');
         expect(importErrorKey(429, 'rate_limited')).toBe('recovery.tooManyAttempts');
         expect(importErrorKey(null, undefined)).toBe('import.failedGeneric');

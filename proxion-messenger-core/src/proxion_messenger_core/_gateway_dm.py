@@ -847,7 +847,7 @@ class DmHandlerMixin:
                     if _peer_x25519:
                         try:
                             from .sealed_relay import seal_relay_payload as _seal
-                            _sealed = _seal(inner_payload, _peer_x25519)
+                            _sealed = _seal(self._with_gateway_url_claim(inner_payload), _peer_x25519)
                             payload = {
                                 "to_webid": target_webid,
                                 "message_id": message_id,
@@ -1316,7 +1316,8 @@ class DmHandlerMixin:
                         "message_id": transport_id,
                         "timestamp": ts,
                         "relay_nonce": relay_nonce,
-                        "sealed_payload": _seal(relay_payload, _peer_seal_pub),
+                        "sealed_payload": _seal(self._with_gateway_url_claim(relay_payload),
+                                                _peer_seal_pub),
                     }
                 except Exception as _se:
                     logger.debug("dm_fanout seal failed, relaying signed-plaintext: %s", _se)
@@ -1375,6 +1376,13 @@ class DmHandlerMixin:
             return "400 Bad Request", '{"error":"invalid fanout content"}'
         if not message_id or not to_device_id or not isinstance(payload, dict):
             return "400 Bad Request", '{"error":"invalid fanout content"}'
+        # A contact that moved to a new gateway proves the new URL with its key.
+        _origin = str(data.get("origin_gateway_url") or "")
+        if _origin and self._store and self._store.get_peer_gateway_pin(from_webid):
+            from .relay import verify_gateway_url_claim, _validate_relay_target
+            if (_validate_relay_target(_origin)
+                    and verify_gateway_url_claim(from_webid, _origin, data)):
+                self._record_peer_gateway(from_webid, _origin, proven=True)
         event = json.dumps({
             "type": "dm_fanout",
             "message_id": message_id,
