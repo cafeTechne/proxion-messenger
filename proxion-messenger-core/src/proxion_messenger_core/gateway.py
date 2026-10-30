@@ -3431,6 +3431,9 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         new_content = data.get("new_content", "")
         edited_at   = data.get("edited_at", "")
         from_webid  = data.get("from_webid", "")
+        if edited_at:
+            from ._gateway_http import _utc_iso
+            edited_at = _utc_iso(str(edited_at)[:64])
         if not all([room_id, message_id, new_content]):
             return "400 Bad Request", '{"error":"missing_edit_fields"}'
         room = self._local_rooms.get(room_id)

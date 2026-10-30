@@ -925,8 +925,8 @@ class HttpEndpointsMixin:
             # reaction relay (room_reaction had emoji un-whitelisted -> 400 in
             # production; masked because tests call the handler directly) + dm_reaction
             "emoji",
-            # dm_edit relay
-            "new_content",
+            # dm_edit relay; room_edit also carries when the edit was made
+            "new_content", "edited_at",
             # dm_disappear_timer relay
             "ms",
             # room emoji federation deltas (R59G) — same class of bug as the
