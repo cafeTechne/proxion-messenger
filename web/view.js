@@ -428,7 +428,9 @@ export function createView({
     // whose onclick is the view-switcher above).
     function _navigateToThread(threadId) {
         if (!threadId) return;
-        const li = document.getElementById(`nav-${CSS.escape(threadId)}`);
+        // getElementById takes the raw id: CSS.escape would turn a room id
+        // that starts with a digit ("9f...") into one that never matches.
+        const li = document.getElementById(`nav-${threadId}`);
         if (li) li.click();
     }
 

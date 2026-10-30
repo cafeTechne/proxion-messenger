@@ -22,7 +22,7 @@ const GROUPS = {
                     'smoke_multidevice_dm.mjs', 'smoke_call.mjs', 'smoke_pairing.mjs', 'smoke_tabs.mjs'],
   // The gateway-less web build against a local Solid server (fetched with npx).
   pod: ['smoke_web_nogw.mjs', 'smoke_web_signedin.mjs', 'smoke_web_join.mjs', 'smoke_web_join_link.mjs',
-        'smoke_web_dm.mjs', 'smoke_web_account.mjs', 'smoke_web_rooms.mjs'],
+        'smoke_web_dm.mjs', 'smoke_web_account.mjs', 'smoke_web_rooms.mjs', 'smoke_web_session.mjs'],
   // Pixel baselines depend on the machine's font rendering, so local only.
   visual: ['smoke_visual.mjs'],
 };

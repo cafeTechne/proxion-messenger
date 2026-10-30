@@ -28,6 +28,7 @@
     "smoke:web-join-link": "node smoke_web_join_link.mjs",
     "smoke:web-dm": "node smoke_web_dm.mjs",
     "smoke:web-rooms": "node smoke_web_rooms.mjs",
+    "smoke:web-session": "node smoke_web_session.mjs",
     "smoke:federation": "node smoke_federation.mjs",
     "smoke:pairing": "node smoke_pairing.mjs",
     "smoke:dmhistory": "node smoke_dm_history.mjs",

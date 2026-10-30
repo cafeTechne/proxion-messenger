@@ -5024,6 +5024,11 @@ import { createAccountSync } from './account-sync.js';
         // and the header subtitle. Called by view.js whenever a thread opens.
         function _onViewOpened() {
             const inp = document.getElementById("message-input");
+            // The draft kept across signing in again goes back into its thread.
+            if (_pendingDraft && inp && activeView?.id === _pendingDraft.thread) {
+                if (!inp.value) inp.value = _pendingDraft.text;
+                _pendingDraft = null;
+            }
             if (inp && activeView && !inp.disabled) {
                 const isRoom = activeView.type === "room" || activeView.type === "local_room";
                 inp.placeholder = isRoom
@@ -5409,6 +5414,7 @@ import { createAccountSync } from './account-sync.js';
         // identity provider, so the composer text is kept for the way back;
         // queued room writes and undelivered DMs are already stored.
         const _REAUTH_DRAFT_KEY = 'proxion_reauth_draft';
+        let _pendingDraft = null;
         function _signInAgain() {
             try {
                 const input = document.getElementById('message-input');
@@ -5426,17 +5432,15 @@ import { createAccountSync } from './account-sync.js';
                 sessionStorage.removeItem(_REAUTH_DRAFT_KEY);
             } catch (_) { return; }
             if (!saved || typeof saved.thread !== 'string' || typeof saved.text !== 'string') return;
+            _pendingDraft = saved;   // filled in by _onViewOpened when the thread opens
+            // Reopen the thread once the sidebar lists it.
             let tries = 0;
-            const put = () => {
-                const input = document.getElementById('message-input');
-                if (activeView?.id !== saved.thread) {
-                    if (tries === 0) _navigateToThread(saved.thread);
-                    if (++tries < 20) { setTimeout(put, 500); return; }
-                    return;
-                }
-                if (input && !input.value) input.value = saved.text;
+            const open = () => {
+                if (!_pendingDraft || activeView?.id === saved.thread) return;
+                if (document.getElementById('nav-' + saved.thread)) { _navigateToThread(saved.thread); return; }
+                if (++tries < 60) setTimeout(open, 500);
             };
-            put();
+            open();
         }
 
         // In-flight guard: the DM path awaits fanout/encryption/key discovery, so
@@ -7836,8 +7840,7 @@ import { createAccountSync } from './account-sync.js';
             if (!thread) return;
             let tries = 0;
             const tryNav = () => {
-                const sel = 'nav-' + (window.CSS && CSS.escape ? CSS.escape(thread) : thread);
-                if (document.getElementById(sel)) { _navigateToThread(thread); return; }
+                if (document.getElementById('nav-' + thread)) { _navigateToThread(thread); return; }
                 if (++tries < 20) setTimeout(tryNav, 500); // wait for the sidebar to populate
             };
             setTimeout(tryNav, 1000);
