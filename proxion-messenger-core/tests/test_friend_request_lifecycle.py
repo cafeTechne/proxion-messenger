@@ -258,3 +258,15 @@ async def test_reading_a_thread_clears_it_on_the_readers_other_sessions(tmp_path
         ev = await _wait(tab2, lambda m: m.get("type") == "thread_read", timeout=3)
         assert ev and ev["thread_id"] == "thread-x"
         assert await _wait(tab1, lambda m: m.get("type") == "thread_read", timeout=1) is None
+
+
+@pytest.mark.asyncio
+async def test_register_snapshot_leaves_out_expired_requests(tmp_path):
+    a, peer = _gateway(tmp_path, "a"), _gateway(tmp_path, "p")
+    live, old = _invite(peer[1], peer[3]).to_dict(), _invite(peer[1], peer[3]).to_dict()
+    old["expires_at"] = 1
+    for inv in (live, old):
+        a[0]._store.save_pending_invite(inv, peer[0]._own_gateway_did())
+    conn, frames = await _registered(a[2], _client_did(), "alice")
+    await conn.close()
+    assert [p["invitation_id"] for p in _pending_in(frames)] == [live["invitation_id"]]

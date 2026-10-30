@@ -591,6 +591,12 @@ class AuthHandlerMixin:
                     from_did = invite_issuer_did(inv)
                     if not from_did or from_did == _own_did:
                         continue
+                    # An expired request can no longer be accepted; do not offer it.
+                    try:
+                        if float(inv.get("expires_at") or 0) < time.time():
+                            continue
+                    except (TypeError, ValueError):
+                        pass
                     issuer = inv.get("issuer", {})
                     pending_list.append({
                         "invitation_id": inv.get("invitation_id"),
