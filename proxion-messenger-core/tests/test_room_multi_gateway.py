@@ -278,3 +278,130 @@ async def test_room_edit_relay_with_edited_at_passes_the_allowlist(tmp_path):
     finally:
         for c in (alice, bob):
             await c.close()
+
+
+def _uses_left(gw, room_id):
+    def q():
+        with gw.gw._store._conn() as conn:
+            return [r[0] for r in conn.execute(
+                "SELECT uses_left FROM room_invites WHERE room_id=?", (room_id,))]
+    return gw.call(q)
+
+
+@pytest.mark.asyncio
+async def test_member_on_another_gateway_leave_kick_ban_and_delete(tmp_path):
+    A, B = GW(tmp_path, "a"), GW(tmp_path, "b")
+    alice = await Client("Alice").connect(A)
+    bob = await Client("Bob").connect(B)
+
+    def fed(rid):
+        return [m["member_did"] for m in A.call(
+            lambda: A.gw._store.get_federated_room_members(rid))]
+
+    def on_b(rid):
+        return B.call(lambda: rid in B.gw._local_rooms)
+    try:
+        rid, link = await _room(alice)
+        await _join(bob, link, rid)
+        # Joining again while already a member does not use up the invite.
+        uses = _uses_left(A, rid)
+        bob.events.clear()
+        await _join(bob, link, rid)
+        assert _uses_left(A, rid) == uses
+
+        # Leave: the host drops Bob and stops sending room content to B.
+        await bob.cmd(cmd="leave_local_room", room_id=rid)
+        assert await alice.wait("room_member_left", room_id=rid, webid=bob.did)
+        assert bob.did not in fed(rid)
+        assert not on_b(rid)
+        await alice.cmd(cmd="send_room", room_id=rid, content="after-leave")
+        assert await _absent(lambda: any(e.get("content") == "after-leave" for e in bob.events))
+        assert not any(m["content"] == "after-leave"
+                       for m in B.call(lambda: B.gw._store.get_messages(rid)))
+
+        # Kick: Bob is told and B drops the room.
+        bob.events.clear()
+        await _join(bob, link, rid)
+        await alice.cmd(cmd="kick_member", room_id=rid, webid=bob.did)
+        assert await bob.wait("kicked_from_room", room_id=rid)
+        assert not on_b(rid)
+
+        # Ban: same, and the rejoin is refused.
+        bob.events.clear()
+        await _join(bob, link, rid)
+        await alice.cmd(cmd="ban_member", room_id=rid, webid=bob.did)
+        assert await bob.wait("kicked_from_room", room_id=rid)
+        assert not on_b(rid)
+        bob.events.clear()
+        await bob.cmd(cmd="join_remote_room", url=link)
+        assert await bob.wait("error", message="banned_from_room")
+
+        # Delete: the member gateway is told and drops its copy.
+        await alice.cmd(cmd="unban_member", room_id=rid, webid=bob.did)
+        await asyncio.sleep(0.3)
+        bob.events.clear()
+        await _join(bob, link, rid)
+        await alice.cmd(cmd="delete_room", room_id=rid)
+        assert await bob.wait("room_deleted", room_id=rid)
+        assert not on_b(rid)
+    finally:
+        for c in (alice, bob):
+            await c.close()
+
+
+@pytest.mark.asyncio
+async def test_owner_leaving_keeps_the_room_hosted_for_remote_members(tmp_path):
+    A, B, C = GW(tmp_path, "a"), GW(tmp_path, "b"), GW(tmp_path, "c")
+    alice = await Client("Alice").connect(A)
+    bob = await Client("Bob").connect(B)
+    carol = await Client("Carol").connect(C)
+    try:
+        rid, link = await _room(alice)
+        await _join(bob, link, rid)
+        # Ownership cannot go to a gateway that cannot host the room.
+        await alice.cmd(cmd="transfer_ownership", room_id=rid, to_did=bob.did)
+        err = await alice.wait_fn(lambda e: e.get("type") == "error"
+                                  and "gateway" in str(e.get("message", "")))
+        assert err, alice.of("error")
+
+        await alice.cmd(cmd="leave_local_room", room_id=rid)
+        assert await alice.wait("left_room", room_id=rid)
+        assert await bob.wait("room_member_left", room_id=rid, webid=alice.did)
+        # The room is still hosted on A: the link works and messages flow.
+        assert A.call(lambda: rid in A.gw._local_rooms)
+        await _join(carol, link, rid)
+        await bob.cmd(cmd="send_room", room_id=rid, content="still-here")
+        assert await carol.wait_content("still-here")
+    finally:
+        for c in (alice, bob, carol):
+            await c.close()
+
+
+@pytest.mark.asyncio
+async def test_other_session_gets_room_joined_elsewhere_and_names_survive_restart(tmp_path):
+    A, B = GW(tmp_path, "a"), GW(tmp_path, "b")
+    alice = await Client("Alice").connect(A)
+    bob = await Client("Bob").connect(B)
+    bob2 = await Client("Bob", agent=bob.agent).connect(B)
+    try:
+        rid, link = await _room(alice)
+        await _join(bob, link, rid)
+        assert await bob2.wait("room_joined", room_id=rid)
+        await alice.cmd(cmd="send_room", room_id=rid, content="to-both")
+        assert await bob2.wait_content("to-both")
+        await bob.cmd(cmd="leave_local_room", room_id=rid)
+        assert await bob2.wait("left_room", room_id=rid)
+
+        bob.events.clear()
+        await _join(bob, link, rid)
+        await bob.close()
+        await bob2.close()
+        B.restart()
+        bob = await Client("Bob", agent=bob.agent).connect(B)
+        bob2 = None
+        assert await bob.members(rid) == ["Alice", "Bob"]
+        assert alice.did not in B.call(lambda: B.gw._store.get_room_members(rid))
+    finally:
+        for c in (alice, bob, bob2):
+            if c:
+                await c.close()

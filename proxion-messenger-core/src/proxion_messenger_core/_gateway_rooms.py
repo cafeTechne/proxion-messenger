@@ -1354,7 +1354,8 @@ class RoomHandlerMixin:
             for webid in self._store.get_room_members(room_id):
                 seen_webids.add(webid)
                 ws = self._any_socket(webid)
-                display_name = (self._display_names.get(ws) if ws else None) or webid[:12]
+                display_name = ((self._display_names.get(ws) if ws else None)
+                                or self._store.get_display_name(webid) or webid[:12])
                 status = self._user_presence.get(webid, {}).get("status", "offline")
                 members.append({"webid": webid, "display_name": display_name, "status": status})
         if room_id in self._local_rooms:
@@ -1392,8 +1393,10 @@ class RoomHandlerMixin:
         Membership is the stored member list, not the live sockets: a member
         who has the app closed is still a member and must not lose the room.
         Admins win over mods over members; ties go to the longest-standing
-        member (join order). Live members missing from the store come next and
-        federated members are the last resort. Returns "" when nobody is left.
+        member (join order). Live members missing from the store come next.
+        A member on another gateway is never picked: their gateway cannot host
+        the room, so the invite link and room management would die with it.
+        Returns "" when nobody here is left.
         """
         stored = [w for w in (self._store.get_room_members(room_id) if self._store else [])
                   if w and w != leaver_did]
@@ -1409,10 +1412,6 @@ class RoomHandlerMixin:
             order = {d: i for i, d in enumerate(candidates)}
             candidates.sort(key=lambda d: (_role_priority.get(_roles.get(d, "member"), 2), order[d]))
             return candidates[0]
-        if self._store:
-            for fm in self._store.get_federated_room_members(room_id):
-                if fm.get("member_did") and fm["member_did"] != leaver_did:
-                    return fm["member_did"]
         return ""
 
     async def _handle_leave_local_room(self, websocket, data: dict) -> None:
@@ -1423,13 +1422,26 @@ class RoomHandlerMixin:
             room = self._local_rooms[room_id]
             caller_did = self._client_webids.get(websocket, "")
             is_creator = room.get("creator_webid") == caller_did and caller_did
+            # A mirror of a room hosted elsewhere: the host must hear about it.
+            _host_gw = self._room_host_gateway(room_id) if caller_did else ""
+            _hosted = self._room_is_hosted_here(room_id)
 
             # Evict ALL of the leaver's sockets, not just the one that sent the
             # command, so a second device does not keep receiving room traffic.
+            _mine = {websocket}
             if caller_did:
-                for _ws in self._sockets_for(caller_did):
-                    room["members"].discard(_ws)
-            room["members"].discard(websocket)
+                _mine |= set(self._sockets_for(caller_did))
+            for _ws in _mine:
+                room["members"].discard(_ws)
+
+            async def _tell_leaver(evt: dict) -> None:
+                _p = json.dumps(evt)
+                for _ws in [websocket] + [w for w in _mine if w is not websocket]:
+                    try:
+                        await _ws.send(_p)
+                    except Exception:
+                        pass
+
             if caller_did and self._store:
                 self._store.remove_room_member(room_id, caller_did)
                 self._store.delete_room_role(room_id, caller_did)
@@ -1445,24 +1457,51 @@ class RoomHandlerMixin:
                     except Exception:
                         pass
 
+            if caller_did and _host_gw:
+                asyncio.create_task(self._relay_ephemeral(_host_gw, {
+                    "content_type": "room_moderation", "action": "leave",
+                    "room_id": room_id, "webid": caller_did, "from_webid": caller_did,
+                }))
+                # Nobody here is left in it: stop mirroring, so the host's
+                # later relays for this room are refused.
+                if self._store and not self._store.get_room_members(room_id):
+                    await self._drop_mirror_room(room_id, {
+                        "type": "left_room", "room_id": room_id})
+                await _tell_leaver({"type": "left_room", "room_id": room_id})
+                return
+            if caller_did and _hosted and not is_creator:
+                self._relay_room_moderation(room_id, "member_left", caller_did,
+                                            room.get("creator_webid", ""))
+
             if is_creator:
                 new_owner_did = self._pick_successor_owner(room, room_id, caller_did)
-                if not new_owner_did:
+                if not new_owner_did and self._store and \
+                        self._store.get_federated_room_members(room_id):
+                    # Only members on other gateways remain. Keep hosting the
+                    # room for them (messages and the invite link keep working)
+                    # rather than handing it to a gateway that cannot host it.
+                    self._relay_room_moderation(room_id, "member_left", caller_did, caller_did)
+                    await _tell_leaver({"type": "left_room", "room_id": room_id})
+                elif not new_owner_did:
                     self._room_codes.pop(room.get("code"), None)
                     del self._local_rooms[room_id]
                     if self._store:
                         self._store.delete_room(room_id)
                     self._forget_room_on_pod(room_id)
-                    await websocket.send(json.dumps({
+                    await _tell_leaver({
                         "type": "left_room", "room_id": room_id,
                         "deleted": True,
                         "reason": "Room deleted — no remaining members.",
-                    }))
+                    })
                 else:
                     new_owner_name = self._name_for(self._any_socket(new_owner_did), new_owner_did)
                     room["creator_webid"] = new_owner_did
                     if self._store:
                         self._store.update_room_creator(room_id, new_owner_did)
+                    self._relay_room_moderation(room_id, "owner_changed", new_owner_did,
+                                                new_owner_did)
+                    self._relay_room_moderation(room_id, "member_left", caller_did,
+                                                new_owner_did)
                     for ws in list(room["members"]):
                         try:
                             await ws.send(json.dumps({
@@ -1473,12 +1512,12 @@ class RoomHandlerMixin:
                             }))
                         except Exception:
                             pass
-                    await websocket.send(json.dumps({
+                    await _tell_leaver({
                         "type": "left_room", "room_id": room_id,
                         "transferred_to": new_owner_name,
-                    }))
+                    })
             else:
-                await websocket.send(json.dumps({"type": "left_room", "room_id": room_id}))
+                await _tell_leaver({"type": "left_room", "room_id": room_id})
 
     async def _handle_delete_room(self, websocket, data: dict) -> None:
         room_id = data.get("room_id", "")
@@ -1495,6 +1534,8 @@ class RoomHandlerMixin:
                         await ws.send(json.dumps({"type": "room_deleted", "room_id": room_id, "room_name": room["name"]}))
                     except Exception:
                         pass
+                # Member gateways drop their copy (read before the rows go).
+                self._relay_room_moderation(room_id, "delete_room", caller_did, caller_did)
                 self._room_codes.pop(room.get("code"), None)
                 del self._local_rooms[room_id]
                 if self._store:
@@ -1513,6 +1554,10 @@ class RoomHandlerMixin:
                 await websocket.send(json.dumps({"type": "error", "message": "Only the room owner can transfer ownership"}))
             elif to_did == caller_did:
                 await websocket.send(json.dumps({"type": "error", "message": "You are already the owner"}))
+            elif self._member_gateways(room_id, to_did):
+                await websocket.send(json.dumps({"type": "error", "message": (
+                    "Ownership can only go to a member on this gateway. "
+                    "That member's gateway cannot host this room.")}))
             else:
                 to_ws = self._any_socket(to_did)
                 if not to_ws or to_ws not in room["members"]:
@@ -1568,6 +1613,8 @@ class RoomHandlerMixin:
                 room["creator_webid"] = new_owner_did
                 if self._store and new_owner_did:
                     self._store.update_room_creator(room_id, new_owner_did)
+                    self._relay_room_moderation(room_id, "owner_changed", new_owner_did,
+                                                new_owner_did)
                 del self._pending_ownership_transfers[room_id]
                 for ws in list(room["members"]):
                     try:
@@ -2328,26 +2375,40 @@ class RoomHandlerMixin:
             # A3: enforce invite expiry / max-uses. Only invite-table codes are
             # gated; a legacy plaintext code (no invite row) falls through so
             # pre-existing joins keep working.
-            if self._store and code_hash and self._store.room_invite_exists(code_hash):
+            # A member coming back (another device, a reload) does not use up the invite.
+            if (self._store and code_hash and not _already_member
+                    and self._store.room_invite_exists(code_hash)):
                 if self._store.consume_room_invite(code_hash) is None:
                     await websocket.send(json.dumps({
                         "type": "error", "message": "invite_expired_or_exhausted"}))
                     return
             room = self._local_rooms[room_id]
-            room["members"].add(websocket)
+            # Every open session of the joiner (other tabs, linked devices) gets the room.
+            _socks = {websocket} | (set(self._sockets_for(joiner_webid)) if joiner_webid else set())
+            room["members"].update(_socks)
             logger.info(f"Client joined local room {room_id} via code {code}")
             if self._store and joiner_webid:
                 self._store.add_room_member(room_id, joiner_webid)
             if joiner_webid:
                 asyncio.ensure_future(self._grant_pod_room_read(room_id, joiner_webid))
-            await websocket.send(json.dumps({
+            _joined = json.dumps({
                 "type": "room_joined",
                 "room_id": room_id,
                 "name": room["name"],
                 "topic": room.get("topic", ""),
                 "code": code,
                 "invite_url": room.get("invite_url", ""),
-            }))
+            })
+            for _ws in [websocket] + [s for s in _socks if s is not websocket]:
+                try:
+                    await _ws.send(_joined)
+                except Exception:
+                    pass
+            if joiner_webid and not _already_member and self._room_is_hosted_here(room_id):
+                # Member gateways learn about the newcomer too.
+                self._relay_room_moderation(
+                    room_id, "member_joined", joiner_webid, room.get("creator_webid", ""),
+                    display_name=self._name_for(websocket, joiner_webid))
             if room.get("history_mode") == "all":
                 history = (
                     self._store.get_messages(room_id, limit=200)
@@ -2377,7 +2438,7 @@ class RoomHandlerMixin:
                 "display_name": self._name_for(websocket, self._client_webids.get(websocket, "")),
             }
             for ws in list(room["members"]):
-                if ws != websocket and ws in self.clients:
+                if ws not in _socks and ws in self.clients:
                     try:
                         await ws.send(json.dumps(join_event))
                     except Exception:
@@ -2410,10 +2471,15 @@ class RoomHandlerMixin:
             await websocket.send(json.dumps({"type": "error", "message": "Cannot kick the room owner"}))
             return
         if room_id and target_webid:
+            # Captured before the member row goes: their gateway must hear of it.
+            _target_gws = self._member_gateways(room_id, target_webid)
             if self._store:
                 self._store.remove_room_member(room_id, target_webid)
                 self._store.delete_room_role(room_id, target_webid)
             self._drop_ownership_offer(room_id, target_webid)
+            self._relay_room_moderation(room_id, "kick", target_webid,
+                                        self._client_webids.get(websocket, ""),
+                                        extra_gateways=_target_gws)
             # Evict ALL of the target's sockets and notify each — a single-socket
             # discard left a second device connected and still receiving.
             _target_sockets = self._sockets_for(target_webid)
@@ -2483,6 +2549,8 @@ class RoomHandlerMixin:
         if target_webid == room.get("creator_webid"):
             await websocket.send(json.dumps({"type": "error", "message": "Cannot ban the room owner"}))
             return
+        # Captured before the ban drops the member row: their gateway must hear of it.
+        _target_gws = self._member_gateways(room_id, target_webid)
         self._store.ban_room_member(room_id, target_webid, caller_webid, reason)
         self._store.remove_room_member(room_id, target_webid)
         self._store.delete_room_role(room_id, target_webid)
@@ -2529,7 +2597,8 @@ class RoomHandlerMixin:
             await self._trigger_sender_key_rotation(room_id, target_webid)
         except Exception as _sk_exc:
             logger.warning("sender_key_rotation after ban failed: %s", _sk_exc)
-        self._relay_room_moderation(room_id, "ban", target_webid, caller_webid, reason=reason)
+        self._relay_room_moderation(room_id, "ban", target_webid, caller_webid, reason=reason,
+                                    extra_gateways=_target_gws)
 
     async def _handle_unban_member(self, websocket, data: dict) -> None:
         room_id = data.get("room_id", "")
@@ -4294,7 +4363,7 @@ class RoomHandlerMixin:
             _local = self._store.get_room_members(room_id) or []
             if not _is_fed and len(_local) + len(_fed) >= _MAX_ROOM_MEMBERS:
                 return refuse("room_full")
-            if self._store.room_invite_exists(code_hash):
+            if not _is_fed and self._store.room_invite_exists(code_hash):
                 if self._store.consume_room_invite(code_hash) is None:
                     return refuse("invite_expired_or_exhausted")
             if not self._store.add_federated_room_member(

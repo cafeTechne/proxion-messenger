@@ -3457,9 +3457,28 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             return "200 OK", '{"status":"ok"}'
         # Membership and room lifecycle news from the host of a room mirrored
         # here: only the owner's gateway speaks for these.
-        if action in ("member_joined", "member_left", "delete_room") and _room:
-            if not caller or caller != _owner or self._room_is_hosted_here(room_id):
+        if action in ("member_joined", "member_left", "delete_room", "owner_changed") and _room:
+            # The host's key recorded at join speaks for the room whoever owns
+            # it now; a mirror without one falls back to the owner's identity.
+            _from_host = (self._relay_room_host_vouches(
+                room_id, caller, data.get("relay_sig_did", ""))
+                if self._room_host_key_known(room_id) else caller == _owner)
+            if not caller or not _from_host or self._room_is_hosted_here(room_id):
                 return "403 Forbidden", '{"error":"not_authorized_to_moderate"}'
+            if action == "owner_changed":
+                if target != _owner:
+                    _host = self._room_host_gateway(room_id)
+                    if not _host or self._relay_identity_is_local(target, room_id):
+                        return "200 OK", '{"status":"ok"}'
+                    if not self._member_gateways(room_id, target):
+                        self._store.add_federated_room_member(room_id, target, _host)
+                    _room["creator_webid"] = target
+                    self._store.update_room_creator(room_id, target)
+                    await self._send_room_event(_room, {
+                        "type": "ownership_transferred", "room_id": room_id,
+                        "new_owner_did": target,
+                        "new_owner_name": self._store.get_display_name(target) or target[:12]})
+                return "200 OK", '{"status":"ok"}'
             if action == "delete_room":
                 await self._drop_mirror_room(room_id, {
                     "type": "room_deleted", "room_id": room_id,
