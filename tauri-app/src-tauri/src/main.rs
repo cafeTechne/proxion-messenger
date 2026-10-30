@@ -21,6 +21,23 @@ struct GatewayFlags {
     running: AtomicBool,
     /// We asked it to stop, so its exit is not a crash.
     stopping: AtomicBool,
+    /// When the sidecar was restarted after a crash, for the crash-loop cap.
+    restarts: Mutex<Vec<Instant>>,
+}
+
+/// A crashed gateway is started again this many times per window; past that it
+/// is left down and the app says so (a crash loop would only spin the CPU).
+const MAX_RESTARTS: usize = 3;
+const RESTART_WINDOW: Duration = Duration::from_secs(300);
+
+/// Record a restart at `now` if the cap allows one. Pure apart from `log`.
+fn allow_restart(log: &mut Vec<Instant>, now: Instant) -> bool {
+    log.retain(|t| now.duration_since(*t) < RESTART_WINDOW);
+    if log.len() >= MAX_RESTARTS {
+        return false;
+    }
+    log.push(now);
+    true
 }
 struct PendingDeepLink(Mutex<Option<String>>);
 struct TrayUnreadState(Mutex<Vec<UnreadContact>>);
@@ -572,90 +589,7 @@ fn main() {
                 }
             }
 
-            // Load pod credentials from keychain to inject into gateway env
-            let pod_css = kread("pod_css_url");
-            let pod_email = kread("pod_email");
-            let pod_pw = kread("pod_password");
-
-            let app_handle = app.handle();
-
-            match tauri::api::process::Command::new_sidecar("proxion-gateway") {
-                Err(e) => {
-                    eprintln!("[gateway] sidecar not found: {e}");
-                    app_handle.emit_all("gateway-missing", ()).ok();
-                }
-                Ok(cmd) => {
-                    // tauri 1.x Command has no per-var .env(); only .envs(HashMap).
-                    let mut env: std::collections::HashMap<String, String> =
-                        std::collections::HashMap::new();
-                    env.insert("PROXION_HTTP_PORT".into(), "8080".into());
-                    env.insert("PROXION_HOST".into(), "127.0.0.1".into());
-                    env.insert("PROXION_WS_PORT".into(), "7474".into());
-                    // The webview dials plain ws://127.0.0.1:7474 and cannot accept a
-                    // self-signed cert, so the loopback sidecar stays on plain ws/http.
-                    env.insert("PROXION_AUTO_TLS".into(), "0".into());
-                    // Exit cleanly when this app closes our end of its stdin.
-                    env.insert("PROXION_SHUTDOWN_ON_STDIN_EOF".into(), "1".into());
-                    // After a relaunch or update, wait for the previous gateway to
-                    // release its ports instead of failing on them.
-                    env.insert("PROXION_BIND_WAIT".into(), "15".into());
-                    env.insert(
-                        "PROXION_DATA_DIR".into(),
-                        app_data_dir.to_string_lossy().to_string(),
-                    );
-                    if let Some(v) = pod_css   { env.insert("PROXION_CSS_URL".into(),      v); }
-                    if let Some(v) = pod_email  { env.insert("PROXION_CSS_EMAIL".into(),    v); }
-                    if let Some(v) = pod_pw     { env.insert("PROXION_CSS_PASSWORD".into(), v); }
-                    let cmd = cmd.envs(env);
-
-                    let (mut rx, child) = cmd.spawn().expect("failed to spawn sidecar");
-                    *app.state::<GatewayChild>().0.lock().unwrap() = Some(child);
-                    app.state::<GatewayFlags>().running.store(true, Ordering::SeqCst);
-
-                    let app_handle2 = app_handle.clone();
-                    tauri::async_runtime::spawn(async move {
-                        // Set once the gateway explained its own failure, so the
-                        // generic crash toast does not repeat it.
-                        let mut reported = false;
-                        while let Some(event) = rx.recv().await {
-                            match event {
-                                tauri::api::process::CommandEvent::Stdout(line) => {
-                                    if let Some(err) = parse_gateway_error(&line) {
-                                        reported = true;
-                                        app_handle2.emit_all("gateway-error", err).ok();
-                                    }
-                                    if line.contains("PROXION_GATEWAY_READY") {
-                                        app_handle2.emit_all("gateway-ready", ()).ok();
-                                        // Deliver cold-start deep link now that gateway is up
-                                        let link = app_handle2
-                                            .state::<PendingDeepLink>()
-                                            .0.lock()
-                                            .unwrap()
-                                            .clone();
-                                        if let Some(url) = link {
-                                            app_handle2.emit_all("deep-link-invoke", &url).ok();
-                                        }
-                                    }
-                                    println!("[gateway] {line}");
-                                }
-                                tauri::api::process::CommandEvent::Stderr(line) => {
-                                    eprintln!("[gateway] ERR: {line}");
-                                }
-                                tauri::api::process::CommandEvent::Terminated(payload) => {
-                                    eprintln!("[gateway] exited: {:?}", payload.code);
-                                    let flags = app_handle2.state::<GatewayFlags>();
-                                    flags.running.store(false, Ordering::SeqCst);
-                                    let stopping = flags.stopping.load(Ordering::SeqCst);
-                                    if payload.code.unwrap_or(0) != 0 && !reported && !stopping {
-                                        app_handle2.emit_all("gateway-crashed", ()).ok();
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    });
-                }
-            }
+            spawn_gateway(&app.handle());
 
             Ok(())
         })
@@ -669,16 +603,144 @@ fn main() {
         });
 }
 
+// Start the gateway sidecar and watch it. A crash (non-zero exit we did not ask
+// for, not explained by the gateway itself) restarts it after a short pause, up
+// to MAX_RESTARTS per RESTART_WINDOW; past that the webview gets
+// `gateway-crashed` so it stops promising delivery.
+fn spawn_gateway(app_handle: &AppHandle) {
+    let app_data_dir = match app_handle.path_resolver().app_data_dir() {
+        Some(d) => d,
+        None => {
+            eprintln!("[gateway] no app data dir available");
+            return;
+        }
+    };
+    // Load pod credentials from keychain to inject into gateway env
+    let pod_css = kread("pod_css_url");
+    let pod_email = kread("pod_email");
+    let pod_pw = kread("pod_password");
+
+    match tauri::api::process::Command::new_sidecar("proxion-gateway") {
+        Err(e) => {
+            eprintln!("[gateway] sidecar not found: {e}");
+            app_handle.emit_all("gateway-missing", ()).ok();
+        }
+        Ok(cmd) => {
+            // tauri 1.x Command has no per-var .env(); only .envs(HashMap).
+            let mut env: std::collections::HashMap<String, String> =
+                std::collections::HashMap::new();
+            env.insert("PROXION_HTTP_PORT".into(), "8080".into());
+            env.insert("PROXION_HOST".into(), "127.0.0.1".into());
+            env.insert("PROXION_WS_PORT".into(), "7474".into());
+            // The webview dials plain ws://127.0.0.1:7474 and cannot accept a
+            // self-signed cert, so the loopback sidecar stays on plain ws/http.
+            env.insert("PROXION_AUTO_TLS".into(), "0".into());
+            // Exit cleanly when this app closes our end of its stdin.
+            env.insert("PROXION_SHUTDOWN_ON_STDIN_EOF".into(), "1".into());
+            // After a relaunch or update, wait for the previous gateway to
+            // release its ports instead of failing on them.
+            env.insert("PROXION_BIND_WAIT".into(), "15".into());
+            env.insert(
+                "PROXION_DATA_DIR".into(),
+                app_data_dir.to_string_lossy().to_string(),
+            );
+            if let Some(v) = pod_css   { env.insert("PROXION_CSS_URL".into(),      v); }
+            if let Some(v) = pod_email  { env.insert("PROXION_CSS_EMAIL".into(),    v); }
+            if let Some(v) = pod_pw     { env.insert("PROXION_CSS_PASSWORD".into(), v); }
+            let cmd = cmd.envs(env);
+
+            let (mut rx, child) = match cmd.spawn() {
+                Ok(pair) => pair,
+                Err(e) => {
+                    eprintln!("[gateway] failed to spawn sidecar: {e}");
+                    app_handle.emit_all("gateway-crashed", ()).ok();
+                    return;
+                }
+            };
+            *app_handle.state::<GatewayChild>().0.lock().unwrap() = Some(child);
+            app_handle.state::<GatewayFlags>().running.store(true, Ordering::SeqCst);
+
+            let app_handle2 = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                // Set once the gateway explained its own failure, so the
+                // generic crash toast does not repeat it.
+                let mut reported = false;
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        tauri::api::process::CommandEvent::Stdout(line) => {
+                            if let Some(err) = parse_gateway_error(&line) {
+                                reported = true;
+                                app_handle2.emit_all("gateway-error", err).ok();
+                            }
+                            if line.contains("PROXION_GATEWAY_READY") {
+                                app_handle2.emit_all("gateway-ready", ()).ok();
+                                // Deliver cold-start deep link now that gateway is up
+                                let link = app_handle2
+                                    .state::<PendingDeepLink>()
+                                    .0.lock()
+                                    .unwrap()
+                                    .clone();
+                                if let Some(url) = link {
+                                    app_handle2.emit_all("deep-link-invoke", &url).ok();
+                                }
+                            }
+                            println!("[gateway] {line}");
+                        }
+                        tauri::api::process::CommandEvent::Stderr(line) => {
+                            eprintln!("[gateway] ERR: {line}");
+                        }
+                        tauri::api::process::CommandEvent::Terminated(payload) => {
+                            eprintln!("[gateway] exited: {:?}", payload.code);
+                            let flags = app_handle2.state::<GatewayFlags>();
+                            flags.running.store(false, Ordering::SeqCst);
+                            let stopping = flags.stopping.load(Ordering::SeqCst);
+                            if payload.code.unwrap_or(0) != 0 && !reported && !stopping {
+                                let again = allow_restart(&mut flags.restarts.lock().unwrap(), Instant::now());
+                                if again {
+                                    eprintln!("[gateway] restarting after a crash");
+                                    let h = app_handle2.clone();
+                                    std::thread::spawn(move || {
+                                        std::thread::sleep(Duration::from_secs(2));
+                                        if !h.state::<GatewayFlags>().stopping.load(Ordering::SeqCst) {
+                                            spawn_gateway(&h);
+                                        }
+                                    });
+                                } else {
+                                    app_handle2.emit_all("gateway-crashed", ()).ok();
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            });
+        }
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::{
-        desktop_exec_quote, desktop_handler_entry, install_kind, name_has_owner_reply, parse_deep_link,
+        allow_restart, desktop_exec_quote, desktop_handler_entry, install_kind, name_has_owner_reply, parse_deep_link,
         parse_gateway_error, self_update_supported, updater_target_for,
         windows_scheme_command, InstallKind,
     };
     use std::ffi::OsStr;
+
+    #[test]
+    fn restart_cap_allows_three_per_window() {
+        use std::time::{Duration, Instant};
+        let mut log = Vec::new();
+        let t0 = Instant::now();
+        assert!(allow_restart(&mut log, t0));
+        assert!(allow_restart(&mut log, t0 + Duration::from_secs(1)));
+        assert!(allow_restart(&mut log, t0 + Duration::from_secs(2)));
+        assert!(!allow_restart(&mut log, t0 + Duration::from_secs(3)));
+        // Once the window has passed, a crash restarts again.
+        assert!(allow_restart(&mut log, t0 + Duration::from_secs(400)));
+    }
 
     fn tmpdir(tag: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir()
