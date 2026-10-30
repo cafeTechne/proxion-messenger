@@ -273,6 +273,14 @@ describe('isDmPeerWebId', () => {
         expect(isDmPeerWebId(null)).toBe(false);
         expect(isDmPeerWebId('https://' + 'a'.repeat(3000))).toBe(false);
     });
+    it('refuses gateway links that are not a profile', () => {
+        expect(isDmPeerWebId('https://gw.example:8080/i/645ad6afb53f32ba')).toBe(false);
+        expect(isDmPeerWebId('https://gw.example/invite?from=did%3Akey%3Az6Mk')).toBe(false);
+        expect(isDmPeerWebId('https://gw.example/?join=abc#x')).toBe(false);
+        expect(isDmPeerWebId('https://gw.example:8080/')).toBe(false);
+        expect(isDmPeerWebId('https://alice.example/#me')).toBe(true);
+        expect(isDmPeerWebId('https://alice.example/profile/card')).toBe(true);
+    });
 });
 
 describe('createWebDm blocks', () => {

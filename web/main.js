@@ -72,7 +72,7 @@ import { createPodSocket } from './podtransport.js';
 import { purgeWebAccount, adoptWebAccount, shouldPromptForName, markNamePrompted } from './web-account.js';
 import { createRendering, replyQuoteHtml } from './rendering.js';
 import { createView, appendSidebarEmpty, mergeDmSnapshot, dropSupersededContactRows } from './view.js';
-import { createInvite, contactAddressFromInput, addressIsOnHost, stashPendingJoin, readPendingJoin, PENDING_JOIN_KEY } from './invite.js';
+import { createInvite, contactAddressFromInput, contactInputKind, isLoopbackUrl, addressIsOnHost, stashPendingJoin, readPendingJoin, PENDING_JOIN_KEY } from './invite.js';
 import { createPush, closedAppPushStatus } from './push.js';
 import { subscribeWebhook, watchResource } from './notify.js';
 import { isPeerPodRootAllowed } from './ssrf.js';
@@ -1807,7 +1807,8 @@ import { createAccountSync } from './account-sync.js';
                 const notice = document.getElementById("ob-invite-notice");
                 const text = document.getElementById("ob-invite-notice-text");
                 if (notice && text) {
-                    text.textContent = t('onboarding.inviteElsewhere', { host: window.location.host });
+                    text.textContent = t('onboarding.inviteElsewhere', { host: window.location.host })
+                        + ' ' + t('onboarding.inviteElsewhereNoBrowser');
                     notice.hidden = false;
                     document.getElementById("ob-copy-landing-invite")?.addEventListener("click", () => {
                         navigator.clipboard.writeText(link)
@@ -2267,6 +2268,8 @@ import { createAccountSync } from './account-sync.js';
                         updateMyAddressBar(event.address);
                     }
                     socketSendOrQueue({ cmd: 'get_my_address' });
+                    // Room invite links are rebuilt on the tunnel URL too.
+                    socketSendOrQueue({ cmd: 'get_rooms' });
                     const line = document.getElementById('tunnel-status-line');
                     if (line) {
                         line.style.display = 'block';
@@ -2560,6 +2563,10 @@ import { createAccountSync } from './account-sync.js';
                     } else {
                         document.getElementById("room-create-form").style.display = "none";
                         document.getElementById("room-invite-url").textContent = event.invite_url;
+                        // A loopback link opens only on this computer: say so
+                        // before it is shared.
+                        const _localHint = document.getElementById("room-invite-local-hint");
+                        if (_localHint) _localHint.hidden = !isLoopbackUrl(event.invite_url);
                         document.getElementById("room-invite-result").style.display = "";
                         // The busy submit that held focus is now hidden with the
                         // form; hand focus to the result's own button.
@@ -2585,8 +2592,9 @@ import { createAccountSync } from './account-sync.js';
                 case "join_invalid_invite": {
                     const _jb = document.getElementById("join-room-submit-btn");
                     const _je = document.getElementById("join-room-error");
-                    if (isButtonBusy(_jb) && _je) _je.textContent = t('join.invalidInvite');
-                    else showToast(t('join.invalidInvite'), 'error');
+                    const _jmsg = t(event.reason === 'desktop_room' ? 'join.desktopRoomInWeb' : 'join.invalidInvite');
+                    if (isButtonBusy(_jb) && _je) _je.textContent = _jmsg;
+                    else showToast(_jmsg, 'error');
                     clearButtonBusy(_jb);
                     _clearJoinPendingBanner();
                     break;
@@ -5806,10 +5814,13 @@ import { createAccountSync } from './account-sync.js';
             // Web build: no gateway friend-request handshake. A peer is just a Solid
             // WebID; discover their pod-published E2E key and open a DM directly.
             if (transport.mode === 'web') {
+                // A link may carry the WebID in ?from=.
                 if (raw.startsWith('http')) {
-                    try { const p = new URL(raw).searchParams.get('from'); if (p) raw = p; } catch (_) {}
+                    try { const p = new URL(raw).searchParams.get('from'); if (p && isDmPeerWebId(p)) raw = p; } catch (_) {}
                 }
-                if (!isDmPeerWebId(raw)) { errEl.textContent = t('contact.enterAddress'); return; }
+                const _kind = contactInputKind(raw);
+                if (_kind === 'proxion') { errEl.textContent = t('contact.desktopAddressInWeb'); return; }
+                if (_kind !== 'webid') { errEl.textContent = t('contact.notAWebId'); return; }
                 const webid = raw;
                 if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = t('contact.lookingUp'); }
                 await fetchAndCachePeerPub(webid, peerPodRootFromWebId(webid)).catch(() => {});
@@ -5831,6 +5842,11 @@ import { createAccountSync } from './account-sync.js';
             }
             // An invite link (https or proxion://) carries the address in
             // ?from=; a short link (https://gw/i/<token>) is resolved by the gateway.
+            // A Solid WebID names a browser-build account, which a gateway
+            // cannot reach yet.
+            if (contactInputKind(raw) === 'webid') {
+                errEl.textContent = t('contact.webIdInDesktop'); return;
+            }
             const _parsed = contactAddressFromInput(raw);
             raw = _parsed.address;
             errEl.textContent = "";

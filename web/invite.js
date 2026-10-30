@@ -10,6 +10,7 @@
 // Idempotent: opening the same link twice / a second registered event is a no-op.
 //
 // createInvite({ getSocket, onPendingInvite })
+import { isDmPeerWebId } from './webdm.js';
 
 const KEY = 'proxion_pending_invite';
 
@@ -104,4 +105,33 @@ export function readPendingJoin(storage, now = Date.now()) {
     } catch { /* an old undated stash */ }
     try { storage.removeItem(PENDING_JOIN_KEY); } catch { /* ignore */ }
     return '';
+}
+
+// The kind of account an Add contact input names. 'webid': a Solid WebID, the
+// only thing the browser build can message. 'proxion': a Proxion address or
+// link from a gateway (desktop): did:key, did@https://gw, proxion://, a
+// ?from= or ?join= link, a short link /i/<token> or /invite. The two kinds
+// cannot reach each other yet, so each side names the other's form clearly.
+// 'invalid' otherwise.
+export function contactInputKind(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return 'invalid';
+    if (/^(did:|proxion:)/i.test(s)) return 'proxion';
+    if (/^[^@\s/]+@https?:\/\//i.test(s)) return 'proxion';
+    if (!/^https?:\/\//i.test(s)) return 'invalid';
+    let u;
+    try { u = new URL(s); } catch { return 'invalid'; }
+    if (u.searchParams.has('from') || u.searchParams.has('join')
+            || /^\/i\/[^/]+\/?$/.test(u.pathname) || /\/invite\/?$/.test(u.pathname)) {
+        return 'proxion';
+    }
+    return isDmPeerWebId(s) ? 'webid' : 'invalid';
+}
+
+// Whether a link points at this computer only (a loopback host), so nobody
+// else can open it.
+export function isLoopbackUrl(url) {
+    let host;
+    try { host = new URL(String(url || '')).hostname; } catch { return false; }
+    return host === 'localhost' || host === '[::1]' || /^127\./.test(host);
 }

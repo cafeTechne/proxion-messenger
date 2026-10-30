@@ -21,12 +21,16 @@ export function peerPodRootFromWebId(webId) {
 
 // A WebID a web DM can be addressed to: https, or http only on a loopback host
 // (a local test pod). Also the shape DM thread ids take in the web build.
+// It must look like a profile: a #fragment or a profile/card path, and no
+// query. A gateway link (/i/<token>, ?from=, ?join=, a bare site) is not one.
 const _LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
 export function isDmPeerWebId(id) {
     if (typeof id !== 'string' || id.length > 2048) return false;
     if (/[<>"{}|\\^`\s]/.test(id)) return false;
     let u;
     try { u = new URL(id); } catch { return false; }
+    if (u.search || /^\/i\/[^/]*\/?$/.test(u.pathname)) return false;
+    if (!(u.hash.length > 1 || /\/(profile|card)(\/|$)/i.test(u.pathname))) return false;
     if (u.protocol === 'https:') return true;
     return u.protocol === 'http:' && _LOOPBACK.has(u.hostname);
 }

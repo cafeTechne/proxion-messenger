@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
-  createInvite, contactAddressFromInput, addressIsOnHost,
+  createInvite, contactAddressFromInput, contactInputKind, isLoopbackUrl, addressIsOnHost,
   stashPendingJoin, readPendingJoin, PENDING_JOIN_KEY, PENDING_JOIN_MAX_AGE_MS,
 } from './invite.js';
 
@@ -114,5 +114,30 @@ describe('pending join stash', () => {
     store[PENDING_JOIN_KEY] = 'OLDCODE';
     expect(readPendingJoin(localStorage)).toBe('');
     expect(store[PENDING_JOIN_KEY]).toBeUndefined();
+  });
+});
+
+describe('contactInputKind', () => {
+  it('tells a Solid WebID from a Proxion desktop address or link', () => {
+    expect(contactInputKind('https://alice.solidcommunity.net/profile/card#me')).toBe('webid');
+    expect(contactInputKind('http://localhost:3000/alice/profile/card#me')).toBe('webid');
+    expect(contactInputKind('did:key:z6MkAbc@https://gw.example')).toBe('proxion');
+    expect(contactInputKind('did:key:z6MkAbc')).toBe('proxion');
+    expect(contactInputKind('proxion://invite?from=did%3Akey%3Az6Mk')).toBe('proxion');
+    expect(contactInputKind('https://gw.example/invite?from=did%3Akey%3Az6Mk')).toBe('proxion');
+    expect(contactInputKind('https://gw.example:8080/i/645ad6afb53f32ba')).toBe('proxion');
+    expect(contactInputKind('https://gw.example:8080/?join=abc')).toBe('proxion');
+    expect(contactInputKind('https://gw.example:8080/')).toBe('invalid');
+    expect(contactInputKind('bob')).toBe('invalid');
+    expect(contactInputKind('')).toBe('invalid');
+  });
+});
+
+describe('isLoopbackUrl', () => {
+  it('flags links that only open on this computer', () => {
+    expect(isLoopbackUrl('http://127.0.0.1:8080/?join=x')).toBe(true);
+    expect(isLoopbackUrl('http://localhost:8080/?join=x')).toBe(true);
+    expect(isLoopbackUrl('https://abc.trycloudflare.com/?join=x')).toBe(false);
+    expect(isLoopbackUrl('abc')).toBe(false);
   });
 });
