@@ -2589,16 +2589,23 @@ class RoomHandlerMixin:
         self._relay_room_moderation(room_id, "unmute", target_webid, self._client_webids.get(websocket, ""))
 
     def _relay_room_moderation(self, room_id: str, action: str, target_webid: str,
-                               caller_webid: str, reason: str = "", expires_at=None) -> None:
-        """Fan a moderation action out to federated member gateways (R-C1)."""
+                               caller_webid: str, reason: str = "", expires_at=None,
+                               extra_gateways=(), exclude_gateways=(),
+                               display_name: str = "") -> None:
+        """Fan a moderation action out to federated member gateways (R-C1).
+
+        *extra_gateways* are reached too: a kicked or banned member's gateway
+        is no longer in the federated member list by the time this runs, and
+        it is the one that most needs to hear about it."""
         if not self._store or not target_webid:
             return
-        _seen: set = set()
-        for _fm in (self._store.get_federated_room_members(room_id) or []):
-            _gw = _fm.get("gateway_url", "")
-            if not _gw or _gw in _seen:
+        _seen: set = {self._norm_gw_url(u) for u in exclude_gateways if u}
+        _targets = [_fm.get("gateway_url", "")
+                    for _fm in (self._store.get_federated_room_members(room_id) or [])]
+        for _gw in _targets + [u for u in extra_gateways if u]:
+            if not _gw or self._norm_gw_url(_gw) in _seen:
                 continue
-            _seen.add(_gw)
+            _seen.add(self._norm_gw_url(_gw))
             _payload = {
                 "content_type": "room_moderation", "action": action,
                 "room_id": room_id, "webid": target_webid, "from_webid": caller_webid,
@@ -2607,7 +2614,86 @@ class RoomHandlerMixin:
                 _payload["reason"] = reason
             if expires_at is not None:
                 _payload["expires_at"] = expires_at
+            if display_name:
+                _payload["display_name"] = display_name[:64]
             asyncio.create_task(self._relay_ephemeral(_gw, _payload))
+
+    def _member_gateways(self, room_id: str, member_did: str) -> list:
+        """The gateway URLs recorded for a federated member of *room_id*."""
+        if not self._store or not member_did:
+            return []
+        return [m.get("gateway_url", "") for m in
+                (self._store.get_federated_room_members(room_id) or [])
+                if m.get("member_did") == member_did and m.get("gateway_url")]
+
+    def _room_is_hosted_here(self, room_id: str) -> bool:
+        room = self._local_rooms.get(room_id)
+        creator = room.get("creator_webid", "") if room else ""
+        return bool(creator) and self._relay_identity_is_local(creator, room_id)
+
+    def _room_host_gateway(self, room_id: str) -> str:
+        """For a mirror of a room hosted elsewhere, the host gateway's URL."""
+        room = self._local_rooms.get(room_id)
+        creator = room.get("creator_webid", "") if room else ""
+        if not creator or self._room_is_hosted_here(room_id):
+            return ""
+        urls = self._member_gateways(room_id, creator)
+        return urls[0] if urls else ""
+
+    def _forward_room_relay(self, data: dict, result: tuple) -> tuple:
+        """Hub fan-out: on the room's host, pass a member's relayed message,
+        reaction, edit or delete on to every OTHER member gateway.
+
+        A member gateway only relays to the host, so without this members on
+        different gateways never see each other. The host has already checked
+        the sender's gateway binding and membership (the handler accepted it);
+        receivers accept the host's signature for members it told them about
+        (_relay_room_host_vouches). Never sent back to the sender's gateway,
+        and a mirror never forwards, so nothing loops. Returns *result*."""
+        try:
+            if not str(result[0]).startswith("200") or not self._store:
+                return result
+            room_id = data.get("room_id", "")
+            if room_id not in self._local_rooms or not self._room_is_hosted_here(room_id):
+                return result
+            origin = {self._norm_gw_url(u)
+                      for u in self._member_gateways(room_id, data.get("from_webid", ""))}
+            if not origin:
+                return result
+            origin.add(self._norm_gw_url(self._gateway_http_url()))
+            fwd = {k: v for k, v in data.items() if not k.startswith("_") and k not in (
+                "signature", "relay_sig_did", "relay_ts", "relay_nonce", "origin_gateway_url")}
+            ct = data.get("content_type", "")
+            for _fm in (self._store.get_federated_room_members(room_id) or []):
+                gw = _fm.get("gateway_url", "")
+                if not gw or self._norm_gw_url(gw) in origin:
+                    continue
+                origin.add(self._norm_gw_url(gw))
+                if ct == "room_message":
+                    asyncio.create_task(self._relay_room_message(gw, room_id, dict(fwd)))
+                else:
+                    asyncio.create_task(self._relay_ephemeral(gw, dict(fwd)))
+        except Exception:
+            logger.debug("room relay fan-out failed", exc_info=True)
+        return result
+
+    async def _drop_mirror_room(self, room_id: str, event: dict) -> None:
+        """Remove this gateway's copy of a room hosted elsewhere, telling the
+        local members still in it with *event*."""
+        room = self._local_rooms.get(room_id)
+        if not room:
+            return
+        payload = json.dumps(event)
+        for ws in list(room.get("members", set())):
+            try:
+                await ws.send(payload)
+            except Exception:
+                pass
+        self._room_codes.pop(room.get("code"), None)
+        self._local_rooms.pop(room_id, None)
+        if self._store:
+            self._store.delete_room(room_id)
+        self._forget_room_on_pod(room_id)
 
     async def _handle_get_room_bans(self, websocket, data: dict) -> None:
         room_id = data.get("room_id", "")
@@ -4040,6 +4126,8 @@ class RoomHandlerMixin:
         name = str(resp.get("name") or "Room").strip()[:100] or "Room"
         topic = str(resp.get("topic") or "")[:500]
         history_mode = "all" if resp.get("history_mode") == "all" else "none"
+        # Every open session of the joiner (other tabs, linked devices) gets the room.
+        _socks = {websocket} | set(self._sockets_for(caller))
         existing = self._local_rooms.get(room_id)
         if existing is not None:
             # Only an existing mirror of THIS host's room may be reused; a host
@@ -4051,10 +4139,10 @@ class RoomHandlerMixin:
             if not _mirrored:
                 await websocket.send(json.dumps({"type": "error", "message": "room_id_conflict"}))
                 return
-            existing["members"].add(websocket)
+            existing["members"].update(_socks)
         else:
             self._local_rooms[room_id] = {
-                "name": name, "code": "", "members": {websocket}, "invite_url": raw,
+                "name": name, "code": "", "members": set(_socks), "invite_url": raw,
                 "history_mode": history_mode, "messages": [], "creator_webid": creator,
                 "topic": topic,
             }
@@ -4062,6 +4150,14 @@ class RoomHandlerMixin:
                 self._store.save_room(room_id, name, "", raw, history_mode, creator)
         if self._store:
             self._store.add_room_member(room_id, caller)
+            # The host gateway's key, so traffic it forwards for members on
+            # other gateways is accepted for this room (_relay_room_host_vouches).
+            try:
+                from .didkey import did_to_pub_key
+                self._store.record_identity_key_seen(
+                    "roomhost:" + room_id, did_to_pub_key(host_did).hex(), trusted=True)
+            except Exception:
+                logger.debug("could not record the room host key", exc_info=True)
             members = [m for m in (resp.get("members") or []) if isinstance(m, dict)]
             if not any(m.get("webid") == creator for m in members):
                 members.insert(0, {"webid": creator})
@@ -4098,15 +4194,21 @@ class RoomHandlerMixin:
                         str(msg.get("from_display_name") or "")[:64], content,
                         str(msg.get("timestamp") or ""))
         logger.info("Joined remote room %s hosted at %s", room_id, host_http)
-        await websocket.send(json.dumps({
+        _joined = json.dumps({
             "type": "room_joined", "room_id": room_id, "name": name, "topic": topic,
             "code": "", "invite_url": raw, "federated": True,
-        }))
+        })
+        await websocket.send(_joined)
+        for ws in _socks - {websocket}:
+            try:
+                await ws.send(_joined)
+            except Exception:
+                pass
         _evt = json.dumps({"type": "room_member_joined", "room_id": room_id,
                            "name": name, "webid": caller,
                            "display_name": self._name_for(websocket, caller)})
         for ws in list(self._local_rooms[room_id]["members"]):
-            if ws is not websocket and ws in self.clients:
+            if ws not in _socks and ws in self.clients:
                 try:
                     await ws.send(_evt)
                 except Exception:
@@ -4210,8 +4312,11 @@ class RoomHandlerMixin:
             except Exception:
                 pass
         _stored = self._store.get_room_members(room_id) if self._store else []
+        # Members on other gateways too: the joiner reaches them through us.
+        _stored = _stored + [m.get("member_did", "") for m in (
+            self._store.get_federated_room_members(room_id) if self._store else [])]
         members = []
-        for wid in ([creator] + [w for w in _stored if w != creator])[:_MAX_ROOM_MEMBERS]:
+        for wid in list(dict.fromkeys([creator] + [w for w in _stored if w != creator]))[:_MAX_ROOM_MEMBERS]:
             if wid and wid != member:
                 members.append({"webid": wid, "display_name":
                                 (self._store.get_display_name(wid) if self._store else None) or ""})
@@ -4231,6 +4336,11 @@ class RoomHandlerMixin:
                 await ws.send(_evt)
             except Exception:
                 pass
+        # And to the other member gateways, so their member lists and relay
+        # checks know the newcomer.
+        self._relay_room_moderation(
+            room_id, "member_joined", member, creator, exclude_gateways=(home,),
+            display_name=(self._store.get_display_name(member) if self._store else "") or "")
         logger.info("Federated member joined room %s from %s", room_id, home)
         return "200 OK", json.dumps({
             "ok": True, "room_id": room_id, "name": room.get("name", ""),

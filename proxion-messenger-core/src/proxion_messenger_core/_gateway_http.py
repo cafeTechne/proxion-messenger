@@ -1005,10 +1005,12 @@ class HttpEndpointsMixin:
                 # the signer binding was ALREADY established, BEFORE the seed below
                 # can create it, and hand it to the handler.
                 _scope = data.get("room_id", "") or data.get("channel_id", "")
+                # A room's host may forward a member on a third gateway (hub fan-out).
+                _vouch = _ct.startswith("room_")
                 if _ct in ("room_edit", "room_delete"):
                     data["_relay_sender_established"] = self._relay_sender_gateway_ok(
                         _from, _signer, require_established=True, may_seed=False,
-                        room_id=_scope)
+                        room_id=_scope, room_host_vouch=_vouch)
                 # Seed a NEW binding only when from_webid is authorized for the
                 # relay target it names (a member of the local room, or a DM peer
                 # for file transfers). A stranger's validly-signed POST must not
@@ -1017,7 +1019,7 @@ class HttpEndpointsMixin:
                 _may_seed = self._relay_seed_authorized(data, _ct, _from)
                 _bound = self._relay_sender_gateway_ok(
                     _from, _signer, require_established=_privileged, may_seed=_may_seed,
-                    room_id=_scope)
+                    room_id=_scope, room_host_vouch=_vouch)
             else:  # _CHANNEL_SIGNED_TYPES — bind the signer to a channel participant
                 _bound = self._voice_channel_gateway_ok(data.get("channel_id", ""), _signer)
             if not _bound:
@@ -1070,11 +1072,11 @@ class HttpEndpointsMixin:
 
         # ── Room message relay — deliver to local members ──
         if data.get("content_type") == "room_message":
-            return await self._handle_room_relay(data)
+            return self._forward_room_relay(data, await self._handle_room_relay(data))
 
         # ── Room reaction relay — deliver to local members ──
         if data.get("content_type") == "room_reaction":
-            return await self._handle_room_reaction_relay(data)
+            return self._forward_room_relay(data, await self._handle_room_reaction_relay(data))
 
         # ── DM reaction relay — deliver reaction_added/removed to a local peer ──
         if data.get("content_type") == "dm_reaction":
@@ -1098,11 +1100,11 @@ class HttpEndpointsMixin:
 
         # ── Room edit relay — update store and deliver to local members ──
         if data.get("content_type") == "room_edit":
-            return await self._handle_room_edit_relay(data)
+            return self._forward_room_relay(data, await self._handle_room_edit_relay(data))
 
         # ── Room delete relay — remove from store and deliver to local members ──
         if data.get("content_type") == "room_delete":
-            return await self._handle_room_delete_relay(data)
+            return self._forward_room_relay(data, await self._handle_room_delete_relay(data))
 
         # ── Room moderation relay — ban/mute propagation (R-C1) ──
         if data.get("content_type") == "room_moderation":

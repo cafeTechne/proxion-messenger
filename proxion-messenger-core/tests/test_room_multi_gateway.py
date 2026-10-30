@@ -232,8 +232,18 @@ async def test_forwarded_room_traffic_keeps_sender_binding(tmp_path):
         await post_relay(C.http + "/relay", forged(B.agent, B, carol.did, "fake-carol"))
         # B posts to the host claiming to be Carol.
         await post_relay(A.http + "/relay", forged(B.agent, B, carol.did, "fake-carol-at-host"))
+        # A gateway that is in no room at all, first contact.
+        D = GW(tmp_path, "d")
+        await post_relay(C.http + "/relay", forged(D.agent, D, bob.did, "fake-bob-from-d"))
+        # Bob hosts a second room that Carol joins. Alice's gateway (host of the
+        # first room) must not be able to speak for Bob in it.
+        rid2, link2 = await _room(bob, "duo")
+        await _join(carol, link2, rid2)
+        await asyncio.sleep(0.3)
+        await post_relay(C.http + "/relay", forged(A.agent, A, bob.did, "fake-bob-room2", rid2))
         assert await _absent(lambda: any(
-            str(e.get("content", "")).startswith("fake-") for e in carol.events + alice.events))
+            str(e.get("content", "")).startswith("fake-")
+            for e in carol.events + alice.events + bob.events))
         # Bob's real messages still arrive everywhere.
         await bob.cmd(cmd="send_room", room_id=rid, content="real-bob")
         assert await carol.wait_content("real-bob")

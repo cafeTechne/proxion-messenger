@@ -2862,7 +2862,9 @@ class PodSyncMixin:
         bind ``from_webid`` to the signing gateway (see _relay_sender_gateway_ok)."""
         from .relay import sign_relay_envelope, post_relay
         import secrets as _sec
-        ts = event.get("timestamp", datetime.now(timezone.utc).isoformat())
+        # relay_ts is when this gateway signs, not when the message was written:
+        # a host forwarding an older (queued) message must still verify.
+        ts = datetime.now(timezone.utc).isoformat()
         payload = {
             # Only fields the receiver's /relay allowlist accepts: the live event
             # also carries "type" and command flags, and any one of

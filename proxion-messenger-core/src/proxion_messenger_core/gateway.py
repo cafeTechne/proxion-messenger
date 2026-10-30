@@ -455,9 +455,13 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             }
             if room["code"]:
                 self._room_codes[room["code"]] = room["room_id"]
-            # Back-fill room_members for rooms that predate the membership table
+            # Back-fill room_members for rooms that predate the membership table.
+            # Not for a mirror of a room hosted elsewhere (the creator is a
+            # federated member there), nor for a room whose owner already left.
             creator = room.get("creator_webid", "")
-            if creator and creator not in self._store.get_room_members(room["room_id"]):
+            if creator and not self._store.get_room_members(room["room_id"]) and not any(
+                    m.get("member_did") == creator
+                    for m in self._store.get_federated_room_members(room["room_id"])):
                 self._store.add_room_member(room["room_id"], creator)
         logger.info(f"Hydrated {len(self._local_rooms)} local rooms from store")
         # R11.2.3: restore per-room disappear timers from SQLite
@@ -578,7 +582,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
     def _relay_sender_gateway_ok(self, from_webid: str, relay_sig_did: str,
                                  require_established: bool = False,
                                  may_seed: bool = True,
-                                 room_id: str = "") -> bool:
+                                 room_id: str = "",
+                                 room_host_vouch: bool = False) -> bool:
         """TOFU continuity binding for ephemeral room/voice/file relays.
 
         The envelope signature only proves *some* gateway (relay_sig_did) signed the
@@ -600,6 +605,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         row, else it permanently drops the victim's real federated traffic. The
         MATCH path (authorizing an already-established binding) never seeds and is
         unaffected by ``may_seed``.
+
+        ``room_host_vouch`` (room relays only) also accepts traffic the host of
+        *room_id* forwards for a member on a third gateway; see
+        _relay_room_host_vouches.
         """
         if not self._store or not from_webid or not relay_sig_did:
             return False
@@ -611,6 +620,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # member or our own gateway DID on first use and then act as them.
         if self._relay_identity_is_local(from_webid, room_id):
             return False
+        if room_host_vouch and self._room_host_key_known(room_id):
+            # A mirror of a room hosted elsewhere hears about the room from its
+            # host only, so nobody else may act (or seed a binding) for it.
+            return self._relay_room_host_vouches(room_id, from_webid, relay_sig_did)
         try:
             from .didkey import did_to_pub_key
             gw_pub_hex = did_to_pub_key(relay_sig_did).hex()
@@ -640,6 +653,43 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         except Exception:
             return False
         return False
+
+    def _room_host_key_known(self, room_id: str) -> bool:
+        """Whether *room_id* is a mirror whose host key was recorded on join."""
+        if (not room_id or not self._store or room_id not in self._local_rooms
+                or self._room_is_hosted_here(room_id)):
+            return False
+        try:
+            return bool(self._store.get_identity_key_history("roomhost:" + room_id))
+        except Exception:
+            return False
+
+    def _relay_room_host_vouches(self, room_id: str, member_did: str, signer_did: str) -> bool:
+        """Whether the host of the room *room_id* (hosted elsewhere, mirrored
+        here) signed a relay for *member_did*, a member the host told us about.
+
+        The host passes each member's room traffic on to every other member
+        gateway (hub fan-out), so a member on a third gateway arrives signed by
+        the host, which already checked that member's own gateway binding. The
+        host key is the one recorded for this room when we joined it. Scoped to
+        the one room: no relaygw binding is created, so the host cannot speak
+        for anyone in a room it does not host.
+        """
+        if not room_id or not member_did or not signer_did or not self._store:
+            return False
+        room = self._local_rooms.get(room_id)
+        if not room:
+            return False
+        try:
+            from .didkey import did_to_pub_key
+            signer_hex = did_to_pub_key(signer_did).hex()
+            hist = self._store.get_identity_key_history("roomhost:" + room_id)
+        except Exception:
+            return False
+        if not any(h.get("pubkey_hex") == signer_hex for h in hist):
+            return False
+        return any(m.get("member_did") == member_did
+                   for m in self._store.get_federated_room_members(room_id))
 
     def _relay_identity_is_local(self, did: str, room_id: str = "") -> bool:
         """Whether *did* is an identity that lives on this gateway.
@@ -3390,6 +3440,57 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # local mod path checks admin before relaying; the receiver must re-verify.
         _room = self._local_rooms.get(room_id)
         _owner = _room.get("creator_webid") if _room else None
+        # A member on another gateway leaving a room hosted here. Self-signed by
+        # the member (the dispatch already checked their gateway binding).
+        if action == "leave" and _room:
+            if (target != caller or not self._room_is_hosted_here(room_id)
+                    or not self._member_gateways(room_id, caller)):
+                return "403 Forbidden", '{"error":"not_authorized_to_moderate"}'
+            _home = self._member_gateways(room_id, caller)
+            self._store.remove_room_member(room_id, caller)
+            self._store.delete_room_role(room_id, caller)
+            self._drop_ownership_offer(room_id, caller)
+            await self._send_room_event(_room, {
+                "type": "room_member_left", "room_id": room_id, "webid": caller})
+            self._relay_room_moderation(room_id, "member_left", caller, _owner or "",
+                                        exclude_gateways=_home)
+            return "200 OK", '{"status":"ok"}'
+        # Membership and room lifecycle news from the host of a room mirrored
+        # here: only the owner's gateway speaks for these.
+        if action in ("member_joined", "member_left", "delete_room") and _room:
+            if not caller or caller != _owner or self._room_is_hosted_here(room_id):
+                return "403 Forbidden", '{"error":"not_authorized_to_moderate"}'
+            if action == "delete_room":
+                await self._drop_mirror_room(room_id, {
+                    "type": "room_deleted", "room_id": room_id,
+                    "room_name": _room.get("name", "")})
+                return "200 OK", '{"status":"ok"}'
+            if target == _owner or self._relay_identity_is_local(target, room_id):
+                # The owner's row is how this mirror reaches the host: keep it.
+                if action == "member_left" and target == _owner:
+                    await self._send_room_event(_room, {
+                        "type": "room_member_left", "room_id": room_id, "webid": target})
+                return "200 OK", '{"status":"ok"}'
+            if action == "member_joined":
+                _host = self._room_host_gateway(room_id)
+                if not _host or self._store.is_room_banned(room_id, target):
+                    return "200 OK", '{"status":"ok"}'
+                from ._gateway_rooms import _MAX_ROOM_MEMBERS
+                if not self._store.add_federated_room_member(
+                        room_id, target, _host, max_members=_MAX_ROOM_MEMBERS):
+                    return "200 OK", '{"status":"ok"}'
+                _dn = str(data.get("display_name") or "").strip()[:64]
+                if _dn:
+                    self._store.save_display_name(target, _dn)
+                await self._send_room_event(_room, {
+                    "type": "room_member_joined", "room_id": room_id,
+                    "name": _room.get("name", ""), "webid": target,
+                    "display_name": _dn or target[:12], "federated": True})
+            else:
+                self._store.remove_federated_room_member(room_id, target)
+                await self._send_room_event(_room, {
+                    "type": "room_member_left", "room_id": room_id, "webid": target})
+            return "200 OK", '{"status":"ok"}'
         # A granted admin must ALSO be a current member — a role row alone
         # survives removal, so an ex-admin whose role row persists must not keep
         # moderation authority. Mirrors the local _check_room_permission("admin").
@@ -3412,8 +3513,22 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         elif action == "unmute":
             self._store.unmute_room_member(room_id, target)
             evt = {"type": "member_unmuted", "room_id": room_id, "webid": target}
+        elif action == "kick":
+            if target == _owner:
+                return "403 Forbidden", '{"error":"not_authorized_to_moderate"}'
+            evt = {"type": "member_kicked", "room_id": room_id, "webid": target}
         else:
             return "400 Bad Request", '{"error":"unknown_moderation_action"}'
+        if action in ("ban", "kick"):
+            # Our own user was removed from a room hosted elsewhere: tell them
+            # and stop mirroring it once nobody here is left in it.
+            if not self._room_is_hosted_here(room_id) and self._relay_identity_is_local(
+                    target, room_id) and target != _owner:
+                await self._evict_from_mirror(room_id, target, action == "ban")
+                if room_id not in self._local_rooms:
+                    return "200 OK", '{"status":"ok"}'
+            elif action == "kick":
+                self._store.remove_federated_room_member(room_id, target)
         room = self._local_rooms.get(room_id)
         if room:
             payload = json.dumps(evt)
@@ -3423,6 +3538,37 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 except Exception:
                     pass
         return "200 OK", '{"status":"ok"}'
+
+    async def _send_room_event(self, room: dict, event: dict) -> None:
+        payload = json.dumps(event)
+        for ws in list(room.get("members", set())):
+            try:
+                await ws.send(payload)
+            except Exception:
+                pass
+
+    async def _evict_from_mirror(self, room_id: str, target: str, banned: bool) -> None:
+        """A local user was kicked or banned from a room hosted elsewhere."""
+        room = self._local_rooms.get(room_id)
+        if not room:
+            return
+        socks = set(self._sockets_for(target))
+        for ws in socks:
+            room["members"].discard(ws)
+        notice = {"type": "kicked_from_room", "room_id": room_id}
+        if banned:
+            notice["message"] = "You were banned from this room"
+        for ws in socks:
+            try:
+                await ws.send(json.dumps(notice))
+            except Exception:
+                pass
+        if self._store:
+            self._store.remove_room_member(room_id, target)
+            self._store.delete_room_role(room_id, target)
+            if not self._store.get_room_members(room_id):
+                await self._drop_mirror_room(room_id, {
+                    "type": "kicked_from_room", "room_id": room_id})
 
     async def _handle_room_edit_relay(self, data: dict) -> tuple[str, str]:
         """Inbound relayed message edit — apply to local store and deliver to room members."""
