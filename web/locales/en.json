@@ -392,6 +392,8 @@
   "btn.copyShortLink": "Copy short link",
   "btn.share": "Share",
   "btn.shareInviteLink": "Share invite link",
+  "btn.newInviteLink": "New link",
+  "invite.newLinkHint": "Make a new invite link. The current link stops working.",
   "share.inviteTitle": "Proxion invite",
   "share.inviteText": "Join me on Proxion:",
   "btn.join": "Join",

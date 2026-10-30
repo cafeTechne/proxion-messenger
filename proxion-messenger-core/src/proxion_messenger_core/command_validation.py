@@ -55,6 +55,7 @@ _SCHEMA: dict[str, dict[str, tuple]] = {
     "auth_response":    {"signature": (str, _MAX_SIG)},
     "join_room":        {"code": (str, _MAX_ID)},
     "join_remote_room": {"url": (str, 2048)},
+    "new_room_invite":  {"room_id": (str, _MAX_ID)},
     # chat_room_create: name is optional and handler truncates at 100 chars
     "chat_room_create": {},
     "set_presence":     {"status": (str, 32)},
@@ -123,7 +124,7 @@ MUTATING_COMMANDS: frozenset[str] = frozenset({
     "add_reaction", "remove_reaction", "pin_message", "unpin_message",
     "set_disappear_timer",
     # rooms
-    "chat_room_create", "rehost_room", "join_room", "join_remote_room", "join_by_invite", "create_invite",
+    "chat_room_create", "rehost_room", "new_room_invite", "join_room", "join_remote_room", "join_by_invite", "create_invite",
     "announce_room_join", "leave_local_room", "delete_room", "update_room",
     "transfer_ownership", "accept_ownership", "decline_ownership",
     "kick_member", "ban_member", "unban_member", "mute_member", "unmute_member",

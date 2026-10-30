@@ -840,6 +840,7 @@ import { createAccountSync } from './account-sync.js';
         const {
             requestRoomMembers, leaveRoom, deleteRoom, transferOwnership,
             copyRoomInviteFromModal, copyRoomInvite, _copyInviteText, kickMember, submitJoinRoom,
+            renewRoomInvite, applyRenewedInvite,
         } = createRooms({
             getSocket: () => socket, getActiveView: () => activeView,
             getRoomCreatorOf: () => roomCreatorOf, getRoomInviteUrls: () => roomInviteUrls,
@@ -2507,6 +2508,9 @@ import { createAccountSync } from './account-sync.js';
                     });
                     // Unread badges from the list; history only for the open room.
                     _applyThreadCatchUp(event.rooms.filter(r => r.local));
+                    break;
+                case "room_invite_renewed":
+                    applyRenewedInvite(event);
                     break;
                 case "room_created":
                     clearButtonBusy(document.getElementById("room-create-submit"));
@@ -6571,6 +6575,7 @@ import { createAccountSync } from './account-sync.js';
             attachListener('#invite-modal-close', 'click', () => {
                 document.getElementById("room-invite-modal").style.display = "none";
             });
+            attachListener('#invite-modal-renew', 'click', renewRoomInvite);
 
             // Room create modal: Done button
             attachListener('#room-create-done-btn', 'click', () => {

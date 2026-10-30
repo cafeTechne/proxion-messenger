@@ -1755,6 +1755,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_chat_room_create(websocket, data)
             elif cmd == "rehost_room":
                 await self._handle_rehost_room(websocket, data)
+            elif cmd == "new_room_invite":
+                await self._handle_new_room_invite(websocket, data)
             elif cmd == "join_room":
                 await self._handle_join_room(websocket, data)
             elif cmd == "join_remote_room":

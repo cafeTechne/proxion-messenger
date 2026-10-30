@@ -2218,6 +2218,44 @@ class RoomHandlerMixin:
             "invite_url": invite_url,
         }))
 
+    async def _handle_new_room_invite(self, websocket, data: dict) -> None:
+        """Owner only: replace a hosted room's invite link with a fresh one
+        (7 days, 100 joins). The old link stops working."""
+        import secrets as _secrets
+        import base64 as _b64
+        import uuid as _uuid_inv
+        room_id = str(data.get("room_id") or "")
+        room = self._local_rooms.get(room_id)
+        if not room or not self._room_is_hosted_here(room_id):
+            await websocket.send(json.dumps({"type": "error", "message": "room_not_found"}))
+            return
+        if not self._check_room_permission(websocket, room_id, role="owner"):
+            await websocket.send(json.dumps({"type": "error", "message": "insufficient_permissions"}))
+            return
+        code = _b64.b32encode(_secrets.token_bytes(16)).rstrip(b"=").decode().lower()
+        code_hash = self._hmac_invite_code(code)
+        _base = self._gateway_http_url()
+        invite_url = f"{_base}/?join={code}" if _base else code
+        self._room_codes.pop(room.get("code"), None)
+        room["code"] = code_hash
+        room["invite_url"] = invite_url
+        self._room_codes[code_hash] = room_id
+        if self._store:
+            self._store.save_room(room_id, room.get("name", ""), code_hash, invite_url,
+                                  room.get("history_mode", "none"),
+                                  room.get("creator_webid", ""))
+            self._store.create_room_invite(
+                str(_uuid_inv.uuid4()), room_id, code_hash, uses_left=100,
+                expires_at=time.time() + 7 * 24 * 3600)
+        evt = json.dumps({"type": "room_invite_renewed", "room_id": room_id,
+                          "code": code, "invite_url": invite_url})
+        caller = self._client_webids.get(websocket, "")
+        for ws in {websocket} | (set(self._sockets_for(caller)) if caller else set()):
+            try:
+                await ws.send(evt)
+            except Exception:
+                pass
+
     async def _handle_rehost_room(self, websocket, data: dict) -> None:
         """Reconstruct a room this gateway has no state for, from the host-owned
         descriptor the client read from its pod (PLAN_ROUND_71 B2, client-driven

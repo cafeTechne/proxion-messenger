@@ -414,3 +414,30 @@ async def test_other_session_gets_room_joined_elsewhere_and_names_survive_restar
         for c in (alice, bob, bob2):
             if c:
                 await c.close()
+
+
+@pytest.mark.asyncio
+async def test_owner_mints_a_fresh_invite_link(tmp_path):
+    A, B = GW(tmp_path, "a"), GW(tmp_path, "b")
+    alice = await Client("Alice").connect(A)
+    dave = await Client("Dave").connect(A)
+    bob = await Client("Bob").connect(B)
+    try:
+        rid, old_link = await _room(alice)
+        await dave.cmd(cmd="join_room", code=old_link.split("join=")[1])
+        assert await dave.wait("room_joined", room_id=rid)
+        # Not the owner: refused.
+        await dave.cmd(cmd="new_room_invite", room_id=rid)
+        assert await dave.wait("error", message="insufficient_permissions")
+
+        await alice.cmd(cmd="new_room_invite", room_id=rid)
+        ev = await alice.wait("room_invite_renewed", room_id=rid)
+        assert ev and ev["invite_url"] != old_link and ev["code"] in ev["invite_url"]
+        assert 100 in _uses_left(A, rid)
+        await bob.cmd(cmd="join_remote_room", url=old_link)
+        assert await bob.wait("error")
+        assert not bob.of("room_joined")
+        await _join(bob, ev["invite_url"], rid)
+    finally:
+        for c in (alice, dave, bob):
+            await c.close()

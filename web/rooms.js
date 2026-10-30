@@ -129,7 +129,31 @@ export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoo
         const codeEl = document.getElementById("invite-modal-code");
         if (urlEl) urlEl.textContent = url;
         if (codeEl) codeEl.textContent = code;
+        // Only the owner can replace the link (the gateway checks this too).
+        // Pod-only rooms have no gateway invite to replace.
+        const renewBtn = document.getElementById("invite-modal-renew");
+        const onGateway = typeof WebSocket !== 'undefined' && getSocket() instanceof WebSocket;
+        if (renewBtn) renewBtn.hidden = !onGateway || !getRoomCreatorOf().has(activeView.id);
         document.getElementById("room-invite-modal").style.display = "flex";
+    }
+
+    function renewRoomInvite() {
+        const activeView = getActiveView();
+        const socket = getSocket();
+        if (!activeView || !socket || socket.readyState !== WebSocket.OPEN) return;
+        socket.send(JSON.stringify({ cmd: "new_room_invite", room_id: activeView.id }));
+    }
+
+    // The gateway replaced a room's invite link: remember it and, if the
+    // invite dialog is showing that room, show the new link and code.
+    function applyRenewedInvite(event) {
+        getRoomInviteUrls()[event.room_id] = event.invite_url;
+        const activeView = getActiveView();
+        if (!activeView || activeView.id !== event.room_id) return;
+        const urlEl = document.getElementById("invite-modal-url");
+        const codeEl = document.getElementById("invite-modal-code");
+        if (urlEl) urlEl.textContent = event.invite_url;
+        if (codeEl) codeEl.textContent = event.code;
     }
 
     function _copyInviteText(text, btn) {
@@ -170,5 +194,6 @@ export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoo
     return {
         requestRoomMembers, leaveRoom, deleteRoom, transferOwnership,
         copyRoomInviteFromModal, copyRoomInvite, _copyInviteText, kickMember, submitJoinRoom,
+        renewRoomInvite, applyRenewedInvite,
     };
 }
