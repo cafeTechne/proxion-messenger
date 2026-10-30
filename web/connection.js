@@ -516,13 +516,30 @@ export function createConnection({
             console.error("Gateway WebSocket error — check that the gateway is running on", wsUrl, err);
         };
 
-        ws.onclose = () => {
+        ws.onclose = (ev) => {
             clearTimeout(_connectTimeout);
             _detach(ws);
             if (getSocket() !== ws) return; // superseded — don't clobber state or schedule reconnect
             _stopHeartbeat();
             _requeueHeld(ws);
             console.log("Disconnected from gateway");
+            // This device was unlinked (or its identity removed): reconnecting can
+            // never succeed, so stop and say why instead of retrying forever.
+            const _why = ev && ev.reason;
+            if (_why === 'device_revoked' || _why === 'identity_revoked') {
+                state._stopped = true;
+                let _wasLinked = _why === 'device_revoked';
+                try {
+                    if (localStorage.getItem('proxion_delegation_cert')) _wasLinked = true;
+                    localStorage.removeItem('proxion_delegation_cert');
+                } catch (_) { /* storage unavailable */ }
+                document.querySelector(".dot").className = "dot offline";
+                document.getElementById("username").innerText = t('conn.offline');
+                const _b = document.getElementById("conn-banner");
+                _bannerText(_b, t(_wasLinked ? 'conn.deviceUnlinked' : 'conn.identityRevoked'));
+                if (_b) _b.style.display = "flex";
+                return;
+            }
             // Announce the drop once (the per-second countdown stays silent — it
             // would otherwise announce every second).
             if (state._wasConnected) announce(t('conn.lost'), true);

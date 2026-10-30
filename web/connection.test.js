@@ -188,6 +188,21 @@ describe('reconnect banner', () => {
   });
 });
 
+describe('unlinked device', () => {
+  it('stops reconnecting, drops the delegation cert and says why', () => {
+    store.proxion_delegation_cert = '{"id":"c1"}';
+    global.localStorage.removeItem = (k) => { delete store[k]; };
+    make().connect();
+    const ws = made[0];
+    ws.readyState = FakeWS.CLOSED;
+    ws.onclose({ code: 1008, reason: 'identity_revoked' });
+    vi.advanceTimersByTime(60000);
+    expect(made).toHaveLength(1);
+    expect(store.proxion_delegation_cert).toBeUndefined();
+    expect(els['conn-banner-text'].textContent).toMatch(/deviceUnlinked|unlinked/);
+  });
+});
+
 describe('forceReconnect', () => {
   it('no-ops when the socket is already open', () => {
     const c = make();

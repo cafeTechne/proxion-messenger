@@ -2491,6 +2491,11 @@ class MiscHandlerMixin:
         if not code or not device_did.startswith("did:key:"):
             await websocket.send(json.dumps({"type": "pairing_invalid", "reason": "missing_fields"}))
             return
+        # A removed device stays removed: its key could never register again, so
+        # say so now instead of approving a pairing that cannot work.
+        if device_did in getattr(self, "_revoked_dids", set()):
+            await websocket.send(json.dumps({"type": "pairing_invalid", "reason": "device_revoked"}))
+            return
         self._prune_pairing_sessions()
         sess = self._pairing_sessions.get(code)
         if not sess or sess["status"] != "started":

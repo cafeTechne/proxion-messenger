@@ -164,6 +164,12 @@ export function createPairing({
 
     function _onInvalid(ev) {
         const reason = ev.reason || 'unknown';
+        if (reason === 'device_revoked') {
+            // This browser's key was unlinked before and stays refused.
+            _text('pair-device-status', t('pairing.deviceRevoked'));
+            state.active = null;
+            return;
+        }
         if (state.active && state.active.asNew) {
             _text('pair-device-status', 'Pairing failed: ' + reason);
         } else {

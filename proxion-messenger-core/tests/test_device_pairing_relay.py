@@ -284,3 +284,22 @@ async def test_unregistered_new_device_can_cancel(gateway, noauth_env):
     assert _last(ws_device, "error") is None or _last(ws_device, "error").get("message") != "Not registered"
     assert code not in gateway._pairing_sessions
     assert _last(ws_primary, "pairing_cancelled") is not None
+
+
+@pytest.mark.asyncio
+async def test_revoked_device_cannot_pair_again(gateway, noauth_env):
+    """A removed device stays removed, and pairing says so instead of
+    approving a link whose register would then be refused."""
+    account = Ed25519PrivateKey.generate()
+    device_did = _did(Ed25519PrivateKey.generate())
+    ws_primary, ws_device = _mock_ws(), _mock_ws()
+    await _register(gateway, ws_primary, _did(account))
+    gateway._revoked_dids.add(device_did)
+    await gateway.process_command(ws_primary, {"cmd": "pair_start"})
+    code = _last(ws_primary, "pairing_started")["pairing_code"]
+    await gateway.process_command(ws_device, {
+        "cmd": "pair_submit", "pairing_code": code, "device_did": device_did,
+    })
+    assert _last(ws_device, "pairing_invalid")["reason"] == "device_revoked"
+    assert _last(ws_primary, "pairing_request") is None
+    assert device_did in gateway._revoked_dids
