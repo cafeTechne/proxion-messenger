@@ -57,6 +57,12 @@ describe('PodSocket', () => {
         ] }]);
     });
 
+    it('join_remote_room (a gateway room link) is refused at once as a desktop room', async () => {
+        const { sock, events } = harness();
+        await sock._route({ cmd: 'join_remote_room', url: 'https://gw.example:8080/?join=abc' });
+        expect(events).toEqual([{ type: 'join_invalid_invite', reason: 'desktop_room' }]);
+    });
+
     it('chat_room_create emits room_created with a fresh id', async () => {
         const { sock, events } = harness();
         await sock._route({ cmd: 'chat_room_create', name: 'General', history_mode: 'none' });

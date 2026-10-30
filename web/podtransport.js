@@ -215,6 +215,11 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, joi
                     handleEvent({ type: 'dms', dms: [] });
                     handleEvent({ type: 'local_dms', dms: [] });
                     break;
+                case 'join_remote_room':
+                    // A link to a room on a gateway (Proxion desktop). The browser
+                    // build has no gateway to join through: say so at once.
+                    handleEvent({ type: 'join_invalid_invite', reason: 'desktop_room' });
+                    break;
                 default:
                     // Not supported in the Phase 1 web build.
                     break;

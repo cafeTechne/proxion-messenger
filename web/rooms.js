@@ -13,6 +13,7 @@
 // reference and never reassigned. showConfirm / showCopyModal are injected.
 // Returned functions are destructured into same-named bindings in main.js.
 import { t } from './i18n.js';
+import { parseInvite } from './webjoin.js';
 
 // Busy state for a submit button whose request waits on a gateway reply
 // (room create / join). Marks the button aria-disabled and aria-busy with a
@@ -57,14 +58,30 @@ export function isButtonBusy(btn) {
     return !!(btn && btn._busy);
 }
 
+// A gateway (desktop) room code: 128 bits as unpadded base32.
+const GATEWAY_CODE_RE = /^[a-z2-7]{26}$/i;
+
 // The gateway command for what a user typed or pasted into a join box: a bare
 // code or a link to this gateway joins here; a link to another gateway is
 // handed to OUR gateway, which joins through the host and keeps the room here
 // (the tab never leaves its own origin). Returns { error } for a bad link and
 // null for empty input.
-export function inviteJoinCommand(raw, ownOrigin) {
+// The browser build (mode 'web') joins only browser-build invites (room id +
+// owner WebID, from any origin) and the gateway only gateway rooms, so a link
+// of the other kind is refused here with a message saying which it is.
+export function inviteJoinCommand(raw, ownOrigin, mode = 'gateway') {
     const s = String(raw || "").trim();
     if (!s) return null;
+    const webInvite = parseInvite(s);
+    if (mode === 'web') {
+        if (webInvite) return { cmd: "join_room", code: s };
+        if (GATEWAY_CODE_RE.test(s)) return { error: 'join.desktopRoomInWeb' };
+        if (!/^https?:\/\//i.test(s)) return { error: 'join.invalidInvite' };
+        let url;
+        try { url = new URL(s); } catch { return { error: 'room.invalidInviteLink' }; }
+        return { error: url.searchParams.get("join") ? 'join.desktopRoomInWeb' : 'room.linkNoCode' };
+    }
+    if (webInvite) return { error: 'join.webRoomInDesktop' };
     if (!/^https?:\/\//i.test(s)) return { cmd: "join_room", code: s };
     let url;
     try { url = new URL(s); } catch { return { error: 'room.invalidInviteLink' }; }
@@ -181,14 +198,16 @@ export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoo
             errEl.textContent = t('conn.notConnectedGateway'); return;
         }
         if (!raw) { errEl.textContent = t('room.enterLinkOrCode'); return; }
-        const cmd = inviteJoinCommand(raw, window.location.origin);
+        const cmd = inviteJoinCommand(raw, window.location.origin, window.proxionTransport?.mode);
         if (cmd.error) { errEl.textContent = t(cmd.error); return; }
-        socket.send(JSON.stringify(cmd));
         // Stay open until the gateway answers (room_joined / join_request_sent
         // close it, an error clears the busy state) so a second click cannot
-        // send a duplicate join.
+        // send a duplicate join. Busy goes on BEFORE the send: the browser
+        // build can answer within send() itself, and that reply must find the
+        // button busy to clear it.
         errEl.textContent = "";
         setButtonBusy(submitBtn, t('room.joining'));
+        socket.send(JSON.stringify(cmd));
     }
 
     return {

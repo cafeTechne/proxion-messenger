@@ -159,6 +159,40 @@ describe('inviteJoinCommand', () => {
     expect(inviteJoinCommand('https://x.example/room', own)).toEqual({ error: 'room.linkNoCode' });
     expect(inviteJoinCommand('https://[bad', own)).toEqual({ error: 'room.invalidInviteLink' });
   });
+
+  const webToken = 'room-abc~https%3A%2F%2Falice.example%2Fprofile%2Fcard%23me';
+  const webLink = 'https://pages.example/app/?join=' + webToken + '&mode=web';
+  const deskCode = 'tv4jvqeo77valiblwxaqs4ymra';
+
+  it('refuses a browser-build invite on the gateway with a clear message', () => {
+    expect(inviteJoinCommand(webLink, own)).toEqual({ error: 'join.webRoomInDesktop' });
+    expect(inviteJoinCommand(webToken, own)).toEqual({ error: 'join.webRoomInDesktop' });
+  });
+
+  it('in the browser build joins a web invite from any origin and refuses desktop rooms', () => {
+    const pages = 'https://pages.example';
+    expect(inviteJoinCommand(webLink, 'https://other.example', 'web')).toEqual({ cmd: 'join_room', code: webLink });
+    expect(inviteJoinCommand(webToken, pages, 'web')).toEqual({ cmd: 'join_room', code: webToken });
+    expect(inviteJoinCommand('https://gw.example:8080/?join=' + deskCode, pages, 'web'))
+      .toEqual({ error: 'join.desktopRoomInWeb' });
+    expect(inviteJoinCommand(deskCode, pages, 'web')).toEqual({ error: 'join.desktopRoomInWeb' });
+    expect(inviteJoinCommand('nonsense', pages, 'web')).toEqual({ error: 'join.invalidInvite' });
+    expect(inviteJoinCommand('https://x.example/room', pages, 'web')).toEqual({ error: 'room.linkNoCode' });
+  });
+});
+
+describe('join busy ordering', () => {
+  it('marks the button busy before sending, so an immediate reply can clear it', () => {
+    els['join-room-input'] = mkEl({ value: 'PLAINCODE' });
+    const btn = mkEl({ textContent: 'Join', setAttribute() {}, removeAttribute() {} });
+    els['join-room-submit-btn'] = btn;
+    let busyAtSend = null;
+    const socket = { readyState: 1, send: () => { busyAtSend = isButtonBusy(btn); clearButtonBusy(btn); } };
+    const { rooms } = make({ socket });
+    rooms.submitJoinRoom();
+    expect(busyAtSend).toBe(true);
+    expect(isButtonBusy(btn)).toBe(false);
+  });
 });
 
 describe('join double-submit guard', () => {

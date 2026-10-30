@@ -331,7 +331,7 @@ export function createOnboarding({ getSocket, setPodBanner, showToast, showCopyM
         _setError("ob-join-error", "");
         const socket = getSocket();
         if (!socket) return;
-        const cmd = inviteJoinCommand(val, window.location?.origin || "");
+        const cmd = inviteJoinCommand(val, window.location?.origin || "", window.proxionTransport?.mode);
         if (cmd.error) {
             _setError("ob-join-error", t(cmd.error));
             if (input.focus) input.focus();

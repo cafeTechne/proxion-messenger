@@ -22,6 +22,7 @@ const EXACT = {
     "invalid_code": "error.invalid_code",
     "invalid_invite_link": "room.invalidInviteLink",
     "remote_gateway_unreachable": "error.remote_gateway_unreachable",
+    "web_room_invite": "join.webRoomInDesktop",
     "room_not_found": "error.room_not_found",
     "room_full": "error.room_full",
     "invite_expired_or_exhausted": "error.invite_expired_or_exhausted",
