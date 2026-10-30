@@ -1,4 +1,4 @@
-import { solidSession, initSolidAuth, solidLogin, solidLogout, podStorageRoot, discoverStorageRoot, accountDbName } from './auth.js';
+import { solidSession, initSolidAuth, solidLogin, solidLogout, podStorageRoot, discoverStorageRoot, accountDbName, boundWebId, takeAuthError, reauthIssuer } from './auth.js';
 import {
     initE2E, e2eSupported, isE2EEnabled, isPeerVerified, markPeerVerified, myX25519PubB64u, cachePeerPub, onPeerPubChanged,
     ratchetEncrypt, ratchetDecrypt, ratchetIdle, fetchAndCachePeerPub, E2EDecryptError, safetyNumber, hasRatchetSession,
@@ -34,7 +34,8 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podReadJoinedRooms, podWriteJoinedRooms, podReadRoomMembersAt, podDeleteOwnedRoom } from './pod.js';
 import { signDm, verifyDmSig, signFanout, verifyFanoutSig } from './dmsig.js';
 import { verifyDeviceCert } from './device-cert.js';
-import { podQueueAdd, podQueueRemove, podQueueFlush } from './podqueue.js';
+import { podQueueAdd, podQueueRemove, podQueueFlush, podQueueList, podQueueCount } from './podqueue.js';
+import { createPodHealth } from './podhealth.js';
 import { buildRoomDescriptor, withMembers, descriptorSigningBytes } from './roomdesc.js';
 import {
     escHtml, formatTimestamp, webidColor, renderMarkdown, markdownToPlain, didIdTag, dmFallbackName, nameWithIdTag, timeAgo,
@@ -110,7 +111,7 @@ import { makeListNavigable, announce } from './a11y.js';
 import { buildPageTitle, viewLabel, createFaviconBadge, jumpToMessage } from './wayfinding.js';
 import { openMenu, closeMenu, refreshMenu, isMenuOpen } from './menu.js';
 import { showConfirm, showPromptModal, installDialogDismiss, installFieldErrorSync, setFieldError } from './dialogs.js';
-import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryGetEdits, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport, applyLocalRecord, isExpired, dmHistoryGet, dmHistorySearch, dmHistoryEnabled } from './dmhistory.js';
+import { dmHistorySave, dmHistoryLoad, dmHistoryDelete, dmHistoryUpdateContent, dmHistoryGetEdits, dmHistoryDeleteThread, dmHistoryDeleteBefore, dmHistorySetEnabled, dmHistoryClearAll, dmHistoryExportRecent, dmHistoryImport, applyLocalRecord, isExpired, dmHistoryGet, dmHistorySearch, dmHistoryEnabled, dmHistorySetDelivery, dmHistoryUndelivered } from './dmhistory.js';
 import { unsealCopy, unsealList, mergeSearchHits, previewText, isSealedCopy } from './dmtext.js';
 import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } from './i18n.js';
 import { createIdentityResolver } from './identity.js';
@@ -544,6 +545,13 @@ import { createAccountSync } from './account-sync.js';
             renderWindow: RENDER_WINDOW, scrollBatch: SCROLL_BATCH,
             resolveName: (w) => resolvePeerName(w),
             getMemberNames: () => currentRoomMembers.map(m => m && m.display_name).filter(Boolean),
+            // A redrawn bubble gets its send state back (thread switch, reload).
+            // The stored "undelivered" flag counts only on our own DMs in the
+            // browser build, where this device's cache is the only record of it.
+            decorateMessage: (el, m) => sendStatus.applyTo(el, {
+                message_id: m.message_id,
+                delivery: (transport.mode === 'web' && m.from_webid === selfWebId) ? m.delivery : undefined,
+            }),
         });
         const { renderMessages, renderMessage, _renderThreaded, scrollToBottom } = rendering;
         // R86: which contacts are known to bind their calls. Two sources, unioned:
@@ -685,9 +693,30 @@ import { createAccountSync } from './account-sync.js';
             openContactByDid: (did) => openContactByDid(did),
         });
         // R66: optimistic-send failure tracking (mark unconfirmed messages failed + retry).
+        // Browser build: the pod session and network state (podhealth.js), set
+        // once the pod socket is installed. Null in gateway mode.
+        let _podHealth = null;
+        // Browser build: our own DMs not yet confirmed delivered, by message id,
+        // from this session's sends and the cached records a reload restores.
+        const _undeliveredDms = new Map();
         const sendStatus = createSendStatus({
-            isOnline: () => !!socket && socket.readyState === WebSocket.OPEN,
-            onRetry: () => probeConnection(),
+            isOnline: () => (_podHealth ? _podHealth.state() === 'ok'
+                : !!socket && socket.readyState === WebSocket.OPEN),
+            onRetry: () => (_podHealth ? _podHealth.probe() : probeConnection()),
+            // Keep an undelivered DM flagged on its cached record so a reload
+            // still shows it, and retries it.
+            onState: (id, st) => {
+                if (transport.mode !== 'web' || !_undeliveredDms.has(id)) return;
+                if (!st) _undeliveredDms.delete(id);
+                dmHistorySetDelivery(id, st).catch(() => {});
+            },
+            resendFor: (id) => {
+                const rec = _undeliveredDms.get(id);
+                return rec ? () => _resendStoredDm(rec) : null;
+            },
+            // In the browser build the pod write is the delivery itself.
+            podNoteText: () => t(transport.mode === 'web' ? 'send.notSent' : 'send.notSavedToPod'),
+            onPodRetry: () => flushPodQueue(),
         });
         // R65: user blocking (the gateway enforces; this is the client feature).
         const blocks = createBlocks({
@@ -2036,6 +2065,15 @@ import { createAccountSync } from './account-sync.js';
             return event;
         }
 
+        // A send whose live echo died with the socket (a network blip) comes back
+        // in the catch-up history after the reconnect: the gateway stored it, so
+        // it was delivered. The browser build's history is this device's own
+        // cache, which also holds undelivered sends, so it proves nothing there.
+        function _confirmFromHistory(msgs) {
+            if (transport.mode === 'web' || !Array.isArray(msgs)) return;
+            for (const m of msgs) if (m && m.message_id) sendStatus.confirm(m.message_id);
+        }
+
         function handleEvent(event) {
             // Multi-device pairing events are handled by the pairing module.
             if (typeof event.type === "string" && event.type.indexOf("pairing_") === 0) {
@@ -2653,6 +2691,7 @@ import { createAccountSync } from './account-sync.js';
                     }
                     break;
                 case "room_history":
+                    _confirmFromHistory(event.messages);
                     if (activeView && activeView.id === event.room_id) {
                         const _rhFeed = document.getElementById("message-feed");
                         _rhFeed.setAttribute("aria-busy", "true");
@@ -2949,6 +2988,7 @@ import { createAccountSync } from './account-sync.js';
                 case "history": {
                     const tid = event.thread_id;
                     const msgs = _unsealHistory(event.messages, tid);
+                    _confirmFromHistory(msgs);
                     const isActive = activeView && activeView.id === tid;
                     const feed = document.getElementById("message-feed");
                     if (isActive) feed.querySelector("#feed-notice")?.remove();
@@ -2979,6 +3019,7 @@ import { createAccountSync } from './account-sync.js';
                 case "local_history": {
                     const tid = event.thread_id;
                     const msgs = _unsealHistory(event.messages, tid);
+                    _confirmFromHistory(msgs);
                     const lastReadTs = event.last_read_ts || 0;
                     const feed = document.getElementById("message-feed");
                     feed.setAttribute("aria-busy", "true");
@@ -5296,6 +5337,108 @@ import { createAccountSync } from './account-sync.js';
             return false;
         }
 
+        // Browser build: send a cached, undelivered DM again under its own id
+        // (after a reload, or when the pod or session comes back). Encrypted the
+        // same way as a fresh send; never plaintext to a keyed peer.
+        async function _resendStoredDm(rec) {
+            const peer = rec && rec.thread_id;
+            if (!peer || !isDmPeerWebId(peer) || typeof rec.content !== 'string') return;
+            try {
+                if (identity.devicesForPeer(peer).length >= 2
+                    && await _tryDmFanout(peer, rec.content, rec.message_id, rec.reply_to_id, rec.thread_id)) return;
+                const payload = { cmd: 'local_dm', target_webid: peer, content: rec.content,
+                    thread_id: rec.thread_id, message_id: rec.message_id };
+                if (rec.reply_to_id) payload.reply_to_id = rec.reply_to_id;
+                const myPub = myX25519PubB64u();
+                if (myPub) payload.x25519_pub = myPub;
+                if (isE2EEnabled(peer)) {
+                    const enc = await ratchetEncrypt(peer, rec.content);
+                    socketSendOrQueue({ ...payload, content: enc.ciphertext, e2e: true,
+                        nonce: enc.nonce, msg_num: enc.msgNum, pn: enc.pn, ratchet_pub: enc.ratchetPub });
+                } else if (isPlaintextOptedIn(peer)) {
+                    socketSendOrQueue(payload);
+                }
+            } catch (err) {
+                console.warn('[dm] resend failed:', err);
+            }
+        }
+
+        // Browser build, after a reload: our DMs the last session never saw
+        // delivered are tracked again and, with the pod reachable, resent.
+        async function _restoreUndeliveredDms() {
+            for (const rec of await dmHistoryUndelivered()) {
+                if (rec.from_webid !== selfWebId || sendStatus.isUndelivered(rec.message_id)) continue;
+                _undeliveredDms.set(rec.message_id, rec);
+                sendStatus.track(rec.message_id, () => _resendStoredDm(rec));
+                if (_podHealth && _podHealth.state() === 'ok') _resendStoredDm(rec);
+            }
+        }
+
+        // Browser build: the pod or the session works again. Send what waited.
+        function _webResume() {
+            flushPodQueue();
+            sendStatus.retryUndelivered();
+        }
+
+        // Browser build: one banner for a lost network, an unreachable pod and a
+        // lapsed session, in the slot the gateway connection banner uses.
+        function _showWebHealth(state) {
+            const banner = document.getElementById('conn-banner');
+            const text = document.getElementById('conn-banner-text');
+            const btn = document.getElementById('conn-retry-btn');
+            const dot = document.querySelector('.dot');
+            if (!banner) return;
+            if (state === 'ok') {
+                banner.style.display = 'none';
+                if (dot) dot.className = 'dot online';
+                return;
+            }
+            const msg = state === 'expired' ? t('session.expired')
+                : state === 'offline' ? t('conn.webOffline') : t('conn.podUnreachable');
+            if (text) text.textContent = msg;
+            if (btn) {
+                btn.textContent = state === 'expired' ? t('session.signInAgain') : t('conn.retryNow');
+                btn.onclick = state === 'expired' ? _signInAgain : () => _podHealth && _podHealth.probe();
+            }
+            banner.style.display = 'flex';
+            if (dot) dot.className = 'dot offline';
+            announce(msg, state === 'expired');
+        }
+
+        // Sign in again after the session lapsed. The page leaves for the
+        // identity provider, so the composer text is kept for the way back;
+        // queued room writes and undelivered DMs are already stored.
+        const _REAUTH_DRAFT_KEY = 'proxion_reauth_draft';
+        function _signInAgain() {
+            try {
+                const input = document.getElementById('message-input');
+                if (input && input.value && activeView) {
+                    sessionStorage.setItem(_REAUTH_DRAFT_KEY, JSON.stringify({ thread: activeView.id, text: input.value }));
+                }
+            } catch (_) { /* private mode */ }
+            const issuer = reauthIssuer(selfWebId);
+            if (issuer) Promise.resolve(solidLogin(issuer)).catch(() => showToast(t('web.signin.failed'), 'error'));
+        }
+        function _restoreReauthDraft() {
+            let saved = null;
+            try {
+                saved = JSON.parse(sessionStorage.getItem(_REAUTH_DRAFT_KEY) || 'null');
+                sessionStorage.removeItem(_REAUTH_DRAFT_KEY);
+            } catch (_) { return; }
+            if (!saved || typeof saved.thread !== 'string' || typeof saved.text !== 'string') return;
+            let tries = 0;
+            const put = () => {
+                const input = document.getElementById('message-input');
+                if (activeView?.id !== saved.thread) {
+                    if (tries === 0) _navigateToThread(saved.thread);
+                    if (++tries < 20) { setTimeout(put, 500); return; }
+                    return;
+                }
+                if (input && !input.value) input.value = saved.text;
+            };
+            put();
+        }
+
         // In-flight guard: the DM path awaits fanout/encryption/key discovery, so
         // a second Enter during those awaits used to re-send the same text under
         // a new clientMsgId. Snapshot and clear the composer before the first
@@ -5501,12 +5644,19 @@ import { createAccountSync } from './account-sync.js';
                         content: content, timestamp: new Date().toISOString(),
                         reply_to_id: payload.reply_to_id || null,
                     };
-                    dmHistorySave(_dmRecord);
+                    // Browser build: flagged undelivered until the drop is
+                    // confirmed, so a thread switch or reload cannot make it look sent.
+                    const _webDm = transport.mode === 'web' && !!_resendPayload;
+                    if (_webDm) _undeliveredDms.set(clientMsgId, _dmRecord);
+                    dmHistorySave(_dmRecord, _webDm ? { delivery: 'pending' } : {});
                     // R61: opt-in archive of the sent DM's plaintext to the pod
                     podArchiveDmMessage(activeView.id, _dmRecord).catch(() => {});
                 }
 
-                if (activeView?.type === 'local_room' && solidSession.info.isLoggedIn) {
+                // A pod session that lapsed (boundWebId stays set until sign-out)
+                // still goes through here: the write fails and is queued, so the
+                // message goes out after signing in again instead of vanishing.
+                if (activeView?.type === 'local_room' && (solidSession.info.isLoggedIn || boundWebId())) {
                     const _roomId = activeView.id;
                     const _podMsg = {
                         content: content,
@@ -5520,8 +5670,18 @@ import { createAccountSync } from './account-sync.js';
                     if (_remoteRoom) {
                         // R106: a joined room lives on the owner's pod. We have ACL,
                         // so write the message straight into their Long Chat container.
-                        sendStatus.trackPodWrite(clientMsgId, async () =>
-                            podWriteChatMessageAt(_remoteRoom.container, clientMsgId, _podMsg));
+                        // A failed write is queued like an owned room's, with the
+                        // container, so it is not lost on a reload.
+                        sendStatus.trackPodWrite(clientMsgId, async () => {
+                            const ok = await podWriteChatMessageAt(_remoteRoom.container, clientMsgId, _podMsg);
+                            if (ok) podQueueRemove(clientMsgId);
+                            else {
+                                podQueueAdd({ message_id: clientMsgId, room_id: _roomId, from_webid: selfWebId,
+                                    msg: _podMsg, container: _remoteRoom.container });
+                                _schedulePodQueueRetry();
+                            }
+                            return ok;
+                        });
                     } else {
                         // D2 write-through + D3 durable queue: the send is not durably
                         // done until the pod write lands. Track it (shows a "not saved to
@@ -5531,7 +5691,10 @@ import { createAccountSync } from './account-sync.js';
                         sendStatus.trackPodWrite(clientMsgId, async () => {
                             const ok = await podWriteMessageJsonLd(_roomId, clientMsgId, _podMsg, true);
                             if (ok) podQueueRemove(clientMsgId);
-                            else podQueueAdd({ message_id: clientMsgId, room_id: _roomId, from_webid: selfWebId, msg: _podMsg });
+                            else {
+                                podQueueAdd({ message_id: clientMsgId, room_id: _roomId, from_webid: selfWebId, msg: _podMsg });
+                                _schedulePodQueueRetry();
+                            }
                             return ok;
                         });
                         podWriteMessageWithIndex(_roomId, {
@@ -6314,13 +6477,35 @@ import { createAccountSync } from './account-sync.js';
             if (!solidSession.info.isLoggedIn) return;
             // Account-bind the replay: only this account's queued room writes are
             // flushed to its pod; entries queued by another account are dropped.
+            // A joined room's write goes to its owner's Long Chat container.
             podQueueFlush(
-                (entry) => podWriteMessageJsonLd(entry.room_id, entry.message_id, entry.msg, true),
-                (id) => document.getElementById('msg-' + id)?.querySelector('.msg-pod-note')?.remove(),
+                (entry) => (entry.container
+                    ? podWriteChatMessageAt(_remoteRooms[entry.room_id]?.container || entry.container, entry.message_id, entry.msg)
+                    : podWriteMessageJsonLd(entry.room_id, entry.message_id, entry.msg, true)),
+                (id) => sendStatus.podSaved(id),
                 selfWebId
-            ).catch(() => {});
+            ).then(({ remaining }) => { if (remaining) _schedulePodQueueRetry(); }).catch(() => {});
         }
         window.addEventListener('online', flushPodQueue);
+        // A pod that fails with the network up (a 5xx, a brief outage) fires no
+        // `online` event: retry the queued writes with backoff while any remain.
+        let _podQueueTimer = null;
+        let _podQueueDelay = 5000;
+        function _schedulePodQueueRetry() {
+            if (_podQueueTimer) return;
+            _podQueueTimer = setTimeout(async () => {
+                _podQueueTimer = null;
+                if (!(await podQueueCount())) { _podQueueDelay = 5000; return; }
+                _podQueueDelay = Math.min(_podQueueDelay * 2, 120000);
+                flushPodQueue();
+            }, _podQueueDelay);
+        }
+        // After a reload: show the "not sent" note on room messages still in the queue.
+        async function _restorePodQueueNotes() {
+            for (const entry of await podQueueList()) {
+                if (!entry.from_webid || entry.from_webid === selfWebId) sendStatus.markPodUnsaved(entry.message_id);
+            }
+        }
 
         // B3: sign a room descriptor with this device's Ed25519 identity key so a
         // gateway can trust it before rehosting (B2). The signer did is the room's
@@ -6433,6 +6618,8 @@ import { createAccountSync } from './account-sync.js';
             syncFromPod().catch(() => {});
             // D3: flush any room pod writes queued while offline / logged out.
             flushPodQueue();
+            _restorePodQueueNotes().catch(() => {});
+            if (_podHealth) _podHealth.markSignedIn();
             // B2: rehydrate rooms we own to a gateway that may have lost them.
             rehostOwnedRooms();
             // R76: watch the Solid inbox so chat invitations arrive live.
@@ -8045,7 +8232,22 @@ import { createAccountSync } from './account-sync.js';
                         blockStore: _webBlockStore,
                     });
                     document.querySelector(".dot").className = "dot online";
+                    // Notice a lapsed session, an unreachable pod and a lost
+                    // network instead of sending into them (podhealth.js).
+                    _podHealth = createPodHealth({
+                        session: solidSession,
+                        ownOrigins: () => [podStorageRoot(), boundWebId()].filter(Boolean),
+                        probeUrl: () => podStorageRoot(),
+                        onChange: _showWebHealth,
+                        onRecovered: _webResume,
+                    });
+                    _podHealth.start();
+                    _podHealth.markSignedIn();
+                    if (_podHealth.state() !== 'ok') _showWebHealth(_podHealth.state());
+                    window.proxionPodHealth = _podHealth;   // for smokes
                     _handleEventAsync({ type: 'registered' });
+                    _restoreUndeliveredDms().catch(() => {});
+                    _restoreReauthDraft();
                     webDm.start().catch(() => {});   // ensure inbox + drain + subscribe
                     webCalls.start().catch(() => {}); // ensure call inbox + drain + subscribe
                     webJoin.start().catch(() => {});  // ensure join inbox + drain + subscribe
@@ -8084,8 +8286,17 @@ import { createAccountSync } from './account-sync.js';
                             if (_inv) _inv.hidden = !parseInvite(window.location.href);
                         } catch (_) { /* ignore */ }
                         const _err = document.getElementById('web-signin-error');
+                        // Back from the identity provider with an error, e.g. the
+                        // user pressed Cancel on the consent page.
+                        const _authErr = takeAuthError();
+                        if (_authErr && _err) {
+                            _err.textContent = _authErr.error === 'access_denied'
+                                ? t('web.signin.cancelled') : t('web.signin.failed');
+                        }
                         const _go = () => {
-                            const url = (document.getElementById('web-signin-url').value || '').trim();
+                            let url = (document.getElementById('web-signin-url').value || '').trim();
+                            // "solidcommunity.net" means the https site.
+                            if (url && !/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) url = 'https://' + url;
                             if (!url.startsWith('https://')) { if (_err) _err.textContent = t('web.signin.badUrl'); return; }
                             if (_err) _err.textContent = '';
                             Promise.resolve(solidLogin(url)).catch(() => {

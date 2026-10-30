@@ -7,7 +7,7 @@
 // flushes the backlog in send order when connectivity returns. A queued write is
 // removed the moment its write finally succeeds.
 //
-// Scope: room messages only. DMs are E2E, cached by dmhistory.js, and are not
+// Scope: room messages only (rooms we own and rooms we joined). DMs are E2E, cached by dmhistory.js, and are not
 // Long-Chat-mirrored. Best-effort: if IndexedDB is unavailable the queue simply
 // does nothing and D2's in-session retry note still covers the current session.
 
@@ -52,6 +52,9 @@ export async function podQueueAdd(entry) {
                 // writes one account's queued room message to another's pod.
                 from_webid: entry.from_webid || (entry.msg && entry.msg.from_webid) || '',
                 msg: entry.msg || {},
+                // A joined room lives on its owner's pod: the write goes to this
+                // Long Chat container instead of our own rooms/ folder.
+                ...(entry.container ? { container: entry.container } : {}),
                 queued_at: entry.queued_at || Date.now(),
             });
             tx.oncomplete = resolve;

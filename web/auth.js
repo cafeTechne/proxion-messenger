@@ -8,6 +8,33 @@ export const solidSession = new Session({ restorePreviousSession: true });
 let _cachedStorageRoot = null;
 
 const _ROOT_KEY = 'proxion_storage_root_v2';
+// The identity provider the user signed in with, for "sign in again" after the
+// session lapses (cleared with the other pod session keys on sign-out).
+const _ISSUER_KEY = 'proxion_oidc_issuer';
+
+// An OIDC error from the identity provider (for example access_denied when the
+// user cancels consent), so the sign-in screen can say what happened.
+let _lastAuthError = null;
+if (solidSession.events && typeof solidSession.events.on === 'function') {
+    solidSession.events.on('error', (error, description) => {
+        _lastAuthError = { error: error || '', description: description || '' };
+    });
+}
+export function takeAuthError() {
+    const e = _lastAuthError;
+    _lastAuthError = null;
+    return e;
+}
+
+// The issuer to sign in again with: the one used last, else the WebID's origin
+// (where CSS, NSS and JSS serve their identity provider).
+export function reauthIssuer(webId) {
+    try {
+        const stored = localStorage.getItem(_ISSUER_KEY);
+        if (stored) return stored;
+    } catch { /* private mode */ }
+    try { return webId ? new URL(webId).origin : null; } catch { return null; }
+}
 
 // Local browser stores that cache decrypted content (DM plaintext, saved
 // messages). Their databases are namespaced per authenticated account so one
@@ -87,6 +114,7 @@ export async function initSolidAuth() {
 }
 
 export async function solidLogin(issuer) {
+    try { localStorage.setItem(_ISSUER_KEY, issuer); } catch { /* private mode */ }
     const opts = {
         oidcIssuer: issuer,
         redirectUrl: window.location.origin + window.location.pathname,

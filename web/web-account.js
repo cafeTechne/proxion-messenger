@@ -14,7 +14,7 @@
 export const POD_SESSION_KEYS = [
     'proxion_pod_connected', 'proxion_pod_webid', 'proxion_css_url',
     'proxion_pod_setup_skipped', 'proxion_pod_banner_dismissed',
-    'proxion_pod_banner_snooze_until',
+    'proxion_pod_banner_snooze_until', 'proxion_oidc_issuer',
 ];
 
 // Per-account state in the browser build.

@@ -38,6 +38,14 @@ describe('podQueue add / list / remove', () => {
         expect(await podQueueCount()).toBe(0);
     });
 
+    it('keeps the owner container of a joined-room write', async () => {
+        await podQueueAdd(entry('j', { container: 'https://owner.example/proxion/rooms/general/' }));
+        await podQueueAdd(entry('o'));
+        const rows = await podQueueList();
+        expect(rows.find(r => r.message_id === 'j').container).toBe('https://owner.example/proxion/rooms/general/');
+        expect(rows.find(r => r.message_id === 'o').container).toBeUndefined();
+    });
+
     it('removes a single entry by id', async () => {
         await podQueueAdd(entry('a'));
         await podQueueAdd(entry('b'));
