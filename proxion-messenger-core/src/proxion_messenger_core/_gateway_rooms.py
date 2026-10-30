@@ -2660,7 +2660,7 @@ class RoomHandlerMixin:
     def _relay_room_moderation(self, room_id: str, action: str, target_webid: str,
                                caller_webid: str, reason: str = "", expires_at=None,
                                extra_gateways=(), exclude_gateways=(),
-                               display_name: str = "") -> None:
+                               display_name: str = "", message_id: str = "") -> None:
         """Fan a moderation action out to federated member gateways (R-C1).
 
         *extra_gateways* are reached too: a kicked or banned member's gateway
@@ -2685,6 +2685,8 @@ class RoomHandlerMixin:
                 _payload["expires_at"] = expires_at
             if display_name:
                 _payload["display_name"] = display_name[:64]
+            if message_id:
+                _payload["message_id"] = message_id
             asyncio.create_task(self._relay_ephemeral(_gw, _payload))
 
     def _member_gateways(self, room_id: str, member_did: str) -> list:
@@ -2821,6 +2823,8 @@ class RoomHandlerMixin:
             content = (msg_row[0].get("content", "") if msg_row else data.get("content", ""))
             self._store.save_pin(room_id, message_id, pinner_webid, content)
             asyncio.create_task(self._sync_pin_to_pod(room_id, message_id, pinner_webid, content))
+            self._relay_room_moderation(room_id, "pin", pinner_webid, pinner_webid,
+                                        message_id=message_id)
         client = None
         if thread_id in self.dm_clients:
             _, client = self.dm_clients[thread_id]
@@ -2972,6 +2976,9 @@ class RoomHandlerMixin:
         if room_id in self._local_rooms and self._store:
             self._store.remove_pin(room_id, message_id)
             asyncio.create_task(self._delete_pin_from_pod(room_id, message_id))
+            self._relay_room_moderation(room_id, "unpin", self._client_webids.get(websocket, ""),
+                                        self._client_webids.get(websocket, ""),
+                                        message_id=message_id)
         event = {"type": "unpinned", "thread_id": thread_id, "message_id": message_id}
         if room_id in self._local_rooms:
             room = self._local_rooms[room_id]

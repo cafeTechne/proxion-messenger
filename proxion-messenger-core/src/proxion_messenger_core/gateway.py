@@ -3536,6 +3536,22 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             if target == _owner:
                 return "403 Forbidden", '{"error":"not_authorized_to_moderate"}'
             evt = {"type": "member_kicked", "room_id": room_id, "webid": target}
+        elif action in ("pin", "unpin"):
+            # Pinning is owner-only, as on the host.
+            _mid = str(data.get("message_id") or "")
+            if caller != _owner:
+                return "403 Forbidden", '{"error":"not_authorized_to_moderate"}'
+            import re as _re_pin
+            if not _re_pin.fullmatch(r"[A-Za-z0-9._:-]{1,128}", _mid):
+                return "400 Bad Request", '{"error":"invalid_message_id"}'
+            if action == "pin":
+                _rows = self._store.get_messages_by_ids([_mid])
+                self._store.save_pin(room_id, _mid, caller,
+                                     _rows[0].get("content", "") if _rows else "")
+                evt = {"type": "message_pinned", "message_id": _mid, "thread_id": room_id}
+            else:
+                self._store.remove_pin(room_id, _mid)
+                evt = {"type": "unpinned", "message_id": _mid, "thread_id": room_id}
         else:
             return "400 Bad Request", '{"error":"unknown_moderation_action"}'
         if action in ("ban", "kick"):

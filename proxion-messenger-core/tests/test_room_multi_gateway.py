@@ -192,6 +192,15 @@ async def test_three_gateway_room_everyone_sees_everything(tmp_path):
         await alice.cmd(cmd="edit_local_message", message_id=a1, thread_id=rid, content="A1-ed")
         for c in (bob, carol):
             assert await c.wait("message_edited", message_id=a1, new_content="A1-ed"), c.name
+        # Pins reach every member gateway and are kept there.
+        await alice.cmd(cmd="pin_message", thread_id=rid, message_id=a1)
+        for c in (bob, carol):
+            assert await c.wait("message_pinned", message_id=a1), c.name
+        await bob.cmd(cmd="get_pins", thread_id=rid)
+        pins = await bob.wait("pins", thread_id=rid)
+        assert [p["message_id"] for p in pins["pins"]] == [a1]
+        await alice.cmd(cmd="unpin_message", thread_id=rid, message_id=a1)
+        assert await carol.wait("unpinned", message_id=a1)
     finally:
         for c in (alice, bob, carol):
             await c.close()
