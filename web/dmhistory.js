@@ -128,7 +128,9 @@ export function applyLocalRecord(existing, rec) {
 // intentionally-skipped ciphertext/placeholder) OR the write committed, and
 // false only when an enabled write actually failed — so a caller that must not
 // discard the source (a consumed pod drop) can tell a real failure from a no-op.
-export async function dmHistorySave(msg) {
+// opts.delivery ('pending') marks our own just-sent DM as not yet delivered; it
+// is taken only from this argument, never from the message itself.
+export async function dmHistorySave(msg, opts = {}) {
     if (!_enabled) return true;
     if (!msg || !msg.message_id || !msg.thread_id) return true;
     // Never persist ciphertext or undecryptable placeholders.
@@ -149,6 +151,7 @@ export async function dmHistorySave(msg) {
                 ...(msg.edited_at ? { edited_at: msg.edited_at } : {}),
                 ...(Array.isArray(msg.edits) && msg.edits.length ? { edits: msg.edits.slice(-MAX_EDITS) } : {}),
                 ...(msg.file ? { file: fileForRecord(msg.file) } : {}),
+                ...(opts.delivery ? { delivery: opts.delivery } : {}),
             });
             tx.oncomplete = resolve;
             tx.onerror = () => reject(tx.error);
@@ -245,6 +248,50 @@ export async function dmHistoryGet(messageId) {
     } catch (_) {
         return null;
     }
+}
+
+// Our own sent DM's delivery state on its cached record: 'pending' or 'failed'
+// until the drop is confirmed, then cleared (null). The flag survives a thread
+// switch and a reload, so an undelivered message never looks sent. No-op when
+// the message is not cached.
+export async function dmHistorySetDelivery(messageId, delivery) {
+    if (!messageId) return;
+    try {
+        const db = await _open();
+        await new Promise((resolve) => {
+            const tx = db.transaction(STORE, 'readwrite');
+            const os = tx.objectStore(STORE);
+            const req = os.get(messageId);
+            req.onsuccess = () => {
+                const rec = req.result;
+                if (!rec || (rec.delivery || null) === (delivery || null)) return;
+                if (delivery) rec.delivery = delivery; else delete rec.delivery;
+                os.put(rec);
+            };
+            tx.oncomplete = resolve;
+            tx.onerror = resolve;
+        });
+    } catch (_) { /* best-effort */ }
+}
+
+// Cached DMs still flagged undelivered, oldest first.
+export async function dmHistoryUndelivered(limit = 200) {
+    try {
+        const db = await _open();
+        const rows = await new Promise((resolve) => {
+            const out = [];
+            const req = db.transaction(STORE, 'readonly').objectStore(STORE).openCursor();
+            req.onsuccess = (e) => {
+                const cur = e.target.result;
+                if (!cur) { resolve(out); return; }
+                if (cur.value && cur.value.delivery) out.push(cur.value);
+                cur.continue();
+            };
+            req.onerror = () => resolve(out);
+        });
+        rows.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+        return rows.slice(-limit);
+    } catch (_) { return []; }
 }
 
 // True when every word of `query` appears in `text`, ignoring case (pure).

@@ -250,3 +250,95 @@ describe('refused sends (rate limit, error frames)', () => {
         expect(order).toEqual(['probe', 'resend']);
     });
 });
+
+// The state outlives the bubble: switching threads or reloading redraws the
+// feed, and applyTo paints the redrawn bubble from it.
+describe('state across a redraw', () => {
+    const failNote = (el) => el._children.find(c => c.className === 'msg-fail-note');
+    const podNote = (el) => el._children.find(c => c.className === 'msg-pod-note' && !c._removed);
+    const fresh = () => { const el = mkMsgEl(); el.classList.remove('msg-pending'); return el; };
+
+    it('a send that fails while another thread is open shows failed when redrawn', () => {
+        const states = [];
+        const ss = createSendStatus({ onState: (id, st) => states.push([id, st]) });
+        els['msg-a1'] = mkMsgEl();
+        ss.track('a1', () => {});
+        delete els['msg-a1'];                 // thread switched away
+        vi.advanceTimersByTime(18000);
+        const el = fresh();
+        els['msg-a1'] = el;
+        ss.applyTo(el, { message_id: 'a1' });
+        expect(el.classList.contains('msg-failed')).toBe(true);
+        expect(failNote(el)).toBeTruthy();
+        expect(states).toEqual([['a1', 'pending'], ['a1', 'failed']]);
+    });
+
+    it('a pending send stays pending when redrawn', () => {
+        const ss = createSendStatus();
+        els['msg-a2'] = mkMsgEl();
+        ss.track('a2', () => {});
+        const el = fresh();
+        els['msg-a2'] = el;
+        ss.applyTo(el, { message_id: 'a2' });
+        expect(el.classList.contains('msg-pending')).toBe(true);
+    });
+
+    it('a stored undelivered record is shown failed, and Retry rebuilds the resend', () => {
+        const resend = vi.fn();
+        const ss = createSendStatus({ resendFor: (id) => (id === 'a3' ? resend : null) });
+        const el = fresh();
+        els['msg-a3'] = el;
+        ss.applyTo(el, { message_id: 'a3', delivery: 'pending' });
+        expect(el.classList.contains('msg-failed')).toBe(true);
+        failNote(el)._kids[1]._on();
+        expect(resend).toHaveBeenCalledTimes(1);
+        expect(el.classList.contains('msg-pending')).toBe(true);
+        ss.confirm('a3');
+        const again = fresh();
+        els['msg-a3'] = again;
+        ss.applyTo(again, { message_id: 'a3', delivery: 'pending' });   // stale cached flag
+        expect(again.classList.contains('msg-failed')).toBe(false);
+    });
+
+    it('retryUndelivered resends failed and waiting sends, not in-flight ones', () => {
+        let online = false;
+        const ss = createSendStatus({ isOnline: () => online });
+        const r1 = vi.fn(); const r2 = vi.fn(); const r3 = vi.fn();
+        els['msg-b1'] = mkMsgEl(); els['msg-b2'] = mkMsgEl(); els['msg-b3'] = mkMsgEl();
+        ss.track('b1', r1);                    // waiting
+        online = true;
+        ss.track('b2', r2);
+        vi.advanceTimersByTime(18000);         // b2 failed
+        ss.track('b3', r3);                    // in flight
+        expect(ss.retryUndelivered()).toBe(2);
+        expect(r1).toHaveBeenCalledTimes(1);
+        expect(r2).toHaveBeenCalledTimes(1);
+        expect(r3).not.toHaveBeenCalled();
+        expect(els['msg-b2'].classList.contains('msg-pending')).toBe(true);
+    });
+
+    it('keeps the pod note across a redraw until the write lands', async () => {
+        const ss = createSendStatus({ podNoteText: () => 'Not sent' });
+        els['msg-p9'] = mkMsgEl();
+        await ss.trackPodWrite('p9', async () => false);
+        const el = fresh();
+        els['msg-p9'] = el;
+        ss.applyTo(el, { message_id: 'p9' });
+        expect(podNote(el)._kids[0].textContent).toBe('Not sent');
+        ss.podSaved('p9');
+        const again = fresh();
+        els['msg-p9'] = again;
+        ss.applyTo(again, { message_id: 'p9' });
+        expect(podNote(again)).toBeUndefined();
+    });
+
+    it('markPodUnsaved shows a restored queue entry whose Retry replays the queue', () => {
+        const onPodRetry = vi.fn();
+        const ss = createSendStatus({ onPodRetry });
+        const el = fresh();
+        els['msg-p8'] = el;
+        ss.markPodUnsaved('p8');
+        podNote(el)._kids[1]._on();
+        expect(onPodRetry).toHaveBeenCalledWith('p8');
+    });
+});

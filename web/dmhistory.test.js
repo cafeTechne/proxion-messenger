@@ -14,6 +14,7 @@ import {
   dmHistorySave, dmHistoryLoad, dmHistoryClearAll,
   dmHistorySetEnabled, dmHistoryEnabled, planEviction,
   dmHistoryExportRecent, dmHistoryImport, dmHistoryDeleteBefore,
+  dmHistorySetDelivery, dmHistoryUndelivered,
 } from './dmhistory.js';
 
 beforeEach(async () => {
@@ -166,5 +167,30 @@ describe('per-account namespacing (cross-account bleed)', () => {
     await dmHistoryClearAll();
     _h.acct = B; await dmHistoryClearAll();
     _h.acct = null;
+  });
+});
+
+describe('delivery flag (undelivered sends survive a reload)', () => {
+  it('keeps a pending flag until the send is confirmed', async () => {
+    await dmHistorySave({ message_id: 'u1', thread_id: 'peer', content: 'hi', timestamp: '2026-01-01' }, { delivery: 'pending' });
+    await dmHistorySave({ message_id: 'u2', thread_id: 'peer', content: 'ok', timestamp: '2026-01-02' });
+    expect((await dmHistoryUndelivered()).map((r) => r.message_id)).toEqual(['u1']);
+    await dmHistorySetDelivery('u1', 'failed');
+    expect((await dmHistoryUndelivered())[0].delivery).toBe('failed');
+    await dmHistorySetDelivery('u1', null);
+    expect(await dmHistoryUndelivered()).toHaveLength(0);
+    expect((await dmHistoryLoad('peer')).map((r) => r.content)).toEqual(['hi', 'ok']);
+  });
+
+  it('never takes the flag from the message itself, and never creates a record', async () => {
+    await dmHistorySave({ message_id: 'u3', thread_id: 'peer', content: 'x', delivery: 'pending' });
+    await dmHistorySetDelivery('missing', 'failed');
+    expect(await dmHistoryUndelivered()).toHaveLength(0);
+    expect(await dmHistoryLoad('peer')).toHaveLength(1);
+  });
+
+  it('an imported record arrives without the flag', async () => {
+    await dmHistoryImport([{ message_id: 'u4', thread_id: 'peer', content: 'y', delivery: 'pending' }]);
+    expect(await dmHistoryUndelivered()).toHaveLength(0);
   });
 });

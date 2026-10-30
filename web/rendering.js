@@ -335,6 +335,8 @@ export function createRendering({
     // Most messages kept in the DOM. Paging past it drops rows from the far
     // end; scrolling back renders them again from the buffer.
     maxRendered = renderWindow * 3,
+    // Re-applies send state (pending, not delivered, not saved) to a drawn row.
+    decorateMessage = () => {},
 }) {
     const RENDER_WINDOW = renderWindow;
     const SCROLL_BATCH = scrollBatch;
@@ -864,6 +866,7 @@ export function createRendering({
         div.appendChild(body);
         div.addEventListener("contextmenu", e => openCtxMenu(e, msgId));
         feed.appendChild(div);
+        decorateMessage(div, msg);
         if (opts.deferReactions) opts.deferReactions.push(msgId);
         else renderReactions(msgId);
     }
