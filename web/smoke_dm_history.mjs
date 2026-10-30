@@ -311,6 +311,28 @@ try {
   else if (!offView.notices) fail('history off: the unsaved DM shows neither text nor the undecryptable notice');
   if (process.exitCode) throw new Error('stop');
 
+  // ── A network blip: Alice sends while her browser is offline but the socket
+  // still reads open. The live echo dies with the socket; the catch-up history
+  // after the reconnect must confirm the send instead of failing it.
+  step = 'network-blip';
+  const MSG3 = 'blip-' + Math.random().toString(36).slice(2, 7);
+  await alice.setOfflineMode(true);
+  await alice.focus('#message-input');
+  await alice.type('#message-input', MSG3);
+  await alice.keyboard.press('Enter');
+  await sleep(5000);
+  await alice.setOfflineMode(false);
+  await bob.waitForFunction((t) => document.getElementById('message-feed')?.textContent.includes(t),
+    { timeout: 30000 }, MSG3).catch(() => fail(`the DM sent during a blip ("${MSG3}") did not arrive on Bob`));
+  await sleep(20000);   // past the 18s confirm timeout
+  const blip = await alice.evaluate((t) => {
+    const el = [...document.querySelectorAll('#message-feed .message')].find((e) => (e.textContent || '').includes(t));
+    return el ? { failed: el.classList.contains('msg-failed'), pending: el.classList.contains('msg-pending') } : null;
+  }, MSG3);
+  if (!blip) fail('the DM sent during a blip is missing from Alice\'s feed');
+  else if (blip.failed || blip.pending) fail(`a delivered DM sent during a blip shows ${blip.failed ? 'Not delivered' : 'pending'}`);
+  if (process.exitCode) throw new Error('stop');
+
   step = 'done';
   if (pageErrors.length) fail(`uncaught page errors: ${pageErrors.join(' | ')}`);
   if (!process.exitCode) {
