@@ -488,7 +488,7 @@ class AuthHandlerMixin:
                             "id": room_id,
                             "name": r["name"],
                             "code": r["code"],
-                            "invite_url": r.get("invite_url", ""),
+                            "invite_url": self._room_invite_url(r),
                             "creator_webid": r.get("creator_webid", ""),
                             "local": True,
                         })
@@ -513,7 +513,7 @@ class AuthHandlerMixin:
                                 "id": room_id,
                                 "name": r["name"],
                                 "code": r["code"],
-                                "invite_url": r.get("invite_url", ""),
+                                "invite_url": self._room_invite_url(r),
                                 "creator_webid": r.get("creator_webid", ""),
                                 "local": True,
                             })

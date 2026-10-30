@@ -614,14 +614,40 @@ class PodSyncMixin:
             backoff = min(backoff * 2, MAX_BACKOFF)
 
     def _gateway_http_url(self) -> str:
-        """Return the HTTP base URL for this gateway's /relay endpoint."""
+        """Return the HTTP base URL for this gateway's /relay endpoint.
+
+        Invite links, room links and the Proxion address all derive from this,
+        so it prefers a URL other people can reach: an explicit
+        PROXION_HTTP_PUBLIC_URL, then an http(s) public_url (the app tunnel or a
+        UPnP mapping, both of which forward to the HTTP port), then host:port.
+        A ws(s):// public_url names the websocket port and is not used here."""
         if self.config.http_public_url:
             return self.config.http_public_url.rstrip("/")
+        pub = (self.config.public_url or "").strip().rstrip("/")
+        if pub.startswith(("https://", "http://")):
+            # UPnP reports http://; a gateway that terminates TLS answers https.
+            if pub.startswith("http://") and self.config.ssl_certfile and self.config.ssl_keyfile:
+                pub = "https://" + pub[len("http://"):]
+            return pub
+        return self._gateway_local_http_url()
+
+    def _gateway_local_http_url(self) -> str:
+        """The HTTP base URL on this machine (host:port), ignoring public URLs."""
         if self.config.http_port:
             scheme = "https" if (self.config.ssl_certfile and self.config.ssl_keyfile) else "http"
             host = self.config.host if self.config.host != "0.0.0.0" else "127.0.0.1"
             return f"{scheme}://{host}:{self.config.http_port}"
         return ""
+
+    def _is_own_http_url(self, url: str) -> bool:
+        """True when *url* names this gateway: its current public HTTP URL, its
+        local host:port (links minted before a tunnel came up) or its WS URL."""
+        u = (url or "").replace("wss://", "https://").replace("ws://", "http://").rstrip("/")
+        if not u:
+            return False
+        own = {self._gateway_http_url(), self._gateway_local_http_url(), self._ws_public_url()}
+        return u in {o.replace("wss://", "https://").replace("ws://", "http://").rstrip("/")
+                     for o in own if o}
 
     # ── Outbound relay queue ─────────────────────────────────────────────────
     #

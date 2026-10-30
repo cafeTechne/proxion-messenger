@@ -784,7 +784,7 @@ class RoomHandlerMixin:
                 "id": rid,
                 "name": room["name"],
                 "code": room.get("code", ""),
-                "invite_url": room.get("invite_url", ""),
+                "invite_url": self._room_invite_url(room),
                 "history_mode": room.get("history_mode", "none"),
                 "creator_webid": room.get("creator_webid", ""),
                 "topic": room.get("topic", ""),
@@ -2145,6 +2145,31 @@ class RoomHandlerMixin:
             _hl.sha256,
         ).hexdigest()
 
+    def _room_invite_url(self, room: dict) -> str:
+        """The invite link for a room, built on the gateway's CURRENT public URL.
+
+        The link is stored when the room is created, which may be before a
+        tunnel or UPnP mapping came up (or under an older tunnel URL), so for a
+        room this gateway hosts the stored base is swapped for the live one. A
+        mirrored remote room (no local code) keeps the host's link."""
+        stored = room.get("invite_url", "") or ""
+        if not room.get("code") or room.get("federated"):
+            return stored
+        from urllib.parse import urlsplit, parse_qs
+        code = ""
+        try:
+            parts = urlsplit(stored)
+            if parts.scheme in ("http", "https"):
+                code = (parse_qs(parts.query).get("join") or [""])[0]
+            elif stored and "/" not in stored and "?" not in stored:
+                code = stored   # minted with no HTTP base: the bare code
+        except ValueError:
+            code = ""
+        base = self._gateway_http_url()
+        if not code or not base:
+            return stored
+        return f"{base}/?join={code}"
+
     async def _handle_chat_room_create(self, websocket, data: dict) -> None:
         import secrets as _secrets
         import base64 as _b64
@@ -2363,8 +2388,21 @@ class RoomHandlerMixin:
             "code": code_plain, "invite_url": invite_url,
         }))
 
+    @staticmethod
+    def _is_web_room_invite(code: str) -> bool:
+        """True for a browser-build room invite token: <room id>~<owner WebID>,
+        percent-encoded (webjoin.js makeInvite). Gateway codes are base32 and
+        never contain "~". The browser build joins through the owner's pod, which
+        this gateway does not speak, so such a code can never match a room here."""
+        from urllib.parse import unquote
+        room, sep, owner = (code or "").partition("~")
+        return bool(sep and room and unquote(owner).startswith(("https://", "http://")))
+
     async def _handle_join_room(self, websocket, data: dict) -> None:
         code = (data.get("code") or "").strip()
+        if self._is_web_room_invite(code):
+            await websocket.send(json.dumps({"type": "error", "message": "web_room_invite"}))
+            return
         # Rate-limit join attempts per IP before doing any hash computation
         _ip = ""
         _meta = getattr(self, "_session_meta", {}).get(websocket, {})
@@ -2435,7 +2473,7 @@ class RoomHandlerMixin:
                 "name": room["name"],
                 "topic": room.get("topic", ""),
                 "code": code,
-                "invite_url": room.get("invite_url", ""),
+                "invite_url": self._room_invite_url(room),
             })
             for _ws in [websocket] + [s for s in _socks if s is not websocket]:
                 try:
@@ -3751,10 +3789,7 @@ class RoomHandlerMixin:
         if direction == "incoming":
             # /webhook/ is served by the HTTP server. A ws(s):// public_url names
             # the websocket port, so only an http(s) one (a tunnel) is used here.
-            _pub = (self.config.public_url or "").rstrip("/")
-            if self.config.http_public_url or not _pub.startswith(("https://", "http://")):
-                _pub = ""
-            http_base = _pub or self._gateway_http_url() or "http://localhost:8080"
+            http_base = self._gateway_http_url() or "http://localhost:8080"
             response["webhook_url"] = f"{http_base}/webhook/{wh_token}"
             response["token"] = wh_token
         else:
@@ -4184,9 +4219,12 @@ class RoomHandlerMixin:
                 or "@" in parts.netloc or not code):
             await websocket.send(json.dumps({"type": "error", "message": "invalid_invite_link"}))
             return
+        if self._is_web_room_invite(code) or "web" in parse_qs(parts.query).get("mode", []):
+            await websocket.send(json.dumps({"type": "error", "message": "web_room_invite"}))
+            return
         origin = f"{parts.scheme}://{parts.netloc}"
         own = self._norm_gw_url(self._gateway_http_url())
-        if origin == own or origin == self._norm_gw_url(self._ws_public_url()):
+        if self._is_own_http_url(origin):
             await self._handle_join_room(websocket, {"code": code})
             return
         caller = self._client_webids.get(websocket, "")
@@ -4205,7 +4243,7 @@ class RoomHandlerMixin:
             return
         host_did = info.get("did", "")
         host_http = self._norm_gw_url(info.get("gateway_http_url", ""))
-        if host_did == self._own_gateway_did() or host_http == own:
+        if host_did == self._own_gateway_did() or self._is_own_http_url(host_http):
             await self._handle_join_room(websocket, {"code": code})
             return
         payload = {
@@ -4397,7 +4435,7 @@ class RoomHandlerMixin:
         if not info:
             return refuse("invalid_home_gateway")
         home = self._norm_gw_url(info.get("gateway_http_url", ""))
-        if not home or home == self._norm_gw_url(self._gateway_http_url()) \
+        if not home or self._is_own_http_url(home) \
                 or not _validate_relay_target(home):
             return refuse("invalid_home_gateway")
         if self._store:

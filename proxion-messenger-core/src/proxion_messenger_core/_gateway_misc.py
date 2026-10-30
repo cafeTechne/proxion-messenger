@@ -3018,8 +3018,7 @@ class MiscHandlerMixin:
         if known_gw:
             home_gateway = known_gw
 
-        own_http = self._gateway_http_url()
-        if home_gateway == own_http or home_gateway == self._ws_public_url():
+        if self._is_own_http_url(home_gateway):
             # Same gateway — no federation needed
             await websocket.send(json.dumps({"type": "federated_room_joined", "room_id": room_id, "same_gateway": True}))
             return
