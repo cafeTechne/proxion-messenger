@@ -22,7 +22,7 @@ vi.mock('./solid-authn.bundle.js', () => ({
 const { podQueueClear } = vi.hoisted(() => ({ podQueueClear: vi.fn(async () => {}) }));
 vi.mock('./podqueue.js', () => ({ podQueueClear }));
 
-import { solidLogout, solidSession } from './auth.js';
+import { solidLogout, solidSession, accountDbName } from './auth.js';
 
 function memLocalStorage() {
     const s = {};
@@ -93,6 +93,24 @@ describe('solidLogout purges pod-derived state', () => {
         expect(deleted.sort()).toEqual(['proxion-shell-v1', 'proxion-shell-v213']);
         expect(podQueueClear).toHaveBeenCalledTimes(1);
     }, 5000);
+});
+
+// A session that expires on its own (failed token refresh) clears isLoggedIn.
+// The stores must stay on the account's database until an explicit sign-out,
+// or new plaintext would land in the bare one the sign-out purge never clears.
+describe('accountDbName after a session expiry', () => {
+    beforeEach(() => { globalThis.localStorage = memLocalStorage(); delete globalThis.caches; });
+
+    it('keeps the account namespace until sign-out', async () => {
+        const webId = 'https://alice.example/profile/card#me';
+        solidSession.info = { isLoggedIn: true, webId };
+        expect(accountDbName('proxion-dm-history')).toBe(`proxion-dm-history::${webId}`);
+        solidSession.info = { isLoggedIn: false, webId };   // sessionExpired
+        expect(accountDbName('proxion-dm-history')).toBe(`proxion-dm-history::${webId}`);
+        await solidLogout();
+        expect(accountDbName('proxion-dm-history')).toBe('proxion-dm-history');
+        solidSession.info = { isLoggedIn: true, webId: null };
+    });
 });
 
 // Open a database, creating the store (and an optional index) if missing, put a

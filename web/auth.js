@@ -34,8 +34,19 @@ const _isPrivateIp = isPrivatePodHost;
 // origin opens a different-named database and cannot read the first's rows.
 // Falls back to the bare base name when no pod account is signed in (gateway-only
 // local rooms), preserving the pre-namespacing name for that case.
+//
+// The WebID is latched at sign-in and kept until an explicit sign-out: a session
+// that expires on its own (a failed token refresh) drops isLoggedIn, and reading
+// the live flag would then point the stores at the bare, un-namespaced database,
+// where new plaintext would outlive the sign-out purge.
+let _boundWebId = null;
+export function boundWebId() {
+    const live = solidSession.info.isLoggedIn && solidSession.info.webId;
+    if (live) _boundWebId = live;
+    return _boundWebId;
+}
 export function accountDbName(base) {
-    const webId = solidSession.info.isLoggedIn && solidSession.info.webId;
+    const webId = boundWebId();
     return webId ? `${base}::${webId}` : base;
 }
 
@@ -68,6 +79,7 @@ export async function initSolidAuth() {
         restorePreviousSession: true,
         url: window.location.href,
     });
+    boundWebId();
     if (window.location.search) {
         history.replaceState(null, '', window.location.pathname);
     }
@@ -106,6 +118,7 @@ export async function solidLogout() {
     } catch (e) {
         console.warn('OIDC logout failed:', e);
     }
+    _boundWebId = null;
     _cachedStorageRoot = null;
     // Clear the persisted root too, so the next account signed in on this browser
     // does not inherit the previous account's pod root.
