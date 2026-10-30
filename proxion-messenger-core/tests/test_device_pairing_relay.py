@@ -287,6 +287,30 @@ async def test_unregistered_new_device_can_cancel(gateway, noauth_env):
 
 
 @pytest.mark.asyncio
+async def test_stale_primary_name_does_not_undo_a_rename(gateway, noauth_env):
+    """A rename made on a linked device survives the primary reconnecting with
+    the old name still in its local storage."""
+    account, device = Ed25519PrivateKey.generate(), Ed25519PrivateKey.generate()
+    account_did, device_did = _did(account), _did(device)
+    ws_p = _mock_ws()
+    gateway.clients.add(ws_p)
+    await gateway.process_command(ws_p, {"cmd": "register", "did": account_did, "display_name": "Alice"})
+    ws_d = _mock_ws()
+    gateway.clients.add(ws_d)
+    await gateway.process_command(ws_d, {
+        "cmd": "register", "did": device_did, "display_name": "Alice",
+        "delegation_cert": issue_device_cert(account, device_did),
+    })
+    await gateway.process_command(ws_d, {"cmd": "set_identity", "display_name": "Alicia"})
+    assert gateway._store.get_display_name(account_did) == "Alicia"
+    ws_p2 = _mock_ws()
+    gateway.clients.add(ws_p2)
+    await gateway.process_command(ws_p2, {"cmd": "register", "did": account_did, "display_name": "Alice"})
+    assert gateway._store.get_display_name(account_did) == "Alicia"
+    assert gateway._display_names[ws_p2] == "Alicia"
+
+
+@pytest.mark.asyncio
 async def test_revoked_device_cannot_pair_again(gateway, noauth_env):
     """A removed device stays removed, and pairing says so instead of
     approving a link whose register would then be refused."""

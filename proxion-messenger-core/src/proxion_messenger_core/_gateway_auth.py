@@ -427,10 +427,11 @@ class AuthHandlerMixin:
 
             if self._store:
                 dn = self._display_names.get(websocket)
-                # A linked device adopts the account's name: the name it held
-                # locally (possibly stale) must not rename the account on
-                # every reconnect. It only seeds an account that has none.
-                if dn and websocket in self._session_device_did:
+                # Every session adopts the account's stored name: the name it
+                # held locally may be stale (renamed meanwhile on another
+                # device) and must not rename the account on reconnect. It only
+                # seeds an account that has none; renames go through set_identity.
+                if dn:
                     saved_dn = self._store.get_display_name(identity)
                     if saved_dn:
                         dn = None
