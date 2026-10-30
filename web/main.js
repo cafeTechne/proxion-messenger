@@ -5840,13 +5840,13 @@ import { createAccountSync } from './account-sync.js';
             if (!socket || socket.readyState !== WebSocket.OPEN) {
                 errEl.textContent = t('conn.notConnectedGateway'); return;
             }
-            // An invite link (https or proxion://) carries the address in
-            // ?from=; a short link (https://gw/i/<token>) is resolved by the gateway.
             // A Solid WebID names a browser-build account, which a gateway
             // cannot reach yet.
             if (contactInputKind(raw) === 'webid') {
                 errEl.textContent = t('contact.webIdInDesktop'); return;
             }
+            // An invite link (https or proxion://) carries the address in
+            // ?from=; a short link (https://gw/i/<token>) is resolved by the gateway.
             const _parsed = contactAddressFromInput(raw);
             raw = _parsed.address;
             errEl.textContent = "";
