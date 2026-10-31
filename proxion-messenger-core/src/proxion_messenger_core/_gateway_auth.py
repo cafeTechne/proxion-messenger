@@ -157,6 +157,32 @@ class AuthHandlerMixin:
             "delegation_cert": pending.get("delegation_cert"),
         })
 
+    def _rotated_from_identity(self, identity: str) -> str:
+        """The previous identity of an operator whose browser identity changed, or "".
+
+        Only a gateway with exactly one local account holding rooms has an
+        unambiguous previous identity. That account must be offline (a live one is
+        a different person) and *identity* must have no contacts or DMs of its own
+        (it would be an established account, not a fresh key)."""
+        if not self._store or not identity:
+            return ""
+        accounts: set = set()
+        for room_id in list(self._local_rooms):
+            remote = {m.get("member_did") for m in self._store.get_federated_room_members(room_id)}
+            accounts.update(m for m in self._store.get_room_members(room_id) if m not in remote)
+        accounts.discard(identity)
+        accounts.discard("")
+        if len(accounts) != 1:
+            return ""
+        prev = next(iter(accounts))
+        if (prev == self._own_gateway_did() or self._sockets_for_exact(prev)
+                or prev in getattr(self, "_revoked_dids", set())):
+            return ""
+        if (self._store.get_dm_threads(owner_webid=identity)
+                or self._store.list_relationships(owner_webid=identity, include_ownerless=False)):
+            return ""
+        return prev
+
     async def _handle_register(self, websocket, data: dict) -> None:
         identity = data.get("did", "") or data.get("webid", "")
         _ip_reg = (self._session_meta.get(websocket) or {}).get("ip_addr", "?")
@@ -496,21 +522,28 @@ class AuthHandlerMixin:
                             "creator_webid": r.get("creator_webid", ""),
                             "local": True,
                         })
-                # DID rotation recovery: if no SQLite membership exists but _local_rooms
-                # has rooms (restored from pod at startup), adopt them all. This handles
-                # the case where the operator's DID changed (e.g. after an IDB wipe) or
-                # where SQLite was cold but the pod had the authoritative room list.
+                # DID rotation recovery: the operator's browser identity changed (e.g.
+                # after an IDB wipe), so it has no SQLite membership while its previous
+                # identity still holds the rooms. Adopt that identity's rooms.
                 # Only the gateway's owner may do this: over the tunnel cloudflared
                 # makes every caller look like loopback, so a loopback check alone
                 # let any fresh identity join every room on the gateway.
                 if not restored_rooms and self._local_rooms:
                     _ip = (self._session_meta.get(websocket) or {}).get("ip_addr", "")
+                    _prev = ""
                     if _ip in ("127.0.0.1", "::1", "localhost") and self._is_tunnel_owner(websocket):
+                        _prev = self._rotated_from_identity(identity)
+                    if _prev:
+                        _adopt = [
+                            (room_id, r) for room_id, r in list(self._local_rooms.items())
+                            if _prev in self._store.get_room_members(room_id)
+                            and not self._store.is_room_banned(room_id, identity)
+                            and not self._store.is_room_banned(room_id, _prev)]
                         logger.info(
-                            "DID rotation recovery: adopting %d local room(s) for %s from %s",
-                            len(self._local_rooms), identity[:20], _ip,
+                            "DID rotation recovery: adopting %d room(s) of %s for %s from %s",
+                            len(_adopt), _prev[:20], identity[:20], _ip,
                         )
-                        for room_id, r in list(self._local_rooms.items()):
+                        for room_id, r in _adopt:
                             self._store.add_room_member(room_id, identity)
                             r["members"].add(websocket)
                             restored_rooms.append({
@@ -555,7 +588,9 @@ class AuthHandlerMixin:
                 from .federation import cert_dict_peer_binds_calls
                 owner_hex = self.agent.identity_pub_bytes.hex()
                 _seen_peers: set = set()
-                for cert_dict in self._store.list_relationships():
+                # Only this account's contacts, as get_relationships scopes them:
+                # another account on this gateway has its own.
+                for cert_dict in self._store.list_relationships(owner_webid=identity):
                     cert_id = cert_dict.get("certificate_id")
                     peer_did = cert_dict.get("peer_did") or ""
                     # One row per person, by the newest cert, as get_relationships
