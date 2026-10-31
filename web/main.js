@@ -68,7 +68,9 @@ import { createE2EStatus } from './e2e-status.js';
 import { createStatusBanners } from './status-banners.js';
 import { createConnection, normalizeGatewayUrl, planThreadCatchUp, createRateRetry, catchUpUnread } from './connection.js';
 import { createTabLock, showTabNotice, hideTabNotice } from './tablock.js';
-import { createTransport, detectMode, applyTransportGating } from './transport.js';
+import { createTransport, detectMode, applyTransportGating, applyCrossModeGating } from './transport.js';
+import { createCrossMode } from './crossmode.js';
+import { createMessageRequests } from './msgrequests.js';
 import { createPodSocket } from './podtransport.js';
 import { purgeWebAccount, adoptWebAccount, shouldPromptForName, markNamePrompted } from './web-account.js';
 import { createRendering, replyQuoteHtml } from './rendering.js';
@@ -910,8 +912,15 @@ import { createAccountSync } from './account-sync.js';
         // One active tab per browser profile (tablock.js): only the leader
         // connects and runs the DM ratchet, or two tabs would fork it.
         const tabLock = createTabLock();
+        // Desktop DMs with browser-build (WebID) contacts go through the pod
+        // (crossmode.js); everything else goes to the gateway as before.
+        let crossMode = null;
+        function socketSendOrQueue(payload, opts) {
+            if (crossMode && crossMode.route(payload)) return;
+            return _wsSendOrQueue(payload, opts);
+        }
         const {
-            socketSendOrQueue, sendOnce, restorePersisted, probe: probeConnection,
+            socketSendOrQueue: _wsSendOrQueue, sendOnce, restorePersisted, probe: probeConnection,
             forceReconnect, connect, flushPending, shutdown: stopConnection,
         } = createConnection({
             wsUrl: WS_URL,
@@ -985,6 +994,85 @@ import { createAccountSync } from './account-sync.js';
             connection: { socketSendOrQueue, forceReconnect, connect, flushPending },
         });
         window.proxionTransport = transport;   // consulted by UI gating + smokes
+        // Message requests: a verified first DM from a WebID that is not a
+        // contact waits, unopened, until accepted (crossmode.js / webdm.js).
+        const messageRequests = createMessageRequests({
+            onAccept: (req) => _acceptMessageRequest(req),
+            onDecline: (req) => _declineMessageRequest(req),
+        });
+        if (transport.mode !== 'web') {
+            crossMode = createCrossMode({
+                send: (m) => {
+                    if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error('not connected');
+                    socket.send(JSON.stringify(m));
+                },
+                handleEvent: (ev) => _handleEventAsync(ev, true),
+                getClientDid: () => clientDid,
+                getSelfId: () => selfWebId,
+                getDisplayName: () => localStorage.getItem('proxion_display_name') || '',
+                // Signed by this device's identity key. No gateway cert: the
+                // signer.json this device publishes names it directly.
+                signEnvelope: async (env) => {
+                    if (!_identityPrivKey || !clientDid) return null;
+                    return env && env.kind === 'fanout'
+                        ? signFanout(env, _identityPrivKey, clientDid)
+                        : signDm(env, _identityPrivKey, clientDid);
+                },
+                verifyDmSig, verifyFanoutSig, verifyDeviceCert,
+                e2e: { cachePeerPub, ratchetDecrypt, hasSession: hasRatchetSession },
+                persistMessage: (m) => dmHistorySave({ ...m, thread_id: m.thread_id }),
+                isBlocked: (w) => blocks.isBlocked(w),
+                isKnownSender: (w) => !!localDmPeers[w],
+                onMessageRequest: (req) => messageRequests.add(req),
+                onUnverifiedDrop: (info) => {
+                    _handleEventAsync({
+                        type: 'message',
+                        message_id: 'unverified-' + Math.random().toString(36).slice(2),
+                        thread_id: info.from_webid, from_webid: info.from_webid,
+                        content: t('dm.unverifiedNotOpened'),
+                        timestamp: new Date().toISOString(),
+                        source: 'local_dm', local: true, sender_verified: false,
+                    }, true);
+                },
+                getContacts: () => Object.keys(localDmPeers || {}),
+                getMyPub: () => myX25519PubB64u(),
+                fetchAndCachePeerPub,
+                onStateChange: (st) => _showCrossModeState(st),
+            });
+            window.proxionCrossMode = crossMode;   // for smokes
+        }
+        // A WebID contact added on desktop: listed with the gateway (so it
+        // survives a reload), watched for presence, and its waiting DMs opened.
+        function _addCrossModeContact(webid, name) {
+            if (!localDmPeers[webid]) localDmPeers[webid] = { display_name: name || null, peer_webid: webid };
+            renderDmSidebar();
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ cmd: 'pod_thread', peer_webid: webid, display_name: name || '' }));
+            }
+            crossMode?.subscribeContact(webid);
+            crossMode?.drainOnce().catch(() => {});
+        }
+        function _acceptMessageRequest(req) {
+            _addCrossModeContact(req.from_webid, req.from_display_name || null);
+        }
+        function _declineMessageRequest(req) {
+            blocks.block(req.from_webid);
+            crossMode?.drainOnce().catch(() => {});   // the waiting drop is deleted unread
+        }
+        // Edits, reactions, files, voice messages, disappearing and scheduled
+        // messages have no pod protocol yet: a desktop thread with a WebID
+        // contact offers text only (transport.js applyCrossModeGating).
+        function _applyCrossModeThreadGating() {
+            const on = transport.mode !== 'web' && activeView?.type === 'local_dm' && isDmPeerWebId(activeView.id);
+            applyCrossModeGating(on);
+        }
+        function _showCrossModeState(st) {
+            const el = document.getElementById('settings-crossmode-status');
+            if (!el) return;
+            if (st.ready) el.textContent = st.conflict ? t('crossmode.conflict') : t('crossmode.ready');
+            else if (st.reason === 'root_mismatch') el.textContent = t('crossmode.rootMismatch');
+            else el.textContent = '';
+        }
         // Hide realtime-only controls the current transport cannot back (web
         // build: DM and call entry points). No-op in gateway mode.
         applyTransportGating(transport);
@@ -998,7 +1086,7 @@ import { createAccountSync } from './account-sync.js';
             addRoomToSidebar, renameRoomInSidebar, populateSidebar, _navigateToThread,
         } = createView({
             getSocket: () => socket,
-            setActiveView: (v) => { _stashWebRoom(); activeView = v; },
+            setActiveView: (v) => { _stashWebRoom(); activeView = v; _applyCrossModeThreadGating(); },
             setMessageMap: (m) => { messageMap = m; },
             setAllMessages: (a) => { allMessages = a; },
             setCurrentRoomMembers: (c) => { currentRoomMembers = c; },
@@ -1885,6 +1973,8 @@ import { createAccountSync } from './account-sync.js';
         // path (isE2EEnabled) trusts this key cache, so only the semi-trusted gateway
         // may seed it; a pod-drop key is honoured only once its envelope is verified.
         async function _handleEventAsync(event, fromPod = false) {
+            // The pod bridge's own replies (gwpod.js) never reach the app dispatch.
+            if (!fromPod && crossMode && crossMode.handleEvent(event)) return;
             // Cache peer's X25519 pub key from a gateway-delivered DM event only.
             if (!fromPod && event.x25519_pub && event.from_webid) {
                 cachePeerPub(event.from_webid, event.x25519_pub);
@@ -2391,6 +2481,7 @@ import { createAccountSync } from './account-sync.js';
                         const _prvw = localStorage.getItem("proxion_link_previews_enabled") === "1";
                         socket.send(JSON.stringify({cmd: "set_link_previews_enabled", enabled: _prvw}));
                         socket.send(JSON.stringify({cmd: "pod_status"}));
+                        if (crossMode) crossMode.onReconnect();   // pod bridge for WebID contacts
                         // Multi-device: learn our own device list so sends can be
                         // fanned to our other linked devices (sender self-sync).
                         socket.send(JSON.stringify({cmd: "get_peer_device_keys", peer_webid: selfWebId}));
@@ -3172,6 +3263,7 @@ import { createAccountSync } from './account-sync.js';
                     }
                     break;
                 case "css_connected":
+                    if (crossMode) crossMode.requestInfo();
                     localStorage.setItem("proxion_my_address", event.proxion_address || "");
                     localStorage.setItem("proxion_pod_connected", "1");
                     localStorage.removeItem("proxion_pod_setup_skipped");
@@ -3427,6 +3519,7 @@ import { createAccountSync } from './account-sync.js';
                         if (connDiv) connDiv.style.display = "block";
                         if (discDiv) discDiv.style.display = "none";
                         if (webidEl && event.webid) webidEl.textContent = event.webid;
+                        if (crossMode && !crossMode.isReady()) crossMode.requestInfo();
                     } else if (isConnected === false && !solidSession.info.isLoggedIn) {
                         // Only show disconnected if the browser also has no Solid session.
                         // Gateway lacking CSS credentials ≠ user logged out.
@@ -5554,6 +5647,7 @@ import { createAccountSync } from './account-sync.js';
                 if (isDmPeerWebId(peerId)) await fetchAndCachePeerPub(peerId, peerPodRootFromWebId(peerId));
                 return;
             }
+            if (crossMode && isDmPeerWebId(peerId)) { await crossMode.fetchPeerPub(peerId).catch(() => false); return; }
             let devices = _peerDeviceKeys[peerId];
             if (devices === undefined && socket && socket.readyState === WebSocket.OPEN) {
                 const reply = _deviceKeyWaiter.wait(peerId);
@@ -6058,10 +6152,19 @@ import { createAccountSync } from './account-sync.js';
             if (!socket || socket.readyState !== WebSocket.OPEN) {
                 errEl.textContent = t('conn.notConnectedGateway'); return;
             }
-            // A Solid WebID names a browser-build account, which a gateway
-            // cannot reach yet.
+            // A Solid WebID names a browser-build account: reached through the
+            // pod the gateway is connected to (crossmode.js), when there is one.
             if (contactInputKind(raw) === 'webid') {
-                errEl.textContent = t('contact.webIdInDesktop'); return;
+                if (!crossMode || !crossMode.isReady() || !isDmPeerWebId(raw)) {
+                    errEl.textContent = t('contact.webIdNeedsPod'); return;
+                }
+                if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = t('contact.lookingUp'); }
+                await crossMode.fetchPeerPub(raw).catch(() => false);
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = t('btn.add'); }
+                _addCrossModeContact(raw, null);
+                openLocalDmThread(raw, localDmPeers[raw].display_name || dmFallbackName(raw), raw);
+                document.getElementById("add-peer-modal").style.display = "none";
+                return;
             }
             // An invite link (https or proxion://) carries the address in
             // ?from=; a short link (https://gw/i/<token>) is resolved by the gateway.
@@ -7336,6 +7439,10 @@ import { createAccountSync } from './account-sync.js';
                 else { pw.type = 'password'; btn.textContent = t('btn.show'); }
             });
 
+            attachListener('#settings-copy-webid-btn', 'click', () => {
+                const w = crossMode?.webId() || document.getElementById('settings-pod-webid')?.textContent?.trim();
+                if (w) navigator.clipboard.writeText(w).then(() => showToast(t('common.copied'))).catch(() => {});
+            });
             // Click your WebID to copy it, so you can share it and be messaged.
             attachListener('#settings-pod-webid', 'click', () => {
                 const w = document.getElementById('settings-pod-webid')?.textContent?.trim();
@@ -7672,6 +7779,8 @@ import { createAccountSync } from './account-sync.js';
                 }
             });
 
+            // Message requests share the requests list (msgrequests.js).
+            document.getElementById('friend-request-list')?.addEventListener('click', e => messageRequests.handleClick(e));
             // Event delegation: #friend-request-list
             document.getElementById('friend-request-list')?.addEventListener('click', e => {
                 const btn = e.target.closest('[data-fr-action]');

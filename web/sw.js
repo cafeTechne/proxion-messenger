@@ -98,6 +98,8 @@ const SHELL = [
   "pod.js",
   "podio.js",
   "gwpod.js",
+  "crossmode.js",
+  "msgrequests.js",
   "acl.js",
   "longchat.js",
   "typeindex.js",
