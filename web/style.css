@@ -3362,6 +3362,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
 .fr-card__claim { color: var(--color-warning-soft); font-size: var(--text-2xs); }
 .fr-card__did { color: var(--text-secondary); font-size: var(--text-2xs); margin-bottom: var(--space-1); word-break: break-all; }
 .fr-card__actions { display: flex; gap: var(--space-2); }
+.fr-card__status { color: var(--text-secondary); font-size: var(--text-2xs); margin-bottom: var(--space-1); }
 /* File transfer progress chip. */
 .xfer-progress {
     position: fixed; bottom: var(--space-2); inset-inline-end: var(--space-2); z-index: 1500;

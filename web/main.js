@@ -887,7 +887,9 @@ import { createAccountSync } from './account-sync.js';
             getActiveView: () => activeView, requestRoomMembers,
         });
         // Friend requests (no host state).
-        const { renderPendingInvite, acceptFriendRequest, refreshFriendRequestsBadge } =
+        const { renderPendingInvite, acceptFriendRequest, refreshFriendRequestsBadge,
+                renderSentRequest, setSentRequests, markSentDelivered, removeSentRequest,
+                hasSentRequest, withdrawFriendRequest } =
             createFriendRequests({ getSocket: () => socket });
         // E2E status UI (header badge + fingerprint bar + verify modal). No host
         // deps; owns _fingerprintBarDid in e2eStatus.state (read by the verify
@@ -3194,9 +3196,25 @@ import { createAccountSync } from './account-sync.js';
                     if (_sb) { _sb.disabled = false; _sb.textContent = t('contact.sendRequest'); }
                     const _addr = event.target_address || event.target_did || "";
                     const _short = _addr.includes("@") ? _addr.split("@").pop() : _addr.slice(0, 16) + "…";
-                    showToast(t('contact.requestSent', { name: _short }));
+                    // Their gateway is down: the request waits on the gateway's
+                    // outbound queue and goes out when they are back.
+                    showToast(t(event.queued ? 'contact.requestQueued' : 'contact.requestSent', { name: _short }));
+                    renderSentRequest({ invitation_id: event.invitation_id, target_did: event.target_did,
+                                        queued: !!event.queued });
                     break;
                 }
+                case "friend_request_delivered":
+                    markSentDelivered(event.invitation_id);
+                    break;
+                case "friend_request_withdrawn":
+                    if (hasSentRequest(event.invitation_id)) showToast(t('fr.withdrawn'));
+                    removeSentRequest(event.invitation_id);
+                    break;
+                case "friend_request_failed":
+                    // A queued request that expired, or that their gateway refused.
+                    removeSentRequest(event.invitation_id);
+                    showToast(t(event.reason === "expired" ? 'fr.expiredUndelivered' : 'fr.refusedUndelivered'));
+                    break;
                 case "friend_request_received":
                     renderPendingInvite(event);
                     // Persist to pod so it survives refresh
@@ -3233,6 +3251,7 @@ import { createAccountSync } from './account-sync.js';
                         podWriteContact(cert.certificate_id, cert).catch(() => {});
                         if (event.invitation_id) podDeleteInvite(event.invitation_id).catch(() => {});
                     }
+                    if (event.invitation_id) removeSentRequest(event.invitation_id);
                     if (event.peer_did && event.x25519_pub) cachePeerPub(event.peer_did, event.x25519_pub);
                     showToast(t('contact.connected', { peer: (event.peer_did || "peer").slice(8, 22) + "…" }));
                     if (socket?.readyState === WebSocket.OPEN)
@@ -3314,6 +3333,8 @@ import { createAccountSync } from './account-sync.js';
                         refreshFriendRequestsBadge();
                     }
                     (event.pending || []).forEach(renderPendingInvite);
+                    // list_friend_requests also lists the requests we sent.
+                    if (Array.isArray(event.sent)) setSentRequests(event.sent);
                     break;
                 case "thread_read":
                     // Read on another tab or device of ours.
@@ -3322,9 +3343,11 @@ import { createAccountSync } from './account-sync.js';
                     break;
                 case "friend_request_dismissed":
                     // Ignored here or on another device, or the person we asked
-                    // ignored it: the request is over on both sides.
+                    // ignored it, or the sender withdrew it: the request is over on
+                    // both sides.
                     if (event.invitation_id) {
                         document.getElementById("fri-" + event.invitation_id)?.remove();
+                        removeSentRequest(event.invitation_id);
                         refreshFriendRequestsBadge();
                         podDeleteInvite(event.invitation_id).catch(() => {});
                     }
@@ -3428,10 +3451,18 @@ import { createAccountSync } from './account-sync.js';
                         _r(null);
                         break;
                     }
+                    // A refused withdrawal: gone already (answered meanwhile) or
+                    // its Cancel button works again.
                     // An accept that was refused: a request that is no longer
                     // waiting (answered elsewhere, or a stale copy) loses its card;
                     // otherwise its Accept button works again.
-                    if (event.invitation_id) {
+                    if (event.invitation_id && event.cmd === "withdraw_friend_request") {
+                        if (event.message === "invite_not_found") removeSentRequest(event.invitation_id);
+                        else {
+                            const _wb = document.querySelector(`#frs-${CSS.escape(event.invitation_id)} [data-fr-action="withdraw"]`);
+                            if (_wb) _wb.disabled = false;
+                        }
+                    } else if (event.invitation_id) {
                         const _card = document.getElementById("fri-" + event.invitation_id);
                         if (_card && event.message === "invite_not_found") {
                             _card.remove();
@@ -7636,6 +7667,12 @@ import { createAccountSync } from './account-sync.js';
                         socket.send(JSON.stringify({cmd: "decline_friend_request", invitation_id: invId}));
                     podDeleteInvite(invId).catch(() => {});
                 }
+            });
+
+            // Event delegation: #sent-request-list (Cancel on a request we sent)
+            document.getElementById('sent-request-list')?.addEventListener('click', e => {
+                const btn = e.target.closest('[data-fr-action="withdraw"]');
+                if (btn) withdrawFriendRequest(btn.dataset.invId, btn);
             });
 
             // (The old #room-members-list delegation was removed: that element was

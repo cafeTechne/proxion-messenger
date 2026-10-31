@@ -1,5 +1,6 @@
 // Friend requests — render an incoming invite into the sidebar list, accept one
-// (gateway command), and show/hide the section badge. No host mutable state.
+// (gateway command), and show/hide the section badge. Also the requests we sent
+// that are still waiting, each with a Cancel button.
 //
 // createFriendRequests({ getSocket }) — getSocket returns the reassignable host
 // socket. escHtml imported from util.js.
@@ -59,5 +60,90 @@ export function createFriendRequests({ getSocket }) {
         return true;
     }
 
-    return { renderPendingInvite, acceptFriendRequest, refreshFriendRequestsBadge };
+    // Requests we sent that are still waiting, by invitation_id. A card is
+    // rebuilt from its entry when its delivery state changes.
+    const sentRequests = new Map();
+
+    function refreshSentRequests() {
+        const section = document.getElementById("sent-requests-section");
+        if (section) section.style.display = sentRequests.size ? "" : "none";
+    }
+
+    function sentCardHtml(req) {
+        const target = req.target_did || "";
+        const name = req.display_name || "";
+        const [before, after = ""] = t('fr.to', { name: "\u0000" }).split("\u0000");
+        const nameLine = name
+            ? `<div class="fr-card__name">${escHtml(before)}<b><bdi>${escHtml(name)}</bdi></b>${escHtml(after)}</div>`
+            : `<div class="fr-card__name">${escHtml(t('fr.sentTitle'))}</div>`;
+        const status = t(req.queued ? 'fr.waitingToDeliver' : 'fr.waitingForAnswer');
+        return nameLine +
+            `<div class="fr-card__did" title="${escHtml(target)}">${escHtml(target)}</div>` +
+            `<div class="fr-card__status">${escHtml(status)}</div>` +
+            `<div class="fr-card__actions">` +
+            `<button data-fr-action="withdraw" data-inv-id="${escHtml(req.invitation_id)}" ` +
+            `class="btn btn--sm btn--slate">${escHtml(t('fr.cancelRequest'))}</button>` +
+            `</div>`;
+    }
+
+    // Add a sent request, or update one already shown (merging the fields).
+    function renderSentRequest(req) {
+        if (!req?.invitation_id) return;
+        const list = document.getElementById("sent-request-list");
+        if (!list) return;
+        const merged = { ...(sentRequests.get(req.invitation_id) || {}), ...req };
+        sentRequests.set(req.invitation_id, merged);
+        let li = document.getElementById("frs-" + req.invitation_id);
+        if (!li) {
+            li = document.createElement("li");
+            li.id = "frs-" + req.invitation_id;
+            li.className = "fr-card";
+            list.appendChild(li);
+        }
+        li.dataset.peerDid = merged.target_did || "";
+        li.innerHTML = sentCardHtml(merged);
+        refreshSentRequests();
+    }
+
+    // The gateway's full list of sent requests still waiting.
+    function setSentRequests(reqs) {
+        const keep = new Set((reqs || []).map(r => r.invitation_id));
+        for (const iid of [...sentRequests.keys()]) {
+            if (!keep.has(iid)) removeSentRequest(iid);
+        }
+        (reqs || []).forEach(renderSentRequest);
+        refreshSentRequests();
+    }
+
+    // The peer's gateway now has it: it is waiting for their answer.
+    function markSentDelivered(invitationId) {
+        if (sentRequests.has(invitationId)) renderSentRequest({ invitation_id: invitationId, queued: false });
+    }
+
+    function removeSentRequest(invitationId) {
+        sentRequests.delete(invitationId);
+        document.getElementById("frs-" + invitationId)?.remove();
+        refreshSentRequests();
+    }
+
+    function hasSentRequest(invitationId) {
+        return sentRequests.has(invitationId);
+    }
+
+    // Cancel a sent request. The card goes when the gateway confirms
+    // (friend_request_withdrawn); until then the button stays disabled.
+    function withdrawFriendRequest(invitationId, button = null) {
+        if (button?.disabled) return false;
+        const socket = getSocket();
+        if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+        socket.send(JSON.stringify({ cmd: "withdraw_friend_request", invitation_id: invitationId }));
+        if (button) button.disabled = true;
+        return true;
+    }
+
+    return {
+        renderPendingInvite, acceptFriendRequest, refreshFriendRequestsBadge,
+        renderSentRequest, setSentRequests, markSentDelivered, removeSentRequest,
+        hasSentRequest, withdrawFriendRequest,
+    };
 }
