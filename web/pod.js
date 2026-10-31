@@ -18,6 +18,10 @@ import {
     buildInviteNotification, parseInboxListing, parseInviteNotification, INBOX_PRED,
 } from './ldn.js';
 import { accessControlUrl, detectAclModel, buildAcpAcr } from './acl.js';
+import {
+    createPodIo, buildInboxAcl, inboxAclBody as _inboxAclBody, publicReadAclBody as _publicReadAclBody,
+    dmInboxUrlFor, callInboxUrlFor, joinInboxUrlFor, presenceUrlFor,
+} from './podio.js';
 
 const SAFE_ID_RE = /^[\w-]{1,128}$/;
 
@@ -1151,41 +1155,7 @@ export async function podEnsureInbox() {
     }
 }
 
-// The inbox ACL: owner full control, public Append (LDN norm), plus any extra
-// read-only agents (R78: the gateway's WebID, so it can poll the inbox for us).
-export function buildInboxAcl(inboxUrl, ownerWebId, readerWebIds = []) {
-    let ttl = `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n@prefix foaf: <http://xmlns.com/foaf/0.1/>.\n`
-        + `<#owner> a acl:Authorization; acl:agent <${ownerWebId}>; acl:accessTo <${inboxUrl}>; acl:default <${inboxUrl}>; acl:mode acl:Read, acl:Write, acl:Control.\n`
-        + `<#public> a acl:Authorization; acl:agentClass foaf:Agent; acl:accessTo <${inboxUrl}>; acl:mode acl:Append.\n`;
-    const readers = [...new Set(readerWebIds.filter(w => w && w !== ownerWebId))];
-    if (readers.length) {
-        const agents = readers.map(w => `acl:agent <${w}>`).join('; ');
-        ttl += `<#gatewayread> a acl:Authorization; ${agents}; acl:accessTo <${inboxUrl}>; acl:default <${inboxUrl}>; acl:mode acl:Read.\n`;
-    }
-    return ttl;
-}
-
-// The inbox/drop-box ACL body for the discovered access-control model: WAC turtle,
-// or on an ACP server (ESS) an ACR with the same shape (owner full control, public
-// Append, optional reader agents Read). ACP path is spec-authored, not yet
-// live-verified; it only activates when the server advertises ACP, so WAC servers
-// (CSS) are unaffected.
-function _inboxAclBody(model, inboxUrl, ownerWebId, readerWebIds = []) {
-    return model === 'acp'
-        ? buildAcpAcr(ownerWebId, readerWebIds, inboxUrl, 'acl:Read', 'acl:Append')
-        : buildInboxAcl(inboxUrl, ownerWebId, readerWebIds);
-}
-
-// Owner full control + public Read for a discoverable resource (the public type
-// index), as WAC turtle or the ACP analogue (public via acp:PublicAgent). ACP path
-// is spec-authored, not yet live-verified; it activates only when the server
-// advertises ACP, so WAC servers (CSS) are unaffected.
-function _publicReadAclBody(model, resourceUrl, ownerWebId) {
-    if (model === 'acp') return buildAcpAcr(ownerWebId, [], resourceUrl, 'acl:Read', 'acl:Read');
-    return `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n@prefix foaf: <http://xmlns.com/foaf/0.1/>.\n`
-        + `<#owner> a acl:Authorization; acl:agent <${ownerWebId}>; acl:accessTo <${resourceUrl}>; acl:mode acl:Read, acl:Write, acl:Control.\n`
-        + `<#public> a acl:Authorization; acl:agentClass foaf:Agent; acl:accessTo <${resourceUrl}>; acl:mode acl:Read.\n`;
-}
+export { buildInboxAcl };
 
 // PUT an inbox/drop-box ACL, retrying once on a non-ok response. Without checking
 // the response, a 403/500 was treated as success and the box stayed owner-only, so
@@ -1315,311 +1285,59 @@ export async function podDeleteInboxNotification(url) {
 // owner can list, read, and delete). The envelope is opaque to pod.js: the
 // caller builds it from e2e.js output (ciphertext, nonce, ratchet_pub, msg_num,
 // pn, sender key + WebID). The pod stores only ciphertext.
+//
+// The drop boxes, identity files, pending-join markers, joined-room records and
+// presence live in podio.js over an injected fetch; this is the instance backed
+// by the Solid session. The desktop app builds another over its gateway (gwpod.js).
+const _io = createPodIo({
+    fetch: (url, opts) => solidSession.fetch(url, opts),
+    isLoggedIn: () => !!solidSession?.info?.isLoggedIn,
+    storageRoot: () => podStorageRoot(),
+    webId: () => solidSession?.info?.webId,
+});
 
-const DM_INBOX_PATH = 'proxion/dm-inbox/';
-const CALL_INBOX_PATH = 'proxion/call-inbox/';
-const JOIN_INBOX_PATH = 'proxion/join-inbox/';
-const MAX_DROPS = 200;
-
-const _dropBoxUrl = (podRoot, path) => (podRoot ? podRoot.replace(/\/?$/, '/') + path : null);
 const _peerRootAllowed = (peerRoot) => isPeerPodRootAllowed(peerRoot, podStorageRoot());   // SSRF gate
 
-/** Ensure OUR drop-box at `path` exists and is public-Append (owner full control). */
-async function _ensureDropBox(path, label) {
-    const root = podStorageRoot();
-    const webId = solidSession?.info?.webId;
-    if (!root || !webId || !solidSession?.info?.isLoggedIn) return null;
-    const inboxUrl = root.replace(/\/?$/, '/') + path;
-    try {
-        const put = await solidSession.fetch(inboxUrl, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'text/turtle',
-                Link: '<http://www.w3.org/ns/ldp#BasicContainer>; rel="type"',
-            },
-            body: '',
-        });
-        if (!put || !(put.ok || put.status === 409 || put.status === 405)) return null;
-        try {
-            const { url: aclUrl, model } = await discoverAccessControl(inboxUrl);
-            await _putInboxAcl(aclUrl, _inboxAclBody(model, inboxUrl, webId, []), label);
-        } catch (err) {
-            console.warn(`[pod] ${label} ACL failed:`, err);
-        }
-        return inboxUrl;
-    } catch (err) {
-        console.warn(`[pod] ensure ${label} failed:`, err);
-        return null;
-    }
-}
-
-/** POST a JSON object into a peer's public-Append drop-box at `path`. */
-async function _dropTo(peerPodRoot, path, obj) {
-    const inbox = _dropBoxUrl(peerPodRoot, path);
-    if (!inbox || !obj || !solidSession?.info?.isLoggedIn) return false;
-    if (!_peerRootAllowed(peerPodRoot)) { console.warn('[pod] refusing drop to unsafe peer root:', peerPodRoot); return false; }
-    try {
-        const res = await solidSession.fetch(inbox, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(obj),
-            redirect: 'error',   // never follow a peer redirect off the vetted host
-        });
-        return !!(res && res.ok);
-    } catch (err) {
-        console.warn('[pod] drop failed:', err);
-        return false;
-    }
-}
-
-/** Read our own drop-box at `path`: returns [{ url, item }] for each object. */
-async function _readDropBox(path) {
-    const root = podStorageRoot();
-    if (!root || !solidSession?.info?.isLoggedIn) return [];
-    const inbox = root.replace(/\/?$/, '/') + path;
-    let urls = [];
-    try {
-        const json = await _fetchJsonCapped(inbox, { headers: { Accept: 'application/ld+json' } }, MAX_POD_LISTING_BYTES);
-        if (!json) return [];
-        urls = parseInboxListing(json, inbox);
-    } catch (err) {
-        console.warn('[pod] drop-box listing failed:', err);
-        return [];
-    }
-    if (urls.length > MAX_DROPS) urls = urls.slice(0, MAX_DROPS);
-    const out = [];
-    for (const url of urls) {
-        try {
-            // Each dropped item is attacker-authored (the box is public-Append), so bound
-            // its body before parse the same way the listing above is bounded.
-            const item = await _fetchJsonCapped(url, { headers: { Accept: 'application/json' } });
-            if (item != null) out.push({ url, item });
-        } catch { /* skip one unreadable drop */ }
-    }
-    return out;
-}
-
-/** Delete a consumed drop by URL. */
-async function _deleteDrop(url) {
-    if (!url || !solidSession?.info?.isLoggedIn) return false;
-    try {
-        const res = await solidSession.fetch(url, { method: 'DELETE' });
-        return !!(res && (res.ok || res.status === 404));
-    } catch (err) {
-        console.warn('[pod] delete drop failed:', err);
-        return false;
-    }
-}
-
 // ── DM sender identity (R107) ──
-// Publish this device's signing identity (its did:key, and the account did it is
-// certified under, if any) next to the public x25519 key. A recipient fetches it
-// from the SENDER's pod to decide whether a DM's envelope signer is allowed to
-// speak for that WebID — an attacker cannot write here, so it is the trust anchor.
-export async function podPublishSigner(signerDid, accountDid) {
-    const root = podStorageRoot();
-    if (!root || !signerDid || !solidSession?.info?.isLoggedIn) return false;
-    const url = root.replace(/\/?$/, '/') + 'proxion/identity/signer.json';
-    try {
-        const res = await solidSession.fetch(url, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ version: 1, signer: signerDid, account_did: accountDid || null }),
-        });
-        if (!res || !res.ok) return false;
-        // The signer is a trust anchor a PEER must read from OUR pod, so give it a
-        // public-read ACL; without it the file inherits proxion/'s owner-only default
-        // and a peer 403s, so R107 sender verification never reaches sender_verified
-        // across pods. Best-effort (the file is already saved), logged on failure.
-        await podPublishIdentityAcl(url);
-        return true;
-    } catch (err) {
-        console.warn('[pod] podPublishSigner failed:', err);
-        return false;
-    }
-}
-
-/**
- * Give an identity trust anchor (signer.json / x25519-pub.json) a public-read ACL.
- * These files carry only public data (a did:key + account did; an X25519 public
- * key), and a peer authenticating as itself must be able to READ them: R107 DM
- * sender verification and gateway-free peer-key discovery both fetch them from the
- * OTHER user's pod. Without it they inherit proxion/'s owner-only default, so a
- * peer 403s and the feature silently degrades to a cross-pod no-op.
- *
- * Public READ only, scoped to the single file via acl:accessTo (never write/append/
- * control, and no acl:default on proxion/ that would expose other private children
- * such as read state, scheduled messages or room data). Mirrors the presence
- * heartbeat / public type index ACL. D4: reads the ACL back to confirm the grant
- * took effect rather than trusting the PUT status alone; returns whether public
- * read is in place.
- */
-export async function podPublishIdentityAcl(resourceUrl) {
-    const webId = solidSession?.info?.webId;
-    if (!resourceUrl || !webId || !solidSession?.info?.isLoggedIn) return false;
-    try {
-        const { url: aclUrl, model } = await discoverAccessControl(resourceUrl);
-        const put = await solidSession.fetch(aclUrl, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'text/turtle' },
-            body: _publicReadAclBody(model, resourceUrl, webId),
-        });
-        if (!put || !put.ok) {
-            console.warn('[pod] identity ACL write returned', put && put.status);
-            return false;
-        }
-        const check = await solidSession.fetch(aclUrl, { headers: { Accept: 'text/turtle' } });
-        if (!check || !check.ok) return false;
-        const ttl = typeof check.text === 'function' ? await check.text() : '';
-        return /acl:Read/.test(ttl);
-    } catch (err) {
-        console.warn('[pod] podPublishIdentityAcl failed:', err);
-        return false;
-    }
-}
-
+export function podPublishSigner(signerDid, accountDid) { return _io.podPublishSigner(signerDid, accountDid); }
+export function podPublishIdentityAcl(resourceUrl) { return _io.podPublishIdentityAcl(resourceUrl); }
 /** Fetch a peer's published signer identity, or null. Guarded against SSRF. */
-export async function podFetchPeerSigner(peerPodRoot) {
-    if (!peerPodRoot || !isPeerPodRootAllowed(peerPodRoot, podStorageRoot()) || !solidSession?.info?.isLoggedIn) return null;
-    try {
-        const d = await _fetchJsonCapped(
-            peerPodRoot.replace(/\/?$/, '/') + 'proxion/identity/signer.json',
-            { headers: { Accept: 'application/json' }, redirect: 'error' },
-        );
-        if (d && typeof d.signer === 'string') {
-            return { signer: d.signer, account_did: typeof d.account_did === 'string' ? d.account_did : null };
-        }
-    } catch { /* peer has not published a signer identity */ }
-    return null;
-}
+export function podFetchPeerSigner(peerPodRoot) { return _io.podFetchPeerSigner(peerPodRoot); }
 
 // ── DM delivery drop-box (R103) ──
-/** The recipient's DM drop-box URL, from their pod storage root. */
-export function dmInboxUrlFor(podRoot) { return _dropBoxUrl(podRoot, DM_INBOX_PATH); }
-export function podEnsureDmInbox() { return _ensureDropBox(DM_INBOX_PATH, 'DM inbox'); }
-export function podDropDm(recipientPodRoot, envelope) { return _dropTo(recipientPodRoot, DM_INBOX_PATH, envelope); }
+export { dmInboxUrlFor, callInboxUrlFor, joinInboxUrlFor, presenceUrlFor };
+export function podEnsureDmInbox() { return _io.podEnsureDmInbox(); }
+export function podDropDm(recipientPodRoot, envelope) { return _io.podDropDm(recipientPodRoot, envelope); }
 /** Read our DM inbox: returns [{ url, envelope }]. */
-export async function podReadDmDrops() {
-    return (await _readDropBox(DM_INBOX_PATH)).map(({ url, item }) => ({ url, envelope: item }));
-}
-export function podDeleteDmDrop(url) { return _deleteDrop(url); }
+export function podReadDmDrops() { return _io.podReadDmDrops(); }
+export function podDeleteDmDrop(url) { return _io.podDeleteDmDrop(url); }
 
 // ── Call signaling drop-box (R105) ──
-/** The callee's call-signaling drop-box URL, from their pod storage root. */
-export function callInboxUrlFor(podRoot) { return _dropBoxUrl(podRoot, CALL_INBOX_PATH); }
-export function podEnsureCallInbox() { return _ensureDropBox(CALL_INBOX_PATH, 'call inbox'); }
+export function podEnsureCallInbox() { return _io.podEnsureCallInbox(); }
 /** Drop a WebRTC signaling message (offer/answer/ICE/hangup) into a peer's call inbox. */
-export function podDropSignal(peerPodRoot, signal) { return _dropTo(peerPodRoot, CALL_INBOX_PATH, signal); }
+export function podDropSignal(peerPodRoot, signal) { return _io.podDropSignal(peerPodRoot, signal); }
 /** Read our call inbox: returns [{ url, signal }]. */
-export async function podReadSignals() {
-    return (await _readDropBox(CALL_INBOX_PATH)).map(({ url, item }) => ({ url, signal: item }));
-}
-export function podDeleteSignal(url) { return _deleteDrop(url); }
+export function podReadSignals() { return _io.podReadSignals(); }
+export function podDeleteSignal(url) { return _io.podDeleteSignal(url); }
 
 // ── Room-join handshake drop-box (R106) ──
-// Both join requests (to a room owner) and approvals (back to a joiner) travel
-// through this one public-Append box, distinguished by a `kind` field.
-/** The recipient's join-inbox URL, from their pod storage root. */
-export function joinInboxUrlFor(podRoot) { return _dropBoxUrl(podRoot, JOIN_INBOX_PATH); }
-export function podEnsureJoinInbox() { return _ensureDropBox(JOIN_INBOX_PATH, 'join inbox'); }
+export function podEnsureJoinInbox() { return _io.podEnsureJoinInbox(); }
 /** Drop a join request or approval into a peer's join inbox. */
-export function podDropJoin(recipientPodRoot, obj) { return _dropTo(recipientPodRoot, JOIN_INBOX_PATH, obj); }
+export function podDropJoin(recipientPodRoot, obj) { return _io.podDropJoin(recipientPodRoot, obj); }
 /** Read our join inbox: returns [{ url, msg }]. */
-export async function podReadJoins() {
-    return (await _readDropBox(JOIN_INBOX_PATH)).map(({ url, item }) => ({ url, msg: item }));
-}
-export function podDeleteJoin(url) { return _deleteDrop(url); }
+export function podReadJoins() { return _io.podReadJoins(); }
+export function podDeleteJoin(url) { return _io.podDeleteJoin(url); }
 
-// --- Pending join requests (W1) ---
-// The join inbox is public-Append, so anyone who knows a WebID can drop a
-// `join_approved`. To stop a forged approval from forcing a room in, the joiner
-// records a marker in their OWN pod (trustworthy, and cross-device) whenever they
-// actually request to join; an approval is only honored when a matching marker
-// exists. Keyed by a hash of (roomId, ownerWebId) so the path is a safe hex id no
-// matter what those strings contain.
-async function _pendingJoinPath(roomId, ownerWebId) {
-    const id = await _sha256Hex(String(roomId) + '\n' + String(ownerWebId));
-    return `proxion/join-requests/${id}.jsonld`;
-}
-
-export async function podWritePendingJoin(roomId, ownerWebId) {
-    if (!roomId || !ownerWebId) return;
-    await _writePxDoc(await _pendingJoinPath(roomId, ownerWebId), 'px:PendingJoin', {
-        'px:roomId': String(roomId),
-        'px:ownerWebId': String(ownerWebId),
-    });
-}
-
-export async function podHasPendingJoin(roomId, ownerWebId) {
-    const root = podStorageRoot();
-    if (!root || !solidSession.info.isLoggedIn || !roomId || !ownerWebId) return false;
-    try {
-        const res = await solidSession.fetch(root + await _pendingJoinPath(roomId, ownerWebId),
-            { headers: { Accept: 'application/ld+json' } });
-        if (!res.ok) return false;
-        const doc = await res.json();
-        // Match the fields too, so an astronomically unlikely hash collision can't
-        // vouch for a different room/owner than the one requested.
-        return doc?.['px:roomId'] === String(roomId) && doc?.['px:ownerWebId'] === String(ownerWebId);
-    } catch { return false; }
-}
-
-export async function podDeletePendingJoin(roomId, ownerWebId) {
-    const root = podStorageRoot();
-    if (!root || !solidSession.info.isLoggedIn || !roomId || !ownerWebId) return;
-    try {
-        await solidSession.fetch(root + await _pendingJoinPath(roomId, ownerWebId), { method: 'DELETE' });
-    } catch { /* best-effort cleanup */ }
-}
+// --- Pending join requests (W1): a marker in our own pod that an approval must match ---
+export function podWritePendingJoin(roomId, ownerWebId) { return _io.podWritePendingJoin(roomId, ownerWebId); }
+export function podHasPendingJoin(roomId, ownerWebId) { return _io.podHasPendingJoin(roomId, ownerWebId); }
+export function podDeletePendingJoin(roomId, ownerWebId) { return _io.podDeletePendingJoin(roomId, ownerWebId); }
 
 // --- Joined rooms (web build) ---
-// A room we joined lives on its owner's pod, and nothing in our own pod pointed
-// at it, so it vanished on reload. This owner-only record lists the rooms we
-// joined ({ roomId, owner, ownerPodRoot, container, title }) so every device can
-// re-register them. The caller re-validates each entry before using it.
-const JOINED_ROOMS_PATH = 'proxion/joined-rooms.jsonld';
-const MAX_JOINED_ROOMS = 200;
-
 /** The joined-room records, [] when there are none, or null if the read failed. */
-export async function podReadJoinedRooms() {
-    const root = podStorageRoot();
-    if (!root || !solidSession?.info?.isLoggedIn) return null;
-    try {
-        const res = await solidSession.fetch(root + JOINED_ROOMS_PATH, { headers: { Accept: 'application/ld+json' } });
-        if (res && res.status === 404) return [];
-        if (!res || !res.ok) return null;
-        const text = await res.text();
-        if (text.length > MAX_POD_LISTING_BYTES) return null;
-        const doc = JSON.parse(text);
-        const list = doc && doc['px:rooms'];
-        return Array.isArray(list) ? list.slice(0, MAX_JOINED_ROOMS) : [];
-    } catch (err) {
-        console.warn('[pod] podReadJoinedRooms failed:', err);
-        return null;
-    }
-}
-
+export function podReadJoinedRooms() { return _io.podReadJoinedRooms(); }
 /** Replace the joined-room records. Returns success. */
-export async function podWriteJoinedRooms(list) {
-    const root = podStorageRoot();
-    if (!root || !solidSession?.info?.isLoggedIn) return false;
-    try {
-        const res = await solidSession.fetch(root + JOINED_ROOMS_PATH, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/ld+json' },
-            body: JSON.stringify({
-                '@context': { px: 'https://proxion.dev/vocab/v1#' },
-                '@type': 'px:JoinedRooms',
-                'px:rooms': (list || []).slice(0, MAX_JOINED_ROOMS),
-                'px:updatedAt': new Date().toISOString(),
-            }),
-        });
-        return !!(res && res.ok);
-    } catch (err) {
-        console.warn('[pod] podWriteJoinedRooms failed:', err);
-        return false;
-    }
-}
+export function podWriteJoinedRooms(list) { return _io.podWriteJoinedRooms(list); }
 
 /**
  * The member list a room's owner keeps next to its Long Chat (members.jsonld in
@@ -1687,81 +1405,10 @@ export async function podReadRoomDescriptorAt(ownerPodRoot, roomId) {
 }
 
 // ── Presence (R104): a public-read heartbeat peers poll or subscribe to ───────
-//
-// Without a gateway to fan out presence, each user publishes a small public-read
-// proxion/presence.json ({ status, heartbeat }) refreshed on a timer. Contacts
-// derive online/away/offline from how fresh the heartbeat is (see webpresence.js).
-
-const PRESENCE_PATH = 'proxion/presence.json';
-let _presenceAclWritten = false;
-
-/** The presence resource URL for a pod storage root. */
-export function presenceUrlFor(podRoot) {
-    if (!podRoot) return null;
-    return podRoot.replace(/\/?$/, '/') + PRESENCE_PATH;
-}
-
 /** Publish our presence heartbeat. Writes a public-read ACL once. */
-export async function podWritePresence(status) {
-    const root = podStorageRoot();
-    const webId = solidSession?.info?.webId;
-    if (!root || !webId || !solidSession?.info?.isLoggedIn) return false;
-    const url = root.replace(/\/?$/, '/') + PRESENCE_PATH;
-    try {
-        const res = await solidSession.fetch(url, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ v: 1, status, heartbeat: Date.now() }),
-        });
-        if (!res || !res.ok) return false;
-        if (!_presenceAclWritten) {
-            try {
-                const { url: aclUrl } = await discoverAccessControl(url);
-                const aclRes = await solidSession.fetch(aclUrl, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'text/turtle' },
-                    body: `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n@prefix foaf: <http://xmlns.com/foaf/0.1/>.\n`
-                        + `<#owner> a acl:Authorization; acl:agent <${webId}>; acl:accessTo <${url}>; acl:mode acl:Read, acl:Write, acl:Control.\n`
-                        + `<#public> a acl:Authorization; acl:agentClass foaf:Agent; acl:accessTo <${url}>; acl:mode acl:Read.\n`,
-                });
-                // Only latch on success, else a failed ACL PUT is never retried and
-                // peers see the user permanently offline (mirrors _putInboxAcl).
-                if (aclRes && aclRes.ok) _presenceAclWritten = true;
-            } catch (err) {
-                console.warn('[pod] presence ACL failed:', err);
-            }
-        }
-        return true;
-    } catch (err) {
-        console.warn('[pod] podWritePresence failed:', err);
-        return false;
-    }
-}
-
+export function podWritePresence(status) { return _io.podWritePresence(status); }
 /** Read a peer's presence: { status, heartbeat } or null. */
-export async function podReadPresence(peerPodRoot) {
-    if (!_peerRootAllowed(peerPodRoot)) return null;
-    const url = presenceUrlFor(peerPodRoot);
-    if (!url || !solidSession?.info?.isLoggedIn) return null;
-    try {
-        const res = await solidSession.fetch(url, { headers: { Accept: 'application/json' }, redirect: 'error' });
-        if (!res || !res.ok) return null;
-        const d = await res.json();
-        if (d && typeof d.status === 'string') {
-            // Capture the server's Last-Modified (a CORS-safelisted header, readable
-            // cross-origin) so freshness can be judged against one trusted clock
-            // rather than the writer's self-reported, possibly-skewed, heartbeat.
-            const lm = res.headers && res.headers.get && res.headers.get('Last-Modified');
-            const serverMs = lm ? Date.parse(lm) : NaN;
-            return {
-                status: d.status,
-                heartbeat: Number(d.heartbeat) || 0,
-                serverMs: Number.isFinite(serverMs) ? serverMs : null,
-            };
-        }
-    } catch { /* peer has no presence / offline */ }
-    return null;
-}
+export function podReadPresence(peerPodRoot) { return _io.podReadPresence(peerPodRoot); }
 
 // ── Solid social graph (contact import) ──────────────────────────────────────
 //

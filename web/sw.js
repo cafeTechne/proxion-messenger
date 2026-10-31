@@ -96,6 +96,7 @@ const SHELL = [
   "dmsig.js",
   "auth.js",
   "pod.js",
+  "podio.js",
   "acl.js",
   "longchat.js",
   "typeindex.js",

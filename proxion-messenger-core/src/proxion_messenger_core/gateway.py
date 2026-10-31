@@ -2839,18 +2839,32 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
           (loopback single-user dev, where the browser registers under its own
           session DID, not the account DID). A live tunnel forces auth on, so
           this branch never trusts a remote caller arriving over the tunnel."""
+        # The connection that opened the live tunnel passed this check before
+        # auth was forced on; it stays the owner for its lifetime so it can
+        # still stop the tunnel it started. A new connection gets no such pass.
+        tunnel_ws = getattr(self, "_tunnel_owner_ws", None)
+        if tunnel_ws is not None and websocket is tunnel_ws and self._tunnel_active():
+            return True
+        return self._owner_by_did_or_local(websocket)
+
+    def _is_pod_owner_socket(self, websocket) -> bool:
+        """Whether *websocket* is the gateway owner, for owner-only features such
+        as the pod bridge: a registered connection that is the gateway's own
+        account DID (proven whenever auth is enforced), or, while auth is NOT
+        enforced (the desktop app on loopback, where the browser registers under
+        its own session DID), a genuine non-proxied loopback connection. A public
+        deployment or a live tunnel never takes the loopback branch."""
+        if not self._client_webids.get(websocket, ""):
+            return False
+        return self._owner_by_did_or_local(websocket)
+
+    def _owner_by_did_or_local(self, websocket) -> bool:
         try:
             owner_did = self._own_gateway_did()
         except Exception:
             owner_did = ""
         caller = self._client_webids.get(websocket, "")
         if owner_did and caller == owner_did:
-            return True
-        # The connection that opened the live tunnel passed this check before
-        # auth was forced on; it stays the owner for its lifetime so it can
-        # still stop the tunnel it started. A new connection gets no such pass.
-        tunnel_ws = getattr(self, "_tunnel_owner_ws", None)
-        if tunnel_ws is not None and websocket is tunnel_ws and self._tunnel_active():
             return True
         if not self._auth_enforced():
             # A reverse proxy also connects from loopback; its callers are remote.

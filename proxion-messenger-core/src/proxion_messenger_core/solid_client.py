@@ -410,6 +410,73 @@ class SolidClient:
         except Exception as exc:
             raise SolidError(f"LIST {stash_uri} failed: {exc}") from exc
 
+    # Response headers request() hands back. Everything else (Set-Cookie, auth
+    # challenges other than the DPoP nonce the client consumes itself) stays here.
+    RESPONSE_HEADERS = frozenset({
+        "content-type", "content-length", "link", "etag", "last-modified",
+        "location", "wac-allow", "accept-patch", "allow",
+    })
+    _REQUEST_METHODS = frozenset({"GET", "HEAD", "PUT", "POST", "PATCH", "DELETE"})
+
+    def request(
+        self,
+        method: str,
+        url: str,
+        body: Optional[bytes] = None,
+        headers: Optional[dict] = None,
+        *,
+        max_bytes: int = 524_288,
+    ) -> tuple[int, dict, bytes]:
+        """One authenticated request to an absolute pod URL, returned as data.
+
+        Unlike get/put/delete this never raises on a non-2xx status: the caller
+        gets ``(status, headers, body)`` with *headers* lower-cased and limited to
+        RESPONSE_HEADERS. Redirects are not followed. The body is streamed and
+        capped at *max_bytes* (SolidError past it). Retries once on 401 after
+        refreshing auth, like the other verbs. Credentials come from
+        _dynamic_headers, so a DPoP client withholds them off the pod's origin.
+        """
+        method = (method or "").upper()
+        if method not in self._REQUEST_METHODS:
+            raise SolidError(f"unsupported method {method!r}")
+        if not (isinstance(url, str) and (url.startswith("http://") or url.startswith("https://"))):
+            raise SolidError("request() needs an absolute http(s) URL")
+        try:
+            for _attempt in range(2):
+                req_headers = {
+                    **(headers or {}),
+                    **self._auth_headers,
+                    **self._dynamic_headers(method, url),
+                }
+                with self._session.stream(
+                    method, url, headers=req_headers, content=body,
+                    follow_redirects=False,
+                ) as response:
+                    if response.status_code == 401 and _attempt == 0:
+                        response.read()  # drain before the connection is reused
+                        self._refresh_auth(response)
+                        continue
+                    out_headers = {
+                        k.lower(): v for k, v in response.headers.items()
+                        if k.lower() in self.RESPONSE_HEADERS
+                    }
+                    chunks: list[bytes] = []
+                    received = 0
+                    if method != "HEAD":
+                        for chunk in response.iter_bytes(chunk_size=65_536):
+                            received += len(chunk)
+                            if received > max_bytes:
+                                raise SolidError(
+                                    f"{method} {url}: response too large (>{max_bytes // 1024} KB)"
+                                )
+                            chunks.append(chunk)
+                    return response.status_code, out_headers, b"".join(chunks)
+            return 401, {}, b""
+        except SolidError:
+            raise
+        except Exception as exc:
+            raise SolidError(f"{method} {url} failed: {exc}") from exc
+
     def set_acl(
         self,
         stash_uri: str,
