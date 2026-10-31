@@ -147,12 +147,14 @@ def safe_get(
     timeout: float = _DEFAULT_TIMEOUT,
     max_bytes: int = _DEFAULT_MAX_BYTES,
     headers: Optional[dict] = None,
+    max_redirects: int = _MAX_REDIRECTS,
 ) -> bytes:
     """GET *url* with SSRF protection and body size limit.
 
     Raises :exc:`NetworkError` when the host resolves to a blocked IP range,
     on non-2xx responses, when the body exceeds *max_bytes*, or on any other
-    transport failure.
+    transport failure. Pass ``max_redirects=0`` when *headers* carry
+    credentials: a redirect is then refused instead of followed.
     """
     if not _HTTPX_AVAILABLE:
         raise NetworkError("httpx is required for network operations")
@@ -163,7 +165,7 @@ def safe_get(
         # check, letting a public host 302 to an internal/loopback target.
         with httpx.Client(timeout=timeout, follow_redirects=False, verify=_make_tls_context()) as client:
             current = url
-            for _hop in range(_MAX_REDIRECTS + 1):
+            for _hop in range(max(0, max_redirects) + 1):
                 resolved_ip = _resolve_safe_ip(current)
                 if resolved_ip is None:
                     if _audit_fn:

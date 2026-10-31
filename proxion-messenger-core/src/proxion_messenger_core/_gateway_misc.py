@@ -2129,6 +2129,39 @@ class MiscHandlerMixin:
 
     _LDP_INBOX_RE = None  # compiled lazily
 
+    _INBOX_POLL_MAX_BODY = 4 * 1024 * 1024
+
+    def _inbox_poll_get(self, client, url: str) -> bytes:
+        """Authenticated GET for the inbox poll, confined to our own pod's origin.
+
+        The polled WebIDs come from push subscriptions, so the URLs are untrusted:
+        the pod credentials go only to the origin of the pod this gateway is
+        connected to, a redirect is refused rather than followed, and a hostname
+        must resolve to a public address that the request is then pinned to (no
+        DNS rebinding onto the gateway's own network). A pod configured as
+        localhost or an IP literal cannot be rebound, so it is fetched directly.
+        """
+        import ipaddress
+        from urllib.parse import urlparse
+        from .network import NetworkError, safe_get
+        pod = urlparse(getattr(self, "_pod_url", "") or "")
+        target = urlparse(url)
+        if (not pod.netloc or target.scheme not in ("http", "https")
+                or (target.scheme, target.netloc) != (pod.scheme, pod.netloc)):
+            raise NetworkError(f"inbox poll: {url!r} is not on the pod origin")
+        host = target.hostname or ""
+        try:
+            ipaddress.ip_address(host)
+            literal = True
+        except ValueError:
+            literal = host == "localhost"
+        if literal:
+            return client.get(url)
+        headers = {**(getattr(client, "_auth_headers", None) or {}),
+                   **client._dynamic_headers("GET", url)}
+        return safe_get(url, headers=headers, max_redirects=0,
+                        max_bytes=self._INBOX_POLL_MAX_BODY, timeout=10.0)
+
     def _discover_inbox_from_profile(self, webid: str):
         """The ldp:inbox IRI from a WebID profile, or None.
 
@@ -2143,7 +2176,7 @@ class MiscHandlerMixin:
         import re
         from urllib.parse import urlparse
         try:
-            body = client.get(webid.split("#")[0]).decode("utf-8", "replace")
+            body = self._inbox_poll_get(client, webid.split("#")[0]).decode("utf-8", "replace")
         except Exception:
             return None
         m = re.search(r"(?:ldp:inbox|<http://www\.w3\.org/ns/ldp#inbox>)\s*<([^>]+)>", body)
@@ -2167,7 +2200,7 @@ class MiscHandlerMixin:
             return None
         import re
         try:
-            body = client.get(inbox_url).decode("utf-8", "replace")
+            body = self._inbox_poll_get(client, inbox_url).decode("utf-8", "replace")
         except Exception:
             return None
         out = set()

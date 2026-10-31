@@ -38,6 +38,15 @@ def gw(agent, tmp_path):
     return g
 
 
+@pytest.fixture(autouse=True)
+def _fetch_via_fake_client(gw, monkeypatch):
+    """The poll fetches through network.safe_get (IP-pinned, no redirects) on the
+    pod origin; route that to the fake pod client these tests wire up."""
+    import proxion_messenger_core.network as net
+    gw._pod_url = "https://alice.pod/"
+    monkeypatch.setattr(net, "safe_get", lambda url, **kw: gw._pod_client().get(url))
+
+
 def _wire_client(gw, profile=PROFILE_TTL, inbox_bodies=None):
     """Point _pod_client at a fake client returning our TTL by URL."""
     state = {"bodies": inbox_bodies or []}
