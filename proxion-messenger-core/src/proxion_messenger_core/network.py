@@ -445,3 +445,53 @@ async def async_safe_post(
     except Exception:
         return False
 
+
+async def async_safe_request(
+    method: str,
+    url: str,
+    *,
+    body: Optional[bytes] = None,
+    headers: Optional[dict] = None,
+    timeout: float = _DEFAULT_TIMEOUT,
+    max_bytes: int = 65_536,
+) -> tuple[int, dict, bytes]:
+    """One unauthenticated request to a foreign host, returned as data.
+
+    The host is resolved and checked like every other helper here (and the
+    request pinned to that IP for http), redirects are never followed (a 3xx is
+    handed back as-is, never chased), and the body is streamed and capped at
+    *max_bytes*. Non-2xx statuses are returned, not raised. Response headers come
+    back lower-cased. Raises :exc:`NetworkError` when blocked, too large, or on a
+    transport failure.
+    """
+    if not _HTTPX_AVAILABLE:
+        raise NetworkError("httpx is required for network operations")
+    method = (method or "").upper()
+    resolved_ip = _resolve_safe_ip(url)
+    if resolved_ip is None:
+        if _audit_fn:
+            try:
+                _audit_fn("ssrf_blocked", "warning", url)
+            except Exception:
+                pass
+        raise NetworkError(f"blocked or unresolvable URL: {url!r}")
+    pinned_url, extra_headers = _pin_url(url, resolved_ip)
+    req_headers = {**(headers or {}), **extra_headers}
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False,
+                                     verify=_make_tls_context()) as client:
+            async with client.stream(method, pinned_url, headers=req_headers, content=body) as resp:
+                chunks: list[bytes] = []
+                received = 0
+                if method != "HEAD":
+                    async for chunk in resp.aiter_bytes(chunk_size=65_536):
+                        received += len(chunk)
+                        if received > max_bytes:
+                            raise NetworkError(f"{method} {url}: response exceeds {max_bytes // 1024} KB")
+                        chunks.append(chunk)
+                out = {k.lower(): v for k, v in resp.headers.items()}
+                return resp.status_code, out, b"".join(chunks)
+    except NetworkError:
+        raise
+    except Exception as exc:
+        raise NetworkError(f"{method} {url} failed: {exc}") from exc

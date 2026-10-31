@@ -88,6 +88,11 @@ _SCHEMA: dict[str, dict[str, tuple]] = {
     "create_webhook":   {"bot_name": (str, 32), "direction": (str, 16, _is_valid_direction)},
     "connect_css":      {"css_url": (str, 256, _is_https_url), "email": (str, 254)},
     "resolve_did":      {"did": (str, 256, _is_did_key)},
+    # Pod bridge (_gateway_podbridge): the handler applies the URL policy.
+    "pod_fetch":        {"req_id": (str, 64), "url": (str, 2048)},
+    "pod_watch":        {"url": (str, 2048)},
+    "pod_unwatch":      {"url": (str, 2048)},
+    "pod_thread":       {"peer_webid": (str, 2048)},
     # Hole punch (Round 24 — actor-bound, mutating)
     "request_hole_punch": {"peer_webid": (str, 256)},
     "hole_punch_complete_notify": {
@@ -150,6 +155,7 @@ MUTATING_COMMANDS: frozenset[str] = frozenset({
     "expire_dm_session", "revoke_session", "logout_all_devices", "delete_account",
     # pod, push, webhooks, settings
     "connect_css", "disconnect_pod", "reconnect_pod",
+    "pod_fetch", "pod_thread",
     "subscribe_push", "unsubscribe_push",
     "create_webhook", "delete_webhook", "rotate_webhook",
     "set_thread_mute", "set_receipts_enabled", "set_link_previews_enabled",
@@ -191,6 +197,7 @@ READ_ONLY_COMMANDS: frozenset[str] = frozenset({
     "get_presence", "get_all_presence", "set_presence", "typing",
     "get_voice_channel_state", "screenshare_started", "screenshare_stopped",
     "tunnel_status", "pod_status", "list_sessions", "list_webhooks",
+    "pod_bridge_info", "pod_watch", "pod_unwatch",
     "list_devices", "get_peer_devices", "get_peer_device_keys", "get_sender_key",
     "list_dm_sessions", "get_account_sync",
     # caller-scoped bookkeeping

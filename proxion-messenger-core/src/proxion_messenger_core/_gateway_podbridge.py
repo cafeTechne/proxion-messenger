@@ -1,0 +1,512 @@
+"""Pod bridge: lets the desktop client speak the browser build's pod protocol.
+
+The browser build delivers DMs, presence and call/join signals through drop
+boxes in each user's Solid pod (web/podio.js). The desktop client runs the same
+protocol code, but it has no Solid session: the gateway holds the pod
+credentials. These owner-only commands give the client a narrow, policy-scoped
+fetch over those credentials (podbridge.classify):
+
+    pod_bridge_info                     -> pod_bridge {ready, webid, pod_root, auth, reason, consumer}
+    pod_fetch {req_id, method, url, headers, body}
+                                        -> pod_fetch_result {req_id, status, headers, body[, error]}
+    pod_watch {url, fast} / pod_unwatch -> pod_changed {url}
+    pod_thread {peer_webid, display_name}  lists a WebID thread with get_dms
+
+The gateway carries ciphertext only and never decides who a drop is from: the
+client verifies every envelope (webdm.js createSenderVerifier). The gateway
+does refuse a blocked sender's drop (it deletes it unread) and keeps the drop
+boxes for one consuming device, the one whose key signed proxion/identity/signer.json.
+"""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import logging
+import time
+from typing import Optional
+
+from . import podbridge as _pbp
+
+logger = logging.getLogger(__name__)
+
+
+class PodBridgeMixin:
+
+    POD_BRIDGE_COMMANDS = frozenset({"pod_bridge_info", "pod_fetch", "pod_watch", "pod_unwatch", "pod_thread"})
+    # Owner-only by policy (security_policy) and remapped for the loopback owner
+    # (gateway.process_command), like the tunnel commands.
+    POD_BRIDGE_OWNER_COMMANDS = frozenset({"pod_fetch", "pod_watch", "pod_unwatch", "pod_thread"})
+    _POD_BRIDGE_RATE_LIMIT = 240          # per socket per 10 s (one drain is a few dozen requests)
+    _POD_WATCH_MAX = 120                  # watched URLs per socket
+    _POD_WATCH_OWN_S = 5.0                # own drop boxes while the client is open
+    _POD_WATCH_FAST_S = 1.0               # ... while a call is ringing
+    _POD_WATCH_FOREIGN_S = 30.0           # a contact's presence
+    _POD_CLOSED_POLL_S = 60.0             # own boxes while no consuming device is connected
+    _POD_REQUEST_TIMEOUT = 10.0
+
+    # ── state ────────────────────────────────────────────────────────────────
+
+    def _pb(self) -> dict:
+        st = getattr(self, "_pod_bridge_state", None)
+        if st is None:
+            st = self._pod_bridge_state = {
+                "watches": {},          # url -> {"sockets": {ws: fast}, "own": bool, "sig": str|None, "next": float}
+                "consumer": None,       # signer did named by our signer.json
+                "consumer_for": None,   # the webid that consumer was read for
+                "consumer_identity": None,  # the socket identity that published it (push target)
+                "boxes_for": None,      # webid the drop boxes were ensured for
+                "seen": {},             # box url -> set(member urls), closed-app push baseline
+                "closed_next": 0.0,
+                "rate": {},             # ws -> [count, window_start]
+            }
+        return st
+
+    def _pb_forget_socket(self, websocket) -> None:
+        st = getattr(self, "_pod_bridge_state", None)
+        if not st:
+            return
+        st["rate"].pop(websocket, None)
+        for url in list(st["watches"]):
+            w = st["watches"][url]
+            w["sockets"].pop(websocket, None)
+            if not w["sockets"]:
+                st["watches"].pop(url, None)
+
+    def _check_pod_bridge_rate(self, websocket) -> bool:
+        now = time.monotonic()
+        rate = self._pb()["rate"]
+        entry = rate.get(websocket)
+        if entry is None or now - entry[1] >= 10.0:
+            rate[websocket] = [1, now]
+            return True
+        if entry[0] >= self._POD_BRIDGE_RATE_LIMIT:
+            return False
+        entry[0] += 1
+        return True
+
+    def _pb_signing_did(self, websocket) -> str:
+        """The did:key this connection signs with (its own device key, also when
+        it registered under an account through a delegation cert)."""
+        return (self._session_device_did.get(websocket)
+                or self._session_signing_did.get(websocket)
+                or (self._client_webids.get(websocket, "") if str(self._client_webids.get(websocket, "")).startswith("did:key:") else ""))
+
+    def _pod_bridge_status(self) -> dict:
+        """{ready, webid, pod_root, auth, reason} for the connected pod."""
+        webid = getattr(self, "_pod_webid", None)
+        pod_url = getattr(self, "_pod_url", None)
+        client = self._pod_client() if webid else None
+        if not client:
+            return {"ready": False, "webid": None, "pod_root": None, "auth": None, "reason": "no_pod"}
+        ok, reason = _pbp.check_pod_root(webid, pod_url)
+        root = _pbp.pod_root_from_webid(webid)
+        from .css_auth import DpopSolidClient
+        auth = "dpop" if isinstance(client, DpopSolidClient) else "bearer"
+        return {"ready": ok, "webid": webid, "pod_root": root if ok else None,
+                "auth": auth, "reason": reason}
+
+    async def _pb_request_own(self, method: str, url: str, body: Optional[bytes] = None,
+                              headers: Optional[dict] = None, max_bytes: int = _pbp.MAX_SMALL_RESPONSE):
+        client = self._pod_client()
+        if client is None:
+            raise RuntimeError("no pod")
+        loop = asyncio.get_event_loop()
+        return await asyncio.wait_for(loop.run_in_executor(
+            None, lambda: client.request(method, url, body, headers or {}, max_bytes=max_bytes)),
+            timeout=self._POD_REQUEST_TIMEOUT + 5)
+
+    async def _pb_consumer(self, refresh: bool = False) -> Optional[str]:
+        """The signer did our pod's signer.json names: the one device that consumes
+        the drop boxes. Cached; re-read on *refresh* or after a pod switch."""
+        st = self._pb()
+        webid = getattr(self, "_pod_webid", None)
+        if not refresh and st["consumer_for"] == webid and st["consumer"]:
+            return st["consumer"]
+        status = self._pod_bridge_status()
+        if not status["ready"]:
+            return None
+        try:
+            code, _h, raw = await self._pb_request_own("GET", status["pod_root"] + "proxion/identity/signer.json")
+            signer = None
+            if code == 200:
+                doc = json.loads(raw.decode("utf-8", "replace") or "null")
+                if isinstance(doc, dict) and isinstance(doc.get("signer"), str):
+                    signer = doc["signer"]
+            st["consumer"], st["consumer_for"] = signer, webid
+            return signer
+        except Exception as exc:
+            logger.debug("pod bridge: signer read failed: %s", exc)
+            return st["consumer"] if st["consumer_for"] == webid else None
+
+    # ── commands ─────────────────────────────────────────────────────────────
+
+    async def _handle_pod_bridge_info(self, websocket, data: dict) -> None:
+        if not self._is_pod_owner_socket(websocket):
+            await websocket.send(json.dumps({"type": "pod_bridge", "ready": False, "reason": "not_owner"}))
+            return
+        status = self._pod_bridge_status()
+        consumer = await self._pb_consumer() if status["ready"] else None
+        status["consumer"] = bool(consumer) and consumer == self._pb_signing_did(websocket)
+        await websocket.send(json.dumps({"type": "pod_bridge", **status}))
+        if status["ready"]:
+            asyncio.ensure_future(self._pb_ensure_boxes())
+
+    async def _pod_fetch_reply(self, websocket, req_id: str, status: int, headers=None,
+                               body: bytes = b"", error: str = "") -> None:
+        msg = {"type": "pod_fetch_result", "req_id": req_id, "status": status,
+               "headers": headers or {}, "body": body.decode("utf-8", "replace") if body else ""}
+        if error:
+            msg["error"] = error
+        await websocket.send(json.dumps(msg))
+
+    def _pb_validate_body(self, websocket, decision, method: str, body: bytes) -> str:
+        """Content checks for writes the bridge makes on the owner's behalf.
+        Returns a refusal reason, or ''."""
+        if method not in ("PUT", "POST") or decision.kind in ("acl", "marker", "joined"):
+            return ""
+        if decision.kind == "box" and decision.own and method == "PUT":
+            return ""   # container creation, empty body
+        try:
+            doc = json.loads(body.decode("utf-8")) if body else None
+        except Exception:
+            return "bad_body"
+        if not isinstance(doc, dict):
+            return "bad_body"
+        if decision.kind == "identity" and decision.url.endswith("/signer.json"):
+            # The signer names THIS device's key and no account: the gateway's own
+            # did must never be published as an account a browser key speaks for.
+            if doc.get("signer") != self._pb_signing_did(websocket) or doc.get("account_did") is not None:
+                return "bad_signer"
+        elif decision.kind == "identity":
+            if not isinstance(doc.get("pub"), str) or len(doc["pub"]) > 128:
+                return "bad_body"
+        elif decision.kind == "presence":
+            if not isinstance(doc.get("status"), str) or len(doc["status"]) > 32:
+                return "bad_body"
+        elif decision.kind == "box":
+            # A drop into any box (a peer's, or our own) speaks as our WebID.
+            if doc.get("from_webid") != getattr(self, "_pod_webid", None):
+                return "bad_sender"
+        return ""
+
+    async def _handle_pod_fetch(self, websocket, data: dict) -> None:
+        req_id = data.get("req_id")
+        if not isinstance(req_id, str) or not req_id or len(req_id) > 64:
+            return
+        if not self._is_pod_owner_socket(websocket):
+            await self._pod_fetch_reply(websocket, req_id, 403, error="not_owner")
+            return
+        if not self._check_pod_bridge_rate(websocket):
+            await self._pod_fetch_reply(websocket, req_id, 429, error="rate_limited")
+            return
+        status = self._pod_bridge_status()
+        if not status["ready"]:
+            await self._pod_fetch_reply(websocket, req_id, 503, error=status["reason"] or "not_ready")
+            return
+        method = str(data.get("method") or "GET").upper()
+        url = data.get("url")
+        decision = _pbp.classify(method, url, status["pod_root"])
+        if not decision.allow:
+            await self._pod_fetch_reply(websocket, req_id, 403, error=decision.reason)
+            return
+        raw_body = data.get("body")
+        if raw_body is not None and not isinstance(raw_body, str):
+            await self._pod_fetch_reply(websocket, req_id, 400, error="bad_body")
+            return
+        body = (raw_body or "").encode("utf-8")
+        if len(body) > _pbp.MAX_REQUEST_BODY:
+            await self._pod_fetch_reply(websocket, req_id, 413, error="too_large")
+            return
+        if method in ("GET", "HEAD", "DELETE"):
+            body = b""
+        reason = self._pb_validate_body(websocket, decision, method, body)
+        if reason:
+            await self._pod_fetch_reply(websocket, req_id, 403, error=reason)
+            return
+        headers = _pbp.filter_request_headers(data.get("headers"), decision, method)
+        # One consuming device: only the device that signed our signer.json reads
+        # and clears the drop boxes. Creating a box or dropping into it is open to
+        # any owner connection.
+        if decision.own and decision.kind in ("box", "drop") and method in ("GET", "HEAD", "DELETE"):
+            if (await self._pb_consumer()) != self._pb_signing_did(websocket):
+                await self._pod_fetch_reply(websocket, req_id, 409, error="not_consumer")
+                return
+        try:
+            if decision.own:
+                code, rh, rbody = await self._pb_request_own(method, url, body or None, headers, decision.max_bytes)
+            else:
+                from .network import async_safe_request
+                code, rh, rbody = await async_safe_request(
+                    method, url, body=body or None, headers=headers,
+                    timeout=self._POD_REQUEST_TIMEOUT, max_bytes=decision.max_bytes)
+        except Exception as exc:
+            msg = str(exc)
+            await self._pod_fetch_reply(websocket, req_id, 502,
+                                        error="too_large" if "too large" in msg or "exceeds" in msg else "upstream")
+            return
+        rh = {k: v for k, v in (rh or {}).items() if k in _pb_response_headers()}
+        # A blocked sender's drop is removed unread, before the client sees it.
+        if decision.own and decision.kind == "drop" and method == "GET" and code == 200:
+            if self._pb_drop_is_blocked(websocket, rbody):
+                try:
+                    await self._pb_request_own("DELETE", url)
+                except Exception:
+                    pass
+                await self._pod_fetch_reply(websocket, req_id, 404, error="blocked")
+                return
+        if decision.own and decision.kind == "identity" and method == "PUT" and url.endswith("/signer.json") and 200 <= code < 300:
+            st = self._pb()
+            prev = st["consumer"]
+            st["consumer"], st["consumer_for"] = self._pb_signing_did(websocket), getattr(self, "_pod_webid", None)
+            st["consumer_identity"] = self._client_webids.get(websocket, "") or None
+            if prev and prev != st["consumer"]:
+                rh = {**rh, "x-proxion-previous-signer": "1"}
+        await self._pod_fetch_reply(websocket, req_id, code, rh, rbody)
+
+    def _pb_drop_is_blocked(self, websocket, raw: bytes) -> bool:
+        try:
+            doc = json.loads(raw.decode("utf-8", "replace") or "null")
+        except Exception:
+            return False
+        sender = doc.get("from_webid") if isinstance(doc, dict) else None
+        owner = self._client_webids.get(websocket, "")
+        return bool(isinstance(sender, str) and sender and owner and self._is_blocked_for(owner, sender))
+
+    async def _handle_pod_watch(self, websocket, data: dict) -> None:
+        url = data.get("url")
+        if not self._is_pod_owner_socket(websocket):
+            return
+        status = self._pod_bridge_status()
+        if not status["ready"]:
+            await websocket.send(json.dumps({"type": "pod_watch_refused", "url": url, "reason": status["reason"]}))
+            return
+        decision = _pbp.classify("GET", url, status["pod_root"])
+        allowed = decision.allow and ((decision.own and decision.kind == "box")
+                                      or (not decision.own and decision.kind == "presence"))
+        if allowed and decision.own and (await self._pb_consumer()) != self._pb_signing_did(websocket):
+            await websocket.send(json.dumps({"type": "pod_watch_refused", "url": url, "reason": "not_consumer"}))
+            return
+        if not allowed:
+            await websocket.send(json.dumps({"type": "pod_watch_refused", "url": url, "reason": decision.reason or "path_not_allowed"}))
+            return
+        st = self._pb()
+        mine = sum(1 for w in st["watches"].values() if websocket in w["sockets"])
+        w = st["watches"].get(url)
+        if (w is None or websocket not in w["sockets"]) and mine >= self._POD_WATCH_MAX:
+            await websocket.send(json.dumps({"type": "pod_watch_refused", "url": url, "reason": "too_many"}))
+            return
+        if w is None:
+            w = st["watches"][url] = {"sockets": {}, "own": decision.own, "sig": None, "next": 0.0}
+        w["sockets"][websocket] = bool(data.get("fast"))
+        w["next"] = 0.0
+
+    async def _handle_pod_unwatch(self, websocket, data: dict) -> None:
+        st = self._pb()
+        w = st["watches"].get(data.get("url"))
+        if w:
+            w["sockets"].pop(websocket, None)
+            if not w["sockets"]:
+                st["watches"].pop(data.get("url"), None)
+
+    async def _handle_pod_thread(self, websocket, data: dict) -> None:
+        """Keep a WebID DM thread in this account's DM list (get_dms / local_dms),
+        so it survives a reload like any other DM."""
+        if not self._is_pod_owner_socket(websocket) or not self._store:
+            return
+        peer = data.get("peer_webid")
+        if not _pbp.is_dm_peer_webid(peer):
+            await websocket.send(json.dumps({"type": "error", "code": "E_SCHEMA", "message": "invalid_webid"}))
+            return
+        name = str(data.get("display_name") or "")[:100] or None
+        owner = self._client_webids.get(websocket, "")
+        self._store.save_dm_thread(peer, peer, name, owner_webid=owner)
+
+    # ── background: boxes, watches, closed-app push ──────────────────────────
+
+    async def _pb_ensure_boxes(self) -> None:
+        """Create our three drop boxes with a public-Append ACL once per pod, so
+        peers can drop to us before the desktop client has ever opened."""
+        st = self._pb()
+        status = self._pod_bridge_status()
+        if not status["ready"] or st["boxes_for"] == status["webid"]:
+            return
+        st["boxes_for"] = status["webid"]
+        root = status["pod_root"]
+        for box in _pbp.BOXES:
+            url = f"{root}proxion/{box}-inbox/"
+            try:
+                code, _h, _b = await self._pb_request_own("PUT", url, b"", {
+                    "Content-Type": "text/turtle", "Link": _pb_container_link()})
+                if code not in (200, 201, 204, 205, 409, 405):
+                    st["boxes_for"] = None
+                    continue
+                code, h, _b = await self._pb_request_own("HEAD", url)
+                acl_url, model = _pb_acl_from_link(h.get("link", ""), url)
+                if model != "wac" or not acl_url.startswith(url):
+                    continue   # an ACP server (the client writes the ACR on start), or an odd link
+                code, _h, _b = await self._pb_request_own(
+                    "PUT", acl_url, _pbp.inbox_acl_turtle(url, status["webid"]).encode(),
+                    {"Content-Type": "text/turtle"})
+                if not (200 <= code < 300):
+                    st["boxes_for"] = None
+            except Exception as exc:
+                logger.debug("pod bridge: ensure %s failed: %s", url, exc)
+                st["boxes_for"] = None
+
+    async def _pb_signature(self, url: str, own: bool) -> Optional[str]:
+        try:
+            if own:
+                code, h, body = await self._pb_request_own("GET", url, None, {"Accept": "text/turtle"},
+                                                          _pbp.MAX_LISTING_RESPONSE)
+            else:
+                from .network import async_safe_request
+                code, h, body = await async_safe_request("GET", url, timeout=self._POD_REQUEST_TIMEOUT,
+                                                         max_bytes=_pbp.MAX_SMALL_RESPONSE)
+        except Exception:
+            return None
+        if code == 404:
+            return "absent"
+        if not (200 <= code < 300):
+            return None
+        return hashlib.sha256(body + (h.get("etag", "") + h.get("last-modified", "")).encode()).hexdigest()
+
+    async def _pb_poll_watches(self, now: float) -> None:
+        st = self._pb()
+        for url, w in list(st["watches"].items()):
+            if not w["sockets"]:
+                st["watches"].pop(url, None)
+                continue
+            if now < w["next"]:
+                continue
+            if w["own"]:
+                interval = self._POD_WATCH_FAST_S if any(w["sockets"].values()) else self._POD_WATCH_OWN_S
+            else:
+                interval = self._POD_WATCH_FOREIGN_S
+            w["next"] = now + interval
+            sig = await self._pb_signature(url, w["own"])
+            if sig is None:
+                continue
+            prev, w["sig"] = w["sig"], sig
+            if prev is not None and prev != sig:
+                msg = json.dumps({"type": "pod_changed", "url": url})
+                for ws in list(w["sockets"]):
+                    try:
+                        await ws.send(msg)
+                    except Exception:
+                        w["sockets"].pop(ws, None)
+
+    def _pb_consumer_online(self) -> bool:
+        st = self._pb()
+        ident = st.get("consumer_identity") or st.get("consumer")
+        return bool(ident and self._webid_sockets.get(ident))
+
+    async def _pb_closed_app_check(self) -> None:
+        """While no consuming device is connected, look at our DM and call boxes
+        and send a content-free push when a new drop from an unblocked sender
+        lands. A blocked sender's drop is deleted unread."""
+        st = self._pb()
+        status = self._pod_bridge_status()
+        consumer = await self._pb_consumer()
+        if not status["ready"] or not consumer:
+            return
+        ident = st.get("consumer_identity") or consumer
+        fresh = False
+        for box in ("dm", "call"):
+            url = f"{status['pod_root']}proxion/{box}-inbox/"
+            try:
+                code, _h, listing = await self._pb_request_own("GET", url, None, {"Accept": "text/turtle"},
+                                                              _pbp.MAX_LISTING_RESPONSE)
+            except Exception:
+                continue
+            if code != 200:
+                continue
+            members = [m for m in _pbp.container_members(listing, url) if m.startswith(url)][:200]
+            seen = st["seen"].get(url)
+            st["seen"][url] = set(members)
+            if seen is None:
+                continue   # first look sets the baseline
+            for m in [m for m in members if m not in seen][:20]:
+                try:
+                    code, _h, raw = await self._pb_request_own("GET", m)
+                except Exception:
+                    continue
+                if code != 200:
+                    continue
+                try:
+                    doc = json.loads(raw.decode("utf-8", "replace"))
+                except Exception:
+                    continue
+                sender = doc.get("from_webid") if isinstance(doc, dict) else None
+                if isinstance(sender, str) and self._is_blocked_for(ident, sender):
+                    try:
+                        await self._pb_request_own("DELETE", m)
+                    except Exception:
+                        pass
+                    continue
+                fresh = True
+        if fresh:
+            self._pb_push(ident)
+
+    def _pb_push(self, identity: str) -> bool:
+        """A content-free 'new message' push to *identity*'s devices, rate-limited
+        with the inbox push (no sender, no content, no thread)."""
+        if not identity or not self._store:
+            return False
+        subs = self._store.get_push_subscriptions(identity)
+        vpk = getattr(self, "_vapid_private_pem", None)
+        vsub = getattr(self, "_vapid_subject", None)
+        if not (subs and vpk and vsub):
+            return False
+        last = self._last_inbox_push.get("pod:" + identity, 0.0)
+        now = time.time()
+        if now - last < self._INBOX_PUSH_MIN_INTERVAL:
+            return False
+        self._last_inbox_push["pod:" + identity] = now
+        asyncio.ensure_future(self._push_offline_fanout(subs, {"type": "dm", "thread_id": ""}, vpk, vsub))
+        return True
+
+    async def _pod_bridge_loop(self) -> None:
+        """Watches, the one-time drop-box setup, and closed-app push."""
+        while True:
+            await asyncio.sleep(1.0)
+            if not self._pod_bridge_status()["ready"]:
+                continue
+            await self._pb_ensure_boxes()
+            now = time.monotonic()
+            await self._pb_poll_watches(now)
+            st = self._pb()
+            if now >= st["closed_next"]:
+                st["closed_next"] = now + self._POD_CLOSED_POLL_S
+                if not self._pb_consumer_online():
+                    await self._pb_closed_app_check()
+                else:
+                    st["seen"].clear()   # the open client drains; re-baseline when it closes
+
+
+def _pb_response_headers() -> frozenset:
+    from .solid_client import SolidClient
+    return SolidClient.RESPONSE_HEADERS
+
+
+def _pb_container_link() -> str:
+    return '<http://www.w3.org/ns/ldp#BasicContainer>; rel="type"'
+
+
+def _pb_acl_from_link(link: str, resource_url: str) -> tuple[str, str]:
+    """(acl url, 'wac' | 'acp') from a Link header, else the .acl convention."""
+    import re
+    from urllib.parse import urljoin
+    acl = None
+    acp = False
+    for m in re.finditer(r'<([^>]*)>\s*;\s*rel="?([^";,]+)"?', link or ""):
+        uri, rel = m.group(1), m.group(2)
+        if rel == "http://www.w3.org/ns/solid/acp#accessControl":
+            acl, acp = urljoin(resource_url, uri), True
+        elif rel == "acl" and acl is None:
+            acl = urljoin(resource_url, uri)
+    if not acl:
+        return resource_url + ".acl", "wac"
+    if acp or acl.endswith(".acr"):
+        return acl, "acp"
+    return acl, "wac"

@@ -28,6 +28,7 @@ from ._gateway_http import HttpEndpointsMixin
 from ._gateway_dm import DmHandlerMixin
 from ._gateway_auth import AuthHandlerMixin
 from ._gateway_misc import MiscHandlerMixin
+from ._gateway_podbridge import PodBridgeMixin
 from .linkpreview import is_safe_url
 from .relay import _validate_relay_target as _is_safe_gateway_url
 from .command_validation import (validate_command_payload, SchemaError, AUTH_RATE_COMMANDS, HEAVY_COMMANDS,
@@ -122,7 +123,7 @@ def invite_issuer_did(invite: dict) -> str:
         return ""
 
 
-class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSyncMixin, RoomHandlerMixin, DmHandlerMixin, AuthHandlerMixin, MiscHandlerMixin, HttpEndpointsMixin):
+class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSyncMixin, RoomHandlerMixin, DmHandlerMixin, AuthHandlerMixin, MiscHandlerMixin, PodBridgeMixin, HttpEndpointsMixin):
     def __init__(
         self,
         agent: AgentState,
@@ -1147,6 +1148,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             self._rate_signal_counters.pop(websocket, None)
             self._rate_file_counters.pop(websocket, None)
             self._rate_read_counters.pop(websocket, None)
+            self._pb_forget_socket(websocket)
             self._display_names.pop(websocket, None)
             self._revoked_sessions.discard(websocket)
             if webid:
@@ -1350,6 +1352,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await websocket.send(json.dumps({"type": "file_send_failed", "file_id": data.get("file_id", ""),
                                                  "reason": "rate_limited"}))
                 return
+        # Pod bridge: its own budget, enforced in the handlers (_gateway_podbridge),
+        # which answer a refused pod_fetch with its req_id so the client fails fast.
+        elif cmd in self.POD_BRIDGE_COMMANDS:
+            pass
         # Snapshot reads: their own budget (see _check_read_rate_limit). The
         # refusal names the command so the client can retry it.
         elif cmd in SNAPSHOT_READ_COMMANDS:
@@ -1431,6 +1437,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # DID, or genuine non-proxied loopback while auth is not enforced).
         if (cmd in self._TUNNEL_CONTROL_COMMANDS and _owner_did_pol
                 and self._is_tunnel_owner(websocket)):
+            _caller_webid_pol = _owner_did_pol
+        # Same for the pod bridge: the owner proof is _is_pod_owner_socket.
+        if (cmd in self.POD_BRIDGE_OWNER_COMMANDS and _owner_did_pol
+                and self._is_pod_owner_socket(websocket)):
             _caller_webid_pol = _owner_did_pol
         _pol_decision = get_policy().evaluate_ws_command(cmd, _caller_webid_pol, _owner_did_pol)
         if not _pol_decision.allow:
@@ -1738,6 +1748,16 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_stop_tunnel(websocket, data)
             elif cmd == "tunnel_status":
                 await self._handle_tunnel_status(websocket, data)
+            elif cmd == "pod_bridge_info":
+                await self._handle_pod_bridge_info(websocket, data)
+            elif cmd == "pod_fetch":
+                await self._handle_pod_fetch(websocket, data)
+            elif cmd == "pod_watch":
+                await self._handle_pod_watch(websocket, data)
+            elif cmd == "pod_unwatch":
+                await self._handle_pod_unwatch(websocket, data)
+            elif cmd == "pod_thread":
+                await self._handle_pod_thread(websocket, data)
             elif cmd == "mark_read":
                 await self._handle_mark_read(websocket, data)
             elif cmd == "update_last_read":
@@ -4553,6 +4573,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 asyncio.create_task(self._supervised(self._checksum_maintenance_loop)),
                 asyncio.create_task(self._supervised(self._prekey_replenishment_loop)),
                 asyncio.create_task(self._supervised(self._read_position_flush_loop)),
+                # Desktop <-> browser-build interop: drop-box watches, setup, push.
+                asyncio.create_task(self._supervised(self._pod_bridge_loop)),
             ]
 
             # R16: Continuous assurance loop
