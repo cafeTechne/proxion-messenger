@@ -767,7 +767,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         if not room_id or not self._store or room_id not in self._local_rooms:
             return False
         _known = set(self._store.get_room_members(room_id))
-        _known |= {m.get("member_did") for m in self._store.get_federated_room_members(room_id)}
+        _known |= {m.get("member_did") for m in self._store.get_federated_room_members(room_id)
+                   if not m.get("departed")}
         _known.discard("")
         return from_webid in _known
 
@@ -3145,9 +3146,11 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             # you host. This does NOT fail open on an empty member set: a
             # pod-restored room now records its creator (see _restore_rooms_from_pod),
             # and a known room with no resolvable members refuses the relay rather
-            # than accepting an unverifiable sender.
+            # than accepting an unverifiable sender. A departed owner's row is
+            # only the route to the host, not a membership.
             _known = set(self._store.get_room_members(room_id))
-            _known |= {m.get("member_did") for m in self._store.get_federated_room_members(room_id)}
+            _known |= {m.get("member_did") for m in self._store.get_federated_room_members(room_id)
+                       if not m.get("departed")}
             _known.discard("")
             if from_webid not in _known:
                 return "403 Forbidden", '{"error":"sender_not_member"}'
@@ -3537,7 +3540,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # whose federation join wasn't tracked isn't dropped.
         if self._store:
             _known = set(self._store.get_room_members(room_id))
-            _known |= {m.get("member_did") for m in self._store.get_federated_room_members(room_id)}
+            _known |= {m.get("member_did") for m in self._store.get_federated_room_members(room_id)
+                       if not m.get("departed")}
             _known.discard("")
             if _known and from_webid not in _known:
                 return "403 Forbidden", '{"error":"sender_not_member"}'

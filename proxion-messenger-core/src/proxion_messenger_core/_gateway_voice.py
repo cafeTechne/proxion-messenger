@@ -951,7 +951,8 @@ class VoiceHandlerMixin:
             return "403 Forbidden", '{"error":"not_room_host"}'
         if channel_id in self._local_rooms and self._store:
             _members = set(self._store.get_room_members(channel_id))
-            _members |= {m.get("member_did") for m in self._store.get_federated_room_members(channel_id)}
+            _members |= {m.get("member_did") for m in self._store.get_federated_room_members(channel_id)
+                         if not m.get("departed")}
             _members.discard("")
             if _members and from_webid not in _members:
                 return "403 Forbidden", '{"error":"not_a_room_member"}'

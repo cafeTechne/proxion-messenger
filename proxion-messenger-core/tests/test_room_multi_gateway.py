@@ -421,6 +421,58 @@ async def test_owner_leaving_keeps_the_room_hosted_for_remote_members(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_departed_owner_row_is_a_route_not_a_membership(tmp_path):
+    """After the owner leaves, a member gateway keeps her row only to reach the
+    host: relays naming her as sender are refused, other members still flow."""
+    from datetime import datetime, timezone
+    import secrets
+    from proxion_messenger_core.relay import post_relay, sign_relay_envelope
+
+    A, B, C = GW(tmp_path, "a"), GW(tmp_path, "b"), GW(tmp_path, "c")
+    alice = await Client("Alice").connect(A)
+    bob = await Client("Bob").connect(B)
+    carol = await Client("Carol").connect(C)
+    try:
+        rid, link = await _room(alice)
+        await _join(bob, link, rid)
+        await _join(carol, link, rid)
+        await alice.cmd(cmd="send_room", room_id=rid, content="before")
+        mid = (await bob.wait_content("before"))["message_id"]
+        await _room(alice, "solo")
+        await alice.cmd(cmd="leave_local_room", room_id=rid)
+        assert await bob.wait("room_member_left", room_id=rid, webid=alice.did)
+
+        def from_host(extra):
+            p = {"room_id": rid, "from_webid": alice.did, "source": "relay",
+                 "relay_nonce": secrets.token_hex(8),
+                 "relay_sig_did": A.gw._own_gateway_did(),
+                 "relay_ts": datetime.now(timezone.utc).isoformat(),
+                 "origin_gateway_url": A.http, **extra}
+            p["signature"] = sign_relay_envelope(A.agent.identity_key, p)
+            return p
+
+        await post_relay(B.http + "/relay", from_host({
+            "content_type": "room_message", "thread_id": rid, "from_display_name": "Alice",
+            "content": "ghost-post", "timestamp": datetime.now(timezone.utc).isoformat(),
+            "message_id": "ghost-" + secrets.token_hex(6)}))
+        await post_relay(B.http + "/relay", from_host({
+            "content_type": "room_reaction", "message_id": mid, "emoji": "x",
+            "action": "add"}))
+        assert await _absent(lambda: any(e.get("content") == "ghost-post" for e in bob.events)
+                             or bob.of("reaction_added", from_webid=alice.did))
+        assert not any(m["content"] == "ghost-post"
+                       for m in B.call(lambda: B.gw._store.get_messages(rid)))
+        # Her row still routes the room: Carol's messages reach Bob via the host.
+        await carol.cmd(cmd="send_room", room_id=rid, content="via-host")
+        assert await bob.wait_content("via-host")
+        await bob.cmd(cmd="send_room", room_id=rid, content="to-carol")
+        assert await carol.wait_content("to-carol")
+    finally:
+        for c in (alice, bob, carol):
+            await c.close()
+
+
+@pytest.mark.asyncio
 async def test_other_session_gets_room_joined_elsewhere_and_names_survive_restart(tmp_path):
     A, B = GW(tmp_path, "a"), GW(tmp_path, "b")
     alice = await Client("Alice").connect(A)
