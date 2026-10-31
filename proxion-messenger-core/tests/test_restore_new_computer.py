@@ -210,6 +210,39 @@ def test_delete_account_tells_contacts(tmp_path):
     asyncio.run(run())
 
 
+def test_delete_account_clears_only_its_own_blocks(tmp_path):
+    """Reset drops the account's blocks, including its entries in the gateway-wide
+    legacy blocklist.json, while another account on the gateway keeps its own."""
+    x, y, z = _client_did(), _client_did(), _client_did()
+
+    async def run():
+        a = _gateway(tmp_path, "ba")
+        gw = a[0]
+        async with websockets.connect(f"ws://127.0.0.1:{a[2]}") as conn_a,                 websockets.connect(f"ws://127.0.0.1:{a[2]}") as conn_c:
+            ca, cc = _client_did(), _client_did()
+            await _reg(conn_a, ca, "Alice")
+            await _reg(conn_c, cc, "Carol")
+            for conn, who in ((conn_a, x), (conn_a, y), (conn_c, x)):
+                await conn.send(json.dumps({"cmd": "block", "webid": who}))
+            # Entries an older gateway mirrored into the union file, plus one no
+            # account here owns.
+            for who in (x, y, z):
+                gw.blocklist.block(who)
+            await conn_c.send(json.dumps({"cmd": "list_blocks"}))
+            assert (await _wait(conn_c, lambda m: m.get("type") == "blocks"))["webids"] == [x]
+            await conn_a.send(json.dumps({"cmd": "delete_account", "confirm": "delete"}))
+            assert await _wait(conn_a, lambda m: m.get("type") == "account_deleted")
+            assert gw._store.get_blocked_by(ca) == []
+            assert not gw._is_blocked_for(ca, y)
+            assert gw.blocklist.blocked_webids == {x, z}
+            await conn_c.send(json.dumps({"cmd": "list_blocks"}))
+            assert (await _wait(conn_c, lambda m: m.get("type") == "blocks"))["webids"] == [x]
+            assert gw._is_blocked_for(cc, x)
+        on_disk = json.loads((tmp_path / "ba" / "blocklist.json").read_text())
+        assert sorted(on_disk) == sorted([x, z])
+    asyncio.run(run())
+
+
 def test_unproven_gateway_change_stays_pending(tmp_path):
     """A URL change without a signed claim never redirects a contact's traffic."""
     from proxion_messenger_core.gateway import GatewayConfig, ProxionGateway

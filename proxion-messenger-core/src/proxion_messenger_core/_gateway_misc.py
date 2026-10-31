@@ -912,7 +912,14 @@ class MiscHandlerMixin:
                     "to_webid": _peer,
                     "timestamp": _removed_at,
                 }))
+        _my_blocks = self._store.get_blocked_by(webid)
         counts = self._store.delete_account_data(webid)
+        # blocklist.json is the gateway-wide legacy union of every account's
+        # blocks. Drop this account's entries from it unless another account
+        # here still blocks the same person.
+        for _b in _my_blocks:
+            if not self._store.is_blocked_by_anyone(_b):
+                self.blocklist.unblock(_b)
         self._user_presence.pop(webid, None)
         self._relay_queue.pop(webid, None)
         self._did_pod_webids.pop(webid, None)
