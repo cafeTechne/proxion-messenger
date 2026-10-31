@@ -34,7 +34,7 @@ NOT_FOR_WEB = {
     "hole_punch_complete_ack", "hole_punch_initiated", "hole_punch_offer",
     "identity_restore", "incident_simulation_report", "invite_accepted", "invite_created",
     "msg_delivered", "msg_read", "new_member_joined", "notification_read", "notifications",
-    "outbox_failed", "peer_devices", "peer_gateway_change_approved",
+    "outbox_failed", "peer_devices",
     "peer_trust_dispute_resolved", "pod_linked", "prekey_bundle",
     "prekey_replenishment_needed", "prekeys_uploaded", "primary_device_set",
     "quarantine_item_dropped", "quarantine_item_released", "quarantine_items",

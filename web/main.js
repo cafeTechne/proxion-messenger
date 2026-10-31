@@ -96,6 +96,7 @@ import { createDropZone } from './dropzone.js';
 import { createEmoji } from './emoji.js';
 import { createSaved, syncSavedFromPod, pushAllSavedToPod, forgetSavedMessage, forgetSavedExpired } from './saved.js';
 import { createBlocks } from './blocks.js';
+import { createGatewayChanges } from './gateway-change.js';
 import { createSolidChat } from './solidchat.js';
 import { createSolidChatUI } from './solidchat-ui.js';
 import { createSendStatus, seenByText } from './send-status.js';
@@ -722,6 +723,13 @@ import { createAccountSync } from './account-sync.js';
         const blocks = createBlocks({
             getSocket: () => socket, showToast,
             onAfterChange: () => { blocks.renderBlockedList(); },
+        });
+        // A contact seen at a new, unproven gateway address: approve or reject
+        // the move on their DM (the gateway keeps the old route until then).
+        const gatewayChanges = createGatewayChanges({
+            getSocket: () => socket, showConfirm, showToast,
+            getActivePeer: () => (activeView && (activeView.type === "dm" || activeView.type === "local_dm"))
+                ? (activeView.peerWebid || activeView.peerDid || null) : null,
         });
         // Solid conversations: cross-app shared chats (SolidOS / POD-CHAT). A
         // distinct plaintext mode, separate from E2E DMs and gateway rooms.
@@ -2493,6 +2501,13 @@ import { createAccountSync } from './account-sync.js';
                 }
                 case "blocks":
                     blocks.handleBlocksEvent(event.webids);   // R65
+                    break;
+                case "peer_gateway_changes":
+                    gatewayChanges.handleChangesEvent(event.changes);
+                    break;
+                case "peer_gateway_change_approved":
+                case "peer_gateway_change_rejected":
+                    gatewayChanges.handleResult(event);
                     break;
                 case "reaction_added":
                     handleReactionEvent(event, "add");
@@ -5070,6 +5085,8 @@ import { createAccountSync } from './account-sync.js';
             const hdr = document.getElementById("chat-header-name");
             if (hdr) hdr.title = hdr.textContent || "";
             _updateHeaderSubtitle();
+            gatewayChanges.renderBar((activeView?.type === "dm" || activeView?.type === "local_dm")
+                ? (activeView.peerWebid || activeView.peerDid || null) : null);
             _closeRoomOptionsMenu();
             _syncDisappearOption();
             _syncScheduleBtn();
