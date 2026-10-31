@@ -1,4 +1,4 @@
-// msgrequests.js — message requests from browser-build (WebID) senders.
+// msgrequests.js: message requests from browser-build (WebID) senders.
 //
 // On desktop, a signed and verified first DM from a WebID that is not a contact
 // is not opened: it waits in the pod inbox while the user decides. The request

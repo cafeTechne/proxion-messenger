@@ -1,4 +1,4 @@
-// gwpod.js — the desktop client's pod I/O, through the gateway's pod bridge.
+// gwpod.js: the desktop client's pod I/O, through the gateway's pod bridge.
 //
 // The desktop app has no Solid session in the browser: its gateway holds the
 // pod credentials. To talk to browser-build contacts it still runs the browser

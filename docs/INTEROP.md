@@ -19,6 +19,24 @@ Partial / Missing / N-A by design, with citations), see
   not a gap. The encryption protocol is specified in
   [E2E_ENCRYPTION.md](E2E_ENCRYPTION.md) for any app that wants to implement it.
 
+## Proxion desktop and Proxion in the browser
+
+The desktop app (a gateway) and the browser build (no gateway, just your pod) can
+direct-message each other. The browser build delivers a DM by dropping a signed,
+ratchet-encrypted envelope into the recipient's `proxion/dm-inbox/`; the desktop
+client runs that same code (`web/webdm.js`) as the WebID of the pod its gateway is
+connected to, with the gateway making the pod requests on its behalf
+(`_gateway_podbridge.py`, an owner-only and path-allowlisted fetch).
+
+- **Works:** text DMs both ways, message requests for a first DM from a stranger,
+  presence both ways, blocking. Test: `npm run smoke:cross-mode-dm`.
+- **Needs:** a pod connected to the desktop gateway, stored where its WebID points
+  (`{root}profile/card#me` with storage at `{root}`). Share the WebID from
+  Settings, Pod.
+- **Not yet:** rooms, calls, edits, reactions, files, voice messages,
+  disappearing and scheduled messages in these threads. One desktop device per
+  WebID receives them: the one that signed in last.
+
 ## What another Solid app sees
 
 A room is written as a standard Solid [Long Chat](https://solid.github.io/chat/): a

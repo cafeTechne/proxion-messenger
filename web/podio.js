@@ -1,4 +1,4 @@
-// podio.js — the pod drop-box, identity and presence I/O, over an injected fetch.
+// podio.js: the pod drop-box, identity and presence I/O, over an injected fetch.
 //
 // The browser build talks to its pod with the Solid session (pod.js wraps one
 // instance of this over solidSession). The desktop app has no browser session:

@@ -1,4 +1,4 @@
-// crossmode.js — desktop DMs and presence with browser-build (WebID) contacts.
+// crossmode.js: desktop DMs and presence with browser-build (WebID) contacts.
 //
 // A browser-build user is reached through their pod: DMs are signed, ratchet-
 // encrypted envelopes dropped into proxion/dm-inbox/, presence is a public

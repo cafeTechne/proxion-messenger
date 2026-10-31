@@ -103,8 +103,9 @@ Start and hold an E2E DM, delivered near-realtime, no gateway on either side.
 Publish prekey bundles to a public-read pod resource for X3DH init; deliver the
 ratchet-encrypted envelope (unchanged from `e2e.js`) to the recipient's pod DM
 inbox; receive via a `notify.js` subscription to the local inbox. The pod stores
-only ciphertext. Wire-compatible with gateway-relayed DMs so web and desktop
-interoperate.
+only ciphertext. The desktop app reaches these DMs through its gateway's pod
+bridge, as its pod WebID (see INTEROP.md, "Proxion desktop and Proxion in the
+browser"); gateway-relayed DMs between two desktops are a separate path.
 
 ### Phase 3: Presence without a gateway
 Presence as a public-read pod heartbeat resource plus per-contact subscription.
