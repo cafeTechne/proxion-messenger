@@ -295,6 +295,18 @@ class IdentityStoreMixin(object):
                 (peer_did, now),
             ).fetchone()
         return (row["owner_webid"] or "") if row else ""
+
+    def relationship_owners(self, peer_did: str) -> set:
+        """Every LOCAL account (owner_webid, '' for owner-less rows) holding a
+        live relationship with peer_did."""
+        now = int(time.time())
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT owner_webid FROM relationships "
+                "WHERE peer_did = ? AND revoked = 0 AND expires_at > ?",
+                (peer_did, now),
+            ).fetchall()
+        return {(r["owner_webid"] or "") for r in rows}
     def save_relationship(
         self, cert_dict: dict, peer_did: Optional[str] = None, owner_webid: str = ""
     ) -> None:

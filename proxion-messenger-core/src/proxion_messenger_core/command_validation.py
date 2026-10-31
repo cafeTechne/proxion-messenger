@@ -135,7 +135,7 @@ MUTATING_COMMANDS: frozenset[str] = frozenset({
     "withdraw_friend_request", "restore_contacts",
     "revoke_contact", "block", "unblock", "verify_contact",
     "apply_contact_verification_sync", "sync_contact_verifications",
-    "approve_peer_gateway_change", "resolve_peer_trust_dispute",
+    "approve_peer_gateway_change", "reject_peer_gateway_change", "resolve_peer_trust_dispute",
     # calls and connectivity
     "voice_invite", "voice_answer", "ice_candidate", "voice_hangup",
     "join_voice_channel", "leave_voice_channel",
@@ -187,7 +187,7 @@ READ_ONLY_COMMANDS: frozenset[str] = frozenset({
     "resolve_did", "discover_peer", "get_identity", "get_connect_id",
     "resolve_connect_id", "get_my_address", "get_gateway_webid", "get_inbox_webhook",
     "get_relationships", "list_friend_requests", "list_blocks",
-    "get_contact_verification", "list_verified_contacts",
+    "get_peer_gateway_changes", "get_contact_verification", "list_verified_contacts",
     "get_presence", "get_all_presence", "set_presence", "typing",
     "get_voice_channel_state", "screenshare_started", "screenshare_stopped",
     "tunnel_status", "pod_status", "list_sessions", "list_webhooks",

@@ -1879,6 +1879,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_get_realtime_abuse_signals(websocket, data)
             elif cmd == "approve_peer_gateway_change":
                 await self._handle_approve_peer_gateway_change(websocket, data)
+            elif cmd == "reject_peer_gateway_change":
+                await self._handle_reject_peer_gateway_change(websocket, data)
+            elif cmd == "get_peer_gateway_changes":
+                await self._handle_get_peer_gateway_changes(websocket, data)
             elif cmd == "prepare_recovery_operation":
                 await self._handle_prepare_recovery_operation(websocket, data)
             elif cmd == "confirm_recovery_operation":

@@ -579,6 +579,9 @@ class AuthHandlerMixin:
                     })
                 if rel_list:
                     await websocket.send(json.dumps({"type": "relationships", "contacts": rel_list}))
+                    # A contact seen at a new, unproven gateway URL waits for review.
+                    if self._peer_gateway_changes_for(websocket):
+                        await self._send_peer_gateway_changes(websocket)
 
                 # Push pending friend requests (inbound invites awaiting acceptance).
                 # The table also holds the requests this gateway sent; those are

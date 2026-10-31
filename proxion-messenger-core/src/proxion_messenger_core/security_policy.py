@@ -86,7 +86,7 @@ _OWNER_ONLY_COMMANDS: set[str] = {
     "get_audit_logs", "get_security_events", "connect_css", "disconnect_pod",
     "reconnect_pod", "get_runtime_security_state", "get_security_summary",
     "get_degraded_mode_state", "get_realtime_abuse_signals",
-    "approve_peer_gateway_change", "prepare_recovery_operation",
+    "prepare_recovery_operation",
     "confirm_recovery_operation", "export_security_snapshot",
     "resolve_peer_trust_dispute", "list_quarantine_items",
     "release_quarantine_item", "drop_quarantine_item", "ack_checksum_mismatch",

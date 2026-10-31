@@ -506,6 +506,40 @@ class FederationStoreMixin(object):
                 (time.time(), peer_did),
             )
             return True
+
+    def reject_peer_gateway_change(self, peer_did: str) -> bool:
+        """Drop the pending gateway change for peer_did and keep the pinned URL.
+        Returns True if a pending change was cleared."""
+        now = time.time()
+        with self._conn() as conn:
+            pin = conn.execute(
+                "SELECT * FROM peer_gateway_pins WHERE peer_did = ? AND pending_change = 1", (peer_did,)
+            ).fetchone()
+            if not pin:
+                return False
+            conn.execute(
+                """UPDATE peer_gateway_pins SET
+                   last_seen_gateway_url = pinned_gateway_url,
+                   pending_change = 0
+                   WHERE peer_did = ?""",
+                (peer_did,),
+            )
+            # approved = -1 marks a rejected request (0 pending, 1 approved).
+            conn.execute(
+                "UPDATE peer_gateway_change_requests SET approved = -1, approved_at = ? "
+                "WHERE peer_did = ? AND approved = 0",
+                (now, peer_did),
+            )
+            return True
+
+    def list_pending_peer_gateway_changes(self) -> list:
+        """Pins whose peer was seen at a new, unproven gateway URL."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM peer_gateway_pins WHERE pending_change = 1 ORDER BY last_seen_at DESC"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
     def list_peer_gateway_change_requests(self, peer_did: Optional[str] = None, limit: int = 100) -> list:
         with self._conn() as conn:
             if peer_did:

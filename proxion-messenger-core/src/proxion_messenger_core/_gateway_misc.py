@@ -1088,26 +1088,127 @@ class MiscHandlerMixin:
             "severity_24h": _severity(rollup_24h),
         }, default=str))
 
+    def _may_review_peer_gateway(self, websocket, peer_did: str) -> bool:
+        """Whether this session may approve or reject a pending gateway URL
+        change for *peer_did*: the local account holding the relationship with
+        that contact, or the gateway's own identity. An owner-less (legacy)
+        relationship needs the owner proof the tunnel controls use."""
+        caller = self._client_webids.get(websocket, "")
+        if not caller or not peer_did or not self._store:
+            return False
+        if caller == self._own_gateway_did():
+            return True
+        owners = self._store.relationship_owners(peer_did)
+        if caller in owners:
+            return True
+        return "" in owners and self._is_tunnel_owner(websocket)
+
+    def _peer_gateway_changes_for(self, websocket) -> list:
+        """The pending gateway URL changes this session may review."""
+        if not self._store:
+            return []
+        out = []
+        for pin in self._store.list_pending_peer_gateway_changes():
+            did = pin.get("peer_did", "")
+            if not self._may_review_peer_gateway(websocket, did):
+                continue
+            out.append({
+                "peer_did": did,
+                "display_name": self._store.get_display_name(did) or None,
+                "old_url": pin.get("pinned_gateway_url", ""),
+                "new_url": pin.get("last_seen_gateway_url", ""),
+                "observed_at": pin.get("last_seen_at"),
+            })
+        return out
+
+    async def _send_peer_gateway_changes(self, websocket) -> None:
+        await websocket.send(json.dumps({
+            "type": "peer_gateway_changes",
+            "changes": self._peer_gateway_changes_for(websocket),
+        }, default=str))
+
+    async def _push_peer_gateway_changes(self) -> None:
+        """Refresh every session that may review a pending change (a new one
+        was recorded, or another session approved or rejected one)."""
+        for ws in list(self.clients):
+            try:
+                await self._send_peer_gateway_changes(ws)
+            except Exception:
+                pass
+
+    async def _handle_get_peer_gateway_changes(self, websocket, data: dict) -> None:
+        await self._send_peer_gateway_changes(websocket)
+
     async def _handle_approve_peer_gateway_change(self, websocket, data: dict) -> None:
-        """Owner-only: approve a pending peer gateway URL change."""
+        """Approve a pending peer gateway URL change. Only the account holding
+        the relationship may do it; nothing approves one automatically."""
         peer_did = data.get("peer_did", "")
-        if not peer_did:
+        if not isinstance(peer_did, str) or not peer_did:
             await websocket.send(json.dumps({"type": "error", "message": "peer_did required"}))
             return
         if not self._store:
             await websocket.send(json.dumps({"type": "error", "message": "no store"}))
             return
+        if not self._may_review_peer_gateway(websocket, peer_did):
+            await websocket.send(json.dumps({
+                "type": "error", "code": "E_FORBIDDEN", "cmd": "approve_peer_gateway_change",
+                "message": "not_your_contact"}))
+            return
         approved = self._store.approve_peer_gateway_change(peer_did)
         if approved:
-            # Update the in-memory cache to reflect the newly approved URL
             pin = self._store.get_peer_gateway_pin(peer_did)
             if pin:
-                self._peer_gateway_urls[peer_did] = pin["pinned_gateway_url"]
+                url = pin["pinned_gateway_url"]
+                self._peer_gateway_urls[peer_did] = url
+                self._store.save_peer_gateway(peer_did, url)
+                self._store.retarget_pending_relays(peer_did, url)
+                try:
+                    self._store.save_security_event(
+                        "peer_gateway_change_approved", "info",
+                        webid=self._client_webids.get(websocket, "") or None,
+                        details=f"peer_did={peer_did} new={url}",
+                    )
+                except Exception:
+                    pass
+                asyncio.create_task(self._sync_peer_gateway_to_pod(peer_did, url))
         await websocket.send(json.dumps({
             "type": "peer_gateway_change_approved",
             "peer_did": peer_did,
             "approved": approved,
         }))
+        await self._push_peer_gateway_changes()
+
+    async def _handle_reject_peer_gateway_change(self, websocket, data: dict) -> None:
+        """Reject a pending peer gateway URL change: keep relaying to the pinned
+        URL and clear the pending row. Same authorization as approval."""
+        peer_did = data.get("peer_did", "")
+        if not isinstance(peer_did, str) or not peer_did:
+            await websocket.send(json.dumps({"type": "error", "message": "peer_did required"}))
+            return
+        if not self._store:
+            await websocket.send(json.dumps({"type": "error", "message": "no store"}))
+            return
+        if not self._may_review_peer_gateway(websocket, peer_did):
+            await websocket.send(json.dumps({
+                "type": "error", "code": "E_FORBIDDEN", "cmd": "reject_peer_gateway_change",
+                "message": "not_your_contact"}))
+            return
+        rejected = self._store.reject_peer_gateway_change(peer_did)
+        if rejected:
+            try:
+                self._store.save_security_event(
+                    "peer_gateway_change_rejected", "info",
+                    webid=self._client_webids.get(websocket, "") or None,
+                    details=f"peer_did={peer_did}",
+                )
+            except Exception:
+                pass
+        await websocket.send(json.dumps({
+            "type": "peer_gateway_change_rejected",
+            "peer_did": peer_did,
+            "rejected": rejected,
+        }))
+        await self._push_peer_gateway_changes()
 
     async def _handle_prepare_recovery_operation(self, websocket, data: dict) -> None:
         """Owner-only: create a short-lived recovery operation ID for two-person control."""

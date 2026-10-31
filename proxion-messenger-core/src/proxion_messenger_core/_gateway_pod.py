@@ -256,6 +256,11 @@ class PodSyncMixin:
                             )
                         except Exception:
                             pass
+                    # The account holding the contact reviews it (approve/reject).
+                    try:
+                        asyncio.get_running_loop().create_task(self._push_peer_gateway_changes())
+                    except RuntimeError:
+                        pass
                 # Update last-seen but keep pinned URL; mark pending
                 self._store.upsert_peer_gateway_pin(
                     peer_did=did,
