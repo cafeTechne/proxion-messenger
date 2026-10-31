@@ -21,9 +21,9 @@ async def voice_room(alice_session, bob_session):
 
 @pytest.mark.asyncio
 async def test_register_issues_gateway_delegation_cert(live_gateway, alice_agent):
-    """On register, the gateway certifies the browser's signing key as speaking for the
+    """On register, the gateway certifies the owner's signing key as speaking for the
     gateway identity, so a call it signs can be bound to the contact across gateways
-    (R85 Track 1)."""
+    (R85 Track 1). A guest account on the same gateway gets no cert."""
     import json
     import websockets
     from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
@@ -32,32 +32,34 @@ async def test_register_issues_gateway_delegation_cert(live_gateway, alice_agent
 
     gateway = live_gateway["gateway"]
     gateway_did = pub_key_to_did(gateway.agent.identity_pub_bytes)
-    browser_did = pub_key_to_did(
+    guest_did = pub_key_to_did(
         alice_agent.identity_pub.public_bytes(Encoding.Raw, PublicFormat.Raw)
     )
 
-    ws = await websockets.connect(live_gateway["url"])
-    try:
-        await asyncio.wait_for(ws.recv(), timeout=5.0)  # config
-        await ws.send(json.dumps({"cmd": "register", "did": browser_did, "display_name": "Alice"}))
-        registered = None
-        for _ in range(6):
-            ev = json.loads(await asyncio.wait_for(ws.recv(), timeout=5.0))
-            await answer_auth_challenge(ws, ev, alice_agent.identity_key)
-            if ev.get("type") == "registered":
-                registered = ev
-                break
-        assert registered is not None, "no registered event"
-        cert = registered.get("gateway_delegation_cert")
-        assert cert, "register did not issue a gateway delegation cert"
-        # The cert binds THIS browser key to the gateway's identity, signed by the gateway.
-        assert cert["device_did"] == browser_did
-        assert cert["account_did"] == gateway_did
-        assert verify_device_cert(
-            cert, expected_device_did=browser_did, expected_account_did=gateway_did
-        ) == gateway_did
-    finally:
-        await ws.close()
+    async def _registered(did, key):
+        ws = await websockets.connect(live_gateway["url"])
+        try:
+            await asyncio.wait_for(ws.recv(), timeout=5.0)  # config
+            await ws.send(json.dumps({"cmd": "register", "did": did, "display_name": "X"}))
+            for _ in range(6):
+                ev = json.loads(await asyncio.wait_for(ws.recv(), timeout=5.0))
+                await answer_auth_challenge(ws, ev, key)
+                if ev.get("type") == "registered":
+                    return ev
+        finally:
+            await ws.close()
+        raise AssertionError("no registered event")
+
+    assert "gateway_delegation_cert" not in await _registered(guest_did, alice_agent.identity_key)
+
+    cert = (await _registered(gateway_did, gateway.agent.identity_key)).get("gateway_delegation_cert")
+    assert cert, "register did not issue a gateway delegation cert to the owner"
+    # The cert binds the owner's key to the gateway's identity, signed by the gateway.
+    assert cert["device_did"] == gateway_did
+    assert cert["account_did"] == gateway_did
+    assert verify_device_cert(
+        cert, expected_device_did=gateway_did, expected_account_did=gateway_did
+    ) == gateway_did
 
 
 @pytest.mark.asyncio

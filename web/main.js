@@ -2358,10 +2358,13 @@ import { createAccountSync } from './account-sync.js';
                     accountSync.setAccount(event.webid);
                     // R85 Track 1: cache the gateway's cert for our signing key so calls
                     // can prove this browser speaks for our gateway identity (the id a
-                    // federated contact knows us by). Refreshed on every register.
-                    if (event.gateway_delegation_cert) {
-                        try { localStorage.setItem("proxion_gateway_delegation_cert", JSON.stringify(event.gateway_delegation_cert)); } catch (_) {}
-                    }
+                    // federated contact knows us by). Refreshed on every register;
+                    // only the gateway owner's account gets one, so a did:key register
+                    // without one drops a stale copy (a pod WebID register never carries it).
+                    try {
+                        if (event.gateway_delegation_cert) localStorage.setItem("proxion_gateway_delegation_cert", JSON.stringify(event.gateway_delegation_cert));
+                        else if (String(event.webid || '').startsWith('did:key:')) localStorage.removeItem("proxion_gateway_delegation_cert");
+                    } catch (_) {}
                     // Auth is complete — now safe to send all init commands that
                     // require an authenticated socket (they were withheld from onopen).
                     (function _postAuthInit() {

@@ -293,6 +293,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         self._tunnel = None
         self._tunnel_prev_public_url = None
         self._tunnel_prev_force_auth = False
+        # Account DIDs proven to be the gateway owner's during this run (see
+        # _is_owner_account). Lets the owner's linked devices, which register as
+        # that account over a tunnel, keep the gateway delegation cert.
+        self._owner_account_dids: set = set()
         # Serializes tunnel start/stop so the two transitions are mutually
         # exclusive: concurrent starts cannot both spawn cloudflared, and a stop
         # cannot interleave a start's auth-force / public_url mutations (F3).
@@ -2854,6 +2858,23 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             ip = (self._session_meta.get(websocket) or {}).get("ip_addr", "")
             return ip in ("", "127.0.0.1", "::1", "localhost", "unknown")
         return False
+
+    def _is_owner_account(self, websocket, identity: str) -> bool:
+        """Whether *identity*, registered on *websocket*, is the gateway owner's account.
+
+        A session that passes _is_tunnel_owner is the owner, and its account is
+        remembered for the rest of the run. A later session proven (by the auth
+        challenge or a delegation cert) to be one of those accounts is the owner
+        too: that is how the owner's linked device, reaching the gateway over a
+        tunnel with auth forced on, is told apart from a guest account."""
+        owners = getattr(self, "_owner_account_dids", None)
+        if owners is None:
+            owners = self._owner_account_dids = set()
+        if self._is_tunnel_owner(websocket):
+            if identity:
+                owners.add(identity)
+            return True
+        return bool(identity) and identity in owners
 
     def _tunnel_active(self) -> bool:
         """Whether the app-managed public tunnel (cloudflared) is live.

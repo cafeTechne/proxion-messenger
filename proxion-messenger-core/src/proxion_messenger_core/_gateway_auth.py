@@ -415,8 +415,12 @@ class AuthHandlerMixin:
             # our gateway did (federation relationships are keyed gateway-to-gateway),
             # not by the browser key that signs a call's DTLS fingerprint. Shipping this
             # cert with a call lets the far side bind the two and show Verified.
+            # Only the owner's account (and its linked devices) speaks for the
+            # gateway: a guest account holding this cert would show as Verified
+            # owner in its calls.
             _signing_did = data.get("did") or ""
-            if isinstance(_signing_did, str) and _signing_did.startswith("did:key:"):
+            if (isinstance(_signing_did, str) and _signing_did.startswith("did:key:")
+                    and self._is_owner_account(websocket, identity)):
                 try:
                     from .device_cert import issue_device_cert
                     registered_msg["gateway_delegation_cert"] = issue_device_cert(
