@@ -132,12 +132,20 @@ class RoomStoreMixin(object):
             rows = conn.execute(
                 # Banned members never count: every room fanout and membership
                 # check reads this list, so a ban takes effect everywhere at once.
-                "SELECT f.member_did, f.gateway_url FROM room_federated_members f "
+                "SELECT f.member_did, f.gateway_url, f.departed FROM room_federated_members f "
                 "WHERE f.room_id=? AND NOT EXISTS (SELECT 1 FROM room_bans b "
                 "WHERE b.room_id=f.room_id AND b.banned_did=f.member_did)",
                 (room_id,),
             ).fetchall()
-        return [{"member_did": r[0], "gateway_url": r[1]} for r in rows]
+        return [{"member_did": r[0], "gateway_url": r[1], "departed": bool(r[2])} for r in rows]
+    def set_federated_member_departed(self, room_id: str, member_did: str, departed: bool) -> None:
+        """Mark a federated row kept only as the route to a room's host (its
+        owner left), so member lists leave it out."""
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE room_federated_members SET departed=? WHERE room_id=? AND member_did=?",
+                (1 if departed else 0, room_id, member_did),
+            )
     def get_rooms_for_member(self, webid: str) -> list[str]:
         """Return all room_ids that this webid is a member of."""
         with self._conn() as conn:

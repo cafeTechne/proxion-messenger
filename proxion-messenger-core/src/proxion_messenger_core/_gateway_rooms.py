@@ -1370,7 +1370,7 @@ class RoomHandlerMixin:
         if room_id in self._local_rooms and self._store:
             for _fm in (self._store.get_federated_room_members(room_id) or []):
                 _fwid = _fm.get("member_did", "")
-                if _fwid and _fwid not in seen_webids:
+                if _fwid and _fwid not in seen_webids and not _fm.get("departed"):
                     seen_webids.add(_fwid)
                     _fdn = (self._store.get_display_name(_fwid) if self._store else None) or _fwid[:12]
                     _fst = self._user_presence.get(_fwid, {}).get("status", "offline")
@@ -4326,6 +4326,9 @@ class RoomHandlerMixin:
                 dn = m.get("display_name")
                 if isinstance(dn, str) and dn.strip():
                     self._store.save_display_name(wid, dn.strip()[:64])
+            # The owner left: their row is only the route to the host.
+            self._store.set_federated_member_departed(
+                room_id, creator, resp.get("owner_left") is True)
             if history_mode == "all":
                 for msg in (resp.get("messages") or [])[:50]:
                     if not isinstance(msg, dict):
@@ -4467,9 +4470,12 @@ class RoomHandlerMixin:
         # Members on other gateways too: the joiner reaches them through us.
         _stored = _stored + [m.get("member_did", "") for m in (
             self._store.get_federated_room_members(room_id) if self._store else [])]
+        # The owner left and the room stays hosted here for the members on
+        # other gateways: the joiner keeps the owner only as its route to us.
+        _owner_left = bool(creator) and creator not in _stored
         members = []
         for wid in list(dict.fromkeys([creator] + [w for w in _stored if w != creator]))[:_MAX_ROOM_MEMBERS]:
-            if wid and wid != member:
+            if wid and wid != member and not (_owner_left and wid == creator):
                 members.append({"webid": wid, "display_name":
                                 (self._store.get_display_name(wid) if self._store else None) or ""})
         messages = []
@@ -4498,4 +4504,5 @@ class RoomHandlerMixin:
             "ok": True, "room_id": room_id, "name": room.get("name", ""),
             "topic": room.get("topic", ""), "history_mode": room.get("history_mode", "none"),
             "creator_webid": creator, "members": members, "messages": messages,
+            "owner_left": _owner_left,
         })

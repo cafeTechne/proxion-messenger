@@ -253,7 +253,7 @@ class _StoreBase(object):
         """Flush the WAL to the main database file (call before shutdown)."""
         with self._conn() as conn:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    _SCHEMA_VERSION = 63
+    _SCHEMA_VERSION = 64
     _integrity_ok: bool = True
     _migration_error: str = ""
     def _init_db(self) -> None:
@@ -1602,6 +1602,11 @@ class _StoreBase(object):
                     " ON relay_delivery_chain(peer_did, created_at)",
                 ],
             },
+            # 64: a mirror keeps the departed owner's row as its route to the
+            # host; departed hides that row from member lists.
+            [
+                "ALTER TABLE room_federated_members ADD COLUMN departed INTEGER NOT NULL DEFAULT 0",
+            ],
         ]
 
         for version, migration in enumerate(migrations, start=1):

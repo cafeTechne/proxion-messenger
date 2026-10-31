@@ -467,11 +467,11 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 self._room_codes[room["code"]] = room["room_id"]
             # Back-fill room_members for rooms that predate the membership table.
             # Not for a mirror of a room hosted elsewhere (the creator is a
-            # federated member there), nor for a room whose owner already left.
+            # federated member there), nor for a room whose owner already left
+            # (hosted on for members on other gateways only).
             creator = room.get("creator_webid", "")
-            if creator and not self._store.get_room_members(room["room_id"]) and not any(
-                    m.get("member_did") == creator
-                    for m in self._store.get_federated_room_members(room["room_id"])):
+            if creator and not self._store.get_room_members(room["room_id"]) \
+                    and not self._store.get_federated_room_members(room["room_id"]):
                 self._store.add_room_member(room["room_id"], creator)
         logger.info(f"Hydrated {len(self._local_rooms)} local rooms from store")
         # R11.2.3: restore per-room disappear timers from SQLite
@@ -3603,10 +3603,24 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                     "room_name": _room.get("name", "")})
                 return "200 OK", '{"status":"ok"}'
             if target == _owner or self._relay_identity_is_local(target, room_id):
-                # The owner's row is how this mirror reaches the host: keep it.
+                # The owner's row is how this mirror reaches the host: keep it,
+                # marked departed so member lists leave the owner out.
                 if action == "member_left" and target == _owner:
+                    self._store.set_federated_member_departed(room_id, target, True)
                     await self._send_room_event(_room, {
                         "type": "room_member_left", "room_id": room_id, "webid": target})
+                elif action == "member_joined" and target == _owner and any(
+                        m.get("member_did") == target and m.get("departed")
+                        for m in self._store.get_federated_room_members(room_id)):
+                    self._store.set_federated_member_departed(room_id, target, False)
+                    _dn = str(data.get("display_name") or "").strip()[:64]
+                    if _dn:
+                        self._store.save_display_name(target, _dn)
+                    await self._send_room_event(_room, {
+                        "type": "room_member_joined", "room_id": room_id,
+                        "name": _room.get("name", ""), "webid": target,
+                        "display_name": _dn or self._store.get_display_name(target) or target[:12],
+                        "federated": True})
                 return "200 OK", '{"status":"ok"}'
             if action == "member_joined":
                 _host = self._room_host_gateway(room_id)

@@ -373,14 +373,48 @@ async def test_owner_leaving_keeps_the_room_hosted_for_remote_members(tmp_path):
                                   and "gateway" in str(e.get("message", "")))
         assert err, alice.of("error")
 
+        # A room of her own, so reconnecting later does not adopt every room on A.
+        await _room(alice, "solo")
         await alice.cmd(cmd="leave_local_room", room_id=rid)
         assert await alice.wait("left_room", room_id=rid)
         assert await bob.wait("room_member_left", room_id=rid, webid=alice.did)
         # The room is still hosted on A: the link works and messages flow.
         assert A.call(lambda: rid in A.gw._local_rooms)
+        # B keeps Alice's row as its route to the host, but she is not listed.
+        assert await bob.members(rid) == ["Bob"]
+        assert alice.did in [m["member_did"] for m in
+                             B.call(lambda: B.gw._store.get_federated_room_members(rid))]
         await _join(carol, link, rid)
         await bob.cmd(cmd="send_room", room_id=rid, content="still-here")
         assert await carol.wait_content("still-here")
+        # A gateway joining after she left does not list her either.
+        assert await carol.members(rid) == ["Bob", "Carol"]
+        assert await bob.members(rid) == ["Bob", "Carol"]
+
+        # Both survive restarts of the host and the member gateway.
+        for c in (bob, carol):
+            await c.close()
+        A.restart()
+        B.restart()
+        bob = await Client("Bob", agent=bob.agent).connect(B)
+        carol = await Client("Carol", agent=carol.agent).connect(C)
+        assert await bob.members(rid) == ["Bob", "Carol"]
+        await carol.cmd(cmd="send_room", room_id=rid, content="after-restart")
+        assert await bob.wait_content("after-restart")
+        # The restarted host does not bring her back for a new joiner.
+        dave = await Client("Dave").connect(GW(tmp_path, "d"))
+        await _join(dave, link, rid)
+        assert await dave.members(rid) == ["Bob", "Carol", "Dave"]
+        await dave.close()
+
+        # When she comes back, the member gateways list her again.
+        await alice.close()
+        alice = await Client("Alice", agent=alice.agent).connect(A)
+        assert alice.did not in A.call(lambda: A.gw._store.get_room_members(rid))
+        await alice.cmd(cmd="join_room", code=link.split("join=")[1])
+        assert await alice.wait("room_joined", room_id=rid)
+        assert await bob.wait("room_member_joined", room_id=rid, webid=alice.did)
+        assert await bob.members(rid) == ["Alice", "Bob", "Carol", "Dave"]
     finally:
         for c in (alice, bob, carol):
             await c.close()
