@@ -86,7 +86,12 @@ export function createSenderVerifier({ verifyDmSig, verifyFanoutSig, fetchSigner
     };
 }
 
-export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDisplayName, getMyDeviceId, persistMessage, signEnvelope, verifySender, onUnverifiedDrop, isBlocked }) {
+// Optional, for the desktop client (gwpod.js): isKnownSender(webid) and
+// onMessageRequest(info) hold a verified drop from someone who is not a contact
+// as a message request (left in the inbox, not decrypted) until the user
+// accepts; strictSender also refuses an unverified unencrypted drop instead of
+// showing it. The browser build passes none of these and behaves as before.
+export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDisplayName, getMyDeviceId, persistMessage, signEnvelope, verifySender, onUnverifiedDrop, isBlocked, isKnownSender, onMessageRequest, strictSender = false }) {
     let _unsub = null;
 
     // Drop an (already-encrypted) DM to the recipient's pod inbox.
@@ -146,6 +151,16 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
         await pod.podDeleteDmDrop(url);
     }
 
+    function _messageRequest(env) {
+        try {
+            onMessageRequest({
+                from_webid: env.from_webid,
+                from_display_name: typeof env.from_display_name === 'string' ? env.from_display_name.slice(0, 100) : '',
+                message_id: env.message_id,
+            });
+        } catch { /* the request UI is best effort; the drop stays */ }
+    }
+
     async function _handleEnvelope(url, env) {
         const from = env && env.from_webid;
         if (!from) return;
@@ -156,12 +171,16 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
             }
             return;
         }
+        // Not a contact yet: a verified drop waits in the inbox as a message
+        // request; anything unverified falls through to the first-contact rules.
+        const _unknown = !!(isKnownSender && onMessageRequest && !isKnownSender(from));
         // Multi-device fanout copy: only the one addressed to THIS device is ours
         // (devices share a pod inbox). Leave a sibling's copy for that device to
         // claim. Reuse the app's dm_fanout handler for the per-device decrypt.
         if (env.kind === 'fanout') {
             if (getMyDeviceId && env.to_device_id && env.to_device_id !== getMyDeviceId()) return;
             const status = await _senderStatus(env);
+            if (_unknown && status === 'verified') { _messageRequest(env); return; }
             const verified = status === 'verified';
             const p = env.payload || {};
             if (!verified && p.e2e) {
@@ -189,6 +208,12 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
         // from the envelope's ratchet_pub.
         const status = await _senderStatus(env);
         const sender_verified = status === 'verified';
+        if (_unknown && sender_verified) { _messageRequest(env); return; }
+        if (strictSender && !sender_verified && !env.e2e) {
+            if (status === 'unavailable') return;   // retry once the signer is reachable
+            await _rejectUnverified(url, env);
+            return;
+        }
         let content = env.content;
         try {
             if (env.e2e) {

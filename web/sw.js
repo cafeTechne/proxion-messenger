@@ -97,6 +97,7 @@ const SHELL = [
   "auth.js",
   "pod.js",
   "podio.js",
+  "gwpod.js",
   "acl.js",
   "longchat.js",
   "typeindex.js",

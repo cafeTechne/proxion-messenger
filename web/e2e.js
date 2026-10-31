@@ -443,11 +443,15 @@ export function markPeerVerified(peerId) {
     return true;
 }
 
-export async function fetchAndCachePeerPub(peerId, peerPodRoot) {
-    if (!peerPodRoot || !solidSession?.info?.isLoggedIn) return false;
-    if (!isPeerPodRootAllowed(peerPodRoot, podStorageRoot())) return false;   // SSRF gate, see ssrf.js
+// via: { fetch, ownRoot } reads through another pod fetch (the desktop client's
+// gateway pod bridge, gwpod.js) instead of the Solid session.
+export async function fetchAndCachePeerPub(peerId, peerPodRoot, via = null) {
+    const doFetch = via ? via.fetch : (u) => solidSession.fetch(u);
+    const ownRoot = via ? via.ownRoot : podStorageRoot();
+    if (!peerPodRoot || !(via || solidSession?.info?.isLoggedIn)) return false;
+    if (!isPeerPodRootAllowed(peerPodRoot, ownRoot)) return false;   // SSRF gate, see ssrf.js
     try {
-        const res = await solidSession.fetch(peerPodRoot + 'proxion/identity/x25519-pub.json');
+        const res = await doFetch(peerPodRoot + 'proxion/identity/x25519-pub.json');
         if (!res.ok) return false;
         const data = await res.json();
         if (data?.version === 1 && typeof data.pub === 'string') {
