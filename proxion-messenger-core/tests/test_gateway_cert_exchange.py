@@ -143,8 +143,9 @@ class TestSendFriendRequest:
             assert saved_invite["@type"] == "FederationInvite"
     
     @pytest.mark.asyncio
-    async def test_send_friend_request_delivery_failure_returns_error(self, gateway, mock_websocket, mock_agent):
-        """Test that delivery failure returns error."""
+    async def test_send_friend_request_delivery_failure_is_queued(self, gateway, mock_websocket, mock_agent):
+        """A target gateway that cannot be reached gets the request later: it is
+        queued for retry, not refused."""
         from proxion_messenger_core.didkey import pub_key_to_did
         
         target_pub_bytes = Ed25519PrivateKey.generate().public_key().public_bytes(
@@ -160,8 +161,11 @@ class TestSendFriendRequest:
             await gateway._handle_send_friend_request(mock_websocket, data)
 
             response = json.loads(mock_websocket.send.call_args[0][0])
-            assert response["type"] == "error"
-            assert response["message"] == "delivery_failed"
+            assert response["type"] == "friend_request_sent"
+            assert response["queued"] is True
+            relays = gateway._store.get_pending_relays()
+            assert [r["id"] for r in relays] == [f"friend_request:{response['invitation_id']}"]
+            assert relays[0]["to_gateway_url"] == "https://unreachable.example.com"
 
     @pytest.mark.asyncio
     async def test_send_friend_request_to_own_address_is_refused(self, gateway, mock_websocket, mock_agent):

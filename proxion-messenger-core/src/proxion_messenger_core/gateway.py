@@ -93,9 +93,19 @@ def invite_decline_signing_input(invitation_id: str, from_did: str, ts: str) -> 
     return f"proxion-invite-decline|{invitation_id}|{from_did}|{ts}".encode()
 
 
+def invite_withdraw_signing_input(invitation_id: str, from_did: str, ts: str) -> bytes:
+    """Bytes the requesting gateway signs for POST /invite/withdraw."""
+    return f"proxion-invite-withdraw|{invitation_id}|{from_did}|{ts}".encode()
+
+
 # content_type of a queued friend-request decline: it is retried to the peer's
 # /invite/decline (re-signed each time), not to /relay.
 INVITE_DECLINE_RELAY = "invite_decline"
+# A withdrawn friend request, retried to the peer's /invite/withdraw the same way.
+INVITE_WITHDRAW_RELAY = "invite_withdraw"
+# A friend request whose target gateway was down: the signed invite is retried
+# to the peer's /invite until it is delivered, withdrawn or expires.
+FRIEND_REQUEST_RELAY = "friend_request"
 
 
 def invite_issuer_did(invite: dict) -> str:
@@ -1806,6 +1816,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_accept_friend_request(websocket, data)
             elif cmd == "decline_friend_request":
                 await self._handle_decline_friend_request(websocket, data)
+            elif cmd == "withdraw_friend_request":
+                await self._handle_withdraw_friend_request(websocket, data)
 
             elif cmd == "list_friend_requests":
                 await self._handle_list_friend_requests(websocket, data)
@@ -2035,7 +2047,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 return
         from .network import async_safe_post
         sent = await async_safe_post(f"{http_target}/invite", invite.to_dict())
-        if not sent:
+        if not sent and not self._store:
             await websocket.send(json.dumps({
                 "type": "error",
                 "message": "delivery_failed",
@@ -2043,16 +2055,29 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             }))
             return
 
-        # Save pending invite if store is available
+        # Save pending invite if store is available. The target gateway is kept
+        # beside it so a later withdrawal knows where to send the notice.
         if self._store:
-            self._store.save_pending_invite(invite.to_dict(), target_did,
-                                            sender_webid=sender_webid)
+            self._store.save_pending_invite(
+                {**invite.to_dict(), "target_gateway": http_target}, target_did,
+                sender_webid=sender_webid)
+        # Their gateway is down: queue the signed request and deliver it when
+        # they are back, until the request itself expires.
+        if not sent:
+            self._store.enqueue_relay(
+                f"{FRIEND_REQUEST_RELAY}:{invite.invitation_id}"[:128], target_did, http_target,
+                {"content_type": FRIEND_REQUEST_RELAY, "to_webid": target_did,
+                 "invitation_id": invite.invitation_id, "invite": invite.to_dict(),
+                 "_q_sender": ""},
+                expires_at=invite.expires_at)
 
         await websocket.send(json.dumps({
             "type": "friend_request_sent",
             "invitation_id": invite.invitation_id,
             "target_did": target_did,
             "target_address": target_address,
+            "queued": not sent,
+            "expires_at": invite.expires_at,
         }))
 
     async def _handle_decline_friend_request(self, websocket, data: dict):
@@ -2085,6 +2110,45 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                     http_base, invitation_id, invite_issuer_did(invite)))
         _caller = self._client_webids.get(websocket, "")
         _evt = json.dumps({"type": "friend_request_dismissed", "invitation_id": invitation_id})
+        if _caller:
+            await self._send_to_identity(_caller, _evt)
+        else:
+            await websocket.send(_evt)
+
+    async def _handle_withdraw_friend_request(self, websocket, data: dict):
+        """Cancel a friend request this gateway sent that is still waiting. It is
+        marked withdrawn (so a late acceptance is refused) and the target's
+        gateway is told, signed, so their card goes. A request that was never
+        delivered is just taken off the outbound queue."""
+        invitation_id = str(data.get("invitation_id") or "")
+        if self._auth_enforced():
+            caller_did = self._client_webids.get(websocket, "")
+            if caller_did != self._own_gateway_did():
+                await websocket.send(json.dumps({"type": "error", "message": "not_owner"}))
+                return
+        if not self._store or not invitation_id:
+            await websocket.send(json.dumps({"type": "error", "message": "invitation_id required"}))
+            return
+        row = self._store.get_pending_invite_row(invitation_id)
+        invite = (row or {}).get("invite") or {}
+        # Outbound only, and only while nobody has answered it.
+        if (not row or row.get("status") != "pending"
+                or invite_issuer_did(invite) != self._own_gateway_did()):
+            await websocket.send(json.dumps({"type": "error", "message": "invite_not_found",
+                                             "invitation_id": invitation_id,
+                                             "cmd": "withdraw_friend_request"}))
+            return
+        self._store.mark_invite_status(invitation_id, "withdrawn")
+        async with self._relay_queue_lock():
+            never_sent = self._store.take_pending_relay(
+                f"{FRIEND_REQUEST_RELAY}:{invitation_id}"[:128])
+        target = str(invite.get("target_gateway") or "").rstrip("/")
+        if not never_sent and target and _is_safe_gateway_url(target):
+            asyncio.create_task(self._send_invite_withdraw(
+                target, invitation_id, row.get("target_did") or "",
+                invite.get("expires_at")))
+        _caller = self._client_webids.get(websocket, "")
+        _evt = json.dumps({"type": "friend_request_withdrawn", "invitation_id": invitation_id})
         if _caller:
             await self._send_to_identity(_caller, _evt)
         else:
@@ -2281,6 +2345,40 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 logger.warning("Could not queue the invite decline for retry", exc_info=True)
         return False
 
+    def _signed_invite_withdraw(self, invitation_id: str) -> dict:
+        """The signed body of a POST /invite/withdraw, stamped now."""
+        import base64 as _b64
+        own = self._own_gateway_did()
+        ts = datetime.now(timezone.utc).isoformat()
+        sig = _b64.urlsafe_b64encode(self.agent.identity_key.sign(
+            invite_withdraw_signing_input(invitation_id, own, ts))).rstrip(b"=").decode()
+        return {"invitation_id": invitation_id, "from_did": own,
+                "timestamp": ts, "signature": sig}
+
+    async def _send_invite_withdraw(self, http_base: str, invitation_id: str,
+                                    target_did: str, expires_at=None) -> bool:
+        """Tell the target's gateway we withdrew our request. When it is down the
+        notice is queued and retried (re-signed) until the request would have
+        expired anyway."""
+        from .network import async_safe_post
+        if await async_safe_post(http_base + "/invite/withdraw",
+                                 self._signed_invite_withdraw(invitation_id)):
+            return True
+        if self._store:
+            try:
+                exp = float(expires_at or 0)
+            except (TypeError, ValueError):
+                exp = 0.0
+            try:
+                self._store.enqueue_relay(
+                    f"{INVITE_WITHDRAW_RELAY}:{invitation_id}"[:128], target_did or "", http_base,
+                    {"content_type": INVITE_WITHDRAW_RELAY, "to_webid": target_did or "",
+                     "invitation_id": invitation_id, "_q_sender": ""},
+                    expires_at=exp if exp > time.time() else None)
+            except Exception:
+                logger.warning("Could not queue the request withdrawal for retry", exc_info=True)
+        return False
+
     async def _settle_other_invites_for_peer(self, peer_did: str, keep_id: str = "") -> None:
         """A relationship with peer_did now exists: mark every other request still
         pending to or from them accepted and drop their cards, so neither side can
@@ -2421,17 +2519,31 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             # Only show pending invites to the gateway owner. Received requests go
             # in "pending" (what the client renders as cards), the ones this
             # gateway sent in "sent", so a sent request never looks incoming.
-            if caller_did == owner_did:
+            # Without enforced auth the local user registers under a session did,
+            # as accept and decline allow (_auth_enforced).
+            if caller_did == owner_did or not self._auth_enforced():
                 pending_invites = self._store.list_pending_invites("pending")
                 for inv_dict in pending_invites:
                     _iid = inv_dict.get("invitation_id")
                     _from = invite_issuer_did(inv_dict)
                     if _from == owner_did:
+                        try:
+                            _exp = float(inv_dict.get("expires_at") or 0)
+                        except (TypeError, ValueError):
+                            _exp = 0.0
+                        if _exp and _exp < time.time():
+                            continue
                         _row = self._store.get_pending_invite_row(_iid) or {}
+                        _tdid = _row.get("target_did", "")
                         sent.append({
                             "invitation_id": _iid,
-                            "target_did": _row.get("target_did", ""),
+                            "target_did": _tdid,
+                            "display_name": (self._store.get_display_name(_tdid) or None) if _tdid else None,
                             "status": "pending",
+                            # Still on the outbound queue: their gateway was down.
+                            "queued": self._store.has_pending_relay(
+                                f"{FRIEND_REQUEST_RELAY}:{_iid}"[:128]),
+                            "expires_at": _exp or None,
                         })
                     elif _from:
                         pending.append({

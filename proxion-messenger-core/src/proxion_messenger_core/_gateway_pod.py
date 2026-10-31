@@ -784,6 +784,9 @@ class PodSyncMixin:
             logger.warning("Relay %s expired before delivery", relay["id"])
             try:
                 stored = json.loads(relay["payload_json"])
+                if stored.get("content_type") == "friend_request":
+                    await self._friend_request_undeliverable(stored, "expired")
+                    continue
                 self._store.append_relay_delivery_event(
                     relay["id"], stored.get("to_webid", "") or "", "expired")
                 sender = self._queued_relay_sender(stored)
@@ -811,6 +814,72 @@ class PodSyncMixin:
             self._store.increment_relay_attempt(relay["id"])
         return delivered
 
+    async def _attempt_queued_invite_withdraw(self, relay: dict, stored: dict) -> bool:
+        """Retry a queued friend-request withdrawal to the target's gateway,
+        signed afresh like a queued decline."""
+        from .network import async_safe_post
+        try:
+            delivered = await async_safe_post(
+                relay["to_gateway_url"].rstrip("/") + "/invite/withdraw",
+                self._signed_invite_withdraw(str(stored.get("invitation_id") or "")))
+        except Exception:
+            delivered = False
+        if delivered:
+            self._store.mark_relay_delivered(relay["id"])
+        else:
+            self._store.increment_relay_attempt(relay["id"])
+        return delivered
+
+    async def _friend_request_undeliverable(self, stored: dict, reason: str) -> None:
+        """A queued friend request expired or was refused: it is over, and the
+        sender's "waiting to deliver" entry goes."""
+        invitation_id = str(stored.get("invitation_id") or "")
+        if not invitation_id:
+            return
+        row = self._store.get_pending_invite_row(invitation_id)
+        if not row or row.get("status") != "pending":
+            return
+        self._store.mark_invite_status(invitation_id, reason)
+        sender = self._store.get_pending_invite_sender(invitation_id) or ""
+        await self._send_to_identity(sender or self._own_gateway_did(), json.dumps({
+            "type": "friend_request_failed",
+            "invitation_id": invitation_id,
+            "reason": reason,
+        }))
+
+    async def _attempt_queued_friend_request(self, relay: dict, stored: dict) -> bool:
+        """Deliver a friend request that was queued because the target gateway
+        was down. True once the peer has it (or it no longer needs sending)."""
+        invitation_id = str(stored.get("invitation_id") or "")
+        row = self._store.get_pending_invite_row(invitation_id) if invitation_id else None
+        if not row or row.get("status") != "pending" or not isinstance(stored.get("invite"), dict):
+            # Withdrawn, answered or settled meanwhile: nothing left to send.
+            self._store.mark_relay_delivered(relay["id"])
+            return True
+        from .network import async_safe_post_status
+        try:
+            status = await async_safe_post_status(
+                relay["to_gateway_url"].rstrip("/") + "/invite", stored["invite"])
+        except Exception:
+            status = None
+        # 409 is the peer saying it already has this request (an earlier try
+        # reached it but the answer was lost).
+        if status is not None and (200 <= status < 300 or status == 409):
+            self._store.mark_relay_delivered(relay["id"])
+            sender = self._store.get_pending_invite_sender(invitation_id) or ""
+            await self._send_to_identity(sender or self._own_gateway_did(), json.dumps({
+                "type": "friend_request_delivered",
+                "invitation_id": invitation_id,
+            }))
+            return True
+        if status is not None and 400 <= status < 500 and status != 429:
+            # Their gateway answered and refused it: retrying will not help.
+            self._store.mark_relay_permanently_failed(relay["id"])
+            await self._friend_request_undeliverable(stored, "failed")
+            return True
+        self._store.increment_relay_attempt(relay["id"])
+        return False
+
     async def _attempt_pending_relay(self, relay: dict) -> bool:
         """Try one queued relay now. Returns True when it was delivered."""
         try:
@@ -819,6 +888,10 @@ class PodSyncMixin:
             stored = {}
         if stored.get("content_type") == "invite_decline":
             return await self._attempt_queued_invite_decline(relay, stored)
+        if stored.get("content_type") == "invite_withdraw":
+            return await self._attempt_queued_invite_withdraw(relay, stored)
+        if stored.get("content_type") == "friend_request":
+            return await self._attempt_queued_friend_request(relay, stored)
         sender = self._queued_relay_sender(stored)
         peer_did = stored.get("to_webid", "") or ""
         payload: dict = {}

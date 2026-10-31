@@ -71,6 +71,7 @@ _SCHEMA: dict[str, dict[str, tuple]] = {
     "mark_read":        {"thread_id": (str, _MAX_ID)},
     "delete_room":      {"room_id": (str, _MAX_ID)},
     "kick_member":      {"room_id": (str, _MAX_ID), "webid": (str, _MAX_ID)},
+    "withdraw_friend_request": {"invitation_id": (str, _MAX_ID)},
     # pin/unpin use thread_id (may be prefixed "room:…") — validated by handler
     "pin_message":      {"message_id": (str, _MAX_ID)},
     "unpin_message":    {"message_id": (str, _MAX_ID)},
@@ -130,7 +131,8 @@ MUTATING_COMMANDS: frozenset[str] = frozenset({
     "kick_member", "ban_member", "unban_member", "mute_member", "unmute_member",
     "set_member_role", "add_room_emoji", "remove_room_emoji",
     # contacts and trust
-    "send_friend_request", "accept_friend_request", "decline_friend_request", "restore_contacts",
+    "send_friend_request", "accept_friend_request", "decline_friend_request",
+    "withdraw_friend_request", "restore_contacts",
     "revoke_contact", "block", "unblock", "verify_contact",
     "apply_contact_verification_sync", "sync_contact_verifications",
     "approve_peer_gateway_change", "resolve_peer_trust_dispute",

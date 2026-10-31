@@ -72,7 +72,7 @@ class TestPostInviteAcceptSSRF:
         assert url_arg == "https://peer.example.com/invite"
 
     @pytest.mark.asyncio
-    async def test_send_friend_request_delivery_failure_is_error_not_exception(self, tmp_path):
+    async def test_send_friend_request_delivery_failure_is_queued_not_exception(self, tmp_path):
         gw = _make_gateway(tmp_path)
         ws = _fake_ws(gw, "did:key:zsender")
         from proxion_messenger_core.didkey import pub_key_to_did
@@ -86,8 +86,9 @@ class TestPostInviteAcceptSSRF:
              patch("proxion_messenger_core.network.async_safe_post", new_callable=AsyncMock, return_value=False):
             await gw._handle_send_friend_request(ws, {"target_address": target_address})
 
+        # An unreachable gateway: the request waits on the outbound queue.
         responses = [json.loads(c.args[0]) for c in ws.send.call_args_list]
-        assert any(r.get("type") == "error" and r.get("message") == "delivery_failed" for r in responses)
+        assert any(r.get("type") == "friend_request_sent" and r.get("queued") for r in responses)
 
 
 # ---------------------------------------------------------------------------

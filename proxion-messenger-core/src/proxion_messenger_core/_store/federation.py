@@ -299,7 +299,9 @@ class FederationStoreMixin(object):
         with self._conn() as conn:
             rows = conn.execute("SELECT did, gateway_url FROM peer_gateways").fetchall()
             return {r["did"]: r["gateway_url"] for r in rows}
-    def enqueue_relay(self, relay_id: str, to_webid: str, to_gateway_url: str, payload: dict) -> None:
+    def enqueue_relay(self, relay_id: str, to_webid: str, to_gateway_url: str, payload: dict,
+                      expires_at: Optional[float] = None) -> None:
+        """Queue a relay for retry. It expires after a day unless expires_at says otherwise."""
         with self._conn() as conn:
             _now = time.time()
             conn.execute(
@@ -308,8 +310,22 @@ class FederationStoreMixin(object):
                     (id, to_webid, to_gateway_url, payload_json, created_at, expires_at, status)
                 VALUES (?, ?, ?, ?, ?, ?, 'pending')
                 """,
-                (relay_id, to_webid, to_gateway_url, json.dumps(payload), _now, _now + 86400),
+                (relay_id, to_webid, to_gateway_url, json.dumps(payload), _now,
+                 float(expires_at) if expires_at else _now + 86400),
             )
+    def has_pending_relay(self, relay_id: str) -> bool:
+        """Whether relay_id is still queued for delivery."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM pending_relays WHERE id = ? AND status = 'pending'", (relay_id,)
+            ).fetchone()
+        return row is not None
+    def take_pending_relay(self, relay_id: str) -> bool:
+        """Remove a queued relay before it is sent. True when one was queued."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM pending_relays WHERE id = ? AND status = 'pending'", (relay_id,))
+            return bool(cur.rowcount)
     def get_pending_relays(self, limit: int = 50) -> list[dict]:
         with self._conn() as conn:
             rows = conn.execute(

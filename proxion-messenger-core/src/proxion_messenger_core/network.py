@@ -371,6 +371,39 @@ async def async_safe_post_content(
         raise NetworkError(f"POST {url} failed: {exc}") from exc
 
 
+async def async_safe_post_status(
+    url: str,
+    payload: dict,
+    *,
+    timeout: float = _DEFAULT_TIMEOUT,
+) -> Optional[int]:
+    """POST *payload* as JSON to *url* with SSRF protection and return the HTTP
+    status, or ``None`` when the host is blocked or could not be reached. Lets a
+    caller tell a peer that is down from one that refused. Never raises."""
+    if not _HTTPX_AVAILABLE:
+        return None
+    resolved_ip = _resolve_safe_ip(url)
+    if resolved_ip is None:
+        if _audit_fn:
+            try:
+                _audit_fn("ssrf_blocked", "warning", url)
+            except Exception:
+                pass
+        return None
+    pinned_url, extra_headers = _pin_url(url, resolved_ip)
+    req_headers = {"Content-Type": "application/json", **extra_headers}
+    try:
+        async with httpx.AsyncClient(timeout=timeout, verify=_make_tls_context()) as client:
+            resp = await client.post(
+                pinned_url,
+                content=json.dumps(payload).encode(),
+                headers=req_headers,
+            )
+            return resp.status_code
+    except Exception:
+        return None
+
+
 async def async_safe_post(
     url: str,
     payload: dict,
