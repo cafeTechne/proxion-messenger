@@ -1036,5 +1036,13 @@
   "mr.decline": "拒否してブロック",
   "crossmode.ready": "ブラウザー版のユーザーはこの WebID 宛てにメッセージを送れます。",
   "crossmode.conflict": "ブラウザー版の連絡先からのメッセージは、最後にサインインしたデバイスに届きます。このデバイスが別のデバイスから引き継ぎました。",
-  "crossmode.rootMismatch": "ポッドが WebID の指す場所とは別の場所にデータを保存しているため、ブラウザー版のユーザーはこの方法であなたに連絡できません。"
+  "crossmode.rootMismatch": "ポッドが WebID の指す場所とは別の場所にデータを保存しているため、ブラウザー版のユーザーはこの方法であなたに連絡できません。",
+  "error.fr.request_withdrawn": "送信者がこのフレンドリクエストを取り消しました。",
+  "error.fr.request_already_accepted": "このリクエストはすでに承認されているため、取り消せません。",
+  "join.podNeeded": "このルームは Solid ポッドにあります。参加するには設定でポッドを接続してください。",
+  "join.ownPodRoom": "そのルームはあなた自身のポッドにあります。",
+  "join.ownerUnreachable": "ルームのオーナーのポッドに接続できませんでした。後でもう一度お試しください。",
+  "join.bearerPod": "あなたのポッドは bearer トークンでサインインしますが、Proxion はそれを他のポッドに送信しません。他の人のポッドにあるルームに参加するには、Community Solid Server など DPoP を使うポッドが必要です。",
+  "room.podCreateFailed": "ポッドにルームを作成できませんでした。",
+  "room.inPod": "自分のポッドに作成して、ブラウザ版 Proxion のユーザーも参加できるようにする"
 }

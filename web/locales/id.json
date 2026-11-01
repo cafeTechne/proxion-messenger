@@ -1036,5 +1036,13 @@
   "mr.decline": "Tolak dan blokir",
   "crossmode.ready": "Pengguna versi browser bisa mengirim pesan ke kamu lewat WebID ini.",
   "crossmode.conflict": "Pesan dari kontak versi browser masuk ke perangkat yang terakhir masuk. Perangkat ini mengambil alih dari perangkat lain.",
-  "crossmode.rootMismatch": "Pod kamu menyimpan data di tempat lain dari yang ditunjuk WebID kamu, jadi pengguna versi browser tidak bisa menjangkau kamu lewat situ."
+  "crossmode.rootMismatch": "Pod kamu menyimpan data di tempat lain dari yang ditunjuk WebID kamu, jadi pengguna versi browser tidak bisa menjangkau kamu lewat situ.",
+  "error.fr.request_withdrawn": "Pengirim membatalkan permintaan pertemanan ini.",
+  "error.fr.request_already_accepted": "Mereka sudah menerima permintaan ini, jadi tidak bisa dibatalkan lagi.",
+  "join.podNeeded": "Ruang ini ada di Solid pod. Hubungkan pod kamu di Pengaturan untuk bergabung.",
+  "join.ownPodRoom": "Ruang itu ada di pod kamu sendiri.",
+  "join.ownerUnreachable": "Tidak dapat menjangkau pod pemilik ruang. Coba lagi nanti.",
+  "join.bearerPod": "Pod kamu masuk dengan token bearer, yang tidak pernah dikirim Proxion ke pod lain. Bergabung ke ruang di pod orang lain memerlukan pod yang memakai DPoP, seperti Community Solid Server.",
+  "room.podCreateFailed": "Tidak dapat membuat ruang di pod kamu.",
+  "room.inPod": "Buat di pod saya, agar pengguna Proxion di browser bisa bergabung"
 }

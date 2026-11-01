@@ -1036,5 +1036,13 @@
   "mr.decline": "Từ chối và chặn",
   "crossmode.ready": "Người dùng bản trình duyệt có thể nhắn cho bạn qua WebID này.",
   "crossmode.conflict": "Tin nhắn từ liên hệ dùng bản trình duyệt sẽ đến thiết bị đăng nhập gần nhất. Thiết bị này đã tiếp quản từ một thiết bị khác.",
-  "crossmode.rootMismatch": "Pod của bạn lưu dữ liệu ở nơi khác với nơi WebID trỏ tới, nên người dùng bản trình duyệt không liên lạc được với bạn qua đó."
+  "crossmode.rootMismatch": "Pod của bạn lưu dữ liệu ở nơi khác với nơi WebID trỏ tới, nên người dùng bản trình duyệt không liên lạc được với bạn qua đó.",
+  "error.fr.request_withdrawn": "Người gửi đã hủy lời mời kết bạn này.",
+  "error.fr.request_already_accepted": "Họ đã chấp nhận lời mời này nên không thể hủy nữa.",
+  "join.podNeeded": "Phòng này nằm trong một Solid pod. Hãy kết nối pod của bạn trong Cài đặt để tham gia.",
+  "join.ownPodRoom": "Phòng đó nằm trong pod của chính bạn.",
+  "join.ownerUnreachable": "Không thể kết nối tới pod của chủ phòng. Hãy thử lại sau.",
+  "join.bearerPod": "Pod của bạn đăng nhập bằng bearer token, và Proxion không bao giờ gửi token này tới pod khác. Để tham gia phòng trong pod của người khác, bạn cần một pod dùng DPoP, ví dụ Community Solid Server.",
+  "room.podCreateFailed": "Không thể tạo phòng trong pod của bạn.",
+  "room.inPod": "Tạo trong pod của tôi, để người dùng Proxion trên trình duyệt có thể tham gia"
 }

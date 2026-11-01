@@ -1036,5 +1036,13 @@
   "mr.decline": "Refuser et bloquer",
   "crossmode.ready": "Les utilisateurs de la version navigateur peuvent vous écrire à ce WebID.",
   "crossmode.conflict": "Les messages des contacts de la version navigateur vont à l'appareil connecté en dernier. Cet appareil a pris le relais d'un autre.",
-  "crossmode.rootMismatch": "Votre pod stocke les données ailleurs que là où pointe votre WebID, les utilisateurs de la version navigateur ne peuvent donc pas vous joindre par ce biais."
+  "crossmode.rootMismatch": "Votre pod stocke les données ailleurs que là où pointe votre WebID, les utilisateurs de la version navigateur ne peuvent donc pas vous joindre par ce biais.",
+  "error.fr.request_withdrawn": "L'expéditeur a annulé cette demande d'ami.",
+  "error.fr.request_already_accepted": "Cette demande a déjà été acceptée, elle ne peut plus être annulée.",
+  "join.podNeeded": "Ce salon se trouve dans un pod Solid. Connectez votre pod dans les Paramètres pour le rejoindre.",
+  "join.ownPodRoom": "Ce salon se trouve dans votre propre pod.",
+  "join.ownerUnreachable": "Impossible de joindre le pod du propriétaire du salon. Réessayez plus tard.",
+  "join.bearerPod": "Votre pod se connecte avec un jeton bearer, que Proxion n'envoie jamais à un autre pod. Pour rejoindre des salons dans les pods d'autres personnes, il faut un pod qui utilise DPoP, comme Community Solid Server.",
+  "room.podCreateFailed": "Impossible de créer le salon dans votre pod.",
+  "room.inPod": "Le créer dans mon pod, pour que les utilisateurs de Proxion dans le navigateur puissent le rejoindre"
 }

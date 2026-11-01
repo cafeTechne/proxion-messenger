@@ -1036,5 +1036,13 @@
   "mr.decline": "Reddet ve engelle",
   "crossmode.ready": "Tarayıcı sürümü kullanıcıları size bu WebID üzerinden mesaj gönderebilir.",
   "crossmode.conflict": "Tarayıcı sürümündeki kişilerden gelen mesajlar en son oturum açan cihaza gider. Bu cihaz bu görevi başka bir cihazdan devraldı.",
-  "crossmode.rootMismatch": "Pod'unuz verileri WebID'nizin gösterdiği yerden farklı bir yerde saklıyor, bu yüzden tarayıcı sürümü kullanıcıları size bu yolla ulaşamaz."
+  "crossmode.rootMismatch": "Pod'unuz verileri WebID'nizin gösterdiği yerden farklı bir yerde saklıyor, bu yüzden tarayıcı sürümü kullanıcıları size bu yolla ulaşamaz.",
+  "error.fr.request_withdrawn": "Gönderen bu arkadaşlık isteğini iptal etti.",
+  "error.fr.request_already_accepted": "Bu istek zaten kabul edildi, artık iptal edilemez.",
+  "join.podNeeded": "Bu oda bir Solid pod'unda. Katılmak için Ayarlar'dan pod'unuzu bağlayın.",
+  "join.ownPodRoom": "Bu oda kendi pod'unuzda.",
+  "join.ownerUnreachable": "Oda sahibinin pod'una ulaşılamadı. Daha sonra tekrar deneyin.",
+  "join.bearerPod": "Pod'unuz bir bearer token ile oturum açıyor ve Proxion bunu asla başka bir pod'a göndermez. Başkalarının pod'larındaki odalara katılmak için Community Solid Server gibi DPoP kullanan bir pod gerekir.",
+  "room.podCreateFailed": "Oda pod'unuzda oluşturulamadı.",
+  "room.inPod": "Pod'umda oluştur, böylece Proxion'u tarayıcıda kullananlar da katılabilsin"
 }

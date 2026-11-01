@@ -1036,5 +1036,13 @@
   "mr.decline": "Rifiuta e blocca",
   "crossmode.ready": "Gli utenti della versione browser possono scriverti a questo WebID.",
   "crossmode.conflict": "I messaggi dei contatti della versione browser vanno al dispositivo che ha effettuato l'accesso per ultimo. Questo dispositivo ha preso il posto di un altro.",
-  "crossmode.rootMismatch": "Il tuo pod salva i dati in un posto diverso da quello indicato dal tuo WebID, quindi gli utenti della versione browser non possono raggiungerti tramite esso."
+  "crossmode.rootMismatch": "Il tuo pod salva i dati in un posto diverso da quello indicato dal tuo WebID, quindi gli utenti della versione browser non possono raggiungerti tramite esso.",
+  "error.fr.request_withdrawn": "Il mittente ha annullato questa richiesta di amicizia.",
+  "error.fr.request_already_accepted": "Hanno già accettato questa richiesta, quindi non può più essere annullata.",
+  "join.podNeeded": "Questa stanza si trova in un pod Solid. Collega il tuo pod nelle Impostazioni per entrare.",
+  "join.ownPodRoom": "Quella stanza è nel tuo pod.",
+  "join.ownerUnreachable": "Impossibile raggiungere il pod del proprietario della stanza. Riprova più tardi.",
+  "join.bearerPod": "Il tuo pod accede con un token bearer, che Proxion non invia mai a un altro pod. Per entrare in stanze nei pod di altre persone serve un pod che usa DPoP, come Community Solid Server.",
+  "room.podCreateFailed": "Impossibile creare la stanza nel tuo pod.",
+  "room.inPod": "Creala nel mio pod, così chi usa Proxion nel browser può entrare"
 }

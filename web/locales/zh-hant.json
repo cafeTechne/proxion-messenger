@@ -1036,5 +1036,13 @@
   "mr.decline": "拒絕並封鎖",
   "crossmode.ready": "瀏覽器版使用者可以透過這個 WebID 傳訊息給你。",
   "crossmode.conflict": "來自瀏覽器版聯絡人的訊息會送到最後登入的裝置。此裝置已從另一台裝置接手。",
-  "crossmode.rootMismatch": "你的 Pod 把資料存放在與 WebID 指向不同的位置，因此瀏覽器版使用者無法透過它聯絡你。"
+  "crossmode.rootMismatch": "你的 Pod 把資料存放在與 WebID 指向不同的位置，因此瀏覽器版使用者無法透過它聯絡你。",
+  "error.fr.request_withdrawn": "傳送者已撤回這則好友邀請。",
+  "error.fr.request_already_accepted": "對方已接受此邀請，因此無法再撤回。",
+  "join.podNeeded": "此房間位於 Solid Pod 中。請在設定中連接你的 Pod 以加入。",
+  "join.ownPodRoom": "該房間就在你自己的 Pod 中。",
+  "join.ownerUnreachable": "無法連線到房間擁有者的 Pod。請稍後再試。",
+  "join.bearerPod": "你的 Pod 使用 bearer 權杖登入，Proxion 絕不會將其傳送到其他 Pod。要加入他人 Pod 中的房間，需要使用支援 DPoP 的 Pod，例如 Community Solid Server。",
+  "room.podCreateFailed": "無法在你的 Pod 中建立房間。",
+  "room.inPod": "在我的 Pod 中建立，讓在瀏覽器中使用 Proxion 的人也能加入"
 }

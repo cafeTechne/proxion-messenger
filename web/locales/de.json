@@ -1036,5 +1036,13 @@
   "mr.decline": "Ablehnen und blockieren",
   "crossmode.ready": "Nutzer der Browser-Version können dir über diese WebID schreiben.",
   "crossmode.conflict": "Nachrichten von Kontakten der Browser-Version gehen an das Gerät, das sich zuletzt angemeldet hat. Dieses Gerät hat von einem anderen übernommen.",
-  "crossmode.rootMismatch": "Dein Pod speichert Daten an einem anderen Ort als dem, auf den deine WebID zeigt. Nutzer der Browser-Version können dich darüber daher nicht erreichen."
+  "crossmode.rootMismatch": "Dein Pod speichert Daten an einem anderen Ort als dem, auf den deine WebID zeigt. Nutzer der Browser-Version können dich darüber daher nicht erreichen.",
+  "error.fr.request_withdrawn": "Der Absender hat diese Freundschaftsanfrage zurückgezogen.",
+  "error.fr.request_already_accepted": "Die Anfrage wurde bereits angenommen und kann nicht mehr zurückgezogen werden.",
+  "join.podNeeded": "Dieser Raum liegt in einem Solid-Pod. Verbinde deinen Pod in den Einstellungen, um beizutreten.",
+  "join.ownPodRoom": "Dieser Raum liegt in deinem eigenen Pod.",
+  "join.ownerUnreachable": "Der Pod des Raumbesitzers ist nicht erreichbar. Versuche es später erneut.",
+  "join.bearerPod": "Dein Pod meldet sich mit einem Bearer-Token an, das Proxion nie an einen anderen Pod sendet. Für Räume in fremden Pods brauchst du einen Pod mit DPoP, zum Beispiel Community Solid Server.",
+  "room.podCreateFailed": "Der Raum konnte nicht in deinem Pod erstellt werden.",
+  "room.inPod": "In meinem Pod erstellen, damit Proxion-Nutzer im Browser beitreten können"
 }

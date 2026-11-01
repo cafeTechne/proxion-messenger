@@ -1048,5 +1048,13 @@
   "mr.decline": "Odrzuć i zablokuj",
   "crossmode.ready": "Użytkownicy wersji przeglądarkowej mogą pisać do Ciebie na ten WebID.",
   "crossmode.conflict": "Wiadomości od kontaktów z wersji przeglądarkowej trafiają na urządzenie, które zalogowało się ostatnie. To urządzenie przejęło tę rolę od innego.",
-  "crossmode.rootMismatch": "Twój pod przechowuje dane w innym miejscu niż wskazuje Twój WebID, więc użytkownicy wersji przeglądarkowej nie mogą przez niego do Ciebie dotrzeć."
+  "crossmode.rootMismatch": "Twój pod przechowuje dane w innym miejscu niż wskazuje Twój WebID, więc użytkownicy wersji przeglądarkowej nie mogą przez niego do Ciebie dotrzeć.",
+  "error.fr.request_withdrawn": "Nadawca anulował to zaproszenie do znajomych.",
+  "error.fr.request_already_accepted": "To zaproszenie zostało już przyjęte, więc nie można go anulować.",
+  "join.podNeeded": "Ten pokój znajduje się w podzie Solid. Połącz swój pod w Ustawieniach, aby dołączyć.",
+  "join.ownPodRoom": "Ten pokój jest w Twoim własnym podzie.",
+  "join.ownerUnreachable": "Nie można połączyć się z podem właściciela pokoju. Spróbuj ponownie później.",
+  "join.bearerPod": "Twój pod loguje się tokenem bearer, którego Proxion nigdy nie wysyła do innego poda. Aby dołączać do pokojów w podach innych osób, potrzebny jest pod używający DPoP, na przykład Community Solid Server.",
+  "room.podCreateFailed": "Nie udało się utworzyć pokoju w Twoim podzie.",
+  "room.inPod": "Utwórz w moim podzie, aby osoby używające Proxion w przeglądarce mogły dołączyć"
 }
