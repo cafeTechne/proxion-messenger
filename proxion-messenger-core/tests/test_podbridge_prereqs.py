@@ -155,6 +155,7 @@ def _gw(auth_enforced, owner="did:key:zOwner", proxied=False, public=False):
         _auth_enforced=lambda: auth_enforced,
         _ws_is_proxied=lambda ws: proxied,
         _public_deployment=lambda: public,
+        _is_persisted_owner=lambda ws: False,
     )
     gw._owner_by_did_or_local = lambda ws: ProxionGateway._owner_by_did_or_local(gw, ws)
     return gw, ProxionGateway._is_pod_owner_socket
