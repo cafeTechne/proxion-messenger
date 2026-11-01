@@ -297,6 +297,12 @@
         <button type="button" id="backup-nudge-dismiss" class="banner__close" aria-label="Dismiss backup reminder" title="Dismiss backup reminder" data-i18n-attr="aria-label:ui.dismissBackupReminder;title:ui.dismissBackupReminder"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" focusable="false" width="14" height="14" class="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
       </div>
 
+      <!-- A gateway that requires sign-in and has no owner yet (ownerclaim.js). -->
+      <div id="owner-claim-banner" class="banner banner--warning" role="status">
+        <span class="banner__text" data-i18n="claim.banner">This gateway has no owner yet. If you run it, claim it with the code from its log.</span>
+        <button type="button" id="owner-claim-btn" class="banner__action" data-i18n="claim.verb">Claim</button>
+      </div>
+
       <!-- Persistent indicator: a ?join= room request is awaiting the owner's
            approval (R106 gateway-free join handshake). Unlike the one-shot
            "request sent" toast, this stays visible until the room appears, the
@@ -783,6 +789,11 @@
               <div id="settings-devices-list" class="settings-list"></div>
               <div class="settings-actions">
                 <button id="link-device-btn" class="btn btn--outline" data-i18n="btn.linkDevice">+ Link a device</button>
+              </div>
+              <div id="settings-owner-devices" hidden>
+                <h5 class="settings-subhead" data-i18n="section.gatewayOwners">Gateway owners</h5>
+                <p class="settings-hint settings-hint--block" data-i18n="owners.hint">These identities manage this gateway. Devices linked to them are owners too.</p>
+                <div id="settings-owner-devices-list" class="settings-list"></div>
               </div>
             </section>
 

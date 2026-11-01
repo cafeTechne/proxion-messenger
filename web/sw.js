@@ -69,6 +69,7 @@ const SHELL = [
   "a11y.js",
   "device-cert.js",
   "pairing.js",
+  "ownerclaim.js",
   "recovery.js",
   "gifs.js",
   "media-resize.js",

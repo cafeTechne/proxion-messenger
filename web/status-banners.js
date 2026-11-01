@@ -18,6 +18,7 @@ import { webIdHostLabel } from './web-account.js';
 // changes and hides every active banner below the top one.
 export const BANNER_PRIORITY = [
     ['conn-banner', (el) => !!el.style?.display && el.style.display !== 'none'],
+    ['owner-claim-banner', (el) => !!el.classList?.contains('visible')],
     ['join-pending-banner', (el) => !!el.classList?.contains('visible')],
     ['nat-warning-banner', () => true],
     ['backup-nudge', (el) => !!el.classList?.contains('visible')],

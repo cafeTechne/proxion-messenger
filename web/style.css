@@ -1570,6 +1570,10 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
 #join-pending-banner { display: none; }
 #join-pending-banner.visible { display: flex; }
 
+/* Unclaimed public gateway: claim with the code from the gateway log */
+#owner-claim-banner { display: none; }
+#owner-claim-banner.visible { display: flex; }
+
 /* 13.7: Inline image preview */
 .msg-image-preview {
     display: block; max-width: min(320px, 100%); max-height: 240px;

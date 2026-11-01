@@ -1044,5 +1044,21 @@
   "mr.decline": "Decline and block",
   "crossmode.ready": "Browser-build users can message you at this WebID.",
   "crossmode.conflict": "Messages from browser-build contacts go to whichever device signed in last. This device has taken over from another one.",
-  "crossmode.rootMismatch": "Your pod stores data somewhere other than your WebID points to, so browser-build users cannot reach you through it."
+  "crossmode.rootMismatch": "Your pod stores data somewhere other than your WebID points to, so browser-build users cannot reach you through it.",
+  "claim.banner": "This gateway has no owner yet. If you run it, claim it with the code from its log.",
+  "claim.verb": "Claim",
+  "claim.title": "Claim this gateway",
+  "claim.prompt": "Paste the claim code from the gateway log, or the admin token.",
+  "claim.done": "You now own this gateway.",
+  "claim.failed.invalid": "That code did not work. Codes expire after 15 minutes; check the gateway log for the latest one.",
+  "claim.failed.rateLimited": "Too many attempts. Wait a few minutes, or restart the gateway for a new code.",
+  "claim.failed.alreadyClaimed": "This gateway already has an owner.",
+  "claim.failed.authRequired": "Sign in to this gateway before claiming it.",
+  "section.gatewayOwners": "Gateway owners",
+  "owners.hint": "These identities manage this gateway. Devices linked to them are owners too.",
+  "owners.thisDevice": "This device",
+  "owners.remove": "Remove",
+  "owners.removeSelfTitle": "Remove yourself as owner?",
+  "owners.removeSelf": "This device will no longer manage the gateway. Another owner can add it back.",
+  "owners.removeSelfLast": "You are the last owner. The gateway will be unclaimed until someone claims it with a new code from its log."
 }

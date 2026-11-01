@@ -92,6 +92,7 @@ import {
     joinedCacheKey, joinPendingKey,
 } from './webrooms.js';
 import { createPairing } from './pairing.js';
+import { takeClaimFragment, createOwnerClaim } from './ownerclaim.js';
 import { createRecovery, importErrorKey } from './recovery.js';
 import { createGifTray, saveFavorite, pushAllGifsToPod } from './gifs.js';
 import { needsDownscale, downscaleImage, measureMedia, inlineFileLimit, ROOM_FILE_BYTES } from './media-resize.js';
@@ -122,6 +123,10 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
 import { createIdentityResolver } from './identity.js';
 import { initThemePicker, applyTheme, readThemePref } from './theme.js';
 import { createAccountSync } from './account-sync.js';
+
+        // A public gateway's one-time claim link (#claim=CODE) leaves the address
+        // bar before anything else runs; ownerclaim.js presents it after sign-in.
+        const _ownerClaimCode = takeClaimFragment(window.location, window.history);
 
         // Populate the settings language picker from the locale manifest, mark the
         // active one, and reload on change (J1). Endonyms so each language reads
@@ -1258,6 +1263,12 @@ import { createAccountSync } from './account-sync.js';
             getHistoryBundle: () => dmHistoryExportRecent(),
             importHistoryBundle: (records) => dmHistoryImport(records),
         });
+        // Gateway ownership: claim banner / link and the Settings owner list.
+        const ownerClaim = createOwnerClaim({
+            send: (msg) => { if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(msg)); },
+            showToast, showConfirm, showPromptModal, t, escHtml,
+            initialCode: _ownerClaimCode,
+        });
         let roomCreatorOf = new Set(); // room_ids this user owns
         // room_ids where the owner made this user an admin (room_roles).
         const roomAdminOf = new Set();
@@ -1635,6 +1646,7 @@ import { createAccountSync } from './account-sync.js';
                 if (transport.supports('sessions')) {
                     socket.send(JSON.stringify({cmd: "list_sessions"}));
                     socket.send(JSON.stringify({cmd: "list_devices"}));
+                    ownerClaim.requestOwnerDevices();
                 }
                 blocks.requestBlocks();   // R65: refresh the blocked-users list
             }
@@ -2565,6 +2577,7 @@ import { createAccountSync } from './account-sync.js';
                         if (event.gateway_delegation_cert) localStorage.setItem("proxion_gateway_delegation_cert", JSON.stringify(event.gateway_delegation_cert));
                         else if (String(event.webid || '').startsWith('did:key:')) localStorage.removeItem("proxion_gateway_delegation_cert");
                     } catch (_) {}
+                    ownerClaim.onRegistered(event);
                     // Auth is complete — now safe to send all init commands that
                     // require an authenticated socket (they were withheld from onopen).
                     (function _postAuthInit() {
@@ -3989,6 +4002,21 @@ import { createAccountSync } from './account-sync.js';
                     });
                     break;
                 }
+                case "gateway_claimed":
+                    try {
+                        if (event.gateway_delegation_cert) localStorage.setItem("proxion_gateway_delegation_cert", JSON.stringify(event.gateway_delegation_cert));
+                    } catch (_) {}
+                    ownerClaim.onClaimed(event);
+                    break;
+                case "claim_failed":
+                    ownerClaim.onClaimFailed(event);
+                    break;
+                case "owner_devices":
+                    ownerClaim.renderOwnerDevices(event);
+                    break;
+                case "owner_device_removed":
+                    ownerClaim.onOwnerDeviceRemoved(event);
+                    break;
                 case "identity_restored":
                     // The gateway's identity was restored from a backup. The cached
                     // key that marks our own messages, the TURN credentials and the
