@@ -36,6 +36,8 @@ const EXACT = {
     "voice_note_remote_unsupported": "error.voice_note_remote_unsupported",
     "reaction_limit_reached": "error.reaction_limit_reached",
     "contact_revoked": "error.contact_revoked",
+    "request_withdrawn": "error.fr.request_withdrawn",
+    "request_already_accepted": "error.fr.request_already_accepted",
     "schedule_dm_encrypted": "error.schedule_dm_encrypted",
     "identity_revoked": "error.identity_revoked",
     "safe_mode_enabled": "error.safe_mode_enabled",

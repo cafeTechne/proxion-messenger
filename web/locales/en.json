@@ -254,6 +254,8 @@
   "error.fr.invite_not_found": "Invite not found, it may have already been used.",
   "error.fr.contact_revoked": "This contact has been revoked. You can no longer send messages.",
   "error.fr.cannot_add_self": "That is your own address. Ask your contact for theirs.",
+  "error.fr.request_withdrawn": "The sender cancelled this friend request.",
+  "error.fr.request_already_accepted": "They already accepted this request, so it can no longer be cancelled.",
   "ui.reactWithEmoji": "React with emoji",
   "ui.thumbsUp": "thumbs up",
   "ui.heart": "heart",

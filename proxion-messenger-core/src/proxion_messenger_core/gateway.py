@@ -2160,10 +2160,15 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             return
         row = self._store.get_pending_invite_row(invitation_id)
         invite = (row or {}).get("invite") or {}
-        # Outbound only, and only while nobody has answered it.
+        # Outbound only, and only while nobody has answered it. Once they accepted
+        # it the contact exists on both sides, so the withdrawal is refused.
         if (not row or row.get("status") != "pending"
                 or invite_issuer_did(invite) != self._own_gateway_did()):
-            await websocket.send(json.dumps({"type": "error", "message": "invite_not_found",
+            _accepted = bool(row) and row.get("status") == "accepted" and (
+                invite_issuer_did(invite) == self._own_gateway_did())
+            await websocket.send(json.dumps({"type": "error",
+                                             "message": ("request_already_accepted" if _accepted
+                                                         else "invite_not_found"),
                                              "invitation_id": invitation_id,
                                              "cmd": "withdraw_friend_request"}))
             return
@@ -2276,43 +2281,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         )
         cert.sign(self.agent.identity_key)
 
-        # Persist to SQLite and pod
-        self._store.save_relationship(cert.to_dict(), peer_did=alice_did,
-                                      owner_webid=self._client_webids.get(websocket, ""))
-        # Accepting is the owner re-adding this person: a revocation left from an
-        # earlier "Remove contact" would otherwise drop the new friendship's traffic.
-        self._lift_revocation_on_readd(alice_did)
-        # Store the requester's browser E2E key (from the invite) so we can encrypt
-        # the first DM to the right key even if we message before receiving one.
-        _alice_e2e = invite.issuer.get("e2e_key")
-        if _alice_e2e and alice_did:
-            self._store.save_e2e_key(alice_did, _alice_e2e)
-        # Name the new contact by the name their request carried (shown with its
-        # id tag in the contacts list), unless we already know them by one.
-        self._save_peer_name_if_unknown(alice_did, invite.issuer.get("display_name"))
-        asyncio.create_task(self._sync_cert_to_pod(cert.to_dict()))
-
-        # Register Alice's endpoint so relay routing works immediately — validate
-        # first (peer-supplied endpoint_hint) to prevent SSRF pinning to a
-        # private/loopback host, mirroring the accept-POST check below.
+        # The requester's gateway decides whether the request still stands, so
+        # ask it before adding them: if they withdrew it meanwhile (410) they
+        # will not add us, and adding them here would leave a one-sided contact.
         requester_gw_ws = (invite.endpoint_hints or [None])[0]
-        if requester_gw_ws and alice_did:
-            _req_http = requester_gw_ws.replace("wss://", "https://").replace("ws://", "http://")
-            if _is_safe_gateway_url(_req_http):
-                self._record_peer_gateway(alice_did, requester_gw_ws)
-            else:
-                logger.warning("Skipping peer gateway record — invite endpoint_hint is a private URL: %s", requester_gw_ws)
-
-        # Populate dm_clients so pod-backed DMs can use the relationship
-        pod_client = self._pod_client()
-        if pod_client:
-            self.dm_clients[cert.certificate_id] = (cert, pod_client)
-
-        # Any other request between us and this person (they asked twice, or we
-        # asked each other) is settled by this relationship.
-        await self._settle_other_invites_for_peer(alice_did, invitation_id)
-
-        # POST acceptance back to requester's gateway so Alice creates her side too
         if requester_gw_ws:
             http_base = requester_gw_ws.replace("wss://", "https://").replace("ws://", "http://")
             if _is_safe_gateway_url(http_base):
@@ -2333,9 +2305,55 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                                           or self._store.get_display_name(self._client_webids.get(websocket, ""))
                                           or ""),
                 }
-                asyncio.create_task(self._post_invite_accept(accept_url, accept_payload))
+                if await self._post_invite_accept(accept_url, accept_payload) == 410:
+                    self._store.mark_invite_status(invitation_id, "withdrawn")
+                    _caller = self._client_webids.get(websocket, "")
+                    _evt = json.dumps({"type": "friend_request_dismissed",
+                                       "invitation_id": invitation_id, "withdrawn": True})
+                    if _caller:
+                        await self._send_to_identity(_caller, _evt)
+                    else:
+                        await websocket.send(_evt)
+                    await websocket.send(json.dumps({"type": "error", "message": "request_withdrawn",
+                                                     "invitation_id": invitation_id}))
+                    return
             else:
-                logger.warning("Skipping invite accept POST — peer endpoint_hint is a private URL: %s", http_base)
+                logger.warning("Skipping invite accept POST, peer endpoint_hint is a private URL: %s", http_base)
+
+        # Persist to SQLite and pod
+        self._store.save_relationship(cert.to_dict(), peer_did=alice_did,
+                                      owner_webid=self._client_webids.get(websocket, ""))
+        # Accepting is the owner re-adding this person: a revocation left from an
+        # earlier "Remove contact" would otherwise drop the new friendship's traffic.
+        self._lift_revocation_on_readd(alice_did)
+        # Store the requester's browser E2E key (from the invite) so we can encrypt
+        # the first DM to the right key even if we message before receiving one.
+        _alice_e2e = invite.issuer.get("e2e_key")
+        if _alice_e2e and alice_did:
+            self._store.save_e2e_key(alice_did, _alice_e2e)
+        # Name the new contact by the name their request carried (shown with its
+        # id tag in the contacts list), unless we already know them by one.
+        self._save_peer_name_if_unknown(alice_did, invite.issuer.get("display_name"))
+        asyncio.create_task(self._sync_cert_to_pod(cert.to_dict()))
+
+        # Register Alice's endpoint so relay routing works immediately — validate
+        # first (peer-supplied endpoint_hint) to prevent SSRF pinning to a
+        # private/loopback host, mirroring the accept-POST check above.
+        if requester_gw_ws and alice_did:
+            _req_http = requester_gw_ws.replace("wss://", "https://").replace("ws://", "http://")
+            if _is_safe_gateway_url(_req_http):
+                self._record_peer_gateway(alice_did, requester_gw_ws)
+            else:
+                logger.warning("Skipping peer gateway record — invite endpoint_hint is a private URL: %s", requester_gw_ws)
+
+        # Populate dm_clients so pod-backed DMs can use the relationship
+        pod_client = self._pod_client()
+        if pod_client:
+            self.dm_clients[cert.certificate_id] = (cert, pod_client)
+
+        # Any other request between us and this person (they asked twice, or we
+        # asked each other) is settled by this relationship.
+        await self._settle_other_invites_for_peer(alice_did, invitation_id)
 
         # Emit cert to browser so it writes the contact to the pod
         await websocket.send(json.dumps({
@@ -2463,12 +2481,14 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 for cid in cert_ids:
                     self._store.record_pending_pod_op(f"stash://pod/revocations/{cid}.json", "delete")
 
-    async def _post_invite_accept(self, url: str, payload: dict) -> None:
-        """POST the acceptance notification to the requester's gateway via SSRF-safe transport."""
-        from .network import async_safe_post
-        ok = await async_safe_post(url, payload)
-        if not ok:
-            logger.warning(f"invite/accept POST to {url!r} failed or was SSRF-blocked")
+    async def _post_invite_accept(self, url: str, payload: dict) -> "int | None":
+        """POST the acceptance notification to the requester's gateway via SSRF-safe
+        transport. Returns the HTTP status, or None when it could not be reached."""
+        from .network import async_safe_post_status
+        status = await async_safe_post_status(url, payload)
+        if status is None or status >= 300:
+            logger.warning(f"invite/accept POST to {url!r} failed or was SSRF-blocked ({status})")
+        return status
 
     async def _handle_restore_contacts(self, websocket, data: dict) -> None:
         """Rehydrate dm_clients and SQLite from pod-persisted RelationshipCertificates."""

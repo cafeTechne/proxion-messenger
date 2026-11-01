@@ -3568,14 +3568,15 @@ import { createAccountSync } from './account-sync.js';
                     // waiting (answered elsewhere, or a stale copy) loses its card;
                     // otherwise its Accept button works again.
                     if (event.invitation_id && event.cmd === "withdraw_friend_request") {
-                        if (event.message === "invite_not_found") removeSentRequest(event.invitation_id);
+                        if (event.message === "invite_not_found" || event.message === "request_already_accepted")
+                            removeSentRequest(event.invitation_id);
                         else {
                             const _wb = document.querySelector(`#frs-${CSS.escape(event.invitation_id)} [data-fr-action="withdraw"]`);
                             if (_wb) _wb.disabled = false;
                         }
                     } else if (event.invitation_id) {
                         const _card = document.getElementById("fri-" + event.invitation_id);
-                        if (_card && event.message === "invite_not_found") {
+                        if (_card && (event.message === "invite_not_found" || event.message === "request_withdrawn")) {
                             _card.remove();
                             refreshFriendRequestsBadge();
                             podDeleteInvite(event.invitation_id).catch(() => {});

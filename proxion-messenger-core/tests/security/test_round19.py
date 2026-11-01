@@ -41,16 +41,16 @@ class TestPostInviteAcceptSSRF:
     @pytest.mark.asyncio
     async def test_uses_async_safe_post_not_raw_httpx(self, tmp_path):
         gw = _make_gateway(tmp_path)
-        with patch("proxion_messenger_core.network.async_safe_post", new_callable=AsyncMock, return_value=True) as mock_post:
-            await gw._post_invite_accept("https://example.com/invite/accept", {"key": "val"})
+        with patch("proxion_messenger_core.network.async_safe_post_status", new_callable=AsyncMock, return_value=200) as mock_post:
+            assert await gw._post_invite_accept("https://example.com/invite/accept", {"key": "val"}) == 200
         mock_post.assert_called_once_with("https://example.com/invite/accept", {"key": "val"})
 
     @pytest.mark.asyncio
     async def test_private_ip_blocked_by_async_safe_post(self, tmp_path):
         gw = _make_gateway(tmp_path)
-        # async_safe_post returns False for SSRF-blocked URLs; _post_invite_accept must not raise
-        with patch("proxion_messenger_core.network.async_safe_post", new_callable=AsyncMock, return_value=False):
-            await gw._post_invite_accept("http://192.168.1.1/accept", {})  # must not raise
+        # async_safe_post_status returns None for SSRF-blocked URLs; _post_invite_accept must not raise
+        with patch("proxion_messenger_core.network.async_safe_post_status", new_callable=AsyncMock, return_value=None):
+            assert await gw._post_invite_accept("http://192.168.1.1/accept", {}) is None
 
     @pytest.mark.asyncio
     async def test_send_friend_request_uses_async_safe_post(self, tmp_path):

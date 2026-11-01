@@ -261,3 +261,59 @@ async def test_a_queued_request_ends_when_it_expires_or_is_refused(tmp_path, mon
         assert ev["invitation_id"] == second and ev["reason"] == "failed"
         assert _relay_ids(a) == []
         assert await _sent_list(conn_a) == []
+
+
+@pytest.mark.asyncio
+async def test_accept_racing_a_withdrawal_adds_nobody(tmp_path):
+    """Alice withdraws while Bob accepts, and her notice has not reached Bob
+    yet. Her gateway refuses the acceptance, so Bob's does not add her either,
+    and Bob is told the request was cancelled."""
+    from unittest.mock import AsyncMock
+    a, b = _start(tmp_path, "a"), _start(tmp_path, "b")
+    async with websockets.connect(f"ws://127.0.0.1:{a.ws}") as conn_a, \
+               websockets.connect(f"ws://127.0.0.1:{b.ws}") as conn_b:
+        await _register(conn_a, _client_did(), "alice")
+        await _register(conn_b, _client_did(), "bob")
+        iid = (await _send_request(conn_a, b))["invitation_id"]
+        assert await _wait(conn_b, lambda m: m.get("type") == "friend_request_received")
+
+        # The withdrawal notice is still in flight to Bob's gateway.
+        a.gw._send_invite_withdraw = AsyncMock(return_value=True)
+        await conn_a.send(json.dumps({"cmd": "withdraw_friend_request", "invitation_id": iid}))
+        assert await _wait(conn_a, lambda m: m.get("type") == "friend_request_withdrawn")
+        assert _status(b, iid) == "pending"
+
+        await conn_b.send(json.dumps({"cmd": "accept_friend_request", "invitation_id": iid}))
+        gone = await _wait(conn_b, lambda m: m.get("type") in (
+            "friend_request_dismissed", "friend_request_accepted"))
+        assert gone["type"] == "friend_request_dismissed" and gone["invitation_id"] == iid
+        err = await _wait(conn_b, lambda m: m.get("type") == "error")
+        assert err["message"] == "request_withdrawn" and err["invitation_id"] == iid
+        assert await _wait(conn_a, lambda m: m.get("type") == "contact_added", timeout=1) is None
+        assert _status(a, iid) == "withdrawn" and _status(b, iid) == "withdrawn"
+    assert a.gw._store.list_relationships() == []
+    assert b.gw._store.list_relationships() == []
+
+
+@pytest.mark.asyncio
+async def test_withdraw_after_the_accept_landed_is_refused(tmp_path):
+    """Bob's acceptance reached Alice first: both have the contact, and her
+    late withdrawal is refused rather than leaving only Bob with it."""
+    a, b = _start(tmp_path, "a"), _start(tmp_path, "b")
+    async with websockets.connect(f"ws://127.0.0.1:{a.ws}") as conn_a, \
+               websockets.connect(f"ws://127.0.0.1:{b.ws}") as conn_b:
+        await _register(conn_a, _client_did(), "alice")
+        await _register(conn_b, _client_did(), "bob")
+        iid = (await _send_request(conn_a, b))["invitation_id"]
+        assert await _wait(conn_b, lambda m: m.get("type") == "friend_request_received")
+        await conn_b.send(json.dumps({"cmd": "accept_friend_request", "invitation_id": iid}))
+        assert await _wait(conn_b, lambda m: m.get("type") == "friend_request_accepted")
+        assert await _wait(conn_a, lambda m: m.get("type") == "contact_added")
+
+        await conn_a.send(json.dumps({"cmd": "withdraw_friend_request", "invitation_id": iid}))
+        err = await _wait(conn_a, lambda m: m.get("type") in ("error", "friend_request_withdrawn"))
+        assert err["type"] == "error" and err["message"] == "request_already_accepted"
+        assert err["invitation_id"] == iid
+        assert _status(a, iid) == "accepted" and _status(b, iid) == "accepted"
+    assert [r["peer_did"] for r in a.gw._store.list_relationships()] == [b.did]
+    assert [r["peer_did"] for r in b.gw._store.list_relationships()] == [a.did]

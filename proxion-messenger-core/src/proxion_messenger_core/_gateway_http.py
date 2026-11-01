@@ -650,6 +650,10 @@ class HttpEndpointsMixin:
         _inv_issuer = _inv.get("issuer") if isinstance(_inv.get("issuer"), dict) else {}
         if _inv_issuer.get("public_key") != self.agent.identity_pub_bytes.hex():
             return "400 Bad Request", '{"error":"no matching pending invite"}'
+        # Withdrawn before this acceptance arrived: we will not add them, and a
+        # 410 tells the acceptor's gateway not to add us either.
+        if _inv_row["status"] == "withdrawn":
+            return "410 Gone", '{"error":"invite_withdrawn"}'
         if _inv_row["status"] != "pending":
             self._store.save_security_event(
                 "invite_accept_not_pending", "warning",
