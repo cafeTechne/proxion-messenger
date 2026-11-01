@@ -47,4 +47,4 @@ def test_schema_version_intact():
     import sqlite3
     s = _store()
     v = sqlite3.connect(s.db_path).execute("SELECT version FROM schema_version").fetchone()[0]
-    assert v == 64   # bump whenever a migration is added (64 = departed federated member)
+    assert v == 65   # bump whenever a migration is added (65 = owner devices)

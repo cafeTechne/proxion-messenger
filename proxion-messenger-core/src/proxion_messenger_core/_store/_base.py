@@ -27,6 +27,7 @@ WRAPPED_SECRET_COLUMNS: tuple[tuple[str, str], ...] = (
     ("dm_prekeys", "priv_wrapped_b64"),
     ("sender_keys", "chain_key_b64"),
     ("wg_local_identity", "priv_wrapped_b64"),
+    ("owner_devices", "did_wrapped"),
 )
 
 
@@ -253,7 +254,7 @@ class _StoreBase(object):
         """Flush the WAL to the main database file (call before shutdown)."""
         with self._conn() as conn:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    _SCHEMA_VERSION = 64
+    _SCHEMA_VERSION = 65
     _integrity_ok: bool = True
     _migration_error: str = ""
     def _init_db(self) -> None:
@@ -1606,6 +1607,17 @@ class _StoreBase(object):
             # host; departed hides that row from member lists.
             [
                 "ALTER TABLE room_federated_members ADD COLUMN departed INTEGER NOT NULL DEFAULT 0",
+            ],
+            # 65: the identities that own this gateway, kept across restarts.
+            # The did is wrapped under the store key, so a row cannot be added
+            # without it.
+            [
+                """CREATE TABLE IF NOT EXISTS owner_devices (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    did_wrapped TEXT NOT NULL,
+                    via         TEXT NOT NULL DEFAULT '',
+                    added_at    REAL NOT NULL
+                )""",
             ],
         ]
 

@@ -367,3 +367,57 @@ class DeviceStoreMixin(object):
                 )
             except Exception:
                 pass
+
+    def _owner_device_rows(self, conn) -> list:
+        """(rowid, did, via, added_at) for every readable owner row. With a wrap
+        key configured a raw (unwrapped) row is ignored: only this store can
+        have written it, so a raw one was put there by hand."""
+        try:
+            rows = conn.execute(
+                "SELECT id, did_wrapped, via, added_at FROM owner_devices ORDER BY added_at ASC, id ASC"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        out = []
+        for row in rows:
+            stored = row["did_wrapped"] or ""
+            if self._db_wrap_key and not stored.startswith("{"):
+                continue
+            did = self._unwrap_secret(stored)
+            if not did or not isinstance(did, str) or did.startswith("{"):
+                continue
+            out.append((row["id"], did, row["via"] or "", row["added_at"]))
+        return out
+
+    def list_owner_devices(self) -> list[dict]:
+        """The identities that own this gateway, oldest first, one per did."""
+        with self._conn() as conn:
+            seen: set = set()
+            out = []
+            for _rid, did, via, added_at in self._owner_device_rows(conn):
+                if did in seen:
+                    continue
+                seen.add(did)
+                out.append({"did": did, "via": via, "added_at": added_at})
+            return out
+
+    def add_owner_device(self, did: str, via: str = "") -> bool:
+        """Record *did* as an owner. Returns False when it already is one."""
+        if not did:
+            return False
+        with self._conn() as conn:
+            if any(d == did for _r, d, _v, _a in self._owner_device_rows(conn)):
+                return False
+            conn.execute(
+                "INSERT INTO owner_devices (did_wrapped, via, added_at) VALUES (?, ?, ?)",
+                (self._wrap_secret(did), (via or "")[:16], time.time()),
+            )
+            return True
+
+    def remove_owner_device(self, did: str) -> bool:
+        """Drop *did* from the owners. Returns whether a row was removed."""
+        with self._conn() as conn:
+            ids = [r for r, d, _v, _a in self._owner_device_rows(conn) if d == did]
+            for rid in ids:
+                conn.execute("DELETE FROM owner_devices WHERE id=?", (rid,))
+            return bool(ids)
