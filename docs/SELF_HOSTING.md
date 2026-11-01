@@ -83,6 +83,25 @@ Why each one:
 Setting `PROXION_PUBLIC_URL` also skips the UPnP port-mapping attempt that
 `run_gateway.py` otherwise makes on start.
 
+### Claiming the gateway
+
+A gateway that requires sign-in has no owner until you claim it. On first start
+it prints a one-time link next to the Web UI address, and logs it again when it
+expires:
+
+```
+  Claim   : https://chat.example.com/#claim=Wq3...
+```
+
+Open that link in the browser you will use. The page signs in and makes that
+identity the owner, which unlocks the tunnel, pod bridge and other owner-only
+settings. The code is single use, expires after 15 minutes, is written only to
+the gateway log, and stops working once the gateway has an owner. If the link
+is not handy, the "Claim this gateway" banner accepts the code or
+`PROXION_ADMIN_API_TOKEN`. Devices you link to that identity are owners too, and
+Settings > Devices & sessions lists the owners so you can remove one. The
+desktop app and a phone reached through its tunnel need no claim.
+
 ### Option A: Caddy (automatic certificates)
 
 ```
