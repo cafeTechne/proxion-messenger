@@ -2882,12 +2882,14 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
         Opening, closing, or reading the tunnel exposes or reveals the whole
         gateway's public reach, so it is owner-only. The owner is proven one of
-        two ways:
+        three ways:
 
         * its registered identity is the gateway's own account DID (the
           meaningful check whenever auth is enforced, which a live tunnel forces
           on, so it holds even over the tunnel where cloudflared collapses
           peer_ip to loopback), or
+        * its registered identity is a recorded owner (_gateway_owner.py) and
+          this socket proved it with the auth challenge, or
         * it is a genuine loopback connection while auth is NOT enforced
           (loopback single-user dev, where the browser registers under its own
           session DID, not the account DID). A live tunnel forces auth on, so
