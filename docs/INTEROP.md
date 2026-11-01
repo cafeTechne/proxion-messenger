@@ -22,7 +22,7 @@ Partial / Missing / N-A by design, with citations), see
 ## Proxion desktop and Proxion in the browser
 
 The desktop app (a gateway) and the browser build (no gateway, just your pod) can
-direct-message each other. The browser build delivers a DM by dropping a signed,
+direct-message and call each other. The browser build delivers a DM by dropping a signed,
 ratchet-encrypted envelope into the recipient's `proxion/dm-inbox/`; the desktop
 client runs that same code (`web/webdm.js`) as the WebID of the pod its gateway is
 connected to, with the gateway making the pod requests on its behalf
@@ -30,10 +30,20 @@ connected to, with the gateway making the pod requests on its behalf
 
 - **Works:** text DMs both ways, message requests for a first DM from a stranger,
   presence both ways, blocking. Test: `npm run smoke:cross-mode-dm`.
+- **Calls:** 1:1 voice and video both ways. Call signaling (offer, answer, ICE,
+  hangup) is dropped into the other side's `proxion/call-inbox/`; the desktop
+  polls its own every second while a call rings or runs, and only its contacts
+  can ring it. Media is peer to peer. Each side signs its DTLS fingerprint with
+  its device key, and the other side reads Verified only when that key is the
+  one named in the caller's `proxion/identity/signer.json`; any other key reads
+  Unverified, or the call is refused once that contact has made a verified call.
+  The desktop keeps its gateway's TURN relay; the browser build uses public STUN
+  and the default or user-added relay. A call to a closed desktop app shows a
+  missed-call notification within a minute. Test: `npm run smoke:cross-mode-call`.
 - **Needs:** a pod connected to the desktop gateway, stored where its WebID points
   (`{root}profile/card#me` with storage at `{root}`). Share the WebID from
   Settings, Pod.
-- **Not yet:** rooms, calls, edits, reactions, files, voice messages,
+- **Not yet:** rooms, group calls, edits, reactions, files, voice messages,
   disappearing and scheduled messages in these threads. One desktop device per
   WebID receives them: the one that signed in last.
 

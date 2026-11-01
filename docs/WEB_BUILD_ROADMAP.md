@@ -119,7 +119,10 @@ callee's pod inbox and delivered via `notify.js`. `callsec.js` already signs the
 DTLS fingerprint and refuses a MitM, so the untrusted pod-signaling path is safe
 by the same mechanism that protects against an untrusted gateway. STUN covers
 many networks with no server; symmetric-NAT peers need a TURN relay, which never
-sees plaintext media but is a server.
+sees plaintext media but is a server. The desktop app calls browser-build
+contacts the same way, through its gateway's pod bridge as its pod WebID, and
+each side checks the other's fingerprint signature against the key named in the
+other's `proxion/identity/signer.json` (see INTEROP.md).
 
 ---
 
@@ -128,7 +131,10 @@ sees plaintext media but is a server.
 - Presence is heartbeat-based and coarser than the desktop's socket presence.
 - Calls work over public STUN for many networks; restrictive NATs need a TURN
   relay (self-hosted or a shared TURN-only service, far less sensitive than a
-  key-holding gateway).
+  key-holding gateway). The browser build has no gateway TURN: it uses public
+  STUN, plus the default public relay unless turned off, or a relay added in
+  Settings, Calls. The desktop app keeps its gateway's TURN, also when calling a
+  browser-build contact.
 - Delivery latency is pod-notification latency, not direct-socket latency.
 - True push requires a pod that implements the Solid Notifications Protocol;
   otherwise the existing polling fallback applies.
