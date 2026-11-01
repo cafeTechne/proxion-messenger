@@ -349,6 +349,27 @@ def test_closed_app_push_skips_blocked_senders(gw):
     assert pushes == [did]
 
 
+def test_closed_app_push_says_missed_call_for_a_call_invite(gw):
+    did = "did:key:z6MkConsumer"
+    be_consumer(gw, did)
+    dm_box, call_box = ROOT + "proxion/dm-inbox/", ROOT + "proxion/call-inbox/"
+    gw._pod.routes[("GET", dm_box)] = (200, {}, _listing())
+    gw._pod.routes[("GET", call_box)] = (200, {}, _listing())
+    pushes = []
+    with patch.object(type(gw), "_pb_push", lambda self, ident, kind="dm": pushes.append(kind) or True):
+        run(gw._pb_closed_app_check())                       # baseline
+        gw._pod.routes[("GET", call_box)] = (200, {}, _listing("c1"))
+        gw._pod.routes[("GET", call_box + "c1")] = (200, {}, json.dumps(
+            {"type": "ice_candidate", "from_webid": "https://c.example/profile/card#me"}).encode())
+        run(gw._pb_closed_app_check())                       # a stray candidate rings nobody
+        assert pushes == []
+        gw._pod.routes[("GET", call_box)] = (200, {}, _listing("c1", "c2"))
+        gw._pod.routes[("GET", call_box + "c2")] = (200, {}, json.dumps(
+            {"type": "voice_invite", "from_webid": "https://c.example/profile/card#me"}).encode())
+        run(gw._pb_closed_app_check())
+    assert pushes == ["missed_call"]
+
+
 def test_push_is_content_free_and_rate_limited(gw):
     gw._vapid_private_pem, gw._vapid_subject = "pem", "mailto:x@example.com"
     gw._store.get_push_subscriptions = lambda ident: [{"endpoint": "https://push.example/1", "p256dh_b64": "a", "auth_b64": "b"}]
@@ -364,6 +385,15 @@ def test_push_is_content_free_and_rate_limited(gw):
             await asyncio.sleep(0)
     run(go())
     assert payloads == [{"type": "dm", "thread_id": ""}]
+    gw._last_inbox_push.clear()
+    payloads.clear()
+
+    async def go_call():
+        with patch.object(type(gw), "_push_offline_fanout", lambda self, *a: fan(*a)):
+            assert gw._pb_push("did:key:zC", "missed_call") is True
+            await asyncio.sleep(0)
+    run(go_call())
+    assert payloads == [{"type": "missed_call", "thread_id": ""}]
 
 
 def test_rate_limit_answers_with_the_req_id(gw):

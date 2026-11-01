@@ -404,7 +404,9 @@ class PodBridgeMixin:
     async def _pb_closed_app_check(self) -> None:
         """While no consuming device is connected, look at our DM and call boxes
         and send a content-free push when a new drop from an unblocked sender
-        lands. A blocked sender's drop is deleted unread."""
+        lands: "missed call" for a call invite (this look runs once a minute, so
+        the ring is over by then), else "new message". A blocked sender's drop is
+        deleted unread."""
         st = self._pb()
         status = self._pod_bridge_status()
         consumer = await self._pb_consumer()
@@ -412,6 +414,7 @@ class PodBridgeMixin:
             return
         ident = st.get("consumer_identity") or consumer
         fresh = False
+        missed_call = False
         for box in ("dm", "call"):
             url = f"{status['pod_root']}proxion/{box}-inbox/"
             try:
@@ -444,13 +447,18 @@ class PodBridgeMixin:
                     except Exception:
                         pass
                     continue
-                fresh = True
-        if fresh:
+                if box == "call" and isinstance(doc, dict) and doc.get("type") == "voice_invite":
+                    missed_call = True
+                elif box == "dm":
+                    fresh = True
+        if missed_call:
+            self._pb_push(ident, "missed_call")
+        elif fresh:
             self._pb_push(ident)
 
-    def _pb_push(self, identity: str) -> bool:
-        """A content-free 'new message' push to *identity*'s devices, rate-limited
-        with the inbox push (no sender, no content, no thread)."""
+    def _pb_push(self, identity: str, kind: str = "dm") -> bool:
+        """A content-free 'new message' (or 'missed_call') push to *identity*'s
+        devices, rate-limited with the inbox push (no sender, no content, no thread)."""
         if not identity or not self._store:
             return False
         subs = self._store.get_push_subscriptions(identity)
@@ -463,7 +471,8 @@ class PodBridgeMixin:
         if now - last < self._INBOX_PUSH_MIN_INTERVAL:
             return False
         self._last_inbox_push["pod:" + identity] = now
-        asyncio.ensure_future(self._push_offline_fanout(subs, {"type": "dm", "thread_id": ""}, vpk, vsub))
+        payload = {"type": "missed_call" if kind == "missed_call" else "dm", "thread_id": ""}
+        asyncio.ensure_future(self._push_offline_fanout(subs, payload, vpk, vsub))
         return True
 
     async def _pod_bridge_loop(self) -> None:
