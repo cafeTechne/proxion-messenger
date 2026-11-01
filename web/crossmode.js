@@ -128,6 +128,7 @@ export function createCrossMode({
         await _dm.start().catch(() => {});
         _presence.start();
         await _calls.start().catch(() => {});
+        _setState({ started: true });   // identity published: pod rooms may start (crossrooms.js)
     }
 
     // A call signal for a WebID contact goes to their call-inbox. No gateway

@@ -31,7 +31,8 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podEditChatMessageAt, podSoftDeleteChatMessageAt, podSetChatSeqAt,
          podGrantChatParticipants, podPublishSigner, podFetchPeerSigner,
          podSetLongChatSigner, podReadChatDayAt, podRegisterRoomChat,
-         podReadJoinedRooms, podWriteJoinedRooms, podReadRoomMembersAt, podDeleteOwnedRoom } from './pod.js';
+         podReadJoinedRooms, podWriteJoinedRooms, podReadRoomMembersAt, podDeleteOwnedRoom,
+         podWriteChatMessageAtResult } from './pod.js';
 import { signDm, verifyDmSig, signFanout, verifyFanoutSig } from './dmsig.js';
 import { verifyDeviceCert } from './device-cert.js';
 import { podQueueAdd, podQueueRemove, podQueueFlush, podQueueList, podQueueCount } from './podqueue.js';
@@ -70,6 +71,7 @@ import { createConnection, normalizeGatewayUrl, planThreadCatchUp, createRateRet
 import { createTabLock, showTabNotice, hideTabNotice } from './tablock.js';
 import { createTransport, detectMode, applyTransportGating, applyCrossModeGating } from './transport.js';
 import { createCrossMode } from './crossmode.js';
+import { createCrossRooms, webAppUrl } from './crossrooms.js';
 import { createMessageRequests } from './msgrequests.js';
 import { createPodSocket } from './podtransport.js';
 import { purgeWebAccount, adoptWebAccount, shouldPromptForName, markNamePrompted } from './web-account.js';
@@ -927,8 +929,10 @@ import { createAccountSync } from './account-sync.js';
         // Desktop DMs with browser-build (WebID) contacts go through the pod
         // (crossmode.js); everything else goes to the gateway as before.
         let crossMode = null;
+        let crossRooms = null;   // desktop pod rooms shared with browser-build users (crossrooms.js)
         function socketSendOrQueue(payload, opts) {
             if (crossMode && crossMode.route(payload)) return;
+            if (crossRooms && crossRooms.route(payload)) return;
             return _wsSendOrQueue(payload, opts);
         }
         // voice.js writes to the socket directly: its signals for a WebID
@@ -945,12 +949,29 @@ import { createAccountSync } from './account-sync.js';
         function _voiceSocket() {
             return crossMode && socket ? _voiceSocketProxy : socket;
         }
+        // A pod room's commands never reach the gateway, whichever send path
+        // they take (many room actions call socket.send directly).
+        function _withPodRooms(s) {
+            if (!s || typeof s.send !== 'function' || s._podRooms) return s;
+            const raw = s.send.bind(s);
+            s.send = (data) => {
+                if (crossRooms && typeof data === 'string' && (data.includes('"room_id"') || data.includes('"thread_id"')
+                    || data.includes('"join_web_room"') || data.includes('"pod":true'))) {
+                    let cmd = null;
+                    try { cmd = JSON.parse(data); } catch { /* not a command */ }
+                    if (cmd && crossRooms.route(cmd)) return undefined;
+                }
+                return raw(data);
+            };
+            s._podRooms = true;
+            return s;
+        }
         const {
             socketSendOrQueue: _wsSendOrQueue, sendOnce, restorePersisted, probe: probeConnection,
             forceReconnect, connect, flushPending, shutdown: stopConnection,
         } = createConnection({
             wsUrl: WS_URL,
-            getSocket: () => socket, setSocket: (s) => { socket = s; },
+            getSocket: () => socket, setSocket: (s) => { socket = _withPodRooms(s); },
             getClientDid: () => clientDid,
             generateOrLoadIdentity, handleEventAsync: _handleEventAsync,
             isActive: () => tabLock.isLeader(),
@@ -1063,9 +1084,57 @@ import { createAccountSync } from './account-sync.js';
                 getContacts: () => Object.keys(localDmPeers || {}),
                 getMyPub: () => myX25519PubB64u(),
                 fetchAndCachePeerPub,
-                onStateChange: (st) => _showCrossModeState(st),
+                onStateChange: (st) => { _showCrossModeState(st); crossRooms?.onState(st); },
             });
             window.proxionCrossMode = crossMode;   // for smokes
+            crossRooms = _createCrossRooms(crossMode);
+            window.proxionCrossRooms = crossRooms;   // for smokes
+        }
+        // Pod rooms on desktop: rooms in a browser-build user's pod that we
+        // joined, and rooms we host in our own pod for them. Same Long Chat as
+        // the browser build, through the gateway's pod bridge.
+        function _createCrossRooms(cm) {
+            return createCrossRooms({
+                bridge: cm.bridge,
+                send: (m) => {
+                    if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error('not connected');
+                    socket.send(JSON.stringify(m));
+                },
+                handleEvent: (ev) => _handleEventAsync(ev, true),
+                getState: () => cm.state(),
+                getSelfId: () => selfWebId,
+                getDisplayName: () => localStorage.getItem('proxion_display_name') || '',
+                getSigner: () => (_identityPrivKey && clientDid ? { privKey: _identityPrivKey, signerDid: clientDid } : null),
+                signDescriptor: (d) => signRoomDescriptor(d),
+                askApprove: (req, desc) => _queueJoinPrompt(async () => {
+                    const who = await _joinRequesterLabel(req);
+                    return _askJoinOnce(t('join.approvePrompt', { who, room: desc.title || req.room_id }), {
+                        title: t('confirm.joinApprove.title'),
+                        confirmLabel: t('confirm.joinApprove.verb'),
+                        cancelLabel: t('btn.decline'),
+                    });
+                }),
+                onRoom: (rec, info) => _showPodRoom(rec, info),
+                onRemoved: (roomId) => _handleEventAsync({ type: 'kicked_from_room', room_id: roomId }, true),
+                onMessages: (roomId, msgs, info) => _onRoomPodMessages(roomId, msgs, info),
+                notify: (kind, d) => {
+                    if (kind === 'declined') { _clearJoinPendingBanner(d.roomId); showToast(t('join.declined')); }
+                    else if (kind === 'approved') showToast(t('join.approved', { who: dmFallbackName(d.webid) }));
+                    else if (kind === 'bearer') { _clearJoinPendingBanner(d.roomId); showToast(t('join.bearerPod'), 'error'); }
+                    else if (kind === 'create_failed') {
+                        clearButtonBusy(document.getElementById('room-create-submit'));
+                        const _ce = document.getElementById('room-create-error');
+                        if (_ce) _ce.textContent = t('room.podCreateFailed');
+                    }
+                },
+                inviteBase: () => webAppUrl(localStorage),
+            });
+        }
+        function _showPodRoom(rec, info = {}) {
+            addRoomToSidebar(rec.roomId, rec.title, info.invite || (rec.owned ? crossRooms?.inviteFor(rec.roomId) : '') || '');
+            if (rec.owned) roomCreatorOf.add(rec.roomId);
+            _clearJoinPendingBanner(rec.roomId);
+            if (info.joined) showToast(t('join.joined', { room: rec.title }));
         }
         // A WebID contact added on desktop: listed with the gateway (so it
         // survives a reload), watched for presence, and its waiting DMs opened.
@@ -1089,7 +1158,8 @@ import { createAccountSync } from './account-sync.js';
         // messages have no pod protocol yet: a desktop thread with a WebID
         // contact offers text only (transport.js applyCrossModeGating).
         function _applyCrossModeThreadGating() {
-            const on = transport.mode !== 'web' && activeView?.type === 'local_dm' && isDmPeerWebId(activeView.id);
+            const on = transport.mode !== 'web' && ((activeView?.type === 'local_dm' && isDmPeerWebId(activeView.id))
+                || !!crossRooms?.isPodRoom(activeView?.id));
             applyCrossModeGating(on);
         }
         function _showCrossModeState(st) {
@@ -1776,6 +1846,14 @@ import { createAccountSync } from './account-sync.js';
             document.getElementById("room-name-input").value = "";
             { const _ce = document.getElementById("room-create-error"); if (_ce) _ce.textContent = ""; }
             document.getElementById("room-history-toggle").checked = false;
+            // Desktop with a pod: offer a pod room browser-build users can join.
+            {
+                const _row = document.getElementById("room-pod-row");
+                const _st = crossMode ? crossMode.state() : null;
+                if (_row) _row.hidden = !(crossRooms && _st && _st.ready && _st.started);
+                const _pt = document.getElementById("room-pod-toggle");
+                if (_pt) _pt.checked = false;
+            }
             document.getElementById("room-create-modal").style.display = "flex";
             setTimeout(() => document.getElementById("room-name-input").focus(), 50);
         };
@@ -1796,6 +1874,11 @@ import { createAccountSync } from './account-sync.js';
             if (errEl) errEl.textContent = "";
             const historyMode = document.getElementById("room-history-toggle").checked ? "all" : "none";
             setButtonBusy(submitBtn, t('room.creating'));
+            const _podRow = document.getElementById("room-pod-row");
+            if (_podRow && !_podRow.hidden && document.getElementById("room-pod-toggle")?.checked) {
+                socketSendOrQueue({cmd: "chat_room_create", name: name, pod: true});
+                return;
+            }
             socketSendOrQueue({cmd: "chat_room_create", name: name, history_mode: historyMode});
         };
 
@@ -2001,6 +2084,7 @@ import { createAccountSync } from './account-sync.js';
         async function _handleEventAsync(event, fromPod = false) {
             // The pod bridge's own replies (gwpod.js) never reach the app dispatch.
             if (!fromPod && crossMode && crossMode.handleEvent(event)) return;
+            if (!fromPod && crossRooms && crossRooms.handleEvent(event)) return;
             // Cache peer's X25519 pub key from a gateway-delivered DM event only.
             if (!fromPod && event.x25519_pub && event.from_webid) {
                 cachePeerPub(event.from_webid, event.x25519_pub);
@@ -2689,6 +2773,8 @@ import { createAccountSync } from './account-sync.js';
                         }
                         _trackRoomSync(r.id);
                     });
+                    // Desktop pod rooms are not the gateway's: the rebuild above dropped them.
+                    for (const rec of crossRooms?.list() || []) _showPodRoom(rec);
                     // Unread badges from the list; history only for the open room.
                     _applyThreadCatchUp(event.rooms.filter(r => r.local));
                     break;
@@ -2767,7 +2853,10 @@ import { createAccountSync } from './account-sync.js';
                 case "join_invalid_invite": {
                     const _jb = document.getElementById("join-room-submit-btn");
                     const _je = document.getElementById("join-room-error");
-                    const _jmsg = t(event.reason === 'desktop_room' ? 'join.desktopRoomInWeb' : 'join.invalidInvite');
+                    const _jmsg = t({
+                        desktop_room: 'join.desktopRoomInWeb', no_pod: 'join.podNeeded',
+                        own_room: 'join.ownPodRoom', unreachable: 'join.ownerUnreachable',
+                    }[event.reason] || 'join.invalidInvite');
                     if (isButtonBusy(_jb) && _je) _je.textContent = _jmsg;
                     else showToast(_jmsg, 'error');
                     clearButtonBusy(_jb);
@@ -4477,6 +4566,31 @@ import { createAccountSync } from './account-sync.js';
             delete _local_rooms[roomId];
             return true;
         }
+        // Owner: take someone out of a room. The descriptor drops them and the
+        // chat ACL is rewritten from it, so their next append is refused.
+        async function _webKickMember(roomId, webid) {
+            if (!roomCreatorOf.has(roomId) || _remoteRooms[roomId] || webid === selfWebId) return false;
+            const cur = await podReadRoomDescriptor(roomId);
+            if (!cur || cur.owner !== selfWebId) return false;
+            const updated = withMembers(cur, cur.members.filter(m => m.webid !== webid));
+            await signRoomDescriptor({
+                ...updated, name: updated.title, code: roomId,
+                creator_webid: selfWebId, created_at: updated.created,
+            }).then((signed) => podWriteRoomDescriptor(signed)).catch(() => {});
+            const members = updated.members.filter(m => !m.banned).map(m => m.webid);
+            const ok = await podGrantChatParticipants(chatRootUrl(podStorageRoot(), roomId), selfWebId, members.filter(w => w !== selfWebId));
+            await podWriteRoomMembers(roomId, members.map(w => ({ webid: w, role: w === selfWebId ? 'admin' : 'member' }))).catch(() => {});
+            if (_local_rooms[roomId]) _local_rooms[roomId].memberWebIds = new Set(members);
+            return ok;
+        }
+        // Joiner: the owner's pod refused our append, so they took us out.
+        async function _webRemovedFromRoom(roomId) {
+            if (!_remoteRooms[roomId]) return;
+            if (webRoomSync) webRoomSync.untrack(roomId);
+            delete _remoteRooms[roomId];
+            await _updateJoinedRooms((list) => withoutJoinedRecord(list, roomId)).catch(() => {});
+            _handleEventAsync({ type: 'kicked_from_room', room_id: roomId }, true);
+        }
         const _webNameCache = new Map();
         async function _webMemberName(webid) {
             if (webid === selfWebId) return localStorage.getItem('proxion_display_name') || '';
@@ -5849,9 +5963,13 @@ import { createAccountSync } from './account-sync.js';
                         // A failed write is queued like an owned room's, with the
                         // container, so it is not lost on a reload.
                         sendStatus.trackPodWrite(clientMsgId, async () => {
-                            const ok = await podWriteChatMessageAt(_remoteRoom.container, clientMsgId, _podMsg);
+                            const _res = await podWriteChatMessageAtResult(_remoteRoom.container, clientMsgId, _podMsg);
+                            const ok = _res.ok;
                             if (ok) podQueueRemove(clientMsgId);
-                            else {
+                            else if (_res.status === 403) {
+                                // Not a hiccup: the owner removed us. Nothing to retry.
+                                _webRemovedFromRoom(_roomId).catch(() => {});
+                            } else {
                                 podQueueAdd({ message_id: clientMsgId, room_id: _roomId, from_webid: selfWebId,
                                     msg: _podMsg, container: _remoteRoom.container });
                                 _schedulePodQueueRetry();
@@ -7849,14 +7967,17 @@ import { createAccountSync } from './account-sync.js';
                 const targetWebid = item.dataset.webid || '';
                 const isOwner = !!(activeView && roomCreatorOf.has(activeView.id));
                 if (!isOwner || !targetWebid || targetWebid === selfWebId) return;
-                // No moderation commands behind the browser build's members list.
-                if (!transport.supports('room-admin')) return;
+                // A pod room (the browser build's, or a desktop one shared with it)
+                // has one moderation action: taking someone out of its ACL.
+                const _podRoom = transport.mode === 'web' || !!crossRooms?.isPodRoom(activeView.id);
+                if (!transport.supports('room-admin') && !_podRoom) return;
                 const menu = document.getElementById('member-context-menu');
                 if (!menu) return;
                 // Restore the default items — a previous "Mute…" click swaps the
                 // menu body for duration options.
                 if (menu.dataset.defaultHtml) menu.innerHTML = menu.dataset.defaultHtml;
                 else menu.dataset.defaultHtml = menu.innerHTML;
+                for (const el of menu.querySelectorAll('button, hr')) el.hidden = _podRoom && el.dataset.roleAction !== 'kick';
                 menu.dataset.targetWebid = targetWebid;
                 // Clamped to the viewport after measuring (menu.js).
                 openMenu(menu, { x: e.clientX, y: e.clientY, opener: item });
@@ -8425,6 +8546,7 @@ import { createAccountSync } from './account-sync.js';
                             leave: (roomId) => _webLeaveRoom(roomId),
                             deleteOwned: (roomId) => _webDeleteRoom(roomId),
                             members: (roomId) => _webRoomMembers(roomId),
+                            kick: (roomId, webid) => _webKickMember(roomId, webid),
                         },
                         makeRoomInvite: (roomId) => makeInvite(roomId, selfWebId, window.location.href, { webMode: true }),
                         history: _webCachedHistory,

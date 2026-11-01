@@ -22,6 +22,7 @@ import {
     createPodIo, buildInboxAcl, inboxAclBody as _inboxAclBody, publicReadAclBody as _publicReadAclBody,
     dmInboxUrlFor, callInboxUrlFor, joinInboxUrlFor, presenceUrlFor,
 } from './podio.js';
+import { createPodRoomIo, buildSparqlUpdate, buildN3Patch, patchFormatFor } from './podroomio.js';
 
 const SAFE_ID_RE = /^[\w-]{1,128}$/;
 
@@ -189,25 +190,7 @@ export async function podWriteRoomMeta(roomId, meta) {
  * the descriptor points at the same container the type index registers. Returns
  * success (unlike the best-effort podWriteRoomMeta) so callers/tests can react.
  */
-export async function podWriteRoomDescriptor(descriptor) {
-    const roomId = descriptor && descriptor.room_id;
-    if (!roomId || !SAFE_ID_RE.test(roomId) || !solidSession?.info?.isLoggedIn) return false;
-    const root = podStorageRoot();
-    if (!root) return false;
-    const doc = { ...descriptor };
-    if (!doc.long_chat) doc.long_chat = chatRootUrl(root, roomId);
-    try {
-        const res = await solidSession.fetch(`${root}rooms/${roomId}/room.json`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(doc),
-        });
-        return !!(res && res.ok);
-    } catch (err) {
-        console.warn('[pod] podWriteRoomDescriptor failed:', err);
-        return false;
-    }
-}
+export function podWriteRoomDescriptor(descriptor) { return _rooms.podWriteRoomDescriptor(descriptor); }
 
 /**
  * Enumerate the descriptors for rooms this user OWNS, by reading the public type
@@ -215,35 +198,10 @@ export async function podWriteRoomDescriptor(descriptor) {
  * reading its descriptor. This is how the client finds which rooms to rehydrate to
  * a gateway that has lost them (B2). Bounded by the number of registered chats.
  */
-export async function podListOwnedRoomDescriptors(myWebId) {
-    if (!myWebId || !solidSession?.info?.isLoggedIn) return [];
-    const containers = await podListRegisteredChats();
-    const out = [];
-    for (const c of containers) {
-        const roomId = roomIdFromChatContainer(c);
-        if (!roomId) continue;
-        const desc = await podReadRoomDescriptor(roomId);
-        if (desc && desc.owner === myWebId) out.push(desc);
-    }
-    return out;
-}
+export function podListOwnedRoomDescriptors(myWebId) { return _rooms.podListOwnedRoomDescriptors(myWebId); }
 
 /** Read + parse the canonical room descriptor, or null. */
-export async function podReadRoomDescriptor(roomId) {
-    if (!SAFE_ID_RE.test(roomId)) return null;
-    const root = podStorageRoot();
-    if (!root || !solidSession?.info?.isLoggedIn) return null;
-    try {
-        const res = await solidSession.fetch(`${root}rooms/${roomId}/room.json`);
-        if (!res || !res.ok) return null;
-        const text = await res.text();
-        if (text.length > 65536) return null;
-        return parseRoomDescriptor(JSON.parse(text));
-    } catch (err) {
-        console.warn('[pod] podReadRoomDescriptor failed:', err);
-        return null;
-    }
-}
+export function podReadRoomDescriptor(roomId) { return _rooms.podReadRoomDescriptor(roomId); }
 
 export async function podReadMessages(roomId) {
     if (!SAFE_ID_RE.test(roomId)) return [];
@@ -287,22 +245,6 @@ export async function podReadRoomMeta(roomId) {
     }
 }
 
-function buildWacAcl(ownerWebId, memberWebIds, containerUrl) {
-    if (!_validateWebId(ownerWebId)) throw new Error('Invalid owner WebID');
-    const validMembers = (memberWebIds || []).filter(_validateWebId);
-    const memberLines = validMembers.map((wid) => `    acl:agent <${wid}>;`).join('\n');
-    const memberBlock = validMembers.length > 0
-        ? `\n<#members>\n    a acl:Authorization;\n${memberLines}\n    acl:accessTo <${containerUrl}>;\n    acl:default <${containerUrl}>;\n    acl:mode acl:Read.`
-        : '';
-    return (
-        `@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n\n` +
-        `<#owner>\n    a acl:Authorization;\n    acl:agent <${ownerWebId}>;\n` +
-        `    acl:accessTo <${containerUrl}>;\n    acl:default <${containerUrl}>;\n` +
-        `    acl:mode acl:Read, acl:Write, acl:Control.` +
-        memberBlock + '\n'
-    );
-}
-
 /**
  * Discover a resource's access-control resource URL and model from its `Link`
  * header (R100 A2), falling back to the `.acl` convention + WAC when the server
@@ -320,29 +262,7 @@ export async function discoverAccessControl(resourceUrl) {
     return { url: resourceUrl + '.acl', model: 'wac' };
 }
 
-export async function podSetContainerAcl(containerPath, ownerWebId, memberWebIds) {
-    const root = podStorageRoot();
-    if (!root) return;
-    const containerUrl = root + containerPath;
-    if (!containerUrl.startsWith(root)) return;
-    try {
-        const { url, model } = await discoverAccessControl(containerUrl);
-        // Route by the server's access-control model: ACP for ESS-style servers,
-        // WAC otherwise (CSS/NSS). ACP authoring is unverified against live ESS
-        // (R100 A2.2); it only runs when the server advertises ACP, so it cannot
-        // affect WAC servers.
-        const body = model === 'acp'
-            ? buildAcpAcr(ownerWebId, memberWebIds, containerUrl)
-            : buildWacAcl(ownerWebId, memberWebIds, containerUrl);
-        await solidSession.fetch(url, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'text/turtle' },
-            body,
-        });
-    } catch (err) {
-        console.warn('access-control write failed:', err);
-    }
-}
+export function podSetContainerAcl(containerPath, ownerWebId, memberWebIds) { return _rooms.podSetContainerAcl(containerPath, ownerWebId, memberWebIds); }
 
 // --- Bootstrap ---
 
@@ -466,37 +386,6 @@ export async function podWriteMessageJsonLd(threadId, messageId, msg, isRoom = t
 
 // ── Long Chat layout (PLAN_ROUND_67 phases B and C) ──────────────────────────
 
-/** Create a chat channel resource if it is not there yet. Idempotent. */
-async function ensureChatIndexAt(containerUrl, title) {
-    const url = indexUrlAt(containerUrl);
-    try {
-        const head = await solidSession.fetch(url, { method: 'HEAD', redirect: 'error' });
-        if (head && head.ok) return true;
-    } catch { /* treat as missing and try to create it */ }
-    try {
-        const res = await solidSession.fetch(url, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'text/turtle' },
-            body: buildIndexTurtle(title || 'Proxion room'),
-            redirect: 'error',   // never follow a peer redirect off the vetted host
-        });
-        const ok = !!(res && res.ok);
-        // Track D: the index was just created, so this is a NEW chat in our pod.
-        // Register it in the public type index (once, here) so other Solid apps can
-        // discover it. Container-addressed, so this covers both rooms and shared
-        // chats. Best-effort and only for chats in OUR pod (we can only register
-        // discoverable instances of our own storage).
-        const _ownRoot = podStorageRoot();
-        if (ok && _ownRoot && containerUrl.startsWith(_ownRoot)) {
-            podRegisterChat(containerUrl).catch(() => {});
-        }
-        return ok;
-    } catch (err) {
-        console.warn('[pod] ensureChatIndexAt failed:', err);
-        return false;
-    }
-}
-
 /**
  * Append one message to a chat at an ARBITRARY container URL. This is the
  * cross-app primitive: the container may be in our own pod OR in a friend's pod
@@ -504,92 +393,16 @@ async function ensureChatIndexAt(containerUrl, title) {
  * so two people writing the same UTC day do not clobber each other. Verified
  * against a live pod with a second identity posting to another user's chat.
  */
-export async function podWriteChatMessageAt(containerUrl, messageId, msg) {
-    if (!containerUrl || !_peerRootAllowed(containerUrl) || !solidSession?.info?.isLoggedIn) return false;
-    const timestamp = msg.timestamp || new Date().toISOString();
-    await ensureChatIndexAt(containerUrl, msg.room_name);
-    // R101.1: if this is a reply and we know the parent's timestamp (threaded from
-    // the client, which has it locally), build the parent's pod IRI so the append
-    // can add sioc:has_reply. Message IRIs are date-partitioned, so the parent
-    // timestamp is required; without it we simply omit the standard reply link.
-    let replyToIri = null;
-    if (msg.reply_to_id && msg.reply_to_timestamp) {
-        replyToIri = messageIriAt(containerUrl, msg.reply_to_id, msg.reply_to_timestamp);
-    }
-    const messageIri = messageIriAt(containerUrl, messageId, timestamp);
-    // #4: sign the message's core fields (id, created, content, maker) with this
-    // device's identity key so a reader can prove the author. Best-effort: with no
-    // signer the message writes unsigned, valid Long Chat that simply cannot be
-    // verified, the same as one written by another Solid chat app.
-    let proof = null;
-    if (_longChatSigner) {
-        proof = await signLongChat(
-            { id: messageIri, created: timestamp, content: msg.content || '', maker: msg.from_webid || '', from_display_name: msg.from_display_name || '' },
-            _longChatSigner.privKey, _longChatSigner.signerDid,
-        );
-    }
-    const ops = appendOps({
-        channelIri: channelIriAt(containerUrl),
-        messageIri,
-        content: msg.content || '',
-        createdIso: timestamp,
-        makerIri: msg.from_webid || '',
-        // Part B: the display name is now emitted into the shared day file and
-        // covered by the signature above, so a signed message's name cannot be spoofed.
-        fromName: msg.from_display_name || '',
-        replyToIri,
-        proof,
-    });
-    try {
-        const res = await podRdfPatch(dayFileAt(containerUrl, timestamp), ops);
-        return !!(res && res.ok);
-    } catch (err) {
-        console.warn('[pod] podWriteChatMessageAt failed:', err);
-        return false;
-    }
-}
+export function podWriteChatMessageAt(containerUrl, messageId, msg) { return _rooms.podWriteChatMessageAt(containerUrl, messageId, msg); }
+/** Like podWriteChatMessageAt, with the status: { ok, status, policy }. */
+export function podWriteChatMessageAtResult(containerUrl, messageId, msg) { return _rooms.podWriteChatMessageAtResult(containerUrl, messageId, msg); }
 
 /**
  * Read one UTC day of a chat at an arbitrary container URL. Requested as JSON-LD
  * via content negotiation (every Solid server supports it), so no RDF parser has
  * to ship to the browser. Reads chats written by SolidOS and POD-CHAT too.
  */
-export async function podReadChatDayAt(containerUrl, date, threadId = '', ownerWebId = null) {
-    if (!containerUrl || !_peerRootAllowed(containerUrl) || !solidSession?.info?.isLoggedIn) return [];
-    try {
-        const res = await solidSession.fetch(dayFileAt(containerUrl, date), {
-            headers: { Accept: 'application/ld+json' },
-            redirect: 'error',   // never follow a peer redirect off the vetted host
-        });
-        if (!res || !res.ok) return [];
-        // Foreign day file: bound the body before parsing (Content-Length when the
-        // server sends one, then the actual text), mirroring the descriptor path.
-        const len = Number(res.headers?.get?.('content-length'));
-        if (Number.isFinite(len) && len > MAX_CHAT_DAY_BYTES) return [];
-        let json;
-        if (typeof res.text === 'function') {
-            const text = await res.text();
-            if (text.length > MAX_CHAT_DAY_BYTES) return [];
-            json = JSON.parse(text);
-        } else {
-            json = await res.json();
-        }
-        // #4/#5: parse, then authenticate each message's sec:proofValue against the
-        // maker's published signer (podFetchPeerSigner is the same trust anchor a
-        // DM uses), and honour a soft-delete only when its px:deleteProof verifies
-        // for the maker or, when known, the room owner. Unsigned/foreign messages
-        // stay sender_verified:false; an unauthenticated tombstone leaves the
-        // message visible. Nothing is dropped.
-        return verifyLongChatMessages(parseLongChatJsonLd(json, threadId), {
-            fetchPeerSigner: podFetchPeerSigner,
-            peerPodRoot: peerPodRootFromWebId,
-            ownerWebId,
-        });
-    } catch (err) {
-        console.warn('[pod] podReadChatDayAt failed:', err);
-        return [];
-    }
-}
+export function podReadChatDayAt(containerUrl, date, threadId = '', ownerWebId = null) { return _rooms.podReadChatDayAt(containerUrl, date, threadId, ownerWebId); }
 
 /**
  * Rewrite a message's text in a chat's Long Chat day file (Phase B: edits). The
@@ -668,28 +481,7 @@ export async function podSetChatSeqAt(containerUrl, messageId, date, seq) {
  * This is what turns "a chat in my pod" into "a conversation others can take part
  * in".
  */
-export async function podGrantChatParticipants(containerUrl, ownerWebId, participantWebIds) {
-    if (!containerUrl || !solidSession?.info?.isLoggedIn) return false;
-    try {
-        const { url: aclUrl, model } = await discoverAccessControl(containerUrl);
-        // On an ACP server (ESS) the WAC turtle would not grant anything; author an
-        // ACR that gives participants Read+Append instead. (ACP path is spec
-        // -authored, not yet live-verified; it only activates when the server
-        // advertises ACP, so WAC servers such as CSS are unaffected.)
-        const body = model === 'acp'
-            ? buildAcpAcr(ownerWebId, participantWebIds, containerUrl, 'acl:Read, acl:Append')
-            : buildChatAcl(ownerWebId, participantWebIds, containerUrl);
-        const res = await solidSession.fetch(aclUrl, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'text/turtle' },
-            body,
-        });
-        return !!(res && res.ok);
-    } catch (err) {
-        console.warn('[pod] podGrantChatParticipants failed:', err);
-        return false;
-    }
-}
+export function podGrantChatParticipants(containerUrl, ownerWebId, participantWebIds) { return _rooms.podGrantChatParticipants(containerUrl, ownerWebId, participantWebIds); }
 
 // ── Self-pod wrappers (a chat WE host under proxion/rooms/{roomId}/) ──────────
 
@@ -731,21 +523,7 @@ export function podSetLongChatSeq(roomId, messageId, date, seq) {
  * container to find all history would be a request storm on a long-lived chat.
  * A caller wanting more history pages further back by raising `days`.
  */
-export async function podReadChatRecentAt(containerUrl, days = 7, threadId = '', ownerWebId = null) {
-    if (!_peerRootAllowed(containerUrl)) return [];   // SSRF gate (defence in depth)
-    const out = [];
-    const seen = new Set();
-    const today = Date.now();
-    for (let i = Math.max(0, days - 1); i >= 0; i--) {
-        const when = new Date(today - i * 86400000);
-        for (const m of await podReadChatDayAt(containerUrl, when, threadId, ownerWebId)) {
-            if (m.message_id && seen.has(m.message_id)) continue;
-            if (m.message_id) seen.add(m.message_id);
-            out.push(m);
-        }
-    }
-    return out;
-}
+export function podReadChatRecentAt(containerUrl, days = 7, threadId = '', ownerWebId = null) { return _rooms.podReadChatRecentAt(containerUrl, days, threadId, ownerWebId); }
 
 export function podReadLongChatRecent(roomId, days = 7) {
     const root = podStorageRoot();
@@ -783,22 +561,7 @@ export async function podHydrateRoom(roomId, { days = 7, local = [] } = {}) {
 // deregister / list meeting:LongChat containers there.
 
 /** The public type index IRI linked from ANY WebID's profile, or null. */
-export async function podReadPublicTypeIndexUrlFor(webId) {
-    if (!webId || !solidSession?.info?.isLoggedIn) return null;
-    try {
-        const json = await _fetchJsonCapped(webId, { headers: { Accept: 'application/ld+json' }, redirect: 'error' }, MAX_POD_LISTING_BYTES);
-        if (!json) return null;
-        const url = parsePublicTypeIndex(json, webId);
-        // The publicTypeIndex value is attacker-controlled even for a legit WebID, and
-        // it is fetched next with our authenticated session; only follow one that is on
-        // the profile's own origin and clears the SSRF gate.
-        if (!url || !_sameOrigin(url, webId) || !_peerRootAllowed(url)) return null;
-        return url;
-    } catch (err) {
-        console.warn('[pod] podReadPublicTypeIndexUrlFor failed:', err);
-        return null;
-    }
-}
+export function podReadPublicTypeIndexUrlFor(webId) { return _rooms.podReadPublicTypeIndexUrlFor(webId); }
 
 /** The public type index IRI linked from OUR WebID profile, or null. */
 export function podReadPublicTypeIndexUrl() {
@@ -811,50 +574,7 @@ export function podReadPublicTypeIndexUrl() {
  * is refused, we still return the index we created so our own reads/writes work,
  * but discovery by other apps needs the profile link.
  */
-export async function podEnsurePublicTypeIndex() {
-    const existing = await podReadPublicTypeIndexUrl();
-    if (existing) return existing;
-    const root = podStorageRoot();
-    const webId = solidSession?.info?.webId;
-    if (!root || !webId) return null;
-    const indexUrl = `${root}settings/publicTypeIndex.ttl`;
-    try {
-        // Create the index document (CSS creates intermediate containers on PUT).
-        const put = await solidSession.fetch(indexUrl, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'text/turtle' },
-            body: buildEmptyTypeIndex(),
-        });
-        if (!put || !put.ok) return null;
-        // Make it PUBLIC-readable: it is the *public* type index, and discovery by
-        // another app/person only works if they can actually read it. Owner keeps
-        // full control. Without this the index is owner-only and discovery silently
-        // fails cross-identity.
-        try {
-            const { url: idxAclUrl, model } = await discoverAccessControl(indexUrl);
-            await solidSession.fetch(idxAclUrl, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'text/turtle' },
-                body: _publicReadAclBody(model, indexUrl, webId),
-            });
-        } catch (err) {
-            console.warn('[pod] type index public ACL failed:', err);
-        }
-        // Link it from the profile so other apps can discover it (R101.3: N3 Patch
-        // when the server advertises it, else SPARQL Update).
-        try {
-            await podRdfPatch(webId.split('#')[0], {
-                inserts: [`<${webId}> <http://www.w3.org/ns/solid/terms#publicTypeIndex> <${indexUrl}> .`],
-            });
-        } catch (err) {
-            console.warn('[pod] type index created but profile link failed:', err);
-        }
-        return indexUrl;
-    } catch (err) {
-        console.warn('[pod] podEnsurePublicTypeIndex failed:', err);
-        return null;
-    }
-}
+export function podEnsurePublicTypeIndex() { return _rooms.podEnsurePublicTypeIndex(); }
 
 // ── WebID profile name (R100/A1, Solid WebID Profile v1.0.0) ─────────────────
 // A did:key-only user has no dereferenceable card, but a pod-connected user does,
@@ -870,52 +590,11 @@ function _sparqlLiteral(s) {
 }
 
 // ── Generic RDF PATCH (R101.3) ───────────────────────────────────────────────
-// N3 Patch is the Solid-Protocol-mandated PATCH format (SPARQL Update is only
-// recommended), so negotiate on the resource's Accept-Patch and prefer N3 Patch
-// where advertised. `inserts`/`deletes`/`where` are arrays of triple strings.
-export function buildSparqlUpdate({ inserts = [], deletes = [], where = [] }) {
-    if (where.length) {
-        const parts = [];
-        if (deletes.length) parts.push(`DELETE {\n  ${deletes.join('\n  ')}\n}`);
-        if (inserts.length) parts.push(`INSERT {\n  ${inserts.join('\n  ')}\n}`);
-        parts.push(`WHERE {\n  ${where.join('\n  ')}\n}`);
-        return parts.join('\n') + '\n';
-    }
-    const ops = [];
-    if (deletes.length) ops.push(`DELETE DATA {\n  ${deletes.join('\n  ')}\n}`);
-    if (inserts.length) ops.push(`INSERT DATA {\n  ${inserts.join('\n  ')}\n}`);
-    return ops.join(' ;\n') + '\n';
-}
-
-export function buildN3Patch({ inserts = [], deletes = [], where = [] }) {
-    const clauses = ['[] a solid:InsertDeletePatch'];
-    if (where.length)   clauses.push(`  solid:where { ${where.join(' ')} }`);
-    if (deletes.length) clauses.push(`  solid:deletes { ${deletes.join(' ')} }`);
-    if (inserts.length) clauses.push(`  solid:inserts { ${inserts.join(' ')} }`);
-    return `@prefix solid: <http://www.w3.org/ns/solid/terms#>.\n` + clauses.join(';\n') + '.\n';
-}
-
-/** Prefer N3 Patch when the server advertises it in Accept-Patch, else SPARQL. Pure. */
-export function patchFormatFor(acceptPatch) {
-    return (acceptPatch && /text\/n3/i.test(acceptPatch)) ? 'n3' : 'sparql';
-}
+// N3 Patch preferred where advertised, else SPARQL Update (podroomio.js).
+export { buildSparqlUpdate, buildN3Patch, patchFormatFor };
 
 /** PATCH an RDF resource, negotiating N3 Patch vs SPARQL Update from Accept-Patch. */
-export async function podRdfPatch(resourceUrl, ops) {
-    let acceptPatch = null;
-    try {
-        const res = await solidSession.fetch(resourceUrl, { method: 'HEAD', redirect: 'error' });
-        acceptPatch = res?.headers?.get?.('accept-patch') || null;
-    } catch (_) { /* default to SPARQL below */ }
-    const fmt = patchFormatFor(acceptPatch);
-    const body = fmt === 'n3' ? buildN3Patch(ops) : buildSparqlUpdate(ops);
-    const ct = fmt === 'n3' ? 'text/n3' : 'application/sparql-update';
-    // A PATCH is state-changing, so it must never be replayed against a host a peer
-    // pod redirects us to; refuse the redirect the way the peer read paths do.
-    return solidSession.fetch(resourceUrl, {
-        method: 'PATCH', headers: { 'Content-Type': ct }, body, redirect: 'error',
-    });
-}
+export function podRdfPatch(resourceUrl, ops) { return _rooms.podRdfPatch(resourceUrl, ops); }
 
 /** The foaf:name + vcard:fn triples to set (and, if replacing, delete). */
 function _profileNameOps(webId, name, prevName) {
@@ -972,54 +651,13 @@ export async function podEnsureProfileName(displayName) {
 }
 
 /** Register a chat container as a meeting:LongChat instance (discoverable). */
-export async function podRegisterChat(containerUrl) {
-    if (!containerUrl || !solidSession?.info?.isLoggedIn) return false;
-    const indexUrl = await podEnsurePublicTypeIndex();
-    if (!indexUrl) return false;
-    try {
-        const res = await solidSession.fetch(indexUrl, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/sparql-update' },
-            body: buildRegisterPatch({ indexUrl, containerUrl }),
-        });
-        return !!(res && res.ok);
-    } catch (err) {
-        console.warn('[pod] podRegisterChat failed:', err);
-        return false;
-    }
-}
+export function podRegisterChat(containerUrl) { return _rooms.podRegisterChat(containerUrl); }
 
 /** Remove a chat container's registration from the public type index. */
-export async function podDeregisterChat(containerUrl) {
-    if (!containerUrl || !solidSession?.info?.isLoggedIn) return false;
-    const indexUrl = await podReadPublicTypeIndexUrl();
-    if (!indexUrl) return true;   // nothing linked, nothing to remove
-    try {
-        const res = await solidSession.fetch(indexUrl, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/sparql-update' },
-            body: buildDeregisterPatch({ indexUrl, containerUrl }),
-        });
-        return !!(res && res.ok);
-    } catch (err) {
-        console.warn('[pod] podDeregisterChat failed:', err);
-        return false;
-    }
-}
+export function podDeregisterChat(containerUrl) { return _rooms.podDeregisterChat(containerUrl); }
 
 /** Chat containers registered for meeting:LongChat in our public type index. */
-export async function podListRegisteredChats() {
-    const indexUrl = await podReadPublicTypeIndexUrl();
-    if (!indexUrl) return [];
-    try {
-        const json = await _fetchJsonCapped(indexUrl, { headers: { Accept: 'application/ld+json' }, redirect: 'error' }, MAX_POD_LISTING_BYTES);
-        if (!json) return [];
-        return parseRegisteredContainers(json);
-    } catch (err) {
-        console.warn('[pod] podListRegisteredChats failed:', err);
-        return [];
-    }
-}
+export function podListRegisteredChats() { return _rooms.podListRegisteredChats(); }
 
 /**
  * Discover the chats a given WebID hosts (PLAN_ROUND_74 F1). Reads that WebID's
@@ -1296,6 +934,18 @@ const _io = createPodIo({
     webId: () => solidSession?.info?.webId,
 });
 
+// Pod rooms (Long Chat, descriptor, members, type index) live in podroomio.js
+// the same way; the desktop app builds another instance over its gateway
+// (crossrooms.js).
+const _rooms = createPodRoomIo({
+    fetch: (url, opts) => solidSession.fetch(url, opts),
+    isLoggedIn: () => !!solidSession?.info?.isLoggedIn,
+    storageRoot: () => podStorageRoot(),
+    webId: () => solidSession?.info?.webId,
+    getSigner: () => _longChatSigner,
+    fetchPeerSigner: (root) => _io.podFetchPeerSigner(root),
+});
+
 const _peerRootAllowed = (peerRoot) => isPeerPodRootAllowed(peerRoot, podStorageRoot());   // SSRF gate
 
 // ── DM sender identity (R107) ──
@@ -1345,27 +995,7 @@ export function podWriteJoinedRooms(list) { return _io.podWriteJoinedRooms(list)
  * hold Append on that container, so this is not an authority for access.
  * Returns [{ webid, role }], or null when it cannot be read.
  */
-export async function podReadRoomMembersAt(containerUrl) {
-    if (!_isValidChatContainer(containerUrl) || !_peerRootAllowed(containerUrl) || !solidSession?.info?.isLoggedIn) return null;
-    try {
-        const doc = await _fetchJsonCapped(containerUrl + 'members.jsonld',
-            { headers: { Accept: 'application/ld+json' }, redirect: 'error' }, MAX_POD_JSON_BYTES);
-        const raw = doc && doc['px:members'];
-        if (!Array.isArray(raw)) return null;
-        const out = [];
-        const seen = new Set();
-        for (const m of raw.slice(0, 500)) {
-            const webid = m && typeof m.webid === 'string' ? m.webid : '';
-            if (!/^https?:\/\//.test(webid) || seen.has(webid)) continue;
-            seen.add(webid);
-            out.push({ webid, role: typeof m.role === 'string' ? m.role : 'member' });
-        }
-        return out;
-    } catch (err) {
-        console.warn('[pod] podReadRoomMembersAt failed:', err);
-        return null;
-    }
-}
+export function podReadRoomMembersAt(containerUrl) { return _rooms.podReadRoomMembersAt(containerUrl); }
 
 /**
  * Delete a room we own from the web build's point of view: drop its type-index
@@ -1389,20 +1019,7 @@ export async function podDeleteOwnedRoom(roomId) {
 }
 
 /** Read a room descriptor from a specific owner's pod (not our own). */
-export async function podReadRoomDescriptorAt(ownerPodRoot, roomId) {
-    if (!roomId || !SAFE_ID_RE.test(roomId) || !ownerPodRoot || !solidSession?.info?.isLoggedIn) return null;
-    if (!_peerRootAllowed(ownerPodRoot)) return null;   // SSRF gate (defence in depth)
-    try {
-        const res = await solidSession.fetch(`${ownerPodRoot.replace(/\/?$/, '/')}rooms/${roomId}/room.json`, { redirect: 'error' });
-        if (!res || !res.ok) return null;
-        const text = await res.text();
-        if (text.length > 65536) return null;
-        return parseRoomDescriptor(JSON.parse(text));
-    } catch (err) {
-        console.warn('[pod] podReadRoomDescriptorAt failed:', err);
-        return null;
-    }
-}
+export function podReadRoomDescriptorAt(ownerPodRoot, roomId) { return _rooms.podReadRoomDescriptorAt(ownerPodRoot, roomId); }
 
 // ── Presence (R104): a public-read heartbeat peers poll or subscribe to ───────
 /** Publish our presence heartbeat. Writes a public-read ACL once. */
@@ -1542,25 +1159,7 @@ export async function podDeleteMessage(threadId, messageId, isRoom = true) {
 
 // --- Room Members ---
 
-export async function podWriteRoomMembers(roomId, members) {
-    const root = podStorageRoot();
-    if (!root || !solidSession.info.isLoggedIn) return;
-    try {
-        await solidSession.fetch(`${root}proxion/rooms/${roomId}/members.jsonld`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/ld+json' },
-            body: JSON.stringify({
-                '@context': { px: 'https://proxion.dev/vocab/v1#' },
-                '@type': 'px:MemberList',
-                'px:roomId': roomId,
-                'px:members': members,
-                'px:updatedAt': new Date().toISOString(),
-            }),
-        });
-    } catch (err) {
-        console.warn('[pod] podWriteRoomMembers failed:', err);
-    }
-}
+export function podWriteRoomMembers(roomId, members) { return _rooms.podWriteRoomMembers(roomId, members); }
 
 // --- Reactions ---
 

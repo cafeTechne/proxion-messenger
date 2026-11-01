@@ -31,6 +31,15 @@ describe('PodSocket rooms in the browser build', () => {
         ]);
     });
 
+    it('kick_member takes a member out of an owned room and says so', async () => {
+        const kick = vi.fn(async (roomId) => roomId === 'a');
+        const { sock, events } = roomsHarness({ rooms: { kick } });
+        await sock._route({ cmd: 'kick_member', room_id: 'a', webid: 'https://x/#me' });
+        await sock._route({ cmd: 'kick_member', room_id: 'j', webid: 'https://x/#me' });
+        expect(kick).toHaveBeenCalledTimes(2);
+        expect(events).toEqual([{ type: 'member_kicked', room_id: 'a', webid: 'https://x/#me' }]);
+    });
+
     it('chat_room_create lists the room in the type index before it has a message', async () => {
         const { sock, events, pod } = roomsHarness();
         await sock._route({ cmd: 'chat_room_create', name: 'Empty' });

@@ -164,9 +164,9 @@ describe('inviteJoinCommand', () => {
   const webLink = 'https://pages.example/app/?join=' + webToken + '&mode=web';
   const deskCode = 'tv4jvqeo77valiblwxaqs4ymra';
 
-  it('refuses a browser-build invite on the gateway with a clear message', () => {
-    expect(inviteJoinCommand(webLink, own)).toEqual({ error: 'join.webRoomInDesktop' });
-    expect(inviteJoinCommand(webToken, own)).toEqual({ error: 'join.webRoomInDesktop' });
+  it('hands a browser-build invite on the gateway to the pod room join', () => {
+    expect(inviteJoinCommand(webLink, own)).toEqual({ cmd: 'join_web_room', code: webLink });
+    expect(inviteJoinCommand(webToken, own)).toEqual({ cmd: 'join_web_room', code: webToken });
   });
 
   it('in the browser build joins a web invite from any origin and refuses desktop rooms', () => {

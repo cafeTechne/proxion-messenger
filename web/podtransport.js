@@ -15,6 +15,7 @@
 //   leave_local_room    -> forget a joined room, emit `left_room`
 //   delete_room         -> unlist + delete an owned room, emit `room_deleted`
 //   get_room_members    -> read the member list, emit `room_members`
+//   kick_member         -> take a member out of an owned room, emit `member_kicked`
 //   send_room           -> emit the `message` echo (clears optimistic-pending)
 //   get_dms             -> emit empty `dms` (no gateway DMs in web mode)
 //   get_local_history   -> emit `local_history` from what this device holds
@@ -202,6 +203,15 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, joi
                 case 'delete_room': {
                     if (rooms && rooms.deleteOwned && cmd.room_id && await rooms.deleteOwned(cmd.room_id)) {
                         handleEvent({ type: 'room_deleted', room_id: cmd.room_id });
+                    }
+                    break;
+                }
+                case 'kick_member': {
+                    // The owner takes someone out of the room's ACL; their next
+                    // append is refused and their app shows the removal.
+                    if (rooms && rooms.kick && cmd.room_id && typeof cmd.webid === 'string'
+                        && await rooms.kick(cmd.room_id, cmd.webid)) {
+                        handleEvent({ type: 'member_kicked', room_id: cmd.room_id, webid: cmd.webid });
                     }
                     break;
                 }

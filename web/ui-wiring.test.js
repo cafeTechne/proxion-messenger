@@ -61,10 +61,13 @@ describe('UI wiring', () => {
         for (const m of py.matchAll(/cmd\s+in\s+[({[]([^)}\]]+)[)}\]]/g)) {
             for (const n of m[1].matchAll(/["']([a-z0-9_]+)["']/g)) routes.add(n[1]);
         }
+        // Handled in the desktop client itself and never sent to a gateway
+        // (crossrooms.js joins a browser-build room through the pod).
+        const clientOnly = new Set(['join_web_room']);
         const unrouted = [];
         for (const [f, s] of Object.entries(sources)) {
             for (const m of s.matchAll(/\bcmd\s*:\s*['"]([a-z0-9_]+)['"]/g)) {
-                if (!routes.has(m[1])) unrouted.push(`${f}: ${m[1]}`);
+                if (!routes.has(m[1]) && !clientOnly.has(m[1])) unrouted.push(`${f}: ${m[1]}`);
             }
         }
         expect(routes.size).toBeGreaterThan(50);

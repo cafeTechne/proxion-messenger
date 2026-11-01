@@ -67,8 +67,9 @@ const GATEWAY_CODE_RE = /^[a-z2-7]{26}$/i;
 // (the tab never leaves its own origin). Returns { error } for a bad link and
 // null for empty input.
 // The browser build (mode 'web') joins only browser-build invites (room id +
-// owner WebID, from any origin) and the gateway only gateway rooms, so a link
-// of the other kind is refused here with a message saying which it is.
+// owner WebID, from any origin), so a gateway link is refused there with a
+// message saying so. The desktop joins both: a browser-build invite goes to
+// the pod room join (join_web_room), never to the gateway.
 export function inviteJoinCommand(raw, ownOrigin, mode = 'gateway') {
     const s = String(raw || "").trim();
     if (!s) return null;
@@ -81,7 +82,8 @@ export function inviteJoinCommand(raw, ownOrigin, mode = 'gateway') {
         try { url = new URL(s); } catch { return { error: 'room.invalidInviteLink' }; }
         return { error: url.searchParams.get("join") ? 'join.desktopRoomInWeb' : 'room.linkNoCode' };
     }
-    if (webInvite) return { error: 'join.webRoomInDesktop' };
+    // A pod room from the browser build: joined through our pod (crossrooms.js).
+    if (webInvite) return { cmd: "join_web_room", code: s };
     if (!/^https?:\/\//i.test(s)) return { cmd: "join_room", code: s };
     let url;
     try { url = new URL(s); } catch { return { error: 'room.invalidInviteLink' }; }
