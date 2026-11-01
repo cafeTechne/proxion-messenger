@@ -180,7 +180,6 @@
   "contact.desktopAddressInWeb": "That's a Proxion desktop address. The browser build can only message Solid WebIDs. Ask them for their WebID (Proxion desktop, Settings, Pod).",
   "contact.webIdNeedsPod": "That's a Solid WebID. Connect your pod in Settings to message browser-build users.",
   "contact.notAWebId": "That does not look like a Solid WebID. A WebID usually looks like https://pod.example/alice/profile/card#me.",
-  "contact.webIdInDesktop": "That's a Solid WebID, used by the Proxion browser build. Proxion desktop can't message browser-build accounts yet. Ask them for their Proxion address, or use the browser build.",
   "sidebar.empty.rooms": "No rooms yet.",
   "sidebar.empty.createRoom": "Create a room",
   "sidebar.empty.dms": "No direct messages yet.",
