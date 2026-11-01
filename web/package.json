@@ -34,6 +34,7 @@
     "smoke:cross-mode-call": "node smoke_cross_mode_call.mjs",
     "smoke:federation": "node smoke_federation.mjs",
     "smoke:pairing": "node smoke_pairing.mjs",
+    "smoke:owner-claim": "node smoke_owner_claim.mjs",
     "smoke:dmhistory": "node smoke_dm_history.mjs",
     "smoke:dmreaction": "node smoke_dm_reaction.mjs",
     "smoke:multidevice": "node smoke_multidevice_dm.mjs",
