@@ -473,6 +473,96 @@ async def test_departed_owner_row_is_a_route_not_a_membership(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_departed_owner_loses_owner_authority(tmp_path):
+    """An owner who left keeps creator_webid as the route to the host, but no
+    longer bans, pins, renames or edits/deletes others' messages: neither on
+    the host from her own client nor on a member gateway via a relay."""
+    from datetime import datetime, timezone
+    import secrets
+    from proxion_messenger_core.relay import post_relay, sign_relay_envelope
+
+    A, B, C = GW(tmp_path, "a"), GW(tmp_path, "b"), GW(tmp_path, "c")
+    alice = await Client("Alice").connect(A)
+    bob = await Client("Bob").connect(B)
+    carol = await Client("Carol").connect(C)
+    try:
+        rid, link = await _room(alice)
+        await _join(bob, link, rid)
+        await _join(carol, link, rid)
+        await alice.cmd(cmd="send_room", room_id=rid, content="from-alice")
+        a_mid = (await bob.wait_content("from-alice"))["message_id"]
+        await bob.cmd(cmd="send_room", room_id=rid, content="from-bob")
+        b_mid = (await carol.wait_content("from-bob"))["message_id"]
+
+        def from_host(extra):
+            p = {"room_id": rid, "from_webid": alice.did, "source": "relay",
+                 "relay_nonce": secrets.token_hex(8),
+                 "relay_sig_did": A.gw._own_gateway_did(),
+                 "relay_ts": datetime.now(timezone.utc).isoformat(),
+                 "origin_gateway_url": A.http, **extra}
+            p["signature"] = sign_relay_envelope(A.agent.identity_key, p)
+            return p
+
+        # While she is in the room, the host speaking for her is honoured.
+        await post_relay(B.http + "/relay", from_host({
+            "content_type": "room_update", "name": "while-owner", "topic": ""}))
+        assert await bob.wait("room_updated", room_id=rid, name="while-owner")
+
+        await _room(alice, "solo")
+        await alice.cmd(cmd="leave_local_room", room_id=rid)
+        assert await bob.wait("room_member_left", room_id=rid, webid=alice.did)
+        assert await carol.wait("room_member_left", room_id=rid, webid=alice.did)
+        assert B.call(lambda: B.gw._local_rooms[rid]["creator_webid"]) == alice.did
+        assert B.call(lambda: B.gw._room_owner(rid)) == ""
+        assert A.call(lambda: A.gw._room_owner(rid)) == ""
+
+        # Relays signed by the host in her name are refused on a member gateway.
+        for extra in (
+            {"content_type": "room_update", "name": "ghost-name", "topic": ""},
+            {"content_type": "room_moderation", "action": "pin", "webid": alice.did,
+             "message_id": a_mid},
+            {"content_type": "room_moderation", "action": "ban", "webid": carol.did,
+             "reason": "ghost"},
+            {"content_type": "room_moderation", "action": "mute", "webid": carol.did},
+            {"content_type": "room_edit", "message_id": b_mid, "new_content": "ghost-edit"},
+            {"content_type": "room_delete", "message_id": b_mid},
+        ):
+            await post_relay(B.http + "/relay", from_host(extra))
+
+        # On the host her own client has no owner rights either.
+        alice.events.clear()
+        await alice.cmd(cmd="ban_member", room_id=rid, webid=bob.did)
+        await alice.cmd(cmd="update_room", room_id=rid, name="ghost-host-name")
+        await alice.cmd(cmd="new_room_invite", room_id=rid)
+        await alice.cmd(cmd="delete_room", room_id=rid)
+        assert await alice.wait("error", message="insufficient_permissions")
+
+        assert await _absent(lambda: (
+            bob.of("room_updated", name="ghost-name")
+            or bob.of("room_updated", name="ghost-host-name")
+            or bob.of("message_pinned", message_id=a_mid)
+            or bob.of("member_banned") or bob.of("member_muted")
+            or bob.of("message_edited", message_id=b_mid)
+            or bob.of("message_deleted", message_id=b_mid)
+            or bob.of("kicked_from_room") or bob.of("room_deleted")
+            or alice.of("room_invite_renewed")))
+        assert B.call(lambda: B.gw._local_rooms[rid]["name"]) == "while-owner"
+        assert not B.call(lambda: B.gw._store.is_room_banned(rid, carol.did))
+        assert not B.call(lambda: B.gw._store.is_room_muted(rid, carol.did))
+        assert not B.call(lambda: B.gw._store.get_pins(rid))
+        assert any(m["message_id"] == b_mid and m["content"] == "from-bob"
+                   for m in B.call(lambda: B.gw._store.get_messages(rid)))
+        assert A.call(lambda: rid in A.gw._local_rooms)
+        assert not A.call(lambda: A.gw._store.is_room_banned(rid, bob.did))
+        # The room itself keeps working for the members who stayed.
+        await bob.cmd(cmd="send_room", room_id=rid, content="still-works")
+        assert await carol.wait_content("still-works")
+    finally:
+        for c in (alice, bob, carol):
+            await c.close()
+
+
+@pytest.mark.asyncio
 async def test_other_session_gets_room_joined_elsewhere_and_names_survive_restart(tmp_path):
     A, B = GW(tmp_path, "a"), GW(tmp_path, "b")
     alice = await Client("Alice").connect(A)

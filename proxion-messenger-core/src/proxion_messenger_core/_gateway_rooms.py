@@ -580,7 +580,7 @@ class RoomHandlerMixin:
             if not room:
                 return False
             if role == "owner":
-                return room.get("creator_webid") == caller_webid
+                return self._room_owner(room_id) == caller_webid
             if self._store:
                 return caller_webid in self._store.get_room_members(room_id)
             return False
@@ -604,14 +604,14 @@ class RoomHandlerMixin:
         room = self._local_rooms.get(room_id)
         if room:
             if role == "owner":
-                return room.get("creator_webid") == caller_webid
+                return self._room_owner(room_id) == caller_webid
             if role == "admin":
                 # Owner OR an explicitly-granted admin. Previously ANY member
                 # passed here, so any member could ban/mute/unban anyone. A
                 # granted admin must ALSO be a current member — a role row alone
                 # survives removal, so without this a kicked/banned ex-admin who
                 # reconnected could still run admin ops.
-                if room.get("creator_webid") == caller_webid:
+                if self._room_owner(room_id) == caller_webid:
                     return True
                 return bool(
                     self._store
@@ -1526,7 +1526,7 @@ class RoomHandlerMixin:
         else:
             room = self._local_rooms[room_id]
             caller_did = self._client_webids.get(websocket, "")
-            if room.get("creator_webid") != caller_did or not caller_did:
+            if self._room_owner(room_id) != caller_did or not caller_did:
                 await websocket.send(json.dumps({"type": "error", "message": "Only the room owner can delete this room"}))
             else:
                 for ws in list(room["members"]):
@@ -1550,7 +1550,7 @@ class RoomHandlerMixin:
         else:
             room = self._local_rooms[room_id]
             caller_did = self._client_webids.get(websocket, "")
-            if room.get("creator_webid") != caller_did or not caller_did:
+            if self._room_owner(room_id) != caller_did or not caller_did:
                 await websocket.send(json.dumps({"type": "error", "message": "Only the room owner can transfer ownership"}))
             elif to_did == caller_did:
                 await websocket.send(json.dumps({"type": "error", "message": "You are already the owner"}))
@@ -2773,6 +2773,29 @@ class RoomHandlerMixin:
                 (self._store.get_federated_room_members(room_id) or [])
                 if m.get("member_did") == member_did and m.get("gateway_url")]
 
+    def _room_owner(self, room_id: str) -> str:
+        """Who holds owner authority over *room_id* now, or "" for nobody.
+
+        An owner who leaves a room that still has members on other gateways
+        stays its creator_webid: the host keeps hosting it, and on a mirror the
+        owner's row is the route to the host. They hold no owner authority
+        (moderation, pins, renames, editing others' messages) until they
+        rejoin; meanwhile the room has no owner, and granted admins keep
+        their own rights."""
+        room = self._local_rooms.get(room_id)
+        owner = room.get("creator_webid", "") if room else ""
+        if not owner or not self._store:
+            return owner
+        if owner in self._store.get_room_members(room_id):
+            return owner
+        fed = list(self._store.get_federated_room_members(room_id) or [])
+        rows = [m for m in fed if m.get("member_did") == owner]
+        if rows:
+            return "" if all(m.get("departed") for m in rows) else owner
+        # Hosted here: an owner who left a room kept only for members on other
+        # gateways is no longer in room_members.
+        return "" if fed else owner
+
     def _room_is_hosted_here(self, room_id: str) -> bool:
         room = self._local_rooms.get(room_id)
         creator = room.get("creator_webid", "") if room else ""
@@ -3148,11 +3171,12 @@ class RoomHandlerMixin:
         if not room or not caller or not self._store:
             return "404 Not Found", '{"error":"room_not_found"}'
         _is_admin = self._store.get_room_role(room_id, caller) == "admin"
-        if caller != room.get("creator_webid") and not _is_admin:
+        _owner = self._room_owner(room_id)
+        if caller != _owner and not _is_admin:
             return "403 Forbidden", '{"error":"not_authorized_for_room_update"}'
         # An admin role only counts while its holder is still in the room (a stale
         # role row must not outlive a leave or a removal).
-        if caller != room.get("creator_webid"):
+        if caller != _owner:
             _members = set(self._store.get_room_members(room_id))
             _members |= {m.get("member_did") for m in self._store.get_federated_room_members(room_id)
                          if not m.get("departed")}
@@ -3698,7 +3722,7 @@ class RoomHandlerMixin:
         actor_role = "member"
         if self._store:
             actor_role = self._store.get_room_role(room_id, actor)
-        if actor != room_creator and actor_role not in ("admin",):
+        if actor != self._room_owner(room_id) and actor_role not in ("admin",):
             await websocket.send(json.dumps({"type": "error", "message": "Only admins can set roles"}))
             return
         if self._store:
@@ -4176,8 +4200,7 @@ class RoomHandlerMixin:
         caller = data.get("from_webid", "")
         if not room_id or action not in ("add", "remove") or not self._store:
             return "400 Bad Request", '{"error":"missing_emoji_fields"}'
-        _room = self._local_rooms.get(room_id)
-        _owner = _room.get("creator_webid") if _room else None
+        _owner = self._room_owner(room_id)
         _is_admin = bool(caller) and self._store.get_room_role(room_id, caller) == "admin"
         if not caller or (caller != _owner and not _is_admin):
             return "403 Forbidden", '{"error":"not_authorized_for_emoji"}'

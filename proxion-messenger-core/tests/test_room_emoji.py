@@ -49,6 +49,8 @@ def _room(gw, ws, webid=OWNER, room_id="room-emoji-test"):
         "history_mode": "none", "messages": [],
         "creator_webid": OWNER,
     }
+    if gw._store:
+        gw._store.add_room_member(room_id, OWNER)
     return room_id
 
 

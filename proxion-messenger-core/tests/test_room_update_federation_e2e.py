@@ -64,6 +64,7 @@ async def test_room_rename_federates_over_real_relay(tmp_path):
 
     def _setup_a():
         gw_a._local_rooms[room_id] = _room("Old", owner_did)
+        gw_a._store.add_room_member(room_id, owner_did)
         gw_a._store.add_federated_room_member(room_id, member_did, f"http://127.0.0.1:{http_b}")
     def _setup_b():
         gw_b._local_rooms[room_id] = _room("Old", owner_did)

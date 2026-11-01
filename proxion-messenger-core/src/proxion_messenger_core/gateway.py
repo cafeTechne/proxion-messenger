@@ -3707,7 +3707,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         _is_admin = (bool(caller)
                      and self._store.get_room_role(room_id, caller) == "admin"
                      and caller in self._store.get_room_members(room_id))
-        if not caller or (caller != _owner and not _is_admin):
+        # An owner who left keeps creator_webid (the route to the host) but no
+        # authority: see _room_owner.
+        _acting_owner = self._room_owner(room_id)
+        if not caller or (caller != _acting_owner and not _is_admin):
             return "403 Forbidden", '{"error":"not_authorized_to_moderate"}'
         if action == "ban":
             self._store.ban_room_member(room_id, target, caller, str(data.get("reason", "")))
@@ -3730,7 +3733,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         elif action in ("pin", "unpin"):
             # Pinning is owner-only, as on the host.
             _mid = str(data.get("message_id") or "")
-            if caller != _owner:
+            if caller != _acting_owner:
                 return "403 Forbidden", '{"error":"not_authorized_to_moderate"}'
             import re as _re_pin
             if not _re_pin.fullmatch(r"[A-Za-z0-9._:-]{1,128}", _mid):
@@ -3820,7 +3823,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # _relay_sender_established capture in the relay dispatch).
         if self._store:
             _sender = self._store.get_message_sender(message_id)
-            _owner_authority = (room.get("creator_webid") == from_webid
+            _owner_authority = (self._room_owner(room_id) == from_webid
                                 and bool(data.get("_relay_sender_established")))
             if _sender and _sender != from_webid and not _owner_authority:
                 return "403 Forbidden", '{"error":"not_message_author"}'
@@ -3859,7 +3862,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # seed claiming to be the owner must not grant delete-any authority.
         if self._store and from_webid:
             _sender = self._store.get_message_sender(message_id)
-            _owner_authority = (room.get("creator_webid") == from_webid
+            _owner_authority = (self._room_owner(room_id) == from_webid
                                 and bool(data.get("_relay_sender_established")))
             if _sender and _sender != from_webid and not _owner_authority:
                 return "403 Forbidden", '{"error":"not_message_author"}'
