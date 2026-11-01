@@ -43,9 +43,30 @@ connected to, with the gateway making the pod requests on its behalf
 - **Needs:** a pod connected to the desktop gateway, stored where its WebID points
   (`{root}profile/card#me` with storage at `{root}`). Share the WebID from
   Settings, Pod.
-- **Not yet:** rooms, group calls, edits, reactions, files, voice messages,
+- **Not yet:** group calls, edits, reactions, files, voice messages,
   disappearing and scheduled messages in these threads. One desktop device per
   WebID receives them: the one that signed in last.
+
+Rooms shared across the two builds are pod rooms: a Long Chat in the owner's pod
+(below). Gateway rooms stay desktop only.
+
+- **Desktop joins a browser-build room** by pasting the invite link into Join a
+  room. The join request, the owner's approval and the room messages travel
+  through the pods, as between two browsers. After the approval the desktop
+  registers the room's chat container with its gateway, and only then does the
+  gateway send its pod credentials there: DPoP-signed `GET`, `HEAD` and `PATCH`
+  on the chat files of that one container, the host pinned after an SSRF check,
+  no redirects. A pod that signs in with a bearer token (JSS, NSS) never sends
+  that token to another pod, so those desktops cannot join and are told why.
+- **Desktop hosts a room browser-build users can join:** Create a room, "Create it
+  in my pod". The invite link opens the browser build
+  (`https://cafetechne.github.io/proxion-messenger/app/`), and the owner approves
+  join requests on the desktop.
+- Messages are signed by the device key the WebID's `signer.json` names, with
+  `foaf:maker` set to the WebID, and each side verifies the other's. The owner
+  removes a member by rewriting the chat ACL; the removed member's next append
+  is refused (403) and their app shows the removal. Test:
+  `npm run smoke:cross-mode-rooms`.
 
 ## What another Solid app sees
 

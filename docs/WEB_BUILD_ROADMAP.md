@@ -96,7 +96,10 @@ Introduces the transport seam, a Solid-OIDC client identifier document hosted on
 the Pages origin, a web-specific service worker and CSP, and UI gating that
 hides realtime-only affordances behind `transport.supports(...)`. Lights up:
 OIDC login, shared rooms (Long Chat read/write), history, invites (LDN),
-profiles, type index discovery. Shippable on its own.
+profiles, type index discovery. Shippable on its own. The desktop app joins these
+rooms from their invite links and can host its own pod rooms that browser-build
+users join, through its gateway's pod bridge (INTEROP.md, "Proxion desktop and
+Proxion in the browser"). Gateway rooms stay desktop only.
 
 ### Phase 2: DM-push without a gateway
 Start and hold an E2E DM, delivered near-realtime, no gateway on either side.
