@@ -148,6 +148,13 @@ async def main():
             print(f"  Public  : {config.public_url}{_how}", flush=True)
         else:
             print("  Public  : not reachable from internet. Open the app for the setup guide", flush=True)
+        # A public gateway with no owner yet: opening this link claims it.
+        try:
+            _claim = gw.owner_claim_url()
+        except Exception:
+            _claim = ""
+        if _claim:
+            print(f"  Claim   : {_claim}", flush=True)
 
     gw.on_listening = _announce_ready
 

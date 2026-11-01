@@ -46,6 +46,8 @@ def _is_valid_role(v: str) -> bool:
 # Per-command required fields: {field_name: (expected_type, max_len_or_None[, validator_fn])}
 # validator_fn(value: str) -> bool — raise SchemaError when it returns False
 _SCHEMA: dict[str, dict[str, tuple]] = {
+    "claim_gateway":       {"code": (str, 256)},
+    "remove_owner_device": {"did": (str, _MAX_ID)},
     "send_dm":          {"cert_id": (str, _MAX_ID), "content": (str, _MAX_CONTENT)},
     "send_room":        {"room_id": (str, _MAX_ID), "content": (str, _MAX_CONTENT)},
     "local_dm":         {"target_webid": (str, _MAX_ID), "content": (str, _MAX_CONTENT)},
@@ -153,6 +155,7 @@ MUTATING_COMMANDS: frozenset[str] = frozenset({
     "upload_sender_key", "distribute_sender_key", "ack_sender_key_rotation",
     "register_device", "unregister_device", "set_primary_device", "revoke_device_and_rekey",
     "pair_start", "pair_submit", "pair_approve", "pair_cancel",
+    "claim_gateway", "remove_owner_device",
     "device_recovery_code_generate", "device_recovery_code_use",
     "expire_dm_session", "revoke_session", "logout_all_devices", "delete_account",
     # pod, push, webhooks, settings
@@ -186,7 +189,7 @@ TEARDOWN_COMMANDS: frozenset[str] = frozenset({
 # client needs in order to read (read markers, delivery acks, ratchet session
 # upkeep, typing/screen-share notices inside an existing call or thread).
 READ_ONLY_COMMANDS: frozenset[str] = frozenset({
-    "register", "auth_response", "link_pod", "ping",
+    "register", "auth_response", "link_pod", "ping", "list_owner_devices",
     "get_rooms", "get_dms", "get_local_history", "get_room_members", "get_message",
     "get_files", "export_ticket",
     "read_dm", "read_room", "search", "get_receipts", "get_message_readers",

@@ -29,6 +29,7 @@ from ._gateway_dm import DmHandlerMixin
 from ._gateway_auth import AuthHandlerMixin
 from ._gateway_misc import MiscHandlerMixin
 from ._gateway_podbridge import PodBridgeMixin
+from ._gateway_owner import OwnerMixin
 from .linkpreview import is_safe_url
 from .relay import _validate_relay_target as _is_safe_gateway_url
 from .command_validation import (validate_command_payload, SchemaError, AUTH_RATE_COMMANDS, HEAVY_COMMANDS,
@@ -123,7 +124,7 @@ def invite_issuer_did(invite: dict) -> str:
         return ""
 
 
-class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSyncMixin, RoomHandlerMixin, DmHandlerMixin, AuthHandlerMixin, MiscHandlerMixin, PodBridgeMixin, HttpEndpointsMixin):
+class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSyncMixin, RoomHandlerMixin, DmHandlerMixin, AuthHandlerMixin, MiscHandlerMixin, PodBridgeMixin, OwnerMixin, HttpEndpointsMixin):
     def __init__(
         self,
         agent: AgentState,
@@ -294,10 +295,16 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         self._tunnel = None
         self._tunnel_prev_public_url = None
         self._tunnel_prev_force_auth = False
-        # Account DIDs proven to be the gateway owner's during this run (see
-        # _is_owner_account). Lets the owner's linked devices, which register as
-        # that account over a tunnel, keep the gateway delegation cert.
+        # Account DIDs that own this gateway (see _is_owner_account), loaded
+        # from the store below and kept there. A session that proves one of
+        # them is the owner, so the owner's linked devices keep owner rights
+        # over a tunnel and across restarts (_gateway_owner.py).
         self._owner_account_dids: set = set()
+        # Sockets whose registered identity was proven by the auth challenge.
+        self._proven_sockets: set = set()
+        # The one-time claim code of a public gateway with no owner yet.
+        self._owner_claim = None
+        self._owner_claim_fails: dict = {}
         # Serializes tunnel start/stop so the two transitions are mutually
         # exclusive: concurrent starts cannot both spawn cloudflared, and a stop
         # cannot interleave a start's auth-force / public_url mutations (F3).
@@ -378,6 +385,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             )
             self._hydrate_from_store()
             self._peer_gateway_urls.update(self._store.get_all_peer_gateways())
+            self._load_owner_dids()
 
         # VAPID keypair for WebPush (R18)
         import os as _os_vapid
@@ -585,14 +593,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # R97: a live public tunnel forces auth regardless of bind address.
         if getattr(self, "_force_auth", False):
             return True
-        _env = os.environ.get("PROXION_REQUIRE_AUTH", "")
-        if _env == "1":
-            return True
-        if _env == "0":
-            return False
-        _host = (getattr(self, "config", None) and self.config.host) or ""
         # Only genuine loopback skips auth; wildcard (0.0.0.0/::) is routable → auth.
-        return _host not in ("127.0.0.1", "localhost", "::1")
+        return self._auth_enforced_by_config()
 
     def _relay_sender_gateway_ok(self, from_webid: str, relay_sig_did: str,
                                  require_established: bool = False,
@@ -1128,6 +1130,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 )
             self._pending_auth.pop(websocket, None)
             self._auth_verified.discard(websocket)
+            self._proven_sockets.discard(websocket)
             # Only drops the socket-keyed fallback entry (unknown source IP).
             # IP-keyed lockouts deliberately survive the disconnect — otherwise
             # reconnecting would reset the brute-force counter.
@@ -1700,6 +1703,12 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_set_primary_device(websocket, data)
             elif cmd == "revoke_device_and_rekey":
                 await self._handle_revoke_device_and_rekey(websocket, data)
+            elif cmd == "claim_gateway":
+                await self._handle_claim_gateway(websocket, data)
+            elif cmd == "list_owner_devices":
+                await self._handle_list_owner_devices(websocket, data)
+            elif cmd == "remove_owner_device":
+                await self._handle_remove_owner_device(websocket, data)
             elif cmd == "pair_start":
                 await self._handle_pair_start(websocket, data)
             elif cmd == "pair_submit":
@@ -2910,6 +2919,9 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         caller = self._client_webids.get(websocket, "")
         if owner_did and caller == owner_did:
             return True
+        # A recorded owner identity, proven on this socket.
+        if self._is_persisted_owner(websocket):
+            return True
         if not self._auth_enforced():
             # A reverse proxy also connects from loopback; its callers are remote.
             if self._ws_is_proxied(websocket) or self._public_deployment():
@@ -2922,18 +2934,16 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         """Whether *identity*, registered on *websocket*, is the gateway owner's account.
 
         A session that passes _is_tunnel_owner is the owner, and its account is
-        remembered for the rest of the run. A later session proven (by the auth
-        challenge or a delegation cert) to be one of those accounts is the owner
-        too: that is how the owner's linked device, reaching the gateway over a
-        tunnel with auth forced on, is told apart from a guest account."""
-        owners = getattr(self, "_owner_account_dids", None)
-        if owners is None:
-            owners = self._owner_account_dids = set()
+        recorded in the store (_remember_owner). A later session proven (by the
+        auth challenge or a delegation cert) to be one of those accounts is the
+        owner too, in this run or after a restart: that is how the owner's
+        linked device, reaching the gateway over a tunnel with auth forced on,
+        is told apart from a guest account."""
         if self._is_tunnel_owner(websocket):
             if identity:
-                owners.add(identity)
+                self._remember_owner(identity, "local")
             return True
-        return bool(identity) and identity in owners
+        return False
 
     def _tunnel_active(self) -> bool:
         """Whether the app-managed public tunnel (cloudflared) is live.
@@ -4584,6 +4594,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 if _http_task.done():
                     _exc = _http_task.exception() if not _http_task.cancelled() else None
                     raise _exc or GatewayBindError(self.config.host, self.config.http_port)
+            self._owner_claim_code()   # logs the claim link of an unclaimed public gateway
             if self.on_listening is not None:
                 self.on_listening()
 
@@ -4600,6 +4611,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 asyncio.create_task(self._supervised(self._checksum_maintenance_loop)),
                 asyncio.create_task(self._supervised(self._prekey_replenishment_loop)),
                 asyncio.create_task(self._supervised(self._read_position_flush_loop)),
+                asyncio.create_task(self._supervised(self._owner_claim_loop)),
                 # Desktop <-> browser-build interop: drop-box watches, setup, push.
                 asyncio.create_task(self._supervised(self._pod_bridge_loop)),
             ]

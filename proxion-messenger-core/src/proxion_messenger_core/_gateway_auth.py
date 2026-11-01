@@ -332,6 +332,13 @@ class AuthHandlerMixin:
                 self._detach_socket_identity(websocket, _old_identity)
             self._client_webids[websocket] = identity
             self._webid_sockets.setdefault(identity, set()).add(websocket)
+            # Whether this identity was proven (auth challenge, plus a verified
+            # delegation cert for a linked device): only then can it match a
+            # recorded owner (_is_persisted_owner).
+            if already_verified:
+                self._proven_sockets.add(websocket)
+            else:
+                self._proven_sockets.discard(websocket)
             # R7: single-session mode — revoke all other active sockets for this identity
             if os.environ.get("PROXION_SINGLE_SESSION") == "1":
                 _other = [ws for ws in list(self._webid_sockets.get(identity, set())) if ws is not websocket]
@@ -445,14 +452,20 @@ class AuthHandlerMixin:
             # gateway: a guest account holding this cert would show as Verified
             # owner in its calls.
             _signing_did = data.get("did") or ""
+            _is_owner = self._is_owner_account(websocket, identity)
             if (isinstance(_signing_did, str) and _signing_did.startswith("did:key:")
-                    and self._is_owner_account(websocket, identity)):
+                    and _is_owner):
                 try:
                     from .device_cert import issue_device_cert
                     registered_msg["gateway_delegation_cert"] = issue_device_cert(
                         self.agent.identity_key, _signing_did, ttl_days=30)
                 except Exception:
                     logger.debug("gateway delegation cert issue skipped", exc_info=True)
+            registered_msg["owner"] = bool(_is_owner)
+            # An unclaimed public gateway: the client offers the claim banner.
+            # The code itself only ever goes to the gateway log.
+            if not _is_owner and self._owner_claim_open():
+                registered_msg["claimable"] = True
             await websocket.send(json.dumps(registered_msg))
 
             if self._store:
