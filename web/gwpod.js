@@ -13,6 +13,7 @@
 //   bridge.io                     a podio instance (podEnsureDmInbox, podDropDm, ...)
 //   bridge.fetch(url, opts)       Response-like, rejects on timeout like a network error
 //   bridge.watchResource(url, cb, { fast })  pod_watch; returns unsubscribe
+//   bridge.setFast(url, fast)     poll a watched URL every second (a call) or at the normal pace
 //   bridge.reset()                the socket dropped: fail pending requests, keep watches
 
 import { createPodIo } from './podio.js';
@@ -83,6 +84,15 @@ export function createGwPodBridge({ send, timeoutMs = 15000, onInfo = null, onWa
         };
     }
 
+    // The gateway re-reads the flag on every pod_watch, so this both speeds a
+    // watch up and slows it down again.
+    function setFast(url, fast) {
+        const w = _watches.get(url);
+        if (!w || w.fast === !!fast) return;
+        w.fast = !!fast;
+        _sendWatch(url, w.fast);
+    }
+
     // Re-arm every watch on a fresh connection (the gateway forgets a closed socket's).
     function resubscribe() {
         for (const [url, w] of _watches) _sendWatch(url, w.fast);
@@ -122,7 +132,7 @@ export function createGwPodBridge({ send, timeoutMs = 15000, onInfo = null, onWa
     });
 
     return {
-        io, fetch, watchResource, resubscribe, reset, handleEvent,
+        io, fetch, watchResource, setFast, resubscribe, reset, handleEvent,
         info: () => _info,
         requestInfo: () => { try { send({ cmd: 'pod_bridge_info' }); } catch { /* not connected */ } },
         _pendingCount: () => _pending.size,

@@ -41,7 +41,7 @@ export function audioLevel(data) {
 
 export function createVoice(deps) {
     const { showToast, renderMessage, showOsNotification, sendCmd, playNotificationSound, normalizeRelayThreadId, stopScreenShare, getSocket, getActiveView, getSelfWebId, getTurnUrl, getTurnSecret, getLocalDmPeers, getCurrentRoomMembers, getIsSharing, getIdentityPrivKey, getClientDid, getExpectedPeerDid, getDeviceCert,
-        getPeerBindsCalls, onPeerVerified, getUserRelay, getUseDefaultRelay, getContactName } = deps;
+        getPeerBindsCalls, onPeerVerified, getUserRelay, getUseDefaultRelay, getContactName, getOwnWebIds, onCallStateChange } = deps;
     const state = {
             currentCall: null,
             localStream: null,
@@ -465,7 +465,8 @@ export function createVoice(deps) {
         // cross-gateway, our gateway's did. A federated caller only knows us by the
         // gateway did (its DM peer), so its offer is bound to that, not our WebID.
         function _ownRecipientDids() {
-            const out = [getSelfWebId?.() || ''];
+            // On desktop, a browser-build contact knows us by our pod's WebID.
+            const out = [getSelfWebId?.() || '', ...(getOwnWebIds?.() || [])];
             const cert = getDeviceCert?.();
             if (cert && cert.device_did && cert.device_did === getClientDid?.()) out.push(cert.account_did || '');
             return out.filter(Boolean);
@@ -474,7 +475,8 @@ export function createVoice(deps) {
         // Verify a received offer/answer SDP against the expected contact identity.
         // Returns true to proceed, false if the call must be refused (MitM).
         async function _verifyPeerSdp(sdp, role, event) {
-            const _exp = getExpectedPeerDid?.(getActiveView(), event) || '';
+            // May be async: a WebID contact's signer is read from their pod.
+            const _exp = (await getExpectedPeerDid?.(getActiveView(), event)) || '';
             const verdict = await classifyPeerSdp({
                 sdp,
                 role,
@@ -590,6 +592,7 @@ export function createVoice(deps) {
             if (!valid[state._callState]?.includes(newState)) return;
             state._callState = newState;
             _updateCallUI();
+            try { onCallStateChange?.(newState); } catch (_) { /* listener errors stay local */ }
         }
 
         function _updateCallUI() {
@@ -871,7 +874,7 @@ export function createVoice(deps) {
             // A group co-member is identified on the wire by their account did (their
             // caller_webid), which is what getExpectedPeerDid resolves to a contact.
             const acctWebid = event?.caller_webid || peerWebid;
-            const expectedDid = getExpectedPeerDid?.(null, { caller_webid: acctWebid, from_webid: acctWebid }) || '';
+            const expectedDid = (await getExpectedPeerDid?.(null, { caller_webid: acctWebid, from_webid: acctWebid })) || '';
             const verdict = await classifyPeerSdp({
                 sdp,
                 role,

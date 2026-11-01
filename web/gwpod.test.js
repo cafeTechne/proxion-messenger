@@ -70,6 +70,21 @@ describe('createGwPodBridge', () => {
         expect(sent.some((m) => m.cmd === 'pod_unwatch')).toBe(false);   // one listener left
     });
 
+    it('setFast speeds a watch up and slows it down, and only for watched urls', () => {
+        const sent = [];
+        const b = createGwPodBridge({ send: (m) => sent.push(m) });
+        b.watchResource('https://p/call/', vi.fn());
+        b.setFast('https://p/call/', true);
+        b.setFast('https://p/call/', true);
+        b.setFast('https://p/call/', false);
+        b.setFast('https://p/other/', true);
+        expect(sent.filter((m) => m.cmd === 'pod_watch').map((m) => [m.url, m.fast]))
+            .toEqual([['https://p/call/', false], ['https://p/call/', true], ['https://p/call/', false]]);
+        sent.length = 0;
+        b.resubscribe();
+        expect(sent).toEqual([{ cmd: 'pod_watch', url: 'https://p/call/', fast: false }]);
+    });
+
     it('the podio instance is inert until the bridge is ready, then uses our pod root', async () => {
         const sent = [];
         const b = createGwPodBridge({ send: (m) => sent.push(m) });

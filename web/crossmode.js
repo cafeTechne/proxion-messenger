@@ -1,9 +1,10 @@
-// crossmode.js: desktop DMs and presence with browser-build (WebID) contacts.
+// crossmode.js: desktop DMs, presence and calls with browser-build (WebID) contacts.
 //
 // A browser-build user is reached through their pod: DMs are signed, ratchet-
 // encrypted envelopes dropped into proxion/dm-inbox/, presence is a public
-// heartbeat. The desktop client runs that same protocol (webdm.js,
-// webpresence.js) over its gateway's pod bridge (gwpod.js), as the WebID of the
+// heartbeat, call signaling goes through proxion/call-inbox/. The desktop client
+// runs that same protocol (webdm.js, webpresence.js, webcalls.js) over its
+// gateway's pod bridge (gwpod.js), as the WebID of the
 // pod its gateway is connected to. Gateway contacts are untouched: only a
 // command whose target is a WebID is routed here.
 //
@@ -13,6 +14,7 @@
 import { createGwPodBridge } from './gwpod.js';
 import { createWebDm, createSenderVerifier, peerPodRootFromWebId, isDmPeerWebId } from './webdm.js';
 import { createWebPresence } from './webpresence.js';
+import { createWebCalls, createCallSigners, SIGNAL_CMDS } from './webcalls.js';
 import { X25519_PUB_PATH } from './podio.js';
 
 const _DM_CMDS = new Set(['local_dm', 'send_dm']);
@@ -24,17 +26,31 @@ export function webIdTarget(cmd) {
     return isDmPeerWebId(to) ? to : null;
 }
 
+// The WebID a 1:1 call signal (voice.js) is addressed to, when it is one.
+export function callWebIdTarget(cmd) {
+    if (!cmd || !SIGNAL_CMDS.has(cmd.cmd)) return null;
+    return isDmPeerWebId(cmd.target_webid) ? cmd.target_webid : null;
+}
+
 export function createCrossMode({
     send, handleEvent, getClientDid, getDisplayName, signEnvelope,
     verifyDmSig, verifyFanoutSig, verifyDeviceCert, e2e, persistMessage,
     isBlocked, isKnownSender, onMessageRequest, onUnverifiedDrop,
     getContacts, getMyPub, fetchAndCachePeerPub, onStateChange = () => {}, getSelfId = () => getClientDid(),
+    isAllowedCaller = isKnownSender,
 }) {
-    let _dm = null, _presence = null, _startedFor = null;
+    let _dm = null, _presence = null, _calls = null, _callActive = false, _startedFor = null;
     let _state = { ready: false, reason: 'unknown', webid: null, pod_root: null, conflict: false };
 
     const bridge = createGwPodBridge({ send, onInfo: (info) => { _onInfo(info).catch(() => {}); } });
-    const notify = { watchResource: (url, cb) => bridge.watchResource(url, cb) };
+    const notify = {
+        watchResource: (url, cb, opts) => bridge.watchResource(url, cb, opts),
+        setFast: (url, fast) => bridge.setFast(url, fast),
+    };
+    // The signer.json key a WebID contact's calls must be signed by (callsec.js).
+    const callSigners = createCallSigners({
+        fetchSigner: (w) => bridge.io.podFetchPeerSigner(peerPodRootFromWebId(w)),
+    });
     const via = () => ({ fetch: (u) => bridge.fetch(u), ownRoot: _state.pod_root });
 
     function _setState(patch) {
@@ -69,7 +85,12 @@ export function createCrossMode({
             return;
         }
         _setState({ ready: true, reason: '', webid: info.webid, pod_root: info.pod_root });
-        if (_startedFor === info.webid) { bridge.resubscribe(); _dm && _dm.drainOnce().catch(() => {}); return; }
+        if (_startedFor === info.webid) {
+            bridge.resubscribe();
+            _dm && _dm.drainOnce().catch(() => {});
+            _calls && _calls.drainOnce().catch(() => {});
+            return;
+        }
         _startedFor = info.webid;
         const conflict = await _publishIdentity(info).catch(() => false);
         _setState({ conflict });
@@ -93,8 +114,33 @@ export function createCrossMode({
             getContacts: () => (getContacts() || []).filter(isDmPeerWebId),
             peerPodRoot: (w) => peerPodRootFromWebId(w),
         });
+        _calls = createWebCalls({
+            pod: bridge.io, notify,
+            handleEvent: (ev) => handleEvent(ev),
+            getSelfWebId: () => _state.webid,
+            getDisplayName,
+            peerPodRoot: (w) => peerPodRootFromWebId(w),
+            isBlocked,
+            // Only contacts ring the desktop, as with gateway calls.
+            isAllowedCaller: (w) => !!(w && isAllowedCaller(w)),
+        });
+        _calls.setActive(_callActive);
         await _dm.start().catch(() => {});
         _presence.start();
+        await _calls.start().catch(() => {});
+    }
+
+    // A call signal for a WebID contact goes to their call-inbox. No gateway
+    // cert rides along: the signer.json this device publishes names its key
+    // directly, and the far side verifies against that. A call that cannot be
+    // placed ends at once instead of ringing out for 30 seconds.
+    function _routeCall(cmd, to) {
+        const { fp_cert: _cert, ...signal } = cmd;
+        const unavailable = () => {
+            if (cmd.cmd === 'voice_invite') handleEvent({ type: 'voice_unavailable', session_id: cmd.session_id, target_webid: to });
+        };
+        if (!_calls || !_state.ready) { unavailable(); return; }
+        _calls.sendSignal(signal).then((ok) => { if (!ok) unavailable(); }).catch(unavailable);
     }
 
     // Route a DM command for a WebID contact through the pod. Returns true when
@@ -102,6 +148,8 @@ export function createCrossMode({
     // copy is confirmed only when the drop landed; otherwise it stays pending and
     // the send-status retry applies.
     function route(cmd) {
+        const callTo = callWebIdTarget(cmd);
+        if (callTo) { _routeCall(cmd, callTo); return true; }
         const to = webIdTarget(cmd);
         if (to) {
             if (_dm && _state.ready) {
@@ -141,8 +189,15 @@ export function createCrossMode({
         fetchPeerPub: (peerId) => (_state.ready && fetchAndCachePeerPub
             ? fetchAndCachePeerPub(peerId, peerPodRootFromWebId(peerId), via())
             : Promise.resolve(false)),
-        subscribeContact: (w) => { if (_presence && isDmPeerWebId(w)) _presence.subscribeContact(w); },
+        subscribeContact: (w) => {
+            if (_presence && isDmPeerWebId(w)) _presence.subscribeContact(w);
+            if (_state.ready) callSigners.prefetch(w);
+        },
+        // Ringing or in a call: poll the call-inbox every second.
+        setCallActive: (active) => { _callActive = !!active; if (_calls) _calls.setActive(_callActive); },
+        expectedCallSigner: (view, event) => callSigners.expectedFor(view, event),
         drainOnce: () => (_dm ? _dm.drainOnce() : Promise.resolve()),
+        drainCalls: () => (_calls ? _calls.drainOnce() : Promise.resolve()),
         bridge,
     };
 }

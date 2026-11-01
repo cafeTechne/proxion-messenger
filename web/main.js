@@ -82,7 +82,7 @@ import { isPeerPodRootAllowed } from './ssrf.js';
 import { createWebDm, createSenderVerifier, peerPodRootFromWebId, isDmPeerWebId } from './webdm.js';
 import { resolveDmSendMode, canScheduleInView, primaryKeyFromDevices, createDeviceKeyWaiter, isPlaintextOptedIn, setPlaintextOptIn, DmKeyMissingError } from './dmkey.js';
 import { createWebPresence } from './webpresence.js';
-import { createWebCalls } from './webcalls.js';
+import { createWebCalls, createCallSigners } from './webcalls.js';
 import { createWebJoin, makeInvite, parseInvite } from './webjoin.js';
 import { chatRootUrl, dayFileAt } from './longchat.js';
 import {
@@ -583,7 +583,7 @@ import { createAccountSync } from './account-sync.js';
         });
         const voice = createVoice({
             showToast, renderMessage, showOsNotification, sendCmd, playNotificationSound, normalizeRelayThreadId, stopScreenShare,
-            getSocket: () => socket, getActiveView: () => activeView, getSelfWebId: () => selfWebId,
+            getSocket: () => _voiceSocket(), getActiveView: () => activeView, getSelfWebId: () => selfWebId,
             getTurnUrl: () => turnUrl, getTurnSecret: () => turnSecret,
             // R91: a relay the user added in Settings > Calls (no env vars needed).
             getUserRelay: () => {
@@ -611,10 +611,22 @@ import { createAccountSync } from './account-sync.js';
                     return r ? JSON.parse(r) : null;
                 } catch { return null; }
             },
-            getExpectedPeerDid: (view, event) => identity.contactForCall(view, event),
+            getExpectedPeerDid: async (view, event) => identity.contactForCall(view, event)
+                || (await _webIdCallSigner(view, event)),
             getPeerBindsCalls: (did) => identity.peerBindsCalls(did),
             onPeerVerified: (did) => _noteCallCapablePeer(did),
+            // Desktop: browser-build contacts call us at our pod's WebID.
+            getOwnWebIds: () => (crossMode && crossMode.webId() ? [crossMode.webId()] : []),
+            onCallStateChange: (st) => { if (crossMode) crossMode.setCallActive(st !== 'idle'); },
         });
+        // A browser-build (WebID) contact signs a call with the key their pod's
+        // signer.json names (webcalls.js createCallSigners); '' for anyone else.
+        let _webCallSigners = null;
+        function _webIdCallSigner(view, event) {
+            const s = transport.mode === 'web' ? _webCallSigners : crossMode;
+            if (!s) return '';
+            return (s.expectedFor || s.expectedCallSigner)(view, event);
+        }
         // Pod / connectivity status banners (no deps). Instantiated before
         // onboarding because setPodBanner is injected into createOnboarding below.
         const { _updateSettingsPodDot, setPodSyncIndicator, setPodBanner, setWebPodConnected, _showNatWarning } =
@@ -918,6 +930,20 @@ import { createAccountSync } from './account-sync.js';
         function socketSendOrQueue(payload, opts) {
             if (crossMode && crossMode.route(payload)) return;
             return _wsSendOrQueue(payload, opts);
+        }
+        // voice.js writes to the socket directly: its signals for a WebID
+        // contact are routed the same way.
+        const _voiceSocketProxy = {
+            get readyState() { return socket ? socket.readyState : WebSocket.CLOSED; },
+            send(str) {
+                let m = null;
+                try { m = JSON.parse(str); } catch { /* not a command */ }
+                if (m && crossMode && crossMode.route(m)) return;
+                socket.send(str);
+            },
+        };
+        function _voiceSocket() {
+            return crossMode && socket ? _voiceSocketProxy : socket;
         }
         const {
             socketSendOrQueue: _wsSendOrQueue, sendOnce, restorePersisted, probe: probeConnection,
@@ -8353,6 +8379,9 @@ import { createAccountSync } from './account-sync.js';
                         },
                     });
                     // R105: gateway-free call signaling over the pod call-inbox.
+                    _webCallSigners = createCallSigners({
+                        fetchSigner: (webid) => podFetchPeerSigner(peerPodRootFromWebId(webid)),
+                    });
                     const webCalls = createWebCalls({
                         pod: { podEnsureCallInbox, podDropSignal, podReadSignals, podDeleteSignal },
                         notify: { watchResource },
