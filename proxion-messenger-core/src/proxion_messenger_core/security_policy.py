@@ -117,7 +117,7 @@ _OWNER_ONLY_COMMANDS: set[str] = {
     # Desktop pod bridge: a fetch over the owner's pod credentials. The loopback
     # desktop owner is admitted through gateway._is_pod_owner_socket, like the
     # tunnel. pod_bridge_info is not listed: it answers ready=false to anyone else.
-    "pod_fetch", "pod_watch", "pod_unwatch", "pod_thread",
+    "pod_fetch", "pod_watch", "pod_unwatch", "pod_thread", "pod_room_register", "pod_room_unregister",
 }
 
 _RESTRICTED_HTTP_PATHS: set[str] = {

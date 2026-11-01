@@ -11,6 +11,14 @@ fetch over those credentials (podbridge.classify):
                                         -> pod_fetch_result {req_id, status, headers, body[, error]}
     pod_watch {url, fast} / pod_unwatch -> pod_changed {url}
     pod_thread {peer_webid, display_name}  lists a WebID thread with get_dms
+    pod_room_register {room_id, owner_webid} -> pod_room_registered {room_id, container, ok, reason}
+    pod_room_unregister {container}
+
+A room on someone else's pod (a browser-build user's Long Chat) is the one
+place the pod credentials leave our own pod: after an approved join the client
+registers the room's container, and only then does pod_fetch make DPoP-signed
+GET/HEAD/PATCH requests on that container's chat files. A bearer-token pod
+(JSS/NSS) never sends its token off its own pod; those rooms are refused.
 
 The gateway carries ciphertext only and never decides who a drop is from: the
 client verifies every envelope (webdm.js createSenderVerifier). The gateway
@@ -33,10 +41,12 @@ logger = logging.getLogger(__name__)
 
 class PodBridgeMixin:
 
-    POD_BRIDGE_COMMANDS = frozenset({"pod_bridge_info", "pod_fetch", "pod_watch", "pod_unwatch", "pod_thread"})
+    POD_BRIDGE_COMMANDS = frozenset({"pod_bridge_info", "pod_fetch", "pod_watch", "pod_unwatch", "pod_thread",
+                                     "pod_room_register", "pod_room_unregister"})
     # Owner-only by policy (security_policy) and remapped for the loopback owner
     # (gateway.process_command), like the tunnel commands.
-    POD_BRIDGE_OWNER_COMMANDS = frozenset({"pod_fetch", "pod_watch", "pod_unwatch", "pod_thread"})
+    POD_BRIDGE_OWNER_COMMANDS = frozenset({"pod_fetch", "pod_watch", "pod_unwatch", "pod_thread",
+                                           "pod_room_register", "pod_room_unregister"})
     _POD_BRIDGE_RATE_LIMIT = 240          # per socket per 10 s (one drain is a few dozen requests)
     _POD_WATCH_MAX = 120                  # watched URLs per socket
     _POD_WATCH_OWN_S = 5.0                # own drop boxes while the client is open
@@ -59,8 +69,19 @@ class PodBridgeMixin:
                 "seen": {},             # box url -> set(member urls), closed-app push baseline
                 "closed_next": 0.0,
                 "rate": {},             # ws -> [count, window_start]
+                "rooms": {},            # joined room container -> room id (credentials allowed)
+                "rooms_for": None,      # the webid those rooms were registered for
+                "room_nonces": {},      # origin -> last DPoP-Nonce a room's server asked for
             }
         return st
+
+    def _pb_rooms(self) -> dict:
+        """Joined-room containers registered for the connected pod's WebID."""
+        st = self._pb()
+        webid = getattr(self, "_pod_webid", None)
+        if st["rooms_for"] != webid:
+            st["rooms"], st["rooms_for"], st["room_nonces"] = {}, webid, {}
+        return st["rooms"]
 
     def _pb_forget_socket(self, websocket) -> None:
         st = getattr(self, "_pod_bridge_state", None)
@@ -116,6 +137,42 @@ class PodBridgeMixin:
             None, lambda: client.request(method, url, body, headers or {}, max_bytes=max_bytes)),
             timeout=self._POD_REQUEST_TIMEOUT + 5)
 
+    async def _pb_request_room(self, method: str, url: str, body: Optional[bytes] = None,
+                               headers: Optional[dict] = None, max_bytes: int = _pbp.MAX_SMALL_RESPONSE):
+        """One DPoP-authenticated request to a joined room on another pod.
+
+        The proof is bound to this method and URL and the token to our DPoP key,
+        so the room's server cannot replay either elsewhere. The host is resolved
+        and pinned like any foreign request and redirects are never followed."""
+        from .css_auth import DpopSolidClient
+        from .dpop import make_dpop_proof_es256, _extract_dpop_nonce
+        from .network import async_safe_request
+        from urllib.parse import urlsplit
+        client = self._pod_client()
+        if not isinstance(client, DpopSolidClient):
+            raise PermissionError("bearer")
+        creds = client._credentials
+        loop = asyncio.get_event_loop()
+        token = await loop.run_in_executor(None, creds.get_token)
+        nonces = self._pb()["room_nonces"]
+        parts = urlsplit(url)
+        origin = f"{parts.scheme}://{parts.netloc}"
+        for attempt in range(2):
+            proof = make_dpop_proof_es256(creds._dpop_ec_key, method, url,
+                                          nonce=nonces.get(origin), access_token=token)
+            req_headers = {**(headers or {}), "Authorization": f"DPoP {token}", "DPoP": proof,
+                           "User-Agent": "Proxion/1.0"}
+            code, rh, rbody = await async_safe_request(
+                method, url, body=body, headers=req_headers,
+                timeout=self._POD_REQUEST_TIMEOUT, max_bytes=max_bytes)
+            if code == 401 and attempt == 0:
+                nonce = rh.get("dpop-nonce") or _extract_dpop_nonce(rh.get("www-authenticate", ""))
+                if nonce and nonce != nonces.get(origin):
+                    nonces[origin] = nonce
+                    continue
+            return code, rh, rbody
+        return 401, {}, b""
+
     async def _pb_consumer(self, refresh: bool = False) -> Optional[str]:
         """The signer did our pod's signer.json names: the one device that consumes
         the drop boxes. Cached; re-read on *refresh* or after a pod switch."""
@@ -163,7 +220,7 @@ class PodBridgeMixin:
     def _pb_validate_body(self, websocket, decision, method: str, body: bytes) -> str:
         """Content checks for writes the bridge makes on the owner's behalf.
         Returns a refusal reason, or ''."""
-        if method not in ("PUT", "POST") or decision.kind in ("acl", "marker", "joined"):
+        if method not in ("PUT", "POST") or decision.kind in ("acl", "marker", "joined", "room_index", "typeindex"):
             return ""
         if decision.kind == "box" and decision.own and method == "PUT":
             return ""   # container creation, empty body
@@ -185,9 +242,17 @@ class PodBridgeMixin:
             if not isinstance(doc.get("status"), str) or len(doc["status"]) > 32:
                 return "bad_body"
         elif decision.kind == "box":
-            # A drop into any box (a peer's, or our own) speaks as our WebID.
-            if doc.get("from_webid") != getattr(self, "_pod_webid", None):
+            # A drop into any box (a peer's, or our own) speaks as our WebID. A
+            # room owner's answer to a join request names itself as owner_webid.
+            sender = doc.get("from_webid")
+            if sender is None and decision.box == "join" and doc.get("kind") in ("join_approved", "join_declined"):
+                sender = doc.get("owner_webid")
+            if sender != getattr(self, "_pod_webid", None):
                 return "bad_sender"
+        elif decision.kind == "descriptor":
+            # Our room's descriptor names us as owner and the room its path names.
+            if doc.get("room_id") != decision.room or doc.get("owner") != getattr(self, "_pod_webid", None):
+                return "bad_body"
         return ""
 
     async def _handle_pod_fetch(self, websocket, data: dict) -> None:
@@ -206,9 +271,12 @@ class PodBridgeMixin:
             return
         method = str(data.get("method") or "GET").upper()
         url = data.get("url")
-        decision = _pbp.classify(method, url, status["pod_root"])
+        decision = _pbp.classify(method, url, status["pod_root"], self._pb_rooms())
         if not decision.allow:
             await self._pod_fetch_reply(websocket, req_id, 403, error=decision.reason)
+            return
+        if decision.auth and status["auth"] != "dpop":
+            await self._pod_fetch_reply(websocket, req_id, 403, error="bearer")
             return
         raw_body = data.get("body")
         if raw_body is not None and not isinstance(raw_body, str):
@@ -235,6 +303,8 @@ class PodBridgeMixin:
         try:
             if decision.own:
                 code, rh, rbody = await self._pb_request_own(method, url, body or None, headers, decision.max_bytes)
+            elif decision.auth:
+                code, rh, rbody = await self._pb_request_room(method, url, body or None, headers, decision.max_bytes)
             else:
                 from .network import async_safe_request
                 code, rh, rbody = await async_safe_request(
@@ -281,10 +351,14 @@ class PodBridgeMixin:
         if not status["ready"]:
             await websocket.send(json.dumps({"type": "pod_watch_refused", "url": url, "reason": status["reason"]}))
             return
-        decision = _pbp.classify("GET", url, status["pod_root"])
-        allowed = decision.allow and ((decision.own and decision.kind == "box")
+        decision = _pbp.classify("GET", url, status["pod_root"], self._pb_rooms())
+        room_day = decision.allow and decision.kind == "room_day"
+        if room_day and decision.auth and status["auth"] != "dpop":
+            await websocket.send(json.dumps({"type": "pod_watch_refused", "url": url, "reason": "bearer"}))
+            return
+        allowed = decision.allow and ((decision.own and decision.kind == "box") or room_day
                                       or (not decision.own and decision.kind == "presence"))
-        if allowed and decision.own and (await self._pb_consumer()) != self._pb_signing_did(websocket):
+        if allowed and decision.own and not room_day and (await self._pb_consumer()) != self._pb_signing_did(websocket):
             await websocket.send(json.dumps({"type": "pod_watch_refused", "url": url, "reason": "not_consumer"}))
             return
         if not allowed:
@@ -297,7 +371,8 @@ class PodBridgeMixin:
             await websocket.send(json.dumps({"type": "pod_watch_refused", "url": url, "reason": "too_many"}))
             return
         if w is None:
-            w = st["watches"][url] = {"sockets": {}, "own": decision.own, "sig": None, "next": 0.0}
+            w = st["watches"][url] = {"sockets": {}, "own": decision.own, "auth": decision.auth,
+                                      "room": room_day, "sig": None, "next": 0.0}
         w["sockets"][websocket] = bool(data.get("fast"))
         w["next"] = 0.0
 
@@ -321,6 +396,78 @@ class PodBridgeMixin:
         name = str(data.get("display_name") or "")[:100] or None
         owner = self._client_webids.get(websocket, "")
         self._store.save_dm_thread(peer, peer, name, owner_webid=owner)
+
+    async def _pb_join_on_record(self, root: str, room_id: str, owner_webid: str, container: str) -> bool:
+        """Whether our own pod shows we joined *room_id*: the marker the client
+        writes when it asks to join (cleared once approved), or the joined-room
+        list it writes after the approval."""
+        try:
+            code, _h, raw = await self._pb_request_own("GET", root + _pbp.pending_join_path(room_id, owner_webid))
+            if code == 200:
+                doc = json.loads(raw.decode("utf-8", "replace") or "null")
+                if (isinstance(doc, dict) and doc.get("px:roomId") == room_id
+                        and doc.get("px:ownerWebId") == owner_webid):
+                    return True
+            code, _h, raw = await self._pb_request_own("GET", root + "proxion/joined-rooms.jsonld", None,
+                                                       {"Accept": "application/ld+json"}, _pbp.MAX_LISTING_RESPONSE)
+            if code == 200:
+                doc = json.loads(raw.decode("utf-8", "replace") or "null")
+                for r in (doc.get("px:rooms") if isinstance(doc, dict) else None) or []:
+                    if (isinstance(r, dict) and r.get("roomId") == room_id and r.get("owner") == owner_webid
+                            and r.get("container") == container):
+                        return True
+        except Exception as exc:
+            logger.debug("pod bridge: join record read failed: %s", exc)
+        return False
+
+    async def _handle_pod_room_register(self, websocket, data: dict) -> None:
+        """Let pod_fetch use our credentials on a joined room's Long Chat.
+
+        Only the room's own container on its owner's WebID-derived pod, only
+        when our pod records the join, only over DPoP, and only on a host that
+        passes the SSRF check."""
+        room_id = data.get("room_id")
+        owner = data.get("owner_webid")
+
+        async def reply(ok: bool, reason: str = "", container: str = "") -> None:
+            await websocket.send(json.dumps({"type": "pod_room_registered", "room_id": room_id,
+                                             "container": container, "ok": ok, "reason": reason}))
+        if not self._is_pod_owner_socket(websocket):
+            await reply(False, "not_owner")
+            return
+        status = self._pod_bridge_status()
+        if not status["ready"]:
+            await reply(False, status["reason"] or "not_ready")
+            return
+        if status["auth"] != "dpop":
+            await reply(False, "bearer")
+            return
+        container = _pbp.joined_room_container(owner, room_id)
+        if not container:
+            await reply(False, "bad_room")
+            return
+        if container.startswith(status["pod_root"]):
+            await reply(False, "own_pod", container)
+            return
+        rooms = self._pb_rooms()
+        if container not in rooms and len(rooms) >= _pbp.MAX_JOINED_ROOMS:
+            await reply(False, "too_many")
+            return
+        from .network import _resolve_safe_ip
+        loop = asyncio.get_event_loop()
+        if await loop.run_in_executor(None, _resolve_safe_ip, container) is None:
+            await reply(False, "unsafe_host")
+            return
+        if not await self._pb_join_on_record(status["pod_root"], room_id, owner, container):
+            await reply(False, "not_joined")
+            return
+        rooms[container] = room_id
+        await reply(True, "", container)
+
+    async def _handle_pod_room_unregister(self, websocket, data: dict) -> None:
+        if not self._is_pod_owner_socket(websocket):
+            return
+        self._pb_rooms().pop(data.get("container"), None)
 
     # ── background: boxes, watches, closed-app push ──────────────────────────
 
@@ -354,11 +501,14 @@ class PodBridgeMixin:
                 logger.debug("pod bridge: ensure %s failed: %s", url, exc)
                 st["boxes_for"] = None
 
-    async def _pb_signature(self, url: str, own: bool) -> Optional[str]:
+    async def _pb_signature(self, url: str, own: bool, auth: bool = False) -> Optional[str]:
         try:
             if own:
                 code, h, body = await self._pb_request_own("GET", url, None, {"Accept": "text/turtle"},
                                                           _pbp.MAX_LISTING_RESPONSE)
+            elif auth:
+                code, h, body = await self._pb_request_room("GET", url, None, {"Accept": "text/turtle"},
+                                                           _pbp.MAX_LISTING_RESPONSE)
             else:
                 from .network import async_safe_request
                 code, h, body = await async_safe_request("GET", url, timeout=self._POD_REQUEST_TIMEOUT,
@@ -379,12 +529,18 @@ class PodBridgeMixin:
                 continue
             if now < w["next"]:
                 continue
-            if w["own"]:
+            auth = w.get("auth", False)
+            if auth and not any(url.startswith(c) for c in self._pb_rooms()):
+                st["watches"].pop(url, None)   # the room was left (or the pod switched)
+                continue
+            if w.get("room"):
+                interval = self._POD_WATCH_OWN_S
+            elif w["own"]:
                 interval = self._POD_WATCH_FAST_S if any(w["sockets"].values()) else self._POD_WATCH_OWN_S
             else:
                 interval = self._POD_WATCH_FOREIGN_S
             w["next"] = now + interval
-            sig = await self._pb_signature(url, w["own"])
+            sig = await self._pb_signature(url, w["own"], auth)
             if sig is None:
                 continue
             prev, w["sig"] = w["sig"], sig

@@ -93,6 +93,8 @@ _SCHEMA: dict[str, dict[str, tuple]] = {
     "pod_watch":        {"url": (str, 2048)},
     "pod_unwatch":      {"url": (str, 2048)},
     "pod_thread":       {"peer_webid": (str, 2048)},
+    "pod_room_register": {"room_id": (str, 128), "owner_webid": (str, 2048)},
+    "pod_room_unregister": {"container": (str, 2048)},
     # Hole punch (Round 24 — actor-bound, mutating)
     "request_hole_punch": {"peer_webid": (str, 256)},
     "hole_punch_complete_notify": {
@@ -155,7 +157,7 @@ MUTATING_COMMANDS: frozenset[str] = frozenset({
     "expire_dm_session", "revoke_session", "logout_all_devices", "delete_account",
     # pod, push, webhooks, settings
     "connect_css", "disconnect_pod", "reconnect_pod",
-    "pod_fetch", "pod_thread",
+    "pod_fetch", "pod_thread", "pod_room_register", "pod_room_unregister",
     "subscribe_push", "unsubscribe_push",
     "create_webhook", "delete_webhook", "rotate_webhook",
     "set_thread_mute", "set_receipts_enabled", "set_link_previews_enabled",

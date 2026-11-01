@@ -71,6 +71,9 @@ CONSUMER_BOXES = frozenset(BOXES)
 
 _DROP_NAME = r"[A-Za-z0-9][A-Za-z0-9._-]{0,200}"
 _ACL_SUFFIX = r"\.(?:acl|acr)"
+# Room ids as the clients mint them (pod.js SAFE_ID_RE), and a Long Chat day path.
+_ROOM_ID = r"[A-Za-z0-9_-]{1,128}"
+_DAY = r"\d{4}/\d{2}/\d{2}"
 
 # (regex over the path relative to our pod root, allowed methods, kind, max response)
 _OWN_RULES = [
@@ -83,8 +86,32 @@ _OWN_RULES = [
     (rf"proxion/presence\.json{_ACL_SUFFIX}", {"GET", "HEAD", "PUT"}, "acl", MAX_LISTING_RESPONSE),
     (r"proxion/join-requests/[0-9a-f]{64}\.jsonld", {"GET", "HEAD", "PUT", "DELETE"}, "marker", MAX_SMALL_RESPONSE),
     (r"proxion/joined-rooms\.jsonld", {"GET", "HEAD", "PUT"}, "joined", MAX_LISTING_RESPONSE),
+    # Pod rooms the owner hosts (a Long Chat that members append to). The
+    # descriptor and its owner-only ACL live under rooms/, the chat under
+    # proxion/rooms/. The public type index is how the room is listed again.
+    (rf"rooms/({_ROOM_ID})/room\.json", {"GET", "HEAD", "PUT", "DELETE"}, "descriptor", MAX_SMALL_RESPONSE),
+    (rf"rooms/({_ROOM_ID})/", {"HEAD"}, "room_meta", MAX_SMALL_RESPONSE),
+    (rf"rooms/({_ROOM_ID})/{_ACL_SUFFIX}", {"GET", "HEAD", "PUT"}, "acl", MAX_LISTING_RESPONSE),
+    (rf"proxion/rooms/({_ROOM_ID})/", {"HEAD"}, "room_container", MAX_SMALL_RESPONSE),
+    (rf"proxion/rooms/({_ROOM_ID})/{_ACL_SUFFIX}", {"GET", "HEAD", "PUT"}, "acl", MAX_LISTING_RESPONSE),
+    (rf"proxion/rooms/({_ROOM_ID})/index\.ttl", {"GET", "HEAD", "PUT"}, "room_index", MAX_SMALL_RESPONSE),
+    (rf"proxion/rooms/({_ROOM_ID})/{_DAY}/chat\.ttl", {"GET", "HEAD", "PATCH"}, "room_day", MAX_LISTING_RESPONSE),
+    (rf"proxion/rooms/({_ROOM_ID})/members\.jsonld", {"GET", "HEAD", "PUT"}, "room_members", MAX_SMALL_RESPONSE),
+    (r"settings/publicTypeIndex\.ttl", {"GET", "HEAD", "PUT", "PATCH"}, "typeindex", MAX_LISTING_RESPONSE),
+    (rf"settings/publicTypeIndex\.ttl{_ACL_SUFFIX}", {"GET", "HEAD", "PUT"}, "acl", MAX_LISTING_RESPONSE),
+    (r"profile/card", {"GET", "HEAD", "PATCH"}, "own_profile", MAX_LISTING_RESPONSE),
 ]
 _OWN_RULES = [(re.compile(p + r"\Z"), m, k, cap) for p, m, k, cap in _OWN_RULES]
+
+# A room on someone else's pod that we joined: authenticated (DPoP) reads and
+# appends, only under a container the client registered after an approved join
+# (pod_room_register), and only on the Long Chat files. Relative to the container.
+_ROOM_RULES = [
+    (re.compile(r"index\.ttl\Z"), {"GET", "HEAD"}, "room_index", MAX_SMALL_RESPONSE),
+    (re.compile(rf"{_DAY}/chat\.ttl\Z"), {"GET", "HEAD", "PATCH"}, "room_day", MAX_LISTING_RESPONSE),
+    (re.compile(r"members\.jsonld\Z"), {"GET", "HEAD"}, "room_members", MAX_SMALL_RESPONSE),
+]
+MAX_JOINED_ROOMS = 200
 
 # Foreign pods: unauthenticated, and only the public pieces of the protocol.
 # Matched against the END of the path, so any pod root works.
@@ -95,16 +122,21 @@ _FOREIGN_RULES = [
     (re.compile(r"/profile/card\Z"), {"GET", "HEAD"}, "profile", MAX_LISTING_RESPONSE),
 ]
 
-_CONTENT_TYPES = frozenset({"application/json", "application/ld+json", "text/turtle"})
+_CONTENT_TYPES = frozenset({"application/json", "application/ld+json", "text/turtle",
+                            "text/n3", "application/sparql-update"})
 _CONTAINER_LINK = '<http://www.w3.org/ns/ldp#BasicContainer>; rel="type"'
 
 
 class Decision:
-    __slots__ = ("allow", "reason", "own", "kind", "box", "max_bytes", "url")
+    __slots__ = ("allow", "reason", "own", "kind", "box", "max_bytes", "url", "auth", "room")
 
-    def __init__(self, allow, reason="", own=False, kind="", box="", max_bytes=0, url=""):
+    def __init__(self, allow, reason="", own=False, kind="", box="", max_bytes=0, url="",
+                 auth=False, room=""):
         self.allow, self.reason, self.own, self.kind = allow, reason, own, kind
         self.box, self.max_bytes, self.url = box, max_bytes, url
+        # auth: a foreign request made WITH our credentials (a joined room).
+        # room: the room id a room path names.
+        self.auth, self.room = auth, room
 
     def __repr__(self):   # pragma: no cover - debugging aid
         return f"Decision({self.allow}, {self.reason!r}, own={self.own}, kind={self.kind!r})"
@@ -133,13 +165,15 @@ def _clean_url(url) -> Optional[tuple]:
     return parts
 
 
-def classify(method: str, url: str, pod_root: Optional[str]) -> Decision:
+def classify(method: str, url: str, pod_root: Optional[str], rooms=None) -> Decision:
     """Decide whether the bridge may make *method* on *url*.
 
     Under our own pod root the request is made with the pod credentials, on the
-    allowlisted protocol paths only. Anywhere else it is made unauthenticated,
-    on the public protocol paths only (peer identity files, presence, profile
-    card, and POSTs into peer drop boxes)."""
+    allowlisted protocol paths only. Under a joined room's registered container
+    (*rooms*: container URL -> room id) it is made with the credentials too, but
+    only GET/HEAD/PATCH on the Long Chat files. Anywhere else it is made
+    unauthenticated, on the public protocol paths only (peer identity files,
+    presence, profile card, and POSTs into peer drop boxes)."""
     method = (method or "").upper()
     parts = _clean_url(url)
     if parts is None:
@@ -154,7 +188,19 @@ def classify(method: str, url: str, pod_root: Optional[str]) -> Decision:
             if method not in methods:
                 return _deny("method_not_allowed")
             box = m.group(1) if kind in ("box", "drop") else ""
-            return Decision(True, own=True, kind=kind, box=box, max_bytes=cap, url=url)
+            room = m.group(1) if kind.startswith("room") or kind == "descriptor" else ""
+            return Decision(True, own=True, kind=kind, box=box, max_bytes=cap, url=url, room=room)
+        return _deny("path_not_allowed")
+    for container, room_id in (rooms or {}).items():
+        if not url.startswith(container) or _clean_url(container) is None:
+            continue
+        rel = url[len(container):]
+        for rx, methods, kind, cap in _ROOM_RULES:
+            if not rx.match(rel):
+                continue
+            if method not in methods:
+                return _deny("method_not_allowed")
+            return Decision(True, own=False, kind=kind, max_bytes=cap, url=url, auth=True, room=room_id)
         return _deny("path_not_allowed")
     for rx, methods, kind, cap in _FOREIGN_RULES:
         m = rx.search(parts.path)
@@ -210,6 +256,29 @@ def is_dm_peer_webid(webid) -> bool:
     if parts.scheme == "https" and parts.hostname:
         return True
     return parts.scheme == "http" and parts.hostname in ("localhost", "127.0.0.1", "::1")
+
+
+_ROOM_ID_RE = re.compile(_ROOM_ID + r"\Z")
+
+
+def joined_room_container(owner_webid, room_id) -> Optional[str]:
+    """The Long Chat container of *room_id* on *owner_webid*'s pod, the only
+    container a joined room may be registered under (chatRootUrl in
+    web/longchat.js over the WebID-derived root), or None."""
+    if not isinstance(room_id, str) or not _ROOM_ID_RE.match(room_id) or not is_dm_peer_webid(owner_webid):
+        return None
+    root = pod_root_from_webid(owner_webid)
+    if not root or _clean_url(root) is None:
+        return None
+    return f"{root}proxion/rooms/{room_id}/"
+
+
+def pending_join_path(room_id: str, owner_webid: str) -> str:
+    """Where the joiner's client records a join it asked for (podio.js
+    _pendingJoinPath), relative to the joiner's pod root."""
+    import hashlib
+    digest = hashlib.sha256(f"{room_id}\n{owner_webid}".encode("utf-8")).hexdigest()
+    return f"proxion/join-requests/{digest}.jsonld"
 
 
 def inbox_acl_turtle(inbox_url: str, owner_webid: str) -> str:

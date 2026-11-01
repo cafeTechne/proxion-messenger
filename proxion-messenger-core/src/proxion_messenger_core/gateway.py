@@ -1758,6 +1758,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                 await self._handle_pod_unwatch(websocket, data)
             elif cmd == "pod_thread":
                 await self._handle_pod_thread(websocket, data)
+            elif cmd == "pod_room_register":
+                await self._handle_pod_room_register(websocket, data)
+            elif cmd == "pod_room_unregister":
+                await self._handle_pod_room_unregister(websocket, data)
             elif cmd == "mark_read":
                 await self._handle_mark_read(websocket, data)
             elif cmd == "update_last_read":

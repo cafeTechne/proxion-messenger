@@ -160,7 +160,7 @@ def test_foreign_reads_are_unauthenticated_and_drop_client_auth_headers(gw):
     ("GET", "file:///etc/passwd"),
     ("PUT", ROOT + "proxion/settings.jsonld"),
     ("DELETE", ROOT + "proxion/identity/signer.json"),
-    ("GET", ROOT + "rooms/x/room.json"),
+    ("GET", ROOT + "rooms/x/notes.json"),
     ("PUT", ROOT + "profile/card"),
 ])
 def test_off_policy_requests_are_refused_before_any_io(gw, method, url):
