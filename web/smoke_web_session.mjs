@@ -15,7 +15,7 @@ import { resolve, join } from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
 import { startCss, provisionAccount } from './scripts/css-harness.mjs';
-import { buildAndServeHttps, signIn, settleName } from './scripts/e2e-signin.mjs';
+import { buildAndServeHttps, signIn, settleName, consentClick } from './scripts/e2e-signin.mjs';
 
 const HERE = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const CHROME = [
@@ -116,7 +116,7 @@ try {
   await sleep(500);
   await pageX.evaluate((u) => { window.proxionWebLogin(u); }, css.url).catch(() => {});
   await pageX.waitForSelector('#cancel', { timeout: 25000 });
-  await Promise.all([pageX.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => null), pageX.click('#cancel')]);
+  await consentClick(pageX, '#cancel');
   if (await waitFor(pageX, () => /cancel/i.test(document.getElementById('web-signin-error')?.textContent || ''), null, 15000)) ok('a cancelled consent is explained on the sign-in screen');
   else fail(`no message after cancelling consent: ${JSON.stringify(await pageX.evaluate(() => document.getElementById('web-signin-error')?.textContent))}`);
   await pageX.close();
@@ -245,10 +245,7 @@ try {
   ]);
   if (await pageA.$('input[name="webId"]')) {
     await pageA.click('input[name="webId"]');
-    await Promise.all([
-      pageA.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => null),
-      pageA.click('#authorize'),
-    ]);
+    await consentClick(pageA, '#authorize');
   }
   await pageA.waitForFunction(() => !location.href.includes('/consent') && !location.href.includes('/.oidc/'), { timeout: 30000 });
   await pageA.waitForFunction(() => typeof window.proxionWebDm === 'object', { timeout: 30000 });

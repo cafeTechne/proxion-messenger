@@ -21,7 +21,7 @@ import { join, extname, normalize, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
 import { startCss, provisionAccount } from './scripts/css-harness.mjs';
-import { settleName } from './scripts/e2e-signin.mjs';
+import { settleName, consentClick } from './scripts/e2e-signin.mjs';
 
 const HERE = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const CHROME = [
@@ -121,11 +121,7 @@ try {
   await page.evaluate((u) => { window.proxionWebLogin(u); }, css.url);
   await page.waitForSelector('input[name="webId"]', { timeout: 25000 });
   await page.click('input[name="webId"]');
-  await Promise.all([
-    page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => null),
-    page.click('#authorize'),
-  ]);
-  await page.waitForFunction(() => !location.href.includes('/consent') && !location.href.includes('/.oidc/'), { timeout: 30000 });
+  await consentClick(page, '#authorize');
   await new Promise((r) => setTimeout(r, 5000));
 
   const booted = await page.evaluate(() => ({

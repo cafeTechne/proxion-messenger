@@ -14,7 +14,7 @@ import { resolve, join } from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
 import { startCss, provisionAccount } from './scripts/css-harness.mjs';
-import { buildAndServeHttps, signIn } from './scripts/e2e-signin.mjs';
+import { buildAndServeHttps, signIn, consentClick } from './scripts/e2e-signin.mjs';
 
 const HERE = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const CHROME = [
@@ -96,8 +96,7 @@ try {
     await pageB.evaluate((u) => { window.proxionWebLogin(u); }, css.url);
     await pageB.waitForSelector('input[name="webId"]', { timeout: 25000 });
     await pageB.click('input[name="webId"]');
-    await Promise.all([pageB.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => null), pageB.click('#authorize')]);
-    await pageB.waitForFunction(() => !location.href.includes('/consent') && !location.href.includes('/.oidc/'), { timeout: 30000 });
+    await consentClick(pageB, '#authorize');
     await pageB.waitForFunction(() => typeof window.proxionWebDm === 'object', { timeout: 20000 });
     const sent = await pageB.waitForFunction(() => !localStorage.getItem('proxion_pending_join')
       && document.getElementById('join-pending-banner')?.classList.contains('visible'), { timeout: 15000 })

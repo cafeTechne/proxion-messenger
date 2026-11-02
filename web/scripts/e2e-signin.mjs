@@ -71,6 +71,19 @@ export async function buildAndServeHttps(webDir, buildWebScript) {
   return { origin, server, buildDir, certDir: tls.dir };
 }
 
+// Click a button on CSS's consent screen (#authorize or #cancel) until the page
+// leaves it. The screen wires its buttons from a script that may still be
+// loading when the button appears; a click before that does nothing at all,
+// so a single click intermittently leaves the smoke stuck on consent.
+export async function consentClick(page, selector) {
+  const away = () => !location.href.includes('/consent') && !location.href.includes('/.oidc/');
+  for (let i = 0; i < 6; i++) {
+    await page.click(selector).catch(() => {});
+    if (await page.waitForFunction(away, { timeout: 8000 }).then(() => true, () => false)) return;
+  }
+  await page.waitForFunction(away, { timeout: 5000 });
+}
+
 // Drive a page from the app through the full OIDC + consent flow to signed-in.
 // `cookies` are the account's CSS cookies (from provisionAccount). Resolves once
 // the app is back and logged in (PodSocket installed), throws on failure.
@@ -82,11 +95,7 @@ export async function signIn(page, { appOrigin, cssUrl, cookies, name }) {
   await page.evaluate((u) => { window.proxionWebLogin(u); }, cssUrl);
   await page.waitForSelector('input[name="webId"]', { timeout: 25000 });
   await page.click('input[name="webId"]');
-  await Promise.all([
-    page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => null),
-    page.click('#authorize'),
-  ]);
-  await page.waitForFunction(() => !location.href.includes('/consent') && !location.href.includes('/.oidc/'), { timeout: 30000 });
+  await consentClick(page, '#authorize');
   await page.waitForFunction(() => typeof window.proxionWebDm === 'object', { timeout: 20000 });
   return settleName(page, name);
 }
