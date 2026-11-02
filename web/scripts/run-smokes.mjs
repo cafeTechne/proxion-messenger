@@ -37,7 +37,7 @@ if (!wanted.length || unknown.length) {
   process.exit(2);
 }
 
-const TIMEOUT_MS = 6 * 60 * 1000;
+const TIMEOUT_MS = 10 * 60 * 1000;   // the two-direction pod room smoke alone runs about 6 minutes
 function run(file) {
   return new Promise((res) => {
     const started = Date.now();
