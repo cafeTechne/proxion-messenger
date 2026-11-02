@@ -1044,5 +1044,21 @@
   "join.ownerUnreachable": "Không thể kết nối tới pod của chủ phòng. Hãy thử lại sau.",
   "join.bearerPod": "Pod của bạn đăng nhập bằng bearer token, và Proxion không bao giờ gửi token này tới pod khác. Để tham gia phòng trong pod của người khác, bạn cần một pod dùng DPoP, ví dụ Community Solid Server.",
   "room.podCreateFailed": "Không thể tạo phòng trong pod của bạn.",
-  "room.inPod": "Tạo trong pod của tôi, để người dùng Proxion trên trình duyệt có thể tham gia"
+  "room.inPod": "Tạo trong pod của tôi, để người dùng Proxion trên trình duyệt có thể tham gia",
+  "claim.banner": "Cổng này chưa có chủ sở hữu. Nếu bạn đang vận hành nó, hãy nhận quyền sở hữu bằng mã trong nhật ký của nó.",
+  "claim.verb": "Nhận quyền",
+  "claim.title": "Nhận quyền sở hữu cổng này",
+  "claim.prompt": "Dán mã nhận quyền từ nhật ký của cổng, hoặc token quản trị.",
+  "claim.done": "Bạn hiện là chủ sở hữu của cổng này.",
+  "claim.failed.invalid": "Mã đó không dùng được. Mã hết hạn sau 15 phút; hãy xem mã mới nhất trong nhật ký của cổng.",
+  "claim.failed.rateLimited": "Quá nhiều lần thử. Hãy đợi vài phút, hoặc khởi động lại cổng để nhận mã mới.",
+  "claim.failed.alreadyClaimed": "Cổng này đã có chủ sở hữu.",
+  "claim.failed.authRequired": "Hãy đăng nhập vào cổng này trước khi nhận quyền sở hữu.",
+  "section.gatewayOwners": "Chủ sở hữu cổng",
+  "owners.hint": "Các danh tính này quản lý cổng này. Thiết bị liên kết với chúng cũng là chủ sở hữu.",
+  "owners.thisDevice": "Thiết bị này",
+  "owners.remove": "Gỡ",
+  "owners.removeSelfTitle": "Gỡ bạn khỏi danh sách chủ sở hữu?",
+  "owners.removeSelf": "Thiết bị này sẽ không còn quản lý cổng nữa. Chủ sở hữu khác có thể thêm lại.",
+  "owners.removeSelfLast": "Bạn là chủ sở hữu cuối cùng. Cổng sẽ không có chủ cho đến khi có người nhận quyền bằng mã mới trong nhật ký."
 }

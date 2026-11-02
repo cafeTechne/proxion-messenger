@@ -1044,5 +1044,21 @@
   "join.ownerUnreachable": "无法连接房间所有者的 Pod。请稍后再试。",
   "join.bearerPod": "你的 Pod 使用 bearer 令牌登录，Proxion 绝不会将其发送到其他 Pod。要加入他人 Pod 中的房间，需要使用支持 DPoP 的 Pod，例如 Community Solid Server。",
   "room.podCreateFailed": "无法在你的 Pod 中创建房间。",
-  "room.inPod": "在我的 Pod 中创建，让在浏览器中使用 Proxion 的人也能加入"
+  "room.inPod": "在我的 Pod 中创建，让在浏览器中使用 Proxion 的人也能加入",
+  "claim.banner": "此网关还没有所有者。如果你在运行它，请用其日志中的代码认领。",
+  "claim.verb": "认领",
+  "claim.title": "认领此网关",
+  "claim.prompt": "粘贴网关日志中的认领代码，或管理员令牌。",
+  "claim.done": "你现在是此网关的所有者。",
+  "claim.failed.invalid": "该代码无效。代码在 15 分钟后过期，请在网关日志中查看最新代码。",
+  "claim.failed.rateLimited": "尝试次数过多。请等待几分钟，或重启网关以获取新代码。",
+  "claim.failed.alreadyClaimed": "此网关已有所有者。",
+  "claim.failed.authRequired": "请先登录此网关再认领。",
+  "section.gatewayOwners": "网关所有者",
+  "owners.hint": "这些身份管理此网关。与其关联的设备也是所有者。",
+  "owners.thisDevice": "此设备",
+  "owners.remove": "移除",
+  "owners.removeSelfTitle": "将自己从所有者中移除？",
+  "owners.removeSelf": "此设备将不再管理网关。其他所有者可以重新添加它。",
+  "owners.removeSelfLast": "你是最后一位所有者。在有人用其日志中的新代码认领之前，网关将没有所有者。"
 }

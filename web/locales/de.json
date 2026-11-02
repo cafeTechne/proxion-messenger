@@ -1044,5 +1044,21 @@
   "join.ownerUnreachable": "Der Pod des Raumbesitzers ist nicht erreichbar. Versuche es später erneut.",
   "join.bearerPod": "Dein Pod meldet sich mit einem Bearer-Token an, das Proxion nie an einen anderen Pod sendet. Für Räume in fremden Pods brauchst du einen Pod mit DPoP, zum Beispiel Community Solid Server.",
   "room.podCreateFailed": "Der Raum konnte nicht in deinem Pod erstellt werden.",
-  "room.inPod": "In meinem Pod erstellen, damit Proxion-Nutzer im Browser beitreten können"
+  "room.inPod": "In meinem Pod erstellen, damit Proxion-Nutzer im Browser beitreten können",
+  "claim.banner": "Dieses Gateway hat noch keinen Besitzer. Wenn du es betreibst, übernimm es mit dem Code aus seinem Log.",
+  "claim.verb": "Übernehmen",
+  "claim.title": "Dieses Gateway übernehmen",
+  "claim.prompt": "Füge den Code aus dem Gateway-Log oder das Admin-Token ein.",
+  "claim.done": "Dieses Gateway gehört jetzt dir.",
+  "claim.failed.invalid": "Dieser Code hat nicht funktioniert. Codes laufen nach 15 Minuten ab; den neuesten findest du im Gateway-Log.",
+  "claim.failed.rateLimited": "Zu viele Versuche. Warte ein paar Minuten oder starte das Gateway neu, um einen neuen Code zu erhalten.",
+  "claim.failed.alreadyClaimed": "Dieses Gateway hat bereits einen Besitzer.",
+  "claim.failed.authRequired": "Melde dich bei diesem Gateway an, bevor du es übernimmst.",
+  "section.gatewayOwners": "Gateway-Besitzer",
+  "owners.hint": "Diese Identitäten verwalten dieses Gateway. Damit verknüpfte Geräte sind ebenfalls Besitzer.",
+  "owners.thisDevice": "Dieses Gerät",
+  "owners.remove": "Entfernen",
+  "owners.removeSelfTitle": "Dich als Besitzer entfernen?",
+  "owners.removeSelf": "Dieses Gerät verwaltet das Gateway dann nicht mehr. Ein anderer Besitzer kann es wieder hinzufügen.",
+  "owners.removeSelfLast": "Du bist der letzte Besitzer. Das Gateway hat dann keinen Besitzer, bis jemand es mit einem neuen Code aus seinem Log übernimmt."
 }

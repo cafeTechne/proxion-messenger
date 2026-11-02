@@ -1044,5 +1044,21 @@
   "join.ownerUnreachable": "Impossible de joindre le pod du propriétaire du salon. Réessayez plus tard.",
   "join.bearerPod": "Votre pod se connecte avec un jeton bearer, que Proxion n'envoie jamais à un autre pod. Pour rejoindre des salons dans les pods d'autres personnes, il faut un pod qui utilise DPoP, comme Community Solid Server.",
   "room.podCreateFailed": "Impossible de créer le salon dans votre pod.",
-  "room.inPod": "Le créer dans mon pod, pour que les utilisateurs de Proxion dans le navigateur puissent le rejoindre"
+  "room.inPod": "Le créer dans mon pod, pour que les utilisateurs de Proxion dans le navigateur puissent le rejoindre",
+  "claim.banner": "Cette passerelle n'a pas encore de propriétaire. Si vous l'hébergez, revendiquez-la avec le code de son journal.",
+  "claim.verb": "Revendiquer",
+  "claim.title": "Revendiquer cette passerelle",
+  "claim.prompt": "Collez le code du journal de la passerelle, ou le jeton d'administration.",
+  "claim.done": "Cette passerelle vous appartient désormais.",
+  "claim.failed.invalid": "Ce code n'a pas fonctionné. Les codes expirent après 15 minutes ; consultez le journal de la passerelle pour le plus récent.",
+  "claim.failed.rateLimited": "Trop de tentatives. Patientez quelques minutes, ou redémarrez la passerelle pour obtenir un nouveau code.",
+  "claim.failed.alreadyClaimed": "Cette passerelle a déjà un propriétaire.",
+  "claim.failed.authRequired": "Connectez-vous à cette passerelle avant de la revendiquer.",
+  "section.gatewayOwners": "Propriétaires de la passerelle",
+  "owners.hint": "Ces identités gèrent cette passerelle. Les appareils qui y sont liés sont aussi propriétaires.",
+  "owners.thisDevice": "Cet appareil",
+  "owners.remove": "Retirer",
+  "owners.removeSelfTitle": "Vous retirer des propriétaires ?",
+  "owners.removeSelf": "Cet appareil ne gérera plus la passerelle. Un autre propriétaire peut le rajouter.",
+  "owners.removeSelfLast": "Vous êtes le dernier propriétaire. La passerelle restera sans propriétaire jusqu'à ce que quelqu'un la revendique avec un nouveau code de son journal."
 }

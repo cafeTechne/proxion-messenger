@@ -1044,5 +1044,21 @@
   "join.ownerUnreachable": "ルームのオーナーのポッドに接続できませんでした。後でもう一度お試しください。",
   "join.bearerPod": "あなたのポッドは bearer トークンでサインインしますが、Proxion はそれを他のポッドに送信しません。他の人のポッドにあるルームに参加するには、Community Solid Server など DPoP を使うポッドが必要です。",
   "room.podCreateFailed": "ポッドにルームを作成できませんでした。",
-  "room.inPod": "自分のポッドに作成して、ブラウザ版 Proxion のユーザーも参加できるようにする"
+  "room.inPod": "自分のポッドに作成して、ブラウザ版 Proxion のユーザーも参加できるようにする",
+  "claim.banner": "このゲートウェイにはまだオーナーがいません。運用している場合は、ログにあるコードで登録してください。",
+  "claim.verb": "登録",
+  "claim.title": "このゲートウェイのオーナーになる",
+  "claim.prompt": "ゲートウェイのログにある登録コード、または管理者トークンを貼り付けてください。",
+  "claim.done": "このゲートウェイのオーナーになりました。",
+  "claim.failed.invalid": "そのコードは使えませんでした。コードは 15 分で期限切れになります。最新のコードはゲートウェイのログで確認してください。",
+  "claim.failed.rateLimited": "試行回数が多すぎます。数分待つか、ゲートウェイを再起動して新しいコードを取得してください。",
+  "claim.failed.alreadyClaimed": "このゲートウェイにはすでにオーナーがいます。",
+  "claim.failed.authRequired": "登録する前に、このゲートウェイにサインインしてください。",
+  "section.gatewayOwners": "ゲートウェイのオーナー",
+  "owners.hint": "これらの ID がこのゲートウェイを管理します。リンクされたデバイスもオーナーです。",
+  "owners.thisDevice": "このデバイス",
+  "owners.remove": "削除",
+  "owners.removeSelfTitle": "自分をオーナーから外しますか？",
+  "owners.removeSelf": "このデバイスはゲートウェイを管理できなくなります。他のオーナーが再度追加できます。",
+  "owners.removeSelfLast": "あなたが最後のオーナーです。誰かがログの新しいコードで登録するまで、ゲートウェイはオーナー不在になります。"
 }

@@ -1044,5 +1044,21 @@
   "join.ownerUnreachable": "無法連線到房間擁有者的 Pod。請稍後再試。",
   "join.bearerPod": "你的 Pod 使用 bearer 權杖登入，Proxion 絕不會將其傳送到其他 Pod。要加入他人 Pod 中的房間，需要使用支援 DPoP 的 Pod，例如 Community Solid Server。",
   "room.podCreateFailed": "無法在你的 Pod 中建立房間。",
-  "room.inPod": "在我的 Pod 中建立，讓在瀏覽器中使用 Proxion 的人也能加入"
+  "room.inPod": "在我的 Pod 中建立，讓在瀏覽器中使用 Proxion 的人也能加入",
+  "claim.banner": "此閘道還沒有擁有者。如果你在執行它，請用其記錄中的代碼認領。",
+  "claim.verb": "認領",
+  "claim.title": "認領此閘道",
+  "claim.prompt": "貼上閘道記錄中的認領代碼，或管理員權杖。",
+  "claim.done": "你現在是此閘道的擁有者。",
+  "claim.failed.invalid": "該代碼無效。代碼在 15 分鐘後過期，請在閘道記錄中查看最新代碼。",
+  "claim.failed.rateLimited": "嘗試次數過多。請稍候幾分鐘，或重新啟動閘道以取得新代碼。",
+  "claim.failed.alreadyClaimed": "此閘道已有擁有者。",
+  "claim.failed.authRequired": "請先登入此閘道再認領。",
+  "section.gatewayOwners": "閘道擁有者",
+  "owners.hint": "這些身分管理此閘道。與其連結的裝置也是擁有者。",
+  "owners.thisDevice": "此裝置",
+  "owners.remove": "移除",
+  "owners.removeSelfTitle": "將自己從擁有者中移除？",
+  "owners.removeSelf": "此裝置將不再管理閘道。其他擁有者可以重新加入它。",
+  "owners.removeSelfLast": "你是最後一位擁有者。在有人用其記錄中的新代碼認領之前，閘道將沒有擁有者。"
 }

@@ -1044,5 +1044,21 @@
   "join.ownerUnreachable": "Oda sahibinin pod'una ulaşılamadı. Daha sonra tekrar deneyin.",
   "join.bearerPod": "Pod'unuz bir bearer token ile oturum açıyor ve Proxion bunu asla başka bir pod'a göndermez. Başkalarının pod'larındaki odalara katılmak için Community Solid Server gibi DPoP kullanan bir pod gerekir.",
   "room.podCreateFailed": "Oda pod'unuzda oluşturulamadı.",
-  "room.inPod": "Pod'umda oluştur, böylece Proxion'u tarayıcıda kullananlar da katılabilsin"
+  "room.inPod": "Pod'umda oluştur, böylece Proxion'u tarayıcıda kullananlar da katılabilsin",
+  "claim.banner": "Bu ağ geçidinin henüz sahibi yok. Onu siz çalıştırıyorsanız, günlüğündeki kodla sahiplenin.",
+  "claim.verb": "Sahiplen",
+  "claim.title": "Bu ağ geçidini sahiplen",
+  "claim.prompt": "Ağ geçidi günlüğündeki kodu veya yönetici token'ını yapıştırın.",
+  "claim.done": "Artık bu ağ geçidinin sahibisiniz.",
+  "claim.failed.invalid": "Bu kod işe yaramadı. Kodların süresi 15 dakikada dolar; en yenisi için ağ geçidi günlüğüne bakın.",
+  "claim.failed.rateLimited": "Çok fazla deneme. Birkaç dakika bekleyin veya yeni bir kod için ağ geçidini yeniden başlatın.",
+  "claim.failed.alreadyClaimed": "Bu ağ geçidinin zaten bir sahibi var.",
+  "claim.failed.authRequired": "Sahiplenmeden önce bu ağ geçidinde oturum açın.",
+  "section.gatewayOwners": "Ağ geçidi sahipleri",
+  "owners.hint": "Bu kimlikler bu ağ geçidini yönetir. Onlara bağlı cihazlar da sahiptir.",
+  "owners.thisDevice": "Bu cihaz",
+  "owners.remove": "Kaldır",
+  "owners.removeSelfTitle": "Kendinizi sahiplikten kaldırmak mı istiyorsunuz?",
+  "owners.removeSelf": "Bu cihaz artık ağ geçidini yönetmeyecek. Başka bir sahip onu yeniden ekleyebilir.",
+  "owners.removeSelfLast": "Son sahip sizsiniz. Biri günlükteki yeni bir kodla sahiplenene kadar ağ geçidinin sahibi olmayacak."
 }

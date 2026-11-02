@@ -1044,5 +1044,21 @@
   "join.ownerUnreachable": "Tidak dapat menjangkau pod pemilik ruang. Coba lagi nanti.",
   "join.bearerPod": "Pod kamu masuk dengan token bearer, yang tidak pernah dikirim Proxion ke pod lain. Bergabung ke ruang di pod orang lain memerlukan pod yang memakai DPoP, seperti Community Solid Server.",
   "room.podCreateFailed": "Tidak dapat membuat ruang di pod kamu.",
-  "room.inPod": "Buat di pod saya, agar pengguna Proxion di browser bisa bergabung"
+  "room.inPod": "Buat di pod saya, agar pengguna Proxion di browser bisa bergabung",
+  "claim.banner": "Gateway ini belum punya pemilik. Jika kamu yang menjalankannya, klaim dengan kode dari log-nya.",
+  "claim.verb": "Klaim",
+  "claim.title": "Klaim gateway ini",
+  "claim.prompt": "Tempel kode klaim dari log gateway, atau token admin.",
+  "claim.done": "Sekarang kamu pemilik gateway ini.",
+  "claim.failed.invalid": "Kode itu tidak berhasil. Kode kedaluwarsa setelah 15 menit; lihat log gateway untuk kode terbaru.",
+  "claim.failed.rateLimited": "Terlalu banyak percobaan. Tunggu beberapa menit, atau mulai ulang gateway untuk kode baru.",
+  "claim.failed.alreadyClaimed": "Gateway ini sudah punya pemilik.",
+  "claim.failed.authRequired": "Masuk ke gateway ini sebelum mengklaimnya.",
+  "section.gatewayOwners": "Pemilik gateway",
+  "owners.hint": "Identitas ini mengelola gateway ini. Perangkat yang terhubung dengannya juga pemilik.",
+  "owners.thisDevice": "Perangkat ini",
+  "owners.remove": "Hapus",
+  "owners.removeSelfTitle": "Hapus dirimu sebagai pemilik?",
+  "owners.removeSelf": "Perangkat ini tidak akan mengelola gateway lagi. Pemilik lain bisa menambahkannya kembali.",
+  "owners.removeSelfLast": "Kamu pemilik terakhir. Gateway tidak akan punya pemilik sampai seseorang mengklaimnya dengan kode baru dari log-nya."
 }

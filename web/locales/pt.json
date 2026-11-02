@@ -1044,5 +1044,21 @@
   "join.ownerUnreachable": "Não foi possível acessar o pod do dono da sala. Tente novamente mais tarde.",
   "join.bearerPod": "Seu pod entra com um token bearer, que o Proxion nunca envia a outro pod. Para entrar em salas nos pods de outras pessoas é preciso um pod que use DPoP, como o Community Solid Server.",
   "room.podCreateFailed": "Não foi possível criar a sala no seu pod.",
-  "room.inPod": "Criar no meu pod, para que quem usa o Proxion no navegador possa entrar"
+  "room.inPod": "Criar no meu pod, para que quem usa o Proxion no navegador possa entrar",
+  "claim.banner": "Este gateway ainda não tem dono. Se você o administra, reivindique-o com o código do log.",
+  "claim.verb": "Reivindicar",
+  "claim.title": "Reivindicar este gateway",
+  "claim.prompt": "Cole o código do log do gateway ou o token de administrador.",
+  "claim.done": "Agora você é o dono deste gateway.",
+  "claim.failed.invalid": "Esse código não funcionou. Os códigos expiram após 15 minutos; veja o mais recente no log do gateway.",
+  "claim.failed.rateLimited": "Tentativas demais. Aguarde alguns minutos ou reinicie o gateway para obter um novo código.",
+  "claim.failed.alreadyClaimed": "Este gateway já tem dono.",
+  "claim.failed.authRequired": "Entre neste gateway antes de reivindicá-lo.",
+  "section.gatewayOwners": "Donos do gateway",
+  "owners.hint": "Essas identidades administram este gateway. Dispositivos vinculados a elas também são donos.",
+  "owners.thisDevice": "Este dispositivo",
+  "owners.remove": "Remover",
+  "owners.removeSelfTitle": "Remover você como dono?",
+  "owners.removeSelf": "Este dispositivo deixará de administrar o gateway. Outro dono pode adicioná-lo de novo.",
+  "owners.removeSelfLast": "Você é o último dono. O gateway ficará sem dono até alguém reivindicá-lo com um novo código do log."
 }

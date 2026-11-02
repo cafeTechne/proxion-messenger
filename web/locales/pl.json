@@ -1056,5 +1056,21 @@
   "join.ownerUnreachable": "Nie można połączyć się z podem właściciela pokoju. Spróbuj ponownie później.",
   "join.bearerPod": "Twój pod loguje się tokenem bearer, którego Proxion nigdy nie wysyła do innego poda. Aby dołączać do pokojów w podach innych osób, potrzebny jest pod używający DPoP, na przykład Community Solid Server.",
   "room.podCreateFailed": "Nie udało się utworzyć pokoju w Twoim podzie.",
-  "room.inPod": "Utwórz w moim podzie, aby osoby używające Proxion w przeglądarce mogły dołączyć"
+  "room.inPod": "Utwórz w moim podzie, aby osoby używające Proxion w przeglądarce mogły dołączyć",
+  "claim.banner": "Ta brama nie ma jeszcze właściciela. Jeśli to Ty ją uruchamiasz, przejmij ją kodem z jej logu.",
+  "claim.verb": "Przejmij",
+  "claim.title": "Przejmij tę bramę",
+  "claim.prompt": "Wklej kod z logu bramy albo token administratora.",
+  "claim.done": "Ta brama należy teraz do Ciebie.",
+  "claim.failed.invalid": "Ten kod nie zadziałał. Kody wygasają po 15 minutach; najnowszy znajdziesz w logu bramy.",
+  "claim.failed.rateLimited": "Zbyt wiele prób. Odczekaj kilka minut albo uruchom bramę ponownie, aby dostać nowy kod.",
+  "claim.failed.alreadyClaimed": "Ta brama ma już właściciela.",
+  "claim.failed.authRequired": "Zaloguj się do tej bramy, zanim ją przejmiesz.",
+  "section.gatewayOwners": "Właściciele bramy",
+  "owners.hint": "Te tożsamości zarządzają tą bramą. Połączone z nimi urządzenia też są właścicielami.",
+  "owners.thisDevice": "To urządzenie",
+  "owners.remove": "Usuń",
+  "owners.removeSelfTitle": "Usunąć siebie z właścicieli?",
+  "owners.removeSelf": "To urządzenie przestanie zarządzać bramą. Inny właściciel może je dodać ponownie.",
+  "owners.removeSelfLast": "Jesteś ostatnim właścicielem. Brama nie będzie mieć właściciela, dopóki ktoś nie przejmie jej nowym kodem z logu."
 }

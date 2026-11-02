@@ -1044,5 +1044,21 @@
   "join.ownerUnreachable": "방 소유자의 Pod에 연결할 수 없습니다. 나중에 다시 시도하세요.",
   "join.bearerPod": "내 Pod는 bearer 토큰으로 로그인하며, Proxion은 이 토큰을 다른 Pod로 보내지 않습니다. 다른 사람의 Pod에 있는 방에 참여하려면 Community Solid Server처럼 DPoP를 쓰는 Pod가 필요합니다.",
   "room.podCreateFailed": "내 Pod에 방을 만들 수 없습니다.",
-  "room.inPod": "내 Pod에 만들어 브라우저에서 Proxion을 쓰는 사람도 참여할 수 있게 하기"
+  "room.inPod": "내 Pod에 만들어 브라우저에서 Proxion을 쓰는 사람도 참여할 수 있게 하기",
+  "claim.banner": "이 게이트웨이에는 아직 소유자가 없습니다. 직접 운영 중이라면 로그에 있는 코드로 소유권을 등록하세요.",
+  "claim.verb": "등록",
+  "claim.title": "이 게이트웨이 소유권 등록",
+  "claim.prompt": "게이트웨이 로그의 등록 코드나 관리자 토큰을 붙여 넣으세요.",
+  "claim.done": "이제 이 게이트웨이의 소유자입니다.",
+  "claim.failed.invalid": "코드가 맞지 않습니다. 코드는 15분 후 만료되니 게이트웨이 로그에서 최신 코드를 확인하세요.",
+  "claim.failed.rateLimited": "시도 횟수가 너무 많습니다. 몇 분 기다리거나 게이트웨이를 다시 시작해 새 코드를 받으세요.",
+  "claim.failed.alreadyClaimed": "이 게이트웨이에는 이미 소유자가 있습니다.",
+  "claim.failed.authRequired": "등록하기 전에 이 게이트웨이에 로그인하세요.",
+  "section.gatewayOwners": "게이트웨이 소유자",
+  "owners.hint": "이 ID들이 이 게이트웨이를 관리합니다. 연결된 기기도 소유자입니다.",
+  "owners.thisDevice": "이 기기",
+  "owners.remove": "제거",
+  "owners.removeSelfTitle": "소유자에서 나를 제거할까요?",
+  "owners.removeSelf": "이 기기는 더 이상 게이트웨이를 관리하지 않습니다. 다른 소유자가 다시 추가할 수 있습니다.",
+  "owners.removeSelfLast": "마지막 소유자입니다. 누군가 로그의 새 코드로 등록할 때까지 게이트웨이에 소유자가 없게 됩니다."
 }
