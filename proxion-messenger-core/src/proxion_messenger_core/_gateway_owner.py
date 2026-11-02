@@ -4,7 +4,7 @@ claim that gives a freshly started public gateway its first owner.
 Mixin class: add to ProxionGateway's MRO so all methods share `self`.
 Requires on self: _store, _client_webids, _session_meta, _session_device_did,
                   _owner_account_dids, _proven_sockets, config, agent,
-                  _auth_enforced(), _owner_by_did_or_local(), _auth_fail_key().
+                  _auth_enforced(), _owner_by_did_or_local().
 
 An owner is an account identity (the did a session registers as). The
 desktop browser on loopback and anything proven to be the gateway's own did
@@ -34,7 +34,9 @@ class OwnerMixin:
 
     _OWNER_CLAIM_TTL = 15 * 60          # seconds a claim code stays valid
     _OWNER_CLAIM_FAIL_WINDOW = 600.0    # seconds a failed attempt counts
-    _OWNER_CLAIM_FAIL_LIMIT = 5         # failed attempts per source per window
+    _OWNER_CLAIM_FAIL_LIMIT = 5         # failed attempts per identity per window
+    _OWNER_CLAIM_SLOWDOWN = 1.0         # seconds between failed replies, gateway-wide
+    _OWNER_CLAIM_MAX_DELAY = 10.0       # longest a failed reply is held back
 
     # ---- persisted owner set --------------------------------------------------
 
@@ -161,19 +163,28 @@ class OwnerMixin:
             self._owner_claim_code()
             await asyncio.sleep(30)
 
-    def _owner_claim_locked(self, websocket, now: float) -> bool:
+    # Failures count per proven identity, not per source IP: behind a reverse
+    # proxy every caller shares one IP, so an IP bucket would let anyone lock
+    # the operator out of claiming. An attacker can mint fresh identities to
+    # dodge the count, which is fine: a 192-bit code cannot be guessed. The
+    # gateway-wide slowdown below only delays wrong answers, never a right one.
+
+    def _owner_claim_locked(self, identity: str, now: float) -> bool:
         fails = self.__dict__.setdefault("_owner_claim_fails", {})
         for key in [k for k, v in fails.items()
                     if now - v["first_at"] > self._OWNER_CLAIM_FAIL_WINDOW]:
             fails.pop(key, None)
-        entry = fails.get(self._auth_fail_key(websocket))
+        entry = fails.get(identity)
         return bool(entry) and entry["count"] >= self._OWNER_CLAIM_FAIL_LIMIT
 
-    def _owner_claim_failed(self, websocket, now: float) -> None:
+    def _owner_claim_failed(self, identity: str, now: float) -> float:
+        """Count a failure; returns how long to hold back the reply."""
         fails = self.__dict__.setdefault("_owner_claim_fails", {})
-        key = self._auth_fail_key(websocket)
-        entry = fails.setdefault(key, {"count": 0, "first_at": now})
+        entry = fails.setdefault(identity, {"count": 0, "first_at": now})
         entry["count"] += 1
+        slot = max(now, getattr(self, "_owner_claim_next_slot", 0.0))
+        self._owner_claim_next_slot = slot + self._OWNER_CLAIM_SLOWDOWN
+        return min(slot - now, self._OWNER_CLAIM_MAX_DELAY)
 
     def _gateway_cert_for(self, websocket) -> "dict | None":
         """The gateway delegation cert for this session's signing key."""
@@ -203,7 +214,7 @@ class OwnerMixin:
             await _fail("auth_required")
             return
         now = time.time()
-        if self._owner_claim_locked(websocket, now):
+        if self._owner_claim_locked(caller, now):
             await _fail("rate_limited")
             return
         presented = data.get("code", "")
@@ -224,7 +235,7 @@ class OwnerMixin:
         elif presented and code_ok:
             ok, via = True, "claim"
         if not ok:
-            self._owner_claim_failed(websocket, now)
+            delay = self._owner_claim_failed(caller, now)
             if self._store:
                 try:
                     self._store.save_security_event(
@@ -233,6 +244,9 @@ class OwnerMixin:
                         details="claim code or token rejected")
                 except Exception:
                     pass
+            if delay > 0:
+                import asyncio
+                await asyncio.sleep(delay)
             await _fail("already_claimed" if not self._owner_claim_open() and not admin
                         else "invalid_code")
             return

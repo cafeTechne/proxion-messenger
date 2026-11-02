@@ -185,7 +185,9 @@ async def test_expired_code_is_refused_and_a_new_one_is_logged(tmp_path, public_
 async def test_claim_attempts_are_rate_limited(tmp_path, public_auth):
     gw = _gateway(tmp_path / "gw.db")
     url = _serve(gw)
+    gw._OWNER_CLAIM_SLOWDOWN = 0.0
     s = await _connect(url, Ed25519PrivateKey.generate())
+    operator_key = Ed25519PrivateKey.generate()
     try:
         code = gw._owner_claim_code()
         for _ in range(gw._OWNER_CLAIM_FAIL_LIMIT):
@@ -195,8 +197,43 @@ async def test_claim_attempts_are_rate_limited(tmp_path, public_auth):
         r = await s.cmd({"cmd": "claim_gateway", "code": code}, _CLAIM_REPLIES)
         assert r == {"type": "claim_failed", "reason": "rate_limited"}
         assert gw._store.list_owner_devices() == []
+        # The lockout is per identity: the operator, arriving from the same
+        # address (as everyone does behind a reverse proxy), still claims.
+        operator = await _connect(url, operator_key)
+        try:
+            r = await operator.cmd({"cmd": "claim_gateway", "code": code}, _CLAIM_REPLIES)
+            assert r["type"] == "gateway_claimed" and r["webid"] == _did(operator_key)
+        finally:
+            await operator.ws.close()
     finally:
         await s.ws.close()
+
+
+@pytest.mark.asyncio
+async def test_wrong_codes_are_slowed_down_but_the_right_one_is_not(tmp_path, public_auth):
+    gw = _gateway(tmp_path / "gw.db")
+    gw._OWNER_CLAIM_SLOWDOWN = 0.5
+    url = _serve(gw)
+    a = await _connect(url, Ed25519PrivateKey.generate())
+    b = await _connect(url, Ed25519PrivateKey.generate())
+    try:
+        code = gw._owner_claim_code()
+        loop = asyncio.get_running_loop()
+        t0 = loop.time()
+        await asyncio.gather(
+            a.ws.send(json.dumps({"cmd": "claim_gateway", "code": "guess-1"})),
+            b.ws.send(json.dumps({"cmd": "claim_gateway", "code": "guess-2"})),
+        )
+        await asyncio.gather(a.wait(_CLAIM_REPLIES), b.wait(_CLAIM_REPLIES))
+        # Two failures from two identities share the gateway-wide pace.
+        assert loop.time() - t0 >= 0.45
+        t1 = loop.time()
+        r = await a.cmd({"cmd": "claim_gateway", "code": code}, _CLAIM_REPLIES)
+        assert r["type"] == "gateway_claimed"
+        assert loop.time() - t1 < 0.4
+    finally:
+        await a.ws.close()
+        await b.ws.close()
 
 
 @pytest.mark.asyncio
