@@ -45,7 +45,7 @@ MAX_UNUSED_ONE_TIME_PREKEYS = 200
 
 class DmHandlerMixin:
 
-    async def _handle_send_dm(self, websocket, data: dict) -> None:
+    async def _handle_send_dm(self, websocket, data: dict) -> bool | None:
         cert_id = data.get("cert_id")
         content = data.get("content")
         encrypt = data.get("encrypt", True)
@@ -90,7 +90,10 @@ class DmHandlerMixin:
                 return
 
             from .messaging import compose, send
-            msg = compose(self.agent.identity_key, cert, content, encrypt=encrypt, reply_to_id=data.get("reply_to_id"))
+            msg = compose(self.agent.identity_key, cert, content, encrypt=encrypt,
+                          reply_to_id=data.get("reply_to_id"),
+                          message_id=getattr(websocket, "scheduled_message_id", None)
+                          if websocket in self._system_ws else None)
             try:
                 # Blocking pod write: run it off the event loop.
                 await asyncio.get_running_loop().run_in_executor(None, send, msg, client)
@@ -99,6 +102,7 @@ class DmHandlerMixin:
                 logger.warning(f"Failed to send DM to {cert_id}, enqueuing: {e}")
                 self.outbox.enqueue(msg, target_cert_id=cert_id)
                 await websocket.send(json.dumps({"type": "info", "message": "Message queued (offline)"}))
+            return True  # Persisted to the pod or handed to the durable outbox.
         elif self._store:
             # No pod client (or an E2E payload): relay delivery via the peer's gateway
             cert_dict = self._store.get_relationship_by_cert_id(cert_id)
@@ -107,7 +111,7 @@ class DmHandlerMixin:
                 if peer_did:
                     _E2E_KEYS = ("e2e", "nonce", "msg_num", "key_header",
                                  "ratchet_pub", "pn", "x25519_pub")
-                    await self._handle_local_dm(websocket, {
+                    return await self._handle_local_dm(websocket, {
                         "target_webid": peer_did,
                         "content": content,
                         "thread_id": cert_id,
@@ -115,7 +119,6 @@ class DmHandlerMixin:
                         "reply_to_id": data.get("reply_to_id"),
                         **{k: data[k] for k in _E2E_KEYS if k in data},
                     })
-                    return
             await websocket.send(json.dumps({"type": "error", "message": f"Unknown DM recipient: {cert_id}"}))
         else:
             await websocket.send(json.dumps({"type": "error", "message": f"Unknown DM recipient: {cert_id}"}))
@@ -576,7 +579,7 @@ class DmHandlerMixin:
             self._did_pod_webids[client_did] = pod_webid
             await websocket.send(json.dumps({"type": "pod_linked", "pod_webid": pod_webid, "did": client_did}))
 
-    async def _handle_local_dm(self, websocket, data: dict) -> None:
+    async def _handle_local_dm(self, websocket, data: dict) -> bool | None:
         # Direct WS relay for local testing — no pod required.
         # Both sender and target must have called "register" first.
         sender_webid = self._client_webids.get(websocket, "unknown")
@@ -773,7 +776,7 @@ class DmHandlerMixin:
         # from their side), but the target receives nothing — no live delivery, no
         # offline push/relay below. Scoped to the recipient owner (R90 B).
         if self._is_blocked_for(target_webid, sender_webid):
-            return
+            return True
 
         target_sockets = self._sockets_for(target_webid)
         if target_sockets:
@@ -886,12 +889,15 @@ class DmHandlerMixin:
                         "type": "error",
                         "message": f"Relay failed: {exc}",
                     }))
+                    return
             else:
                 await websocket.send(json.dumps({
                     "type": "info",
                     "message": f"Target {target_webid!r} not connected and no gateway URL known. "
                                "Share your Proxion address (DID@gateway-url) so peers can reach you.",
                 }))
+
+        return True
 
     async def _handle_upload_prekeys(self, websocket, data: dict) -> None:
         """Store caller's prekey bundle (signed prekey + one-time prekeys) in local DB."""

@@ -44,6 +44,11 @@ from proxion_messenger_core.store import MemoryStore
 # Fixtures
 # ---------------------------------------------------------------------------
 
+def test_compose_signs_a_stable_delivery_id(alice, cert):
+    message = compose(alice.identity_key, cert, 'scheduled', message_id='stable-delivery-id')
+    assert message.message_id == 'stable-delivery-id'
+    assert message.verify(alice.identity_pub_bytes)
+
 @pytest.fixture
 def alice():
     return AgentState.generate()

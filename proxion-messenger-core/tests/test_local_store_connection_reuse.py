@@ -46,9 +46,13 @@ def test_store_calls_reuse_one_connection_per_thread(tmp_path, connect_counter):
 def test_each_thread_gets_its_own_connection(tmp_path, connect_counter):
     store = LocalStore(str(tmp_path / "s.db"))
     errors = []
+    # Keep all worker identities alive together. A worker could otherwise
+    # finish before the next starts, allowing the OS to reuse its thread id.
+    ready = threading.Barrier(4, timeout=10)
 
     def worker(n):
         try:
+            ready.wait()
             for i in range(20):
                 _save(store, n * 100 + i, thread=f"t{n}")
         except Exception as exc:  # pragma: no cover - surfaced below

@@ -58,6 +58,7 @@ async def test_scheduler_loop_processes_10_messages_in_order(tmp_path):
     alice_did = pub_key_to_did(agent.identity_pub_bytes)
     room_id = "sched-room-1"
     gw._local_rooms[room_id] = {"name": "r", "code": "c", "members": set(), "messages": [], "history_mode": "none"}
+    gw._store.add_room_member(room_id, alice_did)
 
     ws = _mock_ws(alice_did)
     gw.clients.add(ws)
@@ -71,7 +72,7 @@ async def test_scheduler_loop_processes_10_messages_in_order(tmp_path):
     async def capture_process(websocket, data):
         if data.get("cmd") == "send_room":
             processed.append(data["content"])
-        await original_process(websocket, data)
+        return await original_process(websocket, data)
 
     gw.process_command = capture_process
 
@@ -90,6 +91,8 @@ async def test_scheduler_loop_processes_10_messages_in_order(tmp_path):
             pass
 
     assert len(processed) == 10
+    assert len(gw._store.get_messages(room_id)) == 10
+    assert gw._store.get_due_scheduled_messages(time.time()) == []
     # Verify ordering by checking the message contents match seeded order
     for i, content in enumerate(processed):
         assert f"message {i}" in content or content.startswith("message"), content
@@ -123,7 +126,7 @@ async def test_scheduler_loop_skips_cancelled_messages(tmp_path):
     async def capture_process(websocket, data):
         if data.get("cmd") == "send_room":
             processed.append(data["content"])
-        await original_process(websocket, data)
+        return await original_process(websocket, data)
 
     gw.process_command = capture_process
 
@@ -171,6 +174,7 @@ async def test_scheduler_loop_resumes_after_restart(tmp_path):
     gw2 = ProxionGateway(agent=agent, dm_clients={}, room_memberships={}, config=cfg, read_state=ReadState())
 
     gw2._local_rooms[room_id] = {"name": "r", "code": "c", "members": set(), "messages": [], "history_mode": "none"}
+    gw2._store.add_room_member(room_id, alice_did)
 
     ws = _mock_ws(alice_did)
     gw2.clients.add(ws)
@@ -182,7 +186,7 @@ async def test_scheduler_loop_resumes_after_restart(tmp_path):
     async def capture_process(websocket, data):
         if data.get("cmd") == "send_room":
             processed.append(data["content"])
-        await original_process(websocket, data)
+        return await original_process(websocket, data)
 
     gw2.process_command = capture_process
 
@@ -202,3 +206,5 @@ async def test_scheduler_loop_resumes_after_restart(tmp_path):
 
     assert len(processed) == 1
     assert "restart test message" in processed[0]
+    assert len(gw2._store.get_messages(room_id)) == 1
+    assert gw2._store.get_due_scheduled_messages(time.time()) == []

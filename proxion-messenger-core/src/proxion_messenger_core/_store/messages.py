@@ -573,7 +573,7 @@ class MessageStoreMixin(object):
     def get_due_scheduled_messages(self, now: float) -> list:
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT * FROM scheduled_messages WHERE send_at <= ? AND cancelled=0",
+                "SELECT * FROM scheduled_messages WHERE send_at <= ? AND cancelled=0 ORDER BY send_at, created_at, id",
                 (now,)
             ).fetchall()
             return [dict(r) for r in rows]
@@ -593,8 +593,8 @@ class MessageStoreMixin(object):
     def get_scheduled_messages_for_user(self, from_webid: str) -> list:
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT * FROM scheduled_messages WHERE from_webid=? AND cancelled=0 AND send_at > ?",
-                (from_webid, time.time())
+                "SELECT * FROM scheduled_messages WHERE from_webid=? AND cancelled=0 ORDER BY send_at, created_at, id",
+                (from_webid,)
             ).fetchall()
             return [dict(r) for r in rows]
     def mark_scheduled_sent(self, sched_id: str) -> None:

@@ -348,6 +348,7 @@ def compose(
     message_type: str = "text",
     encrypt: bool = False,
     prev_msg: Optional["Message"] = None,
+    message_id: Optional[str] = None,
 ) -> Message:
     """Create and sign a message.  No I/O — call :func:`send` to persist it.
 
@@ -367,6 +368,8 @@ def compose(
         Optional message_id of the parent message (empty string = top-level).
     encrypt:
         If True, encrypt content with AES-256-GCM before composing (default: False).
+    message_id:
+        Stable identifier for a retryable delivery; otherwise generated randomly.
     """
     if now is None:
         now = datetime.datetime.now(datetime.timezone.utc)
@@ -382,7 +385,7 @@ def compose(
     pub_bytes = identity_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
 
     unsigned = Message(
-        message_id=secrets.token_urlsafe(16),
+        message_id=message_id or secrets.token_urlsafe(16),
         cert_id=cert.certificate_id,
         from_pub_hex=pub_bytes.hex(),
         content=content,

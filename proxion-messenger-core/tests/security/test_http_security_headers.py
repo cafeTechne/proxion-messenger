@@ -62,14 +62,19 @@ async def http_server(tmp_path):
         config=GatewayConfig(port=port + 1, http_port=port, web_dir=web_dir),
         read_state=ReadState(),
     )
+    # The HTTP server already signals successful binding. Waiting for that
+    # signal avoids intermittent connection refusals under full-suite load.
+    gw._http_bound = asyncio.get_running_loop().create_future()
     task = asyncio.create_task(gw._serve_http(web_dir, port))
-    await asyncio.sleep(0.15)
-    yield port
-    task.cancel()
     try:
-        await task
-    except (asyncio.CancelledError, Exception):
-        pass
+        await asyncio.wait_for(gw._http_bound, timeout=5)
+        yield port
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 @pytest.mark.asyncio

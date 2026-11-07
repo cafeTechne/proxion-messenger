@@ -21,6 +21,7 @@ import logging
 import re
 import secrets
 import time
+import uuid
 from collections import deque
 from datetime import datetime, timezone
 from .command_validation import seq_int
@@ -248,6 +249,8 @@ class RoomHandlerMixin:
 
     class _NullWs:
         """Stub websocket for offline scheduled message senders."""
+        def __init__(self, scheduled_message_id=None):
+            self.scheduled_message_id = scheduled_message_id
         async def send(self, _): pass
         def __hash__(self): return id(self)
         def __eq__(self, other): return self is other
@@ -266,7 +269,8 @@ class RoomHandlerMixin:
         if self._store:
             for _t in self._store.get_dm_threads(owner_webid=actor):
                 if _t.get("thread_id") == thread_id and _t.get("peer_webid"):
-                    return {"cmd": "local_dm", "target_webid": _t["peer_webid"], "content": content}
+                    return {"cmd": "local_dm", "target_webid": _t["peer_webid"],
+                            "thread_id": thread_id, "content": content}
         return None
 
     def _is_scheduled_dm_thread(self, thread_id: str, actor: str) -> bool:
@@ -278,6 +282,38 @@ class RoomHandlerMixin:
             return True
         return self._actor_participates_in_dm(actor, thread_id)
 
+    async def _deliver_scheduled_message(self, sched):
+        """Acknowledge only accepted sends; retries reuse the same message id."""
+        command = self._scheduled_delivery_command(
+            sched["thread_id"], sched["from_webid"], sched["content"])
+        if command is None:
+            logger.warning("scheduled message %s: thread unavailable; retaining for retry", sched["id"])
+            return False
+        message_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "proxion:scheduled:" + sched["id"]))
+        command["message_id"] = message_id
+        # Local room history is durable acceptance. If the subsequent schedule
+        # update failed (or the gateway restarted), do not publish it again.
+        existing = self._store.get_message(message_id) if command["cmd"] == "send_room" else None
+        if existing and existing["thread_id"] == sched["thread_id"] and existing["from_webid"] == sched["from_webid"]:
+            self._store.mark_scheduled_sent(sched["id"])
+            return True
+        # Use a dedicated internal socket even when the sender is online. This
+        # keeps persistent membership checks identical across reconnects and
+        # avoids charging a user's live websocket for background sends.
+        sender_ws = self._NullWs(message_id)
+        self._client_webids[sender_ws] = sched["from_webid"]
+        self._system_ws.add(sender_ws)
+        try:
+            accepted = await self.process_command(sender_ws, command)
+            if accepted is not True:
+                return False
+            self._store.mark_scheduled_sent(sched["id"])
+            return True
+        finally:
+            self._client_webids.pop(sender_ws, None)
+            self._system_ws.discard(sender_ws)
+            self._rate_counters.pop(sender_ws, None)
+
     async def _scheduler_loop(self):
         """Poll for due scheduled messages every 10 seconds."""
         _consecutive_failures = 0
@@ -287,33 +323,17 @@ class RoomHandlerMixin:
                 continue
             try:
                 due = self._store.get_due_scheduled_messages(time.time())
+                failed = False
                 for sched in due:
-                    _deliver = self._scheduled_delivery_command(
-                        sched["thread_id"], sched["from_webid"], sched["content"])
-                    if _deliver is None:
-                        logger.warning("scheduled message %s: unknown thread %s — dropping",
-                                       sched["id"], str(sched["thread_id"])[:24])
-                        self._store.mark_scheduled_sent(sched["id"])
-                        continue
-                    # Mark sent only once we know how to deliver it (at-most-once).
-                    self._store.mark_scheduled_sent(sched["id"])
-                    sender_ws = next(
-                        (ws for ws, wid in self._client_webids.items()
-                         if wid == sched["from_webid"]),
-                        None
-                    )
-                    null_ws = None
-                    if sender_ws is None:
-                        null_ws = self._NullWs()
-                        self._client_webids[null_ws] = sched["from_webid"]
-                        self._system_ws.add(null_ws)
-                        sender_ws = null_ws
                     try:
-                        await self.process_command(sender_ws, _deliver)
-                    finally:
-                        if null_ws is not None:
-                            self._client_webids.pop(null_ws, None)
-                            self._system_ws.discard(null_ws)
+                        await self._deliver_scheduled_message(sched)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        failed = True
+                        logger.warning("scheduled message %s: delivery failed; retaining for retry", sched["id"], exc_info=True)
+                if failed:
+                    raise RuntimeError("scheduled delivery failed")
                 _consecutive_failures = 0  # reset on success
             except asyncio.CancelledError:
                 raise
@@ -622,7 +642,7 @@ class RoomHandlerMixin:
 
         return False
 
-    async def _handle_send_room(self, websocket, data: dict) -> None:
+    async def _handle_send_room(self, websocket, data: dict) -> bool | None:
         room_id = data.get("room_id")
         content = data.get("content")
         encrypt = data.get("encrypt", True)
@@ -662,6 +682,7 @@ class RoomHandlerMixin:
                 logger.warning(f"Failed to send room message, enqueuing: {e}")
                 self.outbox.enqueue(msg, room_id=room_id)
                 await websocket.send(json.dumps({"type": "info", "message": "Message queued (offline)"}))
+            return True
 
         elif room_id in self._local_rooms:
             if not self._check_room_permission(websocket, room_id):
@@ -740,7 +761,8 @@ class RoomHandlerMixin:
                 if len(_mem) > _ROOM_MEMORY_CAP:
                     del _mem[:len(_mem) - _ROOM_MEMORY_CAP]
             for ws in list(room["members"]):
-                own = ws == websocket
+                own = ws == websocket or (
+                    websocket in self._system_ws and self._client_webids.get(ws) == sender_webid)
                 try:
                     await ws.send(json.dumps({**event, "own": own}))
                 except Exception as exc:
@@ -758,6 +780,7 @@ class RoomHandlerMixin:
                 outgoing_hooks = self._store.get_webhooks_for_thread(room_id, "outgoing")
                 for _wh in outgoing_hooks:
                     asyncio.create_task(self._fire_outgoing_webhook(_wh, event))
+            return True
 
         else:
             await websocket.send(json.dumps({"type": "error", "message": f"Unknown room: {room_id}"}))

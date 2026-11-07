@@ -35,7 +35,7 @@ def test_local_dm_routes_to_local_dm_with_peer(gateway):
     alice, bob = _did(Ed25519PrivateKey.generate()), _did(Ed25519PrivateKey.generate())
     gateway._store.save_dm_thread("dm-thread-1", bob, "Bob", owner_webid=alice)
     cmd = gateway._scheduled_delivery_command("dm-thread-1", alice, "hey bob")
-    assert cmd == {"cmd": "local_dm", "target_webid": bob, "content": "hey bob"}
+    assert cmd == {"cmd": "local_dm", "target_webid": bob, "thread_id": "dm-thread-1", "content": "hey bob"}
 
 
 def test_cert_dm_routes_to_send_dm(gateway):

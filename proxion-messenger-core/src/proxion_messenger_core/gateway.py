@@ -1523,7 +1523,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                         await self._handle_send_dm(websocket, data)
                         self._store.record_operation_result(_op_id, "send_dm", _actor, data.get("device_id"), "ok")
                 else:
-                    await self._handle_send_dm(websocket, data)
+                    return await self._handle_send_dm(websocket, data)
             elif cmd == "edit_message":
                 await self._handle_edit_message(websocket, data)
             elif cmd == "send_room":
@@ -1537,7 +1537,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                         await self._handle_send_room(websocket, data)
                         self._store.record_operation_result(_op_id, "send_room", _actor, data.get("device_id"), "ok")
                 else:
-                    await self._handle_send_room(websocket, data)
+                    return await self._handle_send_room(websocket, data)
             elif cmd == "set_presence":
                 await self._handle_set_presence(websocket, data)
             elif cmd == "get_rooms":
@@ -1567,7 +1567,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             elif cmd == "link_pod":
                 await self._handle_link_pod(websocket, data)
             elif cmd == "local_dm":
-                await self._handle_local_dm(websocket, data)
+                return await self._handle_local_dm(websocket, data)
             elif cmd == "get_local_history":
                 await self._handle_get_local_history(websocket, data)
             elif cmd == "export_ticket":
