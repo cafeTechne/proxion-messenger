@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     buildRoomDescriptor, normalizeMembers, withMembers, parseRoomDescriptor,
-    descriptorSigningBytes, ROOM_DESC_VERSION,
+    descriptorSigningBytes, ROOM_DESC_VERSION, closeRoomDescriptor,
 } from './roomdesc.js';
 
 const _toHex = (u8) => Array.from(u8).map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -40,6 +40,21 @@ describe('descriptorSigningBytes (B3: must match Python room_descriptor.canonica
     it('is stable regardless of member order (canonical sort)', () => {
         expect(_toHex(descriptorSigningBytes({ ...desc, members: [...desc.members].reverse() }))).toBe(EXPECTED);
     });
+
+    it('binds closed state in a distinct v2 signing domain', () => {
+        const closed = { ...desc, 'px:version': 2, closed: true };
+        const expected = EXPECTED.replace('64657363726970746f722d7631', '64657363726970746f722d7632') + '7c0006636c6f736564';
+        expect(_toHex(descriptorSigningBytes(closed))).toBe(expected);
+        expect(_toHex(descriptorSigningBytes({ ...closed, closed: false }))).not.toBe(expected);
+        expect(_toHex(descriptorSigningBytes({ ...closed, 'px:version': 1 }))).not.toBe(expected);
+    });
+});
+
+it('round-trips a closed room without losing its durable lifecycle state', () => {
+    const closed = closeRoomDescriptor(buildRoomDescriptor({ roomId: 'closed', owner: 'https://owner/#me' }), true);
+    expect(parseRoomDescriptor(JSON.parse(JSON.stringify(closed)))).toMatchObject({ closed: true, deletion_complete: true, 'px:version': 2 });
+    expect(closed.members.map(m => m.webid)).toEqual(['https://owner/#me']);
+    expect(parseRoomDescriptor({ ...closed, 'px:version': 1 })).toBe(null);
 });
 
 const OWNER = 'https://me.pod/profile/card#me';

@@ -35,7 +35,7 @@ import {
     podEnsureJoinInbox, podDropJoin, podReadJoins, podDeleteJoin,
     podWritePendingJoin, podHasPendingJoin, podDeletePendingJoin,
     podReadJoinedRooms, podWriteJoinedRooms,
-    podGrantChatParticipants, podWriteChatMessageAt, podReadChatRecentAt,
+    podGrantChatParticipants, podWriteChatMessageAt, podReadChatRecentAt, podDeleteOwnedRoom,
 } from './pod.js';
 import { buildRoomDescriptor, withMembers } from './roomdesc.js';
 import { createPodIo } from './podio.js';
@@ -362,9 +362,9 @@ describe.skipIf(!LIVE)('gateway-free pod round-trips (live CSS)', () => {
         const device = () => createOwnerMembership({
             read: io.podReadRoomDescriptorVersion, write: io.podWriteRoomDescriptorVersion,
             getOwnerId: () => alice.webId,
-            apply: async (descriptor) => {
+            apply: async (descriptor, isCurrent, version) => {
                 const members = descriptor.members.filter((m) => !m.banned).map((m) => m.webid);
-                if (!(await io.podGrantChatParticipants(chat, alice.webId, members.filter((webid) => webid !== alice.webId)))) return false;
+                if (!(await io.podGrantChatParticipants(chat, alice.webId, members.filter((webid) => webid !== alice.webId), version))) return false;
                 return io.podWriteRoomMembers(roomId, members.map((webid) => ({ webid, role: webid === alice.webId ? 'admin' : 'member' })));
             },
         });
@@ -379,6 +379,84 @@ describe.skipIf(!LIVE)('gateway-free pod round-trips (live CSS)', () => {
         expect(final.descriptor.members.map((m) => m.webid).sort()).toEqual([alice.webId, bob.webId, peer].sort());
         expect((await io.podReadRoomMembersAt(chat)).map((m) => m.webid).sort()).toEqual([alice.webId, bob.webId, peer].sort());
         expect((await bobSession.fetch(chat + 'index.ttl')).ok).toBe(true);
+    });
+
+    it('rejects a paused approval ACL write after a completed room closure', async () => {
+        const roomId = uid('close-race');
+        const chat = chatRootUrl(alice.storageRoot, roomId);
+        let unblock, reached;
+        const release = new Promise(resolve => { unblock = resolve; });
+        const paused = new Promise(resolve => { reached = resolve; });
+        let delay = true, conflicts = 0;
+        const fetch = async (url, opts = {}) => {
+            if (delay && url === chat + '.acl' && opts.method === 'PUT' && opts.body.includes(`<${bob.webId}>`)) {
+                delay = false;
+                reached();
+                await release;
+            }
+            const response = await aliceSession.fetch(url, opts);
+            if (response.status === 412) conflicts++;
+            return response;
+        };
+        const io = createPodRoomIo({ fetch, isLoggedIn: () => true,
+            storageRoot: () => alice.storageRoot, webId: () => alice.webId });
+        expect(await io.ensureChatIndexAt(chat, 'Closure race')).toBe(true);
+        expect(await io.podWriteRoomDescriptor(buildRoomDescriptor({ roomId, owner: alice.webId }))).toBe(true);
+        expect(await io.podGrantChatParticipants(chat, alice.webId, [])).toBe(true);
+        const device = () => createOwnerMembership({
+            read: io.podReadRoomDescriptorVersion, write: io.podWriteRoomDescriptorVersion,
+            getOwnerId: () => alice.webId,
+            apply: async (descriptor, isCurrent, version) => {
+                const members = descriptor.members.filter(m => !m.banned).map(m => m.webid);
+                if (!(await io.podGrantChatParticipants(chat, alice.webId, members.filter(w => w !== alice.webId), version))) return false;
+                return io.podWriteRoomMembers(roomId, members.map(webid => ({ webid, role: webid === alice.webId ? 'admin' : 'member' })));
+            },
+        });
+        const approval = device().update(roomId, d => withMembers(d, [...d.members, { webid: bob.webId, role: 'member' }]));
+        try {
+            await paused;
+            expect((await device().remove(roomId, async () => true)).ok).toBe(true);
+            expect((await bobSession.fetch(chat + 'index.ttl')).status).toBe(403);
+        } finally { unblock(); }
+        expect(await approval).toEqual({ ok: false, reason: 'room_closed' });
+        expect(conflicts).toBeGreaterThanOrEqual(1);
+        expect((await bobSession.fetch(chat + 'index.ttl')).status).toBe(403);
+        const final = await io.podReadRoomDescriptorVersion(roomId);
+        expect(final.descriptor).toMatchObject({ closed: true, deletion_complete: true });
+        expect(final.descriptor.members.map(m => m.webid)).toEqual([alice.webId]);
+    }, 30000);
+
+    it('finishes browser-host cleanup through the actual pod.js adapter', async () => {
+        asAlice();
+        const roomId = uid('browser-close');
+        const chat = chatRootUrl(alice.storageRoot, roomId);
+        const io = createPodRoomIo({ fetch: aliceSession.fetch, isLoggedIn: () => true,
+            storageRoot: () => alice.storageRoot, webId: () => alice.webId });
+        expect(await io.ensureChatIndexAt(chat, 'Browser close')).toBe(true);
+        expect(await io.podWriteRoomDescriptor(buildRoomDescriptor({ roomId, owner: alice.webId,
+            members: [{ webid: bob.webId, role: 'member' }] }))).toBe(true);
+        expect(await io.podRegisterChat(chat)).toBe(true);
+        const owner = createOwnerMembership({ read: io.podReadRoomDescriptorVersion,
+            write: io.podWriteRoomDescriptorVersion, getOwnerId: () => alice.webId,
+            apply: async (d, isCurrent, version) => {
+                if (!(await io.podGrantChatParticipants(chat, alice.webId, d.members.filter(m => m.webid !== alice.webId).map(m => m.webid), version))) return false;
+                return io.podWriteRoomMembers(roomId, [{ webid: alice.webId, role: 'admin' }]);
+            },
+        });
+        const cached = await io.podReadRoomDescriptor(roomId);
+        const resource = `${alice.storageRoot}rooms/${roomId}/room.json`;
+        // Simulate a browser still holding the pre-closure GET representation.
+        // Cleanup must validate a fresh snapshot before removing discovery.
+        _session = { info: aliceSession.info, fetch: async (url, opts = {}) => {
+            if (url === resource && !opts.method && opts.cache !== 'no-store') {
+                return new Response(JSON.stringify(cached), { status: 200 });
+            }
+            return aliceSession.fetch(url, opts);
+        } };
+        try {
+            expect(await owner.remove(roomId, () => podDeleteOwnedRoom(roomId))).toMatchObject({ ok: true });
+        } finally { asAlice(); }
+        expect((await io.podReadRoomDescriptor(roomId)).deletion_complete).toBe(true);
     });
 
 });

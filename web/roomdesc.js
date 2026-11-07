@@ -62,6 +62,12 @@ export function withMembers(descriptor, members) {
     };
 }
 
+/** Retain a signed tombstone so stale owner devices can repair old grants. */
+export function closeRoomDescriptor(descriptor, complete = false) {
+    return { ...withMembers(descriptor, []), 'px:version': 2, closed: true,
+        deletion_complete: complete || descriptor.deletion_complete === true };
+}
+
 // ── Signing (B3) ──────────────────────────────────────────────────────────────
 //
 // The exact bytes signed over a descriptor, mirroring the gateway's
@@ -69,6 +75,8 @@ export function withMembers(descriptor, members) {
 // device-cert scheme). long_chat and updated are NOT signed (long_chat is filled
 // server-side after signing; updated is not security relevant). main.js signs these
 // bytes with the client's Ed25519 key and attaches px:signer + px:sig.
+// V1 remains valid for active rooms; V2 also signs the lifecycle state in a
+// distinct domain so removing a closed flag cannot produce an active record.
 const _ENC = new TextEncoder();
 const _US = String.fromCharCode(0x1f);   // webid/role separator (0x1f, matches Python)
 const _RS = String.fromCharCode(0x1e);   // between-members separator (0x1e, matches Python)
@@ -98,12 +106,13 @@ export function descriptorSigningBytes(desc) {
         .map((m) => `${m.webid}${_US}${m.role || ''}`)
         .sort();
     const parts = [
-        'proxion-room-descriptor-v1',
+        Number(desc['px:version']) === 2 ? 'proxion-room-descriptor-v2' : 'proxion-room-descriptor-v1',
         String(desc.room_id || ''),
         String(desc.owner || ''),
         String(desc.created || ''),
         members.join(_RS),
     ].map((s) => _ENC.encode(s));
+    if (Number(desc['px:version']) === 2) parts.push(_ENC.encode(desc.closed === true ? 'closed' : 'active'));
     return _lengthPrefixed(parts);
 }
 
@@ -111,10 +120,12 @@ export function descriptorSigningBytes(desc) {
 export function parseRoomDescriptor(json) {
     if (!json || typeof json !== 'object') return null;
     if (!json.room_id || !json.owner) return null;
+    const version = Number(json['px:version']) || 1;
+    if (![1, 2].includes(version) || (json.closed === true && version !== 2)) return null;
     const owner = String(json.owner);
     return {
         'px:type': 'RoomDescriptor',
-        'px:version': Number(json['px:version']) || 1,
+        'px:version': version,
         room_id: String(json.room_id),
         title: json.title != null ? String(json.title) : '',
         owner,
@@ -122,5 +133,7 @@ export function parseRoomDescriptor(json) {
         long_chat: json.long_chat != null ? String(json.long_chat) : '',
         created: json.created || null,
         updated: json.updated || null,
+        ...(Number(json['px:version']) === 2 ? { closed: json.closed === true,
+            deletion_complete: json.deletion_complete === true } : {}),
     };
 }

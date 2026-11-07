@@ -2301,7 +2301,7 @@ class PodSyncMixin:
             except Exception as exc:
                 logger.debug("_restore_rooms_from_pod: failed to read meta for %s: %s", room_id, exc)
                 continue
-            if not meta or meta.get("deleted"):
+            if not meta or meta.get("deleted") or meta.get("closed"):
                 continue
             name = meta.get("name", room_id)
             code = meta.get("code", "")

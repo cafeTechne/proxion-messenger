@@ -12,6 +12,8 @@ descriptorSigningBytes) exactly — length-prefixed UTF-8 parts joined by '|', t
 same scheme device_cert already uses across JS/Python — so a signature made in the
 browser verifies here. `long_chat` and `updated` are deliberately NOT signed
 (long_chat is filled server-side after signing; updated is not security relevant).
+Version 2 adds the closed state in a separate signing domain. Existing version 1
+active descriptors retain their original canonical bytes.
 """
 from __future__ import annotations
 
@@ -42,12 +44,14 @@ def canonical_bytes(desc: dict) -> bytes:
         if isinstance(m, dict) and m.get("webid")
     )
     parts = [
-        _DOMAIN,
+        b"proxion-room-descriptor-v2" if desc.get("px:version") == 2 else _DOMAIN,
         str(desc.get("room_id", "")).encode("utf-8"),
         str(desc.get("owner", "")).encode("utf-8"),
         str(desc.get("created", "")).encode("utf-8"),
         _RS.join(norm).encode("utf-8"),
     ]
+    if desc.get("px:version") == 2:
+        parts.append(b"closed" if desc.get("closed") is True else b"active")
     return _length_prefixed(parts)
 
 

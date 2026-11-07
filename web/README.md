@@ -46,6 +46,13 @@ npm run smoke:ci         # browser smokes against real gateways
 node scripts/run-smokes.mjs pod-required  # real-pod rooms and OIDC invite links (required in CI)
 ```
 
+Deleting a pod room first saves a closed descriptor, revokes participant read and
+append access, then removes its discovery registration. The owner retains the
+closed record and private chat history. Cleanup failures keep the room available
+to its owner for retry; browser and desktop hosts also resume cleanup on reload.
+Version 1 active descriptors remain readable. Version 2 signs the closed state,
+and conditional ACL writes bind access grants to the current descriptor version.
+
 Each smoke starts its own gateways or throwaway Solid server. `npm run smoke:all`
 adds the full pod and visual groups. The `pod-required` group checks room creation,
 approval, reload, browser/desktop sharing, and invite links through sign-in. CI

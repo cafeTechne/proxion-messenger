@@ -21,6 +21,30 @@ function roomsHarness({ descs = [], joined = [], rooms = {} } = {}) {
 }
 
 describe('PodSocket rooms in the browser build', () => {
+    it('omits completed closures without repeating cleanup on every reload', async () => {
+        const resumeDeletion = vi.fn(async () => true);
+        const h = roomsHarness({ descs: [{ room_id: 'closed', owner: SELF, closed: true, deletion_complete: true }],
+            rooms: { resumeDeletion } });
+        await h.sock._route({ cmd: 'get_rooms' });
+        expect(resumeDeletion).not.toHaveBeenCalled();
+        expect(h.events).toEqual([{ type: 'rooms', rooms: [] }]);
+    });
+    it('resumes closed-room cleanup on reload and omits completed rooms', async () => {
+        const resumeDeletion = vi.fn(async () => true);
+        const h = roomsHarness({ descs: [{ room_id: 'closed', owner: SELF, closed: true }], rooms: { resumeDeletion } });
+        await h.sock._route({ cmd: 'get_rooms' });
+        expect(resumeDeletion).toHaveBeenCalledWith('closed');
+        expect(h.events).toEqual([{ type: 'rooms', rooms: [] }]);
+    });
+
+    it('retains a closed owner room for retry when reload cleanup fails', async () => {
+        const h = roomsHarness({ descs: [{ room_id: 'closed', owner: SELF, closed: true }],
+            rooms: { resumeDeletion: vi.fn(async () => false) } });
+        await h.sock._route({ cmd: 'get_rooms' });
+        expect(h.events[0]).toMatchObject({ type: 'error', cmd: 'delete_room', room_id: 'closed' });
+        expect(h.events[1].rooms).toEqual([{ id: 'closed', name: 'closed', invite_url: '', local: true,
+            creator_webid: SELF, closed: true }]);
+    });
     it('get_rooms rebuilds the invite link for owned rooms and lists joined rooms with their record', async () => {
         const rec = { roomId: 'j', owner: 'https://o/#me', ownerPodRoot: 'https://o/', container: 'https://o/proxion/rooms/j/', title: 'Joined' };
         const { sock, events } = roomsHarness({ descs: [{ room_id: 'a', title: 'Alpha', owner: SELF }], joined: [rec] });

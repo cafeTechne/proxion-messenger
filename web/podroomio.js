@@ -321,7 +321,9 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
         const root = _root();
         if (!root || !_loggedIn()) return null;
         try {
-            const res = await fetch(`${root}rooms/${roomId}/room.json`);
+            const res = await fetch(`${root}rooms/${roomId}/room.json`, {
+                headers: { Accept: 'application/json' }, cache: 'no-store', redirect: 'error',
+            });
             if (!res || !res.ok) return null;
             const text = await res.text();
             if (text.length > 65536) return null;
@@ -600,21 +602,35 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
      * container ACL. Append-only (#4): a participant can add a message but not
      * overwrite or delete an existing one. Rewriting it without someone removes them.
      */
-    async function podGrantChatParticipants(containerUrl, ownerWebId, participantWebIds) {
+    async function podGrantChatParticipants(containerUrl, ownerWebId, participantWebIds, version = null) {
         if (!containerUrl || !_loggedIn()) return false;
         try {
             const { url: aclUrl, model } = await discoverAccessControl(containerUrl);
             // On an ACP server (ESS) the WAC turtle would not grant anything; author an
             // ACR that gives participants Read+Append instead.
-            const body = model === 'acp'
+            let body = model === 'acp'
                 ? buildAcpAcr(ownerWebId, participantWebIds, containerUrl, 'acl:Read, acl:Append')
                 : buildChatAcl(ownerWebId, participantWebIds, containerUrl);
-            const res = await fetch(aclUrl, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'text/turtle' },
-                body,
-            });
-            return !!(res && res.ok);
+            if (version) {
+                if (!isStrongEtag(version.etag) || typeof version.check !== 'function') return false;
+                // A semantic version triple survives RDF serialization. Even an
+                // unchanged participant list must invalidate older pending PUTs.
+                body += `\n<#proxionVersion> <https://proxion.dev/vocab/v1#descriptorVersion> ${JSON.stringify(version.etag)} .\n`;
+            }
+            for (let attempt = 0; attempt < (version ? 5 : 1); attempt++) {
+                const headers = { 'Content-Type': 'text/turtle' };
+                if (version) {
+                    const current = await fetch(aclUrl, { method: 'HEAD', cache: 'no-store', redirect: 'error' });
+                    if (current?.status === 404) headers['If-None-Match'] = '*';
+                    else if (current?.ok && isStrongEtag(current.headers?.get?.('etag'))) headers['If-Match'] = current.headers.get('etag');
+                    else return false;
+                    if (!(await version.check())) return false;
+                }
+                const res = await fetch(aclUrl, { method: 'PUT', headers, body, redirect: 'error' });
+                if (version && res?.status === 412) continue;
+                return !!res?.ok;
+            }
+            return false;
         } catch (err) {
             console.warn('[pod] podGrantChatParticipants failed:', err);
             return false;

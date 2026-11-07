@@ -77,6 +77,20 @@ async def _cold_restore(tmp_path, pod, name):
     return gw2
 
 
+@pytest.mark.asyncio
+async def test_closed_pod_room_is_not_rehosted_from_retained_descriptor(tmp_path):
+    pod = _FakePod()
+    _seed_room(pod, 'closed-pod-room', 'old-invite', 'https://owner.example/#me')
+    uri = 'stash://pod/rooms/closed-pod-room/room.json'
+    meta = json.loads(pod.store[uri])
+    pod.put(uri, json.dumps({**meta, 'px:version': 2, 'closed': True, 'deletion_complete': True}).encode())
+    restored = await _cold_restore(tmp_path, pod, 'closed.db')
+    assert 'closed-pod-room' not in restored._local_rooms
+    assert 'old-invite' not in restored._room_codes
+    assert restored._store.get_all_rooms() == []
+    assert 'stash://pod/rooms/closed-pod-room/messages/m1.json' in pod.store
+
+
 def _serve(tmp_path, pod=None):
     ws_port, http_port = free_port(), free_port()
     gw = ProxionGateway(AgentState.generate(), {}, {},

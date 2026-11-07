@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createOwnerMembership, isStrongEtag } from './room-membership.js';
-import { buildRoomDescriptor, withMembers } from './roomdesc.js';
+import { buildRoomDescriptor, withMembers, closeRoomDescriptor } from './roomdesc.js';
 
 const OWNER = 'https://owner.example/profile/card#me';
 const ALICE = 'https://alice.example/profile/card#me';
@@ -186,5 +186,97 @@ describe('strong HTTP descriptor versions', () => {
         expect(isStrongEtag('"version-1"')).toBe(true);
         expect(isStrongEtag('""')).toBe(true);
         for (const tag of ['W/"weak"', 'unquoted', '"new\r\nIf-Match:*"', '"sp ace"']) expect(isStrongEtag(tag)).toBe(false);
+    });
+});
+
+describe('durable room deletion', () => {
+    it('revokes access before unlisting and retains an owner-only closed descriptor', async () => {
+        const s = store(initial([ALICE]));
+        const unlist = vi.fn(async () => {
+            expect(s.descriptor().closed).toBe(true);
+            expect(s.state.acl).toEqual([OWNER]);
+            expect(s.state.members).toEqual([OWNER]);
+            return true;
+        });
+        expect((await s.client().remove(ROOM, unlist)).ok).toBe(true);
+        expect(unlist).toHaveBeenCalledOnce();
+        expect(s.descriptor()).toMatchObject({ closed: true, deletion_complete: true, 'px:version': 2 });
+        expect(names(s.descriptor())).toEqual([OWNER]);
+    });
+
+    it.each(['descriptor', 'acl', 'unlist', 'completion'])('recovers a failed %s step with a new owner client', async stage => {
+        const s = store(initial([ALICE]));
+        const unlist = vi.fn(async () => true);
+        const write = s.write.getMockImplementation();
+        if (stage === 'descriptor') s.write.mockResolvedValueOnce({ ok: false });
+        if (stage === 'acl') s.apply.mockResolvedValueOnce(false);
+        if (stage === 'unlist') unlist.mockResolvedValueOnce(false);
+        if (stage === 'completion') {
+            s.write.mockImplementation(async (d, version) => d.deletion_complete ? { ok: false } : write(d, version));
+        }
+        expect((await s.client().remove(ROOM, unlist)).ok).toBe(false);
+        if (stage !== 'descriptor') expect(s.descriptor().closed).toBe(true);
+        expect(s.descriptor().deletion_complete).not.toBe(true);
+        if (stage === 'descriptor' || stage === 'acl') expect(unlist).not.toHaveBeenCalled();
+        s.write.mockImplementation(write);
+        expect((await s.client().remove(ROOM, unlist)).ok).toBe(true);
+        expect(s.descriptor().deletion_complete).toBe(true);
+    });
+
+    it('repairs an approval ACL that finishes after another device closes the room', async () => {
+        const s = store();
+        const applying = deferred(), release = deferred();
+        let first = true;
+        const apply = async d => {
+            if (first) { first = false; applying.resolve(); await release.promise; }
+            return s.apply(d);
+        };
+        const approval = s.client({ apply }).update(ROOM, add(ALICE));
+        await applying.promise;
+        expect((await s.client().remove(ROOM, async () => true)).ok).toBe(true);
+        release.resolve();
+        expect(await approval).toEqual({ ok: false, reason: 'room_closed' });
+        expect(s.state.acl).toEqual([OWNER]);
+        expect(s.state.members).toEqual([OWNER]);
+        expect(s.descriptor().deletion_complete).toBe(true);
+    });
+
+    it('does not invoke an approval change on a closed room and repairs stale grants', async () => {
+        const s = store(closeRoomDescriptor(initial([ALICE]), true));
+        s.state.acl = [OWNER, ALICE];
+        const change = vi.fn(add(BOB));
+        expect(await s.client().update(ROOM, change)).toEqual({ ok: false, reason: 'room_closed' });
+        expect(change).not.toHaveBeenCalled();
+        expect(s.state.acl).toEqual([OWNER]);
+    });
+
+    it('refuses an approval whose descriptor snapshot predates closure', async () => {
+        const s = store();
+        const captured = deferred(), release = deferred();
+        let first = true;
+        const read = async () => {
+            const snapshot = await s.read();
+            if (first) { first = false; captured.resolve(); await release.promise; }
+            return snapshot;
+        };
+        const approval = s.client({ read }).update(ROOM, add(ALICE));
+        await captured.promise;
+        expect((await s.client().remove(ROOM, async () => true)).ok).toBe(true);
+        release.resolve();
+        expect(await approval).toEqual({ ok: false, reason: 'room_closed' });
+        expect(names(s.descriptor())).toEqual([OWNER]);
+        expect(s.state.acl).toEqual([OWNER]);
+    });
+
+    it('stops cleanup completion if the account changes while unlisting', async () => {
+        const s = store(initial([ALICE]));
+        let owner = OWNER;
+        const result = await s.client({ getOwnerId: () => owner }).remove(ROOM, async () => {
+            owner = BOB;
+            return true;
+        });
+        expect(result).toEqual({ ok: false, reason: 'account_changed' });
+        expect(s.descriptor()).toMatchObject({ closed: true, deletion_complete: false });
+        expect(s.state.acl).toEqual([OWNER]);
     });
 });

@@ -483,7 +483,7 @@ export async function podSetChatSeqAt(containerUrl, messageId, date, seq) {
  * This is what turns "a chat in my pod" into "a conversation others can take part
  * in".
  */
-export function podGrantChatParticipants(containerUrl, ownerWebId, participantWebIds) { return _rooms.podGrantChatParticipants(containerUrl, ownerWebId, participantWebIds); }
+export function podGrantChatParticipants(containerUrl, ownerWebId, participantWebIds, version) { return _rooms.podGrantChatParticipants(containerUrl, ownerWebId, participantWebIds, version); }
 
 // ── Self-pod wrappers (a chat WE host under proxion/rooms/{roomId}/) ──────────
 
@@ -1003,23 +1003,21 @@ export function podReadRoomMembersAt(containerUrl) { return _rooms.podReadRoomMe
 
 /**
  * Delete a room we own from the web build's point of view: drop its type-index
- * registration (which is what lists it on reload), its descriptor, and its entry
- * in the room index. The Long Chat history stays in the pod. Returns success.
+ * registration and legacy index entry after access has been revoked. Retain
+ * the closed descriptor and owner-only history for recovery across devices.
  */
 export async function podDeleteOwnedRoom(roomId) {
     if (!SAFE_ID_RE.test(roomId || '') || !solidSession?.info?.isLoggedIn) return false;
     const root = podStorageRoot();
     if (!root) return false;
+    const owner = solidSession.info.webId;
+    const snapshot = await _rooms.podReadRoomDescriptorVersion(roomId);
+    const desc = snapshot.descriptor;
+    if (!snapshot.ok || !desc?.closed || desc.owner !== owner || root !== podStorageRoot()) return false;
     const dereg = await podDeregisterRoomChat(roomId).catch(() => false);
-    let descOk = false;
-    try {
-        const res = await solidSession.fetch(`${root}rooms/${roomId}/room.json`, { method: 'DELETE' });
-        descOk = !!(res && (res.ok || res.status === 404));
-    } catch (err) {
-        console.warn('[pod] podDeleteOwnedRoom failed:', err);
-    }
+    if (!dereg || owner !== solidSession.info.webId || root !== podStorageRoot()) return false;
     await _podUpdateRoomIndex(roomId, false).catch(() => {});
-    return !!dereg && descOk;
+    return true;
 }
 
 /** Read a room descriptor from a specific owner's pod (not our own). */

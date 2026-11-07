@@ -83,6 +83,57 @@ function harness({ routes = () => null, register = () => ({ ok: true }), pending
 
 const fetches = (h, method) => h.sent.filter((m) => m.cmd === 'pod_fetch' && (!method || m.method === method));
 
+describe('desktop room deletion', () => {
+    async function ownedRoom() {
+        let descriptor = null;
+        const routes = (method, url, msg) => {
+            if (url === ROOT + 'rooms/' && method === 'GET') return { status: 200, body: JSON.stringify({
+                '@id': url, 'http://www.w3.org/ns/ldp#contains': descriptor
+                    ? [{ '@id': ROOT + `rooms/${descriptor.room_id}/` }] : [],
+            }) };
+            if (url.endsWith('/room.json')) {
+                if (method === 'PUT') { descriptor = JSON.parse(msg.body); return { status: 205 }; }
+                if (method === 'GET' && descriptor) return { status: 200, body: JSON.stringify(descriptor) };
+            }
+            return null;
+        };
+        const h = harness({ routes });
+        h.cr.onState({ ready: true, started: true, webid: ME, pod_root: ROOT });
+        h.cr.route({ cmd: 'chat_room_create', name: 'Closing', pod: true });
+        expect(await until(() => h.events.some(e => e.type === 'room_created'))).toBe(true);
+        return { h, routes, id: descriptor.room_id, descriptor: () => descriptor };
+    }
+
+    it('reports failed cleanup, retains a retryable tombstone, then deletes without dropping it', async () => {
+        const { h, id, descriptor } = await ownedRoom();
+        h.cr.io.podDeregisterChat = vi.fn(async () => false);
+        h.cr.route({ cmd: 'delete_room', room_id: id });
+        expect(await until(() => h.events.some(e => e.type === 'error' && e.cmd === 'delete_room'))).toBe(true);
+        expect(h.cr.isPodRoom(id)).toBe(true);
+        expect(descriptor()).toMatchObject({ closed: true, deletion_complete: false });
+        const acl = fetches(h, 'PUT').filter(m => m.url.endsWith(`/proxion/rooms/${id}/.acl`)).at(-1);
+        expect(acl.body).not.toContain('acl:Append');
+        h.cr.io.podDeregisterChat.mockResolvedValue(true);
+        h.cr.route({ cmd: 'delete_room', room_id: id });
+        expect(await until(() => h.events.some(e => e.type === 'room_deleted'))).toBe(true);
+        expect(h.cr.isPodRoom(id)).toBe(false);
+        expect(descriptor()).toMatchObject({ closed: true, deletion_complete: true });
+        expect(fetches(h, 'DELETE').filter(m => m.url.endsWith('/room.json'))).toEqual([]);
+    });
+
+    it('finishes a pending deletion from the descriptor after reload', async () => {
+        const { h, id, routes, descriptor } = await ownedRoom();
+        h.cr.io.podDeregisterChat = vi.fn(async () => false);
+        h.cr.route({ cmd: 'delete_room', room_id: id });
+        expect(await until(() => descriptor().closed)).toBe(true);
+        const reloaded = harness({ routes });
+        reloaded.cr.onState({ ready: true, started: true, webid: ME, pod_root: ROOT });
+        expect(await until(() => descriptor().deletion_complete)).toBe(true);
+        expect(reloaded.cr.isPodRoom(id)).toBe(false);
+        expect(reloaded.rooms).toEqual([]);
+    });
+});
+
 async function joinBobsRoom(h) {
     h.cr.onState({ ready: true, started: true, webid: ME, pod_root: ROOT });
     await settle();

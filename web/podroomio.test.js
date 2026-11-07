@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createPodRoomIo, validateWebId, buildWacAcl } from './podroomio.js';
-import { buildRoomDescriptor } from './roomdesc.js';
+import { buildRoomDescriptor, closeRoomDescriptor } from './roomdesc.js';
 import { CHAT_CLASS, NS } from './typeindex.js';
 
 const ROOT = 'https://pod.example/alice/';
@@ -19,7 +19,77 @@ function harness(route) {
     return { fetch, io };
 }
 
+describe('versioned room access writes', () => {
+    it('conditions an access write on its HTTP version and binds the descriptor version into RDF', async () => {
+        const h = harness((url, opts) => url === CONTAINER + '.acl'
+            ? response(opts.method === 'PUT' ? 205 : 200, null, '"acl-1"') : null);
+        const check = vi.fn(async () => true);
+        expect(await h.io.podGrantChatParticipants(CONTAINER, ME, [], { etag: '"descriptor-2"', check })).toBe(true);
+        expect(h.fetch).toHaveBeenCalledWith(CONTAINER + '.acl', expect.objectContaining({ method: 'PUT',
+            headers: expect.objectContaining({ 'If-Match': '"acl-1"' }), body: expect.stringContaining('descriptorVersion') }));
+        const body = h.fetch.mock.calls.find(([, opts]) => opts.method === 'PUT')[1].body;
+        expect(body).toContain(JSON.stringify('"descriptor-2"'));
+        expect(check).toHaveBeenCalledOnce();
+    });
+
+    it('refuses stale grants after reading the current ACL', async () => {
+        const h = harness(url => url === CONTAINER + '.acl' ? response(200, null, '"acl-current"') : null);
+        expect(await h.io.podGrantChatParticipants(CONTAINER, ME, ['https://peer/#me'],
+            { etag: '"old-descriptor"', check: async () => false })).toBe(false);
+        expect(h.fetch.mock.calls.some(([, opts]) => opts.method === 'PUT')).toBe(false);
+    });
+
+    it('creates a missing ACL with an absence precondition', async () => {
+        const h = harness((url, opts) => url === CONTAINER + '.acl' && opts.method === 'PUT' ? response(201, null) : null);
+        expect(await h.io.podGrantChatParticipants(CONTAINER, ME, [],
+            { etag: '"descriptor-1"', check: async () => true })).toBe(true);
+        expect(h.fetch).toHaveBeenCalledWith(CONTAINER + '.acl', expect.objectContaining({
+            method: 'PUT', headers: expect.objectContaining({ 'If-None-Match': '*' }),
+        }));
+    });
+
+    it('retries a conflicting ACL write with a fresh validator while its descriptor is current', async () => {
+        let writes = 0;
+        const h = harness((url, opts) => {
+            if (url !== CONTAINER + '.acl') return null;
+            if (opts.method === 'PUT') return response(++writes === 1 ? 412 : 205, null);
+            return response(200, null, writes ? '"acl-new"' : '"acl-old"');
+        });
+        const check = vi.fn(async () => true);
+        expect(await h.io.podGrantChatParticipants(CONTAINER, ME, [], { etag: '"descriptor-1"', check })).toBe(true);
+        expect(h.fetch).toHaveBeenLastCalledWith(CONTAINER + '.acl', expect.objectContaining({
+            method: 'PUT', headers: expect.objectContaining({ 'If-Match': '"acl-new"' }),
+        }));
+        expect(check).toHaveBeenCalledTimes(2);
+    });
+
+    it('rechecks descriptor freshness before retrying an ACL conflict', async () => {
+        const h = harness((url, opts) => url === CONTAINER + '.acl'
+            ? response(opts.method === 'PUT' ? 412 : 200, null, '"acl-1"') : null);
+        const check = vi.fn().mockResolvedValueOnce(true).mockResolvedValue(false);
+        expect(await h.io.podGrantChatParticipants(CONTAINER, ME, [], { etag: '"descriptor-1"', check })).toBe(false);
+        expect(h.fetch.mock.calls.filter(([, opts]) => opts.method === 'PUT')).toHaveLength(1);
+        expect(check).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([null, 'W/"weak"'])('fails closed when an existing ACL lacks a strong validator (%s)', async etag => {
+        const h = harness(url => url === CONTAINER + '.acl' ? response(200, null, etag) : null);
+        expect(await h.io.podGrantChatParticipants(CONTAINER, ME, [],
+            { etag: '"descriptor-1"', check: async () => true })).toBe(false);
+        expect(h.fetch.mock.calls.some(([, opts]) => opts.method === 'PUT')).toBe(false);
+    });
+});
+
 describe('owned room restoration', () => {
+    it('reads fresh closed descriptors so reload can resume cleanup without reopening the room', async () => {
+        const closed = closeRoomDescriptor(DESC, true);
+        const h = harness(url => {
+            if (url === ROOT + 'rooms/') return response(200, { contains: [{ '@id': 'empty-room/' }] });
+            if (url === ROOT + 'rooms/empty-room/room.json') return response(200, closed);
+        });
+        expect(await h.io.podListOwnedRoomDescriptors(ME)).toMatchObject([{ closed: true, deletion_complete: true }]);
+        expect(h.fetch).toHaveBeenCalledWith(ROOT + 'rooms/empty-room/room.json', expect.objectContaining({ cache: 'no-store' }));
+    });
     it('restores an empty room after reload when the profile never linked its type index', async () => {
         const h = harness((url) => {
             if (url === ME) return response(200, [{ '@id': ME }]);

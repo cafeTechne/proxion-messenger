@@ -90,7 +90,7 @@ export function createCrossRooms({
         getOwnerId: me,
         signDescriptor: (desc) => signDescriptor({ ...desc, name: desc.title,
             code: desc.room_id, creator_webid: desc.owner, created_at: desc.created }),
-        apply: (desc, isCurrent) => _applyMembers(desc.room_id, desc, isCurrent),
+        apply: (desc, isCurrent, version) => _applyMembers(desc.room_id, desc, isCurrent, version),
     });
 
     const access = createRoomAccessMonitor({
@@ -212,12 +212,12 @@ export function createCrossRooms({
 
     // Members (not banned) get Read + Append on the chat; the list beside it is
     // for display. Rewriting both from the descriptor drops anyone left out.
-    async function _applyMembers(roomId, desc, isCurrent = () => me() === desc.owner) {
+    async function _applyMembers(roomId, desc, isCurrent = () => me() === desc.owner, version) {
         if (!isCurrent()) return false;
         const self = desc.owner;
         const members = desc.members.filter((m) => !m.banned).map((m) => m.webid);
         const container = chatRootUrl(ownRoot(), roomId);
-        const granted = await io.podGrantChatParticipants(container, self, members.filter((w) => w !== self));
+        const granted = await io.podGrantChatParticipants(container, self, members.filter((w) => w !== self), version);
         if (!granted || !isCurrent()) return false;
         return io.podWriteRoomMembers(roomId, members.map((w) => ({ webid: w, role: w === self ? 'admin' : 'member' })));
     }
@@ -257,6 +257,7 @@ export function createCrossRooms({
         if (!req || !req.room_id || typeof req.from_webid !== 'string' || !/^https?:\/\//.test(req.from_webid)) return true;
         const desc = await io.podReadRoomDescriptor(req.room_id);
         if (!desc || desc.owner !== me()) return false;   // not readable yet, or not ours: keep it
+        if (desc.closed) return _join.sendDecline(req.from_webid, req.room_id);
         const existing = (desc.members || []).find((m) => m.webid === req.from_webid);
         if (existing && existing.banned) return true;
         if (existing) {
@@ -284,11 +285,17 @@ export function createCrossRooms({
     async function _deleteOwned(roomId) {
         const rec = _rooms.get(roomId);
         if (!rec || !rec.owned) return false;
-        await io.podDeregisterChat(rec.container).catch(() => false);
-        const res = await bridge.fetch(`${ownRoot()}rooms/${roomId}/room.json`, { method: 'DELETE' }).catch(() => null);
-        if (!res || !(res.ok || res.status === 404)) return false;
+        rec.closed = true;
+        if (!(await _finishDeletion(roomId))) return false;
         _drop(roomId);
         return true;
+    }
+
+    async function _finishDeletion(roomId) {
+        const root = ownRoot();
+        const result = await ownerMembership.remove(roomId, () => root === ownRoot()
+            && io.podDeregisterChat(chatRootUrl(root, roomId)));
+        return result.ok;
     }
 
     // ── routing ──────────────────────────────────────────────────────────────
@@ -302,6 +309,14 @@ export function createCrossRooms({
     }
 
     async function _send(rec, cmd) {
+        if (rec.owned) {
+            const desc = await io.podReadRoomDescriptor(rec.roomId);
+            if (!desc || desc.closed) {
+                handleEvent({ type: 'error', cmd: 'send_room', room_id: rec.roomId,
+                    message_id: cmd.message_id, message: 'pod_operation_failed' });
+                return;
+            }
+        }
         const msg = {
             content: String(cmd.content || ''),
             from_webid: me(),
@@ -386,7 +401,10 @@ export function createCrossRooms({
                 }
                 break;
             case 'delete_room':
-                _deleteOwned(rec.roomId).then((ok) => { if (ok) handleEvent({ type: 'room_deleted', room_id: rec.roomId }); }).catch(() => {});
+                _deleteOwned(rec.roomId).then((ok) => {
+                    handleEvent(ok ? { type: 'room_deleted', room_id: rec.roomId }
+                        : { type: 'error', cmd: 'delete_room', room_id: rec.roomId, message: 'pod_operation_failed' });
+                }).catch(() => handleEvent({ type: 'error', cmd: 'delete_room', room_id: rec.roomId, message: 'pod_operation_failed' }));
                 break;
             case 'kick_member':
                 if (rec.owned) {
@@ -422,8 +440,12 @@ export function createCrossRooms({
         }
         for (const d of await io.podListOwnedRoomDescriptors(self)) {
             if (_rooms.has(d.room_id)) continue;
+            if (d.closed && d.deletion_complete) continue;
+            if (d.closed && await _finishDeletion(d.room_id)) continue;
             _add({ roomId: d.room_id, owner: self, ownerPodRoot: ownRoot(), container: chatRootUrl(ownRoot(), d.room_id),
-                title: d.title || d.room_id, owned: true }, { invite: inviteFor(d.room_id) });
+                title: d.title || d.room_id, owned: true, ...(d.closed ? { closed: true } : {}) },
+            { invite: d.closed ? '' : inviteFor(d.room_id) });
+            if (d.closed) handleEvent({ type: 'error', cmd: 'delete_room', room_id: d.room_id, message: 'pod_operation_failed' });
         }
     }
 

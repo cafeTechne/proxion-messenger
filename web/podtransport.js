@@ -40,9 +40,10 @@ export function roomsFromDescriptors(descs, selfWebId, makeRoomInvite = null) {
     return (descs || []).map((d) => ({
         id: d.room_id,
         name: d.title || d.room_id,
-        invite_url: makeRoomInvite ? makeRoomInvite(d.room_id) : '',
+        invite_url: !d.closed && makeRoomInvite ? makeRoomInvite(d.room_id) : '',
         local: true,
         creator_webid: d.owner || selfWebId,
+        ...(d.closed ? { closed: true } : {}),
     }));
 }
 
@@ -183,7 +184,18 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, joi
                 }
                 case 'get_rooms': {
                     const self = getSelfWebId();
-                    const descs = self ? await pod.podListOwnedRoomDescriptors(self) : [];
+                    const found = self ? await pod.podListOwnedRoomDescriptors(self) : [];
+                    const descs = [];
+                    for (const d of found) {
+                        if (d.closed && d.deletion_complete) continue;
+                        if (d.closed) {
+                            let removed = false;
+                            try { removed = !!(await rooms?.resumeDeletion?.(d.room_id)); } catch { /* retain owner retry entry */ }
+                            if (removed) continue;
+                            handleEvent({ type: 'error', cmd: 'delete_room', room_id: d.room_id, message: 'pod_operation_failed' });
+                        }
+                        descs.push(d);
+                    }
                     const owned = roomsFromDescriptors(descs, self, makeRoomInvite);
                     const ownedIds = new Set(owned.map((r) => r.id));
                     const joined = (self && rooms && rooms.listJoined) ? await rooms.listJoined() : [];

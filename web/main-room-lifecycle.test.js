@@ -48,6 +48,8 @@ function ownerHarness() {
         chatRootUrl: () => CONTAINER,
         podGrantChatParticipants: vi.fn(async () => true),
         podWriteRoomMembers: vi.fn(async () => true),
+        podDeleteOwnedRoom: vi.fn(async () => true),
+        webRoomSync: { untrack: vi.fn() },
         _local_rooms: {},
         window: { proxionWebJoin: { sendApproval: vi.fn(async () => true), sendDecline: vi.fn(async () => true) } },
         _queueJoinPrompt: (task) => task(),
@@ -56,7 +58,8 @@ function ownerHarness() {
         t: (key) => key,
         showToast: vi.fn(),
     };
-    const app = handlers(['_applyWebRoomMembers', '_approveWebJoin', '_onWebJoinRequest', '_webKickMember'], deps);
+    const app = handlers(['_applyWebRoomMembers', '_approveWebJoin', '_onWebJoinRequest', '_webKickMember',
+        '_webDeleteRoom', '_finishWebRoomDeletion'], deps);
     Object.assign(ownerMembership, createOwnerMembership({
         read: deps.podReadRoomDescriptorVersion, write: deps.podWriteRoomDescriptorVersion,
         getOwnerId: () => deps.selfWebId,
@@ -68,6 +71,32 @@ function ownerHarness() {
 }
 
 describe('browser room owner approval', () => {
+    it('closes and revokes a room before removing discovery, then resumes failed cleanup', async () => {
+        const h = ownerHarness();
+        await h._approveWebJoin(JOINER, ROOM);
+        h.deps.podDeleteOwnedRoom.mockImplementationOnce(async () => {
+            expect(h.persisted().closed).toBe(true);
+            expect(h.deps.podGrantChatParticipants).toHaveBeenLastCalledWith(CONTAINER, OWNER, [], expect.objectContaining({ check: expect.any(Function) }));
+            return false;
+        });
+        expect(await h._webDeleteRoom(ROOM)).toBe(false);
+        expect(h.persisted()).toMatchObject({ closed: true, deletion_complete: false });
+        expect(h.deps.showToast).toHaveBeenCalledWith('error.generic', 'error');
+        expect(h.deps.webRoomSync.untrack).not.toHaveBeenCalled();
+        expect(await h._finishWebRoomDeletion(ROOM)).toBe(true);
+        expect(h.persisted().deletion_complete).toBe(true);
+        expect(h.deps.webRoomSync.untrack).toHaveBeenCalledWith(ROOM);
+    });
+
+    it('declines requests for a closed room without an approval prompt', async () => {
+        const h = ownerHarness();
+        expect(await h._webDeleteRoom(ROOM)).toBe(true);
+        expect(await h._onWebJoinRequest({ room_id: ROOM, from_webid: JOINER })).toBe(true);
+        expect(h.deps.window.proxionWebJoin.sendDecline).toHaveBeenCalledWith(JOINER, ROOM);
+        expect(h.deps._askJoinOnce).not.toHaveBeenCalled();
+        expect(await h._approveWebJoin(JOINER, ROOM)).toBe(false);
+        expect(h.deps.window.proxionWebJoin.sendApproval).not.toHaveBeenCalled();
+    });
     it.each(['descriptor', 'acl', 'members', 'delivery'])('retries a failed %s write before consuming the request', async (stage) => {
         const h = ownerHarness();
         const ops = [h.deps.podWriteRoomDescriptorVersion, h.deps.podGrantChatParticipants,
@@ -82,7 +111,7 @@ describe('browser room owner approval', () => {
 
         expect(await h._onWebJoinRequest(req)).toBe(true);
         expect(h.persisted().members.filter((m) => m.webid === JOINER)).toHaveLength(1);
-        expect(h.deps.podGrantChatParticipants).toHaveBeenLastCalledWith(CONTAINER, OWNER, [JOINER]);
+        expect(h.deps.podGrantChatParticipants).toHaveBeenLastCalledWith(CONTAINER, OWNER, [JOINER], expect.objectContaining({ check: expect.any(Function) }));
         expect(h.deps.podWriteRoomMembers).toHaveBeenLastCalledWith(ROOM, [
             { webid: OWNER, role: 'admin' }, { webid: JOINER, role: 'member' },
         ]);
@@ -98,7 +127,7 @@ describe('browser room owner approval', () => {
 
         expect(await h._onWebJoinRequest({ room_id: ROOM, from_webid: JOINER })).toBe(true);
         expect(h.deps._askJoinOnce).not.toHaveBeenCalled();
-        expect(h.deps.podGrantChatParticipants).toHaveBeenCalledWith(CONTAINER, OWNER, [JOINER]);
+        expect(h.deps.podGrantChatParticipants).toHaveBeenCalledWith(CONTAINER, OWNER, [JOINER], expect.objectContaining({ check: expect.any(Function) }));
         expect(h.deps.podWriteRoomMembers).toHaveBeenCalled();
         expect(h.deps.window.proxionWebJoin.sendApproval).toHaveBeenCalledOnce();
     });
@@ -136,7 +165,7 @@ describe('browser room owner removal', () => {
         expect(h.deps.podWriteRoomMembers).not.toHaveBeenCalled();
         expect(await h._webKickMember(ROOM, JOINER)).toBe(true);
         expect(h.persisted().members.some((m) => m.webid === JOINER)).toBe(false);
-        expect(h.deps.podGrantChatParticipants).toHaveBeenLastCalledWith(CONTAINER, OWNER, []);
+        expect(h.deps.podGrantChatParticipants).toHaveBeenLastCalledWith(CONTAINER, OWNER, [], expect.objectContaining({ check: expect.any(Function) }));
     });
 
     it('does not claim removal when a different owner device re-added the member during access reconciliation', async () => {
@@ -147,7 +176,7 @@ describe('browser room owner removal', () => {
             return true;
         });
         expect(await h._webKickMember(ROOM, JOINER)).toBe(false);
-        expect(h.deps.podGrantChatParticipants).toHaveBeenLastCalledWith(CONTAINER, OWNER, [JOINER]);
+        expect(h.deps.podGrantChatParticipants).toHaveBeenLastCalledWith(CONTAINER, OWNER, [JOINER], expect.objectContaining({ check: expect.any(Function) }));
         expect(h.persisted().members.some((m) => m.webid === JOINER)).toBe(true);
     });
 });

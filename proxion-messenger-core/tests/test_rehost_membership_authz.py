@@ -68,6 +68,18 @@ def _host_room(gw, room_id, owner_did):
 
 
 @pytest.mark.asyncio
+async def test_closed_room_cannot_be_rehosted(gateway):
+    key, did = _identity()
+    ws = _mock_ws()
+    _session(gateway, ws, did, did)
+    desc = {**_signed_descriptor(key, did, 'closed-room'), 'px:version': 2, 'closed': True}
+    desc['px:sig'] = base64.b64encode(key.sign(canonical_bytes(desc))).decode()
+    await gateway._handle_rehost_room(ws, {'descriptor': desc})
+    assert 'closed-room' not in gateway._local_rooms
+    assert json.loads(ws.send.call_args.args[0])['message'] == 'room_closed'
+
+
+@pytest.mark.asyncio
 async def test_rehost_already_hosted_rejects_non_member(gateway):
     gateway._force_auth = True
     room_id = "room-hosted-1"

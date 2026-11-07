@@ -39,6 +39,15 @@ def test_unsigned_returns_none():
     assert verify_descriptor(None) is None
 
 
+def test_closed_state_is_bound_to_v2_signature():
+    key = Ed25519PrivateKey.generate()
+    did = _did(key)
+    closed = _sign({**_desc(), "px:version": 2, "closed": True}, key, did)
+    assert verify_descriptor(closed) == did
+    assert verify_descriptor({**closed, "closed": False}) is None
+    assert verify_descriptor({**closed, "px:version": 1}) is None
+
+
 def test_tampered_membership_returns_none():
     k = Ed25519PrivateKey.generate()
     did = _did(k)

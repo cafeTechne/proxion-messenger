@@ -2315,6 +2315,9 @@ class RoomHandlerMixin:
         import re as _re
         from .room_descriptor import verify_descriptor
         desc = data.get("descriptor") or {}
+        if desc.get("closed") is True:
+            await websocket.send(json.dumps({"type": "error", "code": "E_REHOST", "message": "room_closed"}))
+            return
         room_id = str(desc.get("room_id") or "")
         owner = str(desc.get("owner") or "")
         if not room_id or not _re.fullmatch(r"[\w-]{1,128}", room_id):

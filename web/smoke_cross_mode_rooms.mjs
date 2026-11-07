@@ -196,6 +196,16 @@ try {
   const pageA = await (await browser.createBrowserContext()).newPage();
   const pageB = await (await browser.createBrowserContext()).newPage();
   const errs = [];
+  const deleteOps = [];
+  for (const page of [pageA, pageB]) {
+    page.on('console', message => { if (message.text().includes('Room deletion failed:')) deleteOps.push(message.text()); });
+    page.on('response', response => {
+      if (step.endsWith('-deletes') && response.request().method() !== 'OPTIONS'
+          && /\/(room\.json|\.acl|members\.jsonld|publicTypeIndex\.ttl)$/.test(new URL(response.url()).pathname)) {
+        deleteOps.push(`${response.status()} ${response.request().method()} ${new URL(response.url()).pathname}`);
+      }
+    });
+  }
   pageA.on('pageerror', (e) => errs.push('A: ' + e.message));
   pageB.on('pageerror', (e) => errs.push('B: ' + e.message));
 
@@ -323,6 +333,51 @@ try {
   await pageA.evaluate(() => { const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none'; });
   if (await waitFor(pageA, (id) => !!document.getElementById('nav-' + id), roomA, 60000)) ok('Alice still lists her pod room after a reload');
   else fail('Alice lost her pod room on reload');
+
+  // Rejoin the kicked rooms, then delete them from each host. A deleted room
+  // must revoke real pod reads and writes, including for an idle participant.
+  for (const flow of [
+    { ownerPage: pageB, peerPage: pageA, owner: bob, peer: alice, id: roomB, invite: inviteB,
+      ownerDrain: drainWeb, peerDrain: drainDesk, label: 'browser' },
+    { ownerPage: pageA, peerPage: pageB, owner: alice, peer: bob, id: roomA, invite: inviteA,
+      ownerDrain: drainDesk, peerDrain: drainWeb, label: 'desktop' },
+  ]) {
+    step = flow.label + '-deletes';
+    await requestJoin(flow.peerPage, flow.invite);
+    if (!(await drainUntil(flow.ownerPage, flow.ownerDrain, isPrompted))) throw new Error('no rejoin approval prompt');
+    await flow.ownerPage.click('#confirm-ok');
+    if (!(await drainUntil(flow.peerPage, flow.peerDrain, hasRoom, flow.id))) throw new Error('rejoin not restored');
+    await openRoom(flow.peerPage, flow.id);
+    await openRoom(flow.ownerPage, flow.id);
+    await flow.ownerPage.keyboard.press('Escape');
+    await flow.ownerPage.click('#room-options-btn');
+    await flow.ownerPage.waitForSelector('#delete-room-btn', { visible: true, timeout: 5000 });
+    await flow.ownerPage.click('#delete-room-btn');
+    await flow.ownerPage.waitForFunction(isPrompted, { timeout: 5000 });
+    await flow.ownerPage.click('#confirm-ok');
+    if (!(await waitFor(flow.ownerPage, id => !document.getElementById('nav-' + id), flow.id, 30000))) {
+      const session = await makeAuthSession(flow.owner);
+      const descriptor = await (await session.fetch(`${flow.owner.storageRoot}rooms/${flow.id}/room.json`)).text();
+      const toast = await flow.ownerPage.evaluate(() => document.querySelector('#toast-container')?.innerText || document.querySelector('.toast')?.innerText || '');
+      throw new Error('owner deletion did not finish: ' + toast + '\n' + descriptor + '\n' + deleteOps.slice(-35).join('\n'));
+    }
+    if (!(await removedShown(flow.peerPage, flow.id))) throw new Error('idle participant still lists deleted room');
+    const peerSession = await makeAuthSession(flow.peer);
+    const ownerSession = await makeAuthSession(flow.owner);
+    const container = `${flow.owner.storageRoot}proxion/rooms/${flow.id}/`;
+    const day = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
+    const dayUrl = `${container}${day}/chat.ttl`;
+    const read = await peerSession.fetch(dayUrl);
+    const write = await peerSession.fetch(dayUrl, { method: 'PATCH',
+      headers: { 'Content-Type': 'application/sparql-update' },
+      body: 'INSERT DATA { <urn:proxion:deletion-probe> <urn:proxion:test> "denied" . }' });
+    if (read.status !== 403 || write.status !== 403) throw new Error(`deleted participant access: GET ${read.status}, PATCH ${write.status}`);
+    const history = await ownerSession.fetch(dayUrl);
+    if (!history.ok) throw new Error('owner lost retained history: ' + history.status);
+    const closed = await (await ownerSession.fetch(`${flow.owner.storageRoot}rooms/${flow.id}/room.json`)).json();
+    if (!closed.closed || !closed.deletion_complete || closed.members.length !== 1 || closed.members[0].webid !== flow.owner.webId) throw new Error('missing completed owner-only tombstone');
+    ok(`${flow.label} deletion removes idle participants and denies GET/PATCH; owner retains history and closure record`);
+  }
 
   if (errs.length) fail('page errors:\n    ' + errs.slice(0, 6).join('\n    '));
   else ok('no uncaught page errors on either side');

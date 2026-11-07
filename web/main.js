@@ -1159,7 +1159,7 @@ import { createAccountSync } from './account-sync.js';
             });
         }
         function _showPodRoom(rec, info = {}) {
-            addRoomToSidebar(rec.roomId, rec.title, info.invite || (rec.owned ? crossRooms?.inviteFor(rec.roomId) : '') || '');
+            addRoomToSidebar(rec.roomId, rec.title, rec.closed ? '' : (info.invite || (rec.owned ? crossRooms?.inviteFor(rec.roomId) : '') || ''));
             if (rec.owned) roomCreatorOf.add(rec.roomId);
             _clearJoinPendingBanner(rec.roomId);
             if (info.joined) showToast(t('join.joined', { room: rec.title }));
@@ -4418,13 +4418,13 @@ import { createAccountSync } from './account-sync.js';
                 ...desc, name: desc.title, code: desc.room_id,
                 creator_webid: desc.owner, created_at: desc.created,
             }),
-            apply: (desc, isCurrent) => _applyWebRoomMembers(desc, isCurrent),
+            apply: (desc, isCurrent, version) => _applyWebRoomMembers(desc, isCurrent, version),
         });
-        async function _applyWebRoomMembers(desc, isCurrent) {
+        async function _applyWebRoomMembers(desc, isCurrent, version) {
             if (!isCurrent()) return false;
             const members = desc.members.filter(m => !m.banned).map(m => m.webid);
             const container = chatRootUrl(podStorageRoot(), desc.room_id);
-            if (!(await podGrantChatParticipants(container, desc.owner, members.filter(w => w !== desc.owner)))) return false;
+            if (!(await podGrantChatParticipants(container, desc.owner, members.filter(w => w !== desc.owner), version))) return false;
             if (!isCurrent()) return false;
             return podWriteRoomMembers(desc.room_id, members.map(w => ({ webid: w, role: w === desc.owner ? 'admin' : 'member' })));
         }
@@ -4450,6 +4450,7 @@ import { createAccountSync } from './account-sync.js';
             // request (return false) so a later drain retries instead of dropping it.
             if (!desc) return false;
             if (desc.owner !== selfWebId) return true;
+            if (desc.closed) return !!(await window.proxionWebJoin?.sendDecline(req.from_webid, roomId));
             const existing = (desc.members || []).find(m => m.webid === req.from_webid);
             if (existing && existing.banned) return true;
             // Already a member (opened the link again, or a new device): answer
@@ -4642,8 +4643,16 @@ import { createAccountSync } from './account-sync.js';
         }
         async function _webDeleteRoom(roomId) {
             if (!roomCreatorOf.has(roomId) || _remoteRooms[roomId]) return false;
-            const ok = await podDeleteOwnedRoom(roomId);
-            if (!ok) { showToast(t('error.generic'), 'error'); return false; }
+            return _finishWebRoomDeletion(roomId);
+        }
+        async function _finishWebRoomDeletion(roomId) {
+            const root = podStorageRoot();
+            const result = await _ownerMembership.remove(roomId, () => root === podStorageRoot() && podDeleteOwnedRoom(roomId));
+            if (!result.ok) {
+                console.warn('[Proxion] Room deletion failed:', roomId, result.reason);
+                showToast(t('error.generic'), 'error');
+                return false;
+            }
             if (webRoomSync) webRoomSync.untrack(roomId);
             delete _local_rooms[roomId];
             return true;
@@ -6941,6 +6950,7 @@ import { createAccountSync } from './account-sync.js';
             if (!socket || socket.readyState !== WebSocket.OPEN) return;
             podListOwnedRoomDescriptors(selfWebId).then((descs) => {
                 for (const d of descs) {
+                    if (d.closed) continue;
                     try { socket.send(JSON.stringify({ cmd: 'rehost_room', descriptor: d })); } catch (_) { /* ignore */ }
                 }
             }).catch(() => {});
@@ -8667,6 +8677,7 @@ import { createAccountSync } from './account-sync.js';
                             listJoined: () => _listJoinedRooms(),
                             leave: (roomId) => _webLeaveRoom(roomId),
                             deleteOwned: (roomId) => _webDeleteRoom(roomId),
+                            resumeDeletion: (roomId) => _finishWebRoomDeletion(roomId),
                             members: (roomId) => _webRoomMembers(roomId),
                             kick: (roomId, webid) => _webKickMember(roomId, webid),
                         },
