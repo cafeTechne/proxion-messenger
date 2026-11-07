@@ -29,7 +29,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podEnsureJoinInbox, podDropJoin, podReadJoins, podDeleteJoin,
          podWritePendingJoin, podHasPendingJoin, podDeletePendingJoin,
          podReadRoomDescriptorAt, podReadChatRecentAt, podWriteChatMessageAt,
-         podEditChatMessageAt, podSoftDeleteChatMessageAt, podSetChatSeqAt,
+         podChangeMessageAt, podEditChatMessageAt, podSoftDeleteChatMessageAt, podSetChatSeqAt,
          podGrantChatParticipants, podPublishSigner, podFetchPeerSigner,
          podSetLongChatSigner, podReadChatDayAt, podRegisterRoomChat,
          podReadJoinedRooms, podWriteJoinedRooms, podReadJoinedRoomsVersion, podWriteJoinedRoomsVersion, podReadRoomMembersAt, podDeleteOwnedRoom,
@@ -70,7 +70,7 @@ import { createE2EStatus } from './e2e-status.js';
 import { createStatusBanners } from './status-banners.js';
 import { createConnection, normalizeGatewayUrl, planThreadCatchUp, createRateRetry, catchUpUnread } from './connection.js';
 import { createTabLock, showTabNotice, hideTabNotice } from './tablock.js';
-import { createTransport, detectMode, applyTransportGating, applyCrossModeGating, supportsConversationFeature } from './transport.js';
+import { createTransport, detectMode, applyTransportGating, applyConversationFeatureGating, supportsConversationFeature } from './transport.js';
 import { createCrossMode } from './crossmode.js';
 import { createCrossRooms, webAppUrl } from './crossrooms.js';
 import { createMessageRequests } from './msgrequests.js';
@@ -896,6 +896,10 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             sealEdit: (view, mid, text) => secondary.sealEdit(view, mid, text),
             onSealFailed: _onSealFailed,
             send: _sendOrQueue,
+            canEdit: () => _conversationSupports('edit'),
+            saveEdit: (view, id, content, revision) => _isPodRoomView(view)
+                ? _changePodRoomMessage(view, id, { kind: 'edit', content, expectedRevision: revision }) : null,
+            onEditFailed: result => showToast(t(result?.reason === 'conflict' ? 'msg.editConflict' : 'msg.changeFailed')),
         });
         const { startEdit, commitEdit, cancelEdit, handleMessageEdited } = edit;
         // Mute: mutedThreads is a host-owned Set (read by renderer/dispatch),
@@ -1202,19 +1206,20 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             blocks.block(req.from_webid);
             crossMode?.drainOnce().catch(() => {});   // the waiting drop is deleted unread
         }
-        // Edits, reactions, files, voice messages, disappearing and scheduled
-        // messages have no pod protocol yet: a desktop thread with a WebID
-        // contact offers text only (transport.js applyCrossModeGating).
+        // Resolve capabilities against this conversation protocol. Pod rooms
+        // support signed changes; cross-mode DMs currently support text only.
         function _conversationSupports(feature) {
             const view = activeView;
-            const podRoom = !!view && (!!_remoteRooms[view.id] || !!crossRooms?.isPodRoom(view.id));
+            const podRoom = _isPodRoomView(view);
             const crossModeThread = (view?.type === 'local_dm' || view?.type === 'dm')
                 && isDmPeerWebId(view.peerWebid || view.peerDid || view.id);
             return supportsConversationFeature(transport, feature, { podRoom, crossMode: crossModeThread });
         }
         function _applyCrossModeThreadGating() {
-            if (transport.mode === 'web') return;
-            applyCrossModeGating(!_conversationSupports('reactions'));
+            const view = activeView;
+            applyConversationFeatureGating(transport, { podRoom: _isPodRoomView(view),
+                crossMode: (view?.type === 'local_dm' || view?.type === 'dm')
+                    && isDmPeerWebId(view.peerWebid || view.peerDid || view.id) });
         }
         function _showCrossModeState(st) {
             const el = document.getElementById('settings-crossmode-status');
@@ -2164,7 +2169,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             }
             // Sealed DM edits, reactions and files (e2e-secondary.js). Opened here,
             // before dispatch, like message text; null means drop the event.
-            if (event.type === "message_edited") {
+            if (event.type === "message_edited" && !event.pod_change) {
                 event = await secondary.openEdit(event);
                 if (!event) return;
             } else if (event.type === "reaction_added" || event.type === "reaction_removed") {
@@ -2746,7 +2751,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                     }
                     // Mirror the edit into the room's Long Chat so other Solid apps
                     // see the latest text. Rooms only; DMs are E2E, never mirrored.
-                    if (event.thread_id && _editedTs && activeView
+                    if (!event.pod_change && event.thread_id && _editedTs && activeView
                         && activeView.type === "local_room" && activeView.id === event.thread_id) {
                         // A joined room lives on the owner's pod; edit their container
                         // directly (self-pod wrapper would patch the editor's own pod).
@@ -3402,7 +3407,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                     dmHistoryDelete(event.message_id);
                     // A bookmark must not outlive the message (local and pod copy).
                     forgetSavedMessage(event.message_id).then(_refreshSavedPanel).catch(() => {});
-                    if (event.message_id && event.thread_id) {
+                    if (!event.pod_change && event.message_id && event.thread_id) {
                         const _isRoom = !!(activeView && activeView.type === 'local_room');
                         if (_isRoom) {
                             podDeleteMessage(event.thread_id, event.message_id, true).catch(() => {});
@@ -4565,7 +4570,8 @@ import { createRoomApprovalNotice } from './room-approvals.js';
         // is history: only what arrived after the room was last opened counts as
         // unread. Our own messages (from another device) are shown in the open
         // room but never counted.
-        function _onRoomPodMessages(roomId, msgs, { initial }) {
+        function _onRoomPodMessages(roomId, msgs, { initial, changed } = {}) {
+            if (changed) { _onRoomPodChanges(roomId, msgs); return; }
             const seenTs = localStorage.getItem("proxion_seen_" + roomId) || '';
             let last = null;
             for (const m of msgs) {
@@ -4843,14 +4849,70 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                 renderMessages();
             }
         }
+        function _isPodRoomView(view) {
+            return !!view && view.type === 'local_room' && (transport.mode === 'web'
+                || !!_remoteRooms[view.id] || !!crossRooms?.isPodRoom(view.id));
+        }
+
+        function _onRoomPodChanges(roomId, messages) {
+            for (const incoming of messages) {
+                const message = { ...incoming, thread_id: roomId };
+                const id = message.message_id;
+                const cached = _webRoomCache[roomId];
+                if (cached) _webRoomCache[roomId] = message.deleted ? cached.filter(m => m.message_id !== id)
+                    : cached.map(m => m.message_id === id ? { ...m, ...message } : m);
+                if (activeView?.id === roomId && activeView.type === 'local_room') {
+                    if (message.deleted && edit.state.editingMsgId === id) cancelEdit(id);
+                    if (messageMap[id]) Object.assign(messageMap[id], message);
+                    for (const cachedMessage of allMessages) if (cachedMessage.message_id === id) Object.assign(cachedMessage, message);
+                    _handleEventAsync(message.deleted
+                        ? { type: 'message_deleted', message_id: id, thread_id: roomId, pod_change: true }
+                        : { type: 'message_edited', message_id: id, thread_id: roomId, new_content: message.content,
+                            edited_at: message.edited_at, revision_id: message.revision_id, pod_change: true }, true);
+                } else {
+                    if (message.deleted) forgetSavedMessage(id).then(_refreshSavedPanel).catch(() => {});
+                    if (roomLastMessages[roomId]?.message_id !== id) continue;
+                    if (message.deleted) delete roomLastMessages[roomId];
+                    else roomLastMessages[roomId].snippet = markdownToPlain(message.content || '').slice(0, 40);
+                    updateRoomPreview(roomId);
+                }
+            }
+        }
+
+        async function _changePodRoomMessage(view, id, change) {
+            const session = _webRoomSessionId();
+            const message = messageMap[id];
+            const timestamp = message?.pod_ts || message?.timestamp;
+            const current = () => session === _webRoomSessionId();
+            let result;
+            try {
+                if (crossRooms?.isPodRoom(view.id)) result = await crossRooms.changeMessage(view.id, id, timestamp, change);
+                else {
+                    const remote = _remoteRooms[view.id];
+                    const container = remote?.container || chatRootUrl(podStorageRoot(), view.id);
+                    const owner = remote?.owner || selfWebId;
+                    result = await podChangeMessageAt(container, id, timestamp, change, owner, current);
+                }
+            } catch { result = { ok: false, reason: 'unavailable' }; }
+            if (!current()) return { ok: false, reason: 'account_changed' };
+            if (result.ok) _onRoomPodChanges(view.id, [{ ...result.message, message_id: id }]);
+            else console.warn('[rooms] Message change failed:', result.reason, result.status || 0);
+            return result;
+        }
+
+        function _deleteConfirmed(view, msgId) {
+            if (_isPodRoomView(view)) {
+                const revision = messageMap[msgId]?.revision_id || '';
+                _changePodRoomMessage(view, msgId, { kind: 'delete', expectedRevision: revision })
+                    .then(result => { if (!result.ok) showToast(t('msg.changeFailed')); });
+            } else socketSendOrQueue({ cmd: 'delete_local_message', message_id: msgId, thread_id: view.id });
+        }
+
         function deleteMsg(msgId) {
             if (!activeView) return;
+            const view = { ...activeView };
             showConfirm(t('confirm.deleteMessage'), () => {
-                socketSendOrQueue({
-                    cmd: "delete_local_message",
-                    message_id: msgId,
-                    thread_id: activeView.id,
-                });
+                _deleteConfirmed(view, msgId);
             }, null, { title: t('confirm.deleteMessage.title'), confirmLabel: t('confirm.deleteMessage.verb'), danger: true });
         }
 
@@ -6749,7 +6811,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             const isOwn = _ctxTarget.isOwn;
             const isImage = _isImageAttachment(msg);
             document.getElementById("ctx-edit").style.display  = isOwn ? "" : "none";
-            document.getElementById("ctx-delete").style.display = isOwn ? "" : "none";
+            document.getElementById("ctx-delete").style.display = (isOwn || (_isPodRoomView(activeView) && roomCreatorOf.has(activeView.id))) ? "" : "none";
             document.getElementById("ctx-save-gif").style.display = isImage ? "" : "none";
             document.getElementById("ctx-meme").style.display = isImage ? "" : "none";
             // Local-only removal: offered where the hover bar used to offer it.
@@ -7472,12 +7534,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                     // handler for, so it only cleared local DOM and never
                     // reached the store or the peer. Use the real delete path.
                     const mid = e.target.dataset.msgId;
-                    if (mid && activeView) {
-                        socketSendOrQueue({
-                            cmd: 'delete_local_message', message_id: mid, thread_id: activeView.id,
-                        });
-                    }
-                    document.getElementById(`msg-${mid}`)?.remove();
+                    if (mid && activeView) _deleteConfirmed({ ...activeView }, mid);
                     closeMenu(sub);
                 }
             });
@@ -8183,14 +8240,14 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                 });
             }
 
-            // Mobile: dismiss the members drawer by tapping outside it. The toggle
-            // that opens the drawer sits UNDER it (static header vs. z-indexed
-            // drawer), so without this there was no way to close it on a phone.
+            // Dismiss floating members panels outside the panel. At tablet widths
+            // the panel overlays the feed too, including inline Save controls.
             document.addEventListener('click', e => {
                 const panel = document.getElementById('members-panel');
-                if (!panel || !panel.classList.contains('mobile-open')) return;
+                if (!panel || window.innerWidth > 1100) return;
                 if (e.target.closest('#members-panel') || e.target.closest('#members-toggle')) return;
                 panel.classList.remove('mobile-open');
+                if (window.innerWidth > 768) panel.style.display = 'none';
             });
 
             // The pinned and saved drawers float over the feed: a click anywhere
@@ -8716,6 +8773,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                         dayUrl: (room, date) => dayFileAt(room.container, date),
                         watch: (url, onChange) => watchResource(url, onChange),
                         onNew: (roomId, msgs, info) => _onRoomPodMessages(roomId, msgs, info),
+                        onChange: (roomId, msgs) => _onRoomPodChanges(roomId, msgs),
                     });
                     socket = createPodSocket({
                         getSelfWebId: () => selfWebId,

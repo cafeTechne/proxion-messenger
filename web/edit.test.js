@@ -28,6 +28,7 @@ function make(over = {}) {
     getActiveView: () => (over.activeView === undefined ? { type: 'local_room', id: 'room-1' } : over.activeView),
     getClientDid: () => over.clientDid ?? 'did:key:zSelf',
     getMessageMap: () => messageMap,
+    saveEdit: over.saveEdit, onEditFailed: over.onEditFailed, canEdit: over.canEdit,
   });
   return { edit, sent, messageMap };
 }
@@ -86,7 +87,7 @@ describe('handleMessageEdited', () => {
 });
 
 describe('multi-line inline editor', () => {
-  function open() {
+  function open(options = {}) {
     const created = [];
     global.document.createElement = (tag) => { const el = mkEl({ tag }); created.push(el); return el; };
     const textEl = mkEl({ innerText: 'line one' });
@@ -100,7 +101,7 @@ describe('multi-line inline editor', () => {
       },
     });
     els['msg-m1'] = msgEl;
-    const h = make();
+    const h = make(options);
     h.edit.startEdit('m1');
     const ta = created.find(e => e.tag === 'textarea');
     const restore = (n) => { current = n; };
@@ -108,6 +109,38 @@ describe('multi-line inline editor', () => {
     return { ...h, ta, textEl, created, current: () => current };
   }
   const key = (over) => ({ key: 'Enter', shiftKey: false, isComposing: false, preventDefault: vi.fn(), stopPropagation: vi.fn(), ...over });
+
+  it('keeps a failed pod save draft and retries after confirmation', async () => {
+    const saveEdit = vi.fn().mockResolvedValueOnce({ ok: false }).mockResolvedValueOnce({ ok: true,
+      message: { content: 'Saved', edited_at: '2026-11-07T12:00:00Z', revision_id: 'rev2' } });
+    const onEditFailed = vi.fn();
+    const h = open({ saveEdit, onEditFailed, messageMap: { m1: { content: 'Original', revision_id: 'rev1' } } });
+    h.ta.value = 'Saved';
+    await h.edit.commitEdit('m1', h.ta.value);
+    expect(h.edit.state.editingMsgId).toBe('m1');
+    expect(h.ta.value).toBe('Saved');
+    expect(h.ta.disabled).toBe(false);
+    expect(onEditFailed).toHaveBeenCalledOnce();
+    expect(h.sent).toEqual([]);
+    await h.edit.commitEdit('m1', h.ta.value);
+    expect(saveEdit).toHaveBeenLastCalledWith({ type: 'local_room', id: 'room-1' }, 'm1', 'Saved', 'rev1');
+    expect(h.edit.state.editingMsgId).toBe(null);
+    expect(h.messageMap.m1).toMatchObject({ content: 'Saved', revision_id: 'rev2' });
+  });
+  it('preserves a draft when another device edits and refuses stale completion after cancel', async () => {
+    let resolve;
+    const saveEdit = vi.fn(() => new Promise(r => { resolve = r; }));
+    const h = open({ saveEdit, messageMap: { m1: { content: 'Original', revision_id: 'rev1' } } });
+    h.ta.value = 'Draft';
+    h.edit.handleMessageEdited({ message_id: 'm1', new_content: 'Remote edit', revision_id: 'rev2' });
+    expect(h.ta.value).toBe('Draft');
+    const pending = h.edit.commitEdit('m1', 'Draft');
+    h.edit.cancelEdit('m1');
+    resolve({ ok: true, message: { content: 'Draft' } });
+    await pending;
+    expect(h.messageMap.m1.content).toBe('Remote edit');
+    expect(h.edit.state.editingMsgId).toBe(null);
+  });
 
   it('uses an auto-growing textarea with the edit-input class', () => {
     const { ta } = open();

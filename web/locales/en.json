@@ -1072,5 +1072,7 @@
   "owners.remove": "Remove",
   "owners.removeSelfTitle": "Remove yourself as owner?",
   "owners.removeSelf": "This device will no longer manage the gateway. Another owner can add it back.",
-  "owners.removeSelfLast": "You are the last owner. The gateway will be unclaimed until someone claims it with a new code from its log."
+  "owners.removeSelfLast": "You are the last owner. The gateway will be unclaimed until someone claims it with a new code from its log.",
+  "msg.changeFailed": "Could not confirm the change. Please try again.",
+  "msg.editConflict": "This message changed while you were editing. Cancel and reopen the editor to use the latest version."
 }

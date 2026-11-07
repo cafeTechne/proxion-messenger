@@ -21,7 +21,8 @@ import {
     buildIndexTurtle, appendOps, buildChatAcl, roomIdFromChatContainer,
     parseLongChatJsonLd, verifyLongChatMessages,
 } from './longchat.js';
-import { signLongChat } from './dmsig.js';
+import { signLongChat, signLongChatChange } from './dmsig.js';
+import { applyMessageChanges, changeOps } from './room-changes.js';
 import { peerPodRootFromWebId } from './webdm.js';
 import {
     buildEmptyTypeIndex, buildRegisterPatch, buildDeregisterPatch,
@@ -142,12 +143,14 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
     }
 
     /** PATCH an RDF resource, negotiating N3 Patch vs SPARQL Update from Accept-Patch. */
-    async function podRdfPatch(resourceUrl, ops) {
+    async function podRdfPatch(resourceUrl, ops, isCurrent = () => true) {
+        if (!isCurrent()) return null;
         let acceptPatch = null;
         try {
             const res = await fetch(resourceUrl, { method: 'HEAD', redirect: 'error' });
             acceptPatch = res?.headers?.get?.('accept-patch') || null;
         } catch (_) { /* default to SPARQL below */ }
+        if (!isCurrent()) return null;
         const fmt = patchFormatFor(acceptPatch);
         const body = fmt === 'n3' ? buildN3Patch(ops) : buildSparqlUpdate(ops);
         const ct = fmt === 'n3' ? 'text/n3' : 'application/sparql-update';
@@ -551,21 +554,23 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
      * via content negotiation (every Solid server supports it), so no RDF parser has
      * to ship to the browser. Reads chats written by SolidOS and POD-CHAT too.
      */
-    async function podReadChatDayAt(containerUrl, date, threadId = '', ownerWebId = null) {
-        if (!containerUrl || !_peerRootAllowed(containerUrl) || !_loggedIn()) return [];
+    async function podReadChatDayAtResult(containerUrl, date, threadId = '', ownerWebId = null) {
+        const failed = status => ({ ok: false, status, messages: [] });
+        if (!containerUrl || !_peerRootAllowed(containerUrl) || !_loggedIn()) return failed(0);
         try {
             const res = await fetch(dayFileAt(containerUrl, date), {
                 headers: { Accept: 'application/ld+json' },
                 redirect: 'error',   // never follow a peer redirect off the vetted host
+                cache: 'no-store',
             });
-            if (!res || !res.ok) return [];
+            if (!res || !res.ok) return failed(res?.status || 0);
             // Foreign day file: bound the body before parsing.
             const len = Number(res.headers?.get?.('content-length'));
-            if (Number.isFinite(len) && len > MAX_CHAT_DAY_BYTES) return [];
+            if (Number.isFinite(len) && len > MAX_CHAT_DAY_BYTES) return failed(0);
             let json;
             if (typeof res.text === 'function') {
                 const text = await res.text();
-                if (text.length > MAX_CHAT_DAY_BYTES) return [];
+                if (text.length > MAX_CHAT_DAY_BYTES) return failed(0);
                 json = JSON.parse(text);
             } else {
                 json = await res.json();
@@ -576,15 +581,62 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
             // known, the room owner. Unsigned/foreign messages stay
             // sender_verified:false; an unauthenticated tombstone leaves the message
             // visible. Nothing is dropped.
-            return verifyLongChatMessages(parseLongChatJsonLd(json, threadId), {
+            const trust = {
                 fetchPeerSigner,
                 peerPodRoot: peerPodRootFromWebId,
                 ownerWebId,
-            });
+            };
+            const messages = await verifyLongChatMessages(parseLongChatJsonLd(json, threadId), trust);
+            await applyMessageChanges(messages, json, trust);
+            return { ok: true, status: res.status, messages };
         } catch (err) {
             console.warn('[pod] podReadChatDayAt failed:', err);
-            return [];
+            return failed(0);
         }
+    }
+
+    async function podReadChatDayAt(...args) {
+        return (await podReadChatDayAtResult(...args)).messages;
+    }
+
+    async function podChangeMessageAt(containerUrl, messageId, timestamp, change, ownerWebId, isCurrent = () => true) {
+        const actor = webId(), root = _root(), signer = getSigner();
+        const current = () => isCurrent() && _loggedIn() && webId() === actor && _root() === root
+            && getSigner()?.signerDid === signer?.signerDid;
+        const fail = (reason, status = 0) => ({ ok: false, reason, status });
+        if (!current() || !isValidChatContainer(containerUrl) || !_peerRootAllowed(containerUrl)
+            || !SAFE_ID_RE.test(messageId || '') || !Number.isFinite(Date.parse(timestamp))) return fail('unavailable');
+        if (!signer?.privKey || !signer?.signerDid || !['edit', 'delete'].includes(change?.kind)) return fail('unavailable');
+        const content = change.kind === 'edit' ? String(change.content || '').trim() : '';
+        if (change.kind === 'edit' && (!content || new TextEncoder().encode(content).length > 16384)) return fail('invalid_change');
+        const before = await podReadChatDayAtResult(containerUrl, timestamp, '', ownerWebId);
+        if (!current()) return fail('account_changed');
+        if (!before.ok) return fail('unavailable', before.status);
+        const target = messageIriAt(containerUrl, messageId, timestamp);
+        const message = before.messages.find(m => m.iri === target);
+        if (!message) return fail('unavailable');
+        if (actor !== message.from_webid && !(change.kind === 'delete' && actor === ownerWebId)) return fail('forbidden', 403);
+        if (message.deleted) return change.kind === 'delete' ? { ok: true, message } : fail('deleted');
+        // A retry after a lost response can acknowledge the already-persisted edit.
+        if (change.kind === 'edit' && message.content === content) return { ok: true, message };
+        if ((change.expectedRevision || '') !== (message.revision_id || '')) return fail('conflict');
+        const id = `${dayFileAt(containerUrl, timestamp)}#change-${crypto.randomUUID()}`;
+        const operation = { id, target, actor, kind: change.kind, content,
+            created: new Date(Math.max(Date.now(), (Date.parse(message.edited_at) || 0) + 1)).toISOString(), previous: message.revision_id || '' };
+        operation.proof = await signLongChatChange(operation, signer.privKey, signer.signerDid);
+        if (!current()) return fail('account_changed');
+        if (!operation.proof) return fail('unavailable');
+        try {
+            const response = await podRdfPatch(dayFileAt(containerUrl, timestamp), changeOps(operation), current);
+            if (!current()) return fail('account_changed');
+            if (!response?.ok) return fail('unavailable', response?.status || 0);
+            const after = await podReadChatDayAtResult(containerUrl, timestamp, '', ownerWebId);
+            if (!current()) return fail('account_changed');
+            const saved = after.messages.find(m => m.iri === target);
+            if (!after.ok || !saved) return fail('confirmation_failed', after.status);
+            if (change.kind === 'delete' ? !saved.deleted : saved.deleted || saved.revision_id !== id) return fail('conflict');
+            return { ok: true, message: saved };
+        } catch { return fail('unavailable'); }
     }
 
     /**
@@ -707,7 +759,7 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
         podReadRoomDescriptorVersion, podWriteRoomDescriptorVersion,
         podListOwnedRoomDescriptors, podSetContainerAcl,
         ensureChatIndexAt, podWriteChatMessageAt, podWriteChatMessageAtResult,
-        podReadChatDayAt, podReadChatRecentAt, podGrantChatParticipants,
+        podReadChatDayAt, podReadChatDayAtResult, podChangeMessageAt, podReadChatRecentAt, podGrantChatParticipants,
         podReadRoomMembersAt, podWriteRoomMembers,
     };
 }

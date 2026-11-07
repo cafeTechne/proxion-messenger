@@ -116,6 +116,34 @@ const refreshWeb = (id) => window.proxionWebRooms && window.proxionWebRooms.refr
 const refreshDesk = (id) => window.proxionCrossRooms && window.proxionCrossRooms.refresh(id);
 const noUnverified = (page) => page.evaluate(() => !document.querySelector('#message-feed .msg-trust-icon.text-warning'));
 
+async function messageMenu(page, text, action) {
+  const id = await page.evaluate((text) => {
+    const el = Array.from(document.querySelectorAll('#message-feed [id^="msg-"]')).find(el => el.querySelector('.msg-text')?.innerText === text);
+    if (!el) throw Error('Missing message: ' + text);
+    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 200 }));
+    return el.id;
+  }, text);
+  await page.click('#ctx-' + action);
+  return id;
+}
+async function editMessage(page, oldText, newText) {
+  await messageMenu(page, oldText, 'edit');
+  await page.waitForSelector('.edit-input');
+  await page.evaluate(text => { document.querySelector('.edit-input').value = text; }, newText);
+  await page.locator('.edit-confirm-btn').click();
+}
+async function deleteMessage(page, text) {
+  const id = await messageMenu(page, text, 'delete');
+  await page.waitForSelector('#confirm-ok', { visible: true });
+  await page.click('#confirm-ok');
+  if (!(await waitFor(page, id => !document.getElementById(id), id, 30000))) throw Error('Deletion was not confirmed');
+  return id;
+}
+async function changedOnPeer(page, roomId, oldText, newText, refresh) {
+  if (!(await seen(page, roomId, newText, refresh))) throw Error('Peer did not receive edited text');
+  if ((await feedText(page)).includes(oldText)) throw Error('Peer retained stale text');
+}
+
 async function createRoom(page, name, { pod = false } = {}) {
   await page.evaluate(() => document.getElementById('create-room-btn').click());
   await page.waitForSelector('#room-name-input', { visible: true, timeout: 10000 });
@@ -198,7 +226,10 @@ try {
   const errs = [];
   const deleteOps = [];
   for (const page of [pageA, pageB]) {
-    page.on('console', message => { if (message.text().includes('Room deletion failed:')) deleteOps.push(message.text()); });
+    page.on('console', message => {
+      if (message.text().includes('Room deletion failed:')) deleteOps.push(message.text());
+      if (message.text().includes('Message change failed:')) console.log('    ' + message.text());
+    });
     page.on('response', response => {
       if (step.endsWith('-deletes') && response.request().method() !== 'OPTIONS'
           && /\/(room\.json|\.acl|members\.jsonld|publicTypeIndex\.ttl)$/.test(new URL(response.url()).pathname)) {
@@ -257,10 +288,13 @@ try {
   ok('Bob created a room in his pod');
   // Keep approval's access write unavailable through an owner reload. The
   // retained request must have a persistent, actionable status and recover.
-  let blockApproval = true;
+  let blockApproval = true, blockMessageChanges = false, blockedChanges = 0;
   await pageB.setRequestInterception(true);
   pageB.on('request', request => {
-    if (blockApproval && request.method() === 'PUT'
+    if (blockMessageChanges && request.method() === 'PATCH' && request.url().endsWith('/chat.ttl')) {
+      blockedChanges++;
+      request.abort('failed').catch(() => {});
+    } else if (blockApproval && request.method() === 'PUT'
         && request.url() === `${bob.storageRoot}proxion/rooms/${roomB}/.acl`) {
       request.abort('failed').catch(() => {});
     } else request.continue().catch(() => {});
@@ -302,6 +336,16 @@ try {
   if (await seen(pageA, roomB, 'xr-b-1', refreshDesk) && await noUnverified(pageA)) ok('Alice reads Bob\'s reply, proof verified');
   else fail('Alice: ' + JSON.stringify((await feedText(pageA)).slice(0, 300)));
 
+  step = 'web-room-changes';
+  await editMessage(pageA, 'xr-a-1', 'xr-a-edited');
+  await changedOnPeer(pageB, roomB, 'xr-a-1', 'xr-a-edited', refreshWeb);
+  await pageB.reload({ waitUntil: 'load', timeout: 30000 });
+  await openRoom(pageB, roomB);
+  if (!(await seen(pageB, roomB, 'xr-a-edited', refreshWeb))) throw Error('Edited message was lost on reload');
+  const removedA = await deleteMessage(pageA, 'xr-a-edited');
+  if (!(await waitFor(pageB, id => !document.getElementById(id), removedA, 30000))) throw Error('Peer did not receive author deletion');
+  ok('desktop participant edits and deletes in browser-owned room; edit survives reload');
+
   step = 'web-removes';
   await removeMember(pageB, roomB, alice.webId);
   ok('Bob removed Alice from the room');
@@ -338,6 +382,34 @@ try {
   else fail('Alice\'s message did not confirm');
   if (await seen(pageB, roomA, 'xr-a-3', refreshWeb) && await noUnverified(pageB)) ok('Bob reads it, proof verified');
   else fail('Bob: ' + JSON.stringify((await feedText(pageB)).slice(0, 300)));
+
+  step = 'desktop-room-changes';
+  blockMessageChanges = true;
+  await editMessage(pageB, 'xr-b-2', 'xr-b-edited');
+  for (let i = 0; i < 50 && !blockedChanges; i++) await sleep(100);
+  if (!blockedChanges) throw Error('Edit Save did not attempt its pod write');
+  if (!(await waitFor(pageB, () => {
+    const input = document.querySelector('.edit-input');
+    return input && !input.disabled && input.value === 'xr-b-edited';
+  }, undefined, 15000))) throw Error('Failed edit lost its draft');
+  if (!(await feedText(pageA)).includes('xr-b-2')) throw Error('Failed edit changed peer message');
+  blockMessageChanges = false;
+  await pageB.locator('.edit-confirm-btn').click();
+  if (!(await waitFor(pageB, () => !document.querySelector('.edit-input'), undefined, 20000))) {
+    const state = await pageB.evaluate(() => ({ feed: document.getElementById('message-feed')?.innerText,
+      draft: document.querySelector('.edit-input')?.value, disabled: document.querySelector('.edit-input')?.disabled,
+      notices: Array.from(document.querySelectorAll('[role=alert], .toast')).map(el => el.innerText) }));
+    await pageB.screenshot({ path: '/tmp/proxion-room-edit-retry.png' });
+    throw Error('Retry edit did not confirm: ' + JSON.stringify({ ...state, errors: errs }));
+  }
+  await changedOnPeer(pageA, roomA, 'xr-b-2', 'xr-b-edited', refreshDesk);
+  // Owner moderation uses the same signed append-only withdrawal protocol.
+  const removedB = await deleteMessage(pageA, 'xr-b-edited');
+  if (!(await waitFor(pageB, id => !document.getElementById(id), removedB, 30000))) throw Error('Browser did not receive owner deletion');
+  await openRoom(pageB, roomB);
+  if ((await feedText(pageB)).includes('xr-a-edited')) throw Error('Deleted message returned after reopening');
+  await openRoom(pageB, roomA);
+  ok('browser participant retries failed edits in desktop-owned room; owner withdrawal reaches browser');
 
   step = 'desktop-removes';
   await removeMember(pageA, roomA, bob.webId);

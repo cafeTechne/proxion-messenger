@@ -251,6 +251,17 @@ export async function verifyLongChatDeleteProof(t, proof) {
     return _verifyProof(canonicalLongChatDeleteBytes(t), proof);
 }
 
+const CHANGE_FIELDS = ['domain', 'id', 'target', 'actor', 'kind', 'created', 'content', 'previous'];
+function changeBytes(change) {
+    return _canonical(CHANGE_FIELDS, { ...change, domain: 'proxion-room-change-v1' });
+}
+export function signLongChatChange(change, privKey, signerDid) {
+    return _signProof(changeBytes(change), privKey, signerDid);
+}
+export function verifyLongChatChange(change) {
+    return _verifyProof(changeBytes(change), change.proof);
+}
+
 // ── Authenticated reactions and un-reactions (#5 Part C) ──
 // A schema:LikeAction and its append-only un-react tombstone are otherwise
 // unauthenticated, so a member could forge a reaction as anyone or cancel

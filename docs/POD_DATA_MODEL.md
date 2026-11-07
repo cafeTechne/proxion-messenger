@@ -117,8 +117,34 @@ A pod-less identity is a `did:key`, which is a valid IRI but is not
 dereferenceable, so other apps will show the identifier rather than a name. That
 is the expected limit of interop for users who have not connected a pod.
 
-**Edits and deletes** are reflected in the Long Chat too, both verified against
-the real SolidOS databrowser:
+**Pod-native room edits and withdrawal** use signed append-only change records.
+The original message and its proof remain intact. An operation is a separate
+`px:MessageChange` node at `chat.ttl#change-<UUID>` in the original message's UTC
+day file. Its `px:changePayload` literal contains JSON with `id`, `target` (the
+original message IRI), `actor` (WebID), `kind` (`edit` or `delete`), `created`
+(canonical UTC ISO timestamp), `content`, `previous` (revision IRI or empty), and
+`proof` (`did:key|base64-signature`). `px:` is `https://proxion.dev/vocab/v1#`.
+
+The signature uses the same four-byte length-prefixed UTF-8 framing as message
+proofs (big-endian byte lengths, with `0x7c` between framed fields), over
+`domain`, `id`, `target`, `actor`, `kind`, `created`, `content`, and
+`previous`, in that order; the domain is `proxion-room-change-v1`. Readers require
+the actor's published key. Only the original author may edit; either the author
+or room owner may withdraw. Deletion has empty content and wins permanently over
+edits. Otherwise the greatest `(created, id, proof)` tuple using code-unit string
+ordering selects the displayed revision. `previous` enables preflight stale-draft
+checks; concurrent append-only operations still resolve by that deterministic rule.
+The client re-reads the file to confirm the selected result before reporting success.
+
+Participants retain Read + Append permissions. Changes cannot erase original
+text from the pod log. Other Solid apps need to implement this extension to show
+edits/withdrawals; a reader of only `sioc:content` still sees the original message.
+Proxion refreshes the loaded seven-day window with current-day notifications and
+an older-day backstop rotation, so historical changes can take six poll intervals.
+
+**Legacy gateway room mirroring** uses the following representation, previously
+verified against the real SolidOS databrowser. This is separate from pod-native
+room operations above:
 
 - An **edit** rewrites the message's `sioc:content` in place (a SPARQL-Update
   `DELETE`/`INSERT`/`WHERE` on the day file), so the latest text shows in any
@@ -181,8 +207,9 @@ A message with **no** signature, an invalid one, or a signer the author has not
 published shows as **unverified**, but is still read and displayed, never
 dropped. This is required for interoperability: SolidOS and POD-CHAT write
 unsigned messages, and an edit that rewrites `sioc:content` in place changes the
-bytes the original signature covered, so an edited message also reads as
-unverified.
+bytes the original signature covered, so a legacy in-place edited message also reads as
+unverified. Pod-native signed revisions preserve the original message proof and
+authenticate the change separately.
 
 ### The Long Chat container layout
 

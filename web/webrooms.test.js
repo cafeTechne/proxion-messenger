@@ -245,18 +245,19 @@ describe('joined-room updates across independent devices', () => {
 
 function syncHarness(days) {
     const watched = [];
-    const reported = [];
+    const reported = [], changes = [];
     let tick = null;
     const sync = createRoomSync({
         readDay: vi.fn(async (room, date) => days[date.toISOString().slice(0, 10)] || []),
         dayUrl: (room, date) => room.container + date.toISOString().slice(0, 10) + '/chat.ttl',
         watch: vi.fn((url, cb) => { watched.push({ url, cb }); return () => {}; }),
         onNew: (roomId, msgs, info) => reported.push({ roomId, ids: msgs.map(m => m.message_id), initial: info.initial }),
+        onChange: (roomId, msgs) => changes.push({ roomId, msgs }),
         now: () => Date.parse('2026-10-29T12:00:00Z'),
         setTimer: (fn) => { tick = fn; return 1; },
         clearTimer: () => { tick = null; },
     });
-    return { sync, watched, reported, tick: () => tick && tick() };
+    return { sync, watched, reported, changes, tick: () => tick && tick() };
 }
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
@@ -288,6 +289,35 @@ describe('createRoomSync', () => {
         expect(h.reported[1]).toEqual({ roomId: 'r', ids: ['c'], initial: false });
         await h.sync.refresh('r');
         expect(h.reported).toHaveLength(2);
+    });
+
+    it('reports edits and withdrawal once without duplicate incoming messages', async () => {
+        const days = { '2026-10-29': [{ message_id: 'm', content: 'Original', timestamp: '2026-10-29T12:00:00Z' }] };
+        const h = syncHarness(days);
+        h.sync.track({ roomId: 'r', container: 'https://p/proxion/rooms/r/' });
+        await flush();
+        days['2026-10-29'][0] = { ...days['2026-10-29'][0], content: 'Edited', revision_id: 'rev1' };
+        await h.sync.refresh('r');
+        expect(h.changes).toHaveLength(1);
+        expect(h.changes[0].msgs[0].content).toBe('Edited');
+        await h.sync.refresh('r');
+        expect(h.changes).toHaveLength(1);
+        days['2026-10-29'][0] = { ...days['2026-10-29'][0], content: '', deleted: true, revision_id: 'rev2' };
+        await h.sync.refresh('r');
+        expect(h.changes).toHaveLength(2);
+        expect(h.reported).toHaveLength(1);
+    });
+    it('backstop polls older loaded history without phantom unread messages', async () => {
+        const days = { '2026-10-24': [{ message_id: 'old', content: 'Edited', revision_id: 'rev1', timestamp: '2026-10-24T12:00:00Z' }] };
+        const h = syncHarness(days);
+        h.sync.track({ roomId: 'r', container: 'https://p/proxion/rooms/r/' });
+        await flush();
+        for (let i = 0; i < 6; i++) await h.sync.refresh('r');
+        expect(h.changes).toHaveLength(1);
+        expect(h.reported).toEqual([]);
+        days['2026-10-24'].push({ message_id: 'unseen', content: 'Historical', timestamp: '2026-10-24T11:00:00Z' });
+        for (let i = 0; i < 6; i++) await h.sync.refresh('r');
+        expect(h.reported).toEqual([]);
     });
 
     it('watches the current day file and reads again on a notification', async () => {

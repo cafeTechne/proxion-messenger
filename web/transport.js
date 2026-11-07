@@ -254,6 +254,7 @@ const _GATEWAY_MESSAGE_FEATURES = new Set([
 ]);
 
 export function supportsConversationFeature(transport, feature, { podRoom = false, crossMode = false } = {}) {
+    if (transport && podRoom && !crossMode && ['edit', 'delete'].includes(feature)) return true;
     if (!transport?.supports(feature)) return false;
     return !((podRoom || crossMode) && _GATEWAY_MESSAGE_FEATURES.has(feature));
 }
@@ -264,4 +265,19 @@ export function createTransport({ mode, connection } = {}) {
     const resolved = mode || detectMode();
     if (resolved === 'web') return createPodTransport();
     return createGatewayTransport({ connection });
+}
+
+// Re-evaluate the visible controls when switching between gateway and pod rooms.
+export function applyConversationFeatureGating(transport, options = {}, doc) {
+    const d = doc || (typeof document !== 'undefined' ? document : null);
+    if (!d) return;
+    for (const feature of ['edit', 'reactions', 'pins', 'delete']) {
+        const supported = supportsConversationFeature(transport, feature, options);
+        d.documentElement?.classList.toggle('gate-no-' + feature, !supported);
+        if (feature === 'delete') {
+            const button = d.getElementById('delete-for-everyone-btn');
+            if (button) button.style.display = supported ? '' : 'none';
+        }
+    }
+    d.documentElement?.classList.toggle('gate-crossmode', !!(options.podRoom || options.crossMode));
 }

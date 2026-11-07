@@ -180,7 +180,7 @@ export function joinPendingKey(webId) {
  * decide what counts as unread; later reads report only ids not seen before.
  */
 export function createRoomSync({
-    readDay, dayUrl, watch, onNew,
+    readDay, dayUrl, watch, onNew, onChange = () => {},
     pollMs = 15000, now = () => Date.now(),
     setTimer = (fn, ms) => setInterval(fn, ms), clearTimer = (h) => clearInterval(h),
 }) {
@@ -204,6 +204,10 @@ export function createRoomSync({
         // and the first read covers yesterday too, so recent history is seeded.
         const early = d.getUTCHours() === 0 && d.getUTCMinutes() < 10;
         const dates = (!entry.seeded || early) ? [_day(1), d] : [d];
+        if (entry.seeded) {
+            entry.pastDay = (entry.pastDay % 6) + 1;
+            if (!dates.some(date => date.toISOString().slice(0, 10) === _day(entry.pastDay).toISOString().slice(0, 10))) dates.unshift(_day(entry.pastDay));
+        }
         const out = [];
         for (const date of dates) {
             if (rooms.get(entry.room.roomId) !== entry) break;
@@ -226,11 +230,26 @@ export function createRoomSync({
                 _rewatch(entry);
                 const msgs = await _read(entry);
                 if (rooms.get(roomId) !== entry) return;   // untracked meanwhile
-                const fresh = [];
+                const fresh = [], changed = [];
                 for (const m of msgs) {
-                    if (!m || !m.message_id || entry.seen.has(m.message_id)) continue;
+                    if (!m || !m.message_id) continue;
+                    const fingerprint = JSON.stringify([m.content, !!m.deleted, m.revision_id || '', m.edited_at || '']);
+                    const previous = entry.versions.get(m.message_id);
+                    entry.versions.set(m.message_id, fingerprint);
+                    if (entry.seen.has(m.message_id)) {
+                        if ((previous && previous !== fingerprint) || (!previous && (m.revision_id || m.deleted))) changed.push(m);
+                        continue;
+                    }
                     entry.seen.add(m.message_id);
+                    // Historical backstop reads must not generate phantom unread messages.
+                    if (entry.seeded && String(m.timestamp || '').slice(0, 10) < _day(1).toISOString().slice(0, 10)) {
+                        if (m.revision_id || m.deleted) changed.push(m);
+                        continue;
+                    }
                     fresh.push(m);
+                }
+                if (changed.length) {
+                    try { onChange(roomId, changed); } catch (err) { console.warn('[webrooms] onChange failed:', err); }
                 }
                 const initial = !entry.seeded;
                 entry.seeded = true;
@@ -253,7 +272,7 @@ export function createRoomSync({
         const prev = rooms.get(room.roomId);
         if (prev && prev.room.container === room.container) return;
         if (prev) untrack(room.roomId);
-        rooms.set(room.roomId, { room, seen: new Set(known), seeded: false, unwatch: null, watchedUrl: null, busy: false, again: false });
+        rooms.set(room.roomId, { room, seen: new Set(known), versions: new Map(), pastDay: 0, seeded: false, unwatch: null, watchedUrl: null, busy: false, again: false });
         if (!timer) timer = setTimer(_tick, pollMs);
         refresh(room.roomId);
     }

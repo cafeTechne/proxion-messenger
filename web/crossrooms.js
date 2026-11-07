@@ -123,6 +123,7 @@ export function createCrossRooms({
             dayUrl: (room, date) => dayFileAt(room.container, date),
             watch: (url, cb) => bridge.watchResource(url, cb),
             onNew: (roomId, msgs, info) => onMessages(roomId, msgs, info),
+            onChange: (roomId, msgs) => onMessages(roomId, msgs, { changed: true }),
         });
         return _sync;
     }
@@ -547,7 +548,16 @@ export function createCrossRooms({
         _wasReady = ready;
     }
 
+    async function changeMessage(roomId, messageId, timestamp, change) {
+        const ctx = context(), rec = _rooms.get(roomId);
+        if (!rec || !ctx.current()) return { ok: false, reason: 'account_changed' };
+        const current = () => ctx.current() && _rooms.get(roomId) === rec;
+        const result = await io.podChangeMessageAt(rec.container, messageId, timestamp, change, rec.owner, current);
+        return current() ? { ...result, ...(result.message ? { message: _asSelf(result.message) } : {}) } : { ok: false, reason: 'account_changed' };
+    }
+
     return {
+        changeMessage,
         route, handleEvent: handleEvent_, onState,
         isPodRoom: (id) => _rooms.has(id),
         list: () => [..._rooms.values()],

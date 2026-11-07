@@ -48,7 +48,10 @@ connected to, with the gateway making the pod requests on its behalf
   WebID receives them: the one that signed in last.
 
 Rooms shared across the two builds are pod rooms: a Long Chat in the owner's pod
-(below). Gateway rooms stay desktop only.
+(below). Gateway rooms stay desktop only. Members can edit and withdraw their own
+messages, and owners can withdraw any message, using signed append-only change
+records. Failed saves preserve the edit draft for retry; changes survive reload.
+These operations are currently available in pod rooms, not cross-mode DMs.
 
 - **Desktop joins a browser-build room** by pasting the invite link into Join a
   room. The join request, the owner's approval and the room messages travel
@@ -89,7 +92,10 @@ ignore what they do not understand; nothing is lost.
 ## Capabilities, and the test that proves each
 
 - **Renders in SolidOS.** A Proxion room opens as a chat in the real SolidOS
-  databrowser, messages and authors intact, including edits and deletes.
+  databrowser, messages and authors intact. The legacy gateway mirroring path
+  also displays edits and deletes. Pod-native room changes use signed append-only
+  `px:MessageChange` records; other readers must support this extension to show
+  edits or withdrawals, otherwise they retain the original message.
   Proven by driving the actual mashlib databrowser: `web/solidos-render.test.js`,
   `web/solidos-render-edits.test.js`. This method caught a real spec gap (the
   databrowser reads `wf:message`, not the spec's `meeting:message`), which is why

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
     createGatewayTransport, createPodTransport, supportsConversationFeature,
-    applyTransportGating, applyCrossModeGating, gatedRootClasses,
+    applyTransportGating, applyConversationFeatureGating, gatedRootClasses,
 } from './transport.js';
 import { canScheduleInView } from './dmkey.js';
 import { isDmPeerWebId } from './webdm.js';
@@ -41,7 +41,7 @@ function harness({ mode = 'gateway', view = { type: 'local_room', id: 'gateway-r
         _remoteRooms: remote ? { [view.id]: {} } : {},
         crossRooms: { isPodRoom: (id) => desktopPod && id === view.id },
         isDmPeerWebId, supportsConversationFeature,
-        applyCrossModeGating: (on) => applyCrossModeGating(on, doc),
+        applyConversationFeatureGating: (transport, options) => applyConversationFeatureGating(transport, options, doc),
         canScheduleInView: (v, opts) => canScheduleInView(v, { ...opts, optedIn: () => plaintext }),
         isE2EEnabled: () => keyed,
         identity: { devicesForPeer: () => [] },
@@ -53,7 +53,7 @@ function harness({ mode = 'gateway', view = { type: 'local_room', id: 'gateway-r
     const confirmStart = source.indexOf("            attachListener('#schedule-confirm-btn'");
     const confirmEnd = source.indexOf("            attachListener('#schedule-cancel-btn'", confirmStart);
     if (confirmStart < 0 || confirmEnd < 0) throw new Error('Missing scheduling listeners');
-    const helpers = ['_conversationSupports', '_applyCrossModeThreadGating', '_scheduleAllowed', '_scheduleUnavailableText', '_syncScheduleBtn'];
+    const helpers = ['_isPodRoomView', '_conversationSupports', '_applyCrossModeThreadGating', '_scheduleAllowed', '_scheduleUnavailableText', '_syncScheduleBtn'];
     const compiled = `${helpers.map(declaration).join('\n')}\n${source.slice(confirmStart, confirmEnd)}\nreturn { ${helpers.join(', ')}, setView(v) { activeView = v; } };`;
     const app = new Function(...Object.keys(deps), compiled)(...Object.values(deps));
     return { ...app, deps, classes, button, picker, input, listeners, transport, doc };
@@ -79,7 +79,7 @@ describe('main conversation capabilities', () => {
         expect(h._scheduleAllowed()).toBe(supported);
     });
 
-    it('preserves browser feature gates through conversation changes', () => {
+    it('enables pod room changes while preserving other browser feature gates', () => {
         const h = harness({ mode: 'web' });
         applyTransportGating(h.transport, h.doc);
         const expected = new Set(gatedRootClasses(h.transport));
@@ -89,7 +89,12 @@ describe('main conversation capabilities', () => {
         h._applyCrossModeThreadGating();
         h.setView({ type: 'local_room', id: 'other' });
         h._applyCrossModeThreadGating();
+        expected.delete('gate-no-edit');
+        expected.delete('gate-no-delete');
+        expected.add('gate-crossmode');
         expect(h.classes).toEqual(expected);
+        expect(h._conversationSupports('edit')).toBe(true);
+        expect(h._conversationSupports('delete')).toBe(true);
     });
 
     it('restores gateway controls after leaving a desktop pod conversation', () => {

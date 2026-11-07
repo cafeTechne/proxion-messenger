@@ -15,7 +15,7 @@ import { supportsFieldSizing } from './util.js';
 // sent and onSealFailed() is called.
 // send (optional): queues the command while offline (connection.js
 // socketSendOrQueue) instead of dropping it into a closed socket.
-export function createEdit({ getSocket, getActiveView, getClientDid, getMessageMap, sealEdit, onSealFailed, send = null }) {
+export function createEdit({ getSocket, getActiveView, getClientDid, getMessageMap, sealEdit, onSealFailed, send = null, saveEdit = null, canEdit = () => true, onEditFailed = () => {} }) {
     const state = { editingMsgId: null };
 
     // Grow the edit box with its content, up to about 40% of the viewport.
@@ -36,6 +36,7 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
     }
 
     function startEdit(msgId) {
+        if (!canEdit()) return;
         const msgEl = document.getElementById(`msg-${msgId}`);
         if (!msgEl) return;
         if (state.editingMsgId && state.editingMsgId !== msgId) {
@@ -43,7 +44,7 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
         }
         const textEl = msgEl.querySelector(".msg-text");
         if (!textEl) return;
-        const original = textEl.innerText;
+        const original = getMessageMap()[msgId]?.content ?? textEl.innerText;
         state.editingMsgId = msgId;
         // Multi-line editor: Enter saves, Shift+Enter adds a newline, Escape
         // cancels. Enter that confirms an IME candidate is left to the IME.
@@ -92,6 +93,10 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
         inp.oninput = () => _autoGrow(inp);
         state._origTextEl = textEl;
         state._original = original;
+        state._view = { ...getActiveView() };
+        state._revision = getMessageMap()[msgId]?.revision_id || "";
+        state._input = inp;
+        state._saving = null;
         textEl.replaceWith(inp);
         inp.after(actions);
         _autoGrow(inp);
@@ -99,10 +104,31 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
         if (typeof inp.setSelectionRange === "function") inp.setSelectionRange(inp.value.length, inp.value.length);
     }
 
-    function commitEdit(msgId, newContent) {
+    async function commitEdit(msgId, newContent) {
         const socket = getSocket();
         const activeView = getActiveView();
         if ((!socket && !send) || !activeView || !newContent.trim()) return;
+        if (state._saving) return;
+        if (saveEdit) {
+            const input = state._input;
+            const pending = saveEdit(state._view || activeView, msgId, newContent.trim(), state._revision || '');
+            if (pending) {
+                state._saving = input;
+                if (input) input.disabled = true;
+                let result;
+                try { result = await pending; } catch { result = { ok: false }; }
+                if (state._saving === input) state._saving = null;
+                if (state.editingMsgId !== msgId || state._input !== input) return;
+                if (input) input.disabled = false;
+                const view = getActiveView();
+                if (view?.id !== state._view?.id || view?.type !== state._view?.type) return;
+                if (!result?.ok) { onEditFailed(result); return; }
+                cancelEdit(msgId);
+                handleMessageEdited({ message_id: msgId, new_content: result.message.content,
+                    edited_at: result.message.edited_at, revision_id: result.message.revision_id });
+                return;
+            }
+        }
         const _send = send || ((p) => socket.send(JSON.stringify(p)));
         const original = state._original;
         const isLocal = activeView.local || activeView.type === "local_room" || activeView.type === "local_dm";
@@ -159,12 +185,16 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
                     restore.className = "msg-text";
                     restore.innerText = original ?? state._original ?? "";
                 }
+                const latest = getMessageMap()[msgId]?.content;
+                if (latest != null && latest !== state._original) restore.innerText = latest;
                 inp.replaceWith(restore);
             }
             msgEl.querySelector(".edit-actions")?.remove();
         }
         state._origTextEl = null;
         state.editingMsgId = null;
+        state._input = null;
+        state._saving = null;
     }
 
     function handleMessageEdited(event) {
@@ -174,7 +204,9 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
         if (messageMap[event.message_id]) {
             messageMap[event.message_id].content = event.new_content;
             messageMap[event.message_id].edited_at = event.edited_at;
+            if (event.revision_id) messageMap[event.message_id].revision_id = event.revision_id;
         }
+        if (state.editingMsgId === event.message_id) return;
         const msgEl = document.getElementById(`msg-${event.message_id}`);
         if (!msgEl) return;
         let textEl = msgEl.querySelector(".msg-text");
