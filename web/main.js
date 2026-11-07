@@ -29,7 +29,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podEnsureJoinInbox, podDropJoin, podReadJoins, podDeleteJoin,
          podWritePendingJoin, podHasPendingJoin, podDeletePendingJoin,
          podReadRoomDescriptorAt, podReadChatRecentAt, podWriteChatMessageAt,
-         podChangeMessageAt, podEditChatMessageAt, podSoftDeleteChatMessageAt, podSetChatSeqAt,
+         podReadPinsAt, podSetPinAt, podReadPinnedMessageAt, podChangeMessageAt, podEditChatMessageAt, podSoftDeleteChatMessageAt, podSetChatSeqAt,
          podGrantChatParticipants, podPublishSigner, podFetchPeerSigner,
          podSetLongChatSigner, podReadChatDayAt, podRegisterRoomChat,
          podReadJoinedRooms, podWriteJoinedRooms, podReadJoinedRoomsVersion, podWriteJoinedRoomsVersion, podReadRoomMembersAt, podDeleteOwnedRoom,
@@ -726,10 +726,22 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             },
         });
         // Pinned messages: destructured into same-named bindings.
-        const { pinMsg, showPinPanel, renderPins, unpinMsg, jumpToMsg } =
-            createPins({ getSocket: () => socket, getActiveView: () => activeView, getMessages: () => allMessages,
-                revealMessage: (id) => rendering.revealMessage(id),
-                send: _sendOrQueue });
+        const pinActions = createPins({
+            getSocket: () => socket, getActiveView: () => activeView, getMessages: () => allMessages,
+            revealMessage: id => rendering.revealMessage(id), send: _sendOrQueue,
+            getSessionId: () => _webRoomSessionId(),
+            canRead: () => _conversationSupports('pins'),
+            canManage: view => _conversationSupports('pins') && (!_isPodRoomView(view) || roomCreatorOf.has(view.id)),
+            readPins: view => _isPodRoomView(view) ? _readPodPins(view) : null,
+            savePin: (view, id, add, pin) => _isPodRoomView(view) ? _savePodPin(view, id, add, pin) : null,
+            resolvePin: (view, pin) => _isPodRoomView(view) ? _revealPodPin(view, pin) : null,
+            watchPins: (view, callback) => crossRooms?.isPodRoom(view.id) ? crossRooms.watchPins(view.id, callback)
+                : watchResource((_remoteRooms[view.id]?.container || chatRootUrl(podStorageRoot(), view.id)) + 'pins.json', callback),
+            onUnavailable: () => showToast(t('error.transportUnsupported')),
+            onSaveFailed: result => showToast(t(result?.reason === 'pin_limit' ? 'pin.limit' : result?.reason === 'conflict' ? 'pin.conflict' : 'pin.saveFailed')),
+            onSaved: add => showToast(t(add ? 'pin.pinned' : 'pin.unpinned')),
+        });
+        const { pinMsg, showPinPanel, renderPins, unpinMsg, jumpToMsg, closePinPanel } = pinActions;
         // Profile / presence: userPresence and messageMap stay host-owned (the
         // dispatch and renderer also touch them) and are injected by reference.
         const {
@@ -1247,7 +1259,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             addRoomToSidebar, renameRoomInSidebar, populateSidebar, _navigateToThread,
         } = createView({
             getSocket: () => socket,
-            setActiveView: (v) => { _stashWebRoom(); activeView = v; _applyCrossModeThreadGating(); },
+            setActiveView: (v) => { _stashWebRoom(); closePinPanel(); activeView = v; _applyCrossModeThreadGating(); },
             setMessageMap: (m) => { messageMap = m; },
             setAllMessages: (a) => { allMessages = a; },
             setCurrentRoomMembers: (c) => { currentRoomMembers = c; },
@@ -1370,6 +1382,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
         const _webRoomSessionId = () => `${_webRoomEpoch}\n${solidSession.info.isLoggedIn}\n${selfWebId}\n${podStorageRoot()}`;
         function _invalidateWebRoomSession() {
             _webRoomEpoch++;
+            closePinPanel();
             window.proxionWebJoin?.stop();
             webRoomAccess?.stop();
             webRoomSync?.stop();
@@ -1622,6 +1635,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
         // The conversation on screen went away (left, removed, deleted, hidden):
         // say what happened and offer the same first actions as the welcome pane.
         function _showThreadClosed(title) {
+            closePinPanel();
             const feed = document.getElementById("message-feed");
             if (!feed) return;
             // The conversation is gone: its name and room controls must not stay
@@ -2781,6 +2795,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                     }
                     break;
                 case "pins": {
+                    if (_isPodRoomView(activeView)) break;
                     // A sealed DM pin shows this device's plaintext copy or a notice.
                     const _seq = ++_pinsRenderSeq;
                     const _dm = String(event.thread_id || '').startsWith('dm:');
@@ -4861,6 +4876,41 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                 renderMessages();
             }
         }
+        function _podPinRoom(view) {
+            const rec = _remoteRooms[view.id];
+            if (rec) return rec;
+            return roomCreatorOf.has(view.id) && podStorageRoot()
+                ? { container: chatRootUrl(podStorageRoot(), view.id), owner: selfWebId } : null;
+        }
+        async function _readPodPins(view) {
+            if (crossRooms?.isPodRoom(view.id)) return crossRooms.readPins(view.id);
+            const rec = _podPinRoom(view), session = _webRoomSessionId();
+            if (!rec) return { ok: false };
+            return podReadPinsAt(rec.container, rec.owner, () => session === _webRoomSessionId());
+        }
+        async function _savePodPin(view, id, add, pin) {
+            const session = _webRoomSessionId(), current = () => session === _webRoomSessionId();
+            const timestamp = pin?.message?.timestamp || messageMap[id]?.pod_ts || messageMap[id]?.timestamp;
+            if (crossRooms?.isPodRoom(view.id)) return crossRooms.setPin(view.id, id, timestamp, add, pin?.pin_id);
+            const rec = _podPinRoom(view);
+            if (!rec || rec.owner !== selfWebId || !roomCreatorOf.has(view.id)) return { ok: false, reason: 'forbidden' };
+            const descriptor = await podReadRoomDescriptor(view.id);
+            if (!current() || !descriptor || descriptor.closed || descriptor.owner !== selfWebId) return { ok: false, reason: 'room_closed' };
+            return podSetPinAt(rec.container, id, timestamp, add, rec.owner, pin?.pin_id, current);
+        }
+        async function _revealPodPin(view, pin) {
+            const session = _webRoomSessionId();
+            const rec = _podPinRoom(view);
+            const result = crossRooms?.isPodRoom(view.id) ? await crossRooms.readPinMessage(view.id, pin.target)
+                : rec ? await podReadPinnedMessageAt(rec.container, pin.target, rec.owner, () => session === _webRoomSessionId()) : null;
+            if (session !== _webRoomSessionId() || activeView?.id !== view.id || activeView?.type !== view.type) return null;
+            if (!result?.ok || !result.message) { showToast(t('pin.loadFailed')); return null; }
+            const message = { ...result.message, thread_id: view.id, local: true };
+            if (messageMap[message.message_id]) _onRoomPodChanges(view.id, [message]);
+            else rendering.mergeOlderHistory([message]);
+            return rendering.revealMessage(message.message_id);
+        }
+
         function _isPodRoomView(view) {
             return !!view && view.type === 'local_room' && (transport.mode === 'web'
                 || !!_remoteRooms[view.id] || !!crossRooms?.isPodRoom(view.id));
@@ -4880,6 +4930,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                     if (messageMap[id]) Object.assign(messageMap[id], message);
                     for (const cachedMessage of allMessages) if (cachedMessage.message_id === id) Object.assign(cachedMessage, message);
                     renderReactions(id);
+                    if (message.deleted || edited) pinActions.messageChanged(roomId, id);
                     if (message.deleted || edited) _handleEventAsync(message.deleted
                         ? { type: 'message_deleted', message_id: id, thread_id: roomId, pod_change: true }
                         : { type: 'message_edited', message_id: id, thread_id: roomId, new_content: message.content,
@@ -6825,6 +6876,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             };
             const isOwn = _ctxTarget.isOwn;
             const isImage = _isImageAttachment(msg);
+            document.getElementById("ctx-pin").style.display = (!_isPodRoomView(activeView) || roomCreatorOf.has(activeView.id)) ? "" : "none";
             document.getElementById("ctx-edit").style.display  = isOwn ? "" : "none";
             document.getElementById("ctx-delete").style.display = (isOwn || (_isPodRoomView(activeView) && roomCreatorOf.has(activeView.id))) ? "" : "none";
             document.getElementById("ctx-save-gif").style.display = isImage ? "" : "none";
@@ -7586,7 +7638,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
 
             // Pin panel: Close button
             attachListener('#pin-panel-close', 'click', () => {
-                document.getElementById('pin-panel').style.display = 'none';
+                closePinPanel();
             });
 
             // Chat header: Members toggle, Delete room, Leave room
@@ -8274,7 +8326,8 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                     const panel = document.getElementById(id);
                     if (!panel || panel.style.display === 'none') continue;
                     if (e.target.closest('#' + id) || e.target.closest(btn)) continue;
-                    panel.style.display = 'none';
+                    if (id === 'pin-panel') closePinPanel();
+                    else panel.style.display = 'none';
                 }
             });
 

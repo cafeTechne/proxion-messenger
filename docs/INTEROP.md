@@ -54,14 +54,18 @@ records. Failed saves preserve the edit draft for retry; changes survive reload.
 Signed reactions support adding, removing, and re-adding each user’s own emoji,
 including after reload. These operations are currently available in pod rooms,
 not cross-mode DMs. Other Solid apps need to implement the signed change-record
-extension to display these reactions.
+extension to display these reactions. Owners can also pin/unpin room messages;
+members have a read-only pin panel. The owner-signed `pins.json` index keeps old
+pins discoverable beyond the normal history window, and Jump reads their original
+day files. Other Solid apps need this pin-index extension to discover pins.
 
 - **Desktop joins a browser-build room** by pasting the invite link into Join a
   room. The join request, the owner's approval and the room messages travel
   through the pods, as between two browsers. After the approval the desktop
   registers the room's chat container with its gateway, and only then does the
   gateway send its pod credentials there: DPoP-signed `GET`, `HEAD` and `PATCH`
-  on the chat files of that one container, the host pinned after an SSRF check,
+  on the chat files of that one container, plus read-only `GET`/`HEAD` on its
+  signed `pins.json` index, the host pinned after an SSRF check,
   no redirects. A pod that signs in with a bearer token (JSS, NSS) never sends
   that token to another pod, so those desktops cannot join and are told why.
 - **Desktop hosts a room browser-build users can join:** Create a room, "Create it

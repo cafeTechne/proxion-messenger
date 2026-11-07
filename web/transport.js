@@ -254,7 +254,7 @@ const _GATEWAY_MESSAGE_FEATURES = new Set([
 ]);
 
 export function supportsConversationFeature(transport, feature, { podRoom = false, crossMode = false } = {}) {
-    if (transport && podRoom && !crossMode && ['edit', 'delete', 'reactions'].includes(feature)) return true;
+    if (transport && podRoom && !crossMode && ['edit', 'delete', 'reactions', 'pins'].includes(feature)) return true;
     if (!transport?.supports(feature)) return false;
     return !((podRoom || crossMode) && _GATEWAY_MESSAGE_FEATURES.has(feature));
 }
@@ -274,8 +274,8 @@ export function applyConversationFeatureGating(transport, options = {}, doc) {
     for (const feature of ['edit', 'reactions', 'pins', 'delete']) {
         const supported = supportsConversationFeature(transport, feature, options);
         d.documentElement?.classList.toggle('gate-no-' + feature, !supported);
-        if (feature === 'delete') {
-            const button = d.getElementById('delete-for-everyone-btn');
+        if (feature === 'delete' || feature === 'pins') {
+            const button = d.getElementById(feature === 'pins' ? 'pin-panel-btn' : 'delete-for-everyone-btn');
             if (button) button.style.display = supported ? '' : 'none';
         }
     }

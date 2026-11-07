@@ -484,6 +484,9 @@ export async function podSetChatSeqAt(containerUrl, messageId, date, seq) {
  * in".
  */
 export function podGrantChatParticipants(containerUrl, ownerWebId, participantWebIds, version) { return _rooms.podGrantChatParticipants(containerUrl, ownerWebId, participantWebIds, version); }
+export function podReadPinsAt(...args) { return _rooms.podReadPinsAt(...args); }
+export function podSetPinAt(...args) { return _rooms.podSetPinAt(...args); }
+export function podReadPinnedMessageAt(...args) { return _rooms.podReadPinnedMessageAt(...args); }
 export function podChangeMessageAt(...args) { return _rooms.podChangeMessageAt(...args); }
 
 // ── Self-pod wrappers (a chat WE host under proxion/rooms/{roomId}/) ──────────

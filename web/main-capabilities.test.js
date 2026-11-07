@@ -92,6 +92,7 @@ describe('main conversation capabilities', () => {
         expected.delete('gate-no-edit');
         expected.delete('gate-no-delete');
         expected.delete('gate-no-reactions');
+        expected.delete('gate-no-pins');
         expected.add('gate-crossmode');
         expect(h.classes).toEqual(expected);
         expect(h._conversationSupports('edit')).toBe(true);

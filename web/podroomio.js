@@ -15,6 +15,7 @@
 //     getSigner()             -> { privKey, signerDid } for Long Chat proofs, or null
 //     fetchPeerSigner(root)   -> a maker's published signer (podio podFetchPeerSigner)
 
+import { createPodPins } from './room-pins.js';
 import { isPeerPodRootAllowed } from './ssrf.js';
 import {
     chatRootUrl, indexUrlAt, channelIriAt, dayFileAt, messageIriAt,
@@ -773,7 +774,15 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
         }
     }
 
+    const pins = createPodPins({ fetch,
+        allowed: container => _loggedIn() && isValidChatContainer(container) && _peerRootAllowed(container),
+        getWebId: webId, getSigner, fetchPeerSigner, peerPodRoot: peerPodRootFromWebId,
+        getSessionId: () => JSON.stringify([webId(), _root(), _loggedIn(), getSigner()?.signerDid]),
+        readDay: podReadChatDayAtResult,
+    });
+
     return {
+        podReadPinsAt: pins.readPins, podSetPinAt: pins.setPin, podReadPinnedMessageAt: pins.readMessage,
         discoverAccessControl, podRdfPatch,
         podReadPublicTypeIndexUrlFor, podEnsurePublicTypeIndex,
         podRegisterChat, podDeregisterChat, podListRegisteredChats,

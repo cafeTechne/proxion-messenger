@@ -339,3 +339,65 @@ def test_join_answers_speak_as_owner_webid(dpop):
         assert fetch(dpop, ws, "POST", PEER_ROOT + "proxion/dm-inbox/", body=json.dumps(
             {"kind": "join_approved", "owner_webid": WEBID}))["error"] == "bad_sender"
     assert ok.call_count == 1
+
+
+def test_joined_pin_index_is_authenticated_read_only(dpop):
+    ws, did = make_ws()
+    register(dpop, ws, did)
+    _marker(dpop)
+    assert _register(dpop, ws)["ok"] is True
+    url = CONTAINER + "pins.json"
+    seen = []
+
+    async def fake(method, url, body=None, headers=None, timeout=0, max_bytes=0):
+        seen.append((method, url, dict(headers or {})))
+        return 200, {"content-type": "application/json", "etag": '"pins-1"'}, b'{}'
+
+    with patch("proxion_messenger_core.network.async_safe_request", fake):
+        assert fetch(dpop, ws, "GET", url, headers={"Accept": "application/json"})["status"] == 200
+        for method in ("PUT", "PATCH", "DELETE", "POST"):
+            assert fetch(dpop, ws, method, url, body='{}')["status"] == 403
+    assert len(seen) == 1
+    assert seen[0][2]["Authorization"] == "DPoP tok-123"
+    assert _jwt_payload(seen[0][2]["DPoP"])["htu"] == url
+    assert pbp.classify("GET", PEER_ROOT + "proxion/rooms/unregistered/pins.json", ROOT, {}).allow is False
+
+
+def test_owned_pin_snapshot_body_and_conditional_headers(dpop):
+    ws, did = make_ws()
+    register(dpop, ws, did)
+    url = ROOT + "proxion/rooms/r9/pins.json"
+    dpop._pod.routes[("PUT", url)] = (200, {}, b"")
+    doc = {"v": 1, "owner": WEBID, "index": url, "pins": []}
+    result = fetch(dpop, ws, "PUT", url, body=json.dumps(doc),
+                   headers={"Content-Type": "application/json", "If-Match": '"pins-1"'})
+    assert result["status"] == 200
+    assert dpop._pod.calls[-1][3]["If-Match"] == '"pins-1"'
+    for fields in ({"owner": PEER}, {"index": url + "?other"}, {"v": 2}):
+        assert fetch(dpop, ws, "PUT", url, body=json.dumps({**doc, **fields}))["error"] == "bad_body"
+    for method in ("PATCH", "DELETE", "POST"):
+        assert fetch(dpop, ws, method, url, body='{}')["status"] == 403
+
+
+def test_pin_index_watch_requires_registration_and_negotiates_json(dpop):
+    ws, did = make_ws()
+    register(dpop, ws, did)
+    url = CONTAINER + "pins.json"
+    run(dpop._handle_pod_watch(ws, {"url": url}))
+    assert sent(ws)[-1]["type"] == "pod_watch_refused"
+    _marker(dpop)
+    assert _register(dpop, ws)["ok"] is True
+    run(dpop._handle_pod_watch(ws, {"url": url}))
+    assert dpop._pb()["watches"][url]["room"] is True
+    seen = []
+
+    async def fake(method, url, body=None, headers=None, timeout=0, max_bytes=0):
+        seen.append(headers)
+        return 200, {"etag": '"pin-snapshot"'}, b'{"pins": []}'
+
+    with patch("proxion_messenger_core.network.async_safe_request", fake):
+        assert run(dpop._pb_signature(url, False, True)) is not None
+    assert seen[0]["Accept"] == "application/json"
+    run(dpop._handle_pod_room_unregister(ws, {"container": CONTAINER}))
+    run(dpop._pb_poll_watches(100.0))
+    assert url not in dpop._pb()["watches"]

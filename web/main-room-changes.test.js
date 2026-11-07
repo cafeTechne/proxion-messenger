@@ -16,7 +16,7 @@ function harness(active = true) {
         messageMap: { m1: { ...message } }, allMessages: [{ ...message }],
         _webRoomCache: { room: [{ ...message }] },
         roomLastMessages: { room: { message_id: 'm1', snippet: 'Original' } },
-        edit: { state: { editingMsgId: null } }, cancelEdit: vi.fn(),
+        pinActions: { messageChanged: vi.fn() }, edit: { state: { editingMsgId: null } }, cancelEdit: vi.fn(),
         _handleEventAsync: vi.fn(), renderReactions: vi.fn(), updateRoomPreview: vi.fn(), markdownToPlain: text => text,
         forgetSavedMessage: vi.fn(async () => {}), _refreshSavedPanel: vi.fn(),
     };

@@ -1075,5 +1075,10 @@
   "owners.removeSelfLast": "You are the last owner. The gateway will be unclaimed until someone claims it with a new code from its log.",
   "msg.changeFailed": "Could not confirm the change. Please try again.",
   "msg.editConflict": "This message changed while you were editing. Cancel and reopen the editor to use the latest version.",
-  "reaction.saveFailed": "Could not save the reaction. Please try again."
+  "reaction.saveFailed": "Could not save the reaction. Please try again.",
+  "pin.loading": "Loading pinned messages…",
+  "pin.loadFailed": "Could not load this pinned message. Please try again.",
+  "pin.saveFailed": "Could not save the pin change. Please try again.",
+  "pin.conflict": "This pin changed on another device. Refresh the panel and try again.",
+  "pin.limit": "A room can have up to 50 pinned messages."
 }

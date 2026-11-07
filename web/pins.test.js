@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createPins } from './pins.js';
 
 beforeEach(() => {
@@ -18,6 +18,10 @@ function make(over = {}) {
     getSocket: () => (over.socket === undefined ? socket : over.socket),
     getActiveView: () => (over.activeView === undefined ? { type: 'local_room', id: 'room-1' } : over.activeView),
     getMessages: () => over.messages || [],
+    readPins: over.readPins, savePin: over.savePin, watchPins: over.watchPins,
+    canManage: over.canManage, canRead: over.canRead, getSessionId: over.getSessionId,
+    onSaved: over.onSaved, onSaveFailed: over.onSaveFailed, onUnavailable: over.onUnavailable,
+    setTimer: over.setTimer || (() => 1), clearTimer: over.clearTimer || (() => {}),
   });
   return { pins, sent };
 }
@@ -143,5 +147,74 @@ describe('offline pins are queued, not dropped', () => {
       { cmd: 'pin_message', message_id: 'm1', thread_id: 'room:room-1' },
       { cmd: 'unpin_message', message_id: 'm1', thread_id: 'room:room-1' },
     ]);
+  });
+});
+
+
+describe('confirmed pod pin panel', () => {
+  it('keeps failed pin changes retryable without sending gateway commands', async () => {
+    const savePin = vi.fn().mockResolvedValueOnce({ ok: false }).mockResolvedValueOnce({ ok: true });
+    const onSaved = vi.fn(), onSaveFailed = vi.fn();
+    const h = make({ savePin, onSaved, onSaveFailed });
+    await h.pins.pinMsg('m1');
+    expect(onSaved).not.toHaveBeenCalled(); expect(onSaveFailed).toHaveBeenCalledOnce();
+    await h.pins.pinMsg('m1');
+    expect(onSaved).toHaveBeenCalledWith(true);
+    expect(h.sent).toEqual([]);
+    expect(savePin).toHaveBeenCalledTimes(2);
+  });
+  it('renders member pins without an unpin control and refuses direct mutations', async () => {
+    const canManage = () => false, savePin = vi.fn(), onUnavailable = vi.fn();
+    const h = make({ canManage, savePin, onUnavailable });
+    const children = [];
+    global.document.getElementById('pin-list').appendChild = row => children.push(row);
+    h.pins.renderPins([{ message_id: 'm1', content: 'Pinned', pin_id: 'p1' }]);
+    expect(children[0].innerHTML).not.toContain('data-pin-action="unpin"');
+    h.pins.pinMsg('m1'); h.pins.unpinMsg('m1', 'room:room-1');
+    expect(savePin).not.toHaveBeenCalled(); expect(onUnavailable).toHaveBeenCalledTimes(2);
+  });
+  it('loads pins asynchronously and releases the watch and backstop on close', async () => {
+    const readPins = vi.fn(async () => ({ ok: true, pins: [{ message_id: 'old', content: 'Old pin' }] }));
+    const unwatch = vi.fn(), watchPins = vi.fn(() => unwatch), clearTimer = vi.fn();
+    const h = make({ readPins, watchPins, clearTimer });
+    const rows = []; global.document.getElementById('pin-list').appendChild = row => rows.push(row);
+    await h.pins.showPinPanel();
+    expect(rows[0].innerHTML).toContain('Old pin'); expect(h.sent).toEqual([]);
+    h.pins.closePinPanel();
+    expect(unwatch).toHaveBeenCalledOnce(); expect(clearTimer).toHaveBeenCalledWith(1);
+    expect(global.document.getElementById('pin-panel').style.display).toBe('none');
+  });
+  it('discards stale loads after closing or replacing the account session', async () => {
+    let finish, session = 1;
+    const readPins = () => new Promise(resolve => { finish = resolve; });
+    const h = make({ readPins, getSessionId: () => session });
+    const append = vi.fn(); global.document.getElementById('pin-list').appendChild = append;
+    const old = h.pins.showPinPanel(); h.pins.closePinPanel();
+    finish({ ok: true, pins: [{ message_id: 'old', content: 'Old account' }] }); await old;
+    expect(append).not.toHaveBeenCalled();
+    const next = h.pins.showPinPanel(); session++;
+    finish({ ok: true, pins: [{ message_id: 'old', content: 'Old account' }] }); await next;
+    expect(append).not.toHaveBeenCalled();
+    h.pins.closePinPanel();
+  });
+  it('shows a retry button on failed reads and then loads fresh data', async () => {
+    const readPins = vi.fn().mockResolvedValueOnce({ ok: false }).mockResolvedValueOnce({ ok: true, pins: [{ message_id: 'm1', content: 'Loaded after retry' }] });
+    const h = make({ readPins });
+    const rows = []; global.document.getElementById('pin-list').appendChild = row => rows.push(row);
+    await h.pins.showPinPanel();
+    expect(rows[0].textContent).toBe('btn.retry');
+    await rows[0].onclick();
+    expect(rows[1].innerHTML).toContain('Loaded after retry');
+    h.pins.closePinPanel();
+  });
+});
+
+
+describe('native DM pin thread identity', () => {
+  it.each(['dm', 'local_dm'])('keeps unpin in the %s conversation', type => {
+    const h = make({ activeView: { type, id: 'cert-9' } });
+    const rows = []; global.document.getElementById('pin-list').appendChild = row => rows.push(row);
+    h.pins.renderPins([{ message_id: 'm1', content: 'Pinned DM' }]);
+    expect(rows[0].innerHTML).toContain('data-thread-id="dm:cert-9"');
   });
 });

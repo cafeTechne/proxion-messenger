@@ -552,6 +552,38 @@ export function createCrossRooms({
         _wasReady = ready;
     }
 
+    async function readPins(roomId) {
+        const ctx = context(), rec = _rooms.get(roomId);
+        const current = () => ctx.current() && _rooms.get(roomId) === rec;
+        if (!rec || !current()) return { ok: false, reason: 'account_changed' };
+        const result = await io.podReadPinsAt(rec.container, rec.owner, current);
+        if (!current()) return { ok: false, reason: 'account_changed' };
+        return result.ok ? { ...result, pins: result.pins.map(pin => ({ ...pin, message: _asSelf(pin.message) })) } : result;
+    }
+    async function setPin(roomId, id, timestamp, add, expectedPinId) {
+        const ctx = context(), rec = _rooms.get(roomId);
+        const current = () => ctx.current() && _rooms.get(roomId) === rec;
+        if (!rec || !current()) return { ok: false, reason: 'account_changed' };
+        if (!rec.owned) return { ok: false, reason: 'forbidden' };
+        const descriptor = await io.podReadRoomDescriptor(roomId);
+        if (!current() || !descriptor || descriptor.closed || descriptor.owner !== ctx.webId) return { ok: false, reason: 'room_closed' };
+        return io.podSetPinAt(rec.container, id, timestamp, add, rec.owner, expectedPinId, current);
+    }
+    async function readPinMessage(roomId, target) {
+        const ctx = context(), rec = _rooms.get(roomId);
+        const current = () => ctx.current() && _rooms.get(roomId) === rec;
+        if (!rec || !current()) return { ok: false, reason: 'account_changed' };
+        const result = await io.podReadPinnedMessageAt(rec.container, target, rec.owner, current);
+        return current() ? { ...result, message: _asSelf(result.message) } : { ok: false, reason: 'account_changed' };
+    }
+    function watchPins(roomId, callback) {
+        const ctx = context(), rec = _rooms.get(roomId);
+        if (!rec) return () => {};
+        return bridge.watchResource(rec.container + 'pins.json', () => {
+            if (ctx.current() && _rooms.get(roomId) === rec) callback();
+        });
+    }
+
     async function changeMessage(roomId, messageId, timestamp, change) {
         const ctx = context(), rec = _rooms.get(roomId);
         if (!rec || !ctx.current()) return { ok: false, reason: 'account_changed' };
@@ -561,7 +593,7 @@ export function createCrossRooms({
     }
 
     return {
-        changeMessage,
+        changeMessage, readPins, setPin, readPinMessage, watchPins,
         route, handleEvent: handleEvent_, onState,
         isPodRoom: (id) => _rooms.has(id),
         list: () => [..._rooms.values()],

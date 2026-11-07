@@ -49,6 +49,7 @@ Everything lives under a single container, `{pod}/proxion/`:
 │   ├── index.jsonld               px:Index (room ids)
 │   └── {roomId}/
 │       ├── members.jsonld         px:MemberList
+│       ├── pins.json              owner-signed durable pin references
 │       ├── messages/
 │       │   └── {messageId}.jsonld px:Message
 │       ├── reactions/
@@ -159,6 +160,48 @@ text from the pod log. Other Solid apps need to implement this extension to show
 edits/withdrawals/reactions; a reader of only `sioc:content` still sees the original message.
 Proxion refreshes the loaded seven-day window with current-day notifications and
 an older-day backstop rotation, so historical changes can take six poll intervals.
+
+**Durable pod-room pins** live at `proxion/rooms/{roomId}/pins.json`.
+The owner may pin or unpin; participants can read the panel. The JSON snapshot
+contains `v: 1`, `index` (its full URL), `owner` (WebID), `revision` (UUID),
+`updated` (canonical UTC ISO timestamp), `pins`, and `proof`. Each pin is
+`{target, created, id}`: an original message IRI, its pin timestamp, and a unique
+pin revision. The snapshot stores references, not copies of message text.
+
+The owner signs the same length-prefixed UTF-8 framing used above, over `domain`,
+`index`, `owner`, `revision`, `updated`, and `pins`; the domain is
+`proxion-room-pins-v1`. The last field is compact JSON with pins sorted by target
+using code-unit ordering, and fields in `target`, `created`, `id` order. Readers
+check the owner against the room record and verify the proof against that WebID's
+published signer. Invalid snapshots fail explicitly rather than becoming an
+empty replacement index.
+
+Creation uses `If-None-Match: *`; updates require a strong `ETag` and `If-Match`.
+Conflicts re-read and reapply the operation (up to four attempts), preserving
+concurrent owner-device changes. Success requires a fresh signed read confirming
+the desired result. Each panel Unpin action also carries the pin revision, so a
+stale action cannot remove a message re-pinned on another device. Lost-response
+retries acknowledge an already-saved desired state without duplicate writes.
+The compact snapshot supports 50 pins and a 64 KiB body. Before enforcing the
+limit, the writer reclaims slots of withdrawn messages only after successful day
+reads. Failed reads never authorize replacing the index from a cache.
+
+Pin targets must be safe message IDs in the same room's dated `chat.ttl` files;
+foreign URLs, traversal, invalid calendar dates, and alternate resource paths
+are rejected. Reading the panel groups pins by UTC day and reads each original
+day once, independently of the ordinary seven-day history window. It shows the
+latest authenticated edits and omits withdrawn messages. Jump re-reads the target
+and loads older history before scrolling. Session/view guards prevent delayed
+results from populating another account or conversation.
+
+While open, the panel watches `pins.json`, refreshes pinned text on message-change
+notifications, and uses a 30-second backstop. Closing, changing conversation, or
+losing access releases its watch and timer. The desktop bridge permits only
+`GET`/`HEAD` on a joined room's registered pin index; owner `PUT` requests stay
+under its own pod and bind the body's owner/index to the authorized path.
+Pin indexes inherit room membership access, including revocation on closure.
+Other Solid readers need this extension to discover these pins; Long Chat
+message data stays in its existing format.
 
 **Legacy gateway room mirroring** uses the following representation, previously
 verified against the real SolidOS databrowser. This is separate from pod-native

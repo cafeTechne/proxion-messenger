@@ -47,6 +47,30 @@ import { createWebDm } from './webdm.js';
 import { statusFromHeartbeat } from './webpresence.js';
 import { createWebJoin } from './webjoin.js';
 
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function b58encode(bytes) {
+    let zeros = 0; while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
+    const digits = [0];
+    for (let i = zeros; i < bytes.length; i++) {
+        let carry = bytes[i];
+        for (let j = 0; j < digits.length; j++) { carry += digits[j] << 8; digits[j] = carry % 58; carry = (carry / 58) | 0; }
+        while (carry > 0) { digits.push(carry % 58); carry = (carry / 58) | 0; }
+    }
+    let s = ''; for (let k = 0; k < zeros; k++) s += '1';
+    for (let q = digits.length - 1; q >= 0; q--) s += B58[digits[q]];
+    return s;
+}
+function didFromPub(pub) {
+    const mc = new Uint8Array(2 + pub.length); mc[0] = 0xed; mc[1] = 0x01; mc.set(pub, 2);
+    return 'did:key:z' + b58encode(mc);
+}
+async function makeIdentity() {
+    const kp = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+    const rawPub = new Uint8Array(await crypto.subtle.exportKey('raw', kp.publicKey));
+    return { priv: kp.privateKey, did: didFromPub(rawPub) };
+}
+
+
 const LIVE = !!process.env.PROXION_LIVE_POD;
 const uid = (p) => `${p}-${Math.random().toString(36).slice(2, 9)}`;
 
@@ -458,5 +482,39 @@ describe.skipIf(!LIVE)('gateway-free pod round-trips (live CSS)', () => {
         } finally { asAlice(); }
         expect((await io.podReadRoomDescriptor(roomId)).deletion_complete).toBe(true);
     });
+
+    it('keeps owner-signed pins readable to members across old days and conditional updates', async () => {
+        const key = await makeIdentity(), roomId = uid('pins'), chat = chatRootUrl(alice.storageRoot, roomId);
+        const signer = { privKey: key.priv, signerDid: key.did };
+        const io = createPodRoomIo({ fetch: aliceSession.fetch, isLoggedIn: () => true,
+            storageRoot: () => alice.storageRoot, webId: () => alice.webId,
+            getSigner: () => signer, fetchPeerSigner: async () => ({ signer: key.did }) });
+        const peer = createPodRoomIo({ fetch: bobSession.fetch, isLoggedIn: () => true,
+            storageRoot: () => bob.storageRoot, webId: () => bob.webId,
+            getSigner: () => signer, fetchPeerSigner: async () => ({ signer: key.did }) });
+        expect(await io.ensureChatIndexAt(chat, 'Pins')).toBe(true);
+        expect(await io.podGrantChatParticipants(chat, alice.webId, [bob.webId])).toBe(true);
+        const old = '2026-01-01T12:00:00.000Z';
+        for (const id of ['first', 'second']) expect(await io.podWriteChatMessageAt(chat, id,
+            { timestamp: old, content: 'Pinned ' + id, from_webid: alice.webId })).toBe(true);
+        expect(await io.podSetPinAt(chat, 'first', old, true, alice.webId)).toMatchObject({ ok: true });
+        expect((await peer.podReadPinsAt(chat, alice.webId)).pins[0]).toMatchObject({ message_id: 'first', content: 'Pinned first' });
+        expect(await peer.podSetPinAt(chat, 'second', old, true, alice.webId)).toMatchObject({ ok: false, reason: 'forbidden' });
+        expect((await bobSession.fetch(chat + 'pins.json', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status).toBe(403);
+        const other = createPodRoomIo({ fetch: aliceSession.fetch, isLoggedIn: () => true,
+            storageRoot: () => alice.storageRoot, webId: () => alice.webId,
+            getSigner: () => signer, fetchPeerSigner: async () => ({ signer: key.did }) });
+        const results = await Promise.all([
+            io.podSetPinAt(chat, 'first', old, false, alice.webId),
+            other.podSetPinAt(chat, 'second', old, true, alice.webId),
+        ]);
+        expect(results.every(result => result.ok)).toBe(true);
+        expect((await peer.podReadPinsAt(chat, alice.webId)).pins.map(pin => pin.message_id)).toEqual(['second']);
+        expect(await io.podChangeMessageAt(chat, 'second', old, { kind: 'edit', content: 'Latest pinned text' }, alice.webId)).toMatchObject({ ok: true });
+        expect((await peer.podReadPinsAt(chat, alice.webId)).pins[0].content).toBe('Latest pinned text');
+        const latest = (await io.podReadChatDayAt(chat, old, '', alice.webId)).find(message => message.message_id === 'second');
+        expect(await io.podChangeMessageAt(chat, 'second', old, { kind: 'delete', expectedRevision: latest.revision_id }, alice.webId)).toMatchObject({ ok: true });
+        expect((await peer.podReadPinsAt(chat, alice.webId)).pins).toEqual([]);
+    }, 30000);
 
 });

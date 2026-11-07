@@ -139,6 +139,21 @@ async function deleteMessage(page, text) {
   if (!(await waitFor(page, id => !document.getElementById(id), id, 30000))) throw Error('Deletion was not confirmed');
   return id;
 }
+async function openPins(page) {
+  await page.locator('#pin-panel-btn').click();
+  await page.waitForSelector('#pin-panel', { visible: true });
+}
+async function expectPin(page, text, present = true) {
+  if (!(await waitFor(page, ({ text, present }) => {
+    const list = document.getElementById('pin-list');
+    return !!list && list.innerText.includes(text) === present && !list.innerText.includes('Loading');
+  }, { text, present }, 45000))) throw Error('Unexpected pin list for ' + text + ': ' + await page.evaluate(() => document.getElementById('pin-list')?.innerText));
+}
+async function jumpPin(page, id) {
+  await page.locator(`#pin-list [data-pin-action="jump"][data-msg-id="${id}"]`).click();
+  if (!(await waitFor(page, id => !!document.getElementById('msg-' + id), id, 20000))) throw Error('Could not jump to old pin ' + id);
+}
+
 async function addReaction(page, text, emoji) {
   const id = await messageMenu(page, text, 'react');
   await page.waitForSelector('#emoji-picker', { visible: true });
@@ -317,10 +332,12 @@ try {
   ok('Bob created a room in his pod');
   // Keep approval's access write unavailable through an owner reload. The
   // retained request must have a persistent, actionable status and recover.
-  let blockApproval = true, blockMessageChanges = false, blockedChanges = 0;
+  let blockApproval = true, blockMessageChanges = false, blockedChanges = 0, blockPinWrites = false, blockedPins = 0;
   await pageB.setRequestInterception(true);
   pageB.on('request', request => {
-    if (blockMessageChanges && request.method() === 'PATCH' && request.url().endsWith('/chat.ttl')) {
+    if (blockPinWrites && request.method() === 'PUT' && request.url().endsWith('/pins.json')) {
+      blockedPins++; request.abort('failed').catch(() => {});
+    } else if (blockMessageChanges && request.method() === 'PATCH' && request.url().endsWith('/chat.ttl')) {
       blockedChanges++;
       request.abort('failed').catch(() => {});
     } else if (blockApproval && request.method() === 'PUT'
@@ -365,6 +382,34 @@ try {
   if (await seen(pageA, roomB, 'xr-b-1', refreshDesk) && await noUnverified(pageA)) ok('Alice reads Bob\'s reply, proof verified');
   else fail('Alice: ' + JSON.stringify((await feedText(pageA)).slice(0, 300)));
 
+  step = 'web-room-pins';
+  await messageMenu(pageB, 'xr-a-1', 'pin');
+  await openPins(pageB); await expectPin(pageB, 'xr-a-1');
+  await openPins(pageA); await expectPin(pageA, 'xr-a-1');
+  if (await pageA.evaluate(() => !!document.querySelector('#pin-list [data-pin-action="unpin"]'))) throw Error('Member can unpin');
+  const refused = await pageA.evaluate(({ id, timestamp }) => window.proxionCrossRooms.setPin(id, 'arbitrary', timestamp, true), { id: roomB, timestamp: new Date().toISOString() });
+  if (refused.ok || refused.reason !== 'forbidden') throw Error('Programmatic member pin was allowed');
+  blockPinWrites = true;
+  await pageB.locator('#pin-list [data-pin-action="unpin"]').click();
+  for (let i = 0; i < 50 && !blockedPins; i++) await sleep(100);
+  if (!blockedPins) throw Error('Unpin did not attempt a conditional write');
+  await sleep(600); await expectPin(pageB, 'xr-a-1');
+  blockPinWrites = false;
+  await pageB.locator('#pin-list [data-pin-action="unpin"]').click();
+  await expectPin(pageB, 'xr-a-1', false); await expectPin(pageA, 'xr-a-1', false);
+  await pageB.click('#pin-panel-close'); await pageA.click('#pin-panel-close');
+  await messageMenu(pageB, 'xr-a-1', 'pin');
+  const oldPinDate = new Date(Date.now() - 14 * 86400000).toISOString();
+  const oldWebResult = await pageB.evaluate(async ({ container, owner, timestamp }) => {
+    const api = await import('./pod.js');
+    const written = await api.podWriteChatMessageAt(container, 'old-web-pin', { timestamp, content: 'xr-old-web-pin', from_webid: owner });
+    return written && await api.podSetPinAt(container, 'old-web-pin', timestamp, true, owner);
+  }, { container: `${bob.storageRoot}proxion/rooms/${roomB}/`, owner: bob.webId, timestamp: oldPinDate });
+  if (!oldWebResult?.ok) throw Error('Could not persist old browser pin: ' + JSON.stringify(oldWebResult));
+  await openPins(pageA); await expectPin(pageA, 'xr-old-web-pin');
+  await jumpPin(pageA, 'old-web-pin'); await pageA.click('#pin-panel-close');
+  ok('browser owner pins; member reads/jumps old history; rejected unpin remains retryable');
+
   step = 'web-room-reactions';
   const reactionTarget = await addReaction(pageA, 'xr-a-1', '👍');
   await expectReaction(pageA, roomB, reactionTarget, '👍', 1, true, refreshDesk);
@@ -390,9 +435,12 @@ try {
   await openRoom(pageB, roomB);
   if (!(await seen(pageB, roomB, 'xr-a-edited', refreshWeb))) throw Error('Edited message was lost on reload');
   await expectReaction(pageB, roomB, reactionTarget, '👍', 1, false, refreshWeb);
+  await openPins(pageB); await expectPin(pageB, 'xr-a-edited'); await expectPin(pageB, 'xr-old-web-pin');
   const removedA = await deleteMessage(pageA, 'xr-a-edited');
   if (!(await waitFor(pageB, id => !document.getElementById(id), removedA, 30000))) throw Error('Peer did not receive author deletion');
-  ok('desktop participant edits and deletes in browser-owned room; edit survives reload');
+  await expectPin(pageB, 'xr-a-edited', false);
+  await pageB.click('#pin-panel-close');
+  ok('desktop participant edits and deletes in browser-owned room; pins reflect edits and withdrawal after reload');
 
   step = 'web-removes';
   await removeMember(pageB, roomB, alice.webId);
@@ -430,6 +478,20 @@ try {
   else fail('Alice\'s message did not confirm');
   if (await seen(pageB, roomA, 'xr-a-3', refreshWeb) && await noUnverified(pageB)) ok('Bob reads it, proof verified');
   else fail('Bob: ' + JSON.stringify((await feedText(pageB)).slice(0, 300)));
+
+  step = 'desktop-room-pins';
+  await messageMenu(pageA, 'xr-b-2', 'pin');
+  await openPins(pageA); await expectPin(pageA, 'xr-b-2'); await pageA.click('#pin-panel-close');
+  await openPins(pageB); await expectPin(pageB, 'xr-b-2');
+  if (await pageB.evaluate(() => !!document.querySelector('#pin-list [data-pin-action="unpin"]'))) throw Error('Browser member can unpin');
+  await pageB.click('#pin-panel-close');
+  const oldDeskResult = await pageA.evaluate(async ({ container, owner, timestamp }) => {
+    const io = window.proxionCrossRooms.io;
+    const written = await io.podWriteChatMessageAt(container, 'old-desk-pin', { timestamp, content: 'xr-old-desk-pin', from_webid: owner });
+    return written && await io.podSetPinAt(container, 'old-desk-pin', timestamp, true, owner);
+  }, { container: `${alice.storageRoot}proxion/rooms/${roomA}/`, owner: alice.webId, timestamp: oldPinDate });
+  if (!oldDeskResult?.ok) throw Error('Could not persist old desktop pin: ' + JSON.stringify(oldDeskResult));
+  ok('desktop owner pins in her pod; browser participant reads the signed index');
 
   step = 'desktop-room-reactions';
   const beforeBlockedReaction = blockedChanges;
@@ -495,6 +557,11 @@ try {
   await openRoom(pageA, roomA);
   for (const emoji of ['👍', '🎉', '🔥']) await expectReaction(pageA, roomA, desktopReactionTarget, emoji, 1, false, refreshDesk);
   ok('desktop history restores persisted reactions after reload');
+
+  await openPins(pageA); await expectPin(pageA, 'xr-old-desk-pin');
+  if (await pageA.evaluate(() => !!document.getElementById('msg-old-desk-pin'))) throw Error('Old pin unexpectedly in ordinary 7-day history');
+  await jumpPin(pageA, 'old-desk-pin'); await pageA.click('#pin-panel-close');
+  ok('desktop reload restores old pins outside the history window and Jump loads the original day');
 
   // Rejoin the kicked rooms, then delete them from each host. A deleted room
   // must revoke real pod reads and writes, including for an idle participant.

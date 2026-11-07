@@ -272,7 +272,7 @@ describe('conversation capabilities', () => {
         expect(gatedControlIds(createPodTransport())).toContain('poll-btn');
     });
     it('supports edits and deletion in both pod room builds, while leaving pod DMs gated', () => {
-        for (const transport of [gateway, createPodTransport()]) for (const feature of ['edit', 'delete', 'reactions']) {
+        for (const transport of [gateway, createPodTransport()]) for (const feature of ['edit', 'delete', 'reactions', 'pins']) {
             expect(supportsConversationFeature(transport, feature, { podRoom: true })).toBe(true);
             expect(supportsConversationFeature(transport, feature, { crossMode: true })).toBe(false);
         }

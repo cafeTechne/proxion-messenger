@@ -98,6 +98,7 @@ _OWN_RULES = [
     (rf"proxion/rooms/({_ROOM_ID})/{_ACL_SUFFIX}", {"GET", "HEAD", "PUT"}, "acl", MAX_LISTING_RESPONSE),
     (rf"proxion/rooms/({_ROOM_ID})/index\.ttl", {"GET", "HEAD", "PUT"}, "room_index", MAX_SMALL_RESPONSE),
     (rf"proxion/rooms/({_ROOM_ID})/{_DAY}/chat\.ttl", {"GET", "HEAD", "PATCH"}, "room_day", MAX_LISTING_RESPONSE),
+    (rf"proxion/rooms/({_ROOM_ID})/pins\.json", {"GET", "HEAD", "PUT"}, "room_pins", MAX_SMALL_RESPONSE),
     (rf"proxion/rooms/({_ROOM_ID})/members\.jsonld", {"GET", "HEAD", "PUT"}, "room_members", MAX_SMALL_RESPONSE),
     (r"settings/publicTypeIndex\.ttl", {"GET", "HEAD", "PUT", "PATCH"}, "typeindex", MAX_LISTING_RESPONSE),
     (rf"settings/publicTypeIndex\.ttl{_ACL_SUFFIX}", {"GET", "HEAD", "PUT"}, "acl", MAX_LISTING_RESPONSE),
@@ -107,10 +108,12 @@ _OWN_RULES = [(re.compile(p + r"\Z"), m, k, cap) for p, m, k, cap in _OWN_RULES]
 
 # A room on someone else's pod that we joined: authenticated (DPoP) reads and
 # appends, only under a container the client registered after an approved join
-# (pod_room_register), and only on the Long Chat files. Relative to the container.
+# (pod_room_register), on Long Chat files and the read-only signed pin index.
+# Relative to the container.
 _ROOM_RULES = [
     (re.compile(r"index\.ttl\Z"), {"GET", "HEAD"}, "room_index", MAX_SMALL_RESPONSE),
     (re.compile(rf"{_DAY}/chat\.ttl\Z"), {"GET", "HEAD", "PATCH"}, "room_day", MAX_LISTING_RESPONSE),
+    (re.compile(r"pins\.json\Z"), {"GET", "HEAD"}, "room_pins", MAX_SMALL_RESPONSE),
     (re.compile(r"members\.jsonld\Z"), {"GET", "HEAD"}, "room_members", MAX_SMALL_RESPONSE),
 ]
 MAX_JOINED_ROOMS = 200
@@ -173,7 +176,7 @@ def classify(method: str, url: str, pod_root: Optional[str], rooms=None) -> Deci
     Under our own pod root the request is made with the pod credentials, on the
     allowlisted protocol paths only. Under a joined room's registered container
     (*rooms*: container URL -> room id) it is made with the credentials too, but
-    only GET/HEAD/PATCH on the Long Chat files. Anywhere else it is made
+    GET/HEAD/PATCH on Long Chat files and GET/HEAD on the pin index. Anywhere else it is made
     unauthenticated, on the public protocol paths only (peer identity files,
     presence, profile card, and POSTs into peer drop boxes)."""
     method = (method or "").upper()

@@ -262,6 +262,21 @@ export function verifyLongChatChange(change) {
     return _verifyProof(changeBytes(change), change.proof);
 }
 
+// Pin snapshots are owner-written JSON, independent of the Long Chat day window.
+function roomPinsBytes(snapshot) {
+    return _canonical(['domain', 'index', 'owner', 'revision', 'updated', 'pins'], {
+        ...snapshot, domain: 'proxion-room-pins-v1', pins: JSON.stringify(snapshot.pins
+            .map(pin => ({ target: pin.target, created: pin.created, id: pin.id }))
+            .sort((a, b) => a.target < b.target ? -1 : a.target > b.target ? 1 : 0)),
+    });
+}
+export function signRoomPins(snapshot, privKey, signerDid) {
+    return _signProof(roomPinsBytes(snapshot), privKey, signerDid);
+}
+export function verifyRoomPins(snapshot) {
+    return _verifyProof(roomPinsBytes(snapshot), snapshot.proof);
+}
+
 // ── Authenticated reactions and un-reactions (#5 Part C) ──
 // A schema:LikeAction and its append-only un-react tombstone are otherwise
 // unauthenticated, so a member could forge a reaction as anyone or cancel

@@ -17,7 +17,8 @@ fetch over those credentials (podbridge.classify):
 A room on someone else's pod (a browser-build user's Long Chat) is the one
 place the pod credentials leave our own pod: after an approved join the client
 registers the room's container, and only then does pod_fetch make DPoP-signed
-GET/HEAD/PATCH requests on that container's chat files. A bearer-token pod
+GET/HEAD/PATCH requests on that container's chat files, plus GET/HEAD on its
+signed pin index. A bearer-token pod
 (JSS/NSS) never sends its token off its own pod; those rooms are refused.
 
 The gateway carries ciphertext only and never decides who a drop is from: the
@@ -249,6 +250,9 @@ class PodBridgeMixin:
                 sender = doc.get("owner_webid")
             if sender != getattr(self, "_pod_webid", None):
                 return "bad_sender"
+        elif decision.kind == "room_pins":
+            if doc.get("owner") != getattr(self, "_pod_webid", None) or doc.get("index") != decision.url or doc.get("v") != 1:
+                return "bad_body"
         elif decision.kind == "descriptor":
             # Our room's descriptor names us as owner and the room its path names.
             if doc.get("room_id") != decision.room or doc.get("owner") != getattr(self, "_pod_webid", None):
@@ -352,13 +356,13 @@ class PodBridgeMixin:
             await websocket.send(json.dumps({"type": "pod_watch_refused", "url": url, "reason": status["reason"]}))
             return
         decision = _pbp.classify("GET", url, status["pod_root"], self._pb_rooms())
-        room_day = decision.allow and decision.kind == "room_day"
-        if room_day and decision.auth and status["auth"] != "dpop":
+        room_resource = decision.allow and decision.kind in ("room_day", "room_pins")
+        if room_resource and decision.auth and status["auth"] != "dpop":
             await websocket.send(json.dumps({"type": "pod_watch_refused", "url": url, "reason": "bearer"}))
             return
-        allowed = decision.allow and ((decision.own and decision.kind == "box") or room_day
+        allowed = decision.allow and ((decision.own and decision.kind == "box") or room_resource
                                       or (not decision.own and decision.kind == "presence"))
-        if allowed and decision.own and not room_day and (await self._pb_consumer()) != self._pb_signing_did(websocket):
+        if allowed and decision.own and not room_resource and (await self._pb_consumer()) != self._pb_signing_did(websocket):
             await websocket.send(json.dumps({"type": "pod_watch_refused", "url": url, "reason": "not_consumer"}))
             return
         if not allowed:
@@ -372,7 +376,7 @@ class PodBridgeMixin:
             return
         if w is None:
             w = st["watches"][url] = {"sockets": {}, "own": decision.own, "auth": decision.auth,
-                                      "room": room_day, "sig": None, "next": 0.0}
+                                      "room": room_resource, "sig": None, "next": 0.0}
         w["sockets"][websocket] = bool(data.get("fast"))
         w["next"] = 0.0
 
@@ -544,11 +548,12 @@ class PodBridgeMixin:
 
     async def _pb_signature(self, url: str, own: bool, auth: bool = False) -> Optional[str]:
         try:
+            accept = "application/json" if url.endswith("/pins.json") else "text/turtle"
             if own:
-                code, h, body = await self._pb_request_own("GET", url, None, {"Accept": "text/turtle"},
+                code, h, body = await self._pb_request_own("GET", url, None, {"Accept": accept},
                                                           _pbp.MAX_LISTING_RESPONSE)
             elif auth:
-                code, h, body = await self._pb_request_room("GET", url, None, {"Accept": "text/turtle"},
+                code, h, body = await self._pb_request_room("GET", url, None, {"Accept": accept},
                                                            _pbp.MAX_LISTING_RESPONSE)
             else:
                 from .network import async_safe_request
