@@ -110,6 +110,10 @@ describe('main.js send path', () => {
 
 describe('canScheduleInView', () => {
     const noKey = { hasKey: () => false, optedIn: () => false };
+    it('refuses scheduling when this conversation transport cannot deliver it', () => {
+        expect(canScheduleInView({ type: 'local_room', id: 'pod-room' }, { ...noKey, supported: false })).toBe(false);
+        expect(canScheduleInView({ type: 'local_dm', id: 'bot' }, { hasKey: () => false, optedIn: () => true, supported: false })).toBe(false);
+    });
     it('allows rooms', () => {
         expect(canScheduleInView({ type: 'local_room', id: 'r' }, noKey)).toBe(true);
     });

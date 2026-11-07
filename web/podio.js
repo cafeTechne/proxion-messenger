@@ -16,6 +16,7 @@
 import { isPeerPodRootAllowed } from './ssrf.js';
 import { parseInboxListing } from './ldn.js';
 import { accessControlUrl, detectAclModel, buildAcpAcr } from './acl.js';
+import { normalizeJoinedRecord, LEGACY_JOINED_ROOMS_UNREADABLE } from './webrooms.js';
 
 // A single small doc (one drop, one signer) gets the 64K cap; a container
 // listing, which can legitimately hold many entries, gets a larger one.
@@ -28,7 +29,8 @@ export const JOIN_INBOX_PATH = 'proxion/join-inbox/';
 export const PRESENCE_PATH = 'proxion/presence.json';
 export const SIGNER_PATH = 'proxion/identity/signer.json';
 export const X25519_PUB_PATH = 'proxion/identity/x25519-pub.json';
-const JOINED_ROOMS_PATH = 'proxion/joined-rooms.jsonld';
+const JOINED_ROOMS_PATH = 'proxion/joined-rooms.json';
+const LEGACY_JOINED_ROOMS_PATH = 'proxion/joined-rooms.jsonld';
 const MAX_DROPS = 200;
 const MAX_JOINED_ROOMS = 200;
 
@@ -328,14 +330,16 @@ export function createPodIo({ fetch, isLoggedIn, storageRoot, webId }) {
     }
 
     async function podWritePendingJoin(roomId, ownerWebId) {
-        if (!roomId || !ownerWebId) return;
+        if (!roomId || !ownerWebId) return false;
         const root = _root();
-        if (!root || !_loggedIn()) return;
+        if (!root || !_loggedIn()) return false;
         const path = await _pendingJoinPath(roomId, ownerWebId);
         try {
-            await fetch(root + path, {
+            const res = await fetch(root + path, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/ld+json' },
+                // These records are application state. Store opaque JSON so a
+                // pod's RDF conversion cannot reshape their keys and values.
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     '@context': { px: 'https://proxion.dev/vocab/v1#' },
                     '@type': 'px:PendingJoin',
@@ -344,23 +348,37 @@ export function createPodIo({ fetch, isLoggedIn, storageRoot, webId }) {
                     'px:updatedAt': new Date().toISOString(),
                 }),
             });
+            return !!(res && res.ok);
         } catch (err) {
             console.warn('[pod] _writePxDoc failed:', path, err);
+            return false;
         }
     }
 
+    // true: matching request, false: absent/mismatched, null: unavailable.
+    // A transient read failure must keep the approval in the inbox for retry.
     async function podHasPendingJoin(roomId, ownerWebId) {
         const root = _root();
-        if (!root || !_loggedIn() || !roomId || !ownerWebId) return false;
+        if (!root || !_loggedIn() || !roomId || !ownerWebId) return null;
         try {
             const res = await fetch(root + await _pendingJoinPath(roomId, ownerWebId),
-                { headers: { Accept: 'application/ld+json' } });
-            if (!res.ok) return false;
-            const doc = await res.json();
-            // Match the fields too, so an astronomically unlikely hash collision can't
-            // vouch for a different room/owner than the one requested.
-            return doc?.['px:roomId'] === String(roomId) && doc?.['px:ownerWebId'] === String(ownerWebId);
-        } catch { return false; }
+                { headers: { Accept: 'application/json, application/ld+json;q=0.9' } });
+            if (res && res.status === 404) return false;
+            if (!res || !res.ok) return null;
+            const text = await res.text();
+            if (text.length > MAX_POD_JSON_BYTES) return null;
+            const doc = JSON.parse(text);
+            // Older markers were RDF: accept expanded JSON-LD as well as the
+            // compact document, matching both values on the SAME node.
+            const nodes = Array.isArray(doc) ? doc : (Array.isArray(doc?.['@graph']) ? doc['@graph'] : [doc]);
+            const value = (node, key) => {
+                let v = node?.['px:' + key] ?? node?.['https://proxion.dev/vocab/v1#' + key];
+                if (Array.isArray(v)) { if (v.length !== 1) return null; v = v[0]; }
+                return typeof v === 'string' ? v : v?.['@value'];
+            };
+            return nodes.some(node => value(node, 'roomId') === String(roomId)
+                && value(node, 'ownerWebId') === String(ownerWebId));
+        } catch { return null; }
     }
 
     async function podDeletePendingJoin(roomId, ownerWebId) {
@@ -377,33 +395,86 @@ export function createPodIo({ fetch, isLoggedIn, storageRoot, webId }) {
     // joined ({ roomId, owner, ownerPodRoot, container, title }) so every device can
     // re-register them. The caller re-validates each entry before using it.
 
-    /** The joined-room records, [] when there are none, or null if the read failed. */
-    async function podReadJoinedRooms() {
+    // Canonical JSON first. Missing canonical data can migrate from the legacy
+    // document without overwriting it. Keep the exact representation's version
+    // with its records so another device's membership change cannot be lost.
+    async function podReadJoinedRoomsVersion() {
         const root = _root();
         if (!root || !_loggedIn()) return null;
+        const resource = root + JOINED_ROOMS_PATH;
         try {
-            const res = await fetch(root + JOINED_ROOMS_PATH, { headers: { Accept: 'application/ld+json' } });
-            if (res && res.status === 404) return [];
+            let legacy = false;
+            let res = await fetch(resource, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+            const exists = !!res && res.status !== 404;
+            const etag = exists ? res?.headers?.get?.('etag') || null : null;
+            const snapshot = (records) => ({ records, exists, etag, resource });
+            if (res && res.status === 404) {
+                legacy = true;
+                res = await fetch(root + LEGACY_JOINED_ROOMS_PATH,
+                    { headers: { Accept: 'application/json, application/ld+json;q=0.9' }, cache: 'no-store' });
+            }
+            if (res && res.status === 404) return snapshot([]);
             if (!res || !res.ok) return null;
             const text = await res.text();
             if (text.length > MAX_POD_LISTING_BYTES) return null;
             const doc = JSON.parse(text);
             const list = doc && doc['px:rooms'];
-            return Array.isArray(list) ? list.slice(0, MAX_JOINED_ROOMS) : [];
+            if (Array.isArray(list)) {
+                const records = list.slice(0, MAX_JOINED_ROOMS);
+                if (records.every(normalizeJoinedRecord)) return snapshot(records);
+            }
+            if (!legacy) return null;
+            const px = 'https://proxion.dev/vocab/v1#';
+            const nodes = Array.isArray(doc) ? doc : (Array.isArray(doc?.['@graph']) ? doc['@graph'] : [doc]);
+            const typed = nodes.filter(node => {
+                const types = node?.['@type'];
+                return (Array.isArray(types) ? types : [types])
+                    .some(type => type === 'px:JoinedRooms' || type === px + 'JoinedRooms');
+            });
+            if (typed.length !== 1) return null;
+            const node = typed[0];
+            // RDF drops [], leaving only type/updatedAt for an empty old list.
+            if (!('px:rooms' in node) && !((px + 'rooms') in node)) return snapshot([]);
+            const raw = node['px:rooms'] ?? node[px + 'rooms'];
+            // Nonempty RDF object links can have lost their undefined nested
+            // properties. Preserve the original document and let the store
+            // migrate valid cached records into the separate canonical file.
+            if (Array.isArray(raw) && raw.length && raw.every(item => item && typeof item === 'object' && '@id' in item)) {
+                return snapshot(LEGACY_JOINED_ROOMS_UNREADABLE);
+            }
+            return null;
         } catch (err) {
             console.warn('[pod] podReadJoinedRooms failed:', err);
             return null;
         }
     }
 
-    /** Replace the joined-room records. Returns success. */
-    async function podWriteJoinedRooms(list) {
+    /** The joined records, or null when the record could not be read. */
+    async function podReadJoinedRooms() {
+        const snapshot = await podReadJoinedRoomsVersion();
+        return snapshot ? snapshot.records : null;
+    }
+
+    /** Compare-and-swap against the representation returned by the versioned read. */
+    async function podWriteJoinedRoomsVersion(list, version) {
         const root = _root();
-        if (!root || !_loggedIn()) return false;
+        const resource = root && root + JOINED_ROOMS_PATH;
+        if (!resource || !_loggedIn() || version?.resource !== resource || typeof version.exists !== 'boolean') {
+            return { ok: false, conflict: false };
+        }
+        const headers = { 'Content-Type': 'application/json' };
+        if (version.exists) {
+            // Weak/missing validators cannot guard a lost-update write. The
+            // gateway also bounds forwarded headers to 512 bytes.
+            if (typeof version.etag !== 'string' || version.etag.length > 512
+                || !/^"[\x21\x23-\x7e\x80-\xff]*"$/.test(version.etag)) {
+                return { ok: false, conflict: false };
+            }
+            headers['If-Match'] = version.etag;
+        } else headers['If-None-Match'] = '*';
         try {
-            const res = await fetch(root + JOINED_ROOMS_PATH, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/ld+json' },
+            const res = await fetch(resource, {
+                method: 'PUT', headers,
                 body: JSON.stringify({
                     '@context': { px: 'https://proxion.dev/vocab/v1#' },
                     '@type': 'px:JoinedRooms',
@@ -411,11 +482,18 @@ export function createPodIo({ fetch, isLoggedIn, storageRoot, webId }) {
                     'px:updatedAt': new Date().toISOString(),
                 }),
             });
-            return !!(res && res.ok);
+            return { ok: !!(res && res.ok), conflict: res?.status === 412 };
         } catch (err) {
             console.warn('[pod] podWriteJoinedRooms failed:', err);
-            return false;
+            return { ok: false, conflict: false };
         }
+    }
+
+    /** Replace a known list once, without silently overwriting a newer version. */
+    async function podWriteJoinedRooms(list) {
+        const version = await podReadJoinedRoomsVersion();
+        if (!version) return false;
+        return (await podWriteJoinedRoomsVersion(list, version)).ok;
     }
 
     // ── Presence (R104): a public-read heartbeat peers poll or subscribe to ──
@@ -506,7 +584,7 @@ export function createPodIo({ fetch, isLoggedIn, storageRoot, webId }) {
         podReadJoins: async () => (await _readDropBox(JOIN_INBOX_PATH)).map(({ url, item }) => ({ url, msg: item })),
         podDeleteJoin: (url) => _deleteDrop(url),
         podWritePendingJoin, podHasPendingJoin, podDeletePendingJoin,
-        podReadJoinedRooms, podWriteJoinedRooms,
+        podReadJoinedRooms, podWriteJoinedRooms, podReadJoinedRoomsVersion, podWriteJoinedRoomsVersion,
         podWritePresence, podReadPresence,
         presenceUrlFor, dmInboxUrlFor, callInboxUrlFor, joinInboxUrlFor,
     };

@@ -12,6 +12,7 @@ import { existsSync } from 'fs';
 import { resolve, join } from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
+import { skipSmoke } from './scripts/smoke-status.mjs';
 import { startCss, provisionAccount } from './scripts/css-harness.mjs';
 import { buildAndServeHttps, signIn } from './scripts/e2e-signin.mjs';
 
@@ -25,7 +26,7 @@ const CHROME = [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/usr/bin/google-chrome', '/usr/bin/chromium',
 ].filter(Boolean).find((p) => p && existsSync(p));
-if (!CHROME) { console.error('No Chrome/Edge found; set PROXION_CHROME.'); process.exit(2); }
+if (!CHROME) skipSmoke('No Chrome/Edge found; set PROXION_CHROME.');
 
 let step = 'init';
 const fail = (m) => { console.error(`  \u2717 [${step}] ${m}`); process.exitCode = 1; };
@@ -52,6 +53,16 @@ async function drainUntil(page, check, arg, tries = 16) {
 const promptOpen = () => { const m = document.getElementById('confirm-modal'); return !!m && getComputedStyle(m).display !== 'none'; };
 const hasRoom = (id) => !!document.getElementById('nav-' + id);
 const seesText = (txt) => Array.from(document.querySelectorAll('#message-feed .message')).some((el) => (el.textContent || '').includes(txt));
+const unsupportedControlsHidden = () => ['schedule-btn', 'poll-btn', 'integrations-btn'].every((id) => {
+  const el = document.getElementById(id);
+  return !!el && getComputedStyle(el).display === 'none';
+});
+const disabledPoll = (question) => {
+  const card = Array.from(document.querySelectorAll('.poll-card')).find((el) => el.querySelector('.poll-q')?.textContent === question);
+  return !!card && card.querySelectorAll('.poll-opt').length === 2
+    && Array.from(card.querySelectorAll('.poll-opt')).every((el) => el.disabled && el.getAttribute('aria-disabled') === 'true' && el.title.includes('unavailable'))
+    && card.querySelector('.poll-hint')?.textContent.includes('unavailable');
+};
 
 async function waitFor(page, fn, arg, ms) {
   return page.waitForFunction(fn, { timeout: ms, polling: 500 }, arg).then(() => true).catch(() => false);
@@ -80,12 +91,12 @@ async function requestJoin(page, invite) {
 try {
   step = 'serve';
   served = await buildAndServeHttps(HERE, join(HERE, 'scripts', 'build-web.mjs'));
-  if (!served) { console.log('  \u2013 skipped: could not build/serve over https (openssl?).'); await cleanup(); process.exit(0); }
+  if (!served) { await cleanup(); skipSmoke('could not build/serve over https (openssl?).'); }
   ok('built + serving the web app over https');
 
   step = 'css';
   css = await startCss({ allowSelfSignedClientId: true }).catch(() => null);
-  if (!css) { console.log('  \u2013 skipped: no CSS pod available (offline / npx blocked).'); await cleanup(); process.exit(0); }
+  if (!css) { await cleanup(); skipSmoke('no CSS pod available (offline / npx blocked).'); }
   const stamp = Date.now();
   const alice = await provisionAccount(css.url, { email: `alice-${stamp}@test.example`, password: 'pw-12345678', label: 'alice' });
   const bob = await provisionAccount(css.url, { email: `bob-${stamp}@test.example`, password: 'pw-12345678', label: 'bob' });
@@ -97,7 +108,13 @@ try {
   const pageB = await (await browser.createBrowserContext()).newPage();   // joiner
   const pageC = await (await browser.createBrowserContext()).newPage();   // joiner
   const errs = [];
-  for (const [tag, p] of [['A', pageA], ['B', pageB], ['C', pageC]]) p.on('pageerror', (e) => errs.push(`${tag}: ${e.message}`));
+  for (const [tag, p] of [['A', pageA], ['B', pageB], ['C', pageC]]) {
+    p.on('pageerror', (e) => errs.push(`${tag}: ${e.message}`));
+    if (process.env.PROXION_SMOKE_DEBUG) {
+      p.on('console', (m) => { if (m.type() === 'warn' || m.type() === 'error') console.error(`[${tag}] ${m.type()}: ${m.text()}`); });
+      p.on('response', (r) => { if (r.status() >= 400 && r.request().method() !== 'GET') console.error(`[${tag}] ${r.request().method()} ${r.status()} ${r.url()}`); });
+    }
+  }
 
   step = 'signin';
   await signIn(pageA, { appOrigin: served.origin, cssUrl: css.url, cookies: alice.cookies });
@@ -112,12 +129,15 @@ try {
   await pageA.waitForSelector('#room-name-input', { visible: true, timeout: 10000 });
   await pageA.type('#room-name-input', roomName);
   await pageA.click('#room-create-submit');
-  await pageA.waitForFunction(() => (document.getElementById('room-invite-url')?.textContent || '').includes('?join='), { timeout: 15000 });
+  await pageA.waitForFunction(() => (document.getElementById('room-invite-url')?.textContent || '').includes('?join='), { timeout: 15000 }).catch(async (e) => {
+    console.error('Create state:', await pageA.evaluate(() => ({ error: document.getElementById('room-create-error')?.textContent, busy: document.getElementById('room-create-submit')?.getAttribute('aria-busy') })));
+    throw e;
+  });
   const invite = await pageA.$eval('#room-invite-url', (el) => el.textContent.trim());
   const roomId = decodeURIComponent(new URL(invite).searchParams.get('join').split('~')[0]);
   if (new URL(invite).searchParams.get('mode') === 'web') ok('the invite link keeps mode=web');
   else fail(`invite has no mode=web: ${invite}`);
-  await sleep(2000);   // let the descriptor + type-index writes land
+  // Reload as soon as the invite is exposed: creation must already be durable.
 
   step = 'owner-reload';
   await reload(pageA);
@@ -130,6 +150,8 @@ try {
   });
   if (inviteAfter) ok('after reload the owner still has the invite link');
   else fail('the invite link was missing after the owner reloaded');
+  if (await pageA.evaluate(unsupportedControlsHidden)) ok('unsupported scheduling and poll creation controls stay hidden');
+  else fail('browser room exposes scheduling or poll creation');
 
   // ── Two join requests at once ──
   step = 'requests';
@@ -171,6 +193,10 @@ try {
   else fail('the room never appeared for the approved joiner');
 
   step = 'joiner-reload';
+  // Prove restoration comes from the pod, without this device's room cache.
+  await joiner.evaluate(() => {
+    for (const key of Object.keys(localStorage)) if (key.startsWith('proxion_joined_rooms:')) localStorage.removeItem(key);
+  });
   await reload(joiner);
   if (await waitFor(joiner, hasRoom, roomId, 20000)) ok('the joined room survives the joiner\'s reload');
   else fail('the joined room was gone after the joiner reloaded');
@@ -188,11 +214,73 @@ try {
   if (await waitFor(joiner, seesText, fromOwner, 15000)) ok('the joiner saw the owner\'s message within 15s');
   else fail('the joiner never saw the owner\'s message');
 
+  // Search the messages this device loaded, and state that scope explicitly.
+  step = 'local-search';
+  await pageA.type('#search-input', fromJoiner);
+  const found = await waitFor(pageA, (text) => {
+    const panel = document.getElementById('search-panel');
+    return !!panel && !panel.hidden && Array.from(panel.querySelectorAll('.search-result')).some((el) => el.textContent.includes(text))
+      && !!panel.querySelector('[data-search-scope]')?.textContent.includes('loaded on this device');
+  }, fromJoiner, 10000);
+  if (found) ok('browser search returns loaded messages with an explicit device scope');
+  else fail('browser search did not return the loaded room message and scope note');
+  await pageA.focus('#search-input');
+  await pageA.keyboard.down('Control');
+  await pageA.keyboard.press('a');
+  await pageA.keyboard.up('Control');
+  await pageA.keyboard.press('Backspace');
+  await waitFor(pageA, () => document.getElementById('search-panel')?.hidden, null, 5000);
+
+  // A plain-text poll sent by another client must not offer ineffective votes.
+  step = 'poll-capabilities';
+  const question = 'poll-' + Math.random().toString(36).slice(2, 7);
+  await pageA.focus('#message-input');
+  await pageA.evaluate((text) => {
+    const input = document.getElementById('message-input');
+    input.value = text;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }, `📊 ${question}
+1️⃣ A
+2️⃣ B`);
+  await pageA.keyboard.press('Enter');
+  if (await waitFor(joiner, disabledPoll, question, 15000)) ok('received poll options are disabled with an unavailable hint');
+  else {
+    console.error('Poll state:', JSON.stringify(await joiner.evaluate(() => ({
+      cards: Array.from(document.querySelectorAll('.poll-card')).map((card) => ({ question: card.querySelector('.poll-q')?.textContent, hint: card.querySelector('.poll-hint')?.textContent,
+        options: Array.from(card.querySelectorAll('.poll-opt')).map((el) => ({ disabled: el.disabled, ariaDisabled: el.getAttribute('aria-disabled'), title: el.title })) })),
+      messages: document.getElementById('message-feed')?.innerText.slice(-1000),
+    })), null, 2));
+    fail('a received browser-room poll was missing or exposed ineffective voting');
+  }
+
+  // Rebuild the composer for a different room, then return to the shared room.
+  step = 'capabilities-after-room-switch';
+  await pageA.evaluate(() => document.getElementById('create-room-btn').click());
+  await pageA.waitForSelector('#room-name-input', { visible: true, timeout: 10000 });
+  await pageA.type('#room-name-input', 'other-' + roomName);
+  await pageA.click('#room-create-submit');
+  await pageA.waitForFunction((old) => {
+    const value = document.getElementById('room-invite-url')?.textContent || '';
+    return value.includes('?join=') && value !== old;
+  }, { timeout: 15000 }, invite);
+  await pageA.evaluate(() => document.getElementById('room-create-done-btn')?.click());
+  const otherInvite = await pageA.$eval('#room-invite-url', (el) => el.textContent.trim());
+  const otherRoomId = decodeURIComponent(new URL(otherInvite).searchParams.get('join').split('~')[0]);
+  await pageA.waitForFunction((id) => document.getElementById('nav-' + id)?.classList.contains('active'), { timeout: 10000 }, otherRoomId);
+  if (!(await pageA.evaluate(unsupportedControlsHidden))) fail('unsupported controls reappeared in a newly created room');
+  await openRoom(pageA, roomId);
+  if (await pageA.evaluate(unsupportedControlsHidden) && await waitFor(pageA, disabledPoll, question, 10000)) {
+    ok('room switching keeps unsupported controls hidden and poll votes disabled');
+  } else fail('room switching re-enabled an unsupported action');
+
   // ── Members list, then the joiner leaves ──
   step = 'members';
+  await waitFor(pageA, () => !document.querySelector('.toast--error'), null, 5000);
   await pageA.evaluate(() => document.getElementById('members-toggle')?.click());
   if (await waitFor(pageA, () => document.querySelectorAll('#members-list .member-item').length >= 2, null, 15000)) ok('the owner\'s Members panel lists the owner and the joiner');
   else fail('the Members panel did not list the joiner');
+  await sleep(300);
+  if (await pageA.evaluate(() => !!document.querySelector('.toast--error'))) fail('opening Members showed an unrelated unsupported-action error');
 
   step = 'leave';
   await joiner.evaluate(() => document.getElementById('leave-room-btn')?.click());

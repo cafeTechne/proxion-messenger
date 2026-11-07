@@ -934,3 +934,30 @@ describe('message accessible name and description', () => {
     expect(html).toContain('id="msgf-m2" class="attachment');
   });
 });
+
+
+describe('poll voting availability', () => {
+  function pollHtml(canVotePoll) {
+    const created = [];
+    global.document.createElement = () => { const el = mkEl(); created.push(el); return el; };
+    const feed = mkEl();
+    make({ canVotePoll })._renderMessageEl({
+      message_id: 'poll', from_webid: 'did:key:zBob', content: '📊 Lunch?\n1️⃣ Pizza\n2️⃣ Pasta',
+      timestamp: new Date().toISOString(),
+    }, feed, null, { noDivider: true });
+    return created.map(el => el.innerHTML).join('');
+  }
+  it('renders unsupported poll options disabled with an explanation', () => {
+    const html = pollHtml(() => false);
+    expect((html.match(/disabled aria-disabled="true"/g) || []).length).toBe(2);
+    expect(html).toContain('poll.unavailable');
+    expect(html).toContain('Pizza');
+    expect(html).toContain('Pasta');
+  });
+  it('keeps vote buttons enabled in supported conversations', () => {
+    const html = pollHtml(() => true);
+    expect(html).toContain('data-msg-action="poll-vote"');
+    expect(html).not.toContain('disabled aria-disabled="true"');
+    expect(html).toContain('poll.voteHint');
+  });
+});

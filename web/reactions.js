@@ -21,8 +21,14 @@ import { icon } from './icons.js';
 // emoji) names our own reaction for remove_reaction (its token, if sealed).
 // send (optional): queues reactions while offline (connection.js
 // socketSendOrQueue) so they go out on reconnect instead of being dropped.
-export function createReactions({ getSocket, getActiveView, getSelfWebId, getMessageReactions, getRoomEmojiMap, getMessageTs, getRemoteRoom, resolveName, sealReaction, wireEmoji, onSealFailed, send = null }) {
+export function createReactions({ getSocket, getActiveView, getSelfWebId, getMessageReactions, getRoomEmojiMap, getMessageTs, getRemoteRoom, resolveName, sealReaction, wireEmoji, onSealFailed, send = null, canReact = () => true, onUnavailable = () => {} }) {
     const state = { lastEmojiMsgId: null };
+
+    function _canAct() {
+        if (canReact()) return true;
+        onUnavailable();
+        return false;
+    }
 
     // R60A: a reaction key like ":name:" refers to the room's custom emoji.
     // Returns the map entry or null. Safe by construction: the key must match
@@ -85,6 +91,7 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         if (!container) return;
         const messageReactions = getMessageReactions();
         const selfWebId = getSelfWebId();
+        const interactive = canReact();
         const reacts = messageReactions[mid] || {};
         container.innerHTML = "";
         // A poll's votes are shown on its own option buttons, not as pills.
@@ -101,13 +108,13 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
             // whether the CURRENT user has reacted with this emoji, and make it
             // keyboard-focusable. (Guarded for the DOM stubs used in unit tests.)
             if (typeof span.setAttribute === "function") {
-                span.setAttribute("role", "button");
-                span.setAttribute("aria-pressed", alreadyReacted ? "true" : "false");
+                span.setAttribute("role", interactive ? "button" : "img");
+                if (interactive) span.setAttribute("aria-pressed", alreadyReacted ? "true" : "false");
                 const label = t('reaction.by', { emoji, names: reactorNames(reacts[emoji]) });
                 span.setAttribute("aria-label", label);
                 span.title = label;
             }
-            span.tabIndex = 0;
+            span.tabIndex = interactive ? 0 : -1;
             // R60A: ":name:" keys render the room's custom emoji image (safe:
             // createElement + server-validated map, no innerHTML). Members
             // whose map lacks the name see the literal key — still readable.
@@ -123,9 +130,9 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
                 span.innerText = `${emoji} ${count}`;
             }
             const toggle = () => alreadyReacted ? removeReaction(emoji, mid) : addEmoji(emoji, mid);
-            span.onclick = toggle;
+            if (interactive) span.onclick = toggle;
             // Keyboard: Enter / Space activate the pill like a button.
-            if (typeof span.addEventListener === "function") {
+            if (interactive && typeof span.addEventListener === "function") {
                 span.addEventListener("keydown", (e) => {
                     if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
                         e.preventDefault();
@@ -138,7 +145,7 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         });
         // A small "add reaction" pill at the end of a non-empty row opens the
         // same picker as the hover bar's react button.
-        if (shown > 0) {
+        if (shown > 0 && interactive) {
             const add = document.createElement("button");
             add.className = "reaction reaction-add";
             if (typeof add.setAttribute === "function") {
@@ -166,20 +173,27 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         const btns = [...card.querySelectorAll(".poll-opt[data-emoji]")];
         const counts = btns.map(b => (reacts[b.dataset.emoji] || []).length);
         const total = counts.reduce((a, b) => a + b, 0);
+        const voting = canReact();
         btns.forEach((b, i) => {
+            b.disabled = !voting;
+            b.setAttribute("aria-disabled", String(!voting));
             const voters = reacts[b.dataset.emoji] || [];
             b.setAttribute("aria-pressed", selfWebId && voters.includes(selfWebId) ? "true" : "false");
             b.querySelector(".poll-opt-count").textContent = counts[i] ? String(counts[i]) : "";
             b.querySelector(".poll-opt-bar").style.width = total ? `${Math.round(100 * counts[i] / total)}%` : "0";
-            b.title = voters.length ? reactorNames(voters) : "";
+            const names = voters.length ? reactorNames(voters) : "";
+            b.title = voting ? names : t('poll.unavailable') + (names ? ' · ' + names : '');
         });
         const hint = card.querySelector(".poll-hint");
-        if (hint) hint.textContent = total ? tn('poll.votes', total) : t('poll.voteHint');
+        if (hint) hint.textContent = voting
+            ? (total ? tn('poll.votes', total) : t('poll.voteHint'))
+            : (total ? tn('poll.votes', total) + ' · ' : '') + t('poll.unavailable');
         return new Set(btns.map(b => b.dataset.emoji));
     }
 
     // One vote per person: moves or clears your keycap reaction.
     function votePoll(msgId, emoji) {
+        if (!_canAct()) return;
         if (!msgId || !emoji) return;
         const reacts = getMessageReactions()[msgId] || {};
         const { add, remove } = pollVoteChange(reacts, emoji, getSelfWebId());
@@ -188,6 +202,7 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
     }
 
     function togglePicker(msgId, x, y) {
+        if (!_canAct()) return;
         const picker = document.getElementById("emoji-picker");
         if (state.lastEmojiMsgId === msgId && picker.style.display === "grid") {
             picker.style.display = "none";
@@ -254,6 +269,7 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
     }
 
     function addEmoji(emoji, msgId = null) {
+        if (!_canAct()) return;
         const mid = msgId || state.lastEmojiMsgId;
         const picker = document.getElementById("emoji-picker");
         const _pickerWasOpen = picker.style.display !== "none";
@@ -297,6 +313,7 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
     }
 
     function removeReaction(emoji, msgId) {
+        if (!_canAct()) return;
         const activeView = getActiveView();
         if (!activeView) return;
         const payload = { cmd: "remove_reaction", message_id: msgId, emoji: emoji };

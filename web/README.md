@@ -42,8 +42,16 @@ npm run check:contrast   # WCAG contrast of the palette
 npm run check:spacing    # padding, margin and gap on the --space-* scale
 npm run check:type       # font sizes, line heights, weights on the type scale
 npm run check:inline-styles  # markup and scripts use classes, not style=""
-npm run smoke:ci         # browser smokes against real gateways (what CI runs)
+npm run smoke:ci         # browser smokes against real gateways
+node scripts/run-smokes.mjs pod-required  # real-pod rooms and OIDC invite links (required in CI)
 ```
 
-Each smoke starts its own gateways. `npm run smoke:all` adds the pod and visual
-smokes.
+Each smoke starts its own gateways or throwaway Solid server. `npm run smoke:all`
+adds the full pod and visual groups. The `pod-required` group checks room creation,
+approval, reload, browser/desktop sharing, and invite links through sign-in. CI
+provisions CSS 7.3.0 for this group; local runs use npx unless
+`PROXION_CSS_EXECUTABLE` names an installed server binary.
+
+Unavailable prerequisites are reported as skipped, never passed. Direct optional
+pod smokes exit 77 when skipped; the group runner summarizes these separately.
+`pod-required` and `PROXION_SMOKE_REQUIRED=1` fail when a prerequisite is missing.

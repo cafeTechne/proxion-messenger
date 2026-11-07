@@ -18,7 +18,9 @@
 
 import { createPodRoomIo } from './podroomio.js';
 import { createWebJoin, makeInvite, parseInvite } from './webjoin.js';
-import { createRoomSync, normalizeJoinedList, withJoinedRecord, withoutJoinedRecord } from './webrooms.js';
+import { createRoomSync, createJoinedRoomStore, withJoinedRecord, withoutJoinedRecord } from './webrooms.js';
+import { createRoomAccessMonitor } from './room-access.js';
+import { createOwnerMembership } from './room-membership.js';
 import { peerPodRootFromWebId } from './webdm.js';
 import { isPeerPodRootAllowed } from './ssrf.js';
 import { chatRootUrl, dayFileAt } from './longchat.js';
@@ -55,6 +57,8 @@ export function createCrossRooms({
     onRoom = () => {}, onRemoved = () => {}, onMessages = () => {}, notify = () => {},
     inviteBase = () => WEB_APP_URL,
     timeoutMs = 15000,
+    storage = globalThis.localStorage,
+    accessPollMs = 15000, setAccessTimer, clearAccessTimer,
 }) {
     const _rooms = new Map();   // roomId -> { roomId, owner, ownerPodRoot, container, title, owned }
     const _pendingReg = new Map();   // roomId -> resolve
@@ -62,6 +66,14 @@ export function createCrossRooms({
 
     const me = () => getState().webid || null;
     const ownRoot = () => getState().pod_root || null;
+    const joinedRooms = createJoinedRoomStore({
+        read: () => bridge.io.podReadJoinedRooms(),
+        write: (list) => bridge.io.podWriteJoinedRooms(list),
+        readVersion: typeof bridge.io.podReadJoinedRoomsVersion === 'function' ? () => bridge.io.podReadJoinedRoomsVersion() : undefined,
+        writeVersion: typeof bridge.io.podWriteJoinedRoomsVersion === 'function' ? (list, version) => bridge.io.podWriteJoinedRoomsVersion(list, version) : undefined,
+        getWebId: me,
+        storage,
+    });
     const io = createPodRoomIo({
         // A fragment never goes over the wire (and the bridge refuses one), e.g. a WebID.
         fetch: (u, o) => bridge.fetch(String(u).split('#')[0], o),
@@ -70,6 +82,25 @@ export function createCrossRooms({
         webId: me,
         getSigner,
         fetchPeerSigner: (root) => bridge.io.podFetchPeerSigner(root),
+    });
+
+    const ownerMembership = createOwnerMembership({
+        read: (roomId) => io.podReadRoomDescriptorVersion(roomId),
+        write: (desc, version) => io.podWriteRoomDescriptorVersion(desc, version),
+        getOwnerId: me,
+        signDescriptor: (desc) => signDescriptor({ ...desc, name: desc.title,
+            code: desc.room_id, creator_webid: desc.owner, created_at: desc.created }),
+        apply: (desc, isCurrent) => _applyMembers(desc.room_id, desc, isCurrent),
+    });
+
+    const access = createRoomAccessMonitor({
+        fetch: (url, opts) => bridge.fetch(url, opts),
+        getSession: () => {
+            const state = getState();
+            return { ready: !!(state.ready && state.started), webId: state.webid, root: state.pod_root };
+        },
+        onRemoved: (roomId) => _removed(roomId),
+        pollMs: accessPollMs, setTimer: setAccessTimer, clearTimer: clearAccessTimer,
     });
 
     // Our own messages carry our WebID as maker; the desktop shows them as ours.
@@ -90,12 +121,14 @@ export function createCrossRooms({
         _rooms.set(rec.roomId, rec);
         try { onRoom(rec, info); } catch { /* UI only */ }
         _ensureSync().track({ roomId: rec.roomId, container: rec.container, owner: rec.owner });
+        if (!rec.owned) access.track(rec);
     }
 
     function _drop(roomId) {
         const rec = _rooms.get(roomId);
         if (!rec) return null;
         _rooms.delete(roomId);
+        access.untrack(roomId);
         if (_sync) _sync.untrack(roomId);
         if (!rec.owned) { try { send({ cmd: 'pod_room_unregister', container: rec.container }); } catch { /* socket gone */ } }
         return rec;
@@ -112,9 +145,7 @@ export function createCrossRooms({
     }
 
     async function _updateJoined(change) {
-        const cur = await bridge.io.podReadJoinedRooms();
-        if (cur == null) return false;   // never overwrite a list we could not read
-        return bridge.io.podWriteJoinedRooms(change(normalizeJoinedList(cur)));
+        return joinedRooms.update(change);
     }
 
     // ── joiner ───────────────────────────────────────────────────────────────
@@ -124,7 +155,9 @@ export function createCrossRooms({
         const container = vetJoinedRoom(appr.room_id, appr.owner_webid, appr.owner_pod_root, ownRoot());
         if (!container) return true;
         // Only an approval for a join we asked for (the marker in our own pod).
-        if (!(await bridge.io.podHasPendingJoin(appr.room_id, appr.owner_webid))) return true;
+        const pending = await bridge.io.podHasPendingJoin(appr.room_id, appr.owner_webid);
+        if (pending == null) return false;
+        if (!pending) return true;
         const reg = await _register(appr.room_id, appr.owner_webid);
         if (!reg.ok) {
             if (reg.reason === 'bearer') { notify('bearer', { roomId: appr.room_id }); return true; }
@@ -132,7 +165,7 @@ export function createCrossRooms({
         }
         const rec = { roomId: appr.room_id, owner: appr.owner_webid, ownerPodRoot: appr.owner_pod_root,
             container, title: String(appr.title || appr.room_id).slice(0, 200) };
-        await _updateJoined((list) => withJoinedRecord(list, rec)).catch(() => {});
+        if (!(await _updateJoined((list) => withJoinedRecord(list, rec)))) return false;
         bridge.io.podDeletePendingJoin(appr.room_id, appr.owner_webid).catch(() => {});
         _add({ ...rec, owned: false }, { joined: true });
         return true;
@@ -140,18 +173,33 @@ export function createCrossRooms({
 
     async function _onDeclined(msg) {
         if (!msg || !msg.room_id || !msg.owner_webid) return true;
-        if (!(await bridge.io.podHasPendingJoin(msg.room_id, msg.owner_webid))) return true;
+        const pending = await bridge.io.podHasPendingJoin(msg.room_id, msg.owner_webid);
+        if (pending == null) return false;
+        if (!pending) return true;
         bridge.io.podDeletePendingJoin(msg.room_id, msg.owner_webid).catch(() => {});
         notify('declined', { roomId: msg.room_id });
         return true;
     }
 
-    // The owner took us out: their pod now refuses our append.
+    // Persist confirmed removal before clearing the room. A failed own-pod
+    // update retains the monitor so a later check can finish the cleanup.
     async function _removed(roomId) {
-        const rec = _drop(roomId);
-        if (!rec) return;
-        await _updateJoined((list) => withoutJoinedRecord(list, roomId)).catch(() => {});
-        onRemoved(roomId);
+        const rec = _rooms.get(roomId), account = me(), root = ownRoot();
+        if (!rec || rec.owned) return false;
+        if (!(await _updateJoined((list) => withoutJoinedRecord(list, roomId)))) return false;
+        if (account !== me() || root !== ownRoot() || _rooms.get(roomId) !== rec) return false;
+        _drop(roomId);
+        try { await onRemoved(roomId); } catch { /* UI only */ }
+        return true;
+    }
+
+    async function _leave(roomId) {
+        const rec = _rooms.get(roomId), account = me(), root = ownRoot();
+        if (!rec || rec.owned) return false;
+        if (!(await _updateJoined((list) => withoutJoinedRecord(list, roomId)))) return false;
+        if (account !== me() || root !== ownRoot() || _rooms.get(roomId) !== rec) return false;
+        _drop(roomId);
+        return true;
     }
 
     // ── owner ────────────────────────────────────────────────────────────────
@@ -164,13 +212,14 @@ export function createCrossRooms({
 
     // Members (not banned) get Read + Append on the chat; the list beside it is
     // for display. Rewriting both from the descriptor drops anyone left out.
-    async function _applyMembers(roomId, desc) {
-        const self = me();
+    async function _applyMembers(roomId, desc, isCurrent = () => me() === desc.owner) {
+        if (!isCurrent()) return false;
+        const self = desc.owner;
         const members = desc.members.filter((m) => !m.banned).map((m) => m.webid);
         const container = chatRootUrl(ownRoot(), roomId);
         const granted = await io.podGrantChatParticipants(container, self, members.filter((w) => w !== self));
-        await io.podWriteRoomMembers(roomId, members.map((w) => ({ webid: w, role: w === self ? 'admin' : 'member' })));
-        return granted;
+        if (!granted || !isCurrent()) return false;
+        return io.podWriteRoomMembers(roomId, members.map((w) => ({ webid: w, role: w === self ? 'admin' : 'member' })));
     }
 
     async function create(name) {
@@ -179,11 +228,11 @@ export function createCrossRooms({
         const roomId = genRoomId();
         const container = chatRootUrl(root, roomId);
         const title = String(name || '').slice(0, 200) || roomId;
-        await io.ensureChatIndexAt(container, title);
+        if (!(await io.ensureChatIndexAt(container, title))) return null;
         const desc = buildRoomDescriptor({ roomId, title, owner: self, members: [{ webid: self, role: 'owner' }], longChat: container });
         if (!(await _writeDescriptor(desc))) return null;
-        await io.podSetContainerAcl(`rooms/${roomId}/`, self, []);
-        await _applyMembers(roomId, desc);
+        if (!(await io.podSetContainerAcl(`rooms/${roomId}/`, self, []))) return null;
+        if (!(await _applyMembers(roomId, desc))) return null;
         const invite = inviteFor(roomId);
         _add({ roomId, owner: self, ownerPodRoot: root, container, title, owned: true }, { created: true, invite });
         return { roomId, title, invite };
@@ -193,12 +242,15 @@ export function createCrossRooms({
         return makeInvite(roomId, me(), inviteBase(), { webMode: true });
     }
 
-    async function _approve(webid, roomId, desc) {
-        const cur = (await io.podReadRoomDescriptor(roomId)) || desc;
-        const updated = withMembers(cur, [...(cur.members || []), { webid, role: 'member' }]);
-        await _writeDescriptor(updated);
-        await _applyMembers(roomId, updated);
-        await _join.sendApproval(webid, roomId, updated.title || '');
+    async function _approve(webid, roomId) {
+        const result = await ownerMembership.update(roomId, (cur) => {
+            const existing = (cur.members || []).find(m => m.webid === webid);
+            if (existing?.banned) return null;
+            return existing ? cur : withMembers(cur, [...(cur.members || []), { webid, role: 'member' }]);
+        });
+        if (!result.ok || result.descriptor?.owner !== me()) return false;
+        if (result.skipped || !result.descriptor.members.some(m => m.webid === webid && !m.banned)) return null;
+        return _join.sendApproval(webid, roomId, result.descriptor.title || '');
     }
 
     async function _onJoinRequest(req) {
@@ -208,26 +260,25 @@ export function createCrossRooms({
         const existing = (desc.members || []).find((m) => m.webid === req.from_webid);
         if (existing && existing.banned) return true;
         if (existing) {
-            await _join.sendApproval(req.from_webid, req.room_id, desc.title || '');
-            return true;
+            return _approve(req.from_webid, req.room_id);
         }
         const answer = await askApprove(req, desc);
         if (answer === null) return false;   // unanswered: keep it for next time
         if (answer === 'no') {
-            await _join.sendDecline(req.from_webid, req.room_id);
-            return true;
+            return _join.sendDecline(req.from_webid, req.room_id);
         }
-        await _approve(req.from_webid, req.room_id, desc);
+        const approved = await _approve(req.from_webid, req.room_id);
+        if (approved === false) return false;
+        if (approved !== true) return true;
         notify('approved', { roomId: req.room_id, webid: req.from_webid });
         return true;
     }
 
     async function kick(roomId, webid) {
-        const cur = await io.podReadRoomDescriptor(roomId);
-        if (!cur || cur.owner !== me() || webid === me()) return false;
-        const updated = withMembers(cur, cur.members.filter((m) => m.webid !== webid));
-        await _writeDescriptor(updated);
-        return _applyMembers(roomId, updated);
+        if (webid === me()) return false;
+        const result = await ownerMembership.update(roomId, cur => withMembers(cur, cur.members.filter(m => m.webid !== webid)));
+        return result.ok && result.descriptor?.owner === me()
+            && !result.descriptor.members.some(m => m.webid === webid && !m.banned);
     }
 
     async function _deleteOwned(roomId) {
@@ -268,7 +319,7 @@ export function createCrossRooms({
                 timestamp: msg.timestamp, pod_ts: msg.timestamp, reply_to_id: msg.reply_to_id, local: true,
             });
         } else if (r.status === 403 && !r.policy && !rec.owned) {
-            await _removed(rec.roomId);
+            await access.check(rec.roomId, { denied: true });
         }
     }
 
@@ -328,9 +379,10 @@ export function createCrossRooms({
             case 'get_room_members': _members(rec).catch(() => {}); break;
             case 'leave_local_room':
                 if (!rec.owned) {
-                    _drop(rec.roomId);
-                    _updateJoined((list) => withoutJoinedRecord(list, rec.roomId)).catch(() => {});
-                    handleEvent({ type: 'left_room', room_id: rec.roomId });
+                    _leave(rec.roomId).then((ok) => {
+                        if (ok) handleEvent({ type: 'left_room', room_id: rec.roomId });
+                        else handleEvent({ type: 'error', cmd: 'leave_local_room', room_id: rec.roomId, message: 'pod_operation_failed' });
+                    }).catch(() => handleEvent({ type: 'error', cmd: 'leave_local_room', room_id: rec.roomId, message: 'pod_operation_failed' }));
                 }
                 break;
             case 'delete_room':
@@ -360,7 +412,7 @@ export function createCrossRooms({
 
     async function _restore() {
         const self = me();
-        const joined = normalizeJoinedList((await bridge.io.podReadJoinedRooms()) || []);
+        const joined = await joinedRooms.list();
         for (const r of joined) {
             const container = vetJoinedRoom(r.roomId, r.owner, r.ownerPodRoot, ownRoot());
             if (!container || container !== r.container || _rooms.has(r.roomId)) continue;
@@ -379,9 +431,13 @@ export function createCrossRooms({
     // register the joined rooms again, then re-arm their watches.
     async function _reRegister() {
         for (const rec of _rooms.values()) {
-            if (!rec.owned) await _register(rec.roomId, rec.owner);
+            if (!rec.owned) {
+                const reg = await _register(rec.roomId, rec.owner);
+                if (reg.ok) access.track(rec);
+            }
         }
         bridge.resubscribe();
+        access.checkAll().catch(() => {});
         if (_join) _join.drainOnce().catch(() => {});
     }
 
@@ -389,7 +445,10 @@ export function createCrossRooms({
     // published our identity (state.started), so the join box is ours to read.
     function onState(st) {
         const ready = !!(st && st.ready && st.started);
+        if (!ready) access.stop();
         if (ready && _startedFor !== st.webid) {
+            access.stop();
+            if (_join) _join.stop();
             _startedFor = st.webid;
             for (const id of [..._rooms.keys()]) _drop(id);
             _join = createWebJoin({
@@ -419,6 +478,7 @@ export function createCrossRooms({
         inviteFor, create, kick,
         drainJoins: () => (_join ? _join.drainOnce() : Promise.resolve()),
         refresh: (id) => (_sync ? _sync.refresh(id) : Promise.resolve()),
+        checkAccess: (id, opts) => id ? access.check(id, opts) : access.checkAll(),
         io,
     };
 }

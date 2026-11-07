@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createReactions } from './reactions.js';
 
 // DOM stub: getElementById returns a fake element; createElement a fake span.
@@ -252,5 +252,65 @@ describe('offline reactions are queued, not dropped', () => {
       { cmd: 'add_reaction', message_id: 'm1', emoji: '👍', room_id: 'room-1' },
       { cmd: 'remove_reaction', message_id: 'm1', emoji: '👍', room_id: 'room-1' },
     ]);
+  });
+});
+
+
+describe('conversation reaction capabilities', () => {
+  it('rejects programmatic voting, picker, add and remove without a supported protocol', () => {
+    const sent = [];
+    const onUnavailable = vi.fn();
+    const reactions = { m1: { '1️⃣': ['me'] } };
+    const r = createReactions({
+      getSocket: () => ({ readyState: 1, send: (m) => sent.push(m) }),
+      getActiveView: () => ({ type: 'local_room', id: 'pod-room' }),
+      getSelfWebId: () => 'me', getMessageReactions: () => reactions,
+      send: (p) => sent.push(p), canReact: () => false, onUnavailable,
+    });
+    r.votePoll('m1', '2️⃣');
+    r.addEmoji('👍', 'm1');
+    r.removeReaction('1️⃣', 'm1');
+    r.togglePicker('m1', 0, 0);
+    expect(sent).toEqual([]);
+    expect(reactions).toEqual({ m1: { '1️⃣': ['me'] } });
+    expect(onUnavailable).toHaveBeenCalledTimes(4);
+  });
+
+  it('keeps poll counts visible with voting disabled', () => {
+    const option = (emoji) => ({ dataset: { emoji }, attrs: {}, count: {}, bar: { style: {} },
+      setAttribute(k, v) { this.attrs[k] = v; },
+      querySelector(sel) { return sel === '.poll-opt-count' ? this.count : this.bar; } });
+    const options = [option('1️⃣'), option('2️⃣')];
+    const hint = {};
+    const card = { querySelectorAll: () => options, querySelector: () => hint };
+    const children = [];
+    const container = { parentElement: { querySelector: () => card }, appendChild: (el) => children.push(el) };
+    global.document.getElementById = () => container;
+    const r = createReactions({
+      getSelfWebId: () => 'me', getMessageReactions: () => ({ m1: { '1️⃣': ['me'], '2️⃣': ['someone'] } }),
+      canReact: () => false,
+    });
+    r.renderReactions('m1');
+    expect(options.map(o => o.disabled)).toEqual([true, true]);
+    expect(options[0].attrs['aria-pressed']).toBe('true');
+    expect(options.map(o => o.count.textContent)).toEqual(['1', '1']);
+    expect(hint.textContent).toContain('poll.unavailable');
+    expect(options.every(o => o.title.includes('poll.unavailable'))).toBe(true);
+    expect(options[1].title).toContain('someone');
+    expect(children).toEqual([]);
+  });
+
+  it('rechecks capabilities when switching back to a gateway conversation', () => {
+    const sent = [];
+    let supported = false;
+    const r = createReactions({
+      getActiveView: () => ({ type: 'local_room', id: 'gateway-room' }),
+      getSelfWebId: () => 'me', getMessageReactions: () => ({}),
+      send: (p) => sent.push(p), canReact: () => supported,
+    });
+    r.votePoll('m1', '1️⃣');
+    supported = true;
+    r.votePoll('m1', '1️⃣');
+    expect(sent).toEqual([{ cmd: 'add_reaction', message_id: 'm1', emoji: '1️⃣', room_id: 'gateway-room' }]);
   });
 });

@@ -51,9 +51,10 @@ export function parsePoll(content) {
     return options.length >= 2 ? { question, options } : null;
 }
 
-export function createPolls({ showToast }) {
+export function createPolls({ showToast, canCreatePoll = () => true, onUnavailable = () => {} }) {
 
     function openPollModal() {
+        if (!canCreatePoll()) { onUnavailable(); return; }
         const modal = document.getElementById('poll-modal');
         if (!modal) return;
         document.getElementById('poll-question').value = '';
@@ -71,6 +72,7 @@ export function createPolls({ showToast }) {
     }
 
     function submitPoll() {
+        if (!canCreatePoll()) { onUnavailable(); return; }
         const question = document.getElementById('poll-question')?.value || '';
         const options = [];
         for (let i = 1; i <= MAX_POLL_OPTIONS; i++) {

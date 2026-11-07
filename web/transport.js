@@ -158,6 +158,8 @@ const _FEATURE_CONTROLS = {
     // Attachments (send_file, also the GIF tray) and voice messages
     // (send_voice_message) are gateway commands with no pod path yet.
     files: ['attach-btn', 'gif-tray-btn'],
+    schedule: ['schedule-btn'],
+    polls: ['poll-btn'],
     'voice-messages': ['voice-record-btn'],
     // Sessions and linked devices are gateway records, and the Connection
     // section configures the gateway socket; the browser build has neither.
@@ -241,6 +243,19 @@ export function applyCrossModeGating(on, doc) {
     const root = d && d.documentElement;
     if (!root || !root.classList) return;
     for (const cls of CROSS_MODE_ROOT_CLASSES) root.classList.toggle(cls, !!on);
+}
+
+// Gateway commands have no destination when a desktop conversation uses the
+// pod protocol. Read this per conversation, since a gateway account can also
+// have ordinary rooms and DMs that support the same operations.
+const _GATEWAY_MESSAGE_FEATURES = new Set([
+    'edit', 'reactions', 'pins', 'delete', 'files', 'voice-messages',
+    'disappear', 'schedule', 'polls', 'room-admin', 'owner-leave', 'room-voice',
+]);
+
+export function supportsConversationFeature(transport, feature, { podRoom = false, crossMode = false } = {}) {
+    if (!transport?.supports(feature)) return false;
+    return !((podRoom || crossMode) && _GATEWAY_MESSAGE_FEATURES.has(feature));
 }
 
 // Build the transport for the current page. `connection` is required only for

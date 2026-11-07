@@ -243,11 +243,16 @@ export function createModals({ getSocket, getActiveView, sendCmd, showToast, get
         // Encrypted DMs are searched in this device's saved plaintext only.
         const dmNote = event && event.dm_history_off
             ? `<li class="search-panel__empty" data-search-dm-note>${inlineNotice(t('search.dmHistoryOff'))}</li>` : '';
+        const scopeNote = event && event.local_scope
+            ? `<li class="search-panel__empty" data-search-scope>${inlineNotice(t('search.localScope'))}</li>` : '';
+        const failureNote = event && event.error
+            ? `<li class="search-panel__empty" data-search-error>${inlineNotice(t('search.failed'))}</li>` : '';
+        const notes = scopeNote + dmNote + failureNote;
         if (results.length === 0) {
-            list.innerHTML = `<li class="search-panel__empty">${inlineNotice(t('search.noMatches', { query }))}</li>` + dmNote;
+            list.innerHTML = (event?.error ? '' : `<li class="search-panel__empty">${inlineNotice(t('search.noMatches', { query }))}</li>`) + notes;
             return;
         }
-        if (dmNote) list.innerHTML = dmNote;
+        if (notes) list.innerHTML = notes;
         results.forEach(res => {
             const li = document.createElement('li');
             const btn = document.createElement('button');

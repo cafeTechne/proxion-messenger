@@ -1,4 +1,14 @@
 {
+  "schedule.unavailable": "Scheduling is unavailable in this conversation.",
+  "schedule.saving": "Saving…",
+  "schedule.offline": "Reconnect to schedule this message. Your text is still here.",
+  "schedule.unconfirmed": "Scheduling could not be confirmed. Your text is still here. Check scheduled messages before trying again.",
+  "poll.unavailable": "Poll voting is unavailable in this conversation.",
+  "search.localScope": "Search covers room messages loaded on this device and saved direct messages.",
+  "search.failed": "Search could not read some messages. Try again.",
+  "error.transportUnsupported": "This action is unavailable in this conversation.",
+  "error.podOperationFailed": "The action could not be saved. Check your connection and try again.",
+  "error.scheduleStoreUnavailable": "The message could not be scheduled. Your text is still here. Try again.",
   "_meta": {
     "locale": "en",
     "name": "English",

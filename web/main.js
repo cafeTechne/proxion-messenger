@@ -21,6 +21,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podReadLongChatRecent, podEditLongChatMessage,
          podSoftDeleteLongChatMessage, podSetLongChatSeq,
          reconcileRoomHistory, podWriteRoomDescriptor, podReadRoomDescriptor,
+         podReadRoomDescriptorVersion, podWriteRoomDescriptorVersion,
          podListOwnedRoomDescriptors, podEnsureProfileName,
          podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop,
          podWritePresence, podReadPresence, presenceUrlFor,
@@ -31,7 +32,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          podEditChatMessageAt, podSoftDeleteChatMessageAt, podSetChatSeqAt,
          podGrantChatParticipants, podPublishSigner, podFetchPeerSigner,
          podSetLongChatSigner, podReadChatDayAt, podRegisterRoomChat,
-         podReadJoinedRooms, podWriteJoinedRooms, podReadRoomMembersAt, podDeleteOwnedRoom,
+         podReadJoinedRooms, podWriteJoinedRooms, podReadJoinedRoomsVersion, podWriteJoinedRoomsVersion, podReadRoomMembersAt, podDeleteOwnedRoom,
          podWriteChatMessageAtResult } from './pod.js';
 import { signDm, verifyDmSig, signFanout, verifyFanoutSig } from './dmsig.js';
 import { verifyDeviceCert } from './device-cert.js';
@@ -69,11 +70,14 @@ import { createE2EStatus } from './e2e-status.js';
 import { createStatusBanners } from './status-banners.js';
 import { createConnection, normalizeGatewayUrl, planThreadCatchUp, createRateRetry, catchUpUnread } from './connection.js';
 import { createTabLock, showTabNotice, hideTabNotice } from './tablock.js';
-import { createTransport, detectMode, applyTransportGating, applyCrossModeGating } from './transport.js';
+import { createTransport, detectMode, applyTransportGating, applyCrossModeGating, supportsConversationFeature } from './transport.js';
 import { createCrossMode } from './crossmode.js';
 import { createCrossRooms, webAppUrl } from './crossrooms.js';
 import { createMessageRequests } from './msgrequests.js';
-import { createPodSocket } from './podtransport.js';
+import { createOwnerMembership } from './room-membership.js';
+import { createRoomAccessMonitor } from './room-access.js';
+import { createScheduledComposer } from './schedule.js';
+import { createPodSocket, searchLoadedRooms } from './podtransport.js';
 import { purgeWebAccount, adoptWebAccount, shouldPromptForName, markNamePrompted } from './web-account.js';
 import { createRendering, replyQuoteHtml } from './rendering.js';
 import { createView, appendSidebarEmpty, mergeDmSnapshot, dropSupersededContactRows } from './view.js';
@@ -88,8 +92,8 @@ import { createWebCalls, createCallSigners } from './webcalls.js';
 import { createWebJoin, makeInvite, parseInvite } from './webjoin.js';
 import { chatRootUrl, dayFileAt } from './longchat.js';
 import {
-    createRoomSync, normalizeJoinedRecord, normalizeJoinedList, withJoinedRecord, withoutJoinedRecord,
-    joinedCacheKey, joinPendingKey,
+    createRoomSync, createJoinedRoomStore, normalizeJoinedRecord, withJoinedRecord, withoutJoinedRecord,
+    joinPendingKey,
 } from './webrooms.js';
 import { createPairing } from './pairing.js';
 import { takeClaimFragment, createOwnerClaim } from './ownerclaim.js';
@@ -291,7 +295,7 @@ import { createAccountSync } from './account-sync.js';
         };
 
         function sendCmd(cmd, payload) {
-            if (!socket || socket.readyState !== WebSocket.OPEN) return;
+            if (!socket || socket.readyState !== WebSocket.OPEN) return false;
             const allowed = CMD_ALLOWED_KEYS[cmd];
             const out = { cmd, ...payload };
             if (allowed) {
@@ -300,6 +304,7 @@ import { createAccountSync } from './account-sync.js';
                 }
             }
             socket.send(JSON.stringify(out));
+            return true;
         }
 
         // Pre-fill name from previous session
@@ -543,6 +548,7 @@ import { createAccountSync } from './account-sync.js';
         // openCtxMenu / _sendUpdateLastRead are hoisted function declarations.
         const rendering = createRendering({
             getActiveView: () => activeView, getSocket: () => socket,
+            canVotePoll: () => _conversationSupports('polls'),
             getSelfWebId: () => selfWebId, getSelfPubHex: () => selfPubHex,
             getCurrentDisappearMs: () => currentDisappearMs,
             getCurrentDisappearSince: () => currentDisappearSince,
@@ -680,6 +686,8 @@ import { createAccountSync } from './account-sync.js';
                 sealReaction: (view, mid, emoji) => secondary.sealReaction(view, mid, emoji),
                 wireEmoji: (mid, emoji) => secondary.reactionWireEmoji(mid, emoji),
                 onSealFailed: _onSealFailed,
+                canReact: () => _conversationSupports('reactions'),
+                onUnavailable: () => showToast(t('error.transportUnsupported')),
                 send: _sendOrQueue,
             });
         // Standalone modals (forward / schedule / integrations / search results).
@@ -695,6 +703,21 @@ import { createAccountSync } from './account-sync.js';
                 },
                 openSearchResult: (threadId, msgId) => _openSearchResult(threadId, msgId),
             });
+        const scheduledComposer = createScheduledComposer({
+            send: (command) => sendCmd('schedule_message', command),
+            getDraft: () => document.getElementById('message-input')?.value || '',
+            getThreadId: () => activeView?.id,
+            clearDraft: () => { document.getElementById('message-input').value = ''; },
+            onPending: (pending) => {
+                const button = document.getElementById('schedule-confirm-btn');
+                if (pending) setButtonBusy(button, t('schedule.saving'));
+                else clearButtonBusy(button);
+            },
+            onFailure: (reason) => showToast(t(reason === 'unconfirmed' ? 'schedule.unconfirmed' : 'schedule.offline'), 'error'),
+            onConfirmed: (command) => {
+                if (activeView?.id === command.thread_id) document.getElementById('schedule-picker').style.display = 'none';
+            },
+        });
         // Pinned messages: destructured into same-named bindings.
         const { pinMsg, showPinPanel, renderPins, unpinMsg, jumpToMsg } =
             createPins({ getSocket: () => socket, getActiveView: () => activeView, getMessages: () => allMessages,
@@ -1162,10 +1185,16 @@ import { createAccountSync } from './account-sync.js';
         // Edits, reactions, files, voice messages, disappearing and scheduled
         // messages have no pod protocol yet: a desktop thread with a WebID
         // contact offers text only (transport.js applyCrossModeGating).
+        function _conversationSupports(feature) {
+            const view = activeView;
+            const podRoom = !!view && (!!_remoteRooms[view.id] || !!crossRooms?.isPodRoom(view.id));
+            const crossModeThread = (view?.type === 'local_dm' || view?.type === 'dm')
+                && isDmPeerWebId(view.peerWebid || view.peerDid || view.id);
+            return supportsConversationFeature(transport, feature, { podRoom, crossMode: crossModeThread });
+        }
         function _applyCrossModeThreadGating() {
-            const on = transport.mode !== 'web' && ((activeView?.type === 'local_dm' && isDmPeerWebId(activeView.id))
-                || !!crossRooms?.isPodRoom(activeView?.id));
-            applyCrossModeGating(on);
+            if (transport.mode === 'web') return;
+            applyCrossModeGating(!_conversationSupports('reactions'));
         }
         function _showCrossModeState(st) {
             const el = document.getElementById('settings-crossmode-status');
@@ -1301,6 +1330,7 @@ import { createAccountSync } from './account-sync.js';
         // sends for these route to the owner's container via the *At pod helpers.
         const _remoteRooms = {};
         let _joinPending = false;      // a ?join= request is awaiting owner approval (pending banner)
+        let webRoomAccess = null;     // checks joined-room access without posting
         let webRoomSync = null;        // web build: delivers new room messages from the pod (webrooms.js)
         const _podReadLastFetch = {};
         const POD_READ_DEBOUNCE_MS = 30000;
@@ -1916,7 +1946,7 @@ import { createAccountSync } from './account-sync.js';
             const list = document.getElementById("members-list");
             if (list) list.innerHTML = inlineNotice(t('members.loading'), "loading");
             if (socket) socket.send(JSON.stringify({cmd: "get_room_members", room_id: roomId}));
-            roomEmoji.requestList(roomId);   // R59G: custom emoji for :name: rendering
+            if (_conversationSupports('room-admin')) roomEmoji.requestList(roomId);
         }
         // kickMember: moved to rooms.js (createRooms).
 
@@ -2016,7 +2046,7 @@ import { createAccountSync } from './account-sync.js';
             const still = [];
             for (const p of list) {
                 if (_remoteRooms[p.room_id]) continue;
-                if (!p.owner || await podHasPendingJoin(p.room_id, p.owner)) still.push(p);
+                if (!p.owner || (await podHasPendingJoin(p.room_id, p.owner)) !== false) still.push(p);
             }
             _pendingJoinsWrite(still);
             if (still.length) {
@@ -2794,6 +2824,13 @@ import { createAccountSync } from './account-sync.js';
                 case "room_invite_renewed":
                     applyRenewedInvite(event);
                     break;
+                case "room_create_failed": {
+                    clearButtonBusy(document.getElementById("room-create-submit"));
+                    const err = document.getElementById("room-create-error");
+                    if (err) err.textContent = t('room.podCreateFailed');
+                    else showToast(t('room.podCreateFailed'), 'error');
+                    break;
+                }
                 case "room_created":
                     clearButtonBusy(document.getElementById("room-create-submit"));
                     roomCreatorOf.add(event.room_id);
@@ -2804,7 +2841,7 @@ import { createAccountSync } from './account-sync.js';
                     // Long Chat pointer) as room.json, keeping the legacy fields
                     // (name/code/creator_webid) so existing readers still work. This
                     // is the durable record a gateway rehydrates the room from (B2).
-                    {
+                    if (transport.mode !== 'web' && !event.pod_room) {
                         const _desc = buildRoomDescriptor({
                             roomId: event.room_id, title: event.name, owner: selfWebId,
                             members: [{ webid: selfWebId, role: 'owner' }],
@@ -2817,8 +2854,8 @@ import { createAccountSync } from './account-sync.js';
                             .then((signed) => podWriteRoomDescriptor(signed))
                             .catch(() => {});
                     }
-                    _podUpdateRoomIndex(event.room_id, true).catch(() => {});
-                    if (solidSession.info.isLoggedIn && selfWebId) {
+                    if (transport.mode !== 'web' && !event.pod_room) _podUpdateRoomIndex(event.room_id, true).catch(() => {});
+                    if (transport.mode !== 'web' && !event.pod_room && solidSession.info.isLoggedIn && selfWebId) {
                         podSetContainerAcl(`rooms/${event.room_id}/`, selfWebId, []).catch(() => {});
                         podWriteRoomMembers(event.room_id, [{ webid: selfWebId, role: 'admin' }])
                             .catch(() => {});
@@ -3668,6 +3705,7 @@ import { createAccountSync } from './account-sync.js';
                     break;
                 }
                 case "error": {
+                    scheduledComposer.handleEvent(event);
                     // A read refused by the gateway's rate budget is resent once the
                     // window resets instead of leaving a sidebar or feed empty.
                     _perConnection();
@@ -3955,6 +3993,7 @@ import { createAccountSync } from './account-sync.js';
                 }
                 case "message_scheduled":
                 case "scheduled_created":
+                    scheduledComposer.handleEvent(event);
                     showToast(t('schedule.scheduled'));
                     if (event.id && event.thread_id) {
                         podWriteScheduled(event.id, event.thread_id, event.send_at || '', event.content_preview || '').catch(() => {});
@@ -4371,24 +4410,36 @@ import { createAccountSync } from './account-sync.js';
         // is the member record, so it is updated first and every later approval
         // builds on it; the chat ACL is then rewritten from it, so letting one
         // person in never drops someone approved earlier.
-        async function _approveWebJoin(webid, roomId, fallbackDesc) {
-            const cur = (await podReadRoomDescriptor(roomId)) || fallbackDesc;
-            const updated = withMembers(cur, [...(cur.members || []), { webid, role: 'member' }]);
-            await signRoomDescriptor({
-                ...updated, name: updated.title, code: roomId,
-                creator_webid: selfWebId, created_at: updated.created,
-            }).then((signed) => podWriteRoomDescriptor(signed)).catch(() => {});
-            const members = updated.members.filter(m => !m.banned).map(m => m.webid);
-            // Grant read + append on the Long Chat container so the joiner can
-            // SEE and POST messages (they write to it directly, gateway-free).
-            // The room's read-only member ACL (rooms/) is for the gateway model;
-            // here participants write to the owner's chat container themselves.
-            const chatContainer = chatRootUrl(podStorageRoot(), roomId);
-            await podGrantChatParticipants(chatContainer, selfWebId, members.filter(w => w !== selfWebId)).catch(() => {});
-            await podWriteRoomMembers(roomId, members.map(w => ({ webid: w, role: w === selfWebId ? 'admin' : 'member' }))).catch(() => {});
+        const _ownerMembership = createOwnerMembership({
+            read: podReadRoomDescriptorVersion,
+            write: podWriteRoomDescriptorVersion,
+            getOwnerId: () => selfWebId,
+            signDescriptor: (desc) => signRoomDescriptor({
+                ...desc, name: desc.title, code: desc.room_id,
+                creator_webid: desc.owner, created_at: desc.created,
+            }),
+            apply: (desc, isCurrent) => _applyWebRoomMembers(desc, isCurrent),
+        });
+        async function _applyWebRoomMembers(desc, isCurrent) {
+            if (!isCurrent()) return false;
+            const members = desc.members.filter(m => !m.banned).map(m => m.webid);
+            const container = chatRootUrl(podStorageRoot(), desc.room_id);
+            if (!(await podGrantChatParticipants(container, desc.owner, members.filter(w => w !== desc.owner)))) return false;
+            if (!isCurrent()) return false;
+            return podWriteRoomMembers(desc.room_id, members.map(w => ({ webid: w, role: w === desc.owner ? 'admin' : 'member' })));
+        }
+        async function _approveWebJoin(webid, roomId) {
+            const result = await _ownerMembership.update(roomId, (cur) => {
+                const existing = (cur.members || []).find(m => m.webid === webid);
+                if (existing?.banned) return null;
+                return existing ? cur : withMembers(cur, [...(cur.members || []), { webid, role: 'member' }]);
+            });
+            if (!result.ok || result.descriptor?.owner !== selfWebId) return false;
+            if (result.skipped || !result.descriptor.members.some(m => m.webid === webid && !m.banned)) return null;
+            const updated = result.descriptor;
             _local_rooms[roomId] = _local_rooms[roomId] || {};
-            _local_rooms[roomId].memberWebIds = new Set(members);
-            await window.proxionWebJoin?.sendApproval(webid, roomId, cur.title || '');
+            _local_rooms[roomId].memberWebIds = new Set(updated.members.filter(m => !m.banned).map(m => m.webid));
+            return !!(await window.proxionWebJoin?.sendApproval(webid, roomId, updated.title || ''));
         }
 
         async function _onWebJoinRequest(req) {
@@ -4398,14 +4449,12 @@ import { createAccountSync } from './account-sync.js';
             // Null can mean "not our room" OR "descriptor not readable yet"; keep the
             // request (return false) so a later drain retries instead of dropping it.
             if (!desc) return false;
+            if (desc.owner !== selfWebId) return true;
             const existing = (desc.members || []).find(m => m.webid === req.from_webid);
             if (existing && existing.banned) return true;
             // Already a member (opened the link again, or a new device): answer
             // without asking the owner a second time.
-            if (existing) {
-                await window.proxionWebJoin?.sendApproval(req.from_webid, roomId, desc.title || '');
-                return true;
-            }
+            if (existing) return _queueJoinPrompt(() => _approveWebJoin(req.from_webid, roomId));
             return _queueJoinPrompt(async () => {
                 const who = await _joinRequesterLabel(req);
                 const answer = await _askJoinOnce(t('join.approvePrompt', { who, room: desc.title || roomId }), {
@@ -4415,10 +4464,11 @@ import { createAccountSync } from './account-sync.js';
                 });
                 if (answer === null) return false;   // unanswered: keep it for next time
                 if (answer === 'no') {
-                    await window.proxionWebJoin?.sendDecline(req.from_webid, roomId);
-                    return true;
+                    return !!(await window.proxionWebJoin?.sendDecline(req.from_webid, roomId));
                 }
-                await _approveWebJoin(req.from_webid, roomId, desc);
+                const approved = await _approveWebJoin(req.from_webid, roomId);
+                if (approved === false) return false;
+                if (approved !== true) return true;
                 showToast(t('join.approved', { who }));
                 return true;
             });
@@ -4445,11 +4495,12 @@ import { createAccountSync } from './account-sync.js';
         // owner is the room's verified owner: it is passed to the reader so an
         // owner-moderation delete on the owner's pod authenticates.
         function _registerRemoteRoom(roomId, info) {
-            if (_remoteRooms[roomId]) return false;
+            const existed = !!_remoteRooms[roomId];
             _remoteRooms[roomId] = { ownerPodRoot: info.ownerPodRoot, container: info.container, title: info.title, owner: info.owner };
             addRoomToSidebar(roomId, info.title, '');
             _trackRoomSync(roomId);
-            return true;
+            webRoomAccess?.track({ roomId, ..._remoteRooms[roomId], ownerPodRoot: info.ownerPodRoot, owned: false });
+            return !existed;
         }
 
         // Watch a room (owned or joined) for new messages from others.
@@ -4498,30 +4549,15 @@ import { createAccountSync } from './account-sync.js';
             }
         }
 
-        // Joined-room records: the pod copy is authoritative (so leaving on one
-        // device holds on the others), the WebID-scoped localStorage copy is used
-        // when the pod cannot be read.
-        function _joinedCacheRead() {
-            try { return normalizeJoinedList(JSON.parse(localStorage.getItem(joinedCacheKey(selfWebId)) || '[]')); } catch (_) { return []; }
-        }
-        function _joinedCacheWrite(list) {
-            try { localStorage.setItem(joinedCacheKey(selfWebId), JSON.stringify(list)); } catch (_) { /* ignore */ }
-        }
-        async function _listJoinedRooms() {
-            const fromPod = await podReadJoinedRooms();
-            if (fromPod == null) return _joinedCacheRead();
-            const list = normalizeJoinedList(fromPod);
-            _joinedCacheWrite(list);
-            return list;
-        }
-        async function _updateJoinedRooms(change) {
-            const fromPod = await podReadJoinedRooms();
-            const list = change(fromPod == null ? _joinedCacheRead() : normalizeJoinedList(fromPod));
-            _joinedCacheWrite(list);
-            // Only write back over a list we could read, so a failed read never
-            // replaces the pod copy with this device's possibly older one.
-            if (fromPod != null) await podWriteJoinedRooms(list);
-        }
+        // Commit membership to the pod before consuming its approval. Serialize
+        // local updates so two accepted rooms cannot overwrite each other.
+        const _joinedRooms = createJoinedRoomStore({
+            read: podReadJoinedRooms, write: podWriteJoinedRooms,
+            readVersion: podReadJoinedRoomsVersion, writeVersion: podWriteJoinedRoomsVersion,
+            getWebId: () => selfWebId, storage: localStorage,
+        });
+        function _listJoinedRooms() { return _joinedRooms.list(); }
+        function _updateJoinedRooms(change) { return _joinedRooms.update(change); }
 
         // Web build: the rooms event lists joined rooms with their record. Vet
         // each one again (the record is ours, but its fields came from a drop).
@@ -4548,7 +4584,9 @@ import { createAccountSync } from './account-sync.js';
             // public-Append, so without this an attacker could drop a forged
             // approval and force a room in + make us fetch their pod. Checked BEFORE
             // any fetch of the owner's pod below.
-            if (!(await podHasPendingJoin(appr.room_id, appr.owner_webid))) return;
+            const pending = await podHasPendingJoin(appr.room_id, appr.owner_webid);
+            if (pending == null) return false;
+            if (!pending) return true;
             const roomId = appr.room_id;
             const desc = await podReadRoomDescriptorAt(appr.owner_pod_root, roomId);
             const container = _vetRemoteRoom(roomId, appr.owner_webid, appr.owner_pod_root, desc && desc.long_chat);
@@ -4557,10 +4595,10 @@ import { createAccountSync } from './account-sync.js';
             // Remember the room in our own pod, so it is still here after a reload
             // and on our other devices.
             const rec = { roomId, owner: appr.owner_webid, ownerPodRoot: appr.owner_pod_root, container, title };
-            await _updateJoinedRooms((list) => withJoinedRecord(list, rec)).catch(() => {});
+            if (!(await _updateJoinedRooms((list) => withJoinedRecord(list, rec)))) return false;
             // The request is fulfilled: drop the pending marker so it can't be
             // replayed and doesn't linger in our pod.
-            podDeletePendingJoin(roomId, appr.owner_webid).catch(() => {});
+            await podDeletePendingJoin(roomId, appr.owner_webid).catch(() => {});
             _clearJoinPendingBanner(roomId);
             if (!_registerRemoteRoom(roomId, { ownerPodRoot: appr.owner_pod_root, container, title, owner: appr.owner_webid })) return;
             showToast(t('join.joined', { room: title }));
@@ -4570,20 +4608,36 @@ import { createAccountSync } from './account-sync.js';
         // could otherwise clear the waiting state for a room we never asked for).
         async function _onWebJoinDeclined(msg) {
             if (!msg || !msg.room_id || !msg.owner_webid) return true;
-            if (!(await podHasPendingJoin(msg.room_id, msg.owner_webid))) return true;
+            const pending = await podHasPendingJoin(msg.room_id, msg.owner_webid);
+            if (pending == null) return false;
+            if (!pending) return true;
             podDeletePendingJoin(msg.room_id, msg.owner_webid).catch(() => {});
             _clearJoinPendingBanner(msg.room_id);
             showToast(t('join.declined'));
             return true;
         }
 
+        // Save the descriptor and access rules before exposing the new invite.
+        async function _webCreateRoom(roomId, name) {
+            const desc = buildRoomDescriptor({
+                roomId, title: name, owner: selfWebId,
+                members: [{ webid: selfWebId, role: 'owner' }],
+            });
+            const full = { ...desc, name, code: roomId, creator_webid: selfWebId, created_at: desc.created };
+            if (!(await podWriteRoomDescriptor(await signRoomDescriptor(full)))) return false;
+            if (!(await podSetContainerAcl(`rooms/${roomId}/`, selfWebId, []))) return false;
+            if (!(await podWriteRoomMembers(roomId, [{ webid: selfWebId, role: 'admin' }]))) return false;
+            return !!(await podRegisterRoomChat(roomId));
+        }
+
         // Web build room actions behind the PodSocket (leave, delete, members).
         async function _webLeaveRoom(roomId) {
             const rr = _remoteRooms[roomId];
             if (!rr) return false;   // an owned room is deleted, not left
+            if (!(await _updateJoinedRooms((list) => withoutJoinedRecord(list, roomId)))) return false;
+            webRoomAccess?.untrack(roomId);
             if (webRoomSync) webRoomSync.untrack(roomId);
             delete _remoteRooms[roomId];
-            await _updateJoinedRooms((list) => withoutJoinedRecord(list, roomId)).catch(() => {});
             return true;
         }
         async function _webDeleteRoom(roomId) {
@@ -4598,26 +4652,32 @@ import { createAccountSync } from './account-sync.js';
         // chat ACL is rewritten from it, so their next append is refused.
         async function _webKickMember(roomId, webid) {
             if (!roomCreatorOf.has(roomId) || _remoteRooms[roomId] || webid === selfWebId) return false;
-            const cur = await podReadRoomDescriptor(roomId);
-            if (!cur || cur.owner !== selfWebId) return false;
-            const updated = withMembers(cur, cur.members.filter(m => m.webid !== webid));
-            await signRoomDescriptor({
-                ...updated, name: updated.title, code: roomId,
-                creator_webid: selfWebId, created_at: updated.created,
-            }).then((signed) => podWriteRoomDescriptor(signed)).catch(() => {});
-            const members = updated.members.filter(m => !m.banned).map(m => m.webid);
-            const ok = await podGrantChatParticipants(chatRootUrl(podStorageRoot(), roomId), selfWebId, members.filter(w => w !== selfWebId));
-            await podWriteRoomMembers(roomId, members.map(w => ({ webid: w, role: w === selfWebId ? 'admin' : 'member' }))).catch(() => {});
+            const result = await _ownerMembership.update(roomId, cur => withMembers(cur, cur.members.filter(m => m.webid !== webid)));
+            if (!result.ok || result.descriptor?.owner !== selfWebId) return false;
+            const members = result.descriptor.members.filter(m => !m.banned).map(m => m.webid);
             if (_local_rooms[roomId]) _local_rooms[roomId].memberWebIds = new Set(members);
-            return ok;
+            return !members.includes(webid);
         }
-        // Joiner: the owner's pod refused our append, so they took us out.
+        // Confirmed access removal also removes the durable joined record before
+        // closing the room. A failed save stays tracked for a later retry.
         async function _webRemovedFromRoom(roomId) {
-            if (!_remoteRooms[roomId]) return;
+            const rec = _remoteRooms[roomId], actor = selfWebId;
+            if (!rec) return true;
+            if (!(await _updateJoinedRooms((list) => withoutJoinedRecord(list, roomId)))) return false;
+            if (selfWebId !== actor || _remoteRooms[roomId] !== rec) return false;
+            webRoomAccess?.untrack(roomId);
             if (webRoomSync) webRoomSync.untrack(roomId);
             delete _remoteRooms[roomId];
-            await _updateJoinedRooms((list) => withoutJoinedRecord(list, roomId)).catch(() => {});
             _handleEventAsync({ type: 'kicked_from_room', room_id: roomId }, true);
+            // Discard failed writes for this revoked membership, so a later
+            // rejoin cannot unexpectedly send text queued before removal.
+            podQueueList().then(async (entries) => {
+                for (const entry of entries) {
+                    if (selfWebId !== actor) return;
+                    if (entry.room_id === roomId && entry.from_webid === actor) await podQueueRemove(entry.message_id);
+                }
+            }).catch(() => {});
+            return true;
         }
         const _webNameCache = new Map();
         async function _webMemberName(webid) {
@@ -5366,15 +5426,19 @@ import { createAccountSync } from './account-sync.js';
         // schedule button is off in end-to-end encrypted DMs (dmkey.js).
         function _scheduleAllowed() {
             return canScheduleInView(activeView, {
+                supported: _conversationSupports('schedule'),
                 hasKey: (id) => isE2EEnabled(id),
                 multiDevice: (id) => identity.devicesForPeer(id).length >= 2,
             });
         }
+        function _scheduleUnavailableText() {
+            return t(_conversationSupports('schedule') ? 'schedule.e2eUnavailable' : 'schedule.unavailable');
+        }
         function _syncScheduleBtn() {
             const btn = document.getElementById("schedule-btn");
             if (!btn) return;
-            const ok = !activeView || _scheduleAllowed();
-            const label = ok ? t('ui.scheduleMessage') : t('schedule.e2eUnavailable');
+            const ok = _conversationSupports('schedule') && (!activeView || _scheduleAllowed());
+            const label = ok ? t('ui.scheduleMessage') : _scheduleUnavailableText();
             if (ok) btn.removeAttribute("aria-disabled"); else btn.setAttribute("aria-disabled", "true");
             btn.title = label;
             btn.setAttribute("aria-label", label);
@@ -5410,8 +5474,8 @@ import { createAccountSync } from './account-sync.js';
             // The browser build has no backing for these yet (transport.js
             // 'room-admin'; set_disappear_timer is a gateway command), so it
             // does not offer them.
-            const adminOk = transport.supports("room-admin");
-            const canSet = adminOk && transport.supports('disappear') && (type === "local_dm" || type === "dm" ||
+            const adminOk = _conversationSupports("room-admin");
+            const canSet = adminOk && _conversationSupports('disappear') && (type === "local_dm" || type === "dm" ||
                 ((type === "local_room" || type === "room") && roomCreatorOf.has(activeView.id)));
             if (item) item.hidden = !canSet;
             // Unbanning lives in the Banned members dialog, opened from here.
@@ -5432,7 +5496,7 @@ import { createAccountSync } from './account-sync.js';
             // only the owner may add them.
             const intBtn = document.getElementById("integrations-btn");
             if (intBtn) intBtn.style.display =
-                (type === "local_room" && roomCreatorOf.has(activeView.id)) ? "inline-block" : "none";
+                (adminOk && type === "local_room" && roomCreatorOf.has(activeView.id)) ? "inline-block" : "none";
             updateDisappearBanner(0);
             if (activeView?.id && socket && socket.readyState === WebSocket.OPEN) {
                 socket.send(JSON.stringify({ cmd: "get_disappear_timer", room_id: activeView.id }));
@@ -5696,6 +5760,8 @@ import { createAccountSync } from './account-sync.js';
         function _webResume() {
             flushPodQueue();
             sendStatus.retryUndelivered();
+            for (const [roomId, room] of Object.entries(_remoteRooms)) webRoomAccess?.track({ roomId, ...room, owned: false });
+            webRoomAccess?.checkAll().catch(() => {});
         }
 
         // Browser build: one banner for a lost network, an unreachable pod and a
@@ -5994,11 +6060,18 @@ import { createAccountSync } from './account-sync.js';
                             const _res = await podWriteChatMessageAtResult(_remoteRoom.container, clientMsgId, _podMsg);
                             const ok = _res.ok;
                             if (ok) podQueueRemove(clientMsgId);
-                            else if (_res.status === 403) {
-                                // Not a hiccup: the owner removed us. Nothing to retry.
-                                _webRemovedFromRoom(_roomId).catch(() => {});
+                            else if (_res.status === 403 && !_res.policy) {
+                                // A lapsed session can also deny a write. Keep it
+                                // queued unless independent access checks confirm removal.
+                                const access = await webRoomAccess?.check(_roomId, { denied: true });
+                                if (access === 'removed') podQueueRemove(clientMsgId);
+                                else {
+                                    podQueueAdd({ message_id: clientMsgId, room_id: _roomId, from_webid: _podMsg.from_webid,
+                                        msg: _podMsg, container: _remoteRoom.container });
+                                    _schedulePodQueueRetry();
+                                }
                             } else {
-                                podQueueAdd({ message_id: clientMsgId, room_id: _roomId, from_webid: selfWebId,
+                                podQueueAdd({ message_id: clientMsgId, room_id: _roomId, from_webid: _podMsg.from_webid,
                                     msg: _podMsg, container: _remoteRoom.container });
                                 _schedulePodQueueRetry();
                             }
@@ -6014,7 +6087,7 @@ import { createAccountSync } from './account-sync.js';
                             const ok = await podWriteMessageJsonLd(_roomId, clientMsgId, _podMsg, true);
                             if (ok) podQueueRemove(clientMsgId);
                             else {
-                                podQueueAdd({ message_id: clientMsgId, room_id: _roomId, from_webid: selfWebId, msg: _podMsg });
+                                podQueueAdd({ message_id: clientMsgId, room_id: _roomId, from_webid: _podMsg.from_webid, msg: _podMsg });
                                 _schedulePodQueueRetry();
                             }
                             return ok;
@@ -6558,7 +6631,10 @@ import { createAccountSync } from './account-sync.js';
             try { savedMsgs.renderSaved(); } catch (_) { /* not wired yet */ }
         }
         // R59F: polls (plain-text message; votes are keycap reactions)
-        const polls = createPolls({ showToast });
+        const polls = createPolls({ showToast,
+            canCreatePoll: () => _conversationSupports('polls'),
+            onUnavailable: () => showToast(t('poll.unavailable')),
+        });
         polls.wirePolls();
         // R60B: meme generator (GIF-tray button + image-message caption action)
         const meme = createMeme({ showToast, sendAttachmentFile });
@@ -6900,6 +6976,12 @@ import { createAccountSync } from './account-sync.js';
                 callCapablePins.clear();
                 const _obName = document.getElementById('ob-name');
                 if (_obName) _obName.value = '';
+            }
+            if (transport.mode === 'web' && selfWebId !== webId) {
+                webRoomAccess?.stop();
+                webRoomSync?.stop();
+                for (const id of Object.keys(_remoteRooms)) delete _remoteRooms[id];
+                for (const id of Object.keys(_webRoomCache)) delete _webRoomCache[id];
             }
             localStorage.setItem('proxion_pod_webid', webId);
             selfWebId = webId;
@@ -7281,7 +7363,7 @@ import { createAccountSync } from './account-sync.js';
 
             // Round 69: Schedule button and picker
             attachListener('#schedule-btn', 'click', () => {
-                if (activeView && !_scheduleAllowed()) { showToast(t('schedule.e2eUnavailable')); return; }
+                if (!_scheduleAllowed()) { showToast(_scheduleUnavailableText()); return; }
                 openSchedulePicker();
             });
             attachListener('#schedule-confirm-btn', 'click', () => {
@@ -7293,11 +7375,9 @@ import { createAccountSync } from './account-sync.js';
                 const when = new Date(dt);
                 if (isNaN(when) || when.getTime() <= Date.now()) { showToast(t('schedule.needFuture')); return; }
                 const sendAt = when.toISOString().replace('Z', '+00:00');
-                if (!_scheduleAllowed()) { showToast(t('schedule.e2eUnavailable')); return; }
+                if (!_scheduleAllowed()) { showToast(_scheduleUnavailableText()); return; }
                 const _isDm = activeView.type === 'dm' || activeView.type === 'local_dm';
-                sendCmd('schedule_message', {thread_id:activeView.id, content, send_at:sendAt, ...(_isDm ? { plaintext_ok: true } : {})});
-                document.getElementById('message-input').value = '';
-                document.getElementById('schedule-picker').style.display = 'none';
+                scheduledComposer.submit({thread_id:activeView.id, content, send_at:sendAt, ...(_isDm ? { plaintext_ok: true } : {})});
             });
             attachListener('#schedule-cancel-btn', 'click', () => {
                 document.getElementById('schedule-picker').style.display = 'none';
@@ -7640,6 +7720,8 @@ import { createAccountSync } from './account-sync.js';
                 // the Solid session, forget this account here, and reload to the
                 // sign-in screen.
                 if (transport.mode === 'web') {
+                    webRoomAccess?.stop();
+                    webRoomSync?.stop();
                     try { await solidLogout(); } catch (_) {}
                     purgeWebAccount(localStorage);
                     window.location.reload();
@@ -7669,6 +7751,8 @@ import { createAccountSync } from './account-sync.js';
                 // End the Solid session and purge what this browser cached from
                 // it: decrypted DM history, saved messages, ratchet state, the
                 // SW cache and the offline queue.
+                webRoomAccess?.stop();
+                webRoomSync?.stop();
                 try { await solidLogout(); } catch (_) {}
                 // The identity key and the gateway's rooms and messages survive.
                 const _podKeys = [
@@ -7702,6 +7786,8 @@ import { createAccountSync } from './account-sync.js';
                 if (_hasGateway) {
                     try { await fetch(gatewayUrl('/api/pod-disconnect'), { method: 'POST' }); } catch (_) {}
                 }
+                webRoomAccess?.stop();
+                webRoomSync?.stop();
                 try { await solidLogout(); } catch (_) {}
                 localStorage.clear();
                 sessionStorage.clear();
@@ -8556,6 +8642,13 @@ import { createAccountSync } from './account-sync.js';
                     });
                     // New room messages from others, for every room (owned and
                     // joined): each room's current Long Chat day file is watched.
+                    webRoomAccess?.stop();
+                    webRoomAccess = createRoomAccessMonitor({
+                        fetch: (url, options) => solidSession.fetch(url, options),
+                        getSession: () => ({ webId: selfWebId, root: podStorageRoot(),
+                            ready: !!solidSession.info.isLoggedIn && (!_podHealth || _podHealth.state() === 'ok') }),
+                        onRemoved: (roomId) => _webRemovedFromRoom(roomId),
+                    });
                     webRoomSync = createRoomSync({
                         readDay: (room, date) => podReadChatDayAt(room.container, date, room.roomId, room.owner),
                         dayUrl: (room, date) => dayFileAt(room.container, date),
@@ -8570,6 +8663,7 @@ import { createAccountSync } from './account-sync.js';
                         calls: webCalls,
                         join: webJoin,
                         rooms: {
+                            createOwned: (roomId, name) => _webCreateRoom(roomId, name),
                             listJoined: () => _listJoinedRooms(),
                             leave: (roomId) => _webLeaveRoom(roomId),
                             deleteOwned: (roomId) => _webDeleteRoom(roomId),
@@ -8577,6 +8671,14 @@ import { createAccountSync } from './account-sync.js';
                             kick: (roomId, webid) => _webKickMember(roomId, webid),
                         },
                         makeRoomInvite: (roomId) => makeInvite(roomId, selfWebId, window.location.href, { webMode: true }),
+                        searchRooms: (query) => searchLoadedRooms(query, [
+                            ...Object.entries(_webRoomCache)
+                                .filter(([id]) => document.getElementById('nav-' + id))
+                                .map(([id, messages]) => ({ id, name: _threadNames[id] || id, messages })),
+                            ...(activeView?.type === 'local_room'
+                                ? [{ id: activeView.id, name: activeView.name || activeView.id, messages: allMessages }]
+                                : []),
+                        ]),
                         history: _webCachedHistory,
                         blockStore: _webBlockStore,
                     });
@@ -8601,6 +8703,7 @@ import { createAccountSync } from './account-sync.js';
                     webCalls.start().catch(() => {}); // ensure call inbox + drain + subscribe
                     webJoin.start().catch(() => {});  // ensure join inbox + drain + subscribe
                     _restoreJoinPending().catch(() => {});   // a join still waiting on its owner
+                    window.proxionWebRoomAccess = webRoomAccess;
                     window.proxionWebRooms = webRoomSync;   // for smokes
                     // R107: publish this device's DM signer identity so peers can
                     // verify our DMs really came from us.

@@ -337,6 +337,8 @@ export function createRendering({
     maxRendered = renderWindow * 3,
     // Re-applies send state (pending, not delivered, not saved) to a drawn row.
     decorateMessage = () => {},
+    // Poll votes use the conversation's reaction protocol.
+    canVotePoll = () => true,
 }) {
     const RENDER_WINDOW = renderWindow;
     const SCROLL_BATCH = scrollBatch;
@@ -834,11 +836,13 @@ export function createRendering({
             // R59F: poll card — plain text on the wire, upgraded rendering here.
             // Each option is a vote button; renderReactions fills in the
             // counts from the keycap reactions, so they live-update.
+            const voting = canVotePoll();
+            const unavailable = voting ? '' : ` disabled aria-disabled="true" title="${escHtml(t('poll.unavailable'))}"`;
             const rows = _poll.options.map(o =>
-                `<button type="button" class="poll-opt" data-msg-action="poll-vote" data-msg-id="${msgIdEsc}" data-emoji="${o.emoji}" aria-pressed="false"><span class="poll-opt-bar" aria-hidden="true"></span><span class="poll-opt-text">${o.emoji} ${escHtml(o.text)}</span><span class="poll-opt-count"></span></button>`).join('');
+                `<button type="button" class="poll-opt" data-msg-action="poll-vote" data-msg-id="${msgIdEsc}" data-emoji="${o.emoji}" aria-pressed="false"${unavailable}><span class="poll-opt-bar" aria-hidden="true"></span><span class="poll-opt-text">${o.emoji} ${escHtml(o.text)}</span><span class="poll-opt-count"></span></button>`).join('');
             bodyHtml += `<div id="msgc-${msgIdEsc}" class="msg-content"><div class="poll-card" dir="auto">
                 <div class="poll-q">${escHtml(_poll.question)}</div>${rows}
-                <div class="poll-foot"><span class="poll-hint">${t('poll.voteHint')}</span>${editedHtml}${receiptHtml}</div></div></div>`;
+                <div class="poll-foot"><span class="poll-hint">${t(voting ? 'poll.voteHint' : 'poll.unavailable')}</span>${editedHtml}${receiptHtml}</div></div></div>`;
         } else if (isFileCaption(msg)) {
             // The card names the file; the "📎 name" caption would repeat it.
             bodyHtml += `<div id="msgc-${msgIdEsc}" class="msg-content msg-content--file"><span class="msg-text" dir="auto"></span>${editedHtml}${receiptHtml}</div>`;

@@ -255,6 +255,20 @@ describe('search panel', () => {
     expect(dom['search-hint'].textContent).toBe('');
   });
 
+  it('labels local search scope and explains failures without claiming there were no matches', () => {
+    const m = mk();
+    dom['search-input'].value = 'hello';
+    m.renderSearchResults({ query: 'hello', results: [], local_scope: true });
+    let html = dom['search-panel'].querySelector('[data-search-results]').innerHTML;
+    expect(html).toContain('search.localScope');
+    expect(html).toContain('search.noMatches');
+    m.renderSearchResults({ query: 'hello', results: [], local_scope: true, error: 'pod_operation_failed' });
+    html = dom['search-panel'].querySelector('[data-search-results]').innerHTML;
+    expect(html).toContain('search.failed');
+    expect(html).toContain('search.localScope');
+    expect(html).not.toContain('search.noMatches');
+  });
+
   it('clicking a result closes the panel and opens the message', () => {
     const m = mk();
     dom['search-input'].value = 'hello';

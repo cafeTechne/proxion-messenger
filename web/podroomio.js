@@ -30,6 +30,8 @@ import {
 import { parseRoomDescriptor } from './roomdesc.js';
 import { accessControlUrl, detectAclModel, buildAcpAcr } from './acl.js';
 import { publicReadAclBody } from './podio.js';
+import { parseInboxListing } from './ldn.js';
+import { isStrongEtag } from './room-membership.js';
 
 export const SAFE_ID_RE = /^[\w-]{1,128}$/;
 // Foreign Long Chat reads are on attacker-supplied URLs and bodies: bound how
@@ -52,11 +54,11 @@ export function isValidChatContainer(url) {
 
 export function validateWebId(wid) {
     if (typeof wid !== 'string') return false;
-    if (!wid.startsWith('https://')) return false;
     if (/[<>"{}|\\^`\s]/.test(wid)) return false;
     try {
-        new URL(wid);
-        return true;
+        const url = new URL(wid);
+        return url.protocol === 'https:' || (url.protocol === 'http:'
+            && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname));
     } catch {
         return false;
     }
@@ -253,15 +255,15 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
     /** Remove a chat container's registration from the public type index. */
     async function podDeregisterChat(containerUrl) {
         if (!containerUrl || !_loggedIn()) return false;
-        const indexUrl = await podReadPublicTypeIndexUrlFor(webId());
-        if (!indexUrl) return true;   // nothing linked, nothing to remove
+        const indexUrl = (await podReadPublicTypeIndexUrlFor(webId())) || (_root() && `${_root()}settings/publicTypeIndex.ttl`);
+        if (!indexUrl) return true;   // no pod index to update
         try {
             const res = await fetch(indexUrl, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/sparql-update' },
                 body: buildDeregisterPatch({ indexUrl, containerUrl }),
             });
-            return !!(res && res.ok);
+            return !!(res && (res.ok || res.status === 404));
         } catch (err) {
             console.warn('[pod] podDeregisterChat failed:', err);
             return false;
@@ -270,7 +272,11 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
 
     /** Chat containers registered for meeting:LongChat in our public type index. */
     async function podListRegisteredChats() {
-        const indexUrl = await podReadPublicTypeIndexUrlFor(webId());
+        if (!_loggedIn()) return [];
+        // Creation can succeed even when the profile refuses the discovery link.
+        // Read the same fallback index used by podEnsurePublicTypeIndex after a
+        // reload instead of making that successful registration unreachable.
+        const indexUrl = (await podReadPublicTypeIndexUrlFor(webId())) || (_root() && `${_root()}settings/publicTypeIndex.ttl`);
         if (!indexUrl) return [];
         try {
             const json = await _fetchJsonCapped(indexUrl, { headers: { Accept: 'application/ld+json' }, redirect: 'error' }, MAX_POD_LISTING_BYTES);
@@ -326,6 +332,50 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
         }
     }
 
+    /** A fresh descriptor and its HTTP version, bound to this pod and room. */
+    async function podReadRoomDescriptorVersion(roomId) {
+        const root = _root();
+        if (!SAFE_ID_RE.test(roomId) || !root || !_loggedIn()) return { ok: false, status: 0 };
+        const url = `${root}rooms/${roomId}/room.json`;
+        try {
+            const res = await fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store', redirect: 'error' });
+            const status = res?.status || 0;
+            if (status === 404) return { ok: true, status, roomId, url, missing: true, descriptor: null, etag: null };
+            if (!res?.ok) return { ok: false, status };
+            const text = await res.text();
+            if (text.length > MAX_POD_JSON_BYTES) return { ok: false, status };
+            const descriptor = parseRoomDescriptor(JSON.parse(text));
+            if (!descriptor || descriptor.room_id !== roomId) return { ok: false, status };
+            const etag = res.headers?.get?.('etag') || null;
+            return { ok: true, status, roomId, url, missing: false, descriptor, etag };
+        } catch {
+            return { ok: false, status: 0 };
+        }
+    }
+
+    /** Conditional owner write; an unavailable version never permits an overwrite. */
+    async function podWriteRoomDescriptorVersion(descriptor, version) {
+        const roomId = descriptor?.room_id, root = _root();
+        if (!roomId || !SAFE_ID_RE.test(roomId) || !root || !_loggedIn()) return { ok: false, status: 0 };
+        const url = `${root}rooms/${roomId}/room.json`;
+        if (!version?.ok || version.roomId !== roomId || version.url !== url) {
+            return { ok: false, status: 0, reason: 'version_unavailable' };
+        }
+        const headers = { 'Content-Type': 'application/json' };
+        if (version.missing === true) headers['If-None-Match'] = '*';
+        else if (isStrongEtag(version.etag)) headers['If-Match'] = version.etag;
+        else return { ok: false, status: 0, reason: 'version_unavailable' };
+        const doc = { ...descriptor };
+        if (!doc.long_chat) doc.long_chat = chatRootUrl(root, roomId);
+        try {
+            const res = await fetch(url, { method: 'PUT', headers, body: JSON.stringify(doc), redirect: 'error' });
+            const status = res?.status || 0;
+            return { ok: !!res?.ok, status, conflict: status === 412 };
+        } catch {
+            return { ok: false, status: 0 };
+        }
+    }
+
     /** Read a room descriptor from a specific owner's pod (not our own). */
     async function podReadRoomDescriptorAt(ownerPodRoot, roomId) {
         if (!roomId || !SAFE_ID_RE.test(roomId) || !ownerPodRoot || !_loggedIn()) return null;
@@ -344,16 +394,30 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
 
     /**
      * Enumerate the descriptors for rooms this user OWNS, by reading the public type
-     * index for registered chats, mapping each container back to a room id, and
-     * reading its descriptor. Bounded by the number of registered chats.
+     * index and our own rooms/ listing. A descriptor remains discoverable if its
+     * type-index registration failed. At most 5000 safe room IDs are read.
      */
     async function podListOwnedRoomDescriptors(myWebId) {
         if (!myWebId || !_loggedIn()) return [];
         const containers = await podListRegisteredChats();
+        const ids = new Set(containers.map(roomIdFromChatContainer).filter(Boolean));
+        // A descriptor is the durable record even if type-index registration
+        // failed. Recover those rooms from our own rooms/ container as well.
+        // Listing entries only supply safe IDs: every descriptor is fetched
+        // from our pod, never from an arbitrary URL in the listing.
+        const roomsUrl = _root() && `${_root()}rooms/`;
+        if (roomsUrl) {
+            try {
+                const json = await _fetchJsonCapped(roomsUrl, { headers: { Accept: 'application/ld+json' }, redirect: 'error' }, MAX_POD_LISTING_BYTES);
+                for (const url of parseInboxListing(json, roomsUrl)) {
+                    if (!url.startsWith(roomsUrl) || !url.endsWith('/')) continue;
+                    const id = url.slice(roomsUrl.length, -1);
+                    if (SAFE_ID_RE.test(id)) ids.add(id);
+                }
+            } catch { /* type-index discovery still works while listing is unavailable */ }
+        }
         const out = [];
-        for (const c of containers) {
-            const roomId = roomIdFromChatContainer(c);
-            if (!roomId) continue;
+        for (const roomId of [...ids].slice(0, 5000)) {
             const desc = await podReadRoomDescriptor(roomId);
             if (desc && desc.owner === myWebId) out.push(desc);
         }
@@ -362,9 +426,9 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
 
     async function podSetContainerAcl(containerPath, ownerWebId, memberWebIds) {
         const root = _root();
-        if (!root) return;
+        if (!root || !_loggedIn()) return false;
         const containerUrl = root + containerPath;
-        if (!containerUrl.startsWith(root)) return;
+        if (!containerUrl.startsWith(root)) return false;
         try {
             const { url, model } = await discoverAccessControl(containerUrl);
             // Route by the server's access-control model: ACP for ESS-style servers,
@@ -372,13 +436,15 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
             const body = model === 'acp'
                 ? buildAcpAcr(ownerWebId, memberWebIds, containerUrl)
                 : buildWacAcl(ownerWebId, memberWebIds, containerUrl);
-            await fetch(url, {
+            const res = await fetch(url, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'text/turtle' },
                 body,
             });
+            return !!(res && res.ok);
         } catch (err) {
             console.warn('access-control write failed:', err);
+            return false;
         }
     }
 
@@ -565,7 +631,7 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
         if (!isValidChatContainer(containerUrl) || !_peerRootAllowed(containerUrl) || !_loggedIn()) return null;
         try {
             const doc = await _fetchJsonCapped(containerUrl + 'members.jsonld',
-                { headers: { Accept: 'application/ld+json' }, redirect: 'error' }, MAX_POD_JSON_BYTES);
+                { headers: { Accept: 'application/json' }, redirect: 'error' }, MAX_POD_JSON_BYTES);
             const raw = doc && doc['px:members'];
             if (!Array.isArray(raw)) return null;
             const out = [];
@@ -586,11 +652,11 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
     /** Write the member list of a room we host (members.jsonld in its chat container). */
     async function podWriteRoomMembers(roomId, members) {
         const root = _root();
-        if (!root || !_loggedIn()) return;
+        if (!root || !_loggedIn() || !SAFE_ID_RE.test(roomId)) return false;
         try {
-            await fetch(`${root}proxion/rooms/${roomId}/members.jsonld`, {
+            const res = await fetch(`${root}proxion/rooms/${roomId}/members.jsonld`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/ld+json' },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     '@context': { px: 'https://proxion.dev/vocab/v1#' },
                     '@type': 'px:MemberList',
@@ -599,8 +665,10 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
                     'px:updatedAt': new Date().toISOString(),
                 }),
             });
+            return !!(res && res.ok);
         } catch (err) {
             console.warn('[pod] podWriteRoomMembers failed:', err);
+            return false;
         }
     }
 
@@ -609,6 +677,7 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
         podReadPublicTypeIndexUrlFor, podEnsurePublicTypeIndex,
         podRegisterChat, podDeregisterChat, podListRegisteredChats,
         podWriteRoomDescriptor, podReadRoomDescriptor, podReadRoomDescriptorAt,
+        podReadRoomDescriptorVersion, podWriteRoomDescriptorVersion,
         podListOwnedRoomDescriptors, podSetContainerAcl,
         ensureChatIndexAt, podWriteChatMessageAt, podWriteChatMessageAtResult,
         podReadChatDayAt, podReadChatRecentAt, podGrantChatParticipants,

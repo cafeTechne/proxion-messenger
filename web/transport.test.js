@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
     detectMode, createTransport, createGatewayTransport, createPodTransport,
     NotSupported, FEATURES, gatedControlIds, gatedRootClasses, applyTransportGating,
+    supportsConversationFeature,
 } from './transport.js';
 
 // The module reads window/document/localStorage defensively. Provide/withdraw
@@ -147,6 +148,8 @@ describe('UI gating', () => {
             'settings-address-row',
             'attach-btn',
             'gif-tray-btn',
+            'schedule-btn',
+            'poll-btn',
             'voice-record-btn',
             'settings-sec-devices',
             'settings-sec-connection',
@@ -248,5 +251,31 @@ describe('createTransport', () => {
         // No mode + no signals => gateway, which needs a connection.
         const connection = { socketSendOrQueue: () => {} };
         expect(createTransport({ connection }).mode).toBe('gateway');
+    });
+});
+
+
+describe('conversation capabilities', () => {
+    const gateway = createGatewayTransport({ connection: { socketSendOrQueue() {} } });
+    it('keeps scheduling and poll voting in ordinary gateway rooms', () => {
+        for (const feature of ['schedule', 'polls', 'reactions']) {
+            expect(supportsConversationFeature(gateway, feature)).toBe(true);
+        }
+    });
+    it('withholds commands without a pod protocol from browser and desktop pod conversations', () => {
+        for (const feature of ['schedule', 'polls', 'reactions', 'edit', 'files']) {
+            expect(supportsConversationFeature(createPodTransport(), feature)).toBe(false);
+            expect(supportsConversationFeature(gateway, feature, { podRoom: true })).toBe(false);
+            expect(supportsConversationFeature(gateway, feature, { crossMode: true })).toBe(false);
+        }
+        expect(gatedControlIds(createPodTransport())).toContain('schedule-btn');
+        expect(gatedControlIds(createPodTransport())).toContain('poll-btn');
+    });
+    it('retains supported history and messages when gateway commands are restricted', () => {
+        for (const feature of ['history', 'rooms', 'dm']) {
+            expect(supportsConversationFeature(gateway, feature, { podRoom: true })).toBe(true);
+            expect(supportsConversationFeature(createPodTransport(), feature)).toBe(true);
+        }
+        expect(supportsConversationFeature(null, 'polls')).toBe(false);
     });
 });

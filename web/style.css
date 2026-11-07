@@ -917,6 +917,7 @@ main { background: var(--surface-0); }
 .gate-crossmode #gif-tray-btn,
 .gate-crossmode #voice-record-btn,
 .gate-crossmode #schedule-btn,
+.gate-crossmode #poll-btn,
 .gate-crossmode #room-opt-disappear { display: none !important; }
 
 /* Icon buttons inside the action bar. */
@@ -1669,7 +1670,8 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
     cursor: pointer;
     overflow: hidden;
 }
-.poll-opt:hover { border-color: var(--slate-500); }
+.poll-opt:disabled { cursor: default; opacity: 0.7; }
+.poll-opt:not(:disabled):hover { border-color: var(--slate-500); }
 .poll-opt[aria-pressed="true"] { border-color: var(--accent); }
 .poll-opt-bar {
     position: absolute;

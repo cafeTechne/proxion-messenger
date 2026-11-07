@@ -42,11 +42,12 @@ npm run smoke:a11y            # axe-core WCAG 2.2 AA gate
 npm run smoke:keyboard        # mouse-free journey
 npm run check:i18n            # locale key coverage
 npm run smoke:ci              # browser smokes, single- and two-gateway
+node scripts/run-smokes.mjs pod-required  # required live-pod room journeys
 ```
 
 CI runs the backend suite on Linux, macOS and Windows, the frontend units and
-lint/i18n/contrast checks, the browser smokes (`smoke:ci`), a JSS integration
-job and a sidecar build on each OS (`.github/workflows/ci.yml`). A PR needs all
+lint/i18n/contrast checks, the browser smokes (`smoke:ci`), required live-pod room
+journeys (`pod-required`), a JSS integration job and a sidecar build on each OS (`.github/workflows/ci.yml`). A PR needs all
 of it green. If you touch UI strings, follow the i18n workflow in
 [`web/locales/README.md`](web/locales/README.md) (no markup in strings; run the
 pseudo-locale regeneration).

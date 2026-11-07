@@ -1,6 +1,7 @@
 // Run groups of browser smokes one after another and summarize.
 //
 //   node scripts/run-smokes.mjs ui cross-gateway     # what CI runs
+//   node scripts/run-smokes.mjs pod-required         # required live-pod room journeys
 //   node scripts/run-smokes.mjs all                  # every group, incl. pod + visual
 //
 // Each smoke starts its own gateway(s), so nothing needs to be running first.
@@ -8,10 +9,11 @@
 import { spawn } from 'child_process';
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { SMOKE_SKIP_EXIT } from './smoke-status.mjs';
 
 const WEB = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
-const GROUPS = {
+export const GROUPS = {
   // Single gateway: page boots clean, media path, core journey, rooms, a11y,
   // i18n, first-run setup and settings, the service worker deploy check, and
   // claiming a gateway that requires sign-in.
@@ -25,47 +27,83 @@ const GROUPS = {
   pod: ['smoke_web_nogw.mjs', 'smoke_web_signedin.mjs', 'smoke_web_join.mjs', 'smoke_web_join_link.mjs',
         'smoke_web_dm.mjs', 'smoke_web_account.mjs', 'smoke_web_rooms.mjs', 'smoke_web_session.mjs',
         'smoke_cross_mode_dm.mjs', 'smoke_cross_mode_rooms.mjs', 'smoke_cross_mode_call.mjs'],
+  // A required subset: never pass CI without exercising real pod membership.
+  'pod-required': ['smoke_web_rooms.mjs', 'smoke_cross_mode_rooms.mjs', 'smoke_web_join_link.mjs'],
   // Pixel baselines depend on the machine's font rendering, so local only.
   visual: ['smoke_visual.mjs'],
 };
 
-const names = process.argv.slice(2);
-const wanted = names.includes('all') ? Object.keys(GROUPS) : names;
-const unknown = wanted.filter((g) => !GROUPS[g]);
-if (!wanted.length || unknown.length) {
-  console.error(`usage: run-smokes.mjs <group...>  groups: ${Object.keys(GROUPS).join(', ')}, all`);
-  process.exit(2);
+export function selectGroups(names) {
+  // The required subset is already covered by pod; don't run it twice for all.
+  const wanted = names.includes('all') ? Object.keys(GROUPS).filter((g) => g !== 'pod-required') : names;
+  if (!wanted.length || wanted.some((g) => !GROUPS[g])) throw new Error(
+    `usage: run-smokes.mjs <group...>  groups: ${Object.keys(GROUPS).join(', ')}, all`);
+  return [...new Set(wanted)];
 }
 
 const TIMEOUT_MS = 10 * 60 * 1000;   // the two-direction pod room smoke alone runs about 6 minutes
-function run(file) {
+export function classifySmokeResult({ code, out = '', timedOut = false, error = null, signal = null }) {
+  if (timedOut || error || signal || (code !== 0 && code !== SMOKE_SKIP_EXIT)) return 'failed';
+  // Also recognize older self-skipping scripts, including partial-tier skips.
+  if (code === SMOKE_SKIP_EXIT || /^\s*SMOKE SKIPPED\b/m.test(out)
+      || /^\s*(?:[–-]\s*)?(?:Tier \d+ )?skipped:/im.test(out)) return 'skipped';
+  return 'passed';
+}
+
+export function runSmoke(file, { required = false, spawnProcess = spawn, timeoutMs = TIMEOUT_MS, env = process.env } = {}) {
   return new Promise((res) => {
     const started = Date.now();
-    const p = spawn(process.execPath, [file], { cwd: WEB, env: process.env });
     let out = '';
-    p.stdout.on('data', (d) => { out += d; });
-    p.stderr.on('data', (d) => { out += d; });
-    const timer = setTimeout(() => { out += `\n(timed out after ${TIMEOUT_MS / 1000}s)`; p.kill(); }, TIMEOUT_MS);
-    p.on('close', (code) => {
+    let timedOut = false, finished = false, timer;
+    const finish = (code, signal = null, error = null) => {
+      if (finished) return;
+      finished = true;
       clearTimeout(timer);
-      res({ file, ok: code === 0, secs: Math.round((Date.now() - started) / 1000), out });
-    });
+      if (error) out += `\n${error.message}`;
+      res({ file, status: classifySmokeResult({ code, signal, out, timedOut, error }),
+        required, secs: Math.round((Date.now() - started) / 1000), out });
+    };
+    let p;
+    try {
+      p = spawnProcess(process.execPath, [file], { cwd: WEB,
+        env: { ...env, ...(required ? { PROXION_SMOKE_REQUIRED: '1' } : {}) } });
+    } catch (error) { finish(null, null, error); return; }
+    p.stdout?.on('data', (d) => { out += d; });
+    p.stderr?.on('data', (d) => { out += d; });
+    p.on('error', (error) => finish(null, null, error));
+    p.on('close', (code, signal) => finish(code, signal));
+    timer = setTimeout(() => {
+      timedOut = true;
+      out += `\n(timed out after ${timeoutMs / 1000}s)`;
+      p.kill();
+      // A stuck child must not keep the runner waiting for its close event.
+      finish(null);
+    }, timeoutMs);
   });
 }
 
-const results = [];
-for (const group of wanted) {
-  for (const file of GROUPS[group]) {
-    process.stdout.write(`${group.padEnd(14)} ${file.padEnd(28)} `);
-    const r = await run(file);
-    results.push(r);
-    console.log(`${r.ok ? 'pass' : 'FAIL'}  ${r.secs}s`);
-    if (!r.ok) console.log(r.out.split('\n').map((l) => '    | ' + l).join('\n'));
+export async function runGroups(wanted, { run = runSmoke, write = (s) => process.stdout.write(s),
+  required = process.env.PROXION_SMOKE_REQUIRED === '1' } = {}) {
+  const results = [];
+  for (const group of wanted) {
+    for (const file of GROUPS[group]) {
+      write(`${group.padEnd(14)} ${file.padEnd(28)} `);
+      const r = await run(file, { required: required || group === 'pod-required' });
+      results.push(r);
+      const label = r.status === 'passed' ? 'pass' : (r.status === 'skipped' ? 'SKIP' : 'FAIL');
+      write(`${label}${r.required && r.status === 'skipped' ? ' (required)' : ''}  ${r.secs}s\n`);
+      if (r.status !== 'passed') write(r.out.split('\n').map((l) => '    | ' + l).join('\n') + '\n');
+    }
   }
+  const passed = results.filter((r) => r.status === 'passed').length;
+  const skipped = results.filter((r) => r.status === 'skipped').length;
+  const failures = results.filter((r) => r.status === 'failed' || (r.required && r.status === 'skipped'));
+  write(`\n${passed} passed, ${skipped} skipped, ${results.length - passed - skipped} failed.\n`);
+  if (failures.length) write('Failed or required checks skipped: ' + failures.map((r) => r.file).join(', ') + '\n');
+  return { results, exitCode: failures.length ? 1 : 0 };
 }
-const failed = results.filter((r) => !r.ok);
-console.log(`\n${results.length - failed.length}/${results.length} smokes passed.`);
-if (failed.length) {
-  console.log('Failed: ' + failed.map((r) => r.file).join(', '));
-  process.exitCode = 1;
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try { process.exitCode = (await runGroups(selectGroups(process.argv.slice(2)))).exitCode; }
+  catch (error) { console.error(error.message); process.exitCode = 2; }
 }

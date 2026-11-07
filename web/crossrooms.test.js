@@ -5,6 +5,7 @@ import { createCrossRooms, vetJoinedRoom, webAppUrl, WEB_APP_URL } from './cross
 import { createGwPodBridge } from './gwpod.js';
 import { inviteJoinCommand } from './rooms.js';
 import { parseInvite } from './webjoin.js';
+import { joinedCacheKey, LEGACY_JOINED_ROOMS_UNREADABLE } from './webrooms.js';
 
 const ME = 'https://pod.example/me/profile/card#me';
 const ROOT = 'https://pod.example/me/';
@@ -22,14 +23,21 @@ async function until(fn, ms = 2000) {
 
 // A fake gateway behind a real gwpod bridge: pod_fetch answered from a route
 // table (a function of method + url), pod_room_register from `register`.
-function harness({ routes = () => null, register = () => ({ ok: true }), pending = true, joined = [] } = {}) {
+function harness({ routes = () => null, register = () => ({ ok: true }), pending = true, joined = [], storage, accessPollMs, setAccessTimer, clearAccessTimer } = {}) {
     const sent = [], events = [], notes = [], rooms = [], removed = [];
     let bridge = null, cr = null;
+    let state = { ready: true, started: true, webid: ME, pod_root: ROOT };
+    const descriptorVersions = new Map();
     const send = (m) => {
         sent.push(m);
         if (m.cmd === 'pod_fetch') {
             const r = routes(m.method, m.url, m) || ((m.method === 'GET' || m.method === 'HEAD') ? { status: 404 } : { status: 201 });
-            setTimeout(() => bridge.handleEvent({ type: 'pod_fetch_result', req_id: m.req_id, headers: {}, body: '', ...r }), 0);
+            if (m.url.endsWith('/room.json') && m.method === 'PUT' && r.status >= 200 && r.status < 300) {
+                descriptorVersions.set(m.url, (descriptorVersions.get(m.url) || 0) + 1);
+            }
+            const headers = m.method === 'GET' && m.url.endsWith('/room.json')
+                ? { etag: '"descriptor-' + (descriptorVersions.get(m.url) || 0) + '"' } : {};
+            setTimeout(() => bridge.handleEvent({ type: 'pod_fetch_result', req_id: m.req_id, headers, body: '', ...r }), 0);
         } else if (m.cmd === 'pod_room_register') {
             const r = register(m);
             setTimeout(() => cr.handleEvent({ type: 'pod_room_registered', room_id: m.room_id, container: CONTAINER, ...r }), 0);
@@ -42,15 +50,22 @@ function harness({ routes = () => null, register = () => ({ ok: true }), pending
     bridge.io.podDeletePendingJoin = vi.fn(async () => {});
     bridge.io.podReadJoinedRooms = vi.fn(async () => joined);
     bridge.io.podWriteJoinedRooms = vi.fn(async () => true);
+    bridge.io.podReadJoinedRoomsVersion = vi.fn(async () => ({
+        records: await bridge.io.podReadJoinedRooms(), exists: true, etag: '"joined-1"',
+        resource: ROOT + 'proxion/joined-rooms.json',
+    }));
+    bridge.io.podWriteJoinedRoomsVersion = vi.fn(async (list) => ({
+        ok: await bridge.io.podWriteJoinedRooms(list), conflict: false,
+    }));
     bridge.io.podReadJoins = vi.fn(async () => []);
     bridge.io.podEnsureJoinInbox = vi.fn(async () => ROOT + 'proxion/join-inbox/');
     bridge.io.podDropJoin = vi.fn(async () => true);
-    bridge.io.podWritePendingJoin = vi.fn(async () => {});
+    bridge.io.podWritePendingJoin = vi.fn(async () => true);
     bridge.io.podFetchPeerSigner = vi.fn(async () => null);
     cr = createCrossRooms({
         bridge, send,
         handleEvent: (ev) => events.push(ev),
-        getState: () => ({ ready: true, started: true, webid: ME, pod_root: ROOT }),
+        getState: () => state,
         getSelfId: () => 'did:key:zDevice',
         getDisplayName: () => 'Me',
         getSigner: () => null,
@@ -60,8 +75,10 @@ function harness({ routes = () => null, register = () => ({ ok: true }), pending
         notify: (kind, d) => notes.push({ kind, ...d }),
         inviteBase: () => 'https://web.example/app/',
         timeoutMs: 500,
+        accessPollMs, setAccessTimer, clearAccessTimer,
+        storage,
     });
-    return { cr, bridge, sent, events, notes, rooms, removed };
+    return { cr, bridge, sent, events, notes, rooms, removed, setState: (value) => { state = value; } };
 }
 
 const fetches = (h, method) => h.sent.filter((m) => m.cmd === 'pod_fetch' && (!method || m.method === method));
@@ -142,6 +159,56 @@ describe('joining a browser-build room', () => {
         expect(h.rooms).toEqual([]);
     });
 
+    it('keeps an approval and pending marker until the joined room is saved durably', async () => {
+        const h = harness();
+        h.bridge.io.podWriteJoinedRooms.mockResolvedValueOnce(false);
+        await joinBobsRoom(h);
+        expect(h.rooms).toEqual([]);
+        expect(h.bridge.io.podDeletePendingJoin).not.toHaveBeenCalled();
+        expect(h.bridge.io.podDeleteJoin).not.toHaveBeenCalled();
+        await h.cr.drainJoins();
+        expect(h.cr.isPodRoom(ROOM)).toBe(true);
+        expect(h.bridge.io.podDeletePendingJoin).toHaveBeenCalledWith(ROOM, BOB);
+        expect(h.bridge.io.podDeleteJoin).toHaveBeenCalledTimes(1);
+    });
+
+    it('retries an approval when its pending marker could not be read', async () => {
+        const h = harness();
+        h.bridge.io.podHasPendingJoin.mockResolvedValueOnce(null);
+        await joinBobsRoom(h);
+        expect(h.rooms).toEqual([]);
+        expect(h.bridge.io.podDeleteJoin).not.toHaveBeenCalled();
+        await h.cr.drainJoins();
+        expect(h.cr.isPodRoom(ROOM)).toBe(true);
+    });
+
+    it('restores an invited room from its saved record in a fresh client', async () => {
+        const first = harness();
+        let saved = [];
+        first.bridge.io.podWriteJoinedRooms.mockImplementation(async (list) => { saved = structuredClone(list); return true; });
+        await joinBobsRoom(first);
+        const reload = harness({ joined: saved });
+        reload.cr.onState({ ready: true, started: true, webid: ME, pod_root: ROOT });
+        await until(() => reload.cr.isPodRoom(ROOM));
+        expect(reload.cr.room(ROOM)).toMatchObject({ roomId: ROOM, container: CONTAINER, owned: false });
+        expect(reload.sent.filter((m) => m.cmd === 'pod_room_register')).toHaveLength(1);
+    });
+
+    it('migrates this account cache before registering a room from a damaged legacy list', async () => {
+        const rec = { roomId: ROOM, owner: BOB, ownerPodRoot: BOB_ROOT, container: CONTAINER, title: 'Bob room' };
+        let saved = false;
+        const h = harness({
+            storage: { getItem: (key) => key === joinedCacheKey(ME) ? JSON.stringify([rec]) : null },
+            register: () => ({ ok: saved, reason: saved ? '' : 'not_joined' }),
+        });
+        h.bridge.io.podReadJoinedRooms.mockResolvedValue(LEGACY_JOINED_ROOMS_UNREADABLE);
+        h.bridge.io.podWriteJoinedRooms.mockImplementation(async (list) => { saved = list.length === 1; return true; });
+        h.cr.onState({ ready: true, started: true, webid: ME, pod_root: ROOT });
+        await until(() => h.cr.isPodRoom(ROOM));
+        expect(h.bridge.io.podWriteJoinedRooms).toHaveBeenCalledWith([rec]);
+        expect(h.cr.room(ROOM)).toMatchObject({ ...rec, owned: false });
+    });
+
     it('says why when the gateway pod uses a bearer token', async () => {
         const h = harness({ register: () => ({ ok: false, reason: 'bearer' }) });
         await joinBobsRoom(h);
@@ -161,8 +228,13 @@ describe('joining a browser-build room', () => {
         expect(h.events.find((e) => e.type === 'message')).toMatchObject({ message_id: 'm1', thread_id: ROOM, from_webid: 'did:key:zDevice' });
     });
 
-    it('a 403 from the owner pod means we were removed', async () => {
-        const h = harness({ routes: (m, url) => (m === 'PATCH' && url.startsWith(CONTAINER) ? { status: 403 } : null) });
+    it('a denied append confirms room access and our own session before removal', async () => {
+        const h = harness({ routes: (m, url) => {
+            if (m === 'PATCH' && url.startsWith(CONTAINER)) return { status: 403 };
+            if (m === 'HEAD' && url === CONTAINER + 'members.jsonld') return { status: 403 };
+            if (m === 'HEAD' && url === ROOT + 'proxion/joined-rooms.json') return { status: 200 };
+            return null;
+        } });
         await joinBobsRoom(h);
         h.cr.route({ cmd: 'send_room', room_id: ROOM, message_id: 'm2', content: 'still here?' });
         await until(() => h.removed.length > 0);
@@ -184,6 +256,56 @@ describe('joining a browser-build room', () => {
 });
 
 describe('hosting a room', () => {
+    it.each(['index', 'descriptor', 'private-acl', 'chat-acl', 'members'])('does not report a room as created when %s persistence fails', async (failure) => {
+        const h = harness({ routes: (method, url) => {
+            if (method !== 'PUT') return null;
+            const match = {
+                index: url.endsWith('/index.ttl'),
+                descriptor: url.endsWith('/room.json'),
+                'private-acl': url.startsWith(ROOT + 'rooms/') && url.endsWith('/.acl'),
+                'chat-acl': url.startsWith(ROOT + 'proxion/rooms/') && url.endsWith('/.acl'),
+                members: url.endsWith('/members.jsonld'),
+            };
+            return match[failure] ? { status: 500 } : null;
+        } });
+        expect(await h.cr.create('Team')).toBe(null);
+        expect(h.rooms).toEqual([]);
+        expect(h.cr.list()).toEqual([]);
+    });
+
+    it.each(['descriptor', 'chat-acl', 'members', 'delivery'])('retains the request and repairs membership after %s approval failure', async (failure) => {
+        const JOINER = 'https://pods.example/carol/profile/card#me';
+        let desc = null, failing = false;
+        const h = harness({ routes: (method, url, msg) => {
+            if (method === 'PUT') {
+                if (failing && ((failure === 'descriptor' && url.endsWith('/room.json'))
+                    || (failure === 'chat-acl' && url.startsWith(ROOT + 'proxion/rooms/') && url.endsWith('/.acl'))
+                    || (failure === 'members' && url.endsWith('/members.jsonld')))) return { status: 500 };
+                if (url.endsWith('/room.json')) { desc = msg.body; return { status: 205 }; }
+            }
+            if (method === 'GET' && url.endsWith('/room.json')) return desc ? { status: 200, body: desc } : { status: 404 };
+            return null;
+        } });
+        h.cr.onState({ ready: true, started: true, webid: ME, pod_root: ROOT });
+        const created = await h.cr.create('Team');
+        expect(created).toBeTruthy();
+        failing = true;
+        if (failure === 'delivery') h.bridge.io.podDropJoin.mockResolvedValueOnce(false);
+        h.bridge.io.podReadJoins.mockResolvedValue([{ url: ROOT + 'proxion/join-inbox/retry', msg: {
+            kind: 'join_request', room_id: created.roomId, from_webid: JOINER,
+        } }]);
+        h.bridge.io.podDeleteJoin = vi.fn(async () => true);
+        await h.cr.drainJoins();
+        expect(h.bridge.io.podDeleteJoin).not.toHaveBeenCalled();
+        if (failure !== 'delivery') expect(h.bridge.io.podDropJoin).not.toHaveBeenCalled();
+        failing = false;
+        await h.cr.drainJoins();
+        expect(h.bridge.io.podDeleteJoin).toHaveBeenCalledTimes(1);
+        const acl = fetches(h, 'PUT').filter((m) => m.url === `${ROOT}proxion/rooms/${created.roomId}/.acl`).at(-1);
+        expect(acl.body).toContain(`<${JOINER}>`);
+        expect(h.bridge.io.podDropJoin).toHaveBeenLastCalledWith('https://pods.example/carol/', expect.objectContaining({ kind: 'join_approved' }));
+    });
+
     it('creates the chat, descriptor and owner-only ACLs in our pod', async () => {
         const h = harness();
         h.cr.onState({ ready: true, started: true, webid: ME, pod_root: ROOT });
@@ -231,5 +353,90 @@ describe('hosting a room', () => {
         await until(() => h.events.at(-1).type === 'member_kicked');
         expect(acls().at(-1).body).not.toContain(`<${JOINER}>`);
         expect(h.events.at(-1)).toEqual({ type: 'member_kicked', room_id: id, webid: JOINER });
+    });
+});
+
+
+describe('idle joined-room access and cleanup', () => {
+    function accessRoutes({ peer = () => 403, own = () => 200 } = {}) {
+        return (method, url) => {
+            if (method === 'HEAD' && url === CONTAINER + 'members.jsonld') return { status: peer() };
+            if (method === 'HEAD' && url === ROOT + 'proxion/joined-rooms.json') return { status: own() };
+            return null;
+        };
+    }
+
+    it('detects removal while idle without appending another message', async () => {
+        const h = harness({ routes: accessRoutes() });
+        await joinBobsRoom(h);
+        expect(await h.cr.checkAccess(ROOM)).toBe('denied');
+        expect(h.removed).toEqual([]);
+        expect(await h.cr.checkAccess(ROOM)).toBe('removed');
+        expect(h.removed).toEqual([ROOM]);
+        expect(h.cr.isPodRoom(ROOM)).toBe(false);
+        expect(fetches(h, 'PATCH')).toEqual([]);
+        expect(h.bridge.io.podWriteJoinedRooms).toHaveBeenLastCalledWith([]);
+    });
+
+    it('keeps the room when our own session cannot read private storage', async () => {
+        const h = harness({ routes: accessRoutes({ own: () => 401 }) });
+        await joinBobsRoom(h);
+        expect(await h.cr.checkAccess(ROOM, { denied: true })).toBe('unavailable');
+        expect(await h.cr.checkAccess(ROOM)).toBe('unavailable');
+        expect(h.removed).toEqual([]);
+        expect(h.cr.isPodRoom(ROOM)).toBe(true);
+    });
+
+    it('retains tracking until a confirmed removal is saved durably', async () => {
+        const h = harness({ routes: accessRoutes() });
+        await joinBobsRoom(h);
+        h.bridge.io.podWriteJoinedRooms.mockResolvedValueOnce(false);
+        expect(await h.cr.checkAccess(ROOM, { denied: true })).toBe('denied');
+        expect(h.cr.isPodRoom(ROOM)).toBe(true);
+        expect(h.removed).toEqual([]);
+        expect(h.sent.some((m) => m.cmd === 'pod_room_unregister')).toBe(false);
+        expect(await h.cr.checkAccess(ROOM)).toBe('removed');
+        expect(h.cr.isPodRoom(ROOM)).toBe(false);
+        expect(h.removed).toEqual([ROOM]);
+    });
+
+    it('does not treat an append-only denial as removal while membership remains readable', async () => {
+        const h = harness({ routes: (method, url) => {
+            if (method === 'PATCH' && url.startsWith(CONTAINER)) return { status: 403 };
+            if (method === 'HEAD' && url === CONTAINER + 'members.jsonld') return { status: 200 };
+            return null;
+        } });
+        await joinBobsRoom(h);
+        h.cr.route({ cmd: 'send_room', room_id: ROOM, message_id: 'blocked', content: 'cannot append' });
+        await until(() => fetches(h, 'HEAD').some((m) => m.url === CONTAINER + 'members.jsonld'));
+        await settle();
+        expect(h.removed).toEqual([]);
+        expect(h.cr.isPodRoom(ROOM)).toBe(true);
+    });
+
+    it('stops access checks during disconnect and tracks registered rooms again on reconnect', async () => {
+        const setAccessTimer = vi.fn(() => 9), clearAccessTimer = vi.fn();
+        const h = harness({ routes: accessRoutes({ peer: () => 200 }), setAccessTimer, clearAccessTimer });
+        await joinBobsRoom(h);
+        expect(setAccessTimer).toHaveBeenCalledOnce();
+        h.cr.onState({ ready: false, started: false });
+        expect(clearAccessTimer).toHaveBeenCalledWith(9);
+        expect(await h.cr.checkAccess(ROOM)).toBe('stale');
+        h.cr.onState({ ready: true, started: true, webid: ME, pod_root: ROOT });
+        await until(() => setAccessTimer.mock.calls.length === 2);
+        expect(await h.cr.checkAccess(ROOM)).toBe('allowed');
+    });
+
+    it('does not lose the room after a failed voluntary leave write', async () => {
+        const h = harness();
+        await joinBobsRoom(h);
+        h.bridge.io.podWriteJoinedRooms.mockResolvedValueOnce(false);
+        h.cr.route({ cmd: 'leave_local_room', room_id: ROOM });
+        await until(() => h.events.some((e) => e.type === 'error' && e.cmd === 'leave_local_room'));
+        expect(h.cr.isPodRoom(ROOM)).toBe(true);
+        expect(h.events.some((e) => e.type === 'left_room')).toBe(false);
+        h.cr.route({ cmd: 'leave_local_room', room_id: ROOM });
+        await until(() => h.events.some((e) => e.type === 'left_room'));
+        expect(h.cr.isPodRoom(ROOM)).toBe(false);
     });
 });

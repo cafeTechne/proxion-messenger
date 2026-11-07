@@ -57,6 +57,106 @@ export function joinedCacheKey(webId) {
     return 'proxion_joined_rooms:' + String(webId || '');
 }
 
+// A known legacy RDF document lost its uncontexted nested room fields.
+// Writes use a new resource so the original remains available for recovery.
+export const LEGACY_JOINED_ROOMS_UNREADABLE = 'legacy_joined_rooms_unreadable';
+
+/**
+ * Keep the account's joined-room list durable before acknowledging an approval
+ * or a leave. Serialize reads and writes so two approvals cannot overwrite one
+ * another. The cache is only a fallback for an unavailable pod, never evidence
+ * that a failed write succeeded.
+ */
+export function createJoinedRoomStore({ read, write, readVersion, writeVersion, getWebId, storage, maxRetries = 4 }) {
+    let pending = Promise.resolve();
+    const versioned = !!(readVersion || writeVersion);
+    const attempts = Math.max(1, Math.min(8, Math.trunc(maxRetries) || 4));
+
+    function cached(webId) {
+        try { return normalizeJoinedList(JSON.parse(storage?.getItem(joinedCacheKey(webId)) || '[]')); }
+        catch { return []; }
+    }
+
+    function cache(webId, records) {
+        try { storage?.setItem(joinedCacheKey(webId), JSON.stringify(records)); } catch { /* cache optional */ }
+    }
+
+    function serialize(work) {
+        const result = pending.then(work);
+        pending = result.catch(() => {});
+        return result;
+    }
+
+    async function load(webId) {
+        if (!webId || getWebId() !== webId) return null;
+        try {
+            const version = versioned ? await readVersion?.() : { records: await read?.() };
+            if (getWebId() !== webId || !version
+                || !(Array.isArray(version.records) || version.records === LEGACY_JOINED_ROOMS_UNREADABLE)) return null;
+            return version;
+        } catch { return null; }
+    }
+
+    async function save(webId, records, version) {
+        if (getWebId() !== webId) return { ok: false, conflict: false };
+        try {
+            const result = versioned ? await writeVersion?.(records, version)
+                : { ok: !!(await write?.(records)), conflict: false };
+            if (getWebId() !== webId) return { ok: false, conflict: false };
+            return result || { ok: false, conflict: false };
+        } catch { return { ok: false, conflict: false }; }
+    }
+
+    function list() {
+        const webId = getWebId();
+        return serialize(async () => {
+            if (!webId || getWebId() !== webId) return [];
+            // Migration also participates in compare-and-swap. If another device
+            // creates the canonical list first, use it rather than restoring
+            // this device's older cache over that device's saved memberships.
+            for (let attempt = 0; ; attempt++) {
+                const version = await load(webId);
+                if (getWebId() !== webId) return [];
+                if (!version) return cached(webId);
+                if (version.records !== LEGACY_JOINED_ROOMS_UNREADABLE) {
+                    const records = normalizeJoinedList(version.records);
+                    cache(webId, records);
+                    return records;
+                }
+                const records = cached(webId);
+                if (!records.length || attempt >= attempts) return records;
+                const result = await save(webId, records, version);
+                if (getWebId() !== webId) return [];
+                if (result.ok || !result.conflict) return records;
+            }
+        });
+    }
+
+    function update(change) {
+        const webId = getWebId();
+        return serialize(async () => {
+            if (!webId || getWebId() !== webId) return false;
+            for (let attempt = 0; attempt < attempts; attempt++) {
+                const version = await load(webId);
+                // An unavailable read never authorizes replacing the pod with
+                // a possibly stale cache. Only known legacy repair uses it.
+                if (!version || getWebId() !== webId) return false;
+                const base = version.records === LEGACY_JOINED_ROOMS_UNREADABLE
+                    ? cached(webId) : normalizeJoinedList(version.records);
+                const records = normalizeJoinedList(change(base));
+                const result = await save(webId, records, version);
+                if (getWebId() !== webId) return false;
+                if (result.ok) { cache(webId, records); return true; }
+                if (!result.conflict) return false;
+                // Re-read and REAPPLY the change, not the rejected whole list.
+            }
+            return false;
+        });
+    }
+
+    return { list, update };
+}
+
 /** localStorage key for the "join request pending" marker, scoped to one account. */
 export function joinPendingKey(webId) {
     return 'proxion_join_pending:' + String(webId || '');

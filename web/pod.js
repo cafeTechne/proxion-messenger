@@ -202,6 +202,8 @@ export function podListOwnedRoomDescriptors(myWebId) { return _rooms.podListOwne
 
 /** Read + parse the canonical room descriptor, or null. */
 export function podReadRoomDescriptor(roomId) { return _rooms.podReadRoomDescriptor(roomId); }
+export function podReadRoomDescriptorVersion(roomId) { return _rooms.podReadRoomDescriptorVersion(roomId); }
+export function podWriteRoomDescriptorVersion(descriptor, version) { return _rooms.podWriteRoomDescriptorVersion(descriptor, version); }
 
 export async function podReadMessages(roomId) {
     if (!SAFE_ID_RE.test(roomId)) return [];
@@ -988,6 +990,8 @@ export function podDeletePendingJoin(roomId, ownerWebId) { return _io.podDeleteP
 export function podReadJoinedRooms() { return _io.podReadJoinedRooms(); }
 /** Replace the joined-room records. Returns success. */
 export function podWriteJoinedRooms(list) { return _io.podWriteJoinedRooms(list); }
+export function podReadJoinedRoomsVersion() { return _io.podReadJoinedRoomsVersion(); }
+export function podWriteJoinedRoomsVersion(list, version) { return _io.podWriteJoinedRoomsVersion(list, version); }
 
 /**
  * The member list a room's owner keeps next to its Long Chat (members.jsonld in

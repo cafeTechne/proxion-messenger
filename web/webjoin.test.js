@@ -25,6 +25,7 @@ function harness({ joins = [] } = {}) {
     const approvals = [];
     const pod = {
         podEnsureJoinInbox: vi.fn(async () => 'https://me/proxion/join-inbox/'),
+        podWritePendingJoin: vi.fn(async () => true),
         podDropJoin: vi.fn(async (root, msg) => { dropped.push({ root, msg }); return true; }),
         podReadJoins: vi.fn(async () => joins),
         podDeleteJoin: vi.fn(async (url) => { deleted.push(url); return true; }),
@@ -47,6 +48,25 @@ describe('createWebJoin', () => {
         expect(await join.requestJoin('room-1', 'https://alice.example/profile/card#me')).toBe(true);
         expect(dropped[0].root).toBe('https://alice.example/');
         expect(dropped[0].msg).toMatchObject({ kind: 'join_request', room_id: 'room-1', from_webid: 'https://me/profile/card#me' });
+    });
+
+    it('persists authorization before an owner can immediately answer the request', async () => {
+        const { join, pod } = harness();
+        let release;
+        pod.podWritePendingJoin.mockImplementation(() => new Promise(resolve => { release = resolve; }));
+        const sent = join.requestJoin('room-1', 'https://alice.example/profile/card#me');
+        expect(pod.podDropJoin).not.toHaveBeenCalled();
+        release(true);
+        expect(await sent).toBe(true);
+        expect(pod.podDropJoin).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['rejected', 'unconfirmed', 'throws'])('does not publish a request when its marker write %s', async (failure) => {
+        const { join, pod } = harness();
+        if (failure === 'throws') pod.podWritePendingJoin.mockRejectedValue(new Error('offline'));
+        else pod.podWritePendingJoin.mockResolvedValue(failure === 'rejected' ? false : undefined);
+        expect(await join.requestJoin('room-1', 'https://alice.example/profile/card#me')).toBe(false);
+        expect(pod.podDropJoin).not.toHaveBeenCalled();
     });
 
     it('sendApproval drops a join_approved carrying where the room lives', async () => {
@@ -92,10 +112,28 @@ describe('createWebJoin', () => {
         expect(approvals[0]).toMatchObject({ room_id: 'r', owner_pod_root: 'https://alice.example/' });
     });
 
+    it('retries a retained approval without another notification and stops the timer', async () => {
+        const { pod, notify } = harness({ joins: [{ url: 'approval', msg: { kind: 'join_approved' } }] });
+        const setTimer = vi.fn(() => 7);
+        const clearTimer = vi.fn();
+        const onApproved = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
+        const join = createWebJoin({ pod, notify, getSelfWebId: () => '', peerPodRoot: () => '',
+            onApproved, setTimer, clearTimer });
+        await join.start();
+        expect(pod.podDeleteJoin).not.toHaveBeenCalled();
+        expect(setTimer).toHaveBeenCalledWith(expect.any(Function), 15000);
+        await setTimer.mock.calls[0][0]();
+        await vi.waitFor(() => expect(pod.podDeleteJoin).toHaveBeenCalledWith('approval'));
+        expect(onApproved).toHaveBeenCalledTimes(2);
+        join.stop();
+        expect(clearTimer).toHaveBeenCalledWith(7);
+    });
+
     it('start ensures the inbox, drains, and subscribes', async () => {
         const { join, pod, notify } = harness();
         await join.start();
         expect(pod.podEnsureJoinInbox).toHaveBeenCalled();
         expect(notify.watchResource).toHaveBeenCalledWith('https://me/proxion/join-inbox/', expect.any(Function));
+        join.stop();
     });
 });

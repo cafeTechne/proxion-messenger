@@ -105,6 +105,40 @@ try {
   check(await until(alice, () => document.querySelectorAll('#members-list .member-item').length === 3, null, 6000),
     `owner's member list did not update live: ${JSON.stringify(await memberNames(alice))}`);
 
+  step = 'scheduled-draft';
+  const draft = 'schedule-' + Math.random().toString(36).slice(2, 8);
+  await alice.evaluate((text) => { document.getElementById('message-input').value = text; }, draft);
+  await click(alice, '#schedule-btn');
+  const pickTime = (years) => alice.evaluate((offset) => {
+    const d = new Date(Date.now() + 3600000);
+    d.setFullYear(d.getFullYear() + offset);
+    const pad = (n) => String(n).padStart(2, '0');
+    document.getElementById('schedule-datetime-input').value =
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }, years);
+  // The gateway rejects schedules more than a year ahead. That rejection must
+  // retain the text and let the user retry rather than claim success.
+  await pickTime(2);
+  await click(alice, '#schedule-confirm-btn');
+  check(await until(alice, () => document.getElementById('schedule-confirm-btn')?.getAttribute('aria-busy') !== 'true'),
+    'a refused schedule left its confirm button busy');
+  check(await alice.$eval('#message-input', (el) => el.value) === draft, 'a refused schedule discarded the draft');
+  await pickTime(0);
+  const pendingDraft = await alice.evaluate(() => {
+    document.getElementById('schedule-confirm-btn').click();
+    return document.getElementById('message-input').value;
+  });
+  check(pendingDraft === draft, 'the draft cleared before the scheduling acknowledgement');
+  check(await until(alice, () => document.getElementById('message-input').value === ''),
+    'the matching scheduling acknowledgement did not clear the draft');
+  await click(alice, '#schedule-btn');
+  check(await until(alice, () => !!document.querySelector('[data-cancel-sched]')),
+    'the saved schedule was missing from the gateway list');
+  await alice.evaluate(() => document.querySelector('[data-cancel-sched]').click());
+  check(await until(alice, () => !document.querySelector('[data-cancel-sched]')),
+    'the saved schedule could not be cancelled');
+  await click(alice, '#schedule-cancel-btn');
+
   step = 'seen-by';
   // Bob and Carol have the room open, so a new message from Alice is read
   // straight away and her newest message gets the Seen by row.

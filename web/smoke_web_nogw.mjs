@@ -13,8 +13,8 @@
 //   node web/smoke_web_nogw.mjs
 //   PROXION_CHROME=/path/to/chrome node web/smoke_web_nogw.mjs
 //
-// Exit 0 = all executed assertions met (Tier 2 skipped counts as pass), non-zero
-// = a step failed. Like the other smokes it needs Chrome and is a local gate.
+// Exit 0 = every tier passed, 77 = an optional prerequisite was unavailable.
+// Required runs fail on unavailable prerequisites (PROXION_SMOKE_REQUIRED=1).
 
 import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync, statSync } from 'fs';
 import { spawn } from 'child_process';
@@ -24,6 +24,7 @@ import { tmpdir } from 'os';
 import { join, resolve, extname, normalize } from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
+import { skipSmoke, reportSmokeSkip } from './scripts/smoke-status.mjs';
 import { startCss, provisionAccount } from './scripts/css-harness.mjs';
 
 const HERE = resolve(fileURLToPath(new URL('.', import.meta.url)));   // web/
@@ -36,7 +37,7 @@ const CHROME = [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/usr/bin/google-chrome', '/usr/bin/chromium',
 ].filter(Boolean).find(p => p && existsSync(p));
-if (!CHROME) { console.error('No Chrome/Edge found; set PROXION_CHROME.'); process.exit(2); }
+if (!CHROME) skipSmoke('No Chrome/Edge found; set PROXION_CHROME.');
 
 let step = 'init';
 const fail = (m) => { console.error(`  \u2717 [${step}] ${m}`); process.exitCode = 1; };
@@ -143,7 +144,7 @@ try {
   step = 'tier2-oidc';
   css = await startCss().catch(() => null);
   if (!css) {
-    console.log('  - Tier 2 skipped: no CSS pod available (offline / npx blocked).');
+    reportSmokeSkip('Tier 2: no CSS pod available (offline / npx blocked).');
   } else {
     await provisionAccount(css.url, { email: `smoke-${Date.now()}@test.example`, password: 'pw-12345678', label: 'smoke' });
     // The test pod is http://localhost, so relax the production https-only CSP for
@@ -214,7 +215,7 @@ try {
     else fail('subpath page errors: ' + subErrs.join('; '));
   } finally { subServer.close(); }
 
-  console.log(process.exitCode ? '\nSMOKE FAILED' : '\nSMOKE PASSED');
+  console.log(process.exitCode === 77 ? '\nSMOKE SKIPPED' : (process.exitCode ? '\nSMOKE FAILED' : '\nSMOKE PASSED'));
 } catch (e) {
   step = step || 'run';
   fail(e && e.stack ? e.stack : String(e));

@@ -18,8 +18,9 @@ def agent():
 
 
 @pytest.fixture
-def gateway(agent):
-    return ProxionGateway(agent=agent, dm_clients={}, room_memberships={}, config=GatewayConfig())
+def gateway(agent, tmp_path):
+    return ProxionGateway(agent=agent, dm_clients={}, room_memberships={},
+                          config=GatewayConfig(db_path=str(tmp_path / "schedule.db")))
 
 
 def _mock_ws(webid="https://alice.pod/profile/card#me"):
@@ -38,7 +39,7 @@ async def _register(gw, ws, webid="https://alice.pod/profile/card#me"):
 
 @pytest.mark.asyncio
 async def test_schedule_message_stored(gateway):
-    """schedule_message stores to in-memory list and returns message_scheduled."""
+    """A success acknowledgement means the schedule was persisted."""
     ws = _mock_ws()
     await _register(gateway, ws)
     future = time.time() + 3600
@@ -54,6 +55,10 @@ async def test_schedule_message_stored(gateway):
     assert resp["type"] == "message_scheduled"
     assert resp["id"]
     assert resp["content_preview"] == "hello future"
+    saved = gateway._store.get_scheduled_messages_for_user("https://alice.pod/profile/card#me")
+    assert len(saved) == 1
+    assert saved[0]["id"] == resp["id"]
+    assert saved[0]["content"] == "hello future"
 
 
 @pytest.mark.asyncio

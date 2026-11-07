@@ -119,3 +119,42 @@ async def test_schedule_into_room_allowed(gateway):
     ws = _ws(gateway, "did:key:zAlice")
     await _schedule(gateway, ws, "room-1")
     assert _reply(ws)["type"] == "message_scheduled"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("send_at", ["not-a-time", "2020-01-01T12:00:00+00:00"])
+async def test_schedule_validation_errors_identify_the_rejected_composer(gateway, send_at):
+    ws = _ws(gateway, "did:key:zAlice")
+    await _schedule(gateway, ws, "room-1", send_at=send_at)
+    assert _reply(ws)["type"] == "error"
+    assert _reply(ws)["cmd"] == "schedule_message"
+    assert _reply(ws)["thread_id"] == "room-1"
+    assert gateway._store.get_scheduled_messages_for_user("did:key:zAlice") == []
+
+
+@pytest.mark.asyncio
+async def test_schedule_never_acknowledges_success_without_persistent_storage(gateway):
+    ws = _ws(gateway, "did:key:zAlice")
+    gateway._store = None
+    await gateway._handle_schedule_message(ws, {
+        "thread_id": "room-1", "content": "later", "send_at": _send_at(),
+    })
+    assert _reply(ws) == {
+        "type": "error", "cmd": "schedule_message", "thread_id": "room-1",
+        "message": "schedule_store_unavailable",
+    }
+
+
+@pytest.mark.asyncio
+async def test_schedule_save_failure_keeps_the_request_retryable(gateway, monkeypatch):
+    ws = _ws(gateway, "did:key:zAlice")
+
+    def fail_save(_message):
+        raise RuntimeError("disk unavailable")
+
+    monkeypatch.setattr(gateway._store, "save_scheduled_message", fail_save)
+    await _schedule(gateway, ws, "room-1")
+    assert _reply(ws)["type"] == "error"
+    assert _reply(ws)["cmd"] == "schedule_message"
+    assert _reply(ws)["message"] == "schedule_store_unavailable"
+    assert gateway._store.get_scheduled_messages_for_user("did:key:zAlice") == []

@@ -1,6 +1,6 @@
 // polls.js — R59F: format/parse round-trip and malformed-input handling.
-import { describe, it, expect } from 'vitest';
-import { formatPoll, parsePoll, pollVoteChange, POLL_EMOJI, MAX_POLL_OPTIONS } from './polls.js';
+import { describe, it, expect, vi } from 'vitest';
+import { formatPoll, parsePoll, pollVoteChange, POLL_EMOJI, MAX_POLL_OPTIONS, createPolls } from './polls.js';
 
 describe('formatPoll', () => {
     it('formats question + options with keycap prefixes', () => {
@@ -56,5 +56,25 @@ describe('pollVoteChange', () => {
     });
     it("ignores other people's votes and non-poll reactions", () => {
         expect(pollVoteChange({ [A]: ['x'], '👍': ['me'] }, B, 'me')).toEqual({ add: B, remove: [] });
+    });
+});
+
+
+describe('poll creation capability', () => {
+    it('preserves the draft and modal inputs when the current conversation cannot accept votes', () => {
+        const input = { value: 'Keep this draft', dispatchEvent: vi.fn() };
+        const modal = { style: { display: 'none' } };
+        const question = { value: 'Keep this question' };
+        global.document = { getElementById: (id) => ({ 'message-input': input, 'poll-modal': modal, 'poll-question': question }[id]) };
+        const onUnavailable = vi.fn();
+        const p = createPolls({ showToast: vi.fn(), canCreatePoll: () => false, onUnavailable });
+        p.openPollModal();
+        p.submitPoll();
+        expect(input.value).toBe('Keep this draft');
+        expect(question.value).toBe('Keep this question');
+        expect(modal.style.display).toBe('none');
+        expect(input.dispatchEvent).not.toHaveBeenCalled();
+        expect(onUnavailable).toHaveBeenCalledTimes(2);
+        delete global.document;
     });
 });

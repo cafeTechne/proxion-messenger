@@ -402,14 +402,36 @@ class PodBridgeMixin:
         writes when it asks to join (cleared once approved), or the joined-room
         list it writes after the approval."""
         try:
-            code, _h, raw = await self._pb_request_own("GET", root + _pbp.pending_join_path(room_id, owner_webid))
+            accept = {"Accept": "application/json, application/ld+json;q=0.9"}
+            code, _h, raw = await self._pb_request_own(
+                "GET", root + _pbp.pending_join_path(room_id, owner_webid), None, accept)
             if code == 200:
                 doc = json.loads(raw.decode("utf-8", "replace") or "null")
-                if (isinstance(doc, dict) and doc.get("px:roomId") == room_id
-                        and doc.get("px:ownerWebId") == owner_webid):
+                # Legacy markers may be returned as expanded JSON-LD. Match the
+                # room and owner on one node, never across unrelated subjects.
+                nodes = doc if isinstance(doc, list) else (
+                    doc.get("@graph", [doc]) if isinstance(doc, dict) else [])
+
+                def value(node, key):
+                    if not isinstance(node, dict):
+                        return None
+                    v = node.get("px:" + key, node.get("https://proxion.dev/vocab/v1#" + key))
+                    if isinstance(v, list):
+                        if len(v) != 1:
+                            return None
+                        v = v[0]
+                    return v.get("@value") if isinstance(v, dict) else v
+
+                if any(value(n, "roomId") == room_id and value(n, "ownerWebId") == owner_webid
+                       for n in nodes):
                     return True
-            code, _h, raw = await self._pb_request_own("GET", root + "proxion/joined-rooms.jsonld", None,
-                                                       {"Accept": "application/ld+json"}, _pbp.MAX_LISTING_RESPONSE)
+            code, _h, raw = await self._pb_request_own("GET", root + "proxion/joined-rooms.json", None,
+                                                       {"Accept": "application/json"}, _pbp.MAX_LISTING_RESPONSE)
+            # Once a canonical list exists it is authoritative. A stale legacy
+            # list must never reauthorize a room removed from the JSON record.
+            if code == 404:
+                code, _h, raw = await self._pb_request_own("GET", root + "proxion/joined-rooms.jsonld", None,
+                                                           accept, _pbp.MAX_LISTING_RESPONSE)
             if code == 200:
                 doc = json.loads(raw.decode("utf-8", "replace") or "null")
                 for r in (doc.get("px:rooms") if isinstance(doc, dict) else None) or []:

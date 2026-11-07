@@ -20,6 +20,7 @@ import { tmpdir } from 'os';
 import { join, extname, normalize, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
+import { skipSmoke } from './scripts/smoke-status.mjs';
 import { startCss, provisionAccount } from './scripts/css-harness.mjs';
 import { settleName, consentClick } from './scripts/e2e-signin.mjs';
 
@@ -33,7 +34,7 @@ const CHROME = [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/usr/bin/google-chrome', '/usr/bin/chromium',
 ].filter(Boolean).find((p) => p && existsSync(p));
-if (!CHROME) { console.error('No Chrome/Edge found; set PROXION_CHROME.'); process.exit(2); }
+if (!CHROME) skipSmoke('No Chrome/Edge found; set PROXION_CHROME.');
 
 let step = 'init';
 const fail = (m) => { console.error(`  \u2717 [${step}] ${m}`); process.exitCode = 1; };
@@ -67,7 +68,7 @@ try {
   step = 'cert';
   certDir = mkdtempSync(join(tmpdir(), 'proxion-cert-'));
   const tls = await makeCert(certDir);
-  if (!tls) { console.log('  \u2013 skipped: openssl could not make a cert.'); await cleanup(); process.exit(0); }
+  if (!tls) { await cleanup(); skipSmoke('openssl could not make a cert.'); }
 
   step = 'build';
   buildDir = mkdtempSync(join(tmpdir(), 'proxion-web-'));
@@ -99,7 +100,7 @@ try {
 
   step = 'css';
   css = await startCss({ allowSelfSignedClientId: true }).catch(() => null);
-  if (!css) { console.log('  \u2013 skipped: no CSS pod available (offline / npx blocked).'); await cleanup(); process.exit(0); }
+  if (!css) { await cleanup(); skipSmoke('no CSS pod available (offline / npx blocked).'); }
   const acct = await provisionAccount(css.url, { email: `signedin-${Date.now()}@test.example`, password: 'pw-12345678', label: 'signedin' });
   ok('CSS pod up + account provisioned');
 

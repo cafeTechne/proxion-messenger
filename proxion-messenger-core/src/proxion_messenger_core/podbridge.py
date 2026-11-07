@@ -85,10 +85,12 @@ _OWN_RULES = [
     (r"proxion/presence\.json", {"GET", "HEAD", "PUT"}, "presence", MAX_SMALL_RESPONSE),
     (rf"proxion/presence\.json{_ACL_SUFFIX}", {"GET", "HEAD", "PUT"}, "acl", MAX_LISTING_RESPONSE),
     (r"proxion/join-requests/[0-9a-f]{64}\.jsonld", {"GET", "HEAD", "PUT", "DELETE"}, "marker", MAX_SMALL_RESPONSE),
-    (r"proxion/joined-rooms\.jsonld", {"GET", "HEAD", "PUT"}, "joined", MAX_LISTING_RESPONSE),
+    (r"proxion/joined-rooms\.json(?:ld)?", {"GET", "HEAD", "PUT"}, "joined", MAX_LISTING_RESPONSE),
     # Pod rooms the owner hosts (a Long Chat that members append to). The
     # descriptor and its owner-only ACL live under rooms/, the chat under
     # proxion/rooms/. The public type index is how the room is listed again.
+    # The owner can also recover descriptors whose type-index write failed.
+    (r"rooms/", {"GET", "HEAD"}, "owned_rooms", MAX_LISTING_RESPONSE),
     (rf"rooms/({_ROOM_ID})/room\.json", {"GET", "HEAD", "PUT", "DELETE"}, "descriptor", MAX_SMALL_RESPONSE),
     (rf"rooms/({_ROOM_ID})/", {"HEAD"}, "room_meta", MAX_SMALL_RESPONSE),
     (rf"rooms/({_ROOM_ID})/{_ACL_SUFFIX}", {"GET", "HEAD", "PUT"}, "acl", MAX_LISTING_RESPONSE),

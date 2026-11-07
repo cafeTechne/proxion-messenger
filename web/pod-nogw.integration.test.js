@@ -33,9 +33,15 @@ import {
     podWritePresence, podReadPresence,
     podEnsureCallInbox, podDropSignal, podReadSignals, podDeleteSignal,
     podEnsureJoinInbox, podDropJoin, podReadJoins, podDeleteJoin,
+    podWritePendingJoin, podHasPendingJoin, podDeletePendingJoin,
+    podReadJoinedRooms, podWriteJoinedRooms,
     podGrantChatParticipants, podWriteChatMessageAt, podReadChatRecentAt,
 } from './pod.js';
-import { buildRoomDescriptor } from './roomdesc.js';
+import { buildRoomDescriptor, withMembers } from './roomdesc.js';
+import { createPodIo } from './podio.js';
+import { createPodRoomIo } from './podroomio.js';
+import { createJoinedRoomStore, withJoinedRecord } from './webrooms.js';
+import { createOwnerMembership } from './room-membership.js';
 import { chatRootUrl } from './longchat.js';
 import { createWebDm } from './webdm.js';
 import { statusFromHeartbeat } from './webpresence.js';
@@ -179,7 +185,7 @@ describe.skipIf(!LIVE)('gateway-free pod round-trips (live CSS)', () => {
     });
 
     it('R106: room-join request/approve handshake over the pod (no gateway)', async () => {
-        const podFns = { podEnsureJoinInbox, podDropJoin, podReadJoins, podDeleteJoin };
+        const podFns = { podEnsureJoinInbox, podDropJoin, podReadJoins, podDeleteJoin, podWritePendingJoin };
         const peerRoot = (w) => w.replace(/profile\/card#me$/, '');
         const roomId = uid('room');
         const requests = [];
@@ -198,6 +204,7 @@ describe.skipIf(!LIVE)('gateway-free pod round-trips (live CSS)', () => {
         asBob(); expect(await bobJoin.start()).toBeTruthy();       // joiner's join inbox
 
         asBob(); expect(await bobJoin.requestJoin(roomId, alice.webId)).toBe(true);   // Bob asks
+        expect(await podHasPendingJoin(roomId, alice.webId)).toBe(true);
 
         asAlice(); await aliceJoin.drainOnce();                    // Alice sees the request
         const req = requests.find((r) => r.room_id === roomId);
@@ -210,6 +217,23 @@ describe.skipIf(!LIVE)('gateway-free pod round-trips (live CSS)', () => {
         expect(appr).toBeTruthy();
         expect(appr.owner_webid).toBe(alice.webId);
         expect(appr.owner_pod_root).toBe(alice.storageRoot);       // so Bob knows where the room lives
+        expect(await podHasPendingJoin(roomId, alice.webId)).toBe(true);
+        const record = { roomId, owner: alice.webId, ownerPodRoot: alice.storageRoot,
+            container: chatRootUrl(alice.storageRoot, roomId), title: 'General' };
+        expect(await podWriteJoinedRooms([record])).toBe(true);
+        const persisted = await bobSession.fetch(bob.storageRoot + 'proxion/joined-rooms.json',
+            { headers: { Accept: 'application/json' } });
+        expect(persisted.ok).toBe(true);
+        expect(persisted.headers.get('content-type')).toMatch(/^application\/json\b/);
+        expect((await persisted.json())['px:rooms']).toEqual([record]);
+        await podDeletePendingJoin(roomId, alice.webId);
+        expect(await podHasPendingJoin(roomId, alice.webId)).toBe(false);
+        // A new module instance models a reload: no in-memory state supplies the
+        // nested room fields that a pod's RDF conversion can discard.
+        const { createPodIo } = await import('./podio.js');
+        const reloaded = createPodIo({ fetch: bobSession.fetch, isLoggedIn: () => true,
+            storageRoot: () => bob.storageRoot, webId: () => bob.webId });
+        expect(await reloaded.podReadJoinedRooms()).toEqual([record]);
     });
 
     it('R106: after approval a joiner can read AND post to the owner room (no gateway)', async () => {
@@ -261,4 +285,100 @@ describe.skipIf(!LIVE)('gateway-free pod round-trips (live CSS)', () => {
         expect(await podDeleteSignal(got.url)).toBe(true);
         expect((await podReadSignals()).some((s) => s.url === got.url)).toBe(false);
     });
+
+    it('rejects an actual stale joined-room write with HTTP 412', async () => {
+        const makeIo = () => createPodIo({ fetch: aliceSession.fetch, isLoggedIn: () => true,
+            storageRoot: () => alice.storageRoot, webId: () => alice.webId });
+        const a = makeIo(), b = makeIo();
+        expect(await a.podWriteJoinedRooms([])).toBe(true);
+        const [first, stale] = await Promise.all([a.podReadJoinedRoomsVersion(), b.podReadJoinedRoomsVersion()]);
+        expect(first.exists).toBe(true);
+        expect(first.etag).toMatch(/^".+"$/);
+        expect(stale.etag).toBe(first.etag);
+        const roomId = uid('joined-a');
+        const record = { roomId, owner: bob.webId, ownerPodRoot: bob.storageRoot,
+            container: chatRootUrl(bob.storageRoot, roomId), title: 'First device' };
+        expect(await a.podWriteJoinedRoomsVersion(withJoinedRecord(first.records, record), first)).toEqual({ ok: true, conflict: false });
+        expect(await b.podWriteJoinedRoomsVersion(stale.records, stale)).toEqual({ ok: false, conflict: true });
+        expect(await makeIo().podReadJoinedRooms()).toEqual([record]);
+    });
+
+    it('retries concurrent joined-room approvals from independent devices against real pod ETags', async () => {
+        const resource = alice.storageRoot + 'proxion/joined-rooms.json';
+        let initialReads = 0, conflicts = 0, release;
+        const barrier = new Promise((resolve) => { release = resolve; });
+        const fetch = async (url, opts = {}) => {
+            const response = await aliceSession.fetch(url, opts);
+            if (url === resource && (!opts.method || opts.method === 'GET') && initialReads++ < 2) {
+                if (initialReads === 2) release();
+                await barrier;
+            }
+            if (response.status === 412) conflicts++;
+            return response;
+        };
+        const device = () => {
+            const io = createPodIo({ fetch, isLoggedIn: () => true,
+                storageRoot: () => alice.storageRoot, webId: () => alice.webId });
+            return createJoinedRoomStore({ readVersion: io.podReadJoinedRoomsVersion,
+                writeVersion: io.podWriteJoinedRoomsVersion, getWebId: () => alice.webId });
+        };
+        const first = device(), second = device();
+        const record = (title) => {
+            const roomId = uid('joined-' + title);
+            return { roomId, owner: bob.webId, ownerPodRoot: bob.storageRoot,
+                container: chatRootUrl(bob.storageRoot, roomId), title };
+        };
+        const one = record('one'), two = record('two');
+        expect(await Promise.all([
+            first.update((list) => withJoinedRecord(list, one)),
+            second.update((list) => withJoinedRecord(list, two)),
+        ])).toEqual([true, true]);
+        expect(conflicts).toBeGreaterThanOrEqual(1);
+        const reloaded = await device().list();
+        expect(reloaded).toEqual(expect.arrayContaining([one, two]));
+        expect(new Set(reloaded.map((r) => r.roomId)).size).toBe(reloaded.length);
+    });
+
+    it('converges simultaneous owner approvals to the latest descriptor, ACL, and member list', async () => {
+        const roomId = uid('owner-race');
+        const resource = alice.storageRoot + 'rooms/' + roomId + '/room.json';
+        const chat = chatRootUrl(alice.storageRoot, roomId);
+        let initialReads = 0, conflicts = 0, release;
+        const barrier = new Promise((resolve) => { release = resolve; });
+        const fetch = async (url, opts = {}) => {
+            const response = await aliceSession.fetch(url, opts);
+            if (url === resource && (!opts.method || opts.method === 'GET') && initialReads++ < 2) {
+                if (initialReads === 2) release();
+                await barrier;
+            }
+            if (response.status === 412) conflicts++;
+            return response;
+        };
+        const io = createPodRoomIo({ fetch, isLoggedIn: () => true,
+            storageRoot: () => alice.storageRoot, webId: () => alice.webId });
+        expect(await io.ensureChatIndexAt(chat, 'Owner race')).toBe(true);
+        expect(await io.podWriteRoomDescriptor(buildRoomDescriptor({ roomId, title: 'Owner race',
+            owner: alice.webId, members: [{ webid: alice.webId, role: 'owner' }] }))).toBe(true);
+        const device = () => createOwnerMembership({
+            read: io.podReadRoomDescriptorVersion, write: io.podWriteRoomDescriptorVersion,
+            getOwnerId: () => alice.webId,
+            apply: async (descriptor) => {
+                const members = descriptor.members.filter((m) => !m.banned).map((m) => m.webid);
+                if (!(await io.podGrantChatParticipants(chat, alice.webId, members.filter((webid) => webid !== alice.webId)))) return false;
+                return io.podWriteRoomMembers(roomId, members.map((webid) => ({ webid, role: webid === alice.webId ? 'admin' : 'member' })));
+            },
+        });
+        const peer = alice.storageRoot + 'profile/card#another-device';
+        const approve = (webid) => (descriptor) => withMembers(descriptor,
+            [...descriptor.members, { webid, role: 'member' }]);
+        const result = await Promise.all([device().update(roomId, approve(bob.webId)), device().update(roomId, approve(peer))]);
+        expect(result.every((r) => r.ok)).toBe(true);
+        expect(conflicts).toBeGreaterThanOrEqual(1);
+        const final = await io.podReadRoomDescriptorVersion(roomId);
+        expect(final.etag).toMatch(/^".+"$/);
+        expect(final.descriptor.members.map((m) => m.webid).sort()).toEqual([alice.webId, bob.webId, peer].sort());
+        expect((await io.podReadRoomMembersAt(chat)).map((m) => m.webid).sort()).toEqual([alice.webId, bob.webId, peer].sort());
+        expect((await bobSession.fetch(chat + 'index.ttl')).ok).toBe(true);
+    });
+
 });

@@ -6,10 +6,10 @@
 // Bob runs the browser build, signed in to his pod. Checks:
 //   - Bob hosts a room; Alice joins with his invite link, Bob approves
 //   - messages both ways, each shown as verified (Long Chat proofs)
-//   - Bob removes Alice: her next append is refused (403) and her app shows it
+//   - Bob removes idle Alice: read checks return 403 and her app shows removal
 //   - Alice hosts a room in her pod; Bob joins with her invite, which opens the
 //     browser build; Alice approves on desktop
-//   - messages both ways again, then Alice removes Bob and his app shows it
+//   - messages both ways again, then idle Bob sees Alice's removal without posting
 //
 //   node web/smoke_cross_mode_rooms.mjs
 // Needs Chrome (or PROXION_CHROME), python, openssl, and npx (for CSS). Self-skips
@@ -21,6 +21,7 @@ import { tmpdir } from 'os';
 import { resolve, join } from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
+import { skipSmoke } from './scripts/smoke-status.mjs';
 import { startCss, provisionAccount, makeAuthSession, freePort } from './scripts/css-harness.mjs';
 import { buildAndServeHttps, signIn } from './scripts/e2e-signin.mjs';
 
@@ -35,7 +36,7 @@ const CHROME = [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/usr/bin/google-chrome', '/usr/bin/chromium',
 ].filter(Boolean).find((p) => p && existsSync(p));
-if (!CHROME) { console.error('No Chrome/Edge found; set PROXION_CHROME.'); process.exit(2); }
+if (!CHROME) skipSmoke('No Chrome/Edge found; set PROXION_CHROME.');
 
 let step = 'init';
 const fail = (m) => { console.error(`  \u2717 [${step}] ${m}`); process.exitCode = 1; };
@@ -147,8 +148,10 @@ async function drainUntil(page, drain, check, arg, tries = 20) {
   }
   return false;
 }
-const drainWeb = () => window.proxionWebJoin && window.proxionWebJoin.drainOnce();
-const drainDesk = () => window.proxionCrossRooms && window.proxionCrossRooms.drainJoins();
+// A drain can wait for the owner's confirmation. Start it without awaiting so
+// the harness can observe that prompt and click the approval button.
+const drainWeb = () => { window.proxionWebJoin?.drainOnce().catch(() => {}); };
+const drainDesk = () => { window.proxionCrossRooms?.drainJoins().catch(() => {}); };
 const isPrompted = () => { const m = document.getElementById('confirm-modal'); return !!m && getComputedStyle(m).display !== 'none'; };
 const hasRoom = (id) => !!document.getElementById('nav-' + id);
 
@@ -170,16 +173,16 @@ async function removeMember(page, roomId, webid) {
 }
 
 const removedShown = (page, roomId) => waitFor(page, (id) => !document.getElementById('nav-' + id)
-  && /removed/i.test(document.getElementById('message-feed')?.innerText || ''), roomId, 30000);
+  && /removed/i.test(document.getElementById('message-feed')?.innerText || ''), roomId, 45000);
 
 try {
   step = 'serve';
   served = await buildAndServeHttps(HERE, join(HERE, 'scripts', 'build-web.mjs'));
-  if (!served) { console.log('  \u2013 skipped: could not build/serve over https (openssl?).'); await cleanup(); process.exit(0); }
+  if (!served) { await cleanup(); skipSmoke('could not build/serve over https (openssl?).'); }
 
   step = 'css';
   css = await startCss({ allowSelfSignedClientId: true }).catch(() => null);
-  if (!css) { console.log('  \u2013 skipped: no CSS pod available (offline / npx blocked).'); await cleanup(); process.exit(0); }
+  if (!css) { await cleanup(); skipSmoke('no CSS pod available (offline / npx blocked).'); }
   const stamp = Date.now();
   const alice = await provisionAccount(css.url, { email: `alice-${stamp}@test.example`, password: 'pw-12345678', label: 'alice' });
   const bob = await provisionAccount(css.url, { email: `bob-${stamp}@test.example`, password: 'pw-12345678', label: 'bob' });
@@ -196,17 +199,25 @@ try {
   pageA.on('pageerror', (e) => errs.push('A: ' + e.message));
   pageB.on('pageerror', (e) => errs.push('B: ' + e.message));
 
-  // Alice's bridge traffic: which PATCHes into Bob's pod came back 403.
-  const patchReqs = new Map(), patch403 = [];
+  // Alice's bridge traffic: idle membership HEAD checks and room appends.
+  const patchReqs = new Map(), memberReqs = new Map(), deniedMemberReads = [];
+  const deniedBrowserReads = [];
+  pageB.on('response', (r) => {
+    if (r.request().method() === 'HEAD' && r.status() === 403 && r.url().endsWith('/members.jsonld')) deniedBrowserReads.push(r.url());
+  });
   const cdp = await pageA.createCDPSession();
   await cdp.send('Network.enable');
   cdp.on('Network.webSocketFrameSent', (e) => {
-    try { const m = JSON.parse(e.response.payloadData); if (m.cmd === 'pod_fetch' && m.method === 'PATCH') patchReqs.set(m.req_id, m.url); } catch { /**/ }
+    try {
+      const m = JSON.parse(e.response.payloadData);
+      if (m.cmd === 'pod_fetch' && m.method === 'PATCH') patchReqs.set(m.req_id, m.url);
+      if (m.cmd === 'pod_fetch' && m.method === 'HEAD' && m.url.endsWith('/members.jsonld')) memberReqs.set(m.req_id, m.url);
+    } catch { /**/ }
   });
   cdp.on('Network.webSocketFrameReceived', (e) => {
     try {
       const m = JSON.parse(e.response.payloadData);
-      if (m.type === 'pod_fetch_result' && patchReqs.has(m.req_id) && m.status === 403 && !m.error) patch403.push(patchReqs.get(m.req_id));
+      if (m.type === 'pod_fetch_result' && memberReqs.has(m.req_id) && m.status === 403 && !m.error) deniedMemberReads.push(memberReqs.get(m.req_id));
     } catch { /**/ }
   });
 
@@ -266,15 +277,12 @@ try {
   step = 'web-removes';
   await removeMember(pageB, roomB, alice.webId);
   ok('Bob removed Alice from the room');
-  await sleep(1500);
-  await openRoom(pageA, roomB).catch(() => {});
-  await pageA.focus('#message-input');
-  await pageA.keyboard.type('xr-a-after-removal');
-  await pageA.keyboard.press('Enter');
-  if (await removedShown(pageA, roomB)) ok('Alice\'s app shows she was removed');
+  const appendCount = patchReqs.size;
+  if (await removedShown(pageA, roomB)) ok('idle Alice sees removal without sending another message');
   else fail('Alice\'s UI: ' + JSON.stringify((await feedText(pageA)).slice(0, 300)));
-  if (patch403.some((u) => u.startsWith(bob.storageRoot))) ok('her append to Bob\'s pod was refused with 403');
-  else fail('no 403 on Alice\'s append: ' + JSON.stringify(patch403));
+  if (deniedMemberReads.includes(`${bob.storageRoot}proxion/rooms/${roomB}/members.jsonld`)) ok('Alice confirmed lost read access with her own pod session still usable');
+  else fail('no 403 from Alice\'s idle member read: ' + JSON.stringify(deniedMemberReads));
+  if (patchReqs.size !== appendCount) fail('Alice posted to discover removal');
 
   // ── Alice hosts, Bob joins ────────────────────────────────────────────────
   step = 'desktop-hosts';
@@ -306,13 +314,9 @@ try {
   step = 'desktop-removes';
   await removeMember(pageA, roomA, bob.webId);
   ok('Alice removed Bob from her room');
-  await sleep(1500);
-  await openRoom(pageB, roomA).catch(() => {});
-  await pageB.focus('#message-input');
-  await pageB.keyboard.type('xr-b-after-removal');
-  await pageB.keyboard.press('Enter');
-  if (await removedShown(pageB, roomA)) ok('Bob\'s app shows he was removed');
+  if (await removedShown(pageB, roomA)) ok('idle Bob sees removal without sending another message');
   else fail('Bob\'s UI: ' + JSON.stringify((await feedText(pageB)).slice(0, 300)));
+  if (!deniedBrowserReads.includes(`${alice.storageRoot}proxion/rooms/${roomA}/members.jsonld`)) fail('no 403 from Bob\'s idle member read');
 
   step = 'reload';
   await pageA.reload({ waitUntil: 'load', timeout: 30000 });

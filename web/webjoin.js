@@ -57,8 +57,10 @@ export function parseInvite(str) {
 export function createWebJoin({
     pod, notify, getSelfWebId, getDisplayName, getSelfPodRoot, peerPodRoot,
     onJoinRequest, onApproved, onDeclined,
+    pollMs = 15000, setTimer = (fn, ms) => setInterval(fn, ms), clearTimer = (h) => clearInterval(h),
 }) {
     let _unsub = null;
+    let _retryTimer = null;
     // Drops being handled right now, and drops already consumed. A notification
     // drain can overlap the start() drain (or another notification), and both
     // list the same request: without these the owner would be prompted twice
@@ -70,21 +72,22 @@ export function createWebJoin({
     async function requestJoin(roomId, ownerWebId) {
         const root = peerPodRoot(ownerWebId);
         if (!root) return false;
-        const ok = await pod.podDropJoin(root, {
+        // Persist authorization BEFORE publishing the request. The owner may
+        // answer immediately (including auto-approval of an existing member),
+        // so writing afterwards lets the approval race ahead of its marker.
+        // A failed write must leave the request unsent: otherwise every approval
+        // would be rejected as unsolicited while the UI says we are waiting.
+        if (pod.podWritePendingJoin) {
+            try {
+                if (await pod.podWritePendingJoin(roomId, ownerWebId) !== true) return false;
+            } catch { return false; }
+        }
+        return pod.podDropJoin(root, {
             kind: 'join_request',
             room_id: roomId,
             from_webid: getSelfWebId(),
             from_display_name: getDisplayName ? getDisplayName() : '',
         });
-        // Record a pending marker in our OWN pod so a later `join_approved` can be
-        // checked against a request we actually made. Without this, anyone who
-        // knows our WebID could drop a forged approval into the public-Append join
-        // inbox and force a room in. Best-effort: a failed marker just means the
-        // approval will be treated as unsolicited (safe default).
-        if (ok !== false && pod.podWritePendingJoin) {
-            try { await pod.podWritePendingJoin(roomId, ownerWebId); } catch { /* best-effort */ }
-        }
-        return ok;
     }
 
     // Owner: tell a joiner they are in (after granting them ACL). Carries where
@@ -148,14 +151,22 @@ export function createWebJoin({
 
     async function start() {
         const inbox = await pod.podEnsureJoinInbox();
-        await drainOnce();
-        if (inbox && notify && notify.watchResource) {
+        if (inbox && notify && notify.watchResource && !_unsub) {
             _unsub = notify.watchResource(inbox, () => { drainOnce().catch(() => {}); });
         }
+        // Even a live subscription only reports changes. A retained approval
+        // needs another drain after a temporary failure, without waiting for
+        // somebody else to send a new join. Start before the initial drain,
+        // which can wait on an owner prompt for an arbitrary amount of time.
+        if (inbox && _retryTimer === null) {
+            _retryTimer = setTimer(() => { drainOnce().catch(() => {}); }, pollMs);
+        }
+        await drainOnce();
         return inbox;
     }
 
     function stop() {
+        if (_retryTimer !== null) { clearTimer(_retryTimer); _retryTimer = null; }
         if (_unsub) { try { _unsub(); } catch { /* ignore */ } _unsub = null; }
     }
 

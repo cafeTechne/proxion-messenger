@@ -37,13 +37,44 @@ describe('PodSocket rooms in the browser build', () => {
         await sock._route({ cmd: 'kick_member', room_id: 'a', webid: 'https://x/#me' });
         await sock._route({ cmd: 'kick_member', room_id: 'j', webid: 'https://x/#me' });
         expect(kick).toHaveBeenCalledTimes(2);
-        expect(events).toEqual([{ type: 'member_kicked', room_id: 'a', webid: 'https://x/#me' }]);
+        expect(events).toEqual([{ type: 'member_kicked', room_id: 'a', webid: 'https://x/#me' },
+            { type: 'error', cmd: 'kick_member', code: 'E_POD', message: 'pod_operation_failed', room_id: 'j' }]);
     });
 
     it('chat_room_create lists the room in the type index before it has a message', async () => {
         const { sock, events, pod } = roomsHarness();
         await sock._route({ cmd: 'chat_room_create', name: 'Empty' });
         expect(pod.podRegisterRoomChat).toHaveBeenCalledWith(events[0].room_id);
+    });
+
+    it('does not expose a created room until its durable writes finish', async () => {
+        let finish;
+        const createOwned = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+        const { sock, events, pod } = roomsHarness({ rooms: { createOwned } });
+        const creating = sock._route({ cmd: 'chat_room_create', name: 'Saved' });
+        expect(events).toEqual([]);
+        expect(pod.podRegisterRoomChat).not.toHaveBeenCalled();
+        finish(true);
+        await creating;
+        expect(events[0]).toMatchObject({ type: 'room_created', name: 'Saved' });
+        expect(createOwned).toHaveBeenCalledWith(events[0].room_id, 'Saved');
+    });
+
+    it.each([false, 'throw'])('reports creation failure when saving returns %s', async (failure) => {
+        const createOwned = vi.fn(async () => { if (failure === 'throw') throw new Error('offline'); return false; });
+        const { sock, events } = roomsHarness({ rooms: { createOwned } });
+        await sock._route({ cmd: 'chat_room_create', name: 'Unsaved' });
+        expect(events).toEqual([{ type: 'room_create_failed' }]);
+    });
+
+    it.each([false, 'throw'])('reports join failure when requesting returns %s', async (failure) => {
+        const events = [];
+        const sock = createPodSocket({
+            getSelfWebId: () => SELF, handleEvent: (e) => events.push(e), pod: {},
+            join: { requestJoin: vi.fn(async () => { if (failure === 'throw') throw new Error('offline'); return false; }) },
+        });
+        await sock._route({ cmd: 'join_room', code: 'r1~' + encodeURIComponent('https://o.example/#me') });
+        expect(events).toEqual([{ type: 'join_invalid_invite', reason: 'unreachable' }]);
     });
 
     it('join_request_sent carries the owner, so the pending state can be restored', async () => {
@@ -67,6 +98,7 @@ describe('PodSocket rooms in the browser build', () => {
         await sock._route({ cmd: 'delete_room', room_id: 'a' });
         await sock._route({ cmd: 'get_room_members', room_id: 'a' });
         expect(events).toEqual([
+            { type: 'error', cmd: 'leave_local_room', code: 'E_POD', message: 'pod_operation_failed', room_id: 'a' },
             { type: 'left_room', room_id: 'j' },
             { type: 'room_deleted', room_id: 'a' },
             { type: 'room_members', room_id: 'a', members: [{ webid: SELF, role: 'owner' }], from_pod: true },

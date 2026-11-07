@@ -44,8 +44,8 @@ export async function resolveDmSendMode(peerId, { hasKey, obtainKey, optedIn = i
 // scheduled message itself, as plaintext, so an end-to-end encrypted DM can't
 // be scheduled: only rooms, and DMs that would go out unencrypted anyway (no
 // key, no multi-device fan-out, and the user opted the peer in).
-export function canScheduleInView(view, { hasKey, optedIn = isPlaintextOptedIn, multiDevice = () => false }) {
-    if (!view) return false;
+export function canScheduleInView(view, { hasKey, optedIn = isPlaintextOptedIn, multiDevice = () => false, supported = true }) {
+    if (!supported || !view) return false;
     if (view.type !== 'dm' && view.type !== 'local_dm') return true;
     const peerId = view.peerWebid || view.peerDid || '';
     const optInId = peerId || view.id;

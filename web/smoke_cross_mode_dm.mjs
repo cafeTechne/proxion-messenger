@@ -22,6 +22,7 @@ import { tmpdir } from 'os';
 import { resolve, join } from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
+import { skipSmoke } from './scripts/smoke-status.mjs';
 import { startCss, provisionAccount, makeAuthSession, freePort } from './scripts/css-harness.mjs';
 import { buildAndServeHttps, signIn } from './scripts/e2e-signin.mjs';
 
@@ -36,7 +37,7 @@ const CHROME = [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/usr/bin/google-chrome', '/usr/bin/chromium',
 ].filter(Boolean).find((p) => p && existsSync(p));
-if (!CHROME) { console.error('No Chrome/Edge found; set PROXION_CHROME.'); process.exit(2); }
+if (!CHROME) skipSmoke('No Chrome/Edge found; set PROXION_CHROME.');
 
 let step = 'init';
 const fail = (m) => { console.error(`  \u2717 [${step}] ${m}`); process.exitCode = 1; };
@@ -107,11 +108,11 @@ const waitFor = (page, fn, arg, timeout = 30000) => page.waitForFunction(fn, { t
 try {
   step = 'serve';
   served = await buildAndServeHttps(HERE, join(HERE, 'scripts', 'build-web.mjs'));
-  if (!served) { console.log('  \u2013 skipped: could not build/serve over https (openssl?).'); await cleanup(); process.exit(0); }
+  if (!served) { await cleanup(); skipSmoke('could not build/serve over https (openssl?).'); }
 
   step = 'css';
   css = await startCss({ allowSelfSignedClientId: true }).catch(() => null);
-  if (!css) { console.log('  \u2013 skipped: no CSS pod available (offline / npx blocked).'); await cleanup(); process.exit(0); }
+  if (!css) { await cleanup(); skipSmoke('no CSS pod available (offline / npx blocked).'); }
   const stamp = Date.now();
   const alice = await provisionAccount(css.url, { email: `alice-${stamp}@test.example`, password: 'pw-12345678', label: 'alice' });
   const bob = await provisionAccount(css.url, { email: `bob-${stamp}@test.example`, password: 'pw-12345678', label: 'bob' });

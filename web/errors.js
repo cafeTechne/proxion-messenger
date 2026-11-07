@@ -7,6 +7,9 @@
 
 // Exact backend error string -> i18n key.
 const EXACT = {
+    "transport_unsupported": "error.transportUnsupported",
+    "pod_operation_failed": "error.podOperationFailed",
+    "schedule_store_unavailable": "error.scheduleStoreUnavailable",
     "empty_content": "error.empty_content",
     "content_too_large": "error.content_too_large",
     "invalid_sequence": "error.invalid_sequence",

@@ -3623,35 +3623,41 @@ class RoomHandlerMixin:
         content = data.get("content", "").strip()
         send_at_iso = data.get("send_at", "")
         actor = self._client_webids.get(websocket)
+
+        async def reject(message, code=None):
+            event = {"type": "error", "cmd": "schedule_message", "thread_id": thread_id,
+                     "message": message}
+            if code:
+                event["code"] = code
+            await websocket.send(json.dumps(event))
+
         if len(content.encode("utf-8")) > 4_096:
-            await websocket.send(json.dumps({"type": "error", "code": "E_SCHEMA", "message": "content_too_large"}))
+            await reject("content_too_large", "E_SCHEMA")
             return
         if not actor or not thread_id or not content or not send_at_iso:
-            await websocket.send(json.dumps({"type": "error", "message": "Missing fields"}))
+            await reject("Missing fields")
             return
         try:
             send_at_dt = datetime.fromisoformat(send_at_iso)
             send_at = send_at_dt.timestamp()
         except ValueError:
-            await websocket.send(json.dumps({"type": "error", "message": "Invalid send_at timestamp"}))
+            await reject("Invalid send_at timestamp")
             return
         if send_at <= time.time():
-            await websocket.send(json.dumps({"type": "error", "message": "send_at must be in the future"}))
+            await reject("send_at must be in the future")
             return
         if send_at > time.time() + 365 * 86400:
-            await websocket.send(json.dumps({"type": "error", "message": "Cannot schedule more than 1 year ahead"}))
+            await reject("Cannot schedule more than 1 year ahead")
             return
         # The gateway sends a scheduled message itself, as plaintext. DMs are
         # end-to-end encrypted, so only schedule into one when the client says
         # the user opted this conversation in to unencrypted messages.
         if self._is_scheduled_dm_thread(thread_id, actor) and data.get("plaintext_ok") is not True:
-            await websocket.send(json.dumps({
-                "type": "error", "code": "E_SCHEDULE_E2E", "message": "schedule_dm_encrypted",
-            }))
+            await reject("schedule_dm_encrypted", "E_SCHEDULE_E2E")
             return
         _MAX_PENDING_SCHEDULED = 100
         if self._store and self._store.count_pending_scheduled(actor) >= _MAX_PENDING_SCHEDULED:
-            await websocket.send(json.dumps({"type": "error", "message": "Too many pending scheduled messages"}))
+            await reject("Too many pending scheduled messages")
             return
         import uuid as _uuid_sched
         sched_id = str(_uuid_sched.uuid4())
@@ -3663,8 +3669,15 @@ class RoomHandlerMixin:
             "send_at": send_at,
             "created_at": time.time(),
         }
-        if self._store:
+        if not self._store:
+            await reject("schedule_store_unavailable")
+            return
+        try:
             self._store.save_scheduled_message(sched)
+        except Exception:
+            logger.exception("Failed to persist scheduled message")
+            await reject("schedule_store_unavailable")
+            return
         await websocket.send(json.dumps({
             "type": "message_scheduled",
             "id": sched_id,

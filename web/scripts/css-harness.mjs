@@ -23,16 +23,23 @@ export function freePort() {
     });
 }
 
-function waitForPort(port, timeoutMs) {
-    return new Promise((res, rej) => {
-        const deadline = Date.now() + timeoutMs;
-        const tryOnce = () => {
+async function waitForPort(port, timeoutMs, checkProcess) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        checkProcess();
+        const open = await new Promise((resolve) => {
             const c = netConnect(port, '127.0.0.1');
-            c.once('connect', () => { c.destroy(); res(); });
-            c.once('error', () => { c.destroy(); Date.now() > deadline ? rej(new Error(`port ${port} idle`)) : setTimeout(tryOnce, 300); });
-        };
-        tryOnce();
-    });
+            const done = (ready) => { c.destroy(); resolve(ready); };
+            c.once('connect', () => done(true));
+            c.once('error', () => done(false));
+            c.setTimeout(Math.min(500, Math.max(1, deadline - Date.now())), () => done(false));
+        });
+        checkProcess();
+        if (open) return;
+        await new Promise((resolve) => setTimeout(resolve, Math.min(300, Math.max(0, deadline - Date.now()))));
+    }
+    checkProcess();
+    throw new Error(`CSS did not listen on port ${port} within ${timeoutMs}ms`);
 }
 
 // Start CSS (in-memory backend) on a free port. Returns { url, port, stop() } or
@@ -52,34 +59,44 @@ export async function startCss({ readyTimeoutMs = 120000, allowSelfSignedClientI
     // document (the browser E2E serves the app over https so OIDC accepts the
     // client_id). This throwaway CSS never handles real traffic.
     if (allowSelfSignedClientId) env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    // CI provisions a pinned CSS binary before running required gates. Local
+    // runs can keep using npx without needing a global installation.
+    const executable = process.env.PROXION_CSS_EXECUTABLE;
     const proc = spawn(
-        'npx', ['-y', '@solid/community-server', '-p', String(port), '-l', 'warn'],
+        executable || 'npx', [...(executable ? [] : ['-y', '@solid/community-server']), '-p', String(port), '-l', 'warn'],
         // detached on POSIX puts CSS in its own process group so stop() can kill it.
         { shell: process.platform === 'win32', env, detached: process.platform !== 'win32' },
     );
     let log = '';
+    let launchError = null;
+    proc.on('error', (error) => { launchError = error; });
     proc.stdout.on('data', (d) => { log += d; });
     proc.stderr.on('data', (d) => { log += d; });
-    const deadline = Date.now() + readyTimeoutMs;
-    while (Date.now() < deadline) {
-        if (/listening|started|Running at/i.test(log)) break;
-        if (proc.exitCode !== null) throw new Error('CSS exited early:\n' + log.slice(-800));
-        await new Promise((r) => setTimeout(r, 500));
+    // Kill the whole tree: npx runs CSS as a grandchild (under cmd.exe on
+    // Windows), and killing only the direct child leaves CSS running.
+    function stop() {
+        try {
+            if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
+            else process.kill(-proc.pid, 'SIGTERM');
+        } catch { try { proc.kill(); } catch { /* already gone */ } }
+        proc.stdout?.destroy(); proc.stderr?.destroy();
     }
-    await waitForPort(port, 15000);
+    try {
+        // CSS runs at warn level, so successful startup has no info-level log.
+        // Readiness is the listening socket, with process failures checked on
+        // every attempt and the caller's timeout bounding the entire wait.
+        await waitForPort(port, readyTimeoutMs, () => {
+            if (launchError) throw launchError;
+            if (proc.exitCode !== null || proc.signalCode !== null) throw new Error('CSS exited early');
+        });
+    } catch (error) {
+        stop();
+        throw new Error(`${error.message}\n${log.slice(-800)}`, { cause: error });
+    }
     return {
         url: `http://localhost:${port}`,
         port,
-        // Kill the whole tree: npx runs CSS as a grandchild (under cmd.exe on
-        // Windows), and killing only the direct child left CSS running and the
-        // smoke unable to exit.
-        stop() {
-            try {
-                if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
-                else process.kill(-proc.pid, 'SIGTERM');
-            } catch { try { proc.kill(); } catch { /* already gone */ } }
-            proc.stdout?.destroy(); proc.stderr?.destroy();
-        },
+        stop,
         _log: () => log,
     };
 }

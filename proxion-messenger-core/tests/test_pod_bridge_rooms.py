@@ -89,6 +89,49 @@ def test_register_needs_a_join_on_record(dpop):
     assert res["ok"] is True and res["container"] == CONTAINER
 
 
+def test_canonical_joined_list_restores_rooms_and_overrides_legacy_memberships(dpop):
+    ws, did = make_ws()
+    register(dpop, ws, did)
+    old = {"px:rooms": [{"roomId": ROOM, "owner": PEER, "container": CONTAINER}]}
+    dpop._pod.routes[("GET", ROOT + "proxion/joined-rooms.jsonld")] = (200, {}, json.dumps(old).encode())
+    dpop._pod.routes[("GET", ROOT + "proxion/joined-rooms.json")] = (200, {}, b'{"px:rooms": []}')
+    assert _register(dpop, ws)["reason"] == "not_joined"
+    assert not any(url.endswith("joined-rooms.jsonld") for _, url, _, _ in dpop._pod.calls)
+    dpop._pod.routes[("GET", ROOT + "proxion/joined-rooms.json")] = (200, {}, json.dumps(old).encode())
+    assert _register(dpop, ws)["ok"] is True
+
+
+@pytest.mark.parametrize("status", [403, 503])
+def test_unavailable_canonical_joined_list_never_falls_back_to_stale_legacy(dpop, status):
+    ws, did = make_ws()
+    register(dpop, ws, did)
+    old = {"px:rooms": [{"roomId": ROOM, "owner": PEER, "container": CONTAINER}]}
+    dpop._pod.routes[("GET", ROOT + "proxion/joined-rooms.jsonld")] = (200, {}, json.dumps(old).encode())
+    dpop._pod.routes[("GET", ROOT + "proxion/joined-rooms.json")] = (status, {}, b'')
+    assert _register(dpop, ws)["reason"] == "not_joined"
+    assert not any(url.endswith("joined-rooms.jsonld") for _, url, _, _ in dpop._pod.calls)
+
+
+@pytest.mark.parametrize("graph", [False, True])
+def test_register_accepts_expanded_legacy_pending_markers(dpop, graph):
+    ws, did = make_ws()
+    register(dpop, ws, did)
+    px = "https://proxion.dev/vocab/v1#"
+    nodes = [{px + "roomId": [{"@value": ROOM}], px + "ownerWebId": [{"@value": PEER}]}]
+    doc = {"@graph": nodes} if graph else nodes
+    dpop._pod.routes[("GET", ROOT + pbp.pending_join_path(ROOM, PEER))] = (200, {}, json.dumps(doc).encode())
+    assert _register(dpop, ws)["ok"] is True
+
+
+def test_register_never_matches_pending_fields_across_different_subjects(dpop):
+    ws, did = make_ws()
+    register(dpop, ws, did)
+    px = "https://proxion.dev/vocab/v1#"
+    doc = [{px + "roomId": [{"@value": ROOM}]}, {px + "ownerWebId": [{"@value": PEER}]}]
+    dpop._pod.routes[("GET", ROOT + pbp.pending_join_path(ROOM, PEER))] = (200, {}, json.dumps(doc).encode())
+    assert _register(dpop, ws)["reason"] == "not_joined"
+
+
 def test_register_refuses_non_owner_own_pod_bad_ids_and_private_hosts(dpop):
     _marker(dpop)
     ws, did = make_ws()

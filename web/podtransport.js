@@ -20,7 +20,8 @@
 //   get_dms             -> emit empty `dms` (no gateway DMs in web mode)
 //   get_local_history   -> emit `local_history` from what this device holds
 //   block / unblock / list_blocks -> the block list, kept in blockStore
-//   (anything else)     -> ignored; UI gating hides those entry points
+//   search              -> search loaded room text; main.js adds saved DMs
+//   unsupported actions -> explicit error; gateway-only background sync is ignored
 //
 // DMs, presence, and calls arrive in R103–R105.
 
@@ -62,10 +63,58 @@ export function roomsFromJoined(records) {
 // a browser: getSelfWebId(), handleEvent(event), and a pod facade exposing
 // podListOwnedRoomDescriptors(webId).
 const _SIGNAL_CMDS = new Set(['voice_invite', 'voice_answer', 'ice_candidate', 'voice_hangup']);
+// Shared startup, read markers and preference sync still send these gateway
+// commands. Their browser behavior already lives in pod/UI code, so suppress
+// only this explicit list rather than silently dropping every unknown action.
+const _GATEWAY_BACKGROUND_CMDS = new Set([
+    'register', 'get_identity', 'get_my_address', 'pod_status', 'link_pod',
+    'set_presence', 'set_identity', 'set_receipts_enabled', 'set_link_previews_enabled',
+    'get_peer_device_keys', 'get_relationships', 'list_friend_requests',
+    'get_account_sync', 'set_account_pref', 'get_gateway_webid', 'get_inbox_webhook',
+    'restore_contacts', 'rehost_room', 'set_thread_mute', 'update_last_read',
+    'mark_read', 'typing', 'get_disappear_timer', 'get_room_roles',
+    'get_voice_channel_state', 'get_message_readers', 'list_devices', 'list_sessions',
+    'read_dm', 'read_room', 'subscribe_push', 'unsubscribe_push',
+]);
+
 
 import { parseInvite } from './webjoin.js';
+import { isSealedCopy } from './dmtext.js';
+import { isUndecryptable } from './e2e-secondary.js';
 
-export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, join, rooms, makeRoomInvite, history, blockStore }) {
+// Search snapshots supplied by the host, never an implicit global pod index.
+// Later snapshots win, so the open room's edits/deletes replace stale cache
+// entries. Only bounded, rendered plaintext is returned, without attachment bytes.
+export function searchLoadedRooms(query, snapshots, limit = 50) {
+    const words = String(query || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return [];
+    const byRoom = new Map();
+    for (const room of (Array.isArray(snapshots) ? snapshots : []).slice(-200)) {
+        if (room && typeof room.id === 'string' && Array.isArray(room.messages)) byRoom.set(room.id, room);
+    }
+    const byId = new Map();
+    for (const room of byRoom.values()) {
+        for (const m of room.messages.slice(-1000)) {
+            if (!m || typeof m.message_id !== 'string' || !m.message_id) continue;
+            byId.set(JSON.stringify([room.id, m.message_id]), { room, message: m });
+        }
+    }
+    const hits = [];
+    for (const { room, message: m } of byId.values()) {
+        if (m.deleted || isSealedCopy(m) || typeof m.content !== 'string' || isUndecryptable(m.content)) continue;
+        const text = m.content.toLowerCase();
+        if (!words.every((word) => text.includes(word))) continue;
+        hits.push({
+            message_id: m.message_id, thread_id: room.id, thread_name: room.name || '',
+            content: m.content, from_webid: m.from_webid || '',
+            from_display_name: m.from_display_name || '', timestamp: String(m.timestamp || ''),
+        });
+    }
+    return hits.sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+        .slice(0, Math.max(0, Math.min(100, Number.isFinite(limit) ? Math.trunc(limit) : 50)));
+}
+
+export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, join, rooms, makeRoomInvite, history, blockStore, searchRooms }) {
     // Echo a just-sent DM back so its optimistic render is confirmed (pending
     // cleared). It carries no content: the payload is ciphertext, and the
     // plaintext optimistic copy already shows (main.js only confirms on
@@ -90,11 +139,24 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, joi
         try { if (blockStore) blockStore.save(list); } catch { /* storage unavailable */ }
     }
 
+    function fail(cmd, unsupported = false) {
+        const event = {
+            type: 'error', cmd: cmd?.cmd,
+            code: unsupported ? 'E_UNSUPPORTED' : 'E_POD',
+            message: unsupported ? 'transport_unsupported' : 'pod_operation_failed',
+        };
+        for (const key of ['message_id', 'thread_id', 'room_id', 'request_id']) {
+            if (typeof cmd?.[key] === 'string') event[key] = cmd[key];
+        }
+        handleEvent(event);
+    }
+
     async function route(cmd) {
         try {
             // WebRTC call signaling (R105): drop to the callee's pod call-inbox.
             if (cmd && _SIGNAL_CMDS.has(cmd.cmd)) {
-                if (calls) await calls.sendSignal(cmd);
+                if (!calls) fail(cmd, true);
+                else if (!(await calls.sendSignal(cmd))) fail(cmd);
                 return;
             }
             switch (cmd && cmd.cmd) {
@@ -106,15 +168,17 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, joi
                     // (e.g. the recipient has never opened Proxion, so their DM
                     // inbox does not exist yet) stays pending, and send-status.js
                     // marks it "Not delivered / Retry" instead of a silent success.
-                    const okDm = dm ? await dm.dropDm(cmd) : true;
-                    if (okDm) _echoDm(cmd);
+                    if (!dm) { fail(cmd, true); break; }
+                    if (await dm.dropDm(cmd)) _echoDm(cmd);
+                    else fail(cmd);
                     break;
                 }
                 case 'send_dm_fanout': {
                     // Multi-device: one per-device envelope per recipient/own
                     // device. Echo only if at least one copy was dropped.
-                    const okFan = (dm && dm.dropFanout) ? await dm.dropFanout(cmd) : true;
-                    if (okFan) _echoDm({ message_id: cmd.message_id });
+                    if (!dm?.dropFanout) { fail(cmd, true); break; }
+                    if (await dm.dropFanout(cmd)) _echoDm({ message_id: cmd.message_id });
+                    else fail(cmd);
                     break;
                 }
                 case 'get_rooms': {
@@ -129,13 +193,12 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, joi
                 }
                 case 'chat_room_create': {
                     const roomId = genRoomId();
-                    // List the room in our type index now, not on its first
-                    // message: get_rooms lists from there, so an empty room would
-                    // otherwise be gone after a reload.
-                    if (pod.podRegisterRoomChat) await pod.podRegisterRoomChat(roomId).catch(() => {});
-                    // The room_created handler writes the descriptor, ACL, members,
-                    // and room index to the pod and opens the room. The invite link
-                    // (room id + our WebID) lets someone request to join (R106).
+                    // Production saves the descriptor, access rules and discovery
+                    // record before the UI exposes an invite or allows a reload.
+                    const saved = rooms?.createOwned
+                        ? await rooms.createOwned(roomId, cmd.name)
+                        : await pod.podRegisterRoomChat?.(roomId);
+                    if (!saved) { handleEvent({ type: 'room_create_failed' }); break; }
                     handleEvent({
                         type: 'room_created',
                         room_id: roomId,
@@ -169,8 +232,22 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, joi
                     // The invite code is a web invite (room id + owner WebID).
                     // Drop a join request into the owner's pod; approval arrives async.
                     const inv = join && cmd.code ? parseInvite(cmd.code) : null;
-                    if (inv) { await join.requestJoin(inv.roomId, inv.ownerWebId); handleEvent({ type: 'join_request_sent', room_id: inv.roomId, owner_webid: inv.ownerWebId }); }
+                    if (inv) {
+                        if (await join.requestJoin(inv.roomId, inv.ownerWebId)) handleEvent({ type: 'join_request_sent', room_id: inv.roomId, owner_webid: inv.ownerWebId });
+                        else handleEvent({ type: 'join_invalid_invite', reason: 'unreachable' });
+                    }
                     else handleEvent({ type: 'join_invalid_invite' });
+                    break;
+                }
+                case 'search': {
+                    const query = String(cmd.query || '').trim();
+                    const event = { type: 'search_results', query, results: [], local_scope: true };
+                    if (query.length > 500) event.error = 'pod_operation_failed';
+                    else if (query.length >= 3 && searchRooms) {
+                        try { event.results = (await searchRooms(query)) || []; }
+                        catch { event.error = 'pod_operation_failed'; }
+                    }
+                    handleEvent(event);
                     break;
                 }
                 case 'get_local_history': {
@@ -195,24 +272,24 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, joi
                     break;
                 case 'leave_local_room': {
                     // Only a joined room can be left here; the owner deletes instead.
-                    if (rooms && rooms.leave && cmd.room_id && await rooms.leave(cmd.room_id)) {
-                        handleEvent({ type: 'left_room', room_id: cmd.room_id });
-                    }
+                    if (!rooms?.leave) fail(cmd, true);
+                    else if (cmd.room_id && await rooms.leave(cmd.room_id)) handleEvent({ type: 'left_room', room_id: cmd.room_id });
+                    else fail(cmd);
                     break;
                 }
                 case 'delete_room': {
-                    if (rooms && rooms.deleteOwned && cmd.room_id && await rooms.deleteOwned(cmd.room_id)) {
-                        handleEvent({ type: 'room_deleted', room_id: cmd.room_id });
-                    }
+                    if (!rooms?.deleteOwned) fail(cmd, true);
+                    else if (cmd.room_id && await rooms.deleteOwned(cmd.room_id)) handleEvent({ type: 'room_deleted', room_id: cmd.room_id });
+                    else fail(cmd);
                     break;
                 }
                 case 'kick_member': {
                     // The owner takes someone out of the room's ACL; their next
                     // append is refused and their app shows the removal.
-                    if (rooms && rooms.kick && cmd.room_id && typeof cmd.webid === 'string'
-                        && await rooms.kick(cmd.room_id, cmd.webid)) {
+                    if (!rooms?.kick) fail(cmd, true);
+                    else if (cmd.room_id && typeof cmd.webid === 'string' && await rooms.kick(cmd.room_id, cmd.webid)) {
                         handleEvent({ type: 'member_kicked', room_id: cmd.room_id, webid: cmd.webid });
-                    }
+                    } else fail(cmd);
                     break;
                 }
                 case 'get_room_members': {
@@ -231,11 +308,14 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, joi
                     handleEvent({ type: 'join_invalid_invite', reason: 'desktop_room' });
                     break;
                 default:
-                    // Not supported in the Phase 1 web build.
+                    if (typeof cmd?.cmd === 'string' && !_GATEWAY_BACKGROUND_CMDS.has(cmd.cmd)) fail(cmd, true);
                     break;
             }
         } catch (err) {
             console.warn('[Proxion] PodSocket route failed for', cmd && cmd.cmd, err);
+            if (cmd?.cmd === 'chat_room_create') handleEvent({ type: 'room_create_failed' });
+            else if (cmd?.cmd === 'join_room') handleEvent({ type: 'join_invalid_invite', reason: 'unreachable' });
+            else fail(cmd);
         }
     }
 
