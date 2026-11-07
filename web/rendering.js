@@ -467,6 +467,7 @@ export function createRendering({
     }
 
     function renderMessages() {
+        if (!getActiveView()) return;
         const allMessages = getAllMessages();
         const feed = document.getElementById("message-feed");
         const slice = allMessages.slice(-RENDER_WINDOW).map(_current).filter(Boolean);
@@ -1010,6 +1011,29 @@ export function createRendering({
         });
     }
 
+    // Replace only the edited row when its content structure changes (poll/text).
+    // Other inline editors and the surrounding date/group dividers stay intact.
+    function refreshMessage(msgId) {
+        const old = document.getElementById(`msg-${msgId}`), record = getMessageMap()[msgId];
+        if (!old || !record || !old.parentNode) return false;
+        const message = _current(record);
+        if (!message) return false;
+        const parent = old.parentNode, next = old.nextSibling;
+        const grouped = old.classList.contains('msg-grouped');
+        const focused = old.contains(document.activeElement);
+        const anchor = captureScrollAnchor(parent);
+        old.remove();
+        const fragment = typeof document.createDocumentFragment === 'function' ? document.createDocumentFragment() : document.createElement('div');
+        _renderMessageEl(message, fragment, grouped ? message : null, { noDivider: true, deferReactions: [] });
+        const fresh = fragment.firstElementChild;
+        if (fragment.nodeType === 11) parent.insertBefore(fragment, next || null);
+        else while (fragment.firstElementChild) parent.insertBefore(fragment.firstElementChild, next || null);
+        renderReactions(msgId);
+        restoreScrollAnchor(parent, anchor);
+        if (focused) fresh?.focus?.();
+        return true;
+    }
+
     // Make sure a buffered message has a row (reply / pin / search jumps to
     // a message that was paged out or never rendered). Returns the row, or
     // null when the message is not in the buffer.
@@ -1094,8 +1118,11 @@ export function createRendering({
         _feedEl.addEventListener("load", _restick, true);
         _feedEl.addEventListener("loadedmetadata", _restick, true);
         _feedEl.addEventListener("scroll", (e) => {
-            const allMessages = getAllMessages();
             const activeView = getActiveView();
+            // Closing a paged conversation changes scroll geometry. Its final
+            // scroll event must not rebuild the old buffer over the notice.
+            if (!activeView) return;
+            const allMessages = getAllMessages();
             const socket = getSocket();
             const feed = e.target;
             const detached = _tailDetached(feed);
@@ -1224,6 +1251,6 @@ export function createRendering({
         _renderMessageEl, _dateLabelForTimestamp, ensureDateDivider,
         markUnread, setUnreadBefore, scrollToUnread, clearUnreadDivider, resetUnread,
         removeMessage, fillAttachment,
-        mergeOlderHistory, rerenderKeepingAnchor, revealMessage, attach, state,
+        mergeOlderHistory, rerenderKeepingAnchor, revealMessage, refreshMessage, attach, state,
     };
 }

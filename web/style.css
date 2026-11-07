@@ -910,6 +910,7 @@ main { background: var(--surface-0); }
 .gate-no-pins [data-msg-action="pin"],
 .gate-no-pins #ctx-pin,
 .gate-no-delete #ctx-delete,
+.gate-no-polls #poll-btn,
 .gate-no-room-voice #join-voice-btn { display: none !important; }
 /* A desktop DM with a browser-build contact is text only (transport.js
    applyCrossModeGating). */
@@ -917,7 +918,6 @@ main { background: var(--surface-0); }
 .gate-crossmode #gif-tray-btn,
 .gate-crossmode #voice-record-btn,
 .gate-crossmode #schedule-btn,
-.gate-crossmode #poll-btn,
 .gate-crossmode #room-opt-disappear { display: none !important; }
 
 /* Icon buttons inside the action bar. */

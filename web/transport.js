@@ -26,13 +26,10 @@ export const FEATURES = ['rooms', 'history', 'invites', 'dm', 'presence', 'calls
 // the pod drop box (R103), heartbeat presence (R104), and 1:1 call signaling
 // over the pod (R105). The full gateway-free feature set.
 //
-// Message controls that still speak gateway-only WebSocket commands are NOT in
-// this set, so supports() reports them false in the web build: message edit,
-// reactions, pinning, delete-for-everyone, and the Settings data/federation
-// panels that hit gateway-only HTTP endpoints. The pod transport silently drops
-// those commands, so offering the controls would fake success or lose data.
-// Wiring these to the pod (podEditChatMessageAt / podSoftDeleteChatMessageAt /
-// reaction writes exist for room messages) is a separate future task.
+// Message controls are excluded from this global set. Pod rooms enable their
+// signed edit/delete, reaction, pin and poll paths through the conversation
+// capability checks below; cross-mode DMs still lack those paths. Settings
+// data/federation panels depend on gateway-only HTTP endpoints.
 // Attachments, voice messages and disappearing messages ('files',
 // 'voice-messages', 'disappear') are gateway-only for the same reason.
 //
@@ -177,6 +174,7 @@ const _FEATURE_ROOT_CLASSES = {
     edit: 'gate-no-edit',
     reactions: 'gate-no-reactions',
     pins: 'gate-no-pins',
+    polls: 'gate-no-polls',
     delete: 'gate-no-delete',
     // Room voice runs through the gateway; the pod carries only 1:1 call
     // signaling. Its button is shown per room, so it is hidden by class.
@@ -254,7 +252,7 @@ const _GATEWAY_MESSAGE_FEATURES = new Set([
 ]);
 
 export function supportsConversationFeature(transport, feature, { podRoom = false, crossMode = false } = {}) {
-    if (transport && podRoom && !crossMode && ['edit', 'delete', 'reactions', 'pins'].includes(feature)) return true;
+    if (transport && podRoom && !crossMode && ['edit', 'delete', 'reactions', 'pins', 'polls'].includes(feature)) return true;
     if (!transport?.supports(feature)) return false;
     return !((podRoom || crossMode) && _GATEWAY_MESSAGE_FEATURES.has(feature));
 }
@@ -271,12 +269,16 @@ export function createTransport({ mode, connection } = {}) {
 export function applyConversationFeatureGating(transport, options = {}, doc) {
     const d = doc || (typeof document !== 'undefined' ? document : null);
     if (!d) return;
-    for (const feature of ['edit', 'reactions', 'pins', 'delete']) {
+    for (const feature of ['edit', 'reactions', 'pins', 'delete', 'polls']) {
         const supported = supportsConversationFeature(transport, feature, options);
         d.documentElement?.classList.toggle('gate-no-' + feature, !supported);
-        if (feature === 'delete' || feature === 'pins') {
-            const button = d.getElementById(feature === 'pins' ? 'pin-panel-btn' : 'delete-for-everyone-btn');
-            if (button) button.style.display = supported ? '' : 'none';
+        if (feature === 'delete' || feature === 'pins' || feature === 'polls') {
+            const button = d.getElementById(feature === 'pins' ? 'pin-panel-btn' : feature === 'polls' ? 'poll-btn' : 'delete-for-everyone-btn');
+            if (button) {
+                button.style.display = supported ? '' : 'none';
+                if (supported) button.removeAttribute?.('aria-hidden');
+                else button.setAttribute?.('aria-hidden', 'true');
+            }
         }
     }
     d.documentElement?.classList.toggle('gate-crossmode', !!(options.podRoom || options.crossMode));

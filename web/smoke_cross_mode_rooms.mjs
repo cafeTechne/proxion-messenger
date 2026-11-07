@@ -118,7 +118,7 @@ const noUnverified = (page) => page.evaluate(() => !document.querySelector('#mes
 
 async function messageMenu(page, text, action) {
   const id = await page.evaluate((text) => {
-    const el = Array.from(document.querySelectorAll('#message-feed [id^="msg-"]')).find(el => el.querySelector('.msg-text')?.innerText === text);
+    const el = Array.from(document.querySelectorAll('#message-feed [id^="msg-"]')).find(el => (el.querySelector('.msg-text')?.innerText === text || el.querySelector('.poll-q')?.innerText === text));
     if (!el) throw Error('Missing message: ' + text);
     el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 200 }));
     return el.id;
@@ -126,11 +126,14 @@ async function messageMenu(page, text, action) {
   await page.click('#ctx-' + action);
   return id;
 }
-async function editMessage(page, oldText, newText) {
+async function editMessage(page, oldText, newText, waitForSave = false) {
   await messageMenu(page, oldText, 'edit');
   await page.waitForSelector('.edit-input');
   await page.evaluate(text => { document.querySelector('.edit-input').value = text; }, newText);
   await page.locator('.edit-confirm-btn').click();
+  if (waitForSave) await page.waitForFunction(text => !document.querySelector('.edit-input')
+    && Array.from(document.querySelectorAll('#message-feed .msg-text')).some(el => el.innerText === text),
+  { timeout: 25000 }, newText);
 }
 async function deleteMessage(page, text) {
   const id = await messageMenu(page, text, 'delete');
@@ -139,6 +142,41 @@ async function deleteMessage(page, text) {
   if (!(await waitFor(page, id => !document.getElementById(id), id, 30000))) throw Error('Deletion was not confirmed');
   return id;
 }
+async function createPoll(page, question) {
+  if (!(await page.$eval('#poll-btn', el => el.getClientRects().length > 0))) await page.locator('label[for="compose-more-toggle"]').click();
+  await page.locator('#poll-btn').click();
+  await page.waitForSelector('#poll-modal', { visible: true });
+  await page.type('#poll-question', question);
+  await page.type('#poll-opt-1', 'First'); await page.type('#poll-opt-2', 'Second');
+  await page.click('#poll-submit');
+  if (!(await waitFor(page, question => Array.from(document.querySelectorAll('.poll-card')).some(el => el.querySelector('.poll-q')?.textContent === question), question, 25000))) {
+    const actual = await page.evaluate(() => ({ feed: document.getElementById('message-feed')?.innerText,
+      draft: document.getElementById('message-input')?.value, question: document.getElementById('poll-question')?.value,
+      options: [1,2].map(i => document.getElementById('poll-opt-' + i)?.value), modal: document.getElementById('poll-modal')?.style.display }));
+    throw Error('Poll creation did not confirm: ' + JSON.stringify(actual));
+  }
+  return page.evaluate(question => Array.from(document.querySelectorAll('#message-feed [id^="msg-"]')).find(el => el.querySelector('.poll-q')?.textContent === question).id, question);
+}
+async function vote(page, id, option) {
+  await page.locator(`#${id} .poll-opt[data-emoji="${option === 0 ? '1️⃣' : '2️⃣'}"]`).click();
+}
+async function expectPoll(page, roomId, id, counts, own, refresh, question = null) {
+  for (let i = 0; i < 30; i++) {
+    const matches = await page.evaluate(({ id, counts, own, question }) => {
+      const card = document.getElementById(id)?.querySelector('.poll-card');
+      const options = Array.from(card?.querySelectorAll('.poll-opt') || []);
+      return (!question || card?.querySelector('.poll-q')?.textContent === question) && options.length === counts.length
+        && options.every((el, i) => !el.disabled && Number(el.querySelector('.poll-opt-count')?.textContent || 0) === counts[i]
+          && (el.getAttribute('aria-pressed') === 'true') === (i === own));
+    }, { id, counts, own, question });
+    if (matches) return;
+    await page.evaluate(refresh, roomId).catch(() => {}); await sleep(600);
+  }
+  const actual = await page.evaluate(id => ({ feed: document.getElementById('message-feed')?.innerText,
+    row: document.getElementById(id)?.outerHTML }), id);
+  throw Error('Poll did not reach expected counts/selection: ' + JSON.stringify({ id, counts, own, question, actual }));
+}
+
 async function openPins(page) {
   await page.locator('#pin-panel-btn').click();
   await page.waitForSelector('#pin-panel', { visible: true });
@@ -285,7 +323,7 @@ try {
   pageB.on('pageerror', (e) => errs.push('B: ' + e.message));
 
   // Alice's bridge traffic: idle membership HEAD checks and room appends.
-  const patchReqs = new Map(), memberReqs = new Map(), deniedMemberReads = [];
+  const patchReqs = new Map(), memberReqs = new Map(), deniedMemberReads = [], accessReqs = new Map(), accessResults = [];
   const deniedBrowserReads = [];
   pageB.on('response', (r) => {
     if (r.request().method() === 'HEAD' && r.status() === 403 && r.url().endsWith('/members.jsonld')) deniedBrowserReads.push(r.url());
@@ -297,12 +335,16 @@ try {
       const m = JSON.parse(e.response.payloadData);
       if (m.cmd === 'pod_fetch' && m.method === 'PATCH') patchReqs.set(m.req_id, m.url);
       if (m.cmd === 'pod_fetch' && m.method === 'HEAD' && m.url.endsWith('/members.jsonld')) memberReqs.set(m.req_id, m.url);
+      if (m.cmd === 'pod_fetch' && /\/(members\.jsonld|joined-rooms\.json(?:ld)?)$/.test(m.url)) accessReqs.set(m.req_id, { method: m.method, url: m.url });
     } catch { /**/ }
   });
   cdp.on('Network.webSocketFrameReceived', (e) => {
     try {
       const m = JSON.parse(e.response.payloadData);
       if (m.type === 'pod_fetch_result' && memberReqs.has(m.req_id) && m.status === 403 && !m.error) deniedMemberReads.push(memberReqs.get(m.req_id));
+      if (m.type === 'pod_fetch_result' && accessReqs.has(m.req_id)) {
+        accessResults.push({ ...accessReqs.get(m.req_id), status: m.status, error: m.error }); accessReqs.delete(m.req_id);
+      }
     } catch { /**/ }
   });
 
@@ -382,6 +424,36 @@ try {
   if (await seen(pageA, roomB, 'xr-b-1', refreshDesk) && await noUnverified(pageA)) ok('Alice reads Bob\'s reply, proof verified');
   else fail('Alice: ' + JSON.stringify((await feedText(pageA)).slice(0, 300)));
 
+  step = 'web-room-polls';
+  const webPoll = await createPoll(pageB, 'xr-web-poll');
+  await expectPoll(pageA, roomB, webPoll, [0,0], null, refreshDesk);
+  await vote(pageA, webPoll, 0); await expectPoll(pageA, roomB, webPoll, [1,0], 0, refreshDesk);
+  await vote(pageB, webPoll, 1); await expectPoll(pageB, roomB, webPoll, [1,1], 1, refreshWeb);
+  blockMessageChanges = true;
+  const beforeVoteFailure = blockedChanges;
+  await vote(pageB, webPoll, 0);
+  for (let i = 0; i < 50 && blockedChanges === beforeVoteFailure; i++) await sleep(100);
+  if (blockedChanges === beforeVoteFailure) throw Error('Vote did not attempt its signed write');
+  await expectPoll(pageB, roomB, webPoll, [1,1], 1, refreshWeb);
+  blockMessageChanges = false;
+  await pageB.locator(`#${webPoll} .poll-retry`).click(); await expectPoll(pageB, roomB, webPoll, [2,0], 0, refreshWeb);
+  await vote(pageB, webPoll, 0); await expectPoll(pageB, roomB, webPoll, [1,0], null, refreshWeb);
+  await vote(pageB, webPoll, 1); await expectPoll(pageB, roomB, webPoll, [1,1], 1, refreshWeb);
+  const changedPoll = '📊 xr-web-poll-edited\n1️⃣ Revised first\n2️⃣ Revised second';
+  await editMessage(pageB, 'xr-web-poll', changedPoll, false);
+  if (!(await waitFor(pageB, isPrompted, undefined, 15000))) throw Error('Voted poll edit did not request confirmation');
+  await pageB.click('#confirm-cancel');
+  if (!(await pageB.$('.edit-input'))) throw Error('Canceled reset lost the edit draft');
+  await expectPoll(pageA, roomB, webPoll, [1,1], 0, refreshDesk);
+  await pageB.locator('.edit-confirm-btn').click();
+  if (!(await waitFor(pageB, isPrompted, undefined, 15000))) throw Error('Retry edit did not request reset confirmation');
+  await pageB.click('#confirm-ok');
+  await expectPoll(pageB, roomB, webPoll, [0,0], null, refreshWeb, 'xr-web-poll-edited');
+  await expectPoll(pageA, roomB, webPoll, [0,0], null, refreshDesk, 'xr-web-poll-edited');
+  await vote(pageB, webPoll, 0); await expectPoll(pageB, roomB, webPoll, [1,0], 0, refreshWeb);
+  await vote(pageA, webPoll, 1); await expectPoll(pageA, roomB, webPoll, [1,1], 1, refreshDesk);
+  ok('browser-hosted polls vote atomically, retain failed choices, and require confirmed reset when edited');
+
   step = 'web-room-pins';
   await messageMenu(pageB, 'xr-a-1', 'pin');
   await openPins(pageB); await expectPin(pageB, 'xr-a-1');
@@ -429,13 +501,14 @@ try {
   ok('pod reactions merge two users and support removal/re-add without changing message text');
 
   step = 'web-room-changes';
-  await editMessage(pageA, 'xr-a-1', 'xr-a-edited');
+  await editMessage(pageA, 'xr-a-1', 'xr-a-edited', true);
   await changedOnPeer(pageB, roomB, 'xr-a-1', 'xr-a-edited', refreshWeb);
   await pageB.reload({ waitUntil: 'load', timeout: 30000 });
   await openRoom(pageB, roomB);
   if (!(await seen(pageB, roomB, 'xr-a-edited', refreshWeb))) throw Error('Edited message was lost on reload');
   await expectReaction(pageB, roomB, reactionTarget, '👍', 1, false, refreshWeb);
   await openPins(pageB); await expectPin(pageB, 'xr-a-edited'); await expectPin(pageB, 'xr-old-web-pin');
+  await expectPoll(pageB, roomB, webPoll, [1,1], 0, refreshWeb, 'xr-web-poll-edited');
   const removedA = await deleteMessage(pageA, 'xr-a-edited');
   if (!(await waitFor(pageB, id => !document.getElementById(id), removedA, 30000))) throw Error('Peer did not receive author deletion');
   await expectPin(pageB, 'xr-a-edited', false);
@@ -447,7 +520,9 @@ try {
   ok('Bob removed Alice from the room');
   const appendCount = patchReqs.size;
   if (await removedShown(pageA, roomB)) ok('idle Alice sees removal without sending another message');
-  else fail('Alice\'s UI: ' + JSON.stringify((await feedText(pageA)).slice(0, 300)));
+  else throw Error('Alice removal failed: ' + JSON.stringify({ feed: (await feedText(pageA)).slice(0, 300),
+    ui: await pageA.evaluate(id => ({ listed: !!document.getElementById('nav-' + id), noView: document.querySelector('main')?.classList.contains('no-view') }), roomB),
+    check: await pageA.evaluate(id => window.proxionCrossRooms?.checkAccess(id), roomB), errs, accessResults: accessResults.slice(-30) }));
   if (deniedMemberReads.includes(`${bob.storageRoot}proxion/rooms/${roomB}/members.jsonld`)) ok('Alice confirmed lost read access with her own pod session still usable');
   else fail('no 403 from Alice\'s idle member read: ' + JSON.stringify(deniedMemberReads));
   if (patchReqs.size !== appendCount) fail('Alice posted to discover removal');
@@ -478,6 +553,16 @@ try {
   else fail('Alice\'s message did not confirm');
   if (await seen(pageB, roomA, 'xr-a-3', refreshWeb) && await noUnverified(pageB)) ok('Bob reads it, proof verified');
   else fail('Bob: ' + JSON.stringify((await feedText(pageB)).slice(0, 300)));
+
+  step = 'desktop-room-polls';
+  const deskPoll = await createPoll(pageA, 'xr-desk-poll');
+  await expectPoll(pageB, roomA, deskPoll, [0,0], null, refreshWeb);
+  await vote(pageB, deskPoll, 0); await expectPoll(pageB, roomA, deskPoll, [1,0], 0, refreshWeb);
+  await vote(pageA, deskPoll, 1); await expectPoll(pageA, roomA, deskPoll, [1,1], 1, refreshDesk);
+  await vote(pageB, deskPoll, 0); await expectPoll(pageB, roomA, deskPoll, [0,1], null, refreshWeb);
+  await vote(pageB, deskPoll, 1); await expectPoll(pageB, roomA, deskPoll, [0,2], 1, refreshWeb);
+  await vote(pageA, deskPoll, 0); await expectPoll(pageA, roomA, deskPoll, [1,1], 0, refreshDesk);
+  ok('desktop-hosted polls create, merge voters, switch and clear choices across both builds');
 
   step = 'desktop-room-pins';
   await messageMenu(pageA, 'xr-b-2', 'pin');
@@ -558,6 +643,7 @@ try {
   for (const emoji of ['👍', '🎉', '🔥']) await expectReaction(pageA, roomA, desktopReactionTarget, emoji, 1, false, refreshDesk);
   ok('desktop history restores persisted reactions after reload');
 
+  await expectPoll(pageA, roomA, deskPoll, [1,1], 0, refreshDesk);
   await openPins(pageA); await expectPin(pageA, 'xr-old-desk-pin');
   if (await pageA.evaluate(() => !!document.getElementById('msg-old-desk-pin'))) throw Error('Old pin unexpectedly in ordinary 7-day history');
   await jumpPin(pageA, 'old-desk-pin'); await pageA.click('#pin-panel-close');

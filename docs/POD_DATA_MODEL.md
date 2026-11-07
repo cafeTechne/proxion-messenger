@@ -122,7 +122,7 @@ is the expected limit of interop for users who have not connected a pod.
 The original message and its proof remain intact. An operation is a separate
 `px:MessageChange` node at `chat.ttl#change-<UUID>` in the original message's UTC
 day file. Its `px:changePayload` literal contains JSON with `id`, `target` (the
-original message IRI), `actor` (WebID), `kind` (`edit`, `delete`, `react`, or `unreact`), `created`
+original message IRI), `actor` (WebID), `kind` (`edit`, `delete`, `react`, `unreact`, or `vote`), `created`
 (canonical UTC ISO timestamp), `content`, `previous` (revision IRI or empty), and
 `proof` (`did:key|base64-signature`). `px:` is `https://proxion.dev/vocab/v1#`.
 
@@ -154,6 +154,24 @@ idempotent on retry if the desired state already exists. Browser and desktop
 readers project the same sorted reactor sets. Room synchronization observes those
 sets without generating incoming-message counts or text-edit events. This signed
 extension is currently pod-room specific; cross-mode DMs remain gated.
+
+**Pod-room polls** use the structured plain-text poll format and signed `vote`
+operations in that same day file. Each operation selects one keycap option in
+`content`, or clears the choice with empty content. It also carries
+`poll_revision`: the lowercase SHA-256 hex digest of UTF-8 compact JSON
+`[revision_id || "", content]` for the displayed message. Vote signatures use
+domain `proxion-room-vote-v1` and append `poll_revision` after the ordinary change
+fields. This prevents replaying a vote as a reaction or against another question.
+
+For each actor and current poll revision, the greatest `(created, id, proof)`
+tuple selects that actor's single choice. Generic keycap reactions do not count
+as pod poll votes. A move or clear appends one operation, then rereads to confirm;
+an uncertain response offers Retry with the same desired choice and revision.
+Editing a poll with active votes requires confirmation and changes the revision,
+so votes for its previous question cannot count toward the edited question.
+In-flight votes against an old revision report that the poll changed. Other
+Solid apps can read the question/options as text; counting votes requires this
+extension. Gateway-native polls retain their existing reaction transport.
 
 Participants retain Read + Append permissions. Changes cannot erase original
 text from the pod log. Other Solid apps need to implement this extension to show

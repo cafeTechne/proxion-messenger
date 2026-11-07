@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { roomPollRevision } from './room-polls.js';
+import { formatPoll, POLL_EMOJI } from './polls.js';
 import { signLongChatChange } from './dmsig.js';
 import { applyMessageChanges, parseMessageChanges, changeOps, CHANGE_PAYLOAD } from './room-changes.js';
 import { createPodRoomIo } from './podroomio.js';
@@ -228,5 +230,121 @@ describe('confirmed reaction writes', () => {
         const other = await ioFixture();
         expect(await other.change({ kind: 'delete' })).toMatchObject({ ok: true });
         expect(await other.change({ kind: 'react', content: '👍' })).toMatchObject({ ok: false, reason: 'deleted' });
+    });
+});
+
+
+const pollText = formatPoll('Lunch?', ['Soup', 'Salad']);
+const pollMessage = () => ({ ...original(), content: pollText });
+describe('signed atomic room votes', () => {
+    it('projects one latest choice per actor regardless of record order', async () => {
+        const f = await fixture(), revision = await roomPollRevision(pollMessage());
+        const a = await f.signed({ kind: 'vote', content: POLL_EMOJI[0], poll_revision: revision });
+        const b = await f.signed({ ...a, content: POLL_EMOJI[1], id: a.id + 'b', previous: a.id });
+        const other = await f.signed({ kind: 'vote', actor: stranger, content: POLL_EMOJI[0], poll_revision: revision, id: a.id + 'c' });
+        for (const votes of [[a,b,other], [other,b,a], [b,a,other]]) {
+            const result = await f.apply(votes, pollMessage());
+            expect(result.reactions).toEqual({ [POLL_EMOJI[0]]: [stranger], [POLL_EMOJI[1]]: [author] });
+            expect(result.content).toBe(pollText);
+            expect(result.edited_at).toBeUndefined();
+        }
+    });
+    it('clears and recasts only the signing actor’s vote', async () => {
+        const f = await fixture(), revision = await roomPollRevision(pollMessage());
+        const vote = await f.signed({ kind: 'vote', content: POLL_EMOJI[0], poll_revision: revision });
+        const ownerClear = await f.signed({ kind: 'vote', actor: owner, content: '', poll_revision: revision, id: vote.id + 'b' });
+        expect((await f.apply([vote,ownerClear], pollMessage())).reactions).toEqual({ [POLL_EMOJI[0]]: [author] });
+        const clear = await f.signed({ ...vote, content: '', id: vote.id + 'c' });
+        expect((await f.apply([vote,clear], pollMessage())).reactions).toEqual({});
+        const again = await f.signed({ ...vote, content: POLL_EMOJI[1], id: vote.id + 'd' });
+        expect((await f.apply([clear,again,vote], pollMessage())).reactions).toEqual({ [POLL_EMOJI[1]]: [author] });
+    });
+    it('rejects actor/revision tampering and cannot replay ordinary reaction proofs as votes', async () => {
+        const f = await fixture(), revision = await roomPollRevision(pollMessage());
+        const vote = await f.signed({ kind: 'vote', content: POLL_EMOJI[0], poll_revision: revision });
+        for (const bad of [{ ...vote, actor: owner }, { ...vote, poll_revision: '0'.repeat(64) }, { ...vote, content: POLL_EMOJI[1] }]) {
+            expect((await f.apply([bad], pollMessage())).reactions).toEqual({});
+        }
+        const reaction = await f.signed({ kind: 'react', content: POLL_EMOJI[0] });
+        expect((await f.apply([{ ...reaction, kind: 'vote', poll_revision: revision }], pollMessage())).reactions).toEqual({});
+        expect((await f.apply([reaction], pollMessage())).reactions).toEqual({});
+        expect((await f.apply([vote], original())).reactions).toEqual({});
+    });
+    it('does not let a delayed vote for an older poll displace a current choice', async () => {
+        const f = await fixture(), revision = await roomPollRevision(pollMessage());
+        const current = await f.signed({ kind: 'vote', content: POLL_EMOJI[0], poll_revision: revision });
+        const stale = await f.signed({ kind: 'vote', content: POLL_EMOJI[1], poll_revision: '0'.repeat(64),
+            id: current.id + 'z', created: '2030-01-01T00:00:00.000Z' });
+        expect((await f.apply([stale,current], pollMessage())).reactions).toEqual({ [POLL_EMOJI[0]]: [author] });
+    });
+    it('invalidates previous votes after a poll edit while preserving normal emoji', async () => {
+        const f = await fixture(), revision = await roomPollRevision(pollMessage());
+        const vote = await f.signed({ kind: 'vote', content: POLL_EMOJI[0], poll_revision: revision });
+        const edit = await f.signed({ kind: 'edit', content: formatPoll('Dinner?', ['Rice','Pasta']), id: vote.id + 'b' });
+        const reaction = await f.signed({ kind: 'react', actor: stranger, content: '👍', id: vote.id + 'c' });
+        const result = await f.apply([edit,vote,reaction], pollMessage());
+        expect(result.reactions).toEqual({ '👍': [stranger] });
+        expect(result.poll_votes_reset).toBe(true);
+        expect(result.poll_revision).not.toBe(revision);
+        const next = await f.signed({ kind: 'vote', content: POLL_EMOJI[1], poll_revision: result.poll_revision, id: vote.id + 'd' });
+        expect((await f.apply([next,vote,edit], pollMessage())).reactions).toEqual({ [POLL_EMOJI[1]]: [author] });
+    });
+});
+
+async function pollIo() {
+    const h = await ioFixture();
+    h.graph[0][NS.sioc + 'content'][0]['@value'] = pollText;
+    const revision = await roomPollRevision(pollMessage());
+    return { ...h, revision, vote: (content, expectedPollRevision = revision) => h.change({ kind: 'vote', content, expectedPollRevision }) };
+}
+describe('confirmed atomic vote writes', () => {
+    it('moves and clears a vote with exactly one append per transition and idempotent retries', async () => {
+        const h = await pollIo();
+        expect(await h.vote(POLL_EMOJI[0])).toMatchObject({ ok: true });
+        expect(await h.vote(POLL_EMOJI[0])).toMatchObject({ ok: true }); expect(h.writes()).toBe(1);
+        expect(await h.vote(POLL_EMOJI[1])).toMatchObject({ ok: true, message: { reactions: { [POLL_EMOJI[1]]: [author] } } });
+        expect(h.writes()).toBe(2);
+        expect(await h.vote('')).toMatchObject({ ok: true, message: { reactions: {} } }); expect(h.writes()).toBe(3);
+        expect(await h.vote('')).toMatchObject({ ok: true }); expect(h.writes()).toBe(3);
+        expect(h.graph[0][NS.sioc + 'content'][0]['@value']).toBe(pollText);
+    });
+    it('keeps the confirmed vote after a rejected transition and allows retry', async () => {
+        const h = await pollIo(); await h.vote(POLL_EMOJI[0]); h.setStatus(403);
+        expect(await h.vote(POLL_EMOJI[1])).toMatchObject({ ok: false });
+        expect((await h.io.podReadChatDayAt(container, timestamp))[0].reactions).toEqual({ [POLL_EMOJI[0]]: [author] });
+        h.setStatus(200);
+        expect(await h.vote(POLL_EMOJI[1])).toMatchObject({ ok: true });
+        const lost = await pollIo(); lost.breakConfirmation(true);
+        expect(await lost.vote(POLL_EMOJI[0])).toMatchObject({ ok: false, reason: 'confirmation_failed' });
+        lost.breakConfirmation(false);
+        expect(await lost.vote(POLL_EMOJI[0])).toMatchObject({ ok: true }); expect(lost.writes()).toBe(1);
+    });
+    it('requires confirmation before editing a voted poll and rejects stale option selections', async () => {
+        const h = await pollIo(); await h.vote(POLL_EMOJI[0]);
+        const content = formatPoll('Dinner?', ['Rice','Pasta']);
+        expect(await h.change({ kind: 'edit', content })).toMatchObject({ ok: false, reason: 'poll_has_votes' });
+        expect(h.writes()).toBe(1);
+        expect(await h.change({ kind: 'edit', content, allowPollReset: true })).toMatchObject({ ok: true, message: { reactions: {} } });
+        expect(await h.vote(POLL_EMOJI[1])).toMatchObject({ ok: false, reason: 'poll_changed', message: { content } });
+        expect(h.writes()).toBe(2);
+        const current = (await h.io.podReadChatDayAt(container, timestamp))[0];
+        expect(await h.vote(POLL_EMOJI[1], current.poll_revision)).toMatchObject({ ok: true });
+        expect(await h.change({ kind: 'edit', content: pollText, expectedRevision: current.revision_id, allowPollReset: true })).toMatchObject({ ok: true, message: { reactions: {} } });
+        expect((await h.io.podReadChatDayAt(container, timestamp))[0].poll_revision).not.toBe(h.revision);
+    });
+    it('merges different actors, blocks generic keycap writes, and refuses invalid options/deleted polls', async () => {
+        const h = await pollIo(); await h.vote(POLL_EMOJI[0]); h.switchActor(stranger);
+        expect(await h.vote(POLL_EMOJI[1])).toMatchObject({ ok: true });
+        expect((await h.io.podReadChatDayAt(container, timestamp))[0].reactions).toEqual({ [POLL_EMOJI[0]]: [author], [POLL_EMOJI[1]]: [stranger] });
+        expect(await h.change({ kind: 'react', content: POLL_EMOJI[0] })).toMatchObject({ ok: false, reason: 'invalid_change' });
+        expect(await h.vote(POLL_EMOJI[4])).toMatchObject({ ok: false, reason: 'invalid_poll' });
+        h.switchActor(author);
+        expect(await h.change({ kind: 'delete' })).toMatchObject({ ok: true });
+        expect(await h.vote(POLL_EMOJI[0])).toMatchObject({ ok: false, reason: 'deleted' });
+    });
+    it('does not run queued votes after session changes during patch negotiation', async () => {
+        const h = await pollIo(); h.stopDuringHead();
+        const results = await Promise.all([h.vote(POLL_EMOJI[0]), h.vote(POLL_EMOJI[1])]);
+        expect(results.every(result => !result.ok)).toBe(true); expect(h.writes()).toBe(0);
     });
 });

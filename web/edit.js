@@ -15,7 +15,7 @@ import { supportsFieldSizing } from './util.js';
 // sent and onSealFailed() is called.
 // send (optional): queues the command while offline (connection.js
 // socketSendOrQueue) instead of dropping it into a closed socket.
-export function createEdit({ getSocket, getActiveView, getClientDid, getMessageMap, sealEdit, onSealFailed, send = null, saveEdit = null, canEdit = () => true, onEditFailed = () => {} }) {
+export function createEdit({ getSocket, getActiveView, getClientDid, getMessageMap, sealEdit, onSealFailed, send = null, saveEdit = null, canEdit = () => true, onEditFailed = () => {}, refreshEditedMessage = null }) {
     const state = { editingMsgId: null };
 
     // Grow the edit box with its content, up to about 40% of the viewport.
@@ -42,7 +42,7 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
         if (state.editingMsgId && state.editingMsgId !== msgId) {
             cancelEdit(state.editingMsgId);
         }
-        const textEl = msgEl.querySelector(".msg-text");
+        const textEl = msgEl.querySelector(".msg-text") || msgEl.querySelector(".poll-card");
         if (!textEl) return;
         const original = getMessageMap()[msgId]?.content ?? textEl.innerText;
         state.editingMsgId = msgId;
@@ -195,6 +195,7 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
         state.editingMsgId = null;
         state._input = null;
         state._saving = null;
+        refreshEditedMessage?.(msgId);
     }
 
     function handleMessageEdited(event) {
@@ -207,6 +208,7 @@ export function createEdit({ getSocket, getActiveView, getClientDid, getMessageM
             if (event.revision_id) messageMap[event.message_id].revision_id = event.revision_id;
         }
         if (state.editingMsgId === event.message_id) return;
+        if (refreshEditedMessage?.(event.message_id)) return;
         const msgEl = document.getElementById(`msg-${event.message_id}`);
         if (!msgEl) return;
         let textEl = msgEl.querySelector(".msg-text");

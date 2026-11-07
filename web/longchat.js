@@ -480,18 +480,16 @@ export function mergeLongChatMessages(local = [], fromPod = []) {
 export function reconcileRoomHistory(local = [], pod = []) {
     const localById = new Map();
     for (const m of local || []) if (m && m.message_id) localById.set(m.message_id, m);
-    // The pod list can hold one message twice (the px: index copy and the Long
-    // Chat copy). The first copy is kept, but a sender name only the later copy
-    // carries is taken, so a nameless copy never hides who wrote it.
+    // The day-file projection owns text, withdrawal and signed changes. The
+    // archive copy can be older, and must not hide revisions or votes on reload.
     const podList = [];
     const podIdx = new Map();
     for (const p of pod || []) {
         if (!p || !p.message_id) continue;
         const i = podIdx.get(p.message_id);
         if (i == null) { podIdx.set(p.message_id, podList.length); podList.push(p); continue; }
-        if (!podList[i].from_display_name && p.from_display_name) {
-            podList[i] = { ...podList[i], from_display_name: p.from_display_name };
-        }
+        if (p.iri) podList[i] = { ...podList[i], ...p, from_display_name: p.from_display_name || podList[i].from_display_name };
+        else if (!podList[i].from_display_name && p.from_display_name) podList[i] = { ...podList[i], from_display_name: p.from_display_name };
     }
     const out = [];
     const seen = new Set();
@@ -500,10 +498,15 @@ export function reconcileRoomHistory(local = [], pod = []) {
         seen.add(p.message_id);            // mark seen even when deleted, so a local copy is dropped too
         if (p.deleted) continue;           // tombstoned: reads as deleted, not shown
         const l = localById.get(p.message_id);
+        const fields = ['iri', 'proof', 'sender_verified', 'revision_id', 'change_actor', 'edited_at', 'edited_by',
+            'deleted_at', 'reactions', 'reaction_versions', 'poll_revision', 'poll_vote_versions', 'poll_votes_reset'];
+        // A fresh Long Chat projection also clears old metadata that is absent
+        // now (for example when a poll becomes ordinary text).
+        const state = Object.fromEntries(fields.filter(field => p.iri || Object.hasOwn(p, field)).map(field => [field, p[field]]));
         // Pod wins for content/deleted/timestamp/author; keep local's extra fields
         // (which the shared vocabulary has no term for) where the pod copy is blank.
         out.push(l ? {
-            ...l,
+            ...l, ...state,
             content: p.content,
             deleted: false,
             timestamp: p.timestamp || l.timestamp,

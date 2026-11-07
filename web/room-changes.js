@@ -1,5 +1,7 @@
 // Signed, append-only message revisions. Original Long Chat statements and
 // proofs remain intact; an unsigned or unauthorized change has no effect.
+import { projectRoomVotes } from './room-polls.js';
+import { POLL_EMOJI } from './polls.js';
 import { verifyLongChatChange } from './dmsig.js';
 import { NS, escapeTurtleLiteral, iriRef } from './longchat.js';
 
@@ -33,13 +35,15 @@ export function parseMessageChanges(json) {
             if (typeof raw !== 'string' || raw.length > 65536) continue;
             try {
                 const c = JSON.parse(raw);
-                if (c.id !== node['@id'] || !['edit', 'delete', 'react', 'unreact'].includes(c.kind)) continue;
+                if (c.id !== node['@id'] || !['edit', 'delete', 'react', 'unreact', 'vote'].includes(c.kind)) continue;
                 if (![c.id, c.target, c.actor, c.created, c.content, c.previous, c.proof].every(v => typeof v === 'string')) continue;
                 if (c.id.length > 4096 || c.target.length > 4096 || c.actor.length > 2048 || c.previous.length > 4096 || c.proof.length > 512) continue;
                 if (new TextEncoder().encode(c.content).length > 16384) continue;
                 if (!Number.isFinite(Date.parse(c.created)) || new Date(c.created).toISOString() !== c.created) continue;
                 if (c.kind === 'delete' && c.content !== '') continue;
                 if (isReactionChange(c.kind) && !isRoomReaction(c.content)) continue;
+                if (c.kind === 'vote' && (typeof c.poll_revision !== 'string' || !/^[a-f0-9]{64}$/.test(c.poll_revision || '')
+                    || (c.content !== '' && !POLL_EMOJI.includes(c.content)))) continue;
                 changes.push(c);
             } catch { /* malformed changes cannot alter the message */ }
         }
@@ -54,7 +58,7 @@ export async function applyMessageChanges(messages, json, { ownerWebId, fetchPee
     for (const change of parseMessageChanges(json)) {
         const message = byTarget.get(change.target);
         if (!message || !change.id.startsWith(change.target.split('#')[0] + '#change-')) continue;
-        if (!isReactionChange(change.kind) && change.actor !== message.from_webid
+        if (change.kind !== 'vote' && !isReactionChange(change.kind) && change.actor !== message.from_webid
             && !(change.kind === 'delete' && change.actor === ownerWebId)) continue;
         const recovered = await verifyLongChatChange(change);
         if (!recovered) continue;
@@ -93,7 +97,7 @@ export async function applyMessageChanges(messages, json, { ownerWebId, fetchPee
         message.reactions = Object.fromEntries([...active].sort(([a], [b]) => compare(a, b))
             .map(([emoji, actors]) => [emoji, actors.sort(compare)]));
         if (message.deleted) message.reactions = {};
-        const revisions = changes.filter(c => !isReactionChange(c.kind));
+        const revisions = changes.filter(c => c.kind === 'edit' || c.kind === 'delete');
         if (!revisions.length) continue;
         // Withdrawal is permanent: an edit, regardless of timestamp, cannot
         // bring a message back after its author or room owner deletes it.
@@ -113,5 +117,5 @@ export async function applyMessageChanges(messages, json, { ownerWebId, fetchPee
             message.edited_by = latest.actor;
         }
     }
-    return messages;
+    return projectRoomVotes(messages, valid);
 }

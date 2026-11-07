@@ -69,3 +69,31 @@ describe('reconcileRoomHistory (pod-authoritative)', () => {
         expect(out.map(m => m.message_id)).toEqual(['1']);
     });
 });
+
+
+describe('signed room projection during reload', () => {
+    const archived = msg('1', { content: 'Original poll', reactions: {} });
+    const projected = msg('1', { iri: 'https://pod/room/2026/11/07/chat.ttl#1', content: 'Edited poll', revision_id: 'edit-1',
+        edited_at: '2026-11-07T12:00:00Z', reactions: { '1️⃣': ['https://bob/#me'] }, poll_revision: 'poll-version',
+        poll_vote_versions: { 'https://bob/#me': { content: '1️⃣' } }, sender_verified: true });
+    it.each([false, true])('prefers the day projection over an archive copy, reversed=%s', reverse => {
+        const copies = reverse ? [projected, archived] : [archived, projected];
+        expect(reconcileRoomHistory([], copies)[0]).toMatchObject(projected);
+        expect(reconcileRoomHistory([archived], copies)[0]).toMatchObject(projected);
+    });
+    it('keeps confirmed votes and edit metadata instead of stale local maps', () => {
+        const result = reconcileRoomHistory([archived], [projected])[0];
+        expect(result.reactions).toEqual(projected.reactions);
+        expect(result.poll_revision).toBe('poll-version');
+        expect(result.revision_id).toBe('edit-1');
+    });
+    it('honors withdrawal despite an older archived copy', () => {
+        expect(reconcileRoomHistory([archived], [archived, { ...projected, deleted: true }])).toEqual([]);
+    });
+    it('clears stale poll/revision metadata when the authoritative day has ordinary text', () => {
+        const plain = { ...msg('1'), iri: projected.iri, reactions: {}, sender_verified: true };
+        const result = reconcileRoomHistory([projected], [plain])[0];
+        expect(result.reactions).toEqual({}); expect(result.poll_revision).toBeUndefined();
+        expect(result.poll_vote_versions).toBeUndefined(); expect(result.revision_id).toBeUndefined();
+    });
+});

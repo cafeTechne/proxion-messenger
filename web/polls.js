@@ -1,8 +1,9 @@
 // polls.js — R59F: lightweight polls with ZERO backend changes. A poll is a
 // structured plain-text message (readable as-is on any client, upgraded or
 // not, local or federated); votes are ordinary keycap-emoji reactions, so the
-// existing reaction pipeline carries counts, live updates, and federation for
-// free. The poll card's option buttons cast them (one vote per person).
+// gateway reaction pipeline carries counts and federation. Pod rooms use an
+// atomic signed choice bound to the poll revision; the card shares the same
+// reaction-shaped counts (one vote per person).
 //
 // Format (parse + format are pure and round-trip):
 //   📊 <question>
@@ -34,7 +35,7 @@ export function pollVoteChange(reacts, emoji, self) {
 
 // {question, options: [{emoji, text}]} for a well-formed poll, else null.
 export function parsePoll(content) {
-    if (!content || !content.startsWith(POLL_MARKER + ' ')) return null;
+    if (typeof content !== 'string' || !content.startsWith(POLL_MARKER + ' ')) return null;
     const lines = content.split('\n');
     const question = lines[0].slice(POLL_MARKER.length + 1).trim();
     if (!question) return null;
@@ -51,10 +52,15 @@ export function parsePoll(content) {
     return options.length >= 2 ? { question, options } : null;
 }
 
-export function createPolls({ showToast, canCreatePoll = () => true, onUnavailable = () => {} }) {
+export function createPolls({ showToast, canCreatePoll = () => true, onUnavailable = () => {}, getActiveView = () => null, getSessionId = () => '' }) {
 
+    let context = null;
+    const current = () => !context || (context.session === getSessionId()
+        && context.view?.id === getActiveView()?.id && context.view?.type === getActiveView()?.type);
     function openPollModal() {
         if (!canCreatePoll()) { onUnavailable(); return; }
+        if (document.getElementById('message-input')?.value?.trim()) { showToast(t('poll.draftPending')); return; }
+        context = { view: getActiveView() ? { ...getActiveView() } : null, session: getSessionId() };
         const modal = document.getElementById('poll-modal');
         if (!modal) return;
         document.getElementById('poll-question').value = '';
@@ -62,8 +68,10 @@ export function createPolls({ showToast, canCreatePoll = () => true, onUnavailab
             const el = document.getElementById(`poll-opt-${i}`);
             if (el) el.value = '';
         }
+        const more = document.getElementById('compose-more-toggle');
+        if (more) more.checked = false;
         modal.style.display = 'flex';
-        setTimeout(() => document.getElementById('poll-question')?.focus(), 50);
+        document.getElementById('poll-question')?.focus();
     }
 
     function closePollModal() {
@@ -72,7 +80,8 @@ export function createPolls({ showToast, canCreatePoll = () => true, onUnavailab
     }
 
     function submitPoll() {
-        if (!canCreatePoll()) { onUnavailable(); return; }
+        if (!canCreatePoll() || !current()) { onUnavailable(); return; }
+        if (document.getElementById('message-input')?.value?.trim()) { showToast(t('poll.draftPending')); return; }
         const question = document.getElementById('poll-question')?.value || '';
         const options = [];
         for (let i = 1; i <= MAX_POLL_OPTIONS; i++) {

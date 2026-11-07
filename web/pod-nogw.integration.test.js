@@ -43,6 +43,7 @@ import { createPodRoomIo } from './podroomio.js';
 import { createJoinedRoomStore, withJoinedRecord } from './webrooms.js';
 import { createOwnerMembership } from './room-membership.js';
 import { chatRootUrl } from './longchat.js';
+import { formatPoll, POLL_EMOJI } from './polls.js';
 import { createWebDm } from './webdm.js';
 import { statusFromHeartbeat } from './webpresence.js';
 import { createWebJoin } from './webjoin.js';
@@ -515,6 +516,65 @@ describe.skipIf(!LIVE)('gateway-free pod round-trips (live CSS)', () => {
         const latest = (await io.podReadChatDayAt(chat, old, '', alice.webId)).find(message => message.message_id === 'second');
         expect(await io.podChangeMessageAt(chat, 'second', old, { kind: 'delete', expectedRevision: latest.revision_id }, alice.webId)).toMatchObject({ ok: true });
         expect((await peer.podReadPinsAt(chat, alice.webId)).pins).toEqual([]);
+    }, 30000);
+
+    it('persists atomic votes under member Append access and rejects an in-flight stale poll choice', async () => {
+        const a = await makeIdentity(), b = await makeIdentity(), roomId = uid('votes');
+        const chat = chatRootUrl(alice.storageRoot, roomId), timestamp = new Date().toISOString();
+        const trust = async root => ({ signer: root === alice.storageRoot ? a.did : b.did });
+        const ownerIo = createPodRoomIo({ fetch: aliceSession.fetch, isLoggedIn: () => true,
+            storageRoot: () => alice.storageRoot, webId: () => alice.webId,
+            getSigner: () => ({ privKey: a.priv, signerDid: a.did }), fetchPeerSigner: trust });
+        let failWrite = false, pause = false, release, entered, writes = 0;
+        const blocked = new Promise(resolve => { release = resolve; });
+        const reached = new Promise(resolve => { entered = resolve; });
+        const memberIo = createPodRoomIo({ fetch: async (url, options = {}) => {
+            if (options.method === 'PATCH') {
+                writes++;
+                if (failWrite) return { ok: false, status: 503 };
+                if (pause) { entered(); await blocked; }
+            }
+            return bobSession.fetch(url, options);
+        }, isLoggedIn: () => true, storageRoot: () => bob.storageRoot, webId: () => bob.webId,
+        getSigner: () => ({ privKey: b.priv, signerDid: b.did }), fetchPeerSigner: trust });
+        expect(await ownerIo.ensureChatIndexAt(chat, 'Votes')).toBe(true);
+        expect(await ownerIo.podGrantChatParticipants(chat, alice.webId, [bob.webId])).toBe(true);
+        const content = formatPoll('Lunch?', ['Soup', 'Salad']);
+        expect(await ownerIo.podWriteChatMessageAt(chat, 'poll', { timestamp, content, from_webid: alice.webId })).toBe(true);
+        const read = async () => (await ownerIo.podReadChatDayAt(chat, timestamp, roomId, alice.webId))[0];
+        const original = await read();
+        const cast = choice => memberIo.podChangeMessageAt(chat, 'poll', timestamp,
+            { kind: 'vote', content: choice, expectedPollRevision: original.poll_revision }, alice.webId);
+        expect(await cast(POLL_EMOJI[0])).toMatchObject({ ok: true });
+        expect(await ownerIo.podChangeMessageAt(chat, 'poll', timestamp,
+            { kind: 'vote', content: POLL_EMOJI[1], expectedPollRevision: original.poll_revision }, alice.webId)).toMatchObject({ ok: true });
+        expect((await read()).reactions).toEqual({ [POLL_EMOJI[0]]: [bob.webId], [POLL_EMOJI[1]]: [alice.webId] });
+        failWrite = true;
+        expect(await cast(POLL_EMOJI[1])).toMatchObject({ ok: false });
+        expect((await read()).reactions[POLL_EMOJI[0]]).toEqual([bob.webId]);
+        failWrite = false; const before = writes;
+        expect(await cast(POLL_EMOJI[1])).toMatchObject({ ok: true });
+        expect(writes - before).toBe(1);
+        expect((await read()).reactions[POLL_EMOJI[1]].sort()).toEqual([alice.webId, bob.webId].sort());
+        expect(await cast('')).toMatchObject({ ok: true });
+        expect(await ownerIo.podChangeMessageAt(chat, 'poll', timestamp,
+            { kind: 'edit', content: formatPoll('Dinner?', ['Rice', 'Pasta']) }, alice.webId)).toMatchObject({ ok: false, reason: 'poll_has_votes' });
+        expect(await ownerIo.podChangeMessageAt(chat, 'poll', timestamp,
+            { kind: 'edit', content: formatPoll('Dinner?', ['Rice', 'Pasta']), allowPollReset: true }, alice.webId)).toMatchObject({ ok: true });
+        expect(await cast(POLL_EMOJI[0])).toMatchObject({ ok: false, reason: 'poll_changed' });
+        const revised = await read();
+        expect(await memberIo.podChangeMessageAt(chat, 'poll', timestamp,
+            { kind: 'vote', content: POLL_EMOJI[0], expectedPollRevision: revised.poll_revision }, alice.webId)).toMatchObject({ ok: true });
+        pause = true;
+        const stale = memberIo.podChangeMessageAt(chat, 'poll', timestamp,
+            { kind: 'vote', content: POLL_EMOJI[1], expectedPollRevision: revised.poll_revision }, alice.webId);
+        await reached;
+        try {
+            expect(await ownerIo.podChangeMessageAt(chat, 'poll', timestamp,
+                { kind: 'edit', content: formatPoll('Breakfast?', ['Toast', 'Eggs']), expectedRevision: revised.revision_id, allowPollReset: true }, alice.webId)).toMatchObject({ ok: true });
+        } finally { release(); }
+        expect(await stale).toMatchObject({ ok: false, reason: 'poll_changed' });
+        expect((await read()).reactions).toEqual({});
     }, 30000);
 
 });

@@ -15,6 +15,7 @@
 //     getSigner()             -> { privKey, signerDid } for Long Chat proofs, or null
 //     fetchPeerSigner(root)   -> a maker's published signer (podio podFetchPeerSigner)
 
+import { parsePoll, POLL_EMOJI } from './polls.js';
 import { createPodPins } from './room-pins.js';
 import { isPeerPodRootAllowed } from './ssrf.js';
 import {
@@ -604,7 +605,7 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
     // previous confirmed snapshot, and queued work must stay in its session.
     const pendingReactions = new Map();
     function podChangeMessageAt(container, id, timestamp, change, owner, isCurrent = () => true) {
-        if (!isReactionChange(change?.kind)) return _changeMessageAt(container, id, timestamp, change, owner, isCurrent);
+        if (!isReactionChange(change?.kind) && change?.kind !== 'vote') return _changeMessageAt(container, id, timestamp, change, owner, isCurrent);
         const actor = webId(), root = _root(), signer = getSigner()?.signerDid;
         const current = () => isCurrent() && webId() === actor && _root() === root && getSigner()?.signerDid === signer;
         const key = JSON.stringify([actor, root, container, id]);
@@ -622,10 +623,11 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
         const fail = (reason, status = 0) => ({ ok: false, reason, status });
         if (!current() || !isValidChatContainer(containerUrl) || !_peerRootAllowed(containerUrl)
             || !SAFE_ID_RE.test(messageId || '') || !Number.isFinite(Date.parse(timestamp))) return fail('unavailable');
-        if (!signer?.privKey || !signer?.signerDid || !['edit', 'delete', 'react', 'unreact'].includes(change?.kind)) return fail('unavailable');
-        const reaction = isReactionChange(change.kind);
+        if (!signer?.privKey || !signer?.signerDid || !['edit', 'delete', 'react', 'unreact', 'vote'].includes(change?.kind)) return fail('unavailable');
+        const reaction = isReactionChange(change.kind), vote = change.kind === 'vote';
         const content = change.kind !== 'delete' ? String(change.content || '').trim() : '';
         if (reaction && !isRoomReaction(content)) return fail('invalid_change');
+        if (vote && content !== '' && !POLL_EMOJI.includes(content)) return fail('invalid_poll');
         if (change.kind === 'edit' && (!content || new TextEncoder().encode(content).length > 16384)) return fail('invalid_change');
         const before = await podReadChatDayAtResult(containerUrl, timestamp, '', ownerWebId);
         if (!current()) return fail('account_changed');
@@ -633,17 +635,30 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
         const target = messageIriAt(containerUrl, messageId, timestamp);
         const message = before.messages.find(m => m.iri === target);
         if (!message) return fail('unavailable');
-        if (!reaction && actor !== message.from_webid && !(change.kind === 'delete' && actor === ownerWebId)) return fail('forbidden', 403);
+        if (!reaction && !vote && actor !== message.from_webid && !(change.kind === 'delete' && actor === ownerWebId)) return fail('forbidden', 403);
         if (message.deleted) return change.kind === 'delete' ? { ok: true, message } : fail('deleted');
         // A retry after a lost response can acknowledge the already-persisted edit.
         if (change.kind === 'edit' && message.content === content) return { ok: true, message };
+        const poll = parsePoll(message.content);
+        if (reaction && poll && POLL_EMOJI.includes(content)) return fail('invalid_change');
+        if (vote) {
+            if (!poll || !message.poll_revision) return fail('invalid_poll');
+            if (change.expectedPollRevision !== message.poll_revision) return { ...fail('poll_changed'), message };
+            if (content && !poll.options.some(option => option.emoji === content)) return fail('invalid_poll');
+            const choice = POLL_EMOJI.find(emoji => message.reactions?.[emoji]?.includes(actor)) || '';
+            if (choice === content) return { ok: true, message };
+        }
+        const priorVote = vote ? message.poll_vote_versions?.[actor] : null;
         const priorReaction = reaction ? message.reaction_versions?.[content]?.[actor] : null;
         if (reaction && !!priorReaction?.active === (change.kind === 'react')) return { ok: true, message };
-        if (!reaction && (change.expectedRevision || '') !== (message.revision_id || '')) return fail('conflict');
+        if (!reaction && !vote && (change.expectedRevision || '') !== (message.revision_id || '')) return fail('conflict');
+        if (change.kind === 'edit' && poll && !change.allowPollReset
+            && poll.options.some(option => message.reactions?.[option.emoji]?.length)) return { ...fail('poll_has_votes'), message };
         const id = `${dayFileAt(containerUrl, timestamp)}#change-${crypto.randomUUID()}`;
         const operation = { id, target, actor, kind: change.kind, content,
-            created: new Date(Math.max(Date.now(), (Date.parse(reaction ? priorReaction?.created : message.edited_at) || 0) + 1)).toISOString(),
-            previous: (reaction ? priorReaction?.id : message.revision_id) || '' };
+            created: new Date(Math.max(Date.now(), (Date.parse(vote ? priorVote?.created : reaction ? priorReaction?.created : message.edited_at) || 0) + 1)).toISOString(),
+            previous: (vote ? priorVote?.id : reaction ? priorReaction?.id : message.revision_id) || '' };
+        if (vote) operation.poll_revision = message.poll_revision;
         operation.proof = await signLongChatChange(operation, signer.privKey, signer.signerDid);
         if (!current()) return fail('account_changed');
         if (!operation.proof) return fail('unavailable');
@@ -655,7 +670,9 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
             if (!current()) return fail('account_changed');
             const saved = after.messages.find(m => m.iri === target);
             if (!after.ok || !saved) return fail('confirmation_failed', after.status);
-            const confirmed = reaction ? !saved.deleted && saved.reaction_versions?.[content]?.[actor]?.id === id
+            if (vote && saved.poll_revision !== operation.poll_revision) return { ...fail('poll_changed'), message: saved };
+            const confirmed = vote ? !saved.deleted && saved.poll_vote_versions?.[actor]?.id === id
+                : reaction ? !saved.deleted && saved.reaction_versions?.[content]?.[actor]?.id === id
                 : change.kind === 'delete' ? saved.deleted : !saved.deleted && saved.revision_id === id;
             if (!confirmed) return fail('conflict');
             return { ok: true, message: saved };

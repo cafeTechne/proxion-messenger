@@ -845,6 +845,21 @@ describe('mentions', () => {
 });
 
 describe('scroll to top with the whole buffer rendered', () => {
+  it('keeps a closed-room notice when clearing a paged feed triggers scrolling', () => {
+    const listeners = {};
+    const feed = mkEl({ innerHTML: 'You were removed from this room.',
+      addEventListener(type, fn) { (listeners[type] ||= []).push(fn); } });
+    els['message-feed'] = feed; els['scroll-bottom-btn'] = mkEl();
+    host.allMessages = [{ message_id: 'old', content: 'Old room text', timestamp: at('2026-10-04T10:00:00') }];
+    host.messageMap.old = host.allMessages[0];
+    const r = make(); r.state._detachedTail = true; r.attach();
+    view = null;
+    listeners.scroll.forEach(fn => fn({ target: feed }));
+    r.renderMessages();
+    expect(feed.innerHTML).toBe('You were removed from this room.');
+    expect(feed._children).toEqual([]);
+    expect(sent).toEqual([]);
+  });
   function scrollTop(renderedCount) {
     const listeners = {};
     const all = Array.from({ length: 150 }, (_, i) => ({ message_id: 'm' + i, timestamp: at('2026-10-04T10:00:00') }));
@@ -959,5 +974,36 @@ describe('poll voting availability', () => {
     expect(html).toContain('data-msg-action="poll-vote"');
     expect(html).not.toContain('disabled aria-disabled="true"');
     expect(html).toContain('poll.voteHint');
+  });
+});
+
+
+describe('structural message refresh', () => {
+  it('ignores a row whose message was removed while an editor was closing', () => {
+    els['msg-gone'] = mkEl({ parentNode: mkEl() });
+    expect(make().refreshMessage('gone')).toBe(false);
+  });
+  it.each(['📊 Revised?\n1️⃣ A\n2️⃣ B', 'A normal message now'])('refreshes a poll row without disturbing another editor: %s', content => {
+    const parent = mkEl(), divider = mkEl({ className: 'date-divider' }), neighbor = mkEl({ id: 'msg-other', innerHTML: '<textarea class="edit-input">Keep this draft</textarea>' });
+    const old = mkEl({ id: 'msg-poll', parentNode: parent, nextSibling: neighbor, contains: () => false });
+    parent._children = [divider, old, neighbor];
+    old.remove = () => { delete els['msg-poll']; parent._children.splice(parent._children.indexOf(old), 1); };
+    parent.insertBefore = (fragment, next) => {
+      const index = next ? parent._children.indexOf(next) : parent._children.length;
+      parent._children.splice(index, 0, ...fragment._children);
+    };
+    global.document.createDocumentFragment = () => mkEl({ nodeType: 11 });
+    els['msg-poll'] = old;
+    host.messageMap.poll = { message_id: 'poll', thread_id: 'room-1', content,
+      from_webid: 'did:key:zSelf', timestamp: '2026-11-07T12:00:00Z', edited_at: '2026-11-07T13:00:00Z' };
+    host.allMessages = [host.messageMap.poll];
+    const r = make(); r.state._lastRenderedDate = 'preserved';
+    expect(r.refreshMessage('poll')).toBe(true);
+    expect(parent._children[0]).toBe(divider); expect(parent._children[2]).toBe(neighbor);
+    expect(neighbor.innerHTML).toContain('Keep this draft');
+    expect(parent._children[1].id).toBe('msg-poll');
+    const html = parent._children[1]._children.map(el => el.innerHTML).join('');
+    expect(html.includes('poll-card')).toBe(content.startsWith('📊'));
+    expect(r.state._lastRenderedDate).toBe('preserved');
   });
 });

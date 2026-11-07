@@ -110,7 +110,8 @@ import { createSolidChat } from './solidchat.js';
 import { createSolidChatUI } from './solidchat-ui.js';
 import { createSendStatus, seenByText } from './send-status.js';
 import { sendQueueStore } from './sendqueue.js';
-import { createPolls } from './polls.js';
+import { createPolls, parsePoll } from './polls.js';
+import { roomPollRevision } from './room-polls.js';
 import { createRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { createMeme } from './meme.js';
 import { inlineNotice, feedEmptyState, showFeedNotice } from './states.js';
@@ -689,6 +690,9 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                 onSealFailed: _onSealFailed,
                 canReact: () => _conversationSupports('reactions'),
                 canVotePoll: () => _conversationSupports('polls'),
+                saveVote: (view, id, choice, expected) => _isPodRoomView(view) ? _savePodVote(view, id, choice, expected) : null,
+                getPollState: id => messageMap[id],
+                onVoteFailed: result => showToast(t(result?.reason === 'poll_changed' ? 'poll.changedRetry' : 'poll.voteFailed')),
                 getSessionId: () => _webRoomSessionId(),
                 saveReaction: (view, mid, emoji, add) => _isPodRoomView(view)
                     ? _changePodRoomMessage(view, mid, { kind: add ? 'react' : 'unreact', content: emoji }) : null,
@@ -915,9 +919,13 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             onSealFailed: _onSealFailed,
             send: _sendOrQueue,
             canEdit: () => _conversationSupports('edit'),
+            refreshEditedMessage: id => {
+                if (document.getElementById('msg-' + id)?.querySelector('.poll-card') || parsePoll(messageMap[id]?.content)) return rendering.refreshMessage(id);
+                return false;
+            },
             saveEdit: (view, id, content, revision) => _isPodRoomView(view)
-                ? _changePodRoomMessage(view, id, { kind: 'edit', content, expectedRevision: revision }) : null,
-            onEditFailed: result => showToast(t(result?.reason === 'conflict' ? 'msg.editConflict' : 'msg.changeFailed')),
+                ? _savePodRoomEdit(view, id, content, revision) : null,
+            onEditFailed: result => { if (result?.reason !== 'cancelled') showToast(t(result?.reason === 'conflict' ? 'msg.editConflict' : 'msg.changeFailed')); },
         });
         const { startEdit, commitEdit, cancelEdit, handleMessageEdited } = edit;
         // Mute: mutedThreads is a host-owned Set (read by renderer/dispatch),
@@ -4945,9 +4953,31 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             }
         }
 
-        async function _changePodRoomMessage(view, id, change) {
+        async function _savePodVote(view, id, choice, expected = null) {
+            const session = _webRoomSessionId(), message = { ...messageMap[id] };
+            const revision = expected || await roomPollRevision(message);
+            if (session !== _webRoomSessionId()) return { ok: false, reason: 'account_changed' };
+            if (!revision) return { ok: false, reason: 'invalid_poll' };
+            const result = await _changePodRoomMessage(view, id, { kind: 'vote', content: choice, expectedPollRevision: revision }, message);
+            return { ...result, pollRevision: revision };
+        }
+        async function _savePodRoomEdit(view, id, content, revision) {
+            const session = _webRoomSessionId(), message = { ...messageMap[id] };
+            const change = { kind: 'edit', content, expectedRevision: revision };
+            const result = await _changePodRoomMessage(view, id, change, message);
+            if (result.reason !== 'poll_has_votes') return result;
+            const current = () => session === _webRoomSessionId() && activeView?.id === view.id && activeView?.type === view.type;
+            if (!current()) return { ok: false, reason: 'cancelled' };
+            const approved = await new Promise(resolve => showConfirm(t('poll.editResetConfirm'), () => resolve(true), () => resolve(false), {
+                title: t('poll.editResetTitle'), confirmLabel: t('btn.save'), danger: true,
+            }));
+            if (!approved || !current()) return { ok: false, reason: 'cancelled' };
+            return _changePodRoomMessage(view, id, { ...change, allowPollReset: true }, message);
+        }
+
+        async function _changePodRoomMessage(view, id, change, snapshot = messageMap[id]) {
             const session = _webRoomSessionId();
-            const message = messageMap[id];
+            const message = snapshot;
             const timestamp = message?.pod_ts || message?.timestamp;
             const current = () => session === _webRoomSessionId();
             let result;
@@ -4961,8 +4991,8 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                 }
             } catch { result = { ok: false, reason: 'unavailable' }; }
             if (!current()) return { ok: false, reason: 'account_changed' };
-            if (result.ok) _onRoomPodChanges(view.id, [{ ...result.message, message_id: id }]);
-            else console.warn('[rooms] Message change failed:', result.reason, result.status || 0);
+            if (result.ok || (result.reason === 'poll_changed' && result.message)) _onRoomPodChanges(view.id, [{ ...result.message, message_id: id }]);
+            else if (result.reason !== 'poll_has_votes') console.warn('[rooms] Message change failed:', result.reason, result.status || 0);
             return result;
         }
 
@@ -6821,7 +6851,8 @@ import { createRoomApprovalNotice } from './room-approvals.js';
         }
         // R59F: polls (plain-text message; votes are keycap reactions)
         const polls = createPolls({ showToast,
-            canCreatePoll: () => _conversationSupports('polls'),
+            getActiveView: () => activeView, getSessionId: () => _webRoomSessionId(),
+            canCreatePoll: () => !!activeView && _conversationSupports('polls'),
             onUnavailable: () => showToast(t('poll.unavailable')),
         });
         polls.wirePolls();

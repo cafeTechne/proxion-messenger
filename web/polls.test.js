@@ -78,3 +78,35 @@ describe('poll creation capability', () => {
         delete global.document;
     });
 });
+
+
+describe('poll creation context', () => {
+    function setup() {
+        const elements = Object.fromEntries(['poll-modal', 'poll-question', 'message-input', 'message-form', 'compose-more-toggle', ...Array.from({length:5}, (_, i) => 'poll-opt-' + (i+1))]
+            .map(id => [id, { value: '', style: { display: 'none' }, checked: true, focus: vi.fn(), dispatchEvent: vi.fn() }]));
+        global.document = { getElementById: id => elements[id] || null };
+        return elements;
+    }
+    it('preserves an existing composer draft instead of replacing it with a poll', () => {
+        const els = setup(), showToast = vi.fn(); els['message-input'].value = 'Keep this message';
+        const p = createPolls({ showToast });
+        p.openPollModal(); p.submitPoll();
+        expect(els['message-input'].value).toBe('Keep this message');
+        expect(els['poll-modal'].style.display).toBe('none');
+        expect(showToast).toHaveBeenCalledWith('poll.draftPending');
+        expect(els['message-form'].dispatchEvent).not.toHaveBeenCalled();
+    });
+    it('refuses submission after switching conversation or account, keeping poll fields intact', () => {
+        const els = setup(), onUnavailable = vi.fn();
+        let view = { id: 'room-1', type: 'local_room' }, session = 1;
+        const p = createPolls({ showToast: vi.fn(), onUnavailable, getActiveView: () => view, getSessionId: () => session });
+        p.openPollModal(); expect(els['compose-more-toggle'].checked).toBe(false);
+        expect(els['poll-question'].focus).toHaveBeenCalledOnce();
+        els['poll-question'].value = 'Keep this question'; els['poll-opt-1'].value = 'A'; els['poll-opt-2'].value = 'B';
+        view = { ...view, id: 'room-2' }; p.submitPoll();
+        expect(els['poll-question'].value).toBe('Keep this question');
+        view = { ...view, id: 'room-1' }; session++; p.submitPoll();
+        expect(onUnavailable).toHaveBeenCalledTimes(2);
+        expect(els['message-form'].dispatchEvent).not.toHaveBeenCalled();
+    });
+});

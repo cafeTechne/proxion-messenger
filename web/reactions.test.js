@@ -24,7 +24,7 @@ function make(over = {}) {
     getActiveView: () => (over.activeView === undefined ? { type: 'local_room', id: 'room-1' } : over.activeView),
     getSelfWebId: () => over.selfWebId ?? 'did:key:zSelf',
     getMessageReactions: () => messageReactions,
-    canVotePoll: over.canVotePoll, onUnavailable: over.onUnavailable, getSessionId: over.getSessionId, saveReaction: over.saveReaction, onSaveFailed: over.onSaveFailed, getPodReactions: over.getPodReactions,
+    saveVote: over.saveVote, onVoteFailed: over.onVoteFailed, getPollState: over.getPollState, canVotePoll: over.canVotePoll, onUnavailable: over.onUnavailable, getSessionId: over.getSessionId, saveReaction: over.saveReaction, onSaveFailed: over.onSaveFailed, getPodReactions: over.getPodReactions,
   });
   return { r, sent, messageReactions };
 }
@@ -380,5 +380,50 @@ describe('independent poll capability', () => {
     expect(onUnavailable).toHaveBeenCalledOnce();
     expect(saveReaction).not.toHaveBeenCalled();
     expect(h.sent).toEqual([]);
+  });
+});
+
+
+describe('confirmed pod voting', () => {
+  it('uses one desired-choice save, preserves failed state, and retries without reaction commands', async () => {
+    const onVoteFailed = vi.fn(), saveVote = vi.fn().mockResolvedValue({ ok: true }).mockResolvedValueOnce({ ok: false });
+    const h = make({ messageReactions: { m1: { '1️⃣': ['did:key:zSelf'] } }, saveVote, onVoteFailed });
+    await h.r.votePoll('m1', '2️⃣');
+    expect(h.messageReactions.m1).toEqual({ '1️⃣': ['did:key:zSelf'] });
+    expect(onVoteFailed).toHaveBeenCalledOnce(); expect(h.sent).toEqual([]);
+    await h.r.votePoll('m1', '2️⃣');
+    expect(saveVote).toHaveBeenLastCalledWith({ type: 'local_room', id: 'room-1' }, 'm1', '2️⃣');
+    await h.r.votePoll('m1', '1️⃣');
+    expect(saveVote).toHaveBeenLastCalledWith({ type: 'local_room', id: 'room-1' }, 'm1', '');
+  });
+  it('coalesces pending choices and suppresses failures from an old session', async () => {
+    let finish, session = 1;
+    const saveVote = vi.fn(() => new Promise(resolve => { finish = resolve; })), onVoteFailed = vi.fn();
+    const h = make({ saveVote, onVoteFailed, getSessionId: () => session });
+    const first = h.r.votePoll('m1', '1️⃣'), second = h.r.votePoll('m1', '2️⃣');
+    expect(saveVote).toHaveBeenCalledOnce(); session++;
+    finish({ ok: false }); await Promise.all([first, second]);
+    expect(onVoteFailed).not.toHaveBeenCalled(); expect(h.sent).toEqual([]);
+  });
+});
+
+describe('retrying an uncertain vote response', () => {
+  it('retries the intended clear even if a background read already cleared the selected option', async () => {
+    const option = emoji => ({ dataset: { emoji }, count: {}, bar: { style: {} }, setAttribute() {},
+      querySelector(selector) { return selector === '.poll-opt-count' ? this.count : this.bar; } });
+    const options = [option('1️⃣'), option('2️⃣')], hint = {};
+    let retry = null;
+    const foot = { appendChild: button => { retry = button; button.remove = () => { retry = null; }; } };
+    const card = { querySelectorAll: () => options, querySelector: selector => selector === '.poll-hint' ? hint : selector === '.poll-foot' ? foot : retry };
+    const container = { parentElement: { querySelector: () => card }, appendChild() {}, innerHTML: '' };
+    const saveVote = vi.fn().mockResolvedValueOnce({ ok: false, reason: 'confirmation_failed', pollRevision: 'version' }).mockResolvedValueOnce({ ok: true });
+    const h = make({ messageReactions: { m1: { '1️⃣': ['did:key:zSelf'] } }, saveVote });
+    global.document.getElementById = () => container;
+    await h.r.votePoll('m1', '1️⃣');
+    expect(retry?.textContent).toBe('poll.retryVote');
+    h.messageReactions.m1 = {}; h.r.renderReactions('m1');
+    await retry.onclick();
+    expect(saveVote).toHaveBeenLastCalledWith({ type: 'local_room', id: 'room-1' }, 'm1', '', 'version');
+    expect(retry).toBe(null); expect(h.sent).toEqual([]);
   });
 });

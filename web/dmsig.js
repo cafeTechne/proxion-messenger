@@ -253,6 +253,7 @@ export async function verifyLongChatDeleteProof(t, proof) {
 
 const CHANGE_FIELDS = ['domain', 'id', 'target', 'actor', 'kind', 'created', 'content', 'previous'];
 function changeBytes(change) {
+    if (change.kind === 'vote') return _canonical([...CHANGE_FIELDS, 'poll_revision'], { ...change, domain: 'proxion-room-vote-v1' });
     return _canonical(CHANGE_FIELDS, { ...change, domain: 'proxion-room-change-v1' });
 }
 export function signLongChatChange(change, privKey, signerDid) {

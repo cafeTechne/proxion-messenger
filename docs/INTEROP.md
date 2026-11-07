@@ -58,6 +58,11 @@ extension to display these reactions. Owners can also pin/unpin room messages;
 members have a read-only pin panel. The owner-signed `pins.json` index keeps old
 pins discoverable beyond the normal history window, and Jump reads their original
 day files. Other Solid apps need this pin-index extension to discover pins.
+Pod rooms also support creating polls and casting, changing, or clearing one
+vote per member. Signed atomic choices survive reload in both builds. Editing
+a voted poll asks the author to confirm resetting its votes; previous choices
+remain bound to the old question. Other Solid apps can read the poll text and
+need the signed vote extension to display counts.
 
 - **Desktop joins a browser-build room** by pasting the invite link into Join a
   room. The join request, the owner's approval and the room messages travel

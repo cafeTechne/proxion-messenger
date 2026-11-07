@@ -21,7 +21,7 @@ import { icon } from './icons.js';
 // emoji) names our own reaction for remove_reaction (its token, if sealed).
 // send (optional): queues reactions while offline (connection.js
 // socketSendOrQueue) so they go out on reconnect instead of being dropped.
-export function createReactions({ getSocket, getActiveView, getSelfWebId, getMessageReactions, getRoomEmojiMap, getMessageTs, getRemoteRoom, resolveName, sealReaction, wireEmoji, onSealFailed, send = null, canReact = () => true, onUnavailable = () => {}, saveReaction = null, getPodReactions = () => null, onSaveFailed = () => {}, getSessionId = getSelfWebId, canVotePoll = canReact }) {
+export function createReactions({ getSocket, getActiveView, getSelfWebId, getMessageReactions, getRoomEmojiMap, getMessageTs, getRemoteRoom, resolveName, sealReaction, wireEmoji, onSealFailed, send = null, canReact = () => true, onUnavailable = () => {}, saveReaction = null, getPodReactions = () => null, onSaveFailed = () => {}, getSessionId = getSelfWebId, canVotePoll = canReact, saveVote = null, getPollState = () => null, onVoteFailed = () => {} }) {
     const state = { lastEmojiMsgId: null };
     const pending = new Map();
     function _savePodReaction(view, mid, emoji, add) {
@@ -37,6 +37,33 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
             return result;
         }).finally(() => { if (pending.get(key) === task) pending.delete(key); });
         pending.set(key, task);
+        return task;
+    }
+
+    const pendingVotes = new Map(), failedVotes = new Map();
+    const voteKey = (view, mid, session = getSessionId()) => JSON.stringify([session, view?.type, view?.id, mid]);
+    function _savePodVote(view, mid, choice, expectedRevision = null) {
+        if (!saveVote) return null;
+        const session = getSessionId(), key = voteKey(view, mid, session);
+        if (pendingVotes.has(key)) return pendingVotes.get(key);
+        const revision = expectedRevision || getPollState(mid)?.poll_revision;
+        const saving = revision ? saveVote(view, mid, choice, revision) : saveVote(view, mid, choice);
+        if (!saving) return null;
+        const current = () => session === getSessionId() && getActiveView()?.id === view.id && getActiveView()?.type === view.type;
+        const task = Promise.resolve(saving).catch(() => ({ ok: false })).then(result => {
+            if (result?.ok) failedVotes.delete(key);
+            else if (current() && result?.reason !== 'account_changed') {
+                if (!['poll_changed', 'deleted', 'invalid_poll'].includes(result?.reason)) failedVotes.set(key, { choice, revision: result?.pollRevision || revision });
+                else failedVotes.delete(key);
+                onVoteFailed(result);
+            }
+            return result;
+        }).finally(() => {
+            if (pendingVotes.get(key) === task) pendingVotes.delete(key);
+            if (current()) renderReactions(mid);
+        });
+        pendingVotes.set(key, task);
+        renderReactions(mid);
         return task;
     }
 
@@ -113,7 +140,7 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         const reacts = messageReactions[mid] || {};
         container.innerHTML = "";
         // A poll's votes are shown on its own option buttons, not as pills.
-        const pollKeys = _renderPollCounts(container, reacts, selfWebId);
+        const pollKeys = _renderPollCounts(container, reacts, selfWebId, mid);
         let shown = 0;
         Object.keys(reacts).forEach(emoji => {
             const count = reacts[emoji].length;
@@ -184,14 +211,27 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
     // Fills in the poll card next to `container` (if any): per-option count,
     // a proportional bar, aria-pressed for your own vote, and the total.
     // Returns the set of emoji keys that are poll options.
-    function _renderPollCounts(container, reacts, selfWebId) {
+    function _renderPollCounts(container, reacts, selfWebId, mid) {
         const card = typeof container.parentElement?.querySelector === "function"
             ? container.parentElement.querySelector(".poll-card") : null;
         if (!card) return new Set();
         const btns = [...card.querySelectorAll(".poll-opt[data-emoji]")];
         const counts = btns.map(b => (reacts[b.dataset.emoji] || []).length);
         const total = counts.reduce((a, b) => a + b, 0);
-        const voting = canVotePoll();
+        const supported = canVotePoll(), saving = pendingVotes.has(voteKey(getActiveView?.(), mid));
+        const voting = supported && !saving;
+        card.setAttribute?.('aria-busy', String(saving));
+        card.querySelector('.poll-retry')?.remove?.();
+        const failed = failedVotes.get(voteKey(getActiveView?.(), mid));
+        if (failed && !saving && supported) {
+            const retry = document.createElement('button');
+            retry.type = 'button'; retry.className = 'poll-retry link-btn'; retry.textContent = t('poll.retryVote');
+            const view = { ...getActiveView() }, session = getSessionId();
+            retry.onclick = () => {
+                if (session === getSessionId() && getActiveView()?.id === view.id && getActiveView()?.type === view.type) return _savePodVote(view, mid, failed.choice, failed.revision);
+            };
+            card.querySelector('.poll-foot')?.appendChild?.(retry);
+        }
         btns.forEach((b, i) => {
             b.disabled = !voting;
             b.setAttribute("aria-disabled", String(!voting));
@@ -200,11 +240,11 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
             b.querySelector(".poll-opt-count").textContent = counts[i] ? String(counts[i]) : "";
             b.querySelector(".poll-opt-bar").style.width = total ? `${Math.round(100 * counts[i] / total)}%` : "0";
             const names = voters.length ? reactorNames(voters) : "";
-            b.title = voting ? names : t('poll.unavailable') + (names ? ' · ' + names : '');
+            b.title = voting ? names : t(saving ? 'poll.saving' : 'poll.unavailable') + (names ? ' · ' + names : '');
         });
         const hint = card.querySelector(".poll-hint");
-        if (hint) hint.textContent = voting
-            ? (total ? tn('poll.votes', total) : t('poll.voteHint'))
+        if (hint) hint.textContent = saving ? t('poll.saving') : supported
+            ? (total ? tn('poll.votes', total) : t(getPollState(mid)?.poll_votes_reset ? 'poll.changed' : 'poll.voteHint'))
             : (total ? tn('poll.votes', total) + ' · ' : '') + t('poll.unavailable');
         return new Set(btns.map(b => b.dataset.emoji));
     }
@@ -214,6 +254,11 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         if (!canVotePoll()) { onUnavailable(); return; }
         if (!msgId || !emoji) return;
         const reacts = getMessageReactions()[msgId] || {};
+        const view = getActiveView();
+        if (!view) return;
+        if (!pendingVotes.has(voteKey(view, msgId))) failedVotes.delete(voteKey(view, msgId));
+        const saving = _savePodVote({ ...view }, msgId, (reacts[emoji] || []).includes(getSelfWebId()) ? '' : emoji);
+        if (saving) return saving;
         const { add, remove } = pollVoteChange(reacts, emoji, getSelfWebId());
         remove.forEach(e => removeReaction(e, msgId));
         if (add) addEmoji(add, msgId);

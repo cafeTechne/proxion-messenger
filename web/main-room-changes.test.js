@@ -93,3 +93,36 @@ describe('floating members panel dismissal', () => {
         if (width === 1280) expect(panel.style.display).toBe('block');
     });
 });
+
+
+describe('voted poll edit confirmation', () => {
+    it.each([false, true])('only retries the edit with reset consent when approved=%s', async approved => {
+        const change = vi.fn().mockResolvedValueOnce({ ok: false, reason: 'poll_has_votes' }).mockResolvedValueOnce({ ok: true });
+        let answer;
+        const edit = compile('_savePodRoomEdit', {
+            _webRoomSessionId: () => 1, messageMap: { poll: { content: 'Original', timestamp: '2026-11-07T12:00:00Z' } },
+            activeView: { id: 'room', type: 'local_room' }, _changePodRoomMessage: change,
+            showConfirm: (_text, yes, no) => { answer = approved ? yes : no; }, t: key => key,
+        });
+        const pending = edit({ id: 'room', type: 'local_room' }, 'poll', 'Revised', 'rev1');
+        await Promise.resolve(); answer();
+        const result = await pending;
+        expect(result.ok).toBe(approved);
+        expect(change).toHaveBeenCalledTimes(approved ? 2 : 1);
+        if (approved) expect(change.mock.calls[1][2]).toMatchObject({ allowPollReset: true, expectedRevision: 'rev1' });
+        else expect(result.reason).toBe('cancelled');
+    });
+    it('cancels an accepted reset when the account changes while the prompt is open', async () => {
+        let session = 1, approve;
+        const change = vi.fn(async () => ({ ok: false, reason: 'poll_has_votes' }));
+        const edit = compile('_savePodRoomEdit', {
+            _webRoomSessionId: () => session, messageMap: { poll: { content: 'Original' } },
+            activeView: { id: 'room', type: 'local_room' }, _changePodRoomMessage: change,
+            showConfirm: (_text, yes) => { approve = yes; }, t: key => key,
+        });
+        const pending = edit({ id: 'room', type: 'local_room' }, 'poll', 'Revised', 'rev1');
+        await Promise.resolve(); session++; approve();
+        expect(await pending).toMatchObject({ ok: false, reason: 'cancelled' });
+        expect(change).toHaveBeenCalledOnce();
+    });
+});

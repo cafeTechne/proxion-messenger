@@ -72,9 +72,10 @@ const cases = [
 describe('main conversation capabilities', () => {
     it.each(cases)('uses the actual protocol for %s', (_name, options, supported) => {
         const h = harness(options);
-        for (const feature of ['polls', 'schedule']) {
+        for (const feature of ['schedule']) {
             expect(h._conversationSupports(feature)).toBe(supported);
         }
+        expect(h._conversationSupports('polls')).toBe(supported || ['browser room', 'joined pod room', 'desktop pod room'].includes(_name));
         expect(h._conversationSupports('history')).toBe(true);
         expect(h._scheduleAllowed()).toBe(supported);
     });
@@ -93,6 +94,7 @@ describe('main conversation capabilities', () => {
         expected.delete('gate-no-delete');
         expected.delete('gate-no-reactions');
         expected.delete('gate-no-pins');
+        expected.delete('gate-no-polls');
         expected.add('gate-crossmode');
         expect(h.classes).toEqual(expected);
         expect(h._conversationSupports('edit')).toBe(true);

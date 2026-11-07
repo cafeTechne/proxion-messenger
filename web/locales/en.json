@@ -1080,5 +1080,13 @@
   "pin.loadFailed": "Could not load this pinned message. Please try again.",
   "pin.saveFailed": "Could not save the pin change. Please try again.",
   "pin.conflict": "This pin changed on another device. Refresh the panel and try again.",
-  "pin.limit": "A room can have up to 50 pinned messages."
+  "pin.limit": "A room can have up to 50 pinned messages.",
+  "poll.saving": "Saving vote…",
+  "poll.voteFailed": "Could not save your vote. Please try again.",
+  "poll.changedRetry": "This poll changed. Review the choices and vote again.",
+  "poll.changed": "This poll was updated. Please vote again.",
+  "poll.editResetTitle": "Reset poll votes?",
+  "poll.editResetConfirm": "Changing this poll clears its current votes. Save the change?",
+  "poll.draftPending": "Send or clear your message draft before creating a poll.",
+  "poll.retryVote": "Retry vote"
 }

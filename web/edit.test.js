@@ -28,7 +28,7 @@ function make(over = {}) {
     getActiveView: () => (over.activeView === undefined ? { type: 'local_room', id: 'room-1' } : over.activeView),
     getClientDid: () => over.clientDid ?? 'did:key:zSelf',
     getMessageMap: () => messageMap,
-    saveEdit: over.saveEdit, onEditFailed: over.onEditFailed, canEdit: over.canEdit,
+    saveEdit: over.saveEdit, onEditFailed: over.onEditFailed, canEdit: over.canEdit, refreshEditedMessage: over.refreshEditedMessage,
   });
   return { edit, sent, messageMap };
 }
@@ -208,5 +208,19 @@ describe('offline edits are queued, not dropped', () => {
     edit.commitEdit('m1', 'fixed typo');
     expect(queued).toEqual([{ cmd: 'edit_local_message', message_id: 'm1', thread_id: 'room-1',
       content: 'fixed typo', from_webid: 'did:key:zSelf' }]);
+  });
+});
+
+
+describe('poll edit structure', () => {
+  it('opens a structured poll in the editor and refreshes confirmed state after cancel', () => {
+    const card = mkEl({ innerText: 'Visible poll card' }), refreshEditedMessage = vi.fn(() => true);
+    els['msg-m1'] = mkEl({ querySelector: selector => selector === '.poll-card' ? card : null });
+    const content = '📊 Lunch?\n1️⃣ Soup\n2️⃣ Salad';
+    const h = make({ messageMap: { m1: { content } }, refreshEditedMessage });
+    h.edit.startEdit('m1');
+    expect(h.edit.state._input.value).toBe(content);
+    h.edit.cancelEdit('m1');
+    expect(refreshEditedMessage).toHaveBeenCalledWith('m1');
   });
 });

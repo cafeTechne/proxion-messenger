@@ -53,15 +53,14 @@ async function drainUntil(page, check, arg, tries = 16) {
 const promptOpen = () => { const m = document.getElementById('confirm-modal'); return !!m && getComputedStyle(m).display !== 'none'; };
 const hasRoom = (id) => !!document.getElementById('nav-' + id);
 const seesText = (txt) => Array.from(document.querySelectorAll('#message-feed .message')).some((el) => (el.textContent || '').includes(txt));
-const unsupportedControlsHidden = () => ['schedule-btn', 'poll-btn', 'integrations-btn'].every((id) => {
+const unsupportedControlsHidden = () => ['schedule-btn', 'integrations-btn'].every((id) => {
   const el = document.getElementById(id);
   return !!el && getComputedStyle(el).display === 'none';
 });
-const disabledPoll = (question) => {
+const enabledPoll = (question) => {
   const card = Array.from(document.querySelectorAll('.poll-card')).find((el) => el.querySelector('.poll-q')?.textContent === question);
   return !!card && card.querySelectorAll('.poll-opt').length === 2
-    && Array.from(card.querySelectorAll('.poll-opt')).every((el) => el.disabled && el.getAttribute('aria-disabled') === 'true' && el.title.includes('unavailable'))
-    && card.querySelector('.poll-hint')?.textContent.includes('unavailable');
+    && Array.from(card.querySelectorAll('.poll-opt')).every((el) => !el.disabled && el.getAttribute('aria-disabled') === 'false');
 };
 
 async function waitFor(page, fn, arg, ms) {
@@ -72,7 +71,8 @@ async function reload(page) {
   await page.waitForFunction(() => typeof window.proxionWebDm === 'object', { timeout: 30000 });
 }
 async function openRoom(page, id) {
-  await page.evaluate((rid) => document.getElementById('nav-' + rid)?.click(), id);
+  await page.waitForFunction(rid => !!document.getElementById('nav-' + rid), { timeout: 30000 }, id);
+  await page.evaluate((rid) => document.getElementById('nav-' + rid).querySelector('.room-item-body').click(), id);
   await waitFor(page, () => !!document.getElementById('message-input') && !document.getElementById('message-input').disabled, null, 10000);
 }
 async function send(page, text) {
@@ -150,8 +150,8 @@ try {
   });
   if (inviteAfter) ok('after reload the owner still has the invite link');
   else fail('the invite link was missing after the owner reloaded');
-  if (await pageA.evaluate(unsupportedControlsHidden)) ok('unsupported scheduling and poll creation controls stay hidden');
-  else fail('browser room exposes scheduling or poll creation');
+  if (await pageA.evaluate(unsupportedControlsHidden)) ok('unsupported scheduling and integrations controls stay hidden');
+  else fail('browser room exposes scheduling or integrations');
 
   // ── Two join requests at once ──
   step = 'requests';
@@ -231,27 +231,56 @@ try {
   await pageA.keyboard.press('Backspace');
   await waitFor(pageA, () => document.getElementById('search-panel')?.hidden, null, 5000);
 
-  // A plain-text poll sent by another client must not offer ineffective votes.
-  step = 'poll-capabilities';
+  step = 'poll-voting';
   const question = 'poll-' + Math.random().toString(36).slice(2, 7);
-  await pageA.focus('#message-input');
-  await pageA.evaluate((text) => {
-    const input = document.getElementById('message-input');
-    input.value = text;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  }, `📊 ${question}
-1️⃣ A
-2️⃣ B`);
-  await pageA.keyboard.press('Enter');
-  if (await waitFor(joiner, disabledPoll, question, 15000)) ok('received poll options are disabled with an unavailable hint');
-  else {
-    console.error('Poll state:', JSON.stringify(await joiner.evaluate(() => ({
-      cards: Array.from(document.querySelectorAll('.poll-card')).map((card) => ({ question: card.querySelector('.poll-q')?.textContent, hint: card.querySelector('.poll-hint')?.textContent,
-        options: Array.from(card.querySelectorAll('.poll-opt')).map((el) => ({ disabled: el.disabled, ariaDisabled: el.getAttribute('aria-disabled'), title: el.title })) })),
-      messages: document.getElementById('message-feed')?.innerText.slice(-1000),
-    })), null, 2));
-    fail('a received browser-room poll was missing or exposed ineffective voting');
+  if (!(await pageA.$eval('#poll-btn', el => el.getClientRects().length > 0))) await pageA.locator('label[for="compose-more-toggle"]').click();
+  await pageA.locator('#poll-btn').click();
+  await pageA.waitForSelector('#poll-modal', { visible: true });
+  await pageA.type('#poll-question', question);
+  await pageA.type('#poll-opt-1', 'A'); await pageA.type('#poll-opt-2', 'B');
+  await pageA.click('#poll-submit');
+  if (!(await waitFor(joiner, enabledPoll, question, 20000))) {
+    const snapshot = () => ({ feed: document.getElementById('message-feed')?.innerText, draft: document.getElementById('message-input')?.value,
+      modal: document.getElementById('poll-modal')?.style.display, toast: document.getElementById('toast')?.innerText });
+    throw Error('Received poll is not votable: ' + JSON.stringify({ owner: await pageA.evaluate(snapshot), joiner: await joiner.evaluate(snapshot), errs }));
   }
+  const clickVote = (args) => {
+    const card = Array.from(document.querySelectorAll('.poll-card')).find(el => el.querySelector('.poll-q')?.textContent === args.question);
+    card.querySelectorAll('.poll-opt')[args.option].click();
+  };
+  const countsMatch = ({ question, counts, own }) => {
+    const card = Array.from(document.querySelectorAll('.poll-card')).find(el => el.querySelector('.poll-q')?.textContent === question);
+    const options = Array.from(card?.querySelectorAll('.poll-opt') || []);
+    return options.length === counts.length && options.every((el, i) => !el.disabled
+      && Number(el.querySelector('.poll-opt-count').textContent || 0) === counts[i]
+      && (el.getAttribute('aria-pressed') === 'true') === (i === own));
+  };
+  const check = async (page, counts, own) => {
+    if (!(await waitFor(page, countsMatch, { question, counts, own }, 25000))) {
+      const details = await page.evaluate(async ({ question, container, owner, roomId }) => {
+        const card = Array.from(document.querySelectorAll('.poll-card')).find(el => el.querySelector('.poll-q')?.textContent === question);
+        const api = await import('./pod.js'), auth = await import('./auth.js');
+        const m = (await api.podReadChatDayAt(container, new Date(), roomId, owner)).find(m => m.content.startsWith('📊 ' + question));
+        return { feed: document.getElementById('message-feed')?.innerText, questions: Array.from(document.querySelectorAll('.poll-q')).map(el => el.textContent), options: Array.from(card?.querySelectorAll('.poll-opt') || []).map(el => ({ count: el.querySelector('.poll-opt-count')?.textContent, pressed: el.getAttribute('aria-pressed'), disabled: el.disabled })),
+          me: auth.solidSession.info.webId, localDid: localStorage.getItem('proxion_identity_did'),
+          canonical: m && { content: m.content, reactions: m.reactions, revision: m.poll_revision, votes: Object.values(m.poll_vote_versions || {}).map(v => ({ actor: v.actor, revision: v.poll_revision, signer: v.proof.split('|')[0] })) },
+          signer: (await api.podFetchPeerSigner(auth.podStorageRoot()))?.signer };
+      }, { question, container: `${alice.storageRoot}proxion/rooms/${roomId}/`, owner: alice.webId, roomId });
+      throw Error('Unexpected poll state: ' + JSON.stringify({ expected: { counts, own }, details, errs }));
+    }
+  };
+  await joiner.evaluate(clickVote, { question, option: 0 });
+  await check(joiner, [1,0], 0); await check(pageA, [1,0], null);
+  await joiner.evaluate(clickVote, { question, option: 1 });
+  await check(joiner, [0,1], 1); await check(pageA, [0,1], null);
+  await joiner.evaluate(clickVote, { question, option: 1 });
+  await check(joiner, [0,0], null); await check(pageA, [0,0], null);
+  await joiner.evaluate(clickVote, { question, option: 0 }); await check(joiner, [1,0], 0);
+  await pageA.evaluate(clickVote, { question, option: 0 });
+  await check(pageA, [2,0], 0); await check(joiner, [2,0], 0);
+  await joiner.reload({ waitUntil: 'load', timeout: 30000 });
+  await openRoom(joiner, roomId); await check(joiner, [2,0], 0);
+  ok('browser polls create, vote, switch, clear, merge voters, and survive reload');
 
   // Rebuild the composer for a different room, then return to the shared room.
   step = 'capabilities-after-room-switch';
@@ -269,9 +298,9 @@ try {
   await pageA.waitForFunction((id) => document.getElementById('nav-' + id)?.classList.contains('active'), { timeout: 10000 }, otherRoomId);
   if (!(await pageA.evaluate(unsupportedControlsHidden))) fail('unsupported controls reappeared in a newly created room');
   await openRoom(pageA, roomId);
-  if (await pageA.evaluate(unsupportedControlsHidden) && await waitFor(pageA, disabledPoll, question, 10000)) {
-    ok('room switching keeps unsupported controls hidden and poll votes disabled');
-  } else fail('room switching re-enabled an unsupported action');
+  if (await pageA.evaluate(unsupportedControlsHidden) && await waitFor(pageA, enabledPoll, question, 10000)) {
+    ok('room switching preserves poll voting and keeps unsupported controls hidden');
+  } else fail('room switching broke poll capabilities');
 
   // ── Members list, then the joiner leaves ──
   step = 'members';
