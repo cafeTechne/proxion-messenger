@@ -263,7 +263,7 @@ describe('conversation capabilities', () => {
         }
     });
     it('withholds commands without a pod protocol from browser and desktop pod conversations', () => {
-        for (const feature of ['schedule', 'polls', 'reactions', 'files']) {
+        for (const feature of ['schedule', 'polls', 'files']) {
             expect(supportsConversationFeature(createPodTransport(), feature)).toBe(false);
             expect(supportsConversationFeature(gateway, feature, { podRoom: true })).toBe(false);
             expect(supportsConversationFeature(gateway, feature, { crossMode: true })).toBe(false);
@@ -272,7 +272,7 @@ describe('conversation capabilities', () => {
         expect(gatedControlIds(createPodTransport())).toContain('poll-btn');
     });
     it('supports edits and deletion in both pod room builds, while leaving pod DMs gated', () => {
-        for (const transport of [gateway, createPodTransport()]) for (const feature of ['edit', 'delete']) {
+        for (const transport of [gateway, createPodTransport()]) for (const feature of ['edit', 'delete', 'reactions']) {
             expect(supportsConversationFeature(transport, feature, { podRoom: true })).toBe(true);
             expect(supportsConversationFeature(transport, feature, { crossMode: true })).toBe(false);
         }

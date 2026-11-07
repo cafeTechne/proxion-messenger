@@ -17,7 +17,7 @@ function harness(active = true) {
         _webRoomCache: { room: [{ ...message }] },
         roomLastMessages: { room: { message_id: 'm1', snippet: 'Original' } },
         edit: { state: { editingMsgId: null } }, cancelEdit: vi.fn(),
-        _handleEventAsync: vi.fn(), updateRoomPreview: vi.fn(), markdownToPlain: text => text,
+        _handleEventAsync: vi.fn(), renderReactions: vi.fn(), updateRoomPreview: vi.fn(), markdownToPlain: text => text,
         forgetSavedMessage: vi.fn(async () => {}), _refreshSavedPanel: vi.fn(),
     };
     return { deps, apply: compile('_onRoomPodChanges', deps) };
@@ -39,6 +39,14 @@ describe('room change application', () => {
         expect(h.deps._webRoomCache.room).toEqual([]);
         expect(h.deps.roomLastMessages.room).toBeUndefined();
         expect(h.deps.forgetSavedMessage).toHaveBeenCalledWith('m1');
+        expect(h.deps._handleEventAsync).not.toHaveBeenCalled();
+    });
+    it('refreshes reaction pills without marking text edited or creating message events', () => {
+        const h = harness();
+        h.apply('room', [{ message_id: 'm1', content: 'Original', reactions: { '👍': ['https://bob/#me'] } }]);
+        expect(h.deps.messageMap.m1.reactions).toEqual({ '👍': ['https://bob/#me'] });
+        expect(h.deps._webRoomCache.room[0].reactions).toEqual({ '👍': ['https://bob/#me'] });
+        expect(h.deps.renderReactions).toHaveBeenCalledWith('m1');
         expect(h.deps._handleEventAsync).not.toHaveBeenCalled();
     });
     it('closes an editor when a verified withdrawal arrives', () => {

@@ -117,11 +117,11 @@ A pod-less identity is a `did:key`, which is a valid IRI but is not
 dereferenceable, so other apps will show the identifier rather than a name. That
 is the expected limit of interop for users who have not connected a pod.
 
-**Pod-native room edits and withdrawal** use signed append-only change records.
+**Pod-native room edits, withdrawal, and reactions** use signed append-only change records.
 The original message and its proof remain intact. An operation is a separate
 `px:MessageChange` node at `chat.ttl#change-<UUID>` in the original message's UTC
 day file. Its `px:changePayload` literal contains JSON with `id`, `target` (the
-original message IRI), `actor` (WebID), `kind` (`edit` or `delete`), `created`
+original message IRI), `actor` (WebID), `kind` (`edit`, `delete`, `react`, or `unreact`), `created`
 (canonical UTC ISO timestamp), `content`, `previous` (revision IRI or empty), and
 `proof` (`did:key|base64-signature`). `px:` is `https://proxion.dev/vocab/v1#`.
 
@@ -136,9 +136,27 @@ ordering selects the displayed revision. `previous` enables preflight stale-draf
 checks; concurrent append-only operations still resolve by that deterministic rule.
 The client re-reads the file to confirm the selected result before reporting success.
 
+Reactions use `content` as the reaction key (up to 64 UTF-16 code units / 128
+UTF-8 bytes, with no whitespace, controls, or object-prototype keys). The latest
+signed operation for each `(target, actor, reaction key)` tuple determines whether
+that actor's reaction is present. `previous` refers to that actor's previous
+operation for the same key, separately from the text-edit revision. The timestamp
+advances beyond the previous operation even when a local clock moves backwards.
+Only the actor's published signer can add or remove their reaction. Other users,
+including the owner, cannot remove that actor's reaction by signing as themselves.
+Removing then re-adding creates new operation IRIs, avoiding the permanent
+cancellation of the legacy fixed-ID LikeAction representation. Message withdrawal
+hides all reactions. Reactions do not change the text or its edit marker.
+
+Reaction writes are serialized per message and session, reread for confirmation, and
+idempotent on retry if the desired state already exists. Browser and desktop
+readers project the same sorted reactor sets. Room synchronization observes those
+sets without generating incoming-message counts or text-edit events. This signed
+extension is currently pod-room specific; cross-mode DMs remain gated.
+
 Participants retain Read + Append permissions. Changes cannot erase original
 text from the pod log. Other Solid apps need to implement this extension to show
-edits/withdrawals; a reader of only `sioc:content` still sees the original message.
+edits/withdrawals/reactions; a reader of only `sioc:content` still sees the original message.
 Proxion refreshes the loaded seven-day window with current-day notifications and
 an older-day backstop rotation, so historical changes can take six poll intervals.
 

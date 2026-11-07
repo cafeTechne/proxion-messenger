@@ -320,6 +320,20 @@ describe('createRoomSync', () => {
         expect(h.reported).toEqual([]);
     });
 
+    it('reports reaction-only updates and removal without incrementing incoming counts', async () => {
+        const days = { '2026-10-29': [{ message_id: 'm', content: 'Original', timestamp: '2026-10-29T12:00:00Z', reactions: {} }] };
+        const h = syncHarness(days);
+        h.sync.track({ roomId: 'r', container: 'https://p/proxion/rooms/r/' });
+        await flush();
+        days['2026-10-29'][0].reactions = { '👍': ['https://bob/#me'] };
+        await h.sync.refresh('r');
+        expect(h.changes).toHaveLength(1);
+        days['2026-10-29'][0].reactions = {};
+        await h.sync.refresh('r');
+        expect(h.changes).toHaveLength(2);
+        expect(h.reported).toHaveLength(1);
+    });
+
     it('watches the current day file and reads again on a notification', async () => {
         const days = { '2026-10-29': [] };
         const h = syncHarness(days);

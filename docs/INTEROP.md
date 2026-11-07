@@ -51,7 +51,10 @@ Rooms shared across the two builds are pod rooms: a Long Chat in the owner's pod
 (below). Gateway rooms stay desktop only. Members can edit and withdraw their own
 messages, and owners can withdraw any message, using signed append-only change
 records. Failed saves preserve the edit draft for retry; changes survive reload.
-These operations are currently available in pod rooms, not cross-mode DMs.
+Signed reactions support adding, removing, and re-adding each user’s own emoji,
+including after reload. These operations are currently available in pod rooms,
+not cross-mode DMs. Other Solid apps need to implement the signed change-record
+extension to display these reactions.
 
 - **Desktop joins a browser-build room** by pasting the invite link into Join a
   room. The join request, the owner's approval and the room messages travel

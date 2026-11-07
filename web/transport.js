@@ -254,7 +254,7 @@ const _GATEWAY_MESSAGE_FEATURES = new Set([
 ]);
 
 export function supportsConversationFeature(transport, feature, { podRoom = false, crossMode = false } = {}) {
-    if (transport && podRoom && !crossMode && ['edit', 'delete'].includes(feature)) return true;
+    if (transport && podRoom && !crossMode && ['edit', 'delete', 'reactions'].includes(feature)) return true;
     if (!transport?.supports(feature)) return false;
     return !((podRoom || crossMode) && _GATEWAY_MESSAGE_FEATURES.has(feature));
 }

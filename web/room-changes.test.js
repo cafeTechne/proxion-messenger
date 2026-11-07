@@ -154,3 +154,79 @@ describe('confirmed room changes', () => {
         expect(await h.change({ kind: 'delete' })).toMatchObject({ ok: false });
     });
 });
+
+describe('authenticated room reactions', () => {
+    it('allows each participant to add, remove, and re-add independently of the author', async () => {
+        const f = await fixture();
+        const a = await f.signed({ kind: 'react', actor: stranger, content: '👍' });
+        const b = await f.signed({ kind: 'react', actor: owner, content: '👍', id: a.id + 'b' });
+        const remove = await f.signed({ kind: 'unreact', actor: stranger, content: '👍', id: a.id + 'c', previous: a.id });
+        const again = await f.signed({ kind: 'react', actor: stranger, content: '👍', id: a.id + 'd', previous: remove.id });
+        expect((await f.apply([a,b])).reactions['👍'].sort()).toEqual([owner,stranger].sort());
+        expect((await f.apply([remove,b,a])).reactions['👍']).toEqual([owner]);
+        expect((await f.apply([again,remove,b,a])).reactions['👍'].sort()).toEqual([owner,stranger].sort());
+        expect((await f.apply([a])).content).toBe('Original');
+    });
+    it('ignores forged actors, unsigned changes, malformed keys and tampered removals', async () => {
+        const f = await fixture(), a = await f.signed({ kind: 'react', content: '👍' });
+        expect((await f.apply([{ ...a, actor: stranger }])).reactions).toEqual({});
+        expect((await f.apply([{ ...a, proof: '' }])).reactions).toEqual({});
+        expect((await f.apply([a, { ...a, kind: 'unreact' }])).reactions).toEqual({ '👍': [author] });
+        for (const content of ['__proto__', 'constructor', 'prototype', 'toString', 'valueOf', 'hasOwnProperty', 'a b', '', 'x'.repeat(65)]) {
+            const bad = await f.signed({ kind: 'react', content });
+            expect(parseMessageChanges([node(bad)])).toEqual([]);
+        }
+    });
+    it('withdrawals clear reactions regardless of operation ordering or timestamps', async () => {
+        const f = await fixture();
+        const react = await f.signed({ kind: 'react', actor: stranger, content: '👍' });
+        const deleted = await f.signed({ kind: 'delete', content: '', id: react.id + 'd' });
+        expect((await f.apply([react,deleted])).reactions).toEqual({});
+        expect((await f.apply([deleted,react])).reactions).toEqual({});
+    });
+    it('does not turn a reaction into a text edit or alter the edit revision', async () => {
+        const f = await fixture(), edit = await f.signed();
+        const react = await f.signed({ kind: 'react', content: '👍', id: edit.id + 'b' });
+        expect(await f.apply([react])).toMatchObject({ content: 'Original', reactions: { '👍': [author] } });
+        expect((await f.apply([react])).edited_at).toBeUndefined();
+        expect(await f.apply([edit,react])).toMatchObject({ content: 'Edited', revision_id: edit.id });
+    });
+});
+
+describe('confirmed reaction writes', () => {
+    it('supports non-author add/remove/re-add with idempotent retry and fresh history', async () => {
+        const h = await ioFixture(); h.switchActor(stranger);
+        expect(await h.change({ kind: 'react', content: '👍' })).toMatchObject({ ok: true, message: { reactions: { '👍': [stranger] } } });
+        expect(await h.change({ kind: 'react', content: '👍' })).toMatchObject({ ok: true });
+        expect(h.writes()).toBe(1);
+        expect(await h.change({ kind: 'unreact', content: '👍' })).toMatchObject({ ok: true, message: { reactions: {} } });
+        expect(await h.change({ kind: 'react', content: '👍' })).toMatchObject({ ok: true });
+        expect((await h.io.podReadChatDayAt(container, timestamp))[0]).toMatchObject({ content: 'Original', reactions: { '👍': [stranger] } });
+        expect(h.writes()).toBe(3);
+    });
+    it('serializes rapid emoji changes without dropping the other confirmed reaction', async () => {
+        const h = await ioFixture();
+        const results = await Promise.all([h.change({ kind: 'react', content: '👍' }), h.change({ kind: 'react', content: '🎉' })]);
+        expect(results.every(r => r.ok)).toBe(true);
+        expect(results[1].message.reactions).toEqual({ '👍': [author], '🎉': [author] });
+    });
+    it('keeps failed changes invisible and recovers from a lost confirmation response', async () => {
+        const h = await ioFixture(); h.setStatus(403);
+        expect(await h.change({ kind: 'react', content: '👍' })).toMatchObject({ ok: false });
+        expect((await h.io.podReadChatDayAt(container, timestamp))[0].reactions).toEqual({});
+        const lost = await ioFixture(); lost.breakConfirmation(true);
+        expect(await lost.change({ kind: 'react', content: '👍' })).toMatchObject({ ok: false, reason: 'confirmation_failed' });
+        lost.breakConfirmation(false);
+        expect(await lost.change({ kind: 'react', content: '👍' })).toMatchObject({ ok: true });
+        expect(lost.writes()).toBe(1);
+    });
+    it('does not run queued changes after a session switch or react to a withdrawn message', async () => {
+        const h = await ioFixture(); h.stopDuringHead();
+        const results = await Promise.all([h.change({ kind: 'react', content: '👍' }), h.change({ kind: 'react', content: '🎉' })]);
+        expect(results.every(r => !r.ok)).toBe(true);
+        expect(h.writes()).toBe(0);
+        const other = await ioFixture();
+        expect(await other.change({ kind: 'delete' })).toMatchObject({ ok: true });
+        expect(await other.change({ kind: 'react', content: '👍' })).toMatchObject({ ok: false, reason: 'deleted' });
+    });
+});

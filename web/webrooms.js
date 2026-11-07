@@ -233,17 +233,17 @@ export function createRoomSync({
                 const fresh = [], changed = [];
                 for (const m of msgs) {
                     if (!m || !m.message_id) continue;
-                    const fingerprint = JSON.stringify([m.content, !!m.deleted, m.revision_id || '', m.edited_at || '']);
+                    const fingerprint = JSON.stringify([m.content, !!m.deleted, m.revision_id || '', m.edited_at || '', m.reactions || {}]);
                     const previous = entry.versions.get(m.message_id);
                     entry.versions.set(m.message_id, fingerprint);
                     if (entry.seen.has(m.message_id)) {
-                        if ((previous && previous !== fingerprint) || (!previous && (m.revision_id || m.deleted))) changed.push(m);
+                        if ((previous && previous !== fingerprint) || (!previous && (m.revision_id || m.deleted || Object.keys(m.reaction_versions || {}).length))) changed.push(m);
                         continue;
                     }
                     entry.seen.add(m.message_id);
                     // Historical backstop reads must not generate phantom unread messages.
                     if (entry.seeded && String(m.timestamp || '').slice(0, 10) < _day(1).toISOString().slice(0, 10)) {
-                        if (m.revision_id || m.deleted) changed.push(m);
+                        if (m.revision_id || m.deleted || Object.keys(m.reaction_versions || {}).length) changed.push(m);
                         continue;
                     }
                     fresh.push(m);

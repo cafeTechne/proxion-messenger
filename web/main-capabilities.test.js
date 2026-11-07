@@ -72,7 +72,7 @@ const cases = [
 describe('main conversation capabilities', () => {
     it.each(cases)('uses the actual protocol for %s', (_name, options, supported) => {
         const h = harness(options);
-        for (const feature of ['polls', 'reactions', 'schedule']) {
+        for (const feature of ['polls', 'schedule']) {
             expect(h._conversationSupports(feature)).toBe(supported);
         }
         expect(h._conversationSupports('history')).toBe(true);
@@ -91,6 +91,7 @@ describe('main conversation capabilities', () => {
         h._applyCrossModeThreadGating();
         expected.delete('gate-no-edit');
         expected.delete('gate-no-delete');
+        expected.delete('gate-no-reactions');
         expected.add('gate-crossmode');
         expect(h.classes).toEqual(expected);
         expect(h._conversationSupports('edit')).toBe(true);

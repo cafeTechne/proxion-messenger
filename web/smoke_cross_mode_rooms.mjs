@@ -139,6 +139,35 @@ async function deleteMessage(page, text) {
   if (!(await waitFor(page, id => !document.getElementById(id), id, 30000))) throw Error('Deletion was not confirmed');
   return id;
 }
+async function addReaction(page, text, emoji) {
+  const id = await messageMenu(page, text, 'react');
+  await page.waitForSelector('#emoji-picker', { visible: true });
+  await page.locator(`#emoji-picker [data-emoji="${emoji}"]`).click();
+  return id;
+}
+async function toggleReaction(page, id, emoji) {
+  await page.evaluate(({ id, emoji }) => {
+    const pill = Array.from(document.getElementById(id)?.querySelectorAll('.reaction:not(.reaction-add)') || [])
+      .find(el => el.innerText.startsWith(emoji + ' '));
+    if (!pill) throw Error('Missing reaction pill');
+    pill.click();
+  }, { id, emoji });
+}
+async function expectReaction(page, roomId, id, emoji, count, own, refresh) {
+  for (let i = 0; i < 25; i++) {
+    const matches = await page.evaluate(({ id, emoji, count, own }) => {
+      const message = document.getElementById(id);
+      if (!message) return false;
+      const pill = Array.from(message.querySelectorAll('.reaction:not(.reaction-add)')).find(el => el.innerText.startsWith(emoji + ' '));
+      return count === 0 ? !pill : pill?.innerText === emoji + ' ' + count && pill.classList.contains('active') === own;
+    }, { id, emoji, count, own });
+    if (matches) return;
+    await page.evaluate(refresh, roomId).catch(() => {});
+    await sleep(600);
+  }
+  throw Error(`Reaction ${emoji} ${count} own=${own} did not appear for ${id}`);
+}
+
 async function changedOnPeer(page, roomId, oldText, newText, refresh) {
   if (!(await seen(page, roomId, newText, refresh))) throw Error('Peer did not receive edited text');
   if ((await feedText(page)).includes(oldText)) throw Error('Peer retained stale text');
@@ -336,12 +365,31 @@ try {
   if (await seen(pageA, roomB, 'xr-b-1', refreshDesk) && await noUnverified(pageA)) ok('Alice reads Bob\'s reply, proof verified');
   else fail('Alice: ' + JSON.stringify((await feedText(pageA)).slice(0, 300)));
 
+  step = 'web-room-reactions';
+  const reactionTarget = await addReaction(pageA, 'xr-a-1', '👍');
+  await expectReaction(pageA, roomB, reactionTarget, '👍', 1, true, refreshDesk);
+  await expectReaction(pageB, roomB, reactionTarget, '👍', 1, false, refreshWeb);
+  await addReaction(pageB, 'xr-a-1', '👍');
+  await expectReaction(pageB, roomB, reactionTarget, '👍', 2, true, refreshWeb);
+  await expectReaction(pageA, roomB, reactionTarget, '👍', 2, true, refreshDesk);
+  await toggleReaction(pageB, reactionTarget, '👍');
+  await expectReaction(pageB, roomB, reactionTarget, '👍', 1, false, refreshWeb);
+  await expectReaction(pageA, roomB, reactionTarget, '👍', 1, true, refreshDesk);
+  await toggleReaction(pageA, reactionTarget, '👍');
+  await expectReaction(pageA, roomB, reactionTarget, '👍', 0, false, refreshDesk);
+  await expectReaction(pageB, roomB, reactionTarget, '👍', 0, false, refreshWeb);
+  await addReaction(pageA, 'xr-a-1', '👍');
+  await expectReaction(pageB, roomB, reactionTarget, '👍', 1, false, refreshWeb);
+  if (await pageB.evaluate(id => !!document.getElementById(id)?.querySelector('.edited-tag'), reactionTarget)) throw Error('Reaction incorrectly marked message edited');
+  ok('pod reactions merge two users and support removal/re-add without changing message text');
+
   step = 'web-room-changes';
   await editMessage(pageA, 'xr-a-1', 'xr-a-edited');
   await changedOnPeer(pageB, roomB, 'xr-a-1', 'xr-a-edited', refreshWeb);
   await pageB.reload({ waitUntil: 'load', timeout: 30000 });
   await openRoom(pageB, roomB);
   if (!(await seen(pageB, roomB, 'xr-a-edited', refreshWeb))) throw Error('Edited message was lost on reload');
+  await expectReaction(pageB, roomB, reactionTarget, '👍', 1, false, refreshWeb);
   const removedA = await deleteMessage(pageA, 'xr-a-edited');
   if (!(await waitFor(pageB, id => !document.getElementById(id), removedA, 30000))) throw Error('Peer did not receive author deletion');
   ok('desktop participant edits and deletes in browser-owned room; edit survives reload');
@@ -383,6 +431,26 @@ try {
   if (await seen(pageB, roomA, 'xr-a-3', refreshWeb) && await noUnverified(pageB)) ok('Bob reads it, proof verified');
   else fail('Bob: ' + JSON.stringify((await feedText(pageB)).slice(0, 300)));
 
+  step = 'desktop-room-reactions';
+  const beforeBlockedReaction = blockedChanges;
+  blockMessageChanges = true;
+  const desktopReactionTarget = await addReaction(pageB, 'xr-a-3', '👍');
+  for (let i = 0; i < 50 && blockedChanges === beforeBlockedReaction; i++) await sleep(100);
+  if (blockedChanges === beforeBlockedReaction) throw Error('Reaction did not attempt its pod write');
+  // Wait until the failed operation settles before retrying the same emoji.
+  await sleep(1000);
+  await expectReaction(pageB, roomA, desktopReactionTarget, '👍', 0, false, refreshWeb);
+  await expectReaction(pageA, roomA, desktopReactionTarget, '👍', 0, false, refreshDesk);
+  blockMessageChanges = false;
+  await addReaction(pageB, 'xr-a-3', '👍');
+  await expectReaction(pageB, roomA, desktopReactionTarget, '👍', 1, true, refreshWeb);
+  await expectReaction(pageA, roomA, desktopReactionTarget, '👍', 1, false, refreshDesk);
+  await addReaction(pageB, 'xr-a-3', '🎉');
+  await addReaction(pageB, 'xr-a-3', '🔥');
+  await expectReaction(pageA, roomA, desktopReactionTarget, '🎉', 1, false, refreshDesk);
+  await expectReaction(pageA, roomA, desktopReactionTarget, '🔥', 1, false, refreshDesk);
+  ok('browser participant retries rejected reaction and preserves rapid emoji additions in desktop room');
+
   step = 'desktop-room-changes';
   blockMessageChanges = true;
   await editMessage(pageB, 'xr-b-2', 'xr-b-edited');
@@ -423,6 +491,10 @@ try {
   await pageA.evaluate(() => { const m = document.getElementById('onboarding-modal'); if (m) m.style.display = 'none'; });
   if (await waitFor(pageA, (id) => !!document.getElementById('nav-' + id), roomA, 60000)) ok('Alice still lists her pod room after a reload');
   else fail('Alice lost her pod room on reload');
+
+  await openRoom(pageA, roomA);
+  for (const emoji of ['👍', '🎉', '🔥']) await expectReaction(pageA, roomA, desktopReactionTarget, emoji, 1, false, refreshDesk);
+  ok('desktop history restores persisted reactions after reload');
 
   // Rejoin the kicked rooms, then delete them from each host. A deleted room
   // must revoke real pod reads and writes, including for an idle participant.

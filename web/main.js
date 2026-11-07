@@ -688,6 +688,12 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                 wireEmoji: (mid, emoji) => secondary.reactionWireEmoji(mid, emoji),
                 onSealFailed: _onSealFailed,
                 canReact: () => _conversationSupports('reactions'),
+                canVotePoll: () => _conversationSupports('polls'),
+                getSessionId: () => _webRoomSessionId(),
+                saveReaction: (view, mid, emoji, add) => _isPodRoomView(view)
+                    ? _changePodRoomMessage(view, mid, { kind: add ? 'react' : 'unreact', content: emoji }) : null,
+                getPodReactions: mid => _isPodRoomView(activeView) ? (messageMap[mid]?.reactions ?? null) : null,
+                onSaveFailed: () => showToast(t('reaction.saveFailed')),
                 onUnavailable: () => showToast(t('error.transportUnsupported')),
                 send: _sendOrQueue,
             });
@@ -4577,7 +4583,13 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             for (const m of msgs) {
                 if (!m || m.deleted || !m.message_id) continue;
                 last = m;
-                if (messageMap[m.message_id]) continue;   // already shown
+                if (messageMap[m.message_id]) {
+                    if (m.reactions) {
+                        messageMap[m.message_id].reactions = m.reactions;
+                        renderReactions(m.message_id);
+                    }
+                    continue;
+                }
                 const isOpen = !!(activeView && activeView.id === roomId);
                 const own = !!(selfWebId && m.from_webid === selfWebId);
                 const msg = { ...m, thread_id: roomId, local: true };
@@ -4862,10 +4874,13 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                 if (cached) _webRoomCache[roomId] = message.deleted ? cached.filter(m => m.message_id !== id)
                     : cached.map(m => m.message_id === id ? { ...m, ...message } : m);
                 if (activeView?.id === roomId && activeView.type === 'local_room') {
+                    const previous = messageMap[id];
+                    const edited = previous && (previous.content !== message.content || (previous.revision_id || '') !== (message.revision_id || ''));
                     if (message.deleted && edit.state.editingMsgId === id) cancelEdit(id);
                     if (messageMap[id]) Object.assign(messageMap[id], message);
                     for (const cachedMessage of allMessages) if (cachedMessage.message_id === id) Object.assign(cachedMessage, message);
-                    _handleEventAsync(message.deleted
+                    renderReactions(id);
+                    if (message.deleted || edited) _handleEventAsync(message.deleted
                         ? { type: 'message_deleted', message_id: id, thread_id: roomId, pod_change: true }
                         : { type: 'message_edited', message_id: id, thread_id: roomId, new_content: message.content,
                             edited_at: message.edited_at, revision_id: message.revision_id, pod_change: true }, true);

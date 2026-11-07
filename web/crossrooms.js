@@ -114,7 +114,11 @@ export function createCrossRooms({
     });
 
     // Our own messages carry our WebID as maker; the desktop shows them as ours.
-    const _asSelf = (m) => (m && m.from_webid && m.from_webid === me() ? { ...m, from_webid: getSelfId() } : m);
+    const _asSelf = (m) => m ? { ...m,
+        from_webid: m.from_webid === me() ? getSelfId() : m.from_webid,
+        ...(m.reactions ? { reactions: Object.fromEntries(Object.entries(m.reactions)
+            .map(([emoji, actors]) => [emoji, actors.map(actor => actor === me() ? getSelfId() : actor)])) } : {}),
+    } : m;
 
     function _ensureSync() {
         if (_sync) return _sync;

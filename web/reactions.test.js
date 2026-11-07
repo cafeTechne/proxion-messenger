@@ -24,6 +24,7 @@ function make(over = {}) {
     getActiveView: () => (over.activeView === undefined ? { type: 'local_room', id: 'room-1' } : over.activeView),
     getSelfWebId: () => over.selfWebId ?? 'did:key:zSelf',
     getMessageReactions: () => messageReactions,
+    canVotePoll: over.canVotePoll, onUnavailable: over.onUnavailable, getSessionId: over.getSessionId, saveReaction: over.saveReaction, onSaveFailed: over.onSaveFailed, getPodReactions: over.getPodReactions,
   });
   return { r, sent, messageReactions };
 }
@@ -276,7 +277,7 @@ describe('conversation reaction capabilities', () => {
     expect(onUnavailable).toHaveBeenCalledTimes(4);
   });
 
-  it('keeps poll counts visible with voting disabled', () => {
+  it.each([false, true])('keeps poll counts visible with voting disabled when reactions supported=%s', supported => {
     const option = (emoji) => ({ dataset: { emoji }, attrs: {}, count: {}, bar: { style: {} },
       setAttribute(k, v) { this.attrs[k] = v; },
       querySelector(sel) { return sel === '.poll-opt-count' ? this.count : this.bar; } });
@@ -288,7 +289,7 @@ describe('conversation reaction capabilities', () => {
     global.document.getElementById = () => container;
     const r = createReactions({
       getSelfWebId: () => 'me', getMessageReactions: () => ({ m1: { '1️⃣': ['me'], '2️⃣': ['someone'] } }),
-      canReact: () => false,
+      canReact: () => supported, canVotePoll: () => false,
     });
     r.renderReactions('m1');
     expect(options.map(o => o.disabled)).toEqual([true, true]);
@@ -312,5 +313,72 @@ describe('conversation reaction capabilities', () => {
     supported = true;
     r.votePoll('m1', '1️⃣');
     expect(sent).toEqual([{ cmd: 'add_reaction', message_id: 'm1', emoji: '1️⃣', room_id: 'gateway-room' }]);
+  });
+});
+
+describe('confirmed pod reactions', () => {
+  it('waits for pod confirmation without sending gateway commands and permits retry after failure', async () => {
+    const saveReaction = vi.fn().mockResolvedValueOnce({ ok: false }).mockResolvedValueOnce({ ok: true });
+    const onSaveFailed = vi.fn();
+    const h = make({ saveReaction, onSaveFailed });
+    await h.r.addEmoji('👍', 'm1');
+    expect(onSaveFailed).toHaveBeenCalledOnce();
+    expect(h.messageReactions).toEqual({});
+    await h.r.addEmoji('👍', 'm1');
+    expect(saveReaction).toHaveBeenCalledTimes(2);
+    expect(h.sent).toEqual([]);
+    expect(saveReaction).toHaveBeenLastCalledWith({ type: 'local_room', id: 'room-1' }, 'm1', '👍', true);
+  });
+  it('coalesces repeated clicks while the pod operation is pending', async () => {
+    let finish;
+    const saveReaction = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+    const h = make({ saveReaction });
+    const first = h.r.addEmoji('👍', 'm1'), second = h.r.addEmoji('👍', 'm1');
+    expect(saveReaction).toHaveBeenCalledOnce();
+    finish({ ok: true }); await Promise.all([first,second]);
+    saveReaction.mockResolvedValueOnce({ ok: true });
+    await h.r.removeReaction('👍', 'm1');
+    expect(saveReaction).toHaveBeenLastCalledWith({ type: 'local_room', id: 'room-1' }, 'm1', '👍', false);
+  });
+});
+
+describe('reaction session isolation', () => {
+  it('does not reuse pending work or show old errors in a replacement session', async () => {
+    let session = 1;
+    const finish = [], onSaveFailed = vi.fn();
+    const saveReaction = vi.fn(() => new Promise(resolve => finish.push(resolve)));
+    const h = make({ saveReaction, getSessionId: () => session, onSaveFailed });
+    const old = h.r.addEmoji('👍', 'm1');
+    session++;
+    const fresh = h.r.addEmoji('👍', 'm1');
+    expect(saveReaction).toHaveBeenCalledTimes(2);
+    finish[0]({ ok: false }); finish[1]({ ok: true });
+    await Promise.all([old, fresh]);
+    expect(onSaveFailed).not.toHaveBeenCalled();
+  });
+  it('rejects a picker selection after switching conversations or sessions', async () => {
+    let session = 1;
+    const options = { saveReaction: vi.fn(async () => ({ ok: true })),
+      activeView: { type: 'local_room', id: 'room-1' }, getSessionId: () => session };
+    const h = make(options);
+    h.r.togglePicker('m1', 10, 10);
+    options.activeView = { type: 'local_room', id: 'room-2' };
+    await h.r.addEmoji('👍');
+    options.activeView = { type: 'local_room', id: 'room-1' };
+    h.r.togglePicker('m2', 10, 10); session++;
+    await h.r.addEmoji('👍');
+    expect(options.saveReaction).not.toHaveBeenCalled();
+    expect(h.sent).toEqual([]);
+  });
+});
+
+describe('independent poll capability', () => {
+  it('refuses direct voting even when ordinary reactions work', () => {
+    const onUnavailable = vi.fn(), saveReaction = vi.fn(async () => ({ ok: true }));
+    const h = make({ canVotePoll: () => false, onUnavailable, saveReaction });
+    h.r.votePoll('m1', '1️⃣');
+    expect(onUnavailable).toHaveBeenCalledOnce();
+    expect(saveReaction).not.toHaveBeenCalled();
+    expect(h.sent).toEqual([]);
   });
 });

@@ -21,8 +21,24 @@ import { icon } from './icons.js';
 // emoji) names our own reaction for remove_reaction (its token, if sealed).
 // send (optional): queues reactions while offline (connection.js
 // socketSendOrQueue) so they go out on reconnect instead of being dropped.
-export function createReactions({ getSocket, getActiveView, getSelfWebId, getMessageReactions, getRoomEmojiMap, getMessageTs, getRemoteRoom, resolveName, sealReaction, wireEmoji, onSealFailed, send = null, canReact = () => true, onUnavailable = () => {} }) {
+export function createReactions({ getSocket, getActiveView, getSelfWebId, getMessageReactions, getRoomEmojiMap, getMessageTs, getRemoteRoom, resolveName, sealReaction, wireEmoji, onSealFailed, send = null, canReact = () => true, onUnavailable = () => {}, saveReaction = null, getPodReactions = () => null, onSaveFailed = () => {}, getSessionId = getSelfWebId, canVotePoll = canReact }) {
     const state = { lastEmojiMsgId: null };
+    const pending = new Map();
+    function _savePodReaction(view, mid, emoji, add) {
+        if (!saveReaction) return null;
+        const session = getSessionId();
+        const key = JSON.stringify([session, view.type, view.id, mid, emoji, add]);
+        if (pending.has(key)) return pending.get(key);
+        const saving = saveReaction(view, mid, emoji, add);
+        if (!saving) return null;
+        const task = Promise.resolve(saving).catch(() => ({ ok: false })).then(result => {
+            const current = getActiveView();
+            if (!result?.ok && result?.reason !== 'account_changed' && getSessionId() === session && current?.id === view.id && current?.type === view.type) onSaveFailed(result);
+            return result;
+        }).finally(() => { if (pending.get(key) === task) pending.delete(key); });
+        pending.set(key, task);
+        return task;
+    }
 
     function _canAct() {
         if (canReact()) return true;
@@ -57,7 +73,7 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         renderReactions(message_id, action === "add" ? emoji : null);
         // Pod: persist reaction state (only the acting user writes to their own pod)
         const activeView = getActiveView();
-        if (activeView && activeView.type === 'local_room') {
+        if (!event.pod_change && activeView && activeView.type === 'local_room') {
             podWriteReactions(activeView.id, message_id, messageReactions[message_id] || {}).catch(() => {});
             // R101: also mirror this reaction into the Long Chat day file as a
             // schema:LikeAction so other Solid apps see it. Needs the message's
@@ -92,6 +108,8 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         const messageReactions = getMessageReactions();
         const selfWebId = getSelfWebId();
         const interactive = canReact();
+        const podState = getPodReactions(mid);
+        if (podState !== null) messageReactions[mid] = podState;
         const reacts = messageReactions[mid] || {};
         container.innerHTML = "";
         // A poll's votes are shown on its own option buttons, not as pills.
@@ -173,7 +191,7 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         const btns = [...card.querySelectorAll(".poll-opt[data-emoji]")];
         const counts = btns.map(b => (reacts[b.dataset.emoji] || []).length);
         const total = counts.reduce((a, b) => a + b, 0);
-        const voting = canReact();
+        const voting = canVotePoll();
         btns.forEach((b, i) => {
             b.disabled = !voting;
             b.setAttribute("aria-disabled", String(!voting));
@@ -193,7 +211,7 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
 
     // One vote per person: moves or clears your keycap reaction.
     function votePoll(msgId, emoji) {
-        if (!_canAct()) return;
+        if (!canVotePoll()) { onUnavailable(); return; }
         if (!msgId || !emoji) return;
         const reacts = getMessageReactions()[msgId] || {};
         const { add, remove } = pollVoteChange(reacts, emoji, getSelfWebId());
@@ -209,6 +227,8 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
             return;
         }
         state.lastEmojiMsgId = msgId;
+        state._pickerView = { ...getActiveView() };
+        state._pickerSession = getSessionId();
         // R60A: rebuild the active room's custom emoji entries on each open.
         if (typeof picker.querySelectorAll === "function") {
             picker.querySelectorAll(".custom-entry").forEach(el => el.remove());
@@ -283,6 +303,10 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         // Guard like removeReaction — the thread may have closed while the picker
         // was open; without this activeView.type below throws.
         if (!activeView || !mid) return;
+        if (_pickerWasOpen && state._pickerView && (state._pickerSession !== getSessionId()
+            || state._pickerView.id !== activeView.id || state._pickerView.type !== activeView.type)) return;
+        const saved = _savePodReaction({ ...activeView }, mid, emoji, true);
+        if (saved) return saved;
         const payload = {
             cmd: "add_reaction",
             message_id: mid,
@@ -316,6 +340,8 @@ export function createReactions({ getSocket, getActiveView, getSelfWebId, getMes
         if (!_canAct()) return;
         const activeView = getActiveView();
         if (!activeView) return;
+        const saved = _savePodReaction({ ...activeView }, msgId, emoji, false);
+        if (saved) return saved;
         const payload = { cmd: "remove_reaction", message_id: msgId, emoji: emoji };
         if (activeView.type === "dm" || activeView.type === "local_dm") {
             payload.cert_id = activeView.id;
