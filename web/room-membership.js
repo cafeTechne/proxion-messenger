@@ -8,13 +8,14 @@ export function isStrongEtag(value) {
 
 export function createOwnerMembership({
     read, write, apply, getOwnerId, signDescriptor = async (descriptor) => descriptor,
+    getSessionId = getOwnerId,
     maxRetries = 5,
 }) {
     const pending = new Map();
     const failure = (reason) => ({ ok: false, reason });
 
-    async function updateOnce(roomId, change, owner, closing = false) {
-        const isCurrent = () => !!owner && getOwnerId() === owner;
+    async function updateOnce(roomId, change, owner, closing = false, session = getSessionId()) {
+        const isCurrent = () => !!owner && getOwnerId() === owner && getSessionId() === session;
         const usable = (snapshot) => snapshot?.ok && snapshot.descriptor
             && snapshot.descriptor.room_id === roomId
             && snapshot.descriptor.owner === owner && isStrongEtag(snapshot.etag);
@@ -72,9 +73,10 @@ export function createOwnerMembership({
 
     function enqueue(roomId, operation) {
         const owner = getOwnerId();
-        const key = String(owner) + '\n' + roomId;
+        const session = getSessionId();
+        const key = String(session) + '\n' + String(owner) + '\n' + roomId;
         const previous = pending.get(key) || Promise.resolve();
-        const result = previous.catch(() => {}).then(() => operation(owner))
+        const result = previous.catch(() => {}).then(() => operation(owner, session))
             .catch(() => failure('unavailable'));
         pending.set(key, result);
         result.finally(() => { if (pending.get(key) === result) pending.delete(key); }).catch(() => {});
@@ -82,17 +84,17 @@ export function createOwnerMembership({
     }
 
     function update(roomId, change) {
-        return enqueue(roomId, owner => updateOnce(roomId, change, owner));
+        return enqueue(roomId, (owner, session) => updateOnce(roomId, change, owner, false, session));
     }
 
     function remove(roomId, unlist) {
-        return enqueue(roomId, async owner => {
-            const closed = await updateOnce(roomId, d => d.closed ? d : closeRoomDescriptor(d), owner, true);
+        return enqueue(roomId, async (owner, session) => {
+            const closed = await updateOnce(roomId, d => d.closed ? d : closeRoomDescriptor(d), owner, true, session);
             if (!closed.ok) return closed;
-            if (getOwnerId() !== owner) return failure('account_changed');
+            if (getOwnerId() !== owner || getSessionId() !== session) return failure('account_changed');
             if (!(await unlist())) return failure('unlist_failed');
-            if (getOwnerId() !== owner) return failure('account_changed');
-            return updateOnce(roomId, d => d.deletion_complete ? d : closeRoomDescriptor(d, true), owner, true);
+            if (getOwnerId() !== owner || getSessionId() !== session) return failure('account_changed');
+            return updateOnce(roomId, d => d.deletion_complete ? d : closeRoomDescriptor(d, true), owner, true, session);
         });
     }
 

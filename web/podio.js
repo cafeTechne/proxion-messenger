@@ -200,11 +200,14 @@ export function createPodIo({ fetch, isLoggedIn, storageRoot, webId }) {
     async function _readDropBox(path) {
         const root = _root();
         if (!root || !_loggedIn()) return [];
+        const owner = webId();
+        const current = () => _loggedIn() && _root() === root && webId() === owner;
         const inbox = root.replace(/\/?$/, '/') + path;
         let urls = [];
         try {
             const json = await fetchJsonCapped(inbox, { headers: { Accept: 'application/ld+json' } }, MAX_POD_LISTING_BYTES);
             if (!json) return [];
+            if (!current()) return [];
             urls = parseInboxListing(json, inbox);
         } catch (err) {
             console.warn('[pod] drop-box listing failed:', err);
@@ -213,10 +216,12 @@ export function createPodIo({ fetch, isLoggedIn, storageRoot, webId }) {
         if (urls.length > MAX_DROPS) urls = urls.slice(0, MAX_DROPS);
         const out = [];
         for (const url of urls) {
+            if (!current()) return [];
             try {
                 // Each dropped item is attacker-authored (the box is public-Append), so bound
                 // its body before parse the same way the listing above is bounded.
                 const item = await fetchJsonCapped(url, { headers: { Accept: 'application/json' } });
+                if (!current()) return [];
                 if (item != null) out.push({ url, item });
             } catch { /* skip one unreadable drop */ }
         }
@@ -582,6 +587,15 @@ export function createPodIo({ fetch, isLoggedIn, storageRoot, webId }) {
         podEnsureJoinInbox: () => _ensureDropBox(JOIN_INBOX_PATH, 'join inbox'),
         podDropJoin: (recipientPodRoot, obj) => _dropTo(recipientPodRoot, JOIN_INBOX_PATH, obj),
         podReadJoins: async () => (await _readDropBox(JOIN_INBOX_PATH)).map(({ url, item }) => ({ url, msg: item })),
+        podJoinExists: async (url) => {
+            const inbox = _dropBoxUrl(_root(), JOIN_INBOX_PATH);
+            if (!_loggedIn() || !inbox || typeof url !== 'string' || !url.startsWith(inbox)
+                || !/^[\w~-][\w.~-]{0,255}$/.test(url.slice(inbox.length))) return null;
+            try {
+                const res = await fetch(url, { method: 'HEAD', cache: 'no-store', redirect: 'error' });
+                return res?.status === 404 || res?.status === 410 ? false : res?.ok ? true : null;
+            } catch { return null; }
+        },
         podDeleteJoin: (url) => _deleteDrop(url),
         podWritePendingJoin, podHasPendingJoin, podDeletePendingJoin,
         podReadJoinedRooms, podWriteJoinedRooms, podReadJoinedRoomsVersion, podWriteJoinedRoomsVersion,

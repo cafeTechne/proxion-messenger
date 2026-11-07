@@ -255,13 +255,31 @@ try {
   const inviteB = await createRoom(pageB, 'xr-web-' + stamp.toString(36));
   const roomB = roomIdOf(inviteB);
   ok('Bob created a room in his pod');
+  // Keep approval's access write unavailable through an owner reload. The
+  // retained request must have a persistent, actionable status and recover.
+  let blockApproval = true;
+  await pageB.setRequestInterception(true);
+  pageB.on('request', request => {
+    if (blockApproval && request.method() === 'PUT'
+        && request.url() === `${bob.storageRoot}proxion/rooms/${roomB}/.acl`) {
+      request.abort('failed').catch(() => {});
+    } else request.continue().catch(() => {});
+  });
   await requestJoin(pageA, inviteB);
   if (await waitFor(pageA, () => document.getElementById('join-pending-banner')?.classList.contains('visible'), undefined, 20000)) ok('Alice\'s desktop sent a join request from the browser-build link');
   else fail('no pending join on Alice\'s side');
   if (await drainUntil(pageB, drainWeb, isPrompted)) { await pageB.click('#confirm-ok'); ok('Bob was asked and approved'); }
   else fail('Bob was never prompted');
+  if (!(await waitFor(pageB, () => document.getElementById('room-approval-status')?.classList.contains('visible'), undefined, 20000))) throw new Error('owner approval failure has no persistent retry status');
+  await pageB.reload({ waitUntil: 'load', timeout: 30000 });
+  await pageB.evaluate(() => { const modal = document.getElementById('onboarding-modal'); if (modal) modal.style.display = 'none'; });
+  if (!(await waitFor(pageB, () => document.getElementById('room-approval-status')?.classList.contains('visible'), undefined, 30000))) throw new Error('owner retry status was lost on reload');
+  blockApproval = false;
+  await pageB.click('#room-approval-status button');
   if (await drainUntil(pageA, drainDesk, hasRoom, roomB)) ok('the room appears in Alice\'s desktop sidebar');
   else throw new Error('the room never appeared for Alice:\n' + gw._log().slice(-1500));
+  if (!(await waitFor(pageB, () => !document.getElementById('room-approval-status')?.classList.contains('visible'), undefined, 20000))) throw new Error('owner retry status did not clear after success');
+  ok('failed owner approval survives reload and Retry completes it');
 
   step = 'web-room-messages';
   await openRoom(pageA, roomB);

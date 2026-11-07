@@ -1570,6 +1570,8 @@ svg.icon, svg[aria-hidden="true"] { flex-shrink: 0; vertical-align: -0.125em; }
 /* Persistent join-request indicator: awaiting the room owner's approval */
 #join-pending-banner { display: none; }
 #join-pending-banner.visible { display: flex; }
+#room-approval-status { display: none; }
+#room-approval-status.visible { display: flex; }
 
 /* Unclaimed public gateway: claim with the code from the gateway log */
 #owner-claim-banner { display: none; }

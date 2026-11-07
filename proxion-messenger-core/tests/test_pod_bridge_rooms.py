@@ -49,9 +49,10 @@ def _marker(g):
     g._pod.routes[("GET", url)] = (200, {}, json.dumps({"px:roomId": ROOM, "px:ownerWebId": PEER}).encode())
 
 
-def _register(g, ws, room=ROOM, owner=PEER, safe_ip="203.0.113.5"):
+def _register(g, ws, room=ROOM, owner=PEER, safe_ip="203.0.113.5", request_id=None):
     with patch("proxion_messenger_core.network._resolve_safe_ip", lambda url: safe_ip):
-        run(g._handle_pod_room_register(ws, {"room_id": room, "owner_webid": owner}))
+        run(g._handle_pod_room_register(ws, {"room_id": room, "owner_webid": owner,
+                                           **({"req_id": request_id} if request_id is not None else {})}))
     return [m for m in sent(ws) if m.get("type") == "pod_room_registered"][-1]
 
 
@@ -61,6 +62,39 @@ def _jwt_payload(token):
 
 
 # ── registration ─────────────────────────────────────────────────────────────
+
+def test_registration_echoes_request_correlation_id(dpop):
+    ws, did = make_ws()
+    register(dpop, ws, did)
+    _marker(dpop)
+    reply = _register(dpop, ws, request_id='session-request-1')
+    assert reply['ok'] is True
+    assert reply['req_id'] == 'session-request-1'
+
+
+@pytest.mark.parametrize('change', ['account', 'client'])
+def test_registration_does_not_finish_after_its_pod_session_changes(dpop, monkeypatch, change):
+    import copy
+    ws, did = make_ws()
+    register(dpop, ws, did)
+    old_rooms = dpop._pb_rooms()
+
+    async def record_after_switch(*args):
+        if change == 'account':
+            dpop._pod_webid = PEER
+        else:
+            client = copy.copy(dpop._pod)
+            dpop._pod = client
+            dpop.own_pod_clients[WEBID] = (None, client)
+        return True
+
+    monkeypatch.setattr(dpop, '_pb_join_on_record', record_after_switch)
+    reply = _register(dpop, ws, request_id='old-request')
+    assert reply['ok'] is False
+    assert reply['reason'] == 'account_changed'
+    assert reply['req_id'] == 'old-request'
+    assert CONTAINER not in old_rooms
+    assert CONTAINER not in dpop._pb_rooms()
 
 def test_bearer_pods_cannot_register_a_foreign_room(gw):
     ws, did = make_ws()

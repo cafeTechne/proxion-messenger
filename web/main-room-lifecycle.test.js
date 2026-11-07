@@ -24,6 +24,43 @@ const JOINER = 'https://joiner.example/profile/card#me';
 const ROOT = 'https://owner.example/';
 const ROOM = 'room-130';
 const CONTAINER = ROOT + 'chats/' + ROOM + '/';
+
+it('clears old pod-room UI and cached previews when the connected account changes', () => {
+    const remove = vi.fn();
+    const deps = { document: { getElementById: () => ({ remove }) },
+        roomCreatorOf: new Set([ROOM, 'gateway-room']), roomInviteUrls: { [ROOM]: 'old-invite' },
+        _local_rooms: { [ROOM]: {}, 'gateway-room': {} }, _webRoomCache: { [ROOM]: ['private'] },
+        roomLastMessages: { [ROOM]: { snippet: 'private' } }, activeView: { id: ROOM },
+        updatePageTitle: vi.fn(), _showThreadClosed: vi.fn(), t: key => key,
+    };
+    handlers(['_clearCrossRoomSession'], deps)._clearCrossRoomSession([{ roomId: ROOM }]);
+    expect(remove).toHaveBeenCalledOnce();
+    expect(deps.roomCreatorOf.has(ROOM)).toBe(false);
+    expect(deps.roomCreatorOf.has('gateway-room')).toBe(true);
+    expect(deps._local_rooms).toEqual({ 'gateway-room': {} });
+    expect(deps._webRoomCache).toEqual({});
+    expect(deps.roomLastMessages).toEqual({});
+    expect(deps.roomInviteUrls).toEqual({});
+    expect(deps._showThreadClosed).toHaveBeenCalledWith('heading.welcome');
+});
+
+it.each([false, true])('cancels an old account prompt without dismissing a replacement (replaced=%s)', async replaced => {
+    let current = true, tick, cancel;
+    const ok = { onclick: null }, modal = { style: { display: 'flex' } };
+    const cancelButton = { click: vi.fn(() => { modal.style.display = 'none'; cancel(); }) };
+    const deps = {
+        document: { getElementById: id => ({ 'confirm-ok': ok, 'confirm-modal': modal, 'confirm-cancel': cancelButton })[id] },
+        showConfirm: (_message, yes, no) => { ok.onclick = yes; cancel = no; },
+        setInterval: fn => { tick = fn; return 1; }, clearInterval: vi.fn(),
+    };
+    const app = handlers(['_askJoinOnce'], deps);
+    const answer = app._askJoinOnce('Join?', {}, () => current);
+    if (replaced) ok.onclick = () => {};
+    current = false; tick();
+    expect(await answer).toBe(null);
+    expect(cancelButton.click).toHaveBeenCalledTimes(replaced ? 0 : 1);
+    expect(deps.clearInterval).toHaveBeenCalledWith(1);
+});
 const descriptor = () => buildRoomDescriptor({ roomId: ROOM, title: 'Friends', owner: OWNER });
 const joinedRecord = () => ({ roomId: ROOM, owner: OWNER, ownerPodRoot: ROOT, container: CONTAINER, title: 'Friends' });
 

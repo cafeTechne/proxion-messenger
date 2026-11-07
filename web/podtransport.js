@@ -115,7 +115,11 @@ export function searchLoadedRooms(query, snapshots, limit = 50) {
         .slice(0, Math.max(0, Math.min(100, Number.isFinite(limit) ? Math.trunc(limit) : 50)));
 }
 
-export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, join, rooms, makeRoomInvite, history, blockStore, searchRooms }) {
+export function createPodSocket({ getSelfWebId, getSessionId = getSelfWebId, handleEvent: onEvent, pod, dm, calls, join, rooms, makeRoomInvite, history, blockStore, searchRooms }) {
+    const account = getSelfWebId(), session = getSessionId();
+    let closed = false;
+    const current = () => !closed && account === getSelfWebId() && session === getSessionId();
+    const handleEvent = event => { if (current()) onEvent(event); };
     // Echo a just-sent DM back so its optimistic render is confirmed (pending
     // cleared). It carries no content: the payload is ciphertext, and the
     // plaintext optimistic copy already shows (main.js only confirms on
@@ -153,6 +157,7 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, joi
     }
 
     async function route(cmd) {
+        if (!current()) return;
         try {
             // WebRTC call signaling (R105): drop to the callee's pod call-inbox.
             if (cmd && _SIGNAL_CMDS.has(cmd.cmd)) {
@@ -185,12 +190,14 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, joi
                 case 'get_rooms': {
                     const self = getSelfWebId();
                     const found = self ? await pod.podListOwnedRoomDescriptors(self) : [];
+                    if (!current()) return;
                     const descs = [];
                     for (const d of found) {
                         if (d.closed && d.deletion_complete) continue;
                         if (d.closed) {
                             let removed = false;
                             try { removed = !!(await rooms?.resumeDeletion?.(d.room_id)); } catch { /* retain owner retry entry */ }
+                            if (!current()) return;
                             if (removed) continue;
                             handleEvent({ type: 'error', cmd: 'delete_room', room_id: d.room_id, message: 'pod_operation_failed' });
                         }
@@ -199,6 +206,7 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, joi
                     const owned = roomsFromDescriptors(descs, self, makeRoomInvite);
                     const ownedIds = new Set(owned.map((r) => r.id));
                     const joined = (self && rooms && rooms.listJoined) ? await rooms.listJoined() : [];
+                    if (!current()) return;
                     const others = roomsFromJoined(joined).filter((r) => !ownedIds.has(r.id));
                     handleEvent({ type: 'rooms', rooms: [...owned, ...others] });
                     break;
@@ -342,6 +350,7 @@ export function createPodSocket({ getSelfWebId, handleEvent, pod, dm, calls, joi
             route(cmd);   // fire-and-forget, like WebSocket.send
         },
         close() {
+            closed = true;
             this.readyState = POD_SOCKET_CLOSED;
             if (this.onclose) this.onclose();
         },

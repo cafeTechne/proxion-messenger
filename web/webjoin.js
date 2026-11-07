@@ -14,6 +14,8 @@
 // app supplies the owner-side approve action and the joiner-side registration
 // via callbacks. Dependencies are injected so it is unit-testable.
 
+import { createRoomApprovalStore } from './room-approvals.js';
+
 const SEP = '~';
 
 /** Encode an invite the owner can share: an ?join= link plus the raw token.
@@ -57,19 +59,36 @@ export function parseInvite(str) {
 export function createWebJoin({
     pod, notify, getSelfWebId, getDisplayName, getSelfPodRoot, peerPodRoot,
     onJoinRequest, onApproved, onDeclined,
+    getSessionId = getSelfWebId,
+    storage = globalThis.localStorage, onStatusChange = () => {},
     pollMs = 15000, setTimer = (fn, ms) => setInterval(fn, ms), clearTimer = (h) => clearInterval(h),
 }) {
     let _unsub = null;
     let _retryTimer = null;
+    let _generation = 0, _active = true;
+    const account = () => ({ webId: getSelfWebId(), root: getSelfPodRoot?.(), session: getSessionId() });
+    let _account = account();
+    const statusStore = () => createRoomApprovalStore({ storage, webId: _account.webId, root: _account.root });
+    let _status = statusStore(), _probeOffset = 0;
+    function publish() { try { onStatusChange(_status.list(), () => drainOnce()); } catch { /* status UI must not block delivery */ } }
+    function context() {
+        const generation = _generation, identity = _account;
+        return () => _active && generation === _generation && identity === _account
+            && identity.webId === getSelfWebId() && identity.root === getSelfPodRoot?.()
+            && identity.session === getSessionId();
+    }
     // Drops being handled right now, and drops already consumed. A notification
     // drain can overlap the start() drain (or another notification), and both
     // list the same request: without these the owner would be prompted twice
     // for one request, or prompted again after answering, before the delete lands.
-    const _inFlight = new Set();
+    const _inFlight = new Map();
+    const _probing = new Map();
     const _done = new Set();
 
     // Joiner: ask an owner to let us into a room.
     async function requestJoin(roomId, ownerWebId) {
+        const current = context(), webId = getSelfWebId(), name = getDisplayName?.() || '';
+        if (!current()) return false;
         const root = peerPodRoot(ownerWebId);
         if (!root) return false;
         // Persist authorization BEFORE publishing the request. The owner may
@@ -82,17 +101,20 @@ export function createWebJoin({
                 if (await pod.podWritePendingJoin(roomId, ownerWebId) !== true) return false;
             } catch { return false; }
         }
+        if (!current()) return false;
         return pod.podDropJoin(root, {
             kind: 'join_request',
             room_id: roomId,
-            from_webid: getSelfWebId(),
-            from_display_name: getDisplayName ? getDisplayName() : '',
+            from_webid: webId,
+            from_display_name: name,
         });
     }
 
     // Owner: tell a joiner they are in (after granting them ACL). Carries where
     // the room lives so the joiner can read it.
     async function sendApproval(toWebId, roomId, title) {
+        const current = context();
+        if (!current()) return false;
         const root = peerPodRoot(toWebId);
         if (!root) return false;
         return pod.podDropJoin(root, {
@@ -106,6 +128,8 @@ export function createWebJoin({
 
     // Owner: tell a joiner the request was declined, so they stop waiting.
     async function sendDecline(toWebId, roomId) {
+        const current = context();
+        if (!current()) return false;
         const root = peerPodRoot(toWebId);
         if (!root) return false;
         return pod.podDropJoin(root, {
@@ -115,57 +139,108 @@ export function createWebJoin({
         });
     }
 
-    async function _handle(url, msg) {
+    async function _handle(url, msg, current) {
         // Default: remove a handled or unrecognized message. A handler that
         // returns exactly `false` (e.g. the owner's room descriptor is not
         // readable yet, or the owner closed the tab without answering) keeps the
         // message so a later drain can retry, rather than silently consuming a
         // request the owner never got to act on.
-        let consumed = true;
+        let consumed = _status.get(url, msg)?.state === 'cleanup';
         try {
-            if (msg && msg.kind === 'join_request' && onJoinRequest) consumed = (await onJoinRequest(msg)) !== false;
-            else if (msg && msg.kind === 'join_approved' && onApproved) consumed = (await onApproved(msg)) !== false;
-            else if (msg && msg.kind === 'join_declined' && onDeclined) consumed = (await onDeclined(msg)) !== false;
+            if (!consumed) {
+                consumed = true;
+                if (msg && msg.kind === 'join_request' && onJoinRequest) consumed = (await onJoinRequest(msg, current)) !== false;
+                else if (msg && msg.kind === 'join_approved' && onApproved) consumed = (await onApproved(msg, current)) !== false;
+                else if (msg && msg.kind === 'join_declined' && onDeclined) consumed = (await onDeclined(msg, current)) !== false;
+            }
         } catch (err) {
             console.warn('[webjoin] handling failed:', err);
             consumed = false;
         }
+        if (!current()) return;
+        _status.put(url, msg, consumed ? 'cleanup' : 'retry');
+        if (!consumed) publish();
         if (consumed) {
-            _done.add(url);
-            await pod.podDeleteJoin(url);
+            let deleted = false;
+            try { deleted = await pod.podDeleteJoin(url) === true; } catch { /* retry cleanup without replaying the decision */ }
+            if (!current()) return;
+            if (deleted) {
+                _done.add(url);
+                if (_done.size > 5000) _done.delete(_done.values().next().value);
+                _status.remove(url);
+            }
+            publish();
         }
     }
 
     // Handles every drop concurrently, so a join prompt waiting on the owner does
     // not hold up an approval behind it. The app queues its prompts one at a time.
     async function drainOnce() {
+        const current = context();
+        if (!current()) return;
         const joins = await pod.podReadJoins();
+        if (!current()) return;
         const work = [];
         for (const { url, msg } of joins) {
             if (_inFlight.has(url) || _done.has(url)) continue;
-            _inFlight.add(url);
-            work.push(_handle(url, msg).finally(() => _inFlight.delete(url)));
+            _inFlight.set(url, current);
+            work.push(_handle(url, msg, current).finally(() => {
+                if (_inFlight.get(url) === current) _inFlight.delete(url);
+            }));
         }
         await Promise.all(work);
+        if (!current() || !pod.podJoinExists) return;
+        // Confirm records finished by another device without holding up new
+        // requests. Failed/empty listings alone never clear a retry notice.
+        const urls = new Set(joins.map(row => row.url));
+        const missing = _status.list().filter(row => !urls.has(row.url));
+        const probes = [];
+        for (let i = 0; i < Math.min(20, missing.length); i++) {
+            const row = missing[(_probeOffset + i) % missing.length];
+            if (_probing.has(row.url)) continue;
+            _probing.set(row.url, current);
+            probes.push((async () => {
+                try {
+                    const exists = await pod.podJoinExists(row.url);
+                    if (current() && exists === false) { _status.remove(row.url); publish(); }
+                } catch { /* retain status on network/session failure */ }
+                finally { if (_probing.get(row.url) === current) _probing.delete(row.url); }
+            })());
+        }
+        _probeOffset += 20;
+        await Promise.all(probes);
     }
 
     async function start() {
+        stop();
+        _active = true;
+        _account = account();
+        _status = statusStore();
+        publish();
+        const current = context();
         const inbox = await pod.podEnsureJoinInbox();
+        if (!current()) return null;
         if (inbox && notify && notify.watchResource && !_unsub) {
-            _unsub = notify.watchResource(inbox, () => { drainOnce().catch(() => {}); });
+            _unsub = notify.watchResource(inbox, () => { if (current()) drainOnce().catch(() => {}); });
         }
         // Even a live subscription only reports changes. A retained approval
         // needs another drain after a temporary failure, without waiting for
         // somebody else to send a new join. Start before the initial drain,
         // which can wait on an owner prompt for an arbitrary amount of time.
         if (inbox && _retryTimer === null) {
-            _retryTimer = setTimer(() => { drainOnce().catch(() => {}); }, pollMs);
+            _retryTimer = setTimer(() => { if (current()) drainOnce().catch(() => {}); }, pollMs);
         }
         await drainOnce();
         return inbox;
     }
 
     function stop() {
+        _active = false;
+        _generation++;
+        _inFlight.clear();
+        _probing.clear();
+        _done.clear();
+        try { onStatusChange([], null); } catch { /* optional status UI */ }
         if (_retryTimer !== null) { clearTimer(_retryTimer); _retryTimer = null; }
         if (_unsub) { try { _unsub(); } catch { /* ignore */ } _unsub = null; }
     }

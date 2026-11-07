@@ -36,6 +36,18 @@ function store(descriptor = initial()) {
 }
 
 describe('owner membership across independent devices', () => {
+    it('does not commit an old operation after the same account reconnects', async () => {
+        const s = store();
+        let session = 1, release;
+        const signing = new Promise(resolve => { release = resolve; });
+        const client = s.client({ getSessionId: () => session, signDescriptor: () => signing });
+        const updating = client.update(ROOM, add(ALICE));
+        await vi.waitFor(() => expect(s.read).toHaveBeenCalled());
+        session++;
+        release(add(ALICE)(s.descriptor()));
+        expect(await updating).toEqual({ ok: false, reason: 'account_changed' });
+        expect(s.write).not.toHaveBeenCalled();
+    });
     it('reapplies a conflicting approval without losing the other approved member', async () => {
         const s = store();
         const bothRead = deferred();

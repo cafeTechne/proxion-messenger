@@ -53,6 +53,17 @@ to its owner for retry; browser and desktop hosts also resume cleanup on reload.
 Version 1 active descriptors remain readable. Version 2 signs the closed state,
 and conditional ACL writes bind access grants to the current descriptor version.
 
+Room discovery, saved memberships, join prompts, and registration replies are
+bound to the connected account and pod session. Switching accounts clears the
+old pod rooms and previews, and delayed work cannot restore them into the new
+session. A reconnect also invalidates unfinished work from the previous session.
+
+Owners see a persistent notice when a room request cannot finish. Requests retry
+automatically, and **Retry now** starts another attempt. Account-scoped recovery
+metadata restores the notice after reload. If the decision succeeded but inbox
+cleanup failed, retries finish cleanup without repeating the decision. Unprocessed
+requests still require the owner's approval.
+
 Each smoke starts its own gateways or throwaway Solid server. `npm run smoke:all`
 adds the full pod and visual groups. The `pod-required` group checks room creation,
 approval, reload, browser/desktop sharing, and invite links through sign-in. CI

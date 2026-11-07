@@ -23,8 +23,8 @@ async function until(fn, ms = 2000) {
 
 // A fake gateway behind a real gwpod bridge: pod_fetch answered from a route
 // table (a function of method + url), pod_room_register from `register`.
-function harness({ routes = () => null, register = () => ({ ok: true }), pending = true, joined = [], storage, accessPollMs, setAccessTimer, clearAccessTimer } = {}) {
-    const sent = [], events = [], notes = [], rooms = [], removed = [];
+function harness({ routes = () => null, register = () => ({ ok: true }), askApprove = vi.fn(async () => 'yes'), pending = true, joined = [], storage, accessPollMs, setAccessTimer, clearAccessTimer } = {}) {
+    const sent = [], events = [], notes = [], rooms = [], removed = [], resets = [];
     let bridge = null, cr = null;
     let state = { ready: true, started: true, webid: ME, pod_root: ROOT };
     const descriptorVersions = new Map();
@@ -40,7 +40,8 @@ function harness({ routes = () => null, register = () => ({ ok: true }), pending
             setTimeout(() => bridge.handleEvent({ type: 'pod_fetch_result', req_id: m.req_id, headers, body: '', ...r }), 0);
         } else if (m.cmd === 'pod_room_register') {
             const r = register(m);
-            setTimeout(() => cr.handleEvent({ type: 'pod_room_registered', room_id: m.room_id, container: CONTAINER, ...r }), 0);
+            if (r.defer) return;
+            setTimeout(() => cr.handleEvent({ type: 'pod_room_registered', req_id: m.req_id, room_id: m.room_id, container: CONTAINER, ...r }), 0);
         }
     };
     bridge = createGwPodBridge({ send });
@@ -69,8 +70,9 @@ function harness({ routes = () => null, register = () => ({ ok: true }), pending
         getSelfId: () => 'did:key:zDevice',
         getDisplayName: () => 'Me',
         getSigner: () => null,
-        askApprove: vi.fn(async () => 'yes'),
+        askApprove,
         onRoom: (rec, info) => rooms.push({ rec, info }),
+        onReset: (records) => resets.push(records),
         onRemoved: (id) => removed.push(id),
         notify: (kind, d) => notes.push({ kind, ...d }),
         inviteBase: () => 'https://web.example/app/',
@@ -78,10 +80,103 @@ function harness({ routes = () => null, register = () => ({ ok: true }), pending
         accessPollMs, setAccessTimer, clearAccessTimer,
         storage,
     });
-    return { cr, bridge, sent, events, notes, rooms, removed, setState: (value) => { state = value; } };
+    return { cr, bridge, sent, events, notes, rooms, removed, resets, setState: (value) => { state = value; } };
 }
 
 const fetches = (h, method) => h.sent.filter((m) => m.cmd === 'pod_fetch' && (!method || m.method === method));
+
+describe('room restoration session boundaries', () => {
+    const initial = { ready: true, started: true, webid: ME, pod_root: ROOT };
+    it('clears already displayed pod rooms when a different account connects', async () => {
+        const h = harness();
+        await joinBobsRoom(h);
+        h.bridge.io.podReadJoins.mockResolvedValue([]);
+        const next = { ...initial, webid: BOB, pod_root: BOB_ROOT };
+        h.setState(next); h.cr.onState(next);
+        expect(h.cr.list()).toEqual([]);
+        expect(h.resets.at(-1)).toMatchObject([{ roomId: ROOM, owner: BOB, owned: false }]);
+    });
+    it.each(['account', 'root', 'reconnect'])('discards old owned descriptors after a %s change', async change => {
+        const h = harness();
+        let release;
+        const pending = new Promise(resolve => { release = resolve; });
+        const read = vi.spyOn(h.cr.io, 'podListOwnedRoomDescriptors').mockImplementationOnce(() => pending).mockResolvedValue([]);
+        h.cr.onState(initial);
+        expect(await until(() => read.mock.calls.length === 1)).toBe(true);
+        const next = change === 'account' ? { ...initial, webid: BOB, pod_root: BOB_ROOT }
+            : change === 'root' ? { ...initial, pod_root: ROOT + 'moved/' } : initial;
+        if (change === 'reconnect') h.cr.onState({ ...initial, ready: false });
+        h.setState(next);
+        h.cr.onState(next);
+        expect(await until(() => read.mock.calls.length === 2)).toBe(true);
+        release([{ room_id: 'old-owned', owner: ME, title: 'Old account', closed: true }]);
+        await pending;
+        expect(h.cr.list()).toEqual([]);
+        expect(h.rooms).toEqual([]);
+        expect(fetches(h, 'PUT')).toEqual([]);
+    });
+
+    it('correlates registration replies so an old account cannot complete a new request for the same room', async () => {
+        const rec = { roomId: ROOM, owner: BOB, ownerPodRoot: BOB_ROOT, container: CONTAINER, title: 'Joined' };
+        const h = harness({ joined: [rec], register: () => ({ defer: true }) });
+        vi.spyOn(h.cr.io, 'podListOwnedRoomDescriptors').mockResolvedValue([]);
+        h.cr.onState(initial);
+        const requests = () => h.sent.filter(m => m.cmd === 'pod_room_register');
+        expect(await until(() => requests().length === 1)).toBe(true);
+        const next = { ...initial, webid: ROOT + 'other/profile/card#me', pod_root: ROOT + 'other/' };
+        h.setState(next);
+        h.cr.onState(next);
+        expect(await until(() => requests().length === 2)).toBe(true);
+        expect(requests()[0].req_id).not.toBe(requests()[1].req_id);
+        h.cr.handleEvent({ type: 'pod_room_registered', room_id: ROOM, req_id: requests()[0].req_id, ok: true });
+        expect(h.cr.list()).toEqual([]);
+        h.cr.handleEvent({ type: 'pod_room_registered', room_id: ROOM, req_id: requests()[1].req_id, ok: true });
+        expect(await until(() => h.cr.isPodRoom(ROOM))).toBe(true);
+        expect(h.rooms).toHaveLength(1);
+    });
+
+    it('does not persist or consume an approval whose marker read finishes in another account', async () => {
+        const h = harness();
+        h.cr.onState(initial);
+        let release;
+        h.bridge.io.podHasPendingJoin.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+        h.bridge.io.podReadJoins.mockResolvedValue([{ url: ROOT + 'proxion/join-inbox/old', msg: {
+            kind: 'join_approved', room_id: ROOM, owner_webid: BOB, owner_pod_root: BOB_ROOT,
+        } }]);
+        h.bridge.io.podDeleteJoin = vi.fn(async () => true);
+        const draining = h.cr.drainJoins();
+        expect(await until(() => !!release)).toBe(true);
+        h.bridge.io.podReadJoins.mockResolvedValue([]);
+        const next = { ...initial, webid: BOB, pod_root: BOB_ROOT };
+        h.setState(next); h.cr.onState(next);
+        release(true);
+        await draining;
+        expect(h.cr.list()).toEqual([]);
+        expect(h.bridge.io.podWriteJoinedRooms).not.toHaveBeenCalled();
+        expect(h.bridge.io.podDeletePendingJoin).not.toHaveBeenCalled();
+        expect(h.bridge.io.podDeleteJoin).not.toHaveBeenCalled();
+    });
+
+    it('discards an old owner prompt after switching accounts', async () => {
+        let release;
+        const askApprove = vi.fn(() => new Promise(resolve => { release = resolve; }));
+        const h = harness({ askApprove });
+        vi.spyOn(h.cr.io, 'podReadRoomDescriptor').mockResolvedValue({ room_id: ROOM, owner: ME, members: [] });
+        const write = vi.spyOn(h.cr.io, 'podWriteRoomDescriptorVersion');
+        h.cr.onState(initial);
+        h.bridge.io.podReadJoins.mockResolvedValue([{ url: ROOT + 'proxion/join-inbox/request', msg: {
+            kind: 'join_request', room_id: ROOM, from_webid: BOB,
+        } }]);
+        const draining = h.cr.drainJoins();
+        expect(await until(() => !!release)).toBe(true);
+        h.bridge.io.podReadJoins.mockResolvedValue([]);
+        const next = { ...initial, webid: BOB, pod_root: BOB_ROOT };
+        h.setState(next); h.cr.onState(next);
+        release('yes'); await draining;
+        expect(write).not.toHaveBeenCalled();
+        expect(h.bridge.io.podDropJoin).not.toHaveBeenCalled();
+    });
+});
 
 describe('desktop room deletion', () => {
     async function ownedRoom() {
@@ -196,7 +291,7 @@ describe('joining a browser-build room', () => {
     it('registers the container after an approval we asked for, then lists it', async () => {
         const h = harness();
         await joinBobsRoom(h);
-        expect(h.sent.filter((m) => m.cmd === 'pod_room_register')).toEqual([{ cmd: 'pod_room_register', room_id: ROOM, owner_webid: BOB }]);
+        expect(h.sent.filter((m) => m.cmd === 'pod_room_register')).toEqual([{ cmd: 'pod_room_register', req_id: expect.any(String), room_id: ROOM, owner_webid: BOB }]);
         expect(h.bridge.io.podWriteJoinedRooms).toHaveBeenCalledWith([expect.objectContaining({ roomId: ROOM, owner: BOB, container: CONTAINER })]);
         expect(h.bridge.io.podDeletePendingJoin).toHaveBeenCalledWith(ROOM, BOB);
         expect(h.rooms).toEqual([{ rec: expect.objectContaining({ roomId: ROOM, container: CONTAINER, owned: false }), info: { joined: true } }]);

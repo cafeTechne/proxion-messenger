@@ -21,6 +21,22 @@ function roomsHarness({ descs = [], joined = [], rooms = {} } = {}) {
 }
 
 describe('PodSocket rooms in the browser build', () => {
+    it.each(['account', 'session', 'close'])('discards pending room discovery after a %s change', async change => {
+        let owner = SELF, session = 1, release;
+        const events = [], resumeDeletion = vi.fn();
+        const socket = createPodSocket({ getSelfWebId: () => owner, getSessionId: () => session,
+            handleEvent: e => events.push(e), rooms: { resumeDeletion },
+            pod: { podListOwnedRoomDescriptors: () => new Promise(resolve => { release = resolve; }) },
+        });
+        const reading = socket._route({ cmd: 'get_rooms' });
+        if (change === 'account') owner = 'https://other/#me';
+        else if (change === 'session') session++;
+        else socket.close();
+        release([{ room_id: 'old', owner: SELF, closed: true }]);
+        await reading;
+        expect(events).toEqual([]);
+        expect(resumeDeletion).not.toHaveBeenCalled();
+    });
     it('omits completed closures without repeating cleanup on every reload', async () => {
         const resumeDeletion = vi.fn(async () => true);
         const h = roomsHarness({ descs: [{ room_id: 'closed', owner: SELF, closed: true, deletion_complete: true }],

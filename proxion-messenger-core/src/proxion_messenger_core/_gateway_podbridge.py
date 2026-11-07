@@ -11,7 +11,7 @@ fetch over those credentials (podbridge.classify):
                                         -> pod_fetch_result {req_id, status, headers, body[, error]}
     pod_watch {url, fast} / pod_unwatch -> pod_changed {url}
     pod_thread {peer_webid, display_name}  lists a WebID thread with get_dms
-    pod_room_register {room_id, owner_webid} -> pod_room_registered {room_id, container, ok, reason}
+    pod_room_register {room_id, owner_webid, req_id?} -> pod_room_registered {room_id, container, ok, reason, req_id?}
     pod_room_unregister {container}
 
 A room on someone else's pod (a browser-build user's Long Chat) is the one
@@ -450,10 +450,15 @@ class PodBridgeMixin:
         passes the SSRF check."""
         room_id = data.get("room_id")
         owner = data.get("owner_webid")
+        request_id = data.get("req_id")
 
         async def reply(ok: bool, reason: str = "", container: str = "") -> None:
             await websocket.send(json.dumps({"type": "pod_room_registered", "room_id": room_id,
-                                             "container": container, "ok": ok, "reason": reason}))
+                                             "container": container, "ok": ok, "reason": reason,
+                                             **({"req_id": request_id} if isinstance(request_id, str) and len(request_id) <= 64 else {})}))
+        if request_id is not None and (not isinstance(request_id, str) or not request_id or len(request_id) > 64):
+            await reply(False, "bad_request")
+            return
         if not self._is_pod_owner_socket(websocket):
             await reply(False, "not_owner")
             return
@@ -472,6 +477,14 @@ class PodBridgeMixin:
             await reply(False, "own_pod", container)
             return
         rooms = self._pb_rooms()
+        client = self._pod_client()
+
+        def current():
+            now = self._pod_bridge_status()
+            return (self._is_pod_owner_socket(websocket) and now["ready"]
+                    and now["webid"] == status["webid"] and now["pod_root"] == status["pod_root"]
+                    and self._pod_client() is client and self._pb_rooms() is rooms)
+
         if container not in rooms and len(rooms) >= _pbp.MAX_JOINED_ROOMS:
             await reply(False, "too_many")
             return
@@ -480,8 +493,14 @@ class PodBridgeMixin:
         if await loop.run_in_executor(None, _resolve_safe_ip, container) is None:
             await reply(False, "unsafe_host")
             return
+        if not current():
+            await reply(False, "account_changed")
+            return
         if not await self._pb_join_on_record(status["pod_root"], room_id, owner, container):
             await reply(False, "not_joined")
+            return
+        if not current():
+            await reply(False, "account_changed")
             return
         rooms[container] = room_id
         await reply(True, "", container)

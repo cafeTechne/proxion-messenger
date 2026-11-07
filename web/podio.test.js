@@ -23,6 +23,14 @@ function io(fetch, { loggedIn = true, root = ROOT } = {}) {
 }
 
 describe('createPodIo', () => {
+    it.each([[200, true], [404, false], [403, null], [503, null]])('distinguishes join-drop existence from denied/unavailable reads (%s)', async (status, exists) => {
+        const fetch = vi.fn(async () => res(status));
+        expect(await io(fetch).podJoinExists(ROOT + 'proxion/join-inbox/request')).toBe(exists);
+        expect(fetch).toHaveBeenCalledWith(ROOT + 'proxion/join-inbox/request', expect.objectContaining({ method: 'HEAD', cache: 'no-store' }));
+        fetch.mockClear();
+        expect(await io(fetch).podJoinExists('https://stranger.example/proxion/join-inbox/request')).toBe(null);
+        expect(fetch).not.toHaveBeenCalled();
+    });
     it('does nothing without a session', async () => {
         const fetch = vi.fn();
         const p = io(fetch, { loggedIn: false });

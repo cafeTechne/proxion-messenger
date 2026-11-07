@@ -273,13 +273,17 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
     /** Chat containers registered for meeting:LongChat in our public type index. */
     async function podListRegisteredChats() {
         if (!_loggedIn()) return [];
+        const owner = webId(), root = _root();
+        const current = () => _loggedIn() && webId() === owner && _root() === root;
         // Creation can succeed even when the profile refuses the discovery link.
         // Read the same fallback index used by podEnsurePublicTypeIndex after a
         // reload instead of making that successful registration unreachable.
-        const indexUrl = (await podReadPublicTypeIndexUrlFor(webId())) || (_root() && `${_root()}settings/publicTypeIndex.ttl`);
+        const indexUrl = (await podReadPublicTypeIndexUrlFor(owner)) || (root && `${root}settings/publicTypeIndex.ttl`);
+        if (!current()) return [];
         if (!indexUrl) return [];
         try {
             const json = await _fetchJsonCapped(indexUrl, { headers: { Accept: 'application/ld+json' }, redirect: 'error' }, MAX_POD_LISTING_BYTES);
+            if (!current()) return [];
             if (!json) return [];
             return parseRegisteredContainers(json);
         } catch (err) {
@@ -401,16 +405,21 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
      */
     async function podListOwnedRoomDescriptors(myWebId) {
         if (!myWebId || !_loggedIn()) return [];
+        const root = _root();
+        const current = () => _loggedIn() && webId() === myWebId && _root() === root;
+        if (!current()) return [];
         const containers = await podListRegisteredChats();
+        if (!current()) return [];
         const ids = new Set(containers.map(roomIdFromChatContainer).filter(Boolean));
         // A descriptor is the durable record even if type-index registration
         // failed. Recover those rooms from our own rooms/ container as well.
         // Listing entries only supply safe IDs: every descriptor is fetched
         // from our pod, never from an arbitrary URL in the listing.
-        const roomsUrl = _root() && `${_root()}rooms/`;
+        const roomsUrl = root && `${root}rooms/`;
         if (roomsUrl) {
             try {
                 const json = await _fetchJsonCapped(roomsUrl, { headers: { Accept: 'application/ld+json' }, redirect: 'error' }, MAX_POD_LISTING_BYTES);
+                if (!current()) return [];
                 for (const url of parseInboxListing(json, roomsUrl)) {
                     if (!url.startsWith(roomsUrl) || !url.endsWith('/')) continue;
                     const id = url.slice(roomsUrl.length, -1);
@@ -420,7 +429,9 @@ export function createPodRoomIo({ fetch, isLoggedIn, storageRoot, webId, getSign
         }
         const out = [];
         for (const roomId of [...ids].slice(0, 5000)) {
+            if (!current()) return [];
             const desc = await podReadRoomDescriptor(roomId);
+            if (!current()) return [];
             if (desc && desc.owner === myWebId) out.push(desc);
         }
         return out;

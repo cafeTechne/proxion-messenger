@@ -67,8 +67,9 @@ export const LEGACY_JOINED_ROOMS_UNREADABLE = 'legacy_joined_rooms_unreadable';
  * another. The cache is only a fallback for an unavailable pod, never evidence
  * that a failed write succeeded.
  */
-export function createJoinedRoomStore({ read, write, readVersion, writeVersion, getWebId, storage, maxRetries = 4 }) {
-    let pending = Promise.resolve();
+export function createJoinedRoomStore({ read, write, readVersion, writeVersion, getWebId, getSessionId = getWebId, storage, maxRetries = 4 }) {
+    const pending = new Map();
+    const current = (webId, session) => !!webId && getWebId() === webId && getSessionId() === session;
     const versioned = !!(readVersion || writeVersion);
     const attempts = Math.max(1, Math.min(8, Math.trunc(maxRetries) || 4));
 
@@ -81,42 +82,44 @@ export function createJoinedRoomStore({ read, write, readVersion, writeVersion, 
         try { storage?.setItem(joinedCacheKey(webId), JSON.stringify(records)); } catch { /* cache optional */ }
     }
 
-    function serialize(work) {
-        const result = pending.then(work);
-        pending = result.catch(() => {});
+    function serialize(session, work) {
+        const result = (pending.get(session) || Promise.resolve()).catch(() => {}).then(work);
+        pending.set(session, result);
+        result.finally(() => { if (pending.get(session) === result) pending.delete(session); }).catch(() => {});
         return result;
     }
 
-    async function load(webId) {
-        if (!webId || getWebId() !== webId) return null;
+    async function load(webId, session) {
+        if (!current(webId, session)) return null;
         try {
             const version = versioned ? await readVersion?.() : { records: await read?.() };
-            if (getWebId() !== webId || !version
+            if (!current(webId, session) || !version
                 || !(Array.isArray(version.records) || version.records === LEGACY_JOINED_ROOMS_UNREADABLE)) return null;
             return version;
         } catch { return null; }
     }
 
-    async function save(webId, records, version) {
-        if (getWebId() !== webId) return { ok: false, conflict: false };
+    async function save(webId, records, version, session) {
+        if (!current(webId, session)) return { ok: false, conflict: false };
         try {
             const result = versioned ? await writeVersion?.(records, version)
                 : { ok: !!(await write?.(records)), conflict: false };
-            if (getWebId() !== webId) return { ok: false, conflict: false };
+            if (!current(webId, session)) return { ok: false, conflict: false };
             return result || { ok: false, conflict: false };
         } catch { return { ok: false, conflict: false }; }
     }
 
     function list() {
         const webId = getWebId();
-        return serialize(async () => {
-            if (!webId || getWebId() !== webId) return [];
+        const session = getSessionId();
+        return serialize(session, async () => {
+            if (!current(webId, session)) return [];
             // Migration also participates in compare-and-swap. If another device
             // creates the canonical list first, use it rather than restoring
             // this device's older cache over that device's saved memberships.
             for (let attempt = 0; ; attempt++) {
-                const version = await load(webId);
-                if (getWebId() !== webId) return [];
+                const version = await load(webId, session);
+                if (!current(webId, session)) return [];
                 if (!version) return cached(webId);
                 if (version.records !== LEGACY_JOINED_ROOMS_UNREADABLE) {
                     const records = normalizeJoinedList(version.records);
@@ -125,8 +128,8 @@ export function createJoinedRoomStore({ read, write, readVersion, writeVersion, 
                 }
                 const records = cached(webId);
                 if (!records.length || attempt >= attempts) return records;
-                const result = await save(webId, records, version);
-                if (getWebId() !== webId) return [];
+                const result = await save(webId, records, version, session);
+                if (!current(webId, session)) return [];
                 if (result.ok || !result.conflict) return records;
             }
         });
@@ -134,18 +137,19 @@ export function createJoinedRoomStore({ read, write, readVersion, writeVersion, 
 
     function update(change) {
         const webId = getWebId();
-        return serialize(async () => {
-            if (!webId || getWebId() !== webId) return false;
+        const session = getSessionId();
+        return serialize(session, async () => {
+            if (!current(webId, session)) return false;
             for (let attempt = 0; attempt < attempts; attempt++) {
-                const version = await load(webId);
+                const version = await load(webId, session);
                 // An unavailable read never authorizes replacing the pod with
                 // a possibly stale cache. Only known legacy repair uses it.
-                if (!version || getWebId() !== webId) return false;
+                if (!version || !current(webId, session)) return false;
                 const base = version.records === LEGACY_JOINED_ROOMS_UNREADABLE
                     ? cached(webId) : normalizeJoinedList(version.records);
                 const records = normalizeJoinedList(change(base));
-                const result = await save(webId, records, version);
-                if (getWebId() !== webId) return false;
+                const result = await save(webId, records, version, session);
+                if (!current(webId, session)) return false;
                 if (result.ok) { cache(webId, records); return true; }
                 if (!result.conflict) return false;
                 // Re-read and REAPPLY the change, not the rejected whole list.
@@ -202,6 +206,7 @@ export function createRoomSync({
         const dates = (!entry.seeded || early) ? [_day(1), d] : [d];
         const out = [];
         for (const date of dates) {
+            if (rooms.get(entry.room.roomId) !== entry) break;
             let msgs = [];
             try { msgs = await readDay(entry.room, date); } catch { msgs = []; }
             for (const m of msgs || []) out.push(m);

@@ -127,6 +127,7 @@ import { initI18n, applyStaticI18n, t, tn, getLocale, setLocale, LOCALE_META } f
 import { createIdentityResolver } from './identity.js';
 import { initThemePicker, applyTheme, readThemePref } from './theme.js';
 import { createAccountSync } from './account-sync.js';
+import { createRoomApprovalNotice } from './room-approvals.js';
 
         // A public gateway's one-time claim link (#claim=CODE) leaves the address
         // bar before anything else runs; ownerclaim.js presents it after sign-in.
@@ -1134,17 +1135,21 @@ import { createAccountSync } from './account-sync.js';
                 getDisplayName: () => localStorage.getItem('proxion_display_name') || '',
                 getSigner: () => (_identityPrivKey && clientDid ? { privKey: _identityPrivKey, signerDid: clientDid } : null),
                 signDescriptor: (d) => signRoomDescriptor(d),
-                askApprove: (req, desc) => _queueJoinPrompt(async () => {
+                askApprove: (req, desc, current = () => true) => _queueJoinPrompt(async () => {
+                    if (!current()) return null;
                     const who = await _joinRequesterLabel(req);
+                    if (!current()) return null;
                     return _askJoinOnce(t('join.approvePrompt', { who, room: desc.title || req.room_id }), {
                         title: t('confirm.joinApprove.title'),
                         confirmLabel: t('confirm.joinApprove.verb'),
                         cancelLabel: t('btn.decline'),
-                    });
+                    }, current);
                 }),
                 onRoom: (rec, info) => _showPodRoom(rec, info),
+                onReset: (records) => _clearCrossRoomSession(records),
                 onRemoved: (roomId) => _handleEventAsync({ type: 'kicked_from_room', room_id: roomId }, true),
                 onMessages: (roomId, msgs, info) => _onRoomPodMessages(roomId, msgs, info),
+                onJoinStatus: (rows, retry) => _showRoomApprovalStatus(rows, retry),
                 notify: (kind, d) => {
                     if (kind === 'declined') { _clearJoinPendingBanner(d.roomId); showToast(t('join.declined')); }
                     else if (kind === 'approved') showToast(t('join.approved', { who: dmFallbackName(d.webid) }));
@@ -1163,6 +1168,21 @@ import { createAccountSync } from './account-sync.js';
             if (rec.owned) roomCreatorOf.add(rec.roomId);
             _clearJoinPendingBanner(rec.roomId);
             if (info.joined) showToast(t('join.joined', { room: rec.title }));
+        }
+        function _clearCrossRoomSession(records) {
+            for (const rec of records) {
+                document.getElementById('nav-' + rec.roomId)?.remove();
+                roomCreatorOf.delete(rec.roomId);
+                delete roomInviteUrls[rec.roomId];
+                delete _local_rooms[rec.roomId];
+                delete _webRoomCache[rec.roomId];
+                delete roomLastMessages[rec.roomId];
+                if (activeView?.id === rec.roomId) {
+                    activeView = null;
+                    updatePageTitle();
+                    _showThreadClosed(t('heading.welcome'));
+                }
+            }
         }
         // A WebID contact added on desktop: listed with the gateway (so it
         // survives a reload), watched for presence, and its waiting DMs opened.
@@ -1332,6 +1352,17 @@ import { createAccountSync } from './account-sync.js';
         let _joinPending = false;      // a ?join= request is awaiting owner approval (pending banner)
         let webRoomAccess = null;     // checks joined-room access without posting
         let webRoomSync = null;        // web build: delivers new room messages from the pod (webrooms.js)
+        let _webRoomEpoch = 0;
+        const _showRoomApprovalStatus = createRoomApprovalNotice({
+            element: document.getElementById('room-approval-status'), translate: t,
+        });
+        const _webRoomSessionId = () => `${_webRoomEpoch}\n${solidSession.info.isLoggedIn}\n${selfWebId}\n${podStorageRoot()}`;
+        function _invalidateWebRoomSession() {
+            _webRoomEpoch++;
+            window.proxionWebJoin?.stop();
+            webRoomAccess?.stop();
+            webRoomSync?.stop();
+        }
         const _podReadLastFetch = {};
         const POD_READ_DEBOUNCE_MS = 30000;
 
@@ -4385,7 +4416,8 @@ import { createAccountSync } from './account-sync.js';
         // dialog was taken over by something else, or closed another way), in
         // which case the request stays in the inbox for next time.
         let _joinPromptChain = Promise.resolve();
-        function _askJoinOnce(message, opts) {
+        function _askJoinOnce(message, opts, current = () => true) {
+            if (!current()) return Promise.resolve(null);
             return new Promise((resolve) => {
                 let settled = false;
                 let iv = null;
@@ -4396,6 +4428,11 @@ import { createAccountSync } from './account-sync.js';
                 if (!ours) { done(null); return; }
                 iv = setInterval(() => {
                     const modal = document.getElementById('confirm-modal');
+                    if (!current()) {
+                        done(null);
+                        if (okBtn.onclick === ours && modal?.style.display !== 'none') document.getElementById('confirm-cancel')?.click();
+                        return;
+                    }
                     if (okBtn.onclick !== ours || !modal || modal.style.display === 'none') done(null);
                 }, 500);
             });
@@ -4414,6 +4451,7 @@ import { createAccountSync } from './account-sync.js';
             read: podReadRoomDescriptorVersion,
             write: podWriteRoomDescriptorVersion,
             getOwnerId: () => selfWebId,
+            getSessionId: _webRoomSessionId,
             signDescriptor: (desc) => signRoomDescriptor({
                 ...desc, name: desc.title, code: desc.room_id,
                 creator_webid: desc.owner, created_at: desc.created,
@@ -4428,13 +4466,14 @@ import { createAccountSync } from './account-sync.js';
             if (!isCurrent()) return false;
             return podWriteRoomMembers(desc.room_id, members.map(w => ({ webid: w, role: w === desc.owner ? 'admin' : 'member' })));
         }
-        async function _approveWebJoin(webid, roomId) {
+        async function _approveWebJoin(webid, roomId, current = () => true) {
+            if (!current()) return false;
             const result = await _ownerMembership.update(roomId, (cur) => {
                 const existing = (cur.members || []).find(m => m.webid === webid);
                 if (existing?.banned) return null;
                 return existing ? cur : withMembers(cur, [...(cur.members || []), { webid, role: 'member' }]);
             });
-            if (!result.ok || result.descriptor?.owner !== selfWebId) return false;
+            if (!current() || !result.ok || result.descriptor?.owner !== selfWebId) return false;
             if (result.skipped || !result.descriptor.members.some(m => m.webid === webid && !m.banned)) return null;
             const updated = result.descriptor;
             _local_rooms[roomId] = _local_rooms[roomId] || {};
@@ -4442,10 +4481,12 @@ import { createAccountSync } from './account-sync.js';
             return !!(await window.proxionWebJoin?.sendApproval(webid, roomId, updated.title || ''));
         }
 
-        async function _onWebJoinRequest(req) {
+        async function _onWebJoinRequest(req, current = () => true) {
+            if (!current()) return false;
             if (!req || !req.room_id || typeof req.from_webid !== 'string' || !/^https?:\/\//.test(req.from_webid)) return true;   // malformed: discard
             const roomId = req.room_id;
             const desc = await podReadRoomDescriptor(roomId);
+            if (!current()) return false;
             // Null can mean "not our room" OR "descriptor not readable yet"; keep the
             // request (return false) so a later drain retries instead of dropping it.
             if (!desc) return false;
@@ -4455,19 +4496,22 @@ import { createAccountSync } from './account-sync.js';
             if (existing && existing.banned) return true;
             // Already a member (opened the link again, or a new device): answer
             // without asking the owner a second time.
-            if (existing) return _queueJoinPrompt(() => _approveWebJoin(req.from_webid, roomId));
+            if (existing) return _queueJoinPrompt(() => _approveWebJoin(req.from_webid, roomId, current));
             return _queueJoinPrompt(async () => {
+                if (!current()) return false;
                 const who = await _joinRequesterLabel(req);
+                if (!current()) return false;
                 const answer = await _askJoinOnce(t('join.approvePrompt', { who, room: desc.title || roomId }), {
                     title: t('confirm.joinApprove.title'),
                     confirmLabel: t('confirm.joinApprove.verb'),
                     cancelLabel: t('btn.decline'),
-                });
+                }, current);
+                if (!current()) return false;
                 if (answer === null) return false;   // unanswered: keep it for next time
                 if (answer === 'no') {
                     return !!(await window.proxionWebJoin?.sendDecline(req.from_webid, roomId));
                 }
-                const approved = await _approveWebJoin(req.from_webid, roomId);
+                const approved = await _approveWebJoin(req.from_webid, roomId, current);
                 if (approved === false) return false;
                 if (approved !== true) return true;
                 showToast(t('join.approved', { who }));
@@ -4556,6 +4600,7 @@ import { createAccountSync } from './account-sync.js';
             read: podReadJoinedRooms, write: podWriteJoinedRooms,
             readVersion: podReadJoinedRoomsVersion, writeVersion: podWriteJoinedRoomsVersion,
             getWebId: () => selfWebId, storage: localStorage,
+            getSessionId: _webRoomSessionId,
         });
         function _listJoinedRooms() { return _joinedRooms.list(); }
         function _updateJoinedRooms(change) { return _joinedRooms.update(change); }
@@ -4571,7 +4616,8 @@ import { createAccountSync } from './account-sync.js';
             _clearJoinPendingBanner(r.roomId);
         }
 
-        async function _onWebJoinApproved(appr) {
+        async function _onWebJoinApproved(appr, current = () => true) {
+            if (!current()) return false;
             if (!appr || !appr.room_id || !appr.owner_pod_root) return;
             // owner_pod_root rides in an attacker-writable public-Append join drop, so
             // gate it before any authenticated fetch/watch: refuse a private/loopback
@@ -4586,10 +4632,12 @@ import { createAccountSync } from './account-sync.js';
             // approval and force a room in + make us fetch their pod. Checked BEFORE
             // any fetch of the owner's pod below.
             const pending = await podHasPendingJoin(appr.room_id, appr.owner_webid);
+            if (!current()) return false;
             if (pending == null) return false;
             if (!pending) return true;
             const roomId = appr.room_id;
             const desc = await podReadRoomDescriptorAt(appr.owner_pod_root, roomId);
+            if (!current()) return false;
             const container = _vetRemoteRoom(roomId, appr.owner_webid, appr.owner_pod_root, desc && desc.long_chat);
             if (!container) return;
             const title = (desc && desc.title) || appr.title || roomId;
@@ -4597,9 +4645,11 @@ import { createAccountSync } from './account-sync.js';
             // and on our other devices.
             const rec = { roomId, owner: appr.owner_webid, ownerPodRoot: appr.owner_pod_root, container, title };
             if (!(await _updateJoinedRooms((list) => withJoinedRecord(list, rec)))) return false;
+            if (!current()) return false;
             // The request is fulfilled: drop the pending marker so it can't be
             // replayed and doesn't linger in our pod.
             await podDeletePendingJoin(roomId, appr.owner_webid).catch(() => {});
+            if (!current()) return false;
             _clearJoinPendingBanner(roomId);
             if (!_registerRemoteRoom(roomId, { ownerPodRoot: appr.owner_pod_root, container, title, owner: appr.owner_webid })) return;
             showToast(t('join.joined', { room: title }));
@@ -4607,9 +4657,11 @@ import { createAccountSync } from './account-sync.js';
 
         // Joiner: the owner said no. Only for a request we made (a forged decline
         // could otherwise clear the waiting state for a room we never asked for).
-        async function _onWebJoinDeclined(msg) {
+        async function _onWebJoinDeclined(msg, current = () => true) {
+            if (!current()) return false;
             if (!msg || !msg.room_id || !msg.owner_webid) return true;
             const pending = await podHasPendingJoin(msg.room_id, msg.owner_webid);
+            if (!current()) return false;
             if (pending == null) return false;
             if (!pending) return true;
             podDeletePendingJoin(msg.room_id, msg.owner_webid).catch(() => {});
@@ -6977,6 +7029,7 @@ import { createAccountSync } from './account-sync.js';
         }
 
         async function onPodLoggedIn(webId) {
+            if (transport.mode === 'web') _invalidateWebRoomSession();
             // Browser build: the pod account is the identity, so state another
             // account left in this browser (its name, status, mutes) is dropped,
             // here and in what boot already read into memory.
@@ -7730,8 +7783,7 @@ import { createAccountSync } from './account-sync.js';
                 // the Solid session, forget this account here, and reload to the
                 // sign-in screen.
                 if (transport.mode === 'web') {
-                    webRoomAccess?.stop();
-                    webRoomSync?.stop();
+                    _invalidateWebRoomSession();
                     try { await solidLogout(); } catch (_) {}
                     purgeWebAccount(localStorage);
                     window.location.reload();
@@ -7761,8 +7813,7 @@ import { createAccountSync } from './account-sync.js';
                 // End the Solid session and purge what this browser cached from
                 // it: decrypted DM history, saved messages, ratchet state, the
                 // SW cache and the offline queue.
-                webRoomAccess?.stop();
-                webRoomSync?.stop();
+                _invalidateWebRoomSession();
                 try { await solidLogout(); } catch (_) {}
                 // The identity key and the gateway's rooms and messages survive.
                 const _podKeys = [
@@ -7796,8 +7847,7 @@ import { createAccountSync } from './account-sync.js';
                 if (_hasGateway) {
                     try { await fetch(gatewayUrl('/api/pod-disconnect'), { method: 'POST' }); } catch (_) {}
                 }
-                webRoomAccess?.stop();
-                webRoomSync?.stop();
+                _invalidateWebRoomSession();
                 try { await solidLogout(); } catch (_) {}
                 localStorage.clear();
                 sessionStorage.clear();
@@ -8643,12 +8693,14 @@ import { createAccountSync } from './account-sync.js';
                         pod: { podEnsureJoinInbox, podDropJoin, podReadJoins, podDeleteJoin, podWritePendingJoin },
                         notify: { watchResource },
                         getSelfWebId: () => selfWebId,
+                        getSessionId: _webRoomSessionId,
+                        onStatusChange: (rows, retry) => _showRoomApprovalStatus(rows, retry),
                         getDisplayName: () => localStorage.getItem('proxion_display_name') || '',
                         getSelfPodRoot: () => podStorageRoot(),
                         peerPodRoot: (webid) => peerPodRootFromWebId(webid),
-                        onJoinRequest: (req) => _onWebJoinRequest(req),
-                        onApproved: (appr) => _onWebJoinApproved(appr),
-                        onDeclined: (msg) => _onWebJoinDeclined(msg),
+                        onJoinRequest: (req, current) => _onWebJoinRequest(req, current),
+                        onApproved: (appr, current) => _onWebJoinApproved(appr, current),
+                        onDeclined: (msg, current) => _onWebJoinDeclined(msg, current),
                     });
                     // New room messages from others, for every room (owned and
                     // joined): each room's current Long Chat day file is watched.
@@ -8667,6 +8719,7 @@ import { createAccountSync } from './account-sync.js';
                     });
                     socket = createPodSocket({
                         getSelfWebId: () => selfWebId,
+                        getSessionId: _webRoomSessionId,
                         handleEvent: (ev) => _handleEventAsync(ev, true),
                         pod: { podListOwnedRoomDescriptors, podRegisterRoomChat },
                         dm: webDm,

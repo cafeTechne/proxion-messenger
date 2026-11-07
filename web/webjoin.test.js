@@ -42,6 +42,68 @@ function harness({ joins = [] } = {}) {
     return { join, pod, notify, dropped, deleted, requests, approvals };
 }
 
+describe('join session cancellation', () => {
+    function pausedJoin() {
+        const h = harness();
+        let session = 1;
+        const join = createWebJoin({ pod: h.pod, notify: h.notify,
+            getSelfWebId: () => 'https://me/#me', getSelfPodRoot: () => 'https://me/',
+            getSessionId: () => session, peerPodRoot: () => 'https://peer/',
+            onJoinRequest: vi.fn(async () => true),
+        });
+        return { ...h, join, change: () => { session++; } };
+    }
+
+    it('does not subscribe or start a retry timer after stop during inbox creation', async () => {
+        const h = pausedJoin();
+        let release;
+        h.pod.podEnsureJoinInbox.mockImplementation(() => new Promise(resolve => { release = resolve; }));
+        const starting = h.join.start();
+        h.join.stop();
+        release('https://me/proxion/join-inbox/');
+        expect(await starting).toBe(null);
+        expect(h.notify.watchResource).not.toHaveBeenCalled();
+        expect(h.pod.podReadJoins).not.toHaveBeenCalled();
+    });
+
+    it('does not publish a request after its session changes while saving authorization', async () => {
+        const h = pausedJoin();
+        let release;
+        h.pod.podWritePendingJoin.mockImplementation(() => new Promise(resolve => { release = resolve; }));
+        const requesting = h.join.requestJoin('r', 'https://peer/#me');
+        h.change(); release(true);
+        expect(await requesting).toBe(false);
+        expect(h.pod.podDropJoin).not.toHaveBeenCalled();
+    });
+
+    it('does not process an inbox read that finishes after stop and restart', async () => {
+        const h = pausedJoin();
+        let release;
+        h.pod.podReadJoins.mockImplementationOnce(() => new Promise(resolve => { release = resolve; })).mockResolvedValue([]);
+        const draining = h.join.drainOnce();
+        h.join.stop(); await h.join.start();
+        release([{ url: 'old', msg: { kind: 'join_request' } }]);
+        await draining;
+        expect(h.pod.podDeleteJoin).not.toHaveBeenCalled();
+        h.join.stop();
+    });
+
+    it('does not delete a drop after its handler completes in an expired session', async () => {
+        const h = pausedJoin();
+        let release;
+        const handler = vi.fn(() => new Promise(resolve => { release = resolve; }));
+        const join = createWebJoin({ pod: h.pod, getSelfWebId: () => 'https://me/#me',
+            peerPodRoot: () => 'https://peer/', onApproved: handler });
+        h.pod.podReadJoins.mockResolvedValue([{ url: 'approval', msg: { kind: 'join_approved' } }]);
+        const draining = join.drainOnce();
+        await vi.waitFor(() => expect(handler).toHaveBeenCalled());
+        const current = handler.mock.calls[0][1];
+        join.stop(); release(true); await draining;
+        expect(current()).toBe(false);
+        expect(h.pod.podDeleteJoin).not.toHaveBeenCalled();
+    });
+});
+
 describe('createWebJoin', () => {
     it('requestJoin drops a join_request to the owner', async () => {
         const { join, dropped } = harness();

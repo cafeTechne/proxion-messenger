@@ -37,6 +37,22 @@ describe('joined-room records', () => {
 
 describe('joined-room persistence', () => {
     const SELF = 'https://me.example/profile/card#me';
+    it('starts the new session without waiting for an old read and rejects its eventual result', async () => {
+        let session = 1, release;
+        const pending = new Promise(resolve => { release = resolve; });
+        const read = vi.fn().mockImplementationOnce(() => pending).mockResolvedValue([]);
+        const write = vi.fn(async () => true), storage = { setItem: vi.fn() };
+        const store = createJoinedRoomStore({ getWebId: () => SELF, getSessionId: () => session, read, write, storage });
+        const old = store.list();
+        await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
+        session++;
+        expect(await store.list()).toEqual([]);
+        release([REC]);
+        expect(await old).toEqual([]);
+        expect(write).not.toHaveBeenCalled();
+        expect(storage.setItem).toHaveBeenCalledTimes(1);
+        expect(storage.setItem).toHaveBeenCalledWith(joinedCacheKey(SELF), '[]');
+    });
     function harness() {
         let saved = [];
         const cache = new Map();
@@ -245,6 +261,19 @@ function syncHarness(days) {
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 describe('createRoomSync', () => {
+    it('does not fetch the next day with a new session after a stopped read completes', async () => {
+        let release;
+        const pending = new Promise(resolve => { release = resolve; });
+        const readDay = vi.fn(() => pending), onNew = vi.fn();
+        const sync = createRoomSync({ readDay, onNew, dayUrl: () => 'https://pod/day',
+            watch: () => () => {}, setTimer: () => 1, clearTimer: vi.fn() });
+        sync.track({ roomId: 'old', container: 'https://pod/old/' });
+        expect(readDay).toHaveBeenCalledOnce();
+        sync.stop(); release([{ message_id: 'old-message' }]);
+        await pending; await Promise.resolve();
+        expect(readDay).toHaveBeenCalledOnce();
+        expect(onNew).not.toHaveBeenCalled();
+    });
     it('seeds a room from its recent days, then reports only new ids', async () => {
         const days = {
             '2026-10-28': [{ message_id: 'a', timestamp: '2026-10-28T10:00:00Z' }],

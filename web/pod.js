@@ -978,6 +978,7 @@ export function podEnsureJoinInbox() { return _io.podEnsureJoinInbox(); }
 export function podDropJoin(recipientPodRoot, obj) { return _io.podDropJoin(recipientPodRoot, obj); }
 /** Read our join inbox: returns [{ url, msg }]. */
 export function podReadJoins() { return _io.podReadJoins(); }
+export function podJoinExists(url) { return _io.podJoinExists(url); }
 export function podDeleteJoin(url) { return _io.podDeleteJoin(url); }
 
 // --- Pending join requests (W1): a marker in our own pod that an approval must match ---
