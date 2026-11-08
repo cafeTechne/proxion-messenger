@@ -337,6 +337,8 @@ describe('joining a browser-build room', () => {
         reload.cr.onState({ ready: true, started: true, webid: ME, pod_root: ROOT });
         await until(() => reload.cr.isPodRoom(ROOM));
         expect(reload.cr.room(ROOM)).toMatchObject({ roomId: ROOM, container: CONTAINER, owned: false });
+        expect(saved[0].membershipId).toEqual(expect.any(String));
+        expect(reload.cr.room(ROOM).membershipId).toBe(saved[0].membershipId);
         expect(reload.sent.filter((m) => m.cmd === 'pod_room_register')).toHaveLength(1);
     });
 

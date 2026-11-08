@@ -43,10 +43,11 @@ describe('confirmed browser room removal', () => {
     });
     it('removes the saved membership and only that account’s revoked queued writes', async () => {
         const h = removalHarness();
-        expect(await h.remove(ROOM)).toBe(true);
-        const change = h.deps._updateJoinedRooms.mock.calls[0][0];
         const other = { roomId: 'other', owner: h.room.owner, ownerPodRoot: 'https://owner.example/', container: h.room.container, title: 'Other' };
-        expect(change([{ ...other, roomId: ROOM }, other])).toEqual([other]);
+        let saved = [{ ...other, roomId: ROOM }, other];
+        h.deps._updateJoinedRooms.mockImplementationOnce(async change => { saved = change(saved); return true; });
+        expect(await h.remove(ROOM)).toBe(true);
+        expect(saved).toEqual([other]);
         expect(h.deps._remoteRooms[ROOM]).toBeUndefined();
         expect(h.deps.webRoomAccess.untrack).toHaveBeenCalledWith(ROOM);
         expect(h.deps._handleEventAsync).toHaveBeenCalledWith({ type: 'kicked_from_room', room_id: ROOM }, true);

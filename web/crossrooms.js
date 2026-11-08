@@ -190,7 +190,7 @@ export function createCrossRooms({
             return false;   // keep the approval and try again on the next drain
         }
         const rec = { roomId: appr.room_id, owner: appr.owner_webid, ownerPodRoot: appr.owner_pod_root,
-            container, title: String(appr.title || appr.room_id).slice(0, 200) };
+            container, title: String(appr.title || appr.room_id).slice(0, 200), membershipId: genRoomId() };
         if (!(await _updateJoined((list) => withJoinedRecord(list, rec)))) return false;
         if (!live()) return false;
         bridge.io.podDeletePendingJoin(appr.room_id, appr.owner_webid).catch(() => {});
@@ -216,7 +216,7 @@ export function createCrossRooms({
     async function _removed(roomId) {
         const rec = _rooms.get(roomId), account = me(), root = ownRoot();
         if (!rec || rec.owned) return false;
-        if (!(await _updateJoined((list) => withoutJoinedRecord(list, roomId)))) return false;
+        if (!(await _updateJoined((list) => _rooms.get(roomId) === rec ? withoutJoinedRecord(list, roomId, rec) : list))) return false;
         if (account !== me() || root !== ownRoot() || _rooms.get(roomId) !== rec) return false;
         _drop(roomId);
         try { await onRemoved(roomId); } catch { /* UI only */ }
@@ -226,7 +226,7 @@ export function createCrossRooms({
     async function _leave(roomId) {
         const rec = _rooms.get(roomId), account = me(), root = ownRoot();
         if (!rec || rec.owned) return false;
-        if (!(await _updateJoined((list) => withoutJoinedRecord(list, roomId)))) return false;
+        if (!(await _updateJoined((list) => _rooms.get(roomId) === rec ? withoutJoinedRecord(list, roomId, rec) : list))) return false;
         if (account !== me() || root !== ownRoot() || _rooms.get(roomId) !== rec) return false;
         _drop(roomId);
         return true;

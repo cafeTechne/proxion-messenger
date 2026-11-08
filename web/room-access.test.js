@@ -28,6 +28,18 @@ function harness({ peer = response(200), own = response(200), onRemoved = vi.fn(
 }
 
 describe('idle joined-room access', () => {
+    it('discards an old denial when a fresh membership replaces the same room', async () => {
+        let finish;
+        const h = harness({ peer: () => new Promise(resolve => { finish = resolve; }) });
+        h.monitor.track({ ...ROOM, membershipId: 'old' });
+        const checking = h.monitor.check('r1', { denied: true });
+        h.monitor.track({ ...ROOM, membershipId: 'fresh' });
+        h.setPeer(response(200));
+        finish(response(403));
+        expect(await checking).toBe('stale');
+        expect(h.onRemoved).not.toHaveBeenCalled();
+        expect(await h.monitor.check('r1')).toBe('allowed');
+    });
     it('detects a stable revocation without appending a message', async () => {
         const h = harness({ peer: response(403) });
         h.monitor.track(ROOM);

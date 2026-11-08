@@ -11,6 +11,9 @@ const REC = {
 };
 
 describe('joined-room records', () => {
+    it('retains a membership identifier so cleanup can distinguish a later rejoin', () => {
+        expect(normalizeJoinedRecord({ ...REC, membershipId: 'new-join' })).toEqual({ ...REC, membershipId: 'new-join' });
+    });
     it('keeps a well-formed record and only its known fields', () => {
         expect(normalizeJoinedRecord({ ...REC, extra: 'x' })).toEqual(REC);
     });
@@ -157,6 +160,30 @@ function conditionalRepository(initial = null, { raceReads = false, etag = true 
 describe('joined-room updates across independent devices', () => {
     const SELF = 'https://me.example/profile/card#me';
     const second = { ...REC, roomId: 'room-2' };
+
+    it.each([undefined, 'old-join'])('does not erase a later rejoin during delayed cleanup (%s)', async membershipId => {
+        const old = { ...REC, ...(membershipId ? { membershipId } : {}) };
+        const fresh = { ...REC, membershipId: 'fresh-join' };
+        const server = conditionalRepository([old]);
+        const staleDevice = server.device({ cached: [old] });
+        expect(await server.device().store.update(list => withJoinedRecord(list, fresh))).toBe(true);
+        expect(await staleDevice.store.update(list => withoutJoinedRecord(list, old.roomId, old))).toBe(true);
+        expect(server.saved()).toEqual([fresh]);
+    });
+
+    it('rechecks the membership identity after a conflicting cleanup write', async () => {
+        const old = { ...REC, membershipId: 'old' }, fresh = { ...REC, membershipId: 'fresh' };
+        let records = [old];
+        const writeVersion = vi.fn(async next => {
+            if (writeVersion.mock.calls.length === 1) { records = [fresh]; return { ok: false, conflict: true }; }
+            records = next; return { ok: true };
+        });
+        const store = createJoinedRoomStore({ getWebId: () => SELF,
+            readVersion: async () => ({ records, exists: true, etag: '"version"' }), writeVersion });
+        expect(await store.update(list => withoutJoinedRecord(list, REC.roomId, old))).toBe(true);
+        expect(records).toEqual([fresh]);
+        expect(writeVersion).toHaveBeenCalledTimes(2);
+    });
 
     it.each([null, []])('retains simultaneous approvals when both devices read the same version (%j)', async (initial) => {
         const server = conditionalRepository(initial, { raceReads: true });

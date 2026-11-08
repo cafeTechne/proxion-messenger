@@ -53,7 +53,8 @@ export function createRoomAccessMonitor({
         const account = session();
         if (!account || !validRoom(room, account)) return false;
         const old = rooms.get(room.roomId);
-        if (old && sameAccount(old.account, account) && old.room.container === room.container && old.room.owner === room.owner) {
+        if (old && sameAccount(old.account, account) && old.room.container === room.container && old.room.owner === room.owner
+            && old.room.membershipId === room.membershipId) {
             old.room = { ...room };
             return true;
         }

@@ -34,14 +34,29 @@ export function normalizePinSnapshot(doc, container, owner) {
     return { v: 1, index: doc.index, owner, revision: doc.revision, updated: doc.updated, pins, proof: doc.proof };
 }
 
-export function createPodPins({ fetch, allowed, getWebId, getSessionId, getSigner, fetchPeerSigner, peerPodRoot, readDay }) {
+export function createPodPins({ fetch, allowed, getWebId, getSessionId, getSigner, fetchPeerSigner, peerPodRoot, readDay,
+    retryDelay = () => new Promise(resolve => setTimeout(resolve, 250)) }) {
     const writes = new Map();
     const fail = (reason = 'unavailable', status = 0) => ({ ok: false, reason, status });
     function scope(container, current) {
         const session = getSessionId();
         return () => current() && session === getSessionId() && allowed(container);
     }
-    async function index(container, owner, current) {
+    // Pin discovery and Jump are read-only. Recover once from a transient pod
+    // or gateway failure, but never retry permission/signature errors or PUTs.
+    async function retryRead(read, current) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+            if (!current()) return fail('account_changed');
+            let result;
+            try { result = await read(); } catch { result = fail(); }
+            if (!current()) return fail('account_changed');
+            if (attempt || result?.ok || (result?.reason && result.reason !== 'unavailable')
+                || ![0, 502, 503, 504].includes(result?.status || 0)) return result;
+            await retryDelay();
+        }
+    }
+    const index = (container, owner, current) => retryRead(() => indexOnce(container, owner, current), current);
+    async function indexOnce(container, owner, current) {
         if (!current() || !peerPodRoot(owner)) return fail();
         try {
             const response = await fetch(container + 'pins.json', { headers: { Accept: 'application/json' }, cache: 'no-store', redirect: 'error' });
@@ -67,7 +82,7 @@ export function createPodPins({ fetch, allowed, getWebId, getSessionId, getSigne
     async function readMessage(container, target, owner, isCurrent = () => true) {
         const current = scope(container, isCurrent), ref = pinTarget(container, target);
         if (!ref || !current()) return fail();
-        const day = await readDay(container, ref.date, '', owner);
+        const day = await retryRead(() => readDay(container, ref.date, '', owner), current);
         if (!current()) return fail('account_changed');
         if (!day.ok) return fail('unavailable', day.status);
         const message = day.messages.find(m => m.iri === target && !m.deleted);
@@ -81,7 +96,7 @@ export function createPodPins({ fetch, allowed, getWebId, getSessionId, getSigne
         for (const pin of [...version.pins].sort((a, b) => compare(b.created, a.created) || compare(b.id, a.id))) {
             if (!current()) return fail('account_changed');
             const ref = pinTarget(container, pin.target);
-            if (!days.has(ref.date)) days.set(ref.date, await readDay(container, ref.date, '', owner));
+            if (!days.has(ref.date)) days.set(ref.date, await retryRead(() => readDay(container, ref.date, '', owner), current));
             if (!current()) return fail('account_changed');
             const day = days.get(ref.date);
             if (!day.ok) return fail('unavailable', day.status);

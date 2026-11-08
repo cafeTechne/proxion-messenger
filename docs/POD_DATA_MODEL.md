@@ -760,3 +760,19 @@ and retries in the background. Polling supplements resource notifications and
 reconciles withdrawals/removals. Removing a friend retains existing DM contacts
 and conversation history. Browser friendship requests currently apply between
 browser accounts; gateway contact certificates remain a separate mechanism.
+
+## Joined-room membership identity
+
+Each new browser or desktop pod-room approval saves an optional `membershipId`
+in its `proxion/joined-rooms.json` record and account-scoped local cache. It is
+an opaque fresh ID (at most 128 letters, digits, underscores, or hyphens), retained
+across reloads. It distinguishes successive memberships in the same room; it is
+not an access credential. The owner's descriptor and pod ACLs still grant access.
+
+Leave and revocation cleanup remove only the owner/container/membership ID they
+observed. If another device has saved a newer approval, a conditional-write retry
+preserves that newer record. A new local membership also invalidates pending
+access checks from the old one. Legacy records without an ID remain readable and
+removable; a subsequent approval assigns an ID. Older clients that discard this
+field cannot provide the same protection, so all participating clients should
+load the updated application.

@@ -4622,7 +4622,8 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // owner-moderation delete on the owner's pod authenticates.
         function _registerRemoteRoom(roomId, info) {
             const existed = !!_remoteRooms[roomId];
-            _remoteRooms[roomId] = { ownerPodRoot: info.ownerPodRoot, container: info.container, title: info.title, owner: info.owner };
+            _remoteRooms[roomId] = { ownerPodRoot: info.ownerPodRoot, container: info.container, title: info.title, owner: info.owner,
+                ...(info.membershipId ? { membershipId: info.membershipId } : {}) };
             addRoomToSidebar(roomId, info.title, '');
             _trackRoomSync(roomId);
             webRoomAccess?.track({ roomId, ..._remoteRooms[roomId], ownerPodRoot: info.ownerPodRoot, owned: false });
@@ -4700,7 +4701,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             if (!r) return;
             const container = _vetRemoteRoom(r.roomId, r.owner, r.ownerPodRoot, r.container);
             if (!container) return;
-            _registerRemoteRoom(r.roomId, { ownerPodRoot: r.ownerPodRoot, container, title: r.title || r.roomId, owner: r.owner });
+            _registerRemoteRoom(r.roomId, { ...r, container, title: r.title || r.roomId });
             _clearJoinPendingBanner(r.roomId);
         }
 
@@ -4731,7 +4732,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             const title = (desc && desc.title) || appr.title || roomId;
             // Remember the room in our own pod, so it is still here after a reload
             // and on our other devices.
-            const rec = { roomId, owner: appr.owner_webid, ownerPodRoot: appr.owner_pod_root, container, title };
+            const rec = { roomId, owner: appr.owner_webid, ownerPodRoot: appr.owner_pod_root, container, title, membershipId: crypto.randomUUID() };
             if (!(await _updateJoinedRooms((list) => withJoinedRecord(list, rec)))) return false;
             if (!current()) return false;
             // The request is fulfilled: drop the pending marker so it can't be
@@ -4739,7 +4740,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             await podDeletePendingJoin(roomId, appr.owner_webid).catch(() => {});
             if (!current()) return false;
             _clearJoinPendingBanner(roomId);
-            if (!_registerRemoteRoom(roomId, { ownerPodRoot: appr.owner_pod_root, container, title, owner: appr.owner_webid })) return;
+            if (!_registerRemoteRoom(roomId, rec)) return;
             showToast(t('join.joined', { room: title }));
         }
 
@@ -4775,7 +4776,8 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         async function _webLeaveRoom(roomId) {
             const rr = _remoteRooms[roomId];
             if (!rr) return false;   // an owned room is deleted, not left
-            if (!(await _updateJoinedRooms((list) => withoutJoinedRecord(list, roomId)))) return false;
+            if (!(await _updateJoinedRooms((list) => _remoteRooms[roomId] === rr ? withoutJoinedRecord(list, roomId, rr) : list))) return false;
+            if (_remoteRooms[roomId] !== rr) return false;
             webRoomAccess?.untrack(roomId);
             if (webRoomSync) webRoomSync.untrack(roomId);
             delete _remoteRooms[roomId];
@@ -4812,7 +4814,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         async function _webRemovedFromRoom(roomId) {
             const rec = _remoteRooms[roomId], actor = selfWebId;
             if (!rec) return true;
-            if (!(await _updateJoinedRooms((list) => withoutJoinedRecord(list, roomId)))) return false;
+            if (!(await _updateJoinedRooms((list) => _remoteRooms[roomId] === rec ? withoutJoinedRecord(list, roomId, rec) : list))) return false;
             if (selfWebId !== actor || _remoteRooms[roomId] !== rec) return false;
             webRoomAccess?.untrack(roomId);
             if (webRoomSync) webRoomSync.untrack(roomId);

@@ -29,6 +29,10 @@ export function normalizeJoinedRecord(r) {
     if (!/^[\w-]{1,128}$/.test(rec.roomId)) return null;
     if (!/^https?:\/\//.test(rec.owner) || !/^https?:\/\//.test(rec.ownerPodRoot)) return null;
     if (!/^https?:\/\//.test(rec.container) || !rec.container.endsWith('/')) return null;
+    if (r.membershipId !== undefined) {
+        if (typeof r.membershipId !== 'string' || !/^[\w-]{1,128}$/.test(r.membershipId)) return null;
+        rec.membershipId = r.membershipId;
+    }
     return rec;
 }
 
@@ -47,9 +51,13 @@ export function withJoinedRecord(list, rec) {
     return normalizeJoinedList([...(list || []), rec]);
 }
 
-/** The list without the room `roomId`. */
-export function withoutJoinedRecord(list, roomId) {
-    return normalizeJoinedList(list).filter((r) => r.roomId !== roomId);
+/** Remove only the membership observed by a leave/revocation, when supplied.
+ * A rejoin gets a fresh ID so delayed cleanup from another device cannot erase it.
+ */
+export function withoutJoinedRecord(list, roomId, expected = null) {
+    return normalizeJoinedList(list).filter(r => r.roomId !== roomId || (expected && (
+        r.owner !== expected.owner || r.container !== expected.container
+        || (r.membershipId || '') !== (expected.membershipId || ''))));
 }
 
 /** localStorage key for the joined-room cache, scoped to one account. */

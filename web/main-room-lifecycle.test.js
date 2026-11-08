@@ -310,8 +310,9 @@ describe('browser room joiner approval', () => {
         expect(h.deps._registerRemoteRoom).not.toHaveBeenCalled();
 
         await h._onWebJoinApproved(approval());
-        expect(h.saved()).toEqual([joinedRecord()]);
+        expect(h.saved()).toEqual([{ ...joinedRecord(), membershipId: expect.any(String) }]);
         expect(h.deps._registerRemoteRoom).toHaveBeenCalledOnce();
+        expect(h.deps._registerRemoteRoom).toHaveBeenCalledWith(ROOM, h.saved()[0]);
     });
 
     it('leaves the pending state and approval intact until the joined room is durable', async () => {
@@ -326,7 +327,7 @@ describe('browser room joiner approval', () => {
         expect(h.deps.showToast).not.toHaveBeenCalled();
 
         await h._onWebJoinApproved(approval());
-        expect(h.saved()).toEqual([joinedRecord()]);
+        expect(h.saved()).toEqual([{ ...joinedRecord(), membershipId: expect.any(String) }]);
         expect(h.deps.podDeletePendingJoin).toHaveBeenCalledWith(ROOM, OWNER);
         expect(h.deps._clearJoinPendingBanner).toHaveBeenCalledWith(ROOM);
         expect(h.deps._registerRemoteRoom).toHaveBeenCalledOnce();
@@ -385,6 +386,24 @@ describe('restored room sidebar and leave', () => {
         expect(deps._remoteRooms[ROOM]).toBeUndefined();
         expect(deps.webRoomSync.untrack).toHaveBeenCalledOnce();
         expect(await _webLeaveRoom(ROOM)).toBe(false);
+    });
+
+    it('does not let a delayed leave erase a replacement membership or its watcher', async () => {
+        const fresh = { ...joinedRecord(), membershipId: 'rejoined' };
+        let saved = [joinedRecord()], finish;
+        const deps = { _remoteRooms: { [ROOM]: joinedRecord() }, withoutJoinedRecord,
+            webRoomSync: { untrack: vi.fn() }, webRoomAccess: { untrack: vi.fn() },
+            _updateJoinedRooms: change => new Promise(resolve => { finish = () => { saved = change(saved); resolve(true); }; }),
+        };
+        const app = handlers(['_webLeaveRoom'], deps);
+        const leaving = app._webLeaveRoom(ROOM);
+        deps._remoteRooms[ROOM] = fresh; saved = [fresh];
+        finish();
+        expect(await leaving).toBe(false);
+        expect(saved).toEqual([fresh]);
+        expect(deps._remoteRooms[ROOM]).toBe(fresh);
+        expect(deps.webRoomSync.untrack).not.toHaveBeenCalled();
+        expect(deps.webRoomAccess.untrack).not.toHaveBeenCalled();
     });
 });
 

@@ -59,7 +59,7 @@ async function fixture() {
     const options = { fetch, allowed: url => url === container, getWebId: () => actor,
         getSessionId: () => actor + ':' + epoch, getSigner: () => ({ privKey: key.priv, signerDid: key.did }),
         fetchPeerSigner: async () => ({ signer: key.did }), peerPodRoot: webid => webid === owner ? 'https://pod.example/alice/' : null,
-        readDay };
+        readDay, retryDelay: vi.fn(async () => {}) };
     const io = createPodPins(options);
     return { io, options, fetch, readDay, messages, puts: () => puts, snapshot: () => doc,
         actor: value => actor = value, stop: () => epoch++, interrupt: () => interruptRead = true,
@@ -74,6 +74,33 @@ async function fixture() {
 }
 
 describe('durable signed room pins', () => {
+    it.each([502, 503, 504])('recovers a transient %s when discovering pins and jumping to an old day', async status => {
+        const h = await fixture(); await h.pin('m1');
+        h.fetch.mockClear(); h.readDay.mockClear();
+        h.fetch.mockResolvedValueOnce({ ok: false, status });
+        expect((await h.list()).pins[0].message_id).toBe('m1');
+        expect(h.fetch).toHaveBeenCalledTimes(2);
+        h.readDay.mockClear(); h.readDay.mockResolvedValueOnce({ ok: false, status, messages: [] });
+        expect((await h.io.readMessage(container, target('m1'), owner)).message.message_id).toBe('m1');
+        expect(h.readDay).toHaveBeenCalledTimes(2);
+        expect(h.options.retryDelay).toHaveBeenCalledTimes(2);
+    });
+    it('bounds read retries and cancels them if the account changes during the delay', async () => {
+        const h = await fixture();
+        h.readDay.mockResolvedValue({ ok: false, status: 502, messages: [] });
+        expect(await h.io.readMessage(container, target('m1'), owner)).toMatchObject({ ok: false, status: 502 });
+        expect(h.readDay).toHaveBeenCalledTimes(2);
+        h.readDay.mockClear(); h.options.retryDelay.mockImplementationOnce(async () => h.stop());
+        expect(await h.io.readMessage(container, target('m1'), owner)).toMatchObject({ ok: false, reason: 'account_changed' });
+        expect(h.readDay).toHaveBeenCalledOnce();
+    });
+    it.each([401, 403, 404, 429])('does not retry a %s pin read', async status => {
+        const h = await fixture();
+        h.readDay.mockResolvedValue({ ok: false, status, messages: [] });
+        expect(await h.io.readMessage(container, target('m1'), owner)).toMatchObject({ ok: false, status });
+        expect(h.readDay).toHaveBeenCalledOnce();
+        expect(h.options.retryDelay).not.toHaveBeenCalled();
+    });
     it('restores old pins from original day files and reflects edits and withdrawal', async () => {
         const h = await fixture();
         expect(await h.pin('m1')).toMatchObject({ ok: true });

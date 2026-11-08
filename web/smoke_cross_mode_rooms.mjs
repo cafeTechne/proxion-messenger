@@ -189,7 +189,17 @@ async function expectPin(page, text, present = true) {
 }
 async function jumpPin(page, id) {
   await page.locator(`#pin-list [data-pin-action="jump"][data-msg-id="${id}"]`).click();
-  if (!(await waitFor(page, id => !!document.getElementById('msg-' + id), id, 20000))) throw Error('Could not jump to old pin ' + id);
+  if (!(await waitFor(page, id => !!document.getElementById('msg-' + id), id, 20000))) {
+    const detail = await page.evaluate(async id => {
+      const button = document.querySelector(`#pin-list [data-pin-action="jump"][data-msg-id="${CSS.escape(id)}"]`);
+      const room = window.proxionCrossRooms?.list().find(rec => document.getElementById('nav-' + rec.roomId)?.classList.contains('active'));
+      const pins = room && await window.proxionCrossRooms.readPins(room.roomId);
+      const pin = pins?.pins?.find(pin => pin.message?.message_id === id);
+      return { button: button?.outerHTML, room, pins, resolved: pin && await window.proxionCrossRooms.readPinMessage(room.roomId, pin.target),
+        feed: document.getElementById('message-feed')?.innerText, toasts: document.getElementById('toast-container')?.innerText };
+    }, id);
+    throw Error('Could not jump to old pin ' + id + ': ' + JSON.stringify(detail));
+  }
 }
 
 async function addReaction(page, text, emoji) {
@@ -323,7 +333,7 @@ try {
   pageB.on('pageerror', (e) => errs.push('B: ' + e.message));
 
   // Alice's bridge traffic: idle membership HEAD checks and room appends.
-  const patchReqs = new Map(), memberReqs = new Map(), deniedMemberReads = [], accessReqs = new Map(), accessResults = [];
+  const patchReqs = new Map(), memberReqs = new Map(), deniedMemberReads = [], accessReqs = new Map(), accessResults = [], deletionReqs = new Map();
   const deniedBrowserReads = [];
   pageB.on('response', (r) => {
     if (r.request().method() === 'HEAD' && r.status() === 403 && r.url().endsWith('/members.jsonld')) deniedBrowserReads.push(r.url());
@@ -334,6 +344,7 @@ try {
     try {
       const m = JSON.parse(e.response.payloadData);
       if (step.endsWith('-deletes') && ['delete_room', 'pod_room_unregister'].includes(m.cmd)) deleteOps.push('WS ' + JSON.stringify(m));
+      if (step.endsWith('-deletes') && m.cmd === 'pod_fetch') deletionReqs.set(m.req_id, `${m.method} ${new URL(m.url).pathname}`);
       if (m.cmd === 'pod_fetch' && m.method === 'PATCH') patchReqs.set(m.req_id, m.url);
       if (m.cmd === 'pod_fetch' && m.method === 'HEAD' && m.url.endsWith('/members.jsonld')) memberReqs.set(m.req_id, m.url);
       if (m.cmd === 'pod_fetch' && /\/(members\.jsonld|joined-rooms\.json(?:ld)?)$/.test(m.url)) accessReqs.set(m.req_id, { method: m.method, url: m.url });
@@ -342,6 +353,10 @@ try {
   cdp.on('Network.webSocketFrameReceived', (e) => {
     try {
       const m = JSON.parse(e.response.payloadData);
+      if (m.type === 'pod_fetch_result' && deletionReqs.has(m.req_id)) {
+        deleteOps.push(`bridge ${m.status} ${deletionReqs.get(m.req_id)} ${m.error || ''}`);
+        deletionReqs.delete(m.req_id);
+      }
       if (m.type === 'pod_fetch_result' && memberReqs.has(m.req_id) && m.status === 403 && !m.error) deniedMemberReads.push(memberReqs.get(m.req_id));
       if (m.type === 'pod_fetch_result' && accessReqs.has(m.req_id)) {
         accessResults.push({ ...accessReqs.get(m.req_id), status: m.status, error: m.error }); accessReqs.delete(m.req_id);
