@@ -274,7 +274,7 @@ async function removeMember(page, roomId, webid) {
     const item = document.querySelector(`#members-list .member-item[data-webid="${CSS.escape(w)}"]`);
     item.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 60, clientY: 60 }));
   }, webid);
-  const only = await page.evaluate(() => Array.from(document.querySelectorAll('#member-context-menu button'))
+  const only = await page.evaluate(() => Array.from(document.querySelectorAll('#member-context-menu [data-role-action]'))
     .filter((b) => !b.hidden).map((b) => b.dataset.roleAction));
   if (JSON.stringify(only) !== '["kick"]') throw new Error('pod room menu offers: ' + JSON.stringify(only));
   await page.click('#member-context-menu [data-role-action="kick"]');

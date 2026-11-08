@@ -37,6 +37,7 @@ function make(over = {}) {
     getMessageMap: () => messageMap,
     openContactByDid: over.openContactByDid,
     openDirectMessage: over.openDirectMessage,
+    addFriend: over.addFriend, isSelf: over.isSelf, isBlocked: over.isBlocked, isContact: over.isContact,
   });
   return { profile, sent, userPresence, messageMap };
 }
@@ -161,5 +162,38 @@ describe('profile popover on your own card', () => {
     p.showProfileCard('did:key:zYou', 'You', 10, 10);
     expect(actions.hidden).toBe(false);
     expect(divider.hidden).toBe(false);
+  });
+});
+
+describe('Add friend entry points', () => {
+  it('passes the selected member to the contact flow after closing the profile', () => {
+    const addFriend = vi.fn();
+    const { profile } = make({ addFriend });
+    profile.state.profileCardActive = 'https://bob.example/#me';
+    profile.profileCardAddFriend();
+    expect(addFriend).toHaveBeenCalledWith('https://bob.example/#me');
+    expect(profile.state.profileCardActive).toBe(null);
+  });
+  it.each(['self', 'blocked', 'known'])('prevents adding a %s identity and reflects that state', kind => {
+    const addFriend = vi.fn();
+    const { profile } = make({ addFriend, isSelf: () => kind === 'self',
+      isBlocked: () => kind === 'blocked', isContact: () => kind === 'known' });
+    const button = mkEl();
+    profile.updateFriendAction(button, 'https://bob.example/#me');
+    expect(button.hidden).toBe(kind === 'self');
+    expect(button.disabled).toBe(kind !== 'self');
+    if (kind === 'known') expect(button.textContent).toBe('contact.inContacts');
+    profile.state.profileCardActive = 'https://bob.example/#me';
+    profile.profileCardAddFriend();
+    expect(addFriend).not.toHaveBeenCalled();
+  });
+  it('restores an enabled Add friend option when the next person is unknown', () => {
+    const { profile } = make({ isContact: id => id === 'known' });
+    const button = mkEl();
+    profile.updateFriendAction(button, 'known');
+    expect(button.disabled).toBe(true);
+    profile.updateFriendAction(button, 'new');
+    expect(button.disabled).toBe(false);
+    expect(button.textContent).toBe('btn.addFriend');
   });
 });

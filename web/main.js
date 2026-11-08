@@ -750,16 +750,18 @@ import { createRoomApprovalNotice } from './room-approvals.js';
         // dispatch and renderer also touch them) and are injected by reference.
         const {
             handlePresenceUpdate, updatePresence, showProfileCard, profileCardOpenDM,
-            hideProfileCard, showContactProfile, state: profileState,
+            hideProfileCard, showContactProfile, state: profileState, updateFriendAction, profileCardAddFriend,
         } = createProfile({
             getSocket: () => socket, showToast,
             getUserPresence: () => userPresence, getMessageMap: () => messageMap,
             isBlocked: (webid) => blocks.isBlocked(webid),
             isSelf: (webid) => !!webid && (webid === selfWebId || webid === clientDid),
             isContact: (webid) => !!peerDidToCertId[webid],
+            isSavedContact: (webid) => !!peerDidToCertId[webid] || (transport.mode === 'web' && !!localDmPeers[webid]),
             // createView runs later; this is only called from a click.
             openContactByDid: (did) => openContactByDid(did),
             openDirectMessage: (webid) => _openDirectMessage(webid),
+            addFriend: (webid) => _openAddFriend(webid),
         });
         // R66: optimistic-send failure tracking (mark unconfirmed messages failed + retry).
         // Browser build: the pod session and network state (podhealth.js), set
@@ -1925,6 +1927,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             document.getElementById("add-peer-input").value = "";
             document.getElementById("add-peer-error").textContent = "";
             document.getElementById("add-peer-modal").style.display = "flex";
+            document.getElementById('add-peer-contact-hint').hidden = transport.mode !== 'web';
             setTimeout(() => document.getElementById("add-peer-input").focus(), 50);
         };
 
@@ -6614,6 +6617,16 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             "cannot_add_self": "error.fr.cannot_add_self",
         };
 
+        function _openAddFriend(webid) {
+            if (!webid || webid === selfWebId || webid === clientDid || blocks.isBlocked(webid)) return;
+            if (peerDidToCertId[webid] || (transport.mode === 'web' && localDmPeers[webid])) return;
+            if (transport.mode === 'web' && !isDmPeerWebId(webid)) { showToast(t('contact.memberNeedsWebId')); return; }
+            document.getElementById('add-peer-btn').click();
+            const input = document.getElementById('add-peer-input');
+            input.value = webid;
+            input.focus();
+        }
+
         function _openDirectMessage(webid) {
             if (!webid || webid === selfWebId || webid === clientDid) return true;
             if (transport.mode !== 'web' && openContactByDid(webid)) return true;
@@ -6960,6 +6973,9 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                     (!!selfPubHex && msg.from_pub_hex === selfPubHex),
             };
             const isOwn = _ctxTarget.isOwn;
+            const friendButton = document.getElementById('ctx-add-friend');
+            updateFriendAction(friendButton, msg.from_webid);
+            if (isOwn) friendButton.hidden = true;
             const isImage = _isImageAttachment(msg);
             document.getElementById("ctx-pin").style.display = (!_isPodRoomView(activeView) || roomCreatorOf.has(activeView.id)) ? "" : "none";
             document.getElementById("ctx-edit").style.display  = isOwn ? "" : "none";
@@ -6995,6 +7011,11 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             });
         });
 
+        document.getElementById('ctx-add-friend').onclick = () => {
+            const webid = _ctxTarget?.fromWebid;
+            closeCtxMenu();
+            _openAddFriend(webid);
+        };
         document.getElementById("ctx-reply").onclick = () => {
             if (!_ctxTarget) return;
             setReply(_ctxTarget.msgId);
@@ -7402,6 +7423,12 @@ import { createRoomApprovalNotice } from './room-approvals.js';
 
             // Profile card: Send DM button
             attachListener('#profile-dm-btn', 'click', profileCardOpenDM);
+            attachListener('#profile-add-friend-btn', 'click', profileCardAddFriend);
+            attachListener('#contact-profile-add-friend-btn', 'click', () => {
+                const webid = document.getElementById('contact-profile-dm-btn')?.dataset.webid;
+                document.getElementById('contact-profile-panel').style.display = 'none';
+                _openAddFriend(webid);
+            });
             // R65: block/unblock the profile-card subject
             attachListener('#profile-block-btn', 'click', () => {
                 const webid = profileState?.profileCardActive;
@@ -8343,28 +8370,35 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                 const item = e.target.closest('.member-item');
                 if (!item) return;
                 e.preventDefault();
-                // The menu is entirely owner-only moderation (roles / kick / ban /
-                // mute / transfer). Only open it if the current user OWNS the active
-                // room, and never on yourself. The client can't see its own admin/
-                // mod role (room_roles is a no-op), so gate on ownership — matching
-                // the old members-modal, which hid these buttons for non-owners.
+                // Everyone can add a contact; moderation remains owner-only.
                 const targetWebid = item.dataset.webid || '';
                 const isOwner = !!(activeView && roomCreatorOf.has(activeView.id));
-                if (!isOwner || !targetWebid || targetWebid === selfWebId) return;
+                if (!targetWebid || targetWebid === selfWebId || targetWebid === clientDid) return;
                 // A pod room (the browser build's, or a desktop one shared with it)
                 // has one moderation action: taking someone out of its ACL.
-                const _podRoom = transport.mode === 'web' || !!crossRooms?.isPodRoom(activeView.id);
-                if (!transport.supports('room-admin') && !_podRoom) return;
+                const _podRoom = transport.mode === 'web' || !!crossRooms?.isPodRoom(activeView?.id);
+                const canModerate = isOwner && (transport.supports('room-admin') || _podRoom);
                 const menu = document.getElementById('member-context-menu');
                 if (!menu) return;
                 // Restore the default items — a previous "Mute…" click swaps the
                 // menu body for duration options.
                 if (menu.dataset.defaultHtml) menu.innerHTML = menu.dataset.defaultHtml;
                 else menu.dataset.defaultHtml = menu.innerHTML;
-                for (const el of menu.querySelectorAll('button, hr')) el.hidden = _podRoom && el.dataset.roleAction !== 'kick';
+                for (const el of menu.querySelectorAll('button, hr')) {
+                    if (el.hasAttribute('data-member-add-friend')) continue;
+                    el.hidden = !canModerate || (_podRoom && el.dataset.roleAction !== 'kick');
+                }
+                updateFriendAction(menu.querySelector('[data-member-add-friend]'), targetWebid);
                 menu.dataset.targetWebid = targetWebid;
                 // Clamped to the viewport after measuring (menu.js).
                 openMenu(menu, { x: e.clientX, y: e.clientY, opener: item });
+            });
+            document.getElementById('member-context-menu')?.addEventListener('click', e => {
+                if (!e.target.closest('[data-member-add-friend]')) return;
+                const menu = document.getElementById('member-context-menu');
+                const webid = menu.dataset.targetWebid;
+                closeMenu(menu);
+                _openAddFriend(webid);
             });
             // Member rows: click (or Enter) opens the profile card; arrows move
             // between rows; Shift+F10 / the ContextMenu key opens the menu above.
@@ -8422,7 +8456,8 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                 if (!btn) return;
                 const menu = document.getElementById('member-context-menu');
                 const targetWebid = menu?.dataset.targetWebid;
-                if (!targetWebid || !activeView || !socket) { closeMenu(menu); return; }
+                if (!targetWebid || !activeView || !socket || btn.hidden || btn.disabled
+                    || !roomCreatorOf.has(activeView.id)) { closeMenu(menu); return; }
                 const action = btn.dataset.roleAction;
                 const _rid = activeView.id;
                 if (action === 'kick') {

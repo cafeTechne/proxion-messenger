@@ -10,7 +10,7 @@
 import { t } from './i18n.js';
 import { webidColor, timeAgo, escHtml, avatarInitial, dmFallbackName, gatewayUrl } from './util.js';
 
-export function createProfile({ getSocket, showToast, getUserPresence, getMessageMap, isBlocked, isSelf, isContact, openContactByDid, openDirectMessage }) {
+export function createProfile({ getSocket, showToast, getUserPresence, getMessageMap, isBlocked, isSelf, isContact, openContactByDid, openDirectMessage, addFriend = () => {}, isSavedContact = isContact }) {
     const state = { profileCardActive: null };
 
     function handlePresenceUpdate(event) {
@@ -98,6 +98,7 @@ export function createProfile({ getSocket, showToast, getUserPresence, getMessag
             const el = card.querySelector?.(sel);
             if (el) el.hidden = self;
         }
+        updateFriendAction(document.getElementById('profile-add-friend-btn'), webid);
         card.classList.add("show");
         card.style.left = Math.min(x, window.innerWidth - 310) + "px";
         card.style.top = Math.min(y, window.innerHeight - 250) + "px";
@@ -132,6 +133,22 @@ export function createProfile({ getSocket, showToast, getUserPresence, getMessag
                 }, 100);
             }
         }
+    }
+
+    function updateFriendAction(button, webid) {
+        if (!button) return;
+        const known = !!isSavedContact?.(webid), blocked = !!isBlocked?.(webid);
+        button.hidden = !webid || !!isSelf?.(webid);
+        button.disabled = known || blocked;
+        button.title = blocked ? t('contact.unblockToAdd') : '';
+        const label = button.querySelector?.('[data-friend-label]') || button;
+        label.textContent = t(known ? 'contact.inContacts' : 'btn.addFriend');
+    }
+
+    function profileCardAddFriend() {
+        const webid = state.profileCardActive;
+        hideProfileCard();
+        if (webid && !isSelf?.(webid) && !isBlocked?.(webid) && !isSavedContact?.(webid)) addFriend(webid);
     }
 
     function hideProfileCard() {
@@ -203,6 +220,7 @@ export function createProfile({ getSocket, showToast, getUserPresence, getMessag
         const self = !!isSelf?.(d.did);
         const dmBtn = document.getElementById('contact-profile-dm-btn');
         if (dmBtn) { dmBtn.dataset.webid = d.did || ''; dmBtn.hidden = self; }
+        updateFriendAction(document.getElementById('contact-profile-add-friend-btn'), d.did);
         const rmBtn = document.getElementById('contact-profile-remove-btn');
         if (rmBtn) rmBtn.hidden = self || !(isContact?.(d.did) ?? true);
         const didEl = document.getElementById('contact-profile-did');
@@ -213,6 +231,6 @@ export function createProfile({ getSocket, showToast, getUserPresence, getMessag
 
     return {
         handlePresenceUpdate, updatePresence, showProfileCard, profileCardOpenDM,
-        hideProfileCard, showContactProfile, _renderContactProfile, state,
+        hideProfileCard, showContactProfile, _renderContactProfile, state, updateFriendAction, profileCardAddFriend,
     };
 }

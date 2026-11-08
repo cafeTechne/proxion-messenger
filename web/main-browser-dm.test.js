@@ -69,3 +69,35 @@ it('does not restore a waiting banner when approval beat the request acknowledge
     show({ room_id: 'recovered', owner: 'https://owner.example/#me' });
     expect(clear).toHaveBeenCalledWith('recovered');
 });
+
+describe('Add friend from a message or member menu', () => {
+    function addClient(overrides = {}) {
+        const input = { value: 'old draft', focus: vi.fn() };
+        const opener = { click: vi.fn(() => { input.value = ''; }) };
+        const deps = { selfWebId: 'https://alice.example/#me', clientDid: 'did:key:self',
+            blocks: { isBlocked: () => false }, peerDidToCertId: {}, transport: { mode: 'web' },
+            localDmPeers: {}, isDmPeerWebId, showToast: vi.fn(), t: key => key,
+            document: { getElementById: id => id === 'add-peer-btn' ? opener : input }, ...overrides };
+        const body = source.slice(source.indexOf('function _openAddFriend('));
+        const fn = body.slice(0, /^        }\r?$/m.exec(body).index + 9);
+        const add = new Function(...Object.keys(deps), `${fn}; return _openAddFriend;`)(...Object.values(deps));
+        return { add, input, opener, deps };
+    }
+    it('prefills the selected identity after the dialog opener clears its input', () => {
+        const h = addClient(); h.add(BOB);
+        expect(h.opener.click).toHaveBeenCalledOnce();
+        expect(h.input.value).toBe(BOB);
+        expect(h.input.focus).toHaveBeenCalledOnce();
+    });
+    it.each(['self', 'known', 'blocked'])('does not add a %s identity through a stale menu action', kind => {
+        const h = addClient({ blocks: { isBlocked: () => kind === 'blocked' },
+            localDmPeers: kind === 'known' ? { [BOB]: { peer_webid: BOB } } : {} });
+        h.add(kind === 'self' ? h.deps.selfWebId : BOB);
+        expect(h.opener.click).not.toHaveBeenCalled();
+    });
+    it('explains an incompatible browser identity instead of opening an unusable dialog', () => {
+        const h = addClient(); h.add('did:key:desktop-peer');
+        expect(h.opener.click).not.toHaveBeenCalled();
+        expect(h.deps.showToast).toHaveBeenCalledWith('contact.memberNeedsWebId');
+    });
+});

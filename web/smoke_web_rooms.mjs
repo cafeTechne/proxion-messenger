@@ -319,8 +319,41 @@ try {
 
   step = 'member-dm';
   const peerWebId = firstIsBob ? bob.webId : carol.webId;
+  // A message's overflow menu pre-fills the author's address, not their name.
+  await pageA.evaluate(text => {
+    const row = Array.from(document.querySelectorAll('#message-feed .message')).find(el => el.textContent.includes(text));
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 200 }));
+  }, fromJoiner);
+  await pageA.click('#ctx-add-friend');
+  await pageA.waitForSelector('#add-peer-modal', { visible: true });
+  if (await pageA.$eval('#add-peer-input', el => el.value) !== peerWebId) throw Error('Message Add friend did not prefill the author');
+  await pageA.click('#add-peer-cancel-btn');
+
+  // A regular member also has Add friend, with all moderation actions hidden.
+  await joiner.evaluate(() => document.getElementById('members-toggle').click());
+  await joiner.waitForFunction(webid => !!document.querySelector(`#members-list .member-item[data-webid="${CSS.escape(webid)}"]`), { timeout: 15000 }, alice.webId);
+  await joiner.evaluate(webid => document.querySelector(`#members-list .member-item[data-webid="${CSS.escape(webid)}"]`)
+    .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 500, clientY: 200 })), alice.webId);
+  if (await joiner.evaluate(() => Array.from(document.querySelectorAll('#member-context-menu [data-role-action]')).some(el => !el.hidden))) throw Error('Non-owner was offered moderation actions');
+  await joiner.click('#member-context-menu [data-member-add-friend]');
+  if (await joiner.$eval('#add-peer-input', el => el.value) !== alice.webId) throw Error('Member Add friend did not prefill the selected identity');
+  await joiner.click('#add-peer-cancel-btn');
+
+  // Click the member's name and add through the profile's action as well.
+  await pageA.evaluate(() => { const panel = document.getElementById('members-panel'); panel.style.display = 'block'; });
   await pageA.evaluate(webid => document.querySelector(`#members-list .member-item[data-webid="${CSS.escape(webid)}"]`).click(), peerWebId);
   await pageA.waitForSelector('#profile-card.show', { timeout: 10000 });
+  await pageA.click('#profile-add-friend-btn');
+  await pageA.waitForSelector('#add-peer-modal', { visible: true });
+  if (await pageA.$eval('#add-peer-input', el => el.value) !== peerWebId) throw Error('Profile Add friend did not prefill the selected identity');
+  await pageA.click('#add-peer-submit-btn');
+  await pageA.waitForSelector('#add-peer-modal', { hidden: true, timeout: 20000 });
+  ok('Add friend works from messages and member names, including non-owner menus, and saves the selected contact');
+
+  await openRoom(pageA, roomId);
+  await pageA.evaluate(() => { document.getElementById('members-panel').style.display = 'block'; });
+  await pageA.evaluate(webid => document.querySelector(`#members-list .member-item[data-webid="${CSS.escape(webid)}"]`).click(), peerWebId);
+  if (!(await pageA.$eval('#profile-add-friend-btn', el => el.disabled && el.textContent === 'In contacts'))) throw Error('Saved contact still offers Add friend');
   await pageA.click('#profile-dm-btn');
   await waitFor(pageA, webid => !!document.getElementById('nav-' + webid), peerWebId, 10000);
   const dmText = 'member-dm-' + Date.now();

@@ -48,8 +48,11 @@ connected to, with the gateway making the pod requests on its behalf
   WebID receives them: the one that signed in last.
 
 In the browser, use **Send DM** from a room member's profile or add their Solid
-WebID as a contact. Both entry points use the same pod-backed DM conversation;
-the saved contact and local message history survive reload. Saved browser
+WebID as a contact. Both entry points use the same pod-backed DM conversation.
+**Add friend** in the message menu, member menu, and profile pre-fills the
+add-contact dialog. Saved people show **In contacts**; self-adds and blocked
+people cannot be added through these actions.
+The saved contact and local message history survive reload. Saved browser
 contacts do not imply a mutually accepted friendship; that browser workflow is
 tracked separately in the project plan.
 
