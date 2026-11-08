@@ -11,7 +11,20 @@
 import { t } from './i18n.js';
 import { podUploadVoiceAudio } from './pod.js';
 
-export function createMedia({ getSocket, getActiveView, showToast, getVoiceState, getVoice = () => null }) {
+export function captureMediaTarget({ getSocket, getActiveView, getSessionId = () => '', canSend = () => true }) {
+    const active = getActiveView(), socket = getSocket(), session = getSessionId();
+    if (!active?.id || !socket || socket.readyState !== 1 || !canSend()) return null;
+    const view = { ...active };
+    return { view, socket, current: () => {
+        const now = getActiveView();
+        return socket === getSocket() && socket.readyState === 1 && session === getSessionId()
+            && now?.id === view.id && now?.type === view.type && (now.peerWebid || '') === (view.peerWebid || '') && canSend();
+    } };
+}
+
+export function createMedia({ getSocket, getActiveView, showToast, getVoiceState, getVoice = () => null,
+    getSessionId = () => '', canRecord = () => true }) {
+    const capture = () => captureMediaTarget({ getSocket, getActiveView, getSessionId, canSend: canRecord });
     const state = {
         mediaRecorder: null,
         recordingChunks: [],
@@ -19,6 +32,7 @@ export function createMedia({ getSocket, getActiveView, showToast, getVoiceState
         recordingSeconds: 0,
         recordingStartedAt: 0,
         durationMs: 0,
+        recordingContext: null,
         pending: null,
         pressAt: 0,
         screenStream: null,
@@ -39,25 +53,39 @@ export function createMedia({ getSocket, getActiveView, showToast, getVoiceState
 
     function startVoiceRecording() {
         if (state.pending || (state.mediaRecorder && state.mediaRecorder.state !== 'inactive')) return;
+        const target = capture();
+        if (!target) return;
         const pending = state.pending = { stop: null };
+        let acquiredStream = null;
         navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+            acquiredStream = stream;
             state.pending = null;
             if (pending.stop === false) { stream.getTracks().forEach(tr => tr.stop()); return; }
+            if (!target.current()) { stream.getTracks().forEach(tr => tr.stop()); showToast(t('media.conversationChanged'), 'error'); return; }
             state.recordingChunks = []; state.recordingSeconds = 0; state.durationMs = 0;
             const rec = state.mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-            rec.ondataavailable = e => { if (e.data.size > 0) state.recordingChunks.push(e.data); };
-            rec.onstop = () => { stream.getTracks().forEach(tr => tr.stop()); sendVoiceMessage(); };
+            const recording = state.recordingContext = { target, rec, chunks: state.recordingChunks, durationMs: 0 };
+            rec.ondataavailable = e => { if (e.data.size > 0) recording.chunks.push(e.data); };
+            rec.onstop = () => { stream.getTracks().forEach(tr => tr.stop()); sendVoiceMessage(recording); };
             rec.start();
             state.recordingStartedAt = Date.now();
             _setRecordingUi(true);
             state.recordingTimerInterval = setInterval(() => {
+                if (state.mediaRecorder !== rec) return;
+                if (!target.current()) {
+                    stopVoiceRecording(false); showToast(t('media.conversationChanged'), 'error'); return;
+                }
                 state.recordingSeconds++;
                 const timerEl = document.getElementById('recording-timer');
                 if (timerEl) timerEl.textContent = Math.floor(state.recordingSeconds / 60) + ':' + String(state.recordingSeconds % 60).padStart(2, '0');
                 if (state.recordingSeconds >= 60) stopVoiceRecording(true);
             }, 1000);
             if (pending.stop === true) stopVoiceRecording(true);
-        }).catch(() => { state.pending = null; showToast(t('media.micDenied'), 'error'); });
+        }).catch(() => {
+            acquiredStream?.getTracks().forEach(track => track.stop());
+            state.pending = null; _setRecordingUi(false);
+            showToast(t(acquiredStream ? 'voiceMsg.recordFailed' : 'media.micDenied'), 'error');
+        });
     }
 
     function stopVoiceRecording(send = true) {
@@ -68,6 +96,7 @@ export function createMedia({ getSocket, getActiveView, showToast, getVoiceState
         if (timerEl) timerEl.textContent = '0:00';
         if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') {
             state.durationMs = Math.min(60_000, Date.now() - (state.recordingStartedAt || Date.now()));
+            if (state.recordingContext?.rec === state.mediaRecorder) state.recordingContext.durationMs = state.durationMs;
             const tooShort = send && state.durationMs < MIN_MS;
             if (tooShort) showToast(t('voiceMsg.tooShort'));
             state.mediaRecorder._sendOnStop = send && !tooShort;
@@ -92,21 +121,25 @@ export function createMedia({ getSocket, getActiveView, showToast, getVoiceState
         if (held >= TAP_MS) stopVoiceRecording(true);
     }
 
-    function sendVoiceMessage() {
-        const activeView = getActiveView();
-        const socket = getSocket();
-        if (!state.mediaRecorder || !state.mediaRecorder._sendOnStop || !activeView || !socket) return;
-        const blob = new Blob(state.recordingChunks, { type: 'audio/webm' });
+    function sendVoiceMessage(recording = state.recordingContext || {
+        target: capture(), rec: state.mediaRecorder, chunks: state.recordingChunks, durationMs: state.durationMs,
+    }) {
+        const { target, rec, chunks, durationMs } = recording;
+        if (!rec?._sendOnStop || !target) return;
+        if (!target.current()) { showToast(t('media.conversationChanged'), 'error'); return; }
+        const blob = new Blob(chunks, { type: 'audio/webm' });
         const voiceMsgId = crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36));
         const reader2 = new FileReader();
         reader2.onloadend = () => {
-            socket.send(JSON.stringify({
-                cmd: 'send_voice_message', thread_id: activeView.id,
-                audio_b64: reader2.result.split(',')[1], duration_ms: state.durationMs,
+            if (!target.current()) { showToast(t('media.conversationChanged'), 'error'); return; }
+            if (reader2.error || typeof reader2.result !== 'string') { showToast(t('voiceMsg.readFailed'), 'error'); return; }
+            target.socket.send(JSON.stringify({
+                cmd: 'send_voice_message', thread_id: target.view.id,
+                audio_b64: reader2.result.split(',')[1], duration_ms: durationMs,
                 message_id: voiceMsgId,
             }));
-            if (activeView.type === 'local_room') {
-                podUploadVoiceAudio(activeView.id, voiceMsgId, blob).catch(() => {});
+            if (target.view.type === 'local_room') {
+                podUploadVoiceAudio(target.view.id, voiceMsgId, blob).catch(() => {});
             }
         };
         reader2.readAsDataURL(blob);

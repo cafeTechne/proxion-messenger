@@ -53,7 +53,7 @@ import { createNotifications } from './notifications.js';
 import { createOnboarding, obReopenStep } from './onboarding.js';
 import { createReactions } from './reactions.js';
 import { createPins } from './pins.js';
-import { createMedia } from './media.js';
+import { createMedia, captureMediaTarget } from './media.js';
 import { createModals } from './modals.js';
 import { createProfile } from './profile.js';
 import { createEdit } from './edit.js';
@@ -545,6 +545,8 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             getSocket: () => socket, getActiveView: () => activeView,
             showToast, getVoiceState: () => voice.state,
             getVoice: () => voice,   // R81: recap senders when screen share changes the profile
+            getSessionId: () => _webRoomSessionId(),
+            canRecord: () => _conversationSupports('voice-messages'),
         });
         const { pressMic, releaseMic, stopVoiceRecording, sendVoiceMessage, startScreenShare, stopScreenShare } = media;
         // Message rendering (core slice 2). Created before voice/modals because they
@@ -6419,15 +6421,23 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // the room cap (2 MB) instead of being refused outright.
         async function sendAttachmentFile(file, opts = {}) {
             if (!file || !socket || !activeView) return;
-            if (needsDownscale(file, activeView.type)) {
+            const target = opts.target || captureMediaTarget({ getSocket: () => socket, getActiveView: () => activeView,
+                getSessionId: _webRoomSessionId, canSend: () => _conversationSupports('files') });
+            const current = () => {
+                if (target?.current()) return true;
+                showToast(t('media.conversationChanged'), 'error'); return false;
+            };
+            if (!current()) return;
+            const view = target.view;
+            if (needsDownscale(file, view.type)) {
                 try {
                     file = await downscaleImage(file);
                     showToast(t('file.reduced'));
                 } catch (_) { /* fall through to the existing size toasts */ }
             }
+            if (!current()) return;
             // DM to a keyed peer: the file is encrypted end to end, which adds
             // the AES-GCM tag to what the inline cap has to hold.
-            const view = activeView;
             const sealFile = secondary.mustSeal(view);
             const inlineMax = inlineFileLimit(view.type, sealFile ? FILE_TAG_BYTES : 0);
             if (file.size > inlineMax) {
@@ -6436,7 +6446,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 if (file.size > 25 * 1024 * 1024 - (sealFile ? FILE_TAG_BYTES : 0)) { showToast(t('file.tooLarge')); return; }
                 if (!isDm) { showToast(t('file.roomTooLarge', { mb: ROOM_FILE_MB })); return; }
                 if (!peerWebid) { showToast(t('file.largeDmOnly')); return; }
-                const xferOpts = sealFile ? { seal: (u8, meta) => secondary.sealFile(view, u8, meta, { echo: false }) } : {};
+                const xferOpts = { isCurrent: target.current, ...(sealFile ? { seal: (u8, meta) => secondary.sealFile(view, u8, meta, { echo: false }) } : {}) };
                 fileTransfer.sendFileChunked(file, peerWebid, xferOpts).catch(err => {
                     console.warn("chunked send failed", err);
                     showToast(t('file.sendFailed'));
@@ -6445,6 +6455,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             }
             // Natural size travels with the file so receivers reserve the box.
             const dims = await measureMedia(file);
+            if (!current()) return;
             if (sealFile) {
                 if (!socket || socket.readyState !== WebSocket.OPEN) { showToast(t('file.notConnected')); return; }
                 let sealed;
@@ -6455,6 +6466,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                         width: dims?.width, height: dims?.height, spoiler: opts.spoiler === true,
                     });
                 } catch (err) { sealed = null; console.warn('[e2e] file seal failed; not sending:', err); }
+                if (!current()) return;
                 if (!sealed) { showToast(t('file.sendFailed')); return; }
                 // Name, type, size, dimensions and the spoiler flag are inside the
                 // sealed header; the gateway sees only ciphertext.
@@ -6465,7 +6477,9 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 return;
             }
             const reader = new FileReader();
+            reader.onerror = () => { if (target.current()) showToast(t('file.sendFailed'), 'error'); };
             reader.onload = () => {
+                if (!current()) return;
                 const base64 = reader.result.split(',')[1];
                 const fileMsgId = crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36));
                 const payload = {
@@ -6475,8 +6489,8 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 };
                 if (dims) { payload.width = dims.width; payload.height = dims.height; }
                 if (opts.spoiler === true) payload.spoiler = true;   // R60C
-                if (activeView.type === "dm" || activeView.type === "local_dm") payload.cert_id = activeView.id;
-                else payload.room_id = activeView.id;
+                if (view.type === "dm" || view.type === "local_dm") payload.cert_id = view.id;
+                else payload.room_id = view.id;
                 // sendCmd silently drops when the socket isn't open — for a file
                 // (effortful to re-pick) surface that instead of losing it silently.
                 if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -6484,8 +6498,8 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     return;
                 }
                 sendCmd("send_file", payload);
-                if (activeView.type === 'local_room') {
-                    podUploadFile(activeView.id, fileMsgId, file.name, file).catch(() => {});
+                if (view.type === 'local_room') {
+                    podUploadFile(view.id, fileMsgId, file.name, file).catch(() => {});
                 }
             };
             reader.readAsDataURL(file);
@@ -6521,7 +6535,10 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         async function confirmAndSend(file, batch = null) {
             // The web build has no file path (send_file is a gateway command), and
             // its attach controls are hidden; paste and drop stop here too.
-            if (!transport.supports('files')) return;
+            if (!_conversationSupports('files')) return;
+            const target = captureMediaTarget({ getSocket: () => socket, getActiveView: () => activeView,
+                getSessionId: _webRoomSessionId, canSend: () => _conversationSupports('files') });
+            if (!target) return;
             // Downscale first, so the confirm shows the file that will be sent
             // and a photo that cannot be made to fit is refused before it.
             if (activeView && needsDownscale(file, activeView.type)) {
@@ -6530,10 +6547,11 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     showToast(t('file.reduced'));
                 } catch (_) { /* refused below */ }
             }
+            if (!target.current()) { showToast(t('media.conversationChanged'), 'error'); return; }
             const blocked = attachmentBlockReason(file);
             if (blocked) { showToast(t(blocked, { mb: ROOM_FILE_MB })); return; }
             const { ok, spoiler } = await confirmAttachment(file, batch);
-            if (ok) await sendAttachmentFile(file, { spoiler });
+            if (ok) await sendAttachmentFile(file, { spoiler, target });
         }
 
         // The attach control is a real button (a <label> for a hidden input is

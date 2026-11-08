@@ -29,6 +29,25 @@ function makeFT(overrides = {}) {
 
 const tick = (ms = 5) => new Promise(r => setTimeout(r, ms));
 const fileOf = (n) => ({ name: 'big.pdf', type: 'application/pdf', arrayBuffer: async () => new Uint8Array(n).buffer });
+
+describe('chunked file preparation context', () => {
+  it('does not offer bytes read after the original target is no longer current', async () => {
+    const { ft, calls } = makeFT(); let finish, current = true;
+    const file = { ...fileOf(1), arrayBuffer: () => new Promise(resolve => { finish = resolve; }) };
+    const sending = ft.sendFileChunked(file, 'did:bob', { isCurrent: () => current });
+    current = false; finish(new Uint8Array([1]).buffer);
+    expect(await sending).toBe(false); expect(calls).toHaveLength(0);
+  });
+  it('does not offer a file sealed after an account change', async () => {
+    const { ft, calls } = makeFT(); let finish, current = true;
+    const sending = ft.sendFileChunked(fileOf(1), 'did:bob', {
+      isCurrent: () => current, seal: () => new Promise(resolve => { finish = resolve; }),
+    });
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    current = false; finish({ ct: new Uint8Array([1]), hdr: {} });
+    expect(await sending).toBe(false); expect(calls).toHaveLength(0);
+  });
+});
 async function startSend(ft, calls, n) {
   const p = ft.sendFileChunked(fileOf(n), 'did:bob');
   await tick();

@@ -240,3 +240,35 @@ async def test_voice_message_honors_client_message_id(gateway):
     })
     evs = _audio_events(ws_b)
     assert evs and evs[0]["message_id"] == "client-chosen-id-123"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("room", [True, False])
+async def test_voice_note_audio_is_restored_in_local_history(store_gateway, room):
+    """A live voice note must remain playable when a room or DM is reopened."""
+    gateway = store_gateway
+    ws = _mock_ws()
+    await _register_full(gateway, ws, "did:key:zAlice")
+    thread = "room-audio-history" if room else "dm-audio-history"
+    if room:
+        gateway._local_rooms[thread] = {"members": {ws}, "messages": [], "history_mode": "none"}
+    else:
+        gateway._store.save_dm_thread(thread, "did:key:zBob", None, owner_webid="did:key:zAlice")
+    await gateway.process_command(ws, {
+        "cmd": "send_voice_message", "thread_id": thread, "message_id": "voice-history",
+        "audio_b64": _SMALL_AUDIO, "duration_ms": 1234,
+    })
+    ws.send.reset_mock()
+    await gateway._handle_get_local_history(ws, {"thread_id": thread})
+    history = next(json.loads(call.args[0]) for call in ws.send.call_args_list
+                   if json.loads(call.args[0]).get("type") == "local_history")
+    note = next(message for message in history["messages"] if message["message_id"] == "voice-history")
+    assert note["content_type"] == "audio"
+    assert note["audio_b64"] == _SMALL_AUDIO
+    assert note["duration_ms"] == 1234
+    stranger = _mock_ws()
+    await _register_full(gateway, stranger, "did:key:zStranger")
+    await gateway._handle_get_local_history(stranger, {"thread_id": thread})
+    private = next(json.loads(call.args[0]) for call in stranger.send.call_args_list
+                   if json.loads(call.args[0]).get("type") == "local_history")
+    assert private["messages"] == []

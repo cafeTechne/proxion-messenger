@@ -947,6 +947,12 @@ class RoomHandlerMixin:
                     # Still sealed: the browser shows its own plaintext copy or
                     # an undecryptable notice, never this ciphertext.
                     **({"e2e": True} if m.get("content_type") == "e2e" else {}),
+                    # Voice bytes are stored separately from text. Omitting
+                    # these fields turned a saved note into an empty text row
+                    # whenever its room or DM history was reopened.
+                    **({"content_type": "audio", "audio_b64": m.get("audio_b64", ""),
+                        "duration_ms": m.get("duration_ms", 0)}
+                       if m.get("content_type") == "audio" else {}),
                 }
                 for m in raw
             ]

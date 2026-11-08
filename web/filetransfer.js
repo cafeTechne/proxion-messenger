@@ -100,13 +100,18 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
     // the file and seals its key (e2e-secondary.js). The chunks then carry only
     // ciphertext and the offer only the sealed header; a throw aborts the send.
     async function sendFileChunked(file, toWebid, opts = {}) {
+        const current = opts.isCurrent || (() => true);
+        const aborted = () => { showToast(t('media.conversationChanged'), 'error'); return false; };
+        if (!current()) return aborted();
         const fileId = (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)).replace(/-/g, "").slice(0, 16);
         let buf = new Uint8Array(await file.arrayBuffer());
+        if (!current()) return aborted();
         let offer = {
             filename: file.name, mime_type: file.type || "application/octet-stream", size_bytes: buf.length,
         };
         if (opts.seal) {
             const sealed = await opts.seal(buf, { name: file.name, mime: file.type || "application/octet-stream", size: buf.length });
+            if (!current()) return aborted();
             if (!sealed) throw new Error("seal_failed");
             buf = sealed.ct;
             offer = { filename: SEALED_FILE_NAME, mime_type: SEALED_FILE_MIME, size_bytes: buf.length, ...sealed.hdr };
@@ -141,13 +146,13 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         };
         for (let seq = 0; seq < total; seq++) {
             while (!failure && seq - acked.size >= CHUNK_WINDOW) await waitForProgress();
-            if (failure) return fail();
+            if (failure || !current()) return fail();
             const slice = buf.subarray(seq * CHUNK_BYTES, (seq + 1) * CHUNK_BYTES);
             sendCmd("file_chunk", { to_webid: toWebid, file_id: fileId, seq, data: u8ToB64(slice) });
             _showTransferProgress(fileId, file.name, Math.round(((seq + 1) / total) * 100), "sending");
         }
         while (!failure && acked.size < total) await waitForProgress();
-        if (failure) return fail();
+        if (failure || !current()) return fail();
 
         // Every chunk is through; wait for the receiver to confirm the file.
         rec.stage = "complete";
@@ -158,7 +163,7 @@ export function createFileTransfer({ sendCmd, showToast, renderMessage, getActiv
         });
         sendCmd("file_complete", { to_webid: toWebid, file_id: fileId });
         const ok = await receiptP;
-        if (!ok) return fail();
+        if (!ok || !current()) return fail();
         _clearTransferProgress(fileId);
         delete _outgoingFiles[fileId];
         showToast(t('file.sent', { filename: file.name }));

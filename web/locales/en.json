@@ -1114,5 +1114,8 @@
   "friends.actionFailed": "Could not confirm this change. Refresh and retry.",
   "friends.requestChanged": "This request changed or was cancelled. Refresh to see its current state.",
   "friends.savedForDelivery": "Friend request saved. Waiting to deliver.",
-  "friends.requestHint": "Send a friend request. They can accept or decline it. You can also send a DM without being friends."
+  "friends.requestHint": "Send a friend request. They can accept or decline it. You can also send a DM without being friends.",
+  "media.conversationChanged": "The conversation or connection changed. Select the file or record the message again.",
+  "voiceMsg.readFailed": "Could not read the recording. Please record it again.",
+  "voiceMsg.recordFailed": "Could not start the recorder. Your microphone has been released."
 }

@@ -55,6 +55,48 @@ beforeEach(() => {
 
 const PRIVATE = 'http://169.254.169.254/';
 
+describe('own-pod attachment acknowledgement', () => {
+    const uploads = [
+        () => podUploadFile('room1', 'msg1', 'photo.png', new Blob(['image'], { type: 'image/png' })),
+        () => podUploadVoiceAudio('room1', 'msg1', new Blob(['audio'], { type: 'audio/webm' })),
+    ];
+    it.each([401, 403, 409, 413, 500, 503])('never returns an attachment URI after HTTP %s', async status => {
+        _session = makeSession(async () => ({ ok: false, status }));
+        for (const upload of uploads) expect(await upload()).toBeNull();
+    });
+    it('refuses redirects and acknowledges successful writes in the same account', async () => {
+        for (const upload of uploads) expect(await upload()).toMatch(/^https:\/\/me.pod.example\/proxion\/rooms\/room1\/files\//);
+        expect(_calls.every(call => call.opts.redirect === 'error')).toBe(true);
+    });
+    it.each(['logout', 'actor', 'root', 'session'])('discards acknowledgements after a %s change', async change => {
+        for (const upload of uploads) {
+            let finish;
+            _root = 'https://me.pod.example/';
+            _session = makeSession(() => new Promise(resolve => { finish = resolve; }));
+            const saving = upload();
+            if (change === 'logout') _session.info.isLoggedIn = false;
+            if (change === 'actor') _session.info.webId = 'https://other.example/#me';
+            if (change === 'root') _root = 'https://other.example/';
+            if (change === 'session') _session = makeSession();
+            finish({ ok: true, status: 201 });
+            expect(await saving).toBeNull();
+        }
+    });
+    it('rejects empty or dot-only filenames before fetching', async () => {
+        for (const filename of ['', '.', '..', null]) expect(await podUploadFile('room1', 'msg1', filename, new Blob())).toBeNull();
+        expect(_session.fetch).not.toHaveBeenCalled();
+    });
+    it('treats network failures as failed uploads', async () => {
+        _session = makeSession(async () => { throw new TypeError('offline'); });
+        for (const upload of uploads) expect(await upload()).toBeNull();
+    });
+    it('requires an authenticated actor before writing an own-pod copy', async () => {
+        _session.info.webId = undefined;
+        for (const upload of uploads) expect(await upload()).toBeNull();
+        expect(_session.fetch).not.toHaveBeenCalled();
+    });
+});
+
 describe('cross-pod *At helpers refuse a private-host target before fetching', () => {
     it('podReadRoomDescriptorAt returns null and issues no fetch', async () => {
         expect(await podReadRoomDescriptorAt(PRIVATE, 'room1')).toBe(null);

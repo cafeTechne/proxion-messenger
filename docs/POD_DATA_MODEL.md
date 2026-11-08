@@ -624,12 +624,20 @@ enumerable both by the container itself and by a companion index.
 
 ## Binary resources
 
-Attachments and voice notes are stored as ordinary files with their real content
-types, so any app or file browser can open them directly:
+The optional own-pod copies of gateway attachments and voice notes use ordinary
+files with their real content types. These legacy copy helpers are separate from
+delivery through the gateway:
 
 - Voice notes: `proxion/rooms/{roomId}/files/{messageId}.webm` (`audio/webm`)
 - File attachments: `proxion/rooms/{roomId}/files/{messageId}/{filename}`
 - Avatar: `proxion/profile/avatar.png`
+
+Attachment copy helpers return a URI only after a successful HTTP write in the
+same authenticated account and pod root. Rejected writes, redirects, and account
+changes return null. This acknowledgement does not verify readback or grant room
+participants access. The helpers neither upload into another owner's room nor
+provide browser/desktop pod-room transfers; those controls remain gated pending
+the shared upload, signed-reference, and authenticated-download implementation.
 
 ## Access control
 

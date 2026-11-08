@@ -1293,22 +1293,28 @@ export async function podReadReadState(threadId) {
 
 // --- Voice Audio ---
 
+// These are optional copies in OUR pod, not a transfer to a room owner's pod.
+// A failed write or an account change must never yield a usable-looking URI.
+async function _uploadOwnRoomAsset(root, fileUri, blob, contentType = blob.type || 'application/octet-stream') {
+    const session = solidSession, actor = session.info.webId;
+    if (!actor) return null;
+    try {
+        const response = await session.fetch(fileUri, {
+            method: 'PUT', redirect: 'error',
+            headers: { 'Content-Type': contentType }, body: blob,
+        });
+        return response?.ok && solidSession === session && session.info.isLoggedIn
+            && session.info.webId === actor && podStorageRoot() === root ? fileUri : null;
+    } catch { return null; }
+}
+
 export async function podUploadVoiceAudio(roomId, messageId, audioBlob) {
     const root = podStorageRoot();
     if (!root || !solidSession.info.isLoggedIn) return null;
-    if (!SAFE_ID_RE.test(roomId) || !SAFE_ID_RE.test(messageId)) return null;
+    if (typeof roomId !== 'string' || typeof messageId !== 'string' || !SAFE_ID_RE.test(roomId) || !SAFE_ID_RE.test(messageId)) return null;
     const fileUri = `${root}proxion/rooms/${roomId}/files/${messageId}.webm`;
-    try {
-        await solidSession.fetch(fileUri, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'audio/webm' },
-            body: audioBlob,
-        });
-        return fileUri;
-    } catch (err) {
-        console.warn('[pod] podUploadVoiceAudio failed:', err);
-        return null;
-    }
+    if (!audioBlob || typeof audioBlob.arrayBuffer !== 'function') return null;
+    return _uploadOwnRoomAsset(root, fileUri, audioBlob, 'audio/webm');
 }
 
 export async function podDeleteVoiceAudio(roomId, messageId) {
@@ -1330,20 +1336,12 @@ export async function podDeleteVoiceAudio(roomId, messageId) {
 export async function podUploadFile(roomId, messageId, filename, fileBlob) {
     const root = podStorageRoot();
     if (!root || !solidSession.info.isLoggedIn) return null;
-    if (!SAFE_ID_RE.test(roomId) || !SAFE_ID_RE.test(messageId)) return null;
+    if (typeof roomId !== 'string' || typeof messageId !== 'string' || !SAFE_ID_RE.test(roomId) || !SAFE_ID_RE.test(messageId)) return null;
+    if (typeof filename !== 'string' || !filename || !fileBlob || typeof fileBlob.arrayBuffer !== 'function') return null;
     const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+    if (safeName === '.' || safeName === '..') return null;
     const fileUri = `${root}proxion/rooms/${roomId}/files/${messageId}/${safeName}`;
-    try {
-        await solidSession.fetch(fileUri, {
-            method: 'PUT',
-            headers: { 'Content-Type': fileBlob.type || 'application/octet-stream' },
-            body: fileBlob,
-        });
-        return fileUri;
-    } catch (err) {
-        console.warn('[pod] podUploadFile failed:', err);
-        return null;
-    }
+    return _uploadOwnRoomAsset(root, fileUri, fileBlob);
 }
 
 // --- Scheduled Messages ---

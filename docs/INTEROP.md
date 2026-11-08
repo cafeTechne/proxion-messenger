@@ -213,3 +213,23 @@ queued requests. Unsent writes are discarded, and late acknowledgements cannot
 complete requests from a new connection. `web/gwpod.test.js` covers serial-server
 latency, FIFO ordering, overload, queue expiry, disconnect/account changes, and
 late responses. Room, DM, and call browser smokes exercise the shared transport.
+
+## Gateway file and voice-note recovery
+
+Gateway conversations retain their file-transfer and voice-note paths. Media
+preparation captures the original conversation, socket, and account. Changing
+any of them before dispatch cancels the pending send; an old file read or stopped
+recording cannot target the newly opened conversation. An active recording also
+releases its microphone after its context changes. Recorder startup and read
+failures are surfaced instead of sending empty audio.
+
+Gateway room and DM history now include saved voice-note audio, type, and
+duration, so notes remain playable after reload. Existing participant checks
+still protect those history responses. `web/smoke_media_context.mjs` exercises
+real file selection, delayed reads, microphone recording, conversation switching,
+and restored downloadable file bytes and playable audio. Backend voice-history
+tests also verify that nonparticipants cannot retrieve the restored notes.
+
+This does not enable browser/desktop pod-room attachments or voice notes. Their
+legacy own-pod copy helpers acknowledge only successful writes; a shared room
+transfer protocol remains required before those controls can be enabled.

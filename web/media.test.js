@@ -23,11 +23,46 @@ function make(over = {}) {
     getActiveView: () => (over.activeView === undefined ? { type: 'dm', id: 'cert-1' } : over.activeView),
     showToast: over.showToast ?? (() => {}),
     getVoiceState: () => voiceState,
+    getSessionId: over.getSessionId, canRecord: over.canRecord,
   });
   return { media, sent, voiceState };
 }
 
 describe('sendVoiceMessage', () => {
+  it.each(['conversation', 'socket', 'account', 'capability'])('does not send after a delayed read and a changed %s', change => {
+    const readers = [], showToast = vi.fn();
+    global.FileReader = class { readAsDataURL() { readers.push(this); } };
+    let session = 'one', allowed = true;
+    const options = { activeView: { type: 'dm', id: 'first' }, showToast, getSessionId: () => session, canRecord: () => allowed };
+    const { media, sent } = make(options);
+    media.state.mediaRecorder = { _sendOnStop: true };
+    media.state.durationMs = 3000;
+    media.sendVoiceMessage();
+    if (change === 'conversation') options.activeView.id = 'second';
+    if (change === 'socket') options.socket = { readyState: 1, send: vi.fn() };
+    if (change === 'account') session = 'two';
+    if (change === 'capability') allowed = false;
+    readers[0].result = 'data:audio/webm;base64,QUJD'; readers[0].onloadend();
+    expect(sent).toHaveLength(0);
+    expect(showToast).toHaveBeenCalledWith('media.conversationChanged', 'error');
+  });
+  it('keeps the stopped recording duration when another recording updates state', () => {
+    let reader;
+    global.FileReader = class { readAsDataURL() { reader = this; } };
+    const { media, sent } = make();
+    media.state.mediaRecorder = { _sendOnStop: true }; media.state.durationMs = 3000;
+    media.sendVoiceMessage(); media.state.durationMs = 9000;
+    reader.result = 'data:audio/webm;base64,QUJD'; reader.onloadend();
+    expect(sent[0].duration_ms).toBe(3000);
+  });
+  it('reports a failed audio read instead of sending an empty message', () => {
+    const showToast = vi.fn();
+    global.FileReader = class { readAsDataURL() { this.result = null; this.onloadend(); } };
+    const { media, sent } = make({ showToast });
+    media.state.mediaRecorder = { _sendOnStop: true }; media.sendVoiceMessage();
+    expect(sent).toHaveLength(0);
+    expect(showToast).toHaveBeenCalledWith('voiceMsg.readFailed', 'error');
+  });
   it('does nothing unless a recording is pending', () => {
     const { media, sent } = make();
     media.state.mediaRecorder = { _sendOnStop: false };
@@ -76,6 +111,45 @@ describe('mic press and release', () => {
     global.clearInterval = vi.fn();
     return { track, grant: async () => { resolveMic(stream); await Promise.resolve(); await Promise.resolve(); } };
   }
+
+  it('releases the microphone if the user changes conversation during the permission prompt', async () => {
+    const { track, grant } = rig(), showToast = vi.fn();
+    const options = { activeView: { type: 'dm', id: 'first' }, showToast };
+    const { media, sent } = make(options);
+    media.pressMic(); options.activeView = { type: 'dm', id: 'second' };
+    await grant();
+    expect(track.stop).toHaveBeenCalled();
+    expect(media.state.mediaRecorder).toBeNull(); expect(sent).toHaveLength(0);
+    expect(showToast).toHaveBeenCalledWith('media.conversationChanged', 'error');
+  });
+  it('does not move a stopped recording into a different conversation', async () => {
+    const { track, grant } = rig();
+    const options = { activeView: { type: 'dm', id: 'first' } };
+    const { media, sent } = make(options);
+    media.pressMic(); await grant(); media.state.recordingStartedAt = Date.now() - 2000;
+    options.activeView = { type: 'dm', id: 'second' }; media.stopVoiceRecording(true);
+    expect(track.stop).toHaveBeenCalled(); expect(sent).toHaveLength(0);
+  });
+  it('automatically releases an active microphone after the account changes', async () => {
+    const { track, grant } = rig(); let session = 'first';
+    const { media, sent } = make({ getSessionId: () => session });
+    media.pressMic(); await grant(); session = 'second';
+    global.setInterval.mock.calls[0][0]();
+    expect(track.stop).toHaveBeenCalled(); expect(sent).toHaveLength(0);
+    expect(media.state.mediaRecorder.state).toBe('inactive');
+  });
+  it('does not request a microphone for a conversation without voice-message support', () => {
+    rig(); const request = vi.spyOn(navigator.mediaDevices, 'getUserMedia');
+    const { media } = make({ canRecord: () => false }); media.pressMic();
+    expect(request).not.toHaveBeenCalled();
+  });
+  it('releases an acquired microphone when recorder construction fails', async () => {
+    const { track, grant } = rig(), showToast = vi.fn();
+    global.MediaRecorder = class { constructor() { throw new Error('unsupported recorder'); } };
+    const { media } = make({ showToast }); media.pressMic(); await grant();
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('voiceMsg.recordFailed', 'error'));
+    expect(track.stop).toHaveBeenCalled();
+  });
 
   it('a release before the mic opens still stops (and sends) once it does', async () => {
     const { track, grant } = rig();
