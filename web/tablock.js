@@ -44,6 +44,8 @@ export function createTabLock({
     let stealing = false;
     let channel = null;
     let handoffSink = null;
+    let inviteSink = null;
+    const inviteWaiters = new Map();
     const handoffStash = [];
     let lastRequester = null;
     const unwatch = [];
@@ -89,6 +91,16 @@ export function createTabLock({
     function _onMessage(ev) {
         const msg = ev && ev.data;
         if (!msg || typeof msg !== 'object' || msg.from === tabId) return;
+        if (msg.type === 'room-invite' && leader && inviteSink && typeof msg.code === 'string' && msg.code.length <= 4096) {
+            Promise.resolve().then(() => inviteSink(msg.code)).then(accepted => {
+                if (accepted === true && leader) channel?.postMessage({ type: 'room-invite-accepted', from: tabId, to: msg.from, request: msg.request });
+            }).catch(() => {});
+            return;
+        }
+        if (msg.type === 'room-invite-accepted' && msg.to === tabId) {
+            inviteWaiters.get(msg.request)?.(true);
+            return;
+        }
         if (msg.type === 'release') {
             if (!leader) return;
             lastRequester = msg.from || null;
@@ -197,6 +209,19 @@ export function createTabLock({
         claim,
         takeover,
         tryClaimIfFree,
+        onInvite(sink) { inviteSink = sink; },
+        forwardInvite(code) {
+            if (!supported || leader || typeof code !== 'string' || code.length > 4096) return Promise.resolve(false);
+            _openChannel();
+            if (!channel) return Promise.resolve(false);
+            return new Promise(resolve => {
+                const request = _randomId();
+                const finish = accepted => { clearTimeout(timer); inviteWaiters.delete(request); resolve(accepted); };
+                const timer = setTimeout(() => finish(false), 1500);
+                inviteWaiters.set(request, finish);
+                try { channel.postMessage({ type: 'room-invite', from: tabId, request, code }); } catch { finish(false); }
+            });
+        },
         // hook(): stop sending and return (or resolve to) the commands still
         // queued for the gateway.
         onStepDown(hook) { stepDownHook = hook; },

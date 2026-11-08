@@ -16,7 +16,7 @@ export function createRoomApprovalStore({ storage, webId, root }) {
             && /^[\w~-][\w.~-]{0,255}$/.test(row.url.slice(inbox.length))
             && ['join_request', 'join_approved', 'join_declined'].includes(row.kind)
             && /^[\w-]{1,128}$/.test(row.roomId || '')
-            && ['retry', 'cleanup'].includes(row.state)
+            && ['pending', 'retry', 'cleanup'].includes(row.state)
             && typeof row.fingerprint === 'string' && row.fingerprint.length <= 4096;
     }
     try {
@@ -47,20 +47,23 @@ export function createRoomApprovalStore({ storage, webId, root }) {
 }
 
 /** A persistent notice for this account; rendering never interprets inbox HTML. */
-export function createRoomApprovalNotice({ element, translate }) {
+export function createRoomApprovalNotice({ element, translate, review = () => {} }) {
     let generation = 0;
     return function show(rows, retry) {
         if (!element) return;
         const current = ++generation;
         const requests = rows.filter(row => row.kind === 'join_request');
+        const pending = requests.some(row => row.state === 'pending');
         element.classList.toggle('visible', requests.length > 0);
         const text = element.querySelector('[data-room-request-status]');
         const button = element.querySelector('button');
         if (text) text.textContent = requests.length ? translate(
-            requests.every(row => row.state === 'cleanup') ? 'join.ownerCleanup' : 'join.ownerRetry', { count: requests.length }) : '';
+            pending ? 'join.ownerPending' : requests.every(row => row.state === 'cleanup') ? 'join.ownerCleanup' : 'join.ownerRetry', { count: requests.length }) : '';
         if (!button) return;
         button.disabled = false;
+        button.textContent = translate(pending ? 'join.reviewRequests' : 'conn.retryNow', { count: requests.length });
         button.onclick = requests.length && retry ? async () => {
+            if (pending) review();
             button.disabled = true;
             try { await retry(); } catch { /* Retained requests remain retryable. */ }
             finally { if (generation === current) button.disabled = false; }

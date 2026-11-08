@@ -84,6 +84,23 @@ export function createWebJoin({
     const _inFlight = new Map();
     const _probing = new Map();
     const _done = new Set();
+    let _inboxWork = null;
+
+    async function ensureListening() {
+        if (_unsub || _inboxWork) return _inboxWork;
+        const current = context();
+        const work = (async () => {
+            let inbox;
+            try { inbox = await pod.podEnsureJoinInbox(); } catch { return null; }
+            if (!current()) return null;
+            if (inbox && notify?.watchResource) {
+                try { _unsub = notify.watchResource(inbox, () => { if (current()) drainOnce().catch(() => {}); }); } catch { /* polling remains active */ }
+            }
+            return inbox;
+        })();
+        _inboxWork = work;
+        try { return await work; } finally { if (_inboxWork === work) _inboxWork = null; }
+    }
 
     // Joiner: ask an owner to let us into a room.
     async function requestJoin(roomId, ownerWebId) {
@@ -146,6 +163,10 @@ export function createWebJoin({
         // message so a later drain can retry, rather than silently consuming a
         // request the owner never got to act on.
         let consumed = _status.get(url, msg)?.state === 'cleanup';
+        if (!consumed && msg?.kind === 'join_request') {
+            _status.put(url, msg, 'pending');
+            publish();
+        }
         try {
             if (!consumed) {
                 consumed = true;
@@ -218,18 +239,14 @@ export function createWebJoin({
         _status = statusStore();
         publish();
         const current = context();
-        const inbox = await pod.podEnsureJoinInbox();
+        // Arm recovery before inbox creation: an offline/failed first request
+        // must not leave this account deaf until a full page reload.
+        _retryTimer = setTimer(() => { if (current()) {
+            ensureListening().catch(() => {});
+            drainOnce().catch(() => {});
+        } }, pollMs);
+        const inbox = await ensureListening();
         if (!current()) return null;
-        if (inbox && notify && notify.watchResource && !_unsub) {
-            _unsub = notify.watchResource(inbox, () => { if (current()) drainOnce().catch(() => {}); });
-        }
-        // Even a live subscription only reports changes. A retained approval
-        // needs another drain after a temporary failure, without waiting for
-        // somebody else to send a new join. Start before the initial drain,
-        // which can wait on an owner prompt for an arbitrary amount of time.
-        if (inbox && _retryTimer === null) {
-            _retryTimer = setTimer(() => { if (current()) drainOnce().catch(() => {}); }, pollMs);
-        }
         await drainOnce();
         return inbox;
     }
@@ -240,10 +257,17 @@ export function createWebJoin({
         _inFlight.clear();
         _probing.clear();
         _done.clear();
+        _inboxWork = null;
         try { onStatusChange([], null); } catch { /* optional status UI */ }
         if (_retryTimer !== null) { clearTimer(_retryTimer); _retryTimer = null; }
         if (_unsub) { try { _unsub(); } catch { /* ignore */ } _unsub = null; }
     }
 
-    return { requestJoin, sendApproval, sendDecline, drainOnce, start, stop };
+    function resume() {
+        const current = context();
+        if (!current()) return start();
+        ensureListening().catch(() => {});
+        return drainOnce();
+    }
+    return { requestJoin, sendApproval, sendDecline, drainOnce, start, stop, resume };
 }

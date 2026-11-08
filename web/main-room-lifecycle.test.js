@@ -46,11 +46,12 @@ it('clears old pod-room UI and cached previews when the connected account change
 
 it.each([false, true])('cancels an old account prompt without dismissing a replacement (replaced=%s)', async replaced => {
     let current = true, tick, cancel;
-    const ok = { onclick: null }, modal = { style: { display: 'flex' } };
+    const ok = { onclick: null }, modal = { style: { display: 'none' } };
     const cancelButton = { click: vi.fn(() => { modal.style.display = 'none'; cancel(); }) };
     const deps = {
         document: { getElementById: id => ({ 'confirm-ok': ok, 'confirm-modal': modal, 'confirm-cancel': cancelButton })[id] },
-        showConfirm: (_message, yes, no) => { ok.onclick = yes; cancel = no; },
+        showConfirm: (_message, yes, no) => { modal.style.display = 'flex'; ok.onclick = yes; cancel = no; },
+        _activeJoinReview: null,
         setInterval: fn => { tick = fn; return 1; }, clearInterval: vi.fn(),
     };
     const app = handlers(['_askJoinOnce'], deps);
@@ -89,7 +90,7 @@ function ownerHarness() {
         webRoomSync: { untrack: vi.fn() },
         _local_rooms: {},
         window: { proxionWebJoin: { sendApproval: vi.fn(async () => true), sendDecline: vi.fn(async () => true) } },
-        _queueJoinPrompt: (task) => task(),
+        _queueJoinPrompt: vi.fn(task => task()),
         _joinRequesterLabel: vi.fn(async () => 'Joiner'),
         _askJoinOnce: vi.fn(async () => 'yes'),
         t: (key) => key,
@@ -161,6 +162,7 @@ describe('browser room owner approval', () => {
     it('repairs grants for an existing member before resending approval', async () => {
         const h = ownerHarness();
         await h.deps.podWriteRoomDescriptor(withMembers(h.persisted(), [{ webid: JOINER, role: 'member' }]));
+        h.deps._queueJoinPrompt.mockImplementation(() => new Promise(() => {}));
 
         expect(await h._onWebJoinRequest({ room_id: ROOM, from_webid: JOINER })).toBe(true);
         expect(h.deps._askJoinOnce).not.toHaveBeenCalled();
@@ -384,4 +386,11 @@ describe('restored room sidebar and leave', () => {
         expect(deps.webRoomSync.untrack).toHaveBeenCalledOnce();
         expect(await _webLeaveRoom(ROOM)).toBe(false);
     });
+});
+
+it('retains a join request instead of replacing an unrelated confirmation dialog', async () => {
+    const showConfirm = vi.fn();
+    const app = handlers(['_askJoinOnce'], { document: { getElementById: () => ({ style: { display: 'flex' } }) }, showConfirm });
+    expect(await app._askJoinOnce('Join?', {}, () => true)).toBe(null);
+    expect(showConfirm).not.toHaveBeenCalled();
 });

@@ -40,16 +40,6 @@ async function cleanup() {
   try { if (css) css.stop(); } catch { /**/ }
 }
 
-// Kick a join-inbox drain (not awaited: a drain waits on an open prompt) and
-// poll `check` until it holds.
-async function drainUntil(page, check, arg, tries = 16) {
-  for (let i = 0; i < tries; i++) {
-    try { await page.evaluate(() => { if (window.proxionWebJoin) window.proxionWebJoin.drainOnce(); }); } catch { /**/ }
-    if (await page.evaluate(check, arg).catch(() => false)) return true;
-    await sleep(1500);
-  }
-  return false;
-}
 const promptOpen = () => { const m = document.getElementById('confirm-modal'); return !!m && getComputedStyle(m).display !== 'none'; };
 const hasRoom = (id) => !!document.getElementById('nav-' + id);
 const seesText = (txt) => Array.from(document.querySelectorAll('#message-feed .message')).some((el) => (el.textContent || '').includes(txt));
@@ -155,7 +145,23 @@ try {
 
   // ── Two join requests at once ──
   step = 'requests';
-  const sentB = await requestJoin(pageB, invite);
+  await pageA.evaluate(async () => { window.proxionWebJoin.stop(); await window.proxionWebJoin.resume(); });
+  const invitationTab = await pageB.browserContext().newPage();
+  invitationTab.on('pageerror', error => errs.push('invite: ' + error.message));
+  await invitationTab.goto(invite, { waitUntil: 'load' });
+  await pageB.waitForFunction(code => document.getElementById('join-room-input')?.value === code
+    && document.getElementById('join-room-modal')?.style.display === 'flex', { timeout: 20000, polling: 500 }, new URL(invite).searchParams.get('join')).catch(async error => {
+      const snapshot = async () => ({ url: location.href, notice: document.getElementById('tab-notice')?.innerText,
+        modal: document.getElementById('join-room-modal')?.style.display, input: document.getElementById('join-room-input')?.value,
+        locks: await navigator.locks?.query(), dmReady: !!window.proxionWebDm });
+      throw Error(error.message + JSON.stringify({ active: await pageB.evaluate(snapshot), invite: await invitationTab.evaluate(snapshot), errs }));
+    });
+  await invitationTab.waitForFunction(() => document.getElementById('tab-notice-body')?.textContent.includes('without signing in again'), { timeout: 15000, polling: 500 });
+  if (await invitationTab.evaluate(() => !!window.proxionWebDm)) throw Error('Invite tab started a second active session');
+  await invitationTab.close();
+  await pageB.click('#join-room-submit-btn');
+  const sentB = await waitFor(pageB, () => document.getElementById('join-pending-banner')?.classList.contains('visible'), null, 15000);
+  ok('an invite in another tab opens in the existing signed-in tab without another login');
   const sentC = await requestJoin(pageC, invite);
   if (sentB && sentC) ok('both joiners sent a request (pending banner shown)');
   else fail(`request banners: bob=${sentB} carol=${sentC}`);
@@ -167,12 +173,12 @@ try {
 
   step = 'prompts';
   const prompts = [];
-  if (await drainUntil(pageA, promptOpen)) {
+  if (await waitFor(pageA, promptOpen, null, 40000)) {
     prompts.push(await pageA.$eval('#confirm-msg', (el) => el.textContent));
     await pageA.click('#confirm-ok');
   }
   await sleep(800);
-  if (await drainUntil(pageA, promptOpen)) {
+  if (await waitFor(pageA, promptOpen, null, 40000)) {
     prompts.push(await pageA.$eval('#confirm-msg', (el) => el.textContent));
     await pageA.click('#confirm-cancel');
   }
@@ -184,12 +190,12 @@ try {
   const [joiner, declined] = firstIsBob ? [pageB, pageC] : [pageC, pageB];
 
   step = 'decline';
-  const cleared = await drainUntil(declined, () => !document.getElementById('join-pending-banner')?.classList.contains('visible'));
+  const cleared = await waitFor(declined, () => !document.getElementById('join-pending-banner')?.classList.contains('visible'), null, 40000);
   if (cleared) ok('the decline reached the declined joiner (banner cleared)');
   else fail('the declined joiner kept waiting');
 
   step = 'joined';
-  if (await drainUntil(joiner, hasRoom, roomId)) ok('the approved joiner got the room');
+  if (await waitFor(joiner, hasRoom, roomId, 40000)) ok('the approved joiner got the room without a manual inbox refresh');
   else fail('the room never appeared for the approved joiner');
 
   step = 'joiner-reload';
@@ -310,6 +316,45 @@ try {
   else fail('the Members panel did not list the joiner');
   await sleep(300);
   if (await pageA.evaluate(() => !!document.querySelector('.toast--error'))) fail('opening Members showed an unrelated unsupported-action error');
+
+  step = 'member-dm';
+  const peerWebId = firstIsBob ? bob.webId : carol.webId;
+  await pageA.evaluate(webid => document.querySelector(`#members-list .member-item[data-webid="${CSS.escape(webid)}"]`).click(), peerWebId);
+  await pageA.waitForSelector('#profile-card.show', { timeout: 10000 });
+  await pageA.click('#profile-dm-btn');
+  await waitFor(pageA, webid => !!document.getElementById('nav-' + webid), peerWebId, 10000);
+  const dmText = 'member-dm-' + Date.now();
+  await send(pageA, dmText);
+  if (!(await waitFor(joiner, webid => !!document.getElementById('nav-' + webid), alice.webId, 40000))) throw Error('Member DM never arrived in recipient sidebar');
+  await joiner.evaluate(webid => document.getElementById('nav-' + webid).click(), alice.webId);
+  if (!(await waitFor(joiner, seesText, dmText, 15000))) throw Error('Member DM did not render');
+  await send(joiner, dmText + '-reply');
+  if (!(await waitFor(pageA, seesText, dmText + '-reply', 40000))) throw Error('Member DM reply did not arrive');
+  await reload(pageA);
+  if (!(await waitFor(pageA, webid => !!document.getElementById('nav-' + webid), peerWebId, 20000))) throw Error('Member contact was lost on reload');
+  await pageA.evaluate(webid => document.getElementById('nav-' + webid).click(), peerWebId);
+  if (!(await waitFor(pageA, seesText, dmText, 15000))) throw Error('Member DM history was lost on reload');
+  ok('Send DM from a room member opens a real conversation, receives replies live and survives reload');
+  await openRoom(pageA, roomId); await openRoom(joiner, roomId);
+
+  step = 'existing-member-recovery';
+  // Reproduce the reported split: the owner still lists this member, but the
+  // member's own durable room registration is absent on a fresh load.
+  await joiner.evaluate(async roomId => {
+    const pod = await import('./pod.js');
+    const records = await pod.podReadJoinedRooms();
+    if (!(await pod.podWriteJoinedRooms(records.filter(rec => rec.roomId !== roomId)))) throw Error('Could not prepare missing room registration');
+    for (const key of Object.keys(localStorage)) if (key.startsWith('proxion_joined_rooms:')) localStorage.removeItem(key);
+  }, roomId);
+  await reload(joiner);
+  await sleep(1500);
+  if (await joiner.evaluate(hasRoom, roomId)) throw Error('Missing-registration fixture still shows the room');
+  // Auto-approval can settle before the transient pending banner is observed.
+  await requestJoin(joiner, invite);
+  if (!(await waitFor(joiner, hasRoom, roomId, 40000))) throw Error('Existing member room registration was not restored');
+  if (await pageA.evaluate(promptOpen)) throw Error('Existing member recovery asked the owner to approve again');
+  ok('an existing member with a missing room registration restores it from the invite without another approval');
+  await openRoom(joiner, roomId);
 
   step = 'leave';
   await joiner.evaluate(() => document.getElementById('leave-room-btn')?.click());

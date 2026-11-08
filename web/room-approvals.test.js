@@ -121,3 +121,28 @@ describe('owner request notice', () => {
         expect(text.textContent).toBe('join.ownerCleanup:1');
     });
 });
+
+it('publishes and persists pending requests before an owner answers the prompt', async () => {
+    const saved = storage(); let answer;
+    const h = client(saved, { handle: () => new Promise(resolve => { answer = resolve; }) });
+    const draining = h.join.drainOnce();
+    await vi.waitFor(() => expect(h.onStatusChange).toHaveBeenCalledWith(expect.arrayContaining([
+        expect.objectContaining({ kind: 'join_request', state: 'pending' }),
+    ]), expect.any(Function)));
+    expect(createRoomApprovalStore({ storage: saved, webId: OWNER, root: ROOT }).list()[0].state).toBe('pending');
+    expect(h.io.podDeleteJoin).not.toHaveBeenCalled();
+    answer(false); await draining;
+    expect(h.onStatusChange.mock.calls.at(-1)[0][0].state).toBe('retry');
+});
+
+it('offers Review while a request is waiting for an owner decision', async () => {
+    const text = { textContent: '' }, button = { disabled: false }, review = vi.fn(), retry = vi.fn(async () => {});
+    const element = { classList: { toggle: vi.fn() }, querySelector: selector => selector === 'button' ? button : text };
+    const show = createRoomApprovalNotice({ element, translate: key => key, review });
+    show([{ kind: 'join_request', state: 'pending' }], retry);
+    expect(text.textContent).toBe('join.ownerPending');
+    expect(button.textContent).toBe('join.reviewRequests');
+    await button.onclick();
+    expect(review).toHaveBeenCalledOnce(); expect(retry).toHaveBeenCalledOnce();
+    expect(button.disabled).toBe(false);
+});

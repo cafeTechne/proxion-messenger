@@ -287,3 +287,23 @@ describe('tab notice', () => {
         expect(btn.disabled).toBe(true);
     });
 });
+
+describe('room invite handoff', () => {
+    it('delivers an invite to the active tab without moving its lock or handing off ratchets', async () => {
+        const locks = makeLockManager(), bus = makeBus();
+        const leader = tab(locks, bus), follower = tab(locks, bus);
+        const review = vi.fn(() => true), stepDown = vi.fn();
+        leader.onInvite(review); leader.onStepDown(stepDown);
+        await leader.claim(); follower.claim(); await tick(20);
+        expect(await follower.forwardInvite('room~https%3A%2F%2Fowner.example%2F%23me')).toBe(true);
+        expect(review).toHaveBeenCalledOnce(); expect(leader.isLeader()).toBe(true);
+        expect(follower.isLeader()).toBe(false); expect(stepDown).not.toHaveBeenCalled();
+    });
+    it('keeps takeover available if the active tab cannot accept the invite', async () => {
+        const locks = makeLockManager(), bus = makeBus();
+        const leader = tab(locks, bus), follower = tab(locks, bus);
+        leader.onInvite(() => false); await leader.claim(); follower.claim(); await tick(20);
+        expect(await follower.forwardInvite('room~https://owner/#me')).toBe(false);
+        expect(leader.isLeader()).toBe(true);
+    });
+});

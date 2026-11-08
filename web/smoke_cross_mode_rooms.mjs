@@ -333,6 +333,7 @@ try {
   cdp.on('Network.webSocketFrameSent', (e) => {
     try {
       const m = JSON.parse(e.response.payloadData);
+      if (step.endsWith('-deletes') && ['delete_room', 'pod_room_unregister'].includes(m.cmd)) deleteOps.push('WS ' + JSON.stringify(m));
       if (m.cmd === 'pod_fetch' && m.method === 'PATCH') patchReqs.set(m.req_id, m.url);
       if (m.cmd === 'pod_fetch' && m.method === 'HEAD' && m.url.endsWith('/members.jsonld')) memberReqs.set(m.req_id, m.url);
       if (m.cmd === 'pod_fetch' && /\/(members\.jsonld|joined-rooms\.json(?:ld)?)$/.test(m.url)) accessReqs.set(m.req_id, { method: m.method, url: m.url });
@@ -392,10 +393,12 @@ try {
   else fail('no pending join on Alice\'s side');
   if (await drainUntil(pageB, drainWeb, isPrompted)) { await pageB.click('#confirm-ok'); ok('Bob was asked and approved'); }
   else fail('Bob was never prompted');
-  if (!(await waitFor(pageB, () => document.getElementById('room-approval-status')?.classList.contains('visible'), undefined, 20000))) throw new Error('owner approval failure has no persistent retry status');
+  const approvalFailed = () => document.getElementById('room-approval-status')?.classList.contains('visible')
+    && document.querySelector('[data-room-request-status]')?.textContent.includes('need attention');
+  if (!(await waitFor(pageB, approvalFailed, undefined, 20000))) throw new Error('owner approval failure has no persistent retry status');
   await pageB.reload({ waitUntil: 'load', timeout: 30000 });
   await pageB.evaluate(() => { const modal = document.getElementById('onboarding-modal'); if (modal) modal.style.display = 'none'; });
-  if (!(await waitFor(pageB, () => document.getElementById('room-approval-status')?.classList.contains('visible'), undefined, 30000))) throw new Error('owner retry status was lost on reload');
+  if (!(await waitFor(pageB, approvalFailed, undefined, 30000))) throw new Error('owner retry status was lost on reload');
   blockApproval = false;
   await pageB.click('#room-approval-status button');
   if (await drainUntil(pageA, drainDesk, hasRoom, roomB)) ok('the room appears in Alice\'s desktop sidebar');
@@ -659,7 +662,14 @@ try {
   ]) {
     step = flow.label + '-deletes';
     await requestJoin(flow.peerPage, flow.invite);
-    if (!(await drainUntil(flow.ownerPage, flow.ownerDrain, isPrompted))) throw new Error('no rejoin approval prompt');
+    if (!(await drainUntil(flow.ownerPage, flow.ownerDrain, isPrompted))) {
+      const snapshot = () => ({ pending: document.getElementById('join-pending-banner')?.className,
+        joinError: document.getElementById('join-room-error')?.textContent, status: document.getElementById('room-approval-status')?.innerText,
+        confirm: document.getElementById('confirm-modal')?.innerText, rooms: window.proxionCrossRooms?.list().map(rec => ({ id: rec.roomId, owned: rec.owned })) });
+      const session = await makeAuthSession(flow.owner);
+      const descriptor = await (await session.fetch(`${flow.owner.storageRoot}rooms/${flow.id}/room.json`)).text();
+      throw new Error('no rejoin approval prompt: ' + JSON.stringify({ owner: await flow.ownerPage.evaluate(snapshot), peer: await flow.peerPage.evaluate(snapshot), descriptor, errs }));
+    }
     await flow.ownerPage.click('#confirm-ok');
     if (!(await drainUntil(flow.peerPage, flow.peerDrain, hasRoom, flow.id))) throw new Error('rejoin not restored');
     await openRoom(flow.peerPage, flow.id);
@@ -668,13 +678,17 @@ try {
     await flow.ownerPage.click('#room-options-btn');
     await flow.ownerPage.waitForSelector('#delete-room-btn', { visible: true, timeout: 5000 });
     await flow.ownerPage.click('#delete-room-btn');
-    await flow.ownerPage.waitForFunction(isPrompted, { timeout: 5000 });
+    await flow.ownerPage.waitForFunction(() => document.getElementById('confirm-modal')?.style.display === 'flex'
+      && document.getElementById('confirm-ok')?.textContent === 'Delete room', { timeout: 5000, polling: 500 });
     await flow.ownerPage.click('#confirm-ok');
     if (!(await waitFor(flow.ownerPage, id => !document.getElementById('nav-' + id), flow.id, 30000))) {
       const session = await makeAuthSession(flow.owner);
       const descriptor = await (await session.fetch(`${flow.owner.storageRoot}rooms/${flow.id}/room.json`)).text();
       const toast = await flow.ownerPage.evaluate(() => document.querySelector('#toast-container')?.innerText || document.querySelector('.toast')?.innerText || '');
-      throw new Error('owner deletion did not finish: ' + toast + '\n' + descriptor + '\n' + deleteOps.slice(-35).join('\n'));
+      const ui = await flow.ownerPage.evaluate(() => ({ heading: document.getElementById('chat-header-name')?.textContent,
+        confirmation: document.getElementById('confirm-title')?.textContent,
+        podRooms: window.proxionCrossRooms?.list().map(rec => ({ id: rec.roomId, owned: rec.owned })) }));
+      throw new Error('owner deletion did not finish: ' + toast + '\n' + JSON.stringify(ui) + '\n' + descriptor + '\n' + deleteOps.slice(-35).join('\n'));
     }
     if (!(await removedShown(flow.peerPage, flow.id))) throw new Error('idle participant still lists deleted room');
     const peerSession = await makeAuthSession(flow.peer);

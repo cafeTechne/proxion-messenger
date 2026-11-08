@@ -36,6 +36,7 @@ function make(over = {}) {
     getUserPresence: () => userPresence,
     getMessageMap: () => messageMap,
     openContactByDid: over.openContactByDid,
+    openDirectMessage: over.openDirectMessage,
   });
   return { profile, sent, userPresence, messageMap };
 }
@@ -73,6 +74,15 @@ describe('showProfileCard / hideProfileCard', () => {
 });
 
 describe('profileCardOpenDM', () => {
+  it('opens a browser member DM through its WebID path without sending resolve_did', () => {
+    const openDirectMessage = vi.fn(() => true);
+    const { profile, sent } = make({ openDirectMessage });
+    profile.state.profileCardActive = 'https://bob.example/profile/card#me';
+    profile.profileCardOpenDM();
+    expect(openDirectMessage).toHaveBeenCalledWith('https://bob.example/profile/card#me');
+    expect(sent).toEqual([]);
+    expect(profile.state.profileCardActive).toBe(null);
+  });
   it('clicks an existing DM entry when present', () => {
     const click = vi.fn();
     const { profile } = make();

@@ -10,7 +10,7 @@
 import { t } from './i18n.js';
 import { webidColor, timeAgo, escHtml, avatarInitial, dmFallbackName, gatewayUrl } from './util.js';
 
-export function createProfile({ getSocket, showToast, getUserPresence, getMessageMap, isBlocked, isSelf, isContact, openContactByDid }) {
+export function createProfile({ getSocket, showToast, getUserPresence, getMessageMap, isBlocked, isSelf, isContact, openContactByDid, openDirectMessage }) {
     const state = { profileCardActive: null };
 
     function handlePresenceUpdate(event) {
@@ -107,6 +107,7 @@ export function createProfile({ getSocket, showToast, getUserPresence, getMessag
         const webid = state.profileCardActive;
         if (!webid) return;
         hideProfileCard();
+        if (openDirectMessage?.(webid)) return;
 
         // A friend's chat is their contact thread; a second thread keyed by their
         // id would split the conversation.

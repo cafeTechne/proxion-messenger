@@ -47,6 +47,20 @@ connected to, with the gateway making the pod requests on its behalf
   disappearing and scheduled messages in these threads. One desktop device per
   WebID receives them: the one that signed in last.
 
+In the browser, use **Send DM** from a room member's profile or add their Solid
+WebID as a contact. Both entry points use the same pod-backed DM conversation;
+the saved contact and local message history survive reload. Saved browser
+contacts do not imply a mutually accepted friendship; that browser workflow is
+tracked separately in the project plan.
+
+Room owners see a persistent notice while join requests await a decision.
+Requests retry after temporary inbox failures and listening resumes after
+sign-in or when the app regains focus. Opening an invitation in a second tab
+forwards it for review in the already signed-in browser tab when available;
+the second tab keeps its messaging session inactive. Otherwise **Use here**
+remains available. An existing member can reopen an invite to repair their
+room registration without requiring a second owner decision.
+
 Rooms shared across the two builds are pod rooms: a Long Chat in the owner's pod
 (below). Gateway rooms stay desktop only. Members can edit and withdraw their own
 messages, and owners can withdraw any message, using signed append-only change

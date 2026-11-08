@@ -199,3 +199,33 @@ describe('createWebJoin', () => {
         join.stop();
     });
 });
+
+describe('join listener recovery without reload', () => {
+    it('keeps polling after inbox creation fails and subscribes when it recovers', async () => {
+        const h = harness();
+        const setTimer = vi.fn(() => 9), clearTimer = vi.fn(), onJoinRequest = vi.fn(async () => true);
+        h.pod.podEnsureJoinInbox.mockRejectedValueOnce(new TypeError('offline'));
+        const join = createWebJoin({ pod: h.pod, notify: h.notify, getSelfWebId: () => 'https://me/#me',
+            getSelfPodRoot: () => 'https://me/', peerPodRoot: () => 'https://peer/', onJoinRequest, setTimer, clearTimer });
+        await join.start();
+        expect(setTimer).toHaveBeenCalledOnce();
+        h.pod.podReadJoins.mockResolvedValue([{ url: 'later', msg: { kind: 'join_request', room_id: 'r' } }]);
+        setTimer.mock.calls[0][0]();
+        await vi.waitFor(() => expect(onJoinRequest).toHaveBeenCalledOnce());
+        expect(h.notify.watchResource).toHaveBeenCalledOnce();
+        join.stop(); expect(clearTimer).toHaveBeenCalledWith(9);
+    });
+    it('rearms a stopped listener against the current sign-in session', async () => {
+        const h = harness(); let session = 1;
+        const setTimer = vi.fn(() => 10), clearTimer = vi.fn();
+        const join = createWebJoin({ pod: h.pod, notify: h.notify, getSelfWebId: () => 'https://me/#me',
+            getSelfPodRoot: () => 'https://me/', getSessionId: () => session, peerPodRoot: () => 'https://peer/', setTimer, clearTimer });
+        await join.start(); join.stop(); session++;
+        await join.resume();
+        expect(setTimer).toHaveBeenCalledTimes(2);
+        expect(h.notify.watchResource).toHaveBeenCalledTimes(2);
+        await join.resume();
+        expect(setTimer).toHaveBeenCalledTimes(2);
+        join.stop();
+    });
+});

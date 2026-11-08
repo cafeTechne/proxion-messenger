@@ -759,6 +759,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             isContact: (webid) => !!peerDidToCertId[webid],
             // createView runs later; this is only called from a click.
             openContactByDid: (did) => openContactByDid(did),
+            openDirectMessage: (webid) => _openDirectMessage(webid),
         });
         // R66: optimistic-send failure tracking (mark unconfirmed messages failed + retry).
         // Browser build: the pod session and network state (podhealth.js), set
@@ -985,6 +986,17 @@ import { createRoomApprovalNotice } from './room-approvals.js';
         // One active tab per browser profile (tablock.js): only the leader
         // connects and runs the DM ratchet, or two tabs would fork it.
         const tabLock = createTabLock();
+        let _forwardedRoomInvite = null;
+        tabLock.onInvite(code => {
+            if (transport.mode !== 'web' || !solidSession.info.isLoggedIn || socket?.readyState !== WebSocket.OPEN || !parseInvite(code)) return false;
+            const input = document.getElementById('join-room-input');
+            const modal = document.getElementById('join-room-modal');
+            if (!input || (modal?.style.display === 'flex' && input.value.trim())) return false;
+            document.getElementById('join-room-btn')?.click();
+            input.value = code;
+            input.focus();
+            return true;
+        });
         // Desktop DMs with browser-build (WebID) contacts go through the pod
         // (crossmode.js); everything else goes to the gateway as before.
         let crossMode = null;
@@ -1386,6 +1398,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
         let _webRoomEpoch = 0;
         const _showRoomApprovalStatus = createRoomApprovalNotice({
             element: document.getElementById('room-approval-status'), translate: t,
+            review: () => _activeJoinReview?.(),
         });
         const _webRoomSessionId = () => `${_webRoomEpoch}\n${solidSession.info.isLoggedIn}\n${selfWebId}\n${podStorageRoot()}`;
         function _invalidateWebRoomSession() {
@@ -2084,6 +2097,12 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             } catch (_) { /* ignore */ }
         }
         function _showJoinPendingBanner(entry) {
+            // An existing member can receive approval before the original drop
+            // acknowledgement. A late acknowledgement must not restore Waiting.
+            if (entry?.room_id && (_remoteRooms[entry.room_id] || crossRooms?.isPodRoom(entry.room_id))) {
+                _clearJoinPendingBanner(entry.room_id);
+                return;
+            }
             if (entry && entry.room_id && proxionMode === 'web') {
                 _pendingJoinsWrite([..._pendingJoinsRead().filter(p => p.room_id !== entry.room_id), entry]);
             }
@@ -2162,6 +2181,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             if (code) {
                 // Wait for socket to be open, then join
                 const tryJoin = () => {
+                    if (_forwardedRoomInvite && !tabLock.isLeader()) { setTimeout(tryJoin, 1000); return; }
                     if (_freshHere()) { setTimeout(tryJoin, 1000); return; }
                     if (socket && socket.readyState === WebSocket.OPEN) {
                         socket.send(JSON.stringify({cmd: "join_room", code: code}));
@@ -4437,7 +4457,10 @@ import { createRoomApprovalNotice } from './room-approvals.js';
         // they sent, always with the pod host beside it.
         async function _joinRequesterLabel(req) {
             let name = '';
-            try { name = await podResolveWebIdName(req.from_webid); } catch (_) { /* fall back */ }
+            let deadline;
+            try { name = await Promise.race([podResolveWebIdName(req.from_webid),
+                new Promise(resolve => { deadline = setTimeout(() => resolve(''), 4000); })]); } catch (_) { /* fall back */ }
+            finally { clearTimeout(deadline); }
             if (!name && typeof req.from_display_name === 'string') name = req.from_display_name.slice(0, 64);
             if (name) return nameWithIdTag(name, req.from_webid);
             const tag = didIdTag(req.from_webid);
@@ -4450,16 +4473,22 @@ import { createRoomApprovalNotice } from './room-approvals.js';
         // dialog was taken over by something else, or closed another way), in
         // which case the request stays in the inbox for next time.
         let _joinPromptChain = Promise.resolve();
+        let _activeJoinReview = null;
         function _askJoinOnce(message, opts, current = () => true) {
             if (!current()) return Promise.resolve(null);
+            if (document.getElementById('confirm-modal')?.style.display === 'flex') return Promise.resolve(null);
             return new Promise((resolve) => {
                 let settled = false;
                 let iv = null;
-                const done = (v) => { if (settled) return; settled = true; if (iv) clearInterval(iv); resolve(v); };
+                let review = null;
+                const done = (v) => { if (settled) return; settled = true; if (iv) clearInterval(iv);
+                    if (_activeJoinReview === review) _activeJoinReview = null; resolve(v); };
                 showConfirm(message, () => done('yes'), () => done('no'), opts);
                 const okBtn = document.getElementById('confirm-ok');
                 const ours = okBtn && okBtn.onclick;
                 if (!ours) { done(null); return; }
+                review = () => { if (okBtn.onclick === ours) okBtn.focus(); };
+                _activeJoinReview = review;
                 iv = setInterval(() => {
                     const modal = document.getElementById('confirm-modal');
                     if (!current()) {
@@ -4530,7 +4559,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             if (existing && existing.banned) return true;
             // Already a member (opened the link again, or a new device): answer
             // without asking the owner a second time.
-            if (existing) return _queueJoinPrompt(() => _approveWebJoin(req.from_webid, roomId, current));
+            if (existing) return _approveWebJoin(req.from_webid, roomId, current);
             return _queueJoinPrompt(async () => {
                 if (!current()) return false;
                 const who = await _joinRequesterLabel(req);
@@ -5979,6 +6008,8 @@ import { createRoomApprovalNotice } from './room-approvals.js';
         function _webResume() {
             flushPodQueue();
             sendStatus.retryUndelivered();
+            if (solidSession.info.isLoggedIn) window.proxionWebJoin?.resume().catch(() => {});
+            for (const roomId of new Set([...Object.keys(_remoteRooms), ...roomCreatorOf])) _trackRoomSync(roomId);
             for (const [roomId, room] of Object.entries(_remoteRooms)) webRoomAccess?.track({ roomId, ...room, owned: false });
             webRoomAccess?.checkAll().catch(() => {});
         }
@@ -6582,6 +6613,29 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             "contact_revoked": "error.fr.contact_revoked",
             "cannot_add_self": "error.fr.cannot_add_self",
         };
+
+        function _openDirectMessage(webid) {
+            if (!webid || webid === selfWebId || webid === clientDid) return true;
+            if (transport.mode !== 'web' && openContactByDid(webid)) return true;
+            if (!isDmPeerWebId(webid)) {
+                if (transport.mode !== 'web') return false;
+                showToast(t('contact.memberNeedsWebId'));
+                return true;
+            }
+            if (transport.mode !== 'web' && !crossMode?.isReady()) {
+                showToast(t('contact.webIdNeedsPod'));
+                return true;
+            }
+            if (transport.mode === 'web') {
+                if (!localDmPeers[webid]) localDmPeers[webid] = { display_name: null, peer_webid: webid };
+                _podUpdateDmIndex(webid, true).catch(() => {});
+                window.proxionWebPresence?.subscribeContact(webid);
+                _adoptWebProfileName(webid);
+            } else _addCrossModeContact(webid, null);
+            renderDmSidebar();
+            openLocalDmThread(webid, localDmPeers[webid]?.display_name || dmFallbackName(webid), webid);
+            return true;
+        }
 
         async function submitAddPeer() {
             let raw = document.getElementById("add-peer-input").value.trim();
@@ -7256,6 +7310,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             // Notes first, so a write the flush lands is not marked again after.
             _restorePodQueueNotes().catch(() => {}).then(() => flushPodQueue());
             if (_podHealth) _podHealth.markSignedIn();
+            if (transport.mode === 'web' && window.proxionWebJoin) _webResume();
             // B2: rehydrate rooms we own to a gateway that may have lost them.
             rehostOwnedRooms();
             // R76: watch the Solid inbox so chat invitations arrive live.
@@ -7379,7 +7434,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                 if (webid) {
                     const p = document.getElementById('contact-profile-panel');
                     if (p) p.style.display = 'none';
-                    if (!openContactByDid(webid) && socket?.readyState === WebSocket.OPEN) {
+                    if (!_openDirectMessage(webid) && socket?.readyState === WebSocket.OPEN) {
                         socket.send(JSON.stringify({ cmd: "resolve_did", did: webid }));
                     }
                 }
@@ -8527,14 +8582,27 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             // Wait here while another tab is the active one; nothing below
             // (pod sign-in, E2E init, the gateway socket) runs in a waiting tab.
             await tabLock.claim({
-                onFollower: () => {
+                onFollower: async () => {
                     // This tab is not connecting while it waits, so do not leave
                     // the "Connecting..." placeholder beside the notice.
                     const _u = document.getElementById('username');
                     if (_u) _u.textContent = localStorage.getItem('proxion_display_name') || '';
                     showTabNotice({ t, onUseHere: () => { tabLock.takeover(); } });
+                    const code = new URLSearchParams(window.location.search).get('join');
+                    if (code && parseInvite(code) && await tabLock.forwardInvite(code) && !tabLock.isLeader()) {
+                        _forwardedRoomInvite = code;
+                        if (readPendingJoin(localStorage) === code) localStorage.removeItem(PENDING_JOIN_KEY);
+                        const notice = document.getElementById('tab-notice-body');
+                        if (notice) notice.textContent = t('tab.inviteForwarded');
+                        const url = new URL(window.location.href); url.searchParams.delete('join');
+                        history.replaceState(null, '', url.pathname + url.search + url.hash);
+                    }
                 },
             });
+            if (_forwardedRoomInvite) {
+                stashPendingJoin(localStorage, _forwardedRoomInvite);
+                _forwardedRoomInvite = null;
+            }
             hideTabNotice();
             const podWebId = await initSolidAuth();
             if (podWebId) await onPodLoggedIn(podWebId);
@@ -8932,6 +9000,11 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                     window.proxionWebDm = webDm;      // for smokes / power users
                     window.proxionWebCalls = webCalls;
                     window.proxionWebJoin = webJoin;
+                    const resumeJoins = () => {
+                        if (document.visibilityState === 'visible' && solidSession.info.isLoggedIn) webJoin.resume().catch(() => {});
+                    };
+                    window.addEventListener('focus', resumeJoins);
+                    document.addEventListener('visibilitychange', resumeJoins);
                     // R104: gateway-free presence — publish a heartbeat and watch
                     // contacts' heartbeats, deriving online/away/offline from freshness.
                     const webPresence = createWebPresence({
