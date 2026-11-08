@@ -181,3 +181,18 @@ Message order uses a per-message `px:seq` (the gateway's single-clock time) when
 present, falling back to timestamp otherwise, so a user's devices, and members of a
 single-pod chat, agree on order despite client clock skew.
 `web/longchat-order.test.js`, `web/podcanonical-d4.test.js`.
+
+## Browser mutual friendships
+
+Browser accounts can exchange, accept, decline, withdraw, and remove mutual
+friend requests through actor-owned pod records. This protocol is separate from
+DM contacts and gateway contact certificates; desktop clients do not yet consume
+these friendship records. Existing Add contact and browser/desktop DM flows
+retain their behavior. The resource format and access rules are documented in
+[POD_DATA_MODEL.md](POD_DATA_MODEL.md#browser-friendship-requests).
+
+`web/smoke_web_friends.mjs` exercises two real browser accounts with a local Solid
+server: failed writes, delayed delivery, reload recovery, acceptance, removal,
+decline, withdrawal, DM delivery, and recipient/anonymous access boundaries.
+`web/friendio.test.js` covers conflict merging, key changes, stale request IDs,
+forged notifications, failed writes, account switches, and competing decisions.

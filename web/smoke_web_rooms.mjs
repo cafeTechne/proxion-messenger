@@ -348,12 +348,15 @@ try {
   if (await pageA.$eval('#add-peer-input', el => el.value) !== peerWebId) throw Error('Profile Add friend did not prefill the selected identity');
   await pageA.click('#add-peer-submit-btn');
   await pageA.waitForSelector('#add-peer-modal', { hidden: true, timeout: 20000 });
-  ok('Add friend works from messages and member names, including non-owner menus, and saves the selected contact');
+  await waitFor(joiner, peer => window.proxionWebFriends?.stateFor(peer).state === 'incoming', alice.webId, 40000);
+  await joiner.evaluate(peer => [...document.querySelectorAll('[data-bf-action="accept"]')].find(el => el.dataset.peer === peer).click(), alice.webId);
+  if (!(await waitFor(pageA, peer => window.proxionWebFriends?.stateFor(peer).state === 'friends', peerWebId, 40000))) throw Error('Friend acceptance did not reach the requester');
+  ok('Add friend works from messages and member names, including non-owner menus, and requires the selected person to accept');
 
   await openRoom(pageA, roomId);
   await pageA.evaluate(() => { document.getElementById('members-panel').style.display = 'block'; });
   await pageA.evaluate(webid => document.querySelector(`#members-list .member-item[data-webid="${CSS.escape(webid)}"]`).click(), peerWebId);
-  if (!(await pageA.$eval('#profile-add-friend-btn', el => el.disabled && el.textContent === 'In contacts'))) throw Error('Saved contact still offers Add friend');
+  if (!(await pageA.$eval('#profile-add-friend-btn', el => el.disabled && el.textContent === 'Friends'))) throw Error('Accepted friend still offers Add friend');
   await pageA.click('#profile-dm-btn');
   await waitFor(pageA, webid => !!document.getElementById('nav-' + webid), peerWebId, 10000);
   const dmText = 'member-dm-' + Date.now();

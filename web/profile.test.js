@@ -38,6 +38,7 @@ function make(over = {}) {
     openContactByDid: over.openContactByDid,
     openDirectMessage: over.openDirectMessage,
     addFriend: over.addFriend, isSelf: over.isSelf, isBlocked: over.isBlocked, isContact: over.isContact,
+    getFriendship: over.getFriendship,
   });
   return { profile, sent, userPresence, messageMap };
 }

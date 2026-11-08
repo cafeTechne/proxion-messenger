@@ -193,7 +193,7 @@
       <div class="modal__panel modal__panel--md">
         <form id="add-peer-form" novalidate>
         <h3 id="add-peer-title" class="modal__title" data-i18n="heading.addPeer">Add contact</h3>
-        <p id="add-peer-contact-hint" class="modal__desc" hidden data-i18n="contact.browserAddHint">This saves the person in your contacts so you can message them. It does not add you to their contacts.</p>
+        <p id="add-peer-contact-hint" class="modal__desc" hidden>This saves the person in your contacts so you can message them. It does not add you to their contacts.</p>
         <label for="add-peer-input" class="field-label" data-i18n="label.peerDidProxionAddress">Peer DID or Proxion address</label>
         <input id="add-peer-input" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" class="input" type="text" required placeholder="Paste an invite link or your friend's address" aria-describedby="add-peer-error" data-i18n-attr="placeholder:ui.pasteInviteLinkFriend">
         <p id="add-peer-error" class="field-error" role="alert"></p>
@@ -375,6 +375,12 @@
                         </div>
                     </div>
                     <ul id="room-list"></ul>
+                </section>
+                <section id="browser-friends-section" hidden>
+                    <div class="row-between"><h2 data-i18n="friends.heading">Friends</h2><button type="button" id="browser-add-friend-btn" class="btn btn--sm btn--slate" data-i18n="btn.addFriend">Add friend</button></div>
+                    <p id="browser-friends-status" class="prose-muted" role="status"></p>
+                    <button type="button" id="browser-friends-retry" class="btn btn--sm btn--slate" hidden data-i18n="conn.retryNow">Retry now</button>
+                    <ul id="browser-friends-list"></ul>
                 </section>
                 <section id="friend-requests-section" style="display:none;">
                     <h2 data-i18n="sidebar.friendRequests">Friend requests</h2>

@@ -715,3 +715,48 @@ in open formats, in your pod.
 The `v1` in the namespace is a promise: within it, terms are added but not
 removed or repurposed. A breaking change bumps to `v2` with a documented
 migration.
+
+## Browser friendship requests
+
+Browser friendships use two independently owned consent records. Saving a DM
+contact does not imply friendship. The browser's Add friend actions send a
+request; the recipient must explicitly accept it.
+
+- `proxion/friends/index.json` is owner-only JSON: `{v:1, owner, entries}`.
+  Each entry contains a peer WebID and an optional delivery receipt
+  `{revision, updated}`. The index currently retains at most 200 peers, including
+  historical relationships; removal does not reclaim that capacity.
+- `proxion/friends/peers/{sha256(peerWebId)}.json` is writable only by its owner
+  and readable by that specific peer. Parent containers remain owner-only.
+  WebIDs are normalized with `new URL(webId).href` before hashing.
+- `proxion/friend-inbox/` permits public Append and owner Read. Its signed JSON
+  snapshots are notification hints, never the authoritative friendship state.
+
+Each peer record contains `v:1`, `actor`, `peer`, `revision`, `updated`, `offer`,
+`decision`, and `proof`. Revisions and request IDs are fresh UUIDs; `updated` is
+an ISO UTC timestamp. An offer is null or `{id, state}`, with state `pending`,
+`withdrawn`, or `removed`. A decision is null or `{id, state}`, with state
+`accepted`, `declined`, or `removed`; its ID refers to the other actor's offer.
+Friendship requires a pending offer and the other actor's matching acceptance.
+Crossed requests still require explicit acceptance. Declines and withdrawals
+apply to a particular request ID and cannot cancel a later request.
+
+`proof` is `did:key|base64signature`, signing the ordered fields: domain
+`proxion-friend-intent-v1`, version, actor, peer, revision, timestamp, offer, and
+decision. Each UTF-8 field has a four-byte big-endian length prefix, with a
+literal `|` byte between fields. Non-null slots are JSON strings with `id`
+followed by `state`; null slots are empty strings. See
+`friendIntentBytes` in `web/dmsig.js` for the exact encoding. Consumers verify
+integrity and actor/peer bindings against the fresh canonical resource on the
+actor's pod. Ownership of that protected resource is the identity anchor;
+requiring the currently published device key would invalidate older records
+following a legitimate device change. An inbox snapshot alone is insufficient
+proof of consent. Unavailable canonical records do not establish friendship.
+
+Index and intent writes use strong ETags with `If-Match`, or
+`If-None-Match: *` on creation. Conflicts are retried with a fresh read; missing
+strong validators fail the update. Pending notification delivery survives reload
+and retries in the background. Polling supplements resource notifications and
+reconciles withdrawals/removals. Removing a friend retains existing DM contacts
+and conversation history. Browser friendship requests currently apply between
+browser accounts; gateway contact certificates remain a separate mechanism.

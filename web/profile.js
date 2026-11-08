@@ -10,7 +10,7 @@
 import { t } from './i18n.js';
 import { webidColor, timeAgo, escHtml, avatarInitial, dmFallbackName, gatewayUrl } from './util.js';
 
-export function createProfile({ getSocket, showToast, getUserPresence, getMessageMap, isBlocked, isSelf, isContact, openContactByDid, openDirectMessage, addFriend = () => {}, isSavedContact = isContact }) {
+export function createProfile({ getSocket, showToast, getUserPresence, getMessageMap, isBlocked, isSelf, isContact, openContactByDid, openDirectMessage, addFriend = () => {}, isSavedContact = isContact, getFriendship = () => null }) {
     const state = { profileCardActive: null };
 
     function handlePresenceUpdate(event) {
@@ -137,18 +137,22 @@ export function createProfile({ getSocket, showToast, getUserPresence, getMessag
 
     function updateFriendAction(button, webid) {
         if (!button) return;
-        const known = !!isSavedContact?.(webid), blocked = !!isBlocked?.(webid);
+        const relation = getFriendship(webid);
+        const known = relation ? relation.state === 'friends' : !!isSavedContact?.(webid), blocked = !!isBlocked?.(webid);
         button.hidden = !webid || !!isSelf?.(webid);
-        button.disabled = known || blocked;
+        button.disabled = known || blocked || ['loading', 'outgoing'].includes(relation?.state);
         button.title = blocked ? t('contact.unblockToAdd') : '';
         const label = button.querySelector?.('[data-friend-label]') || button;
-        label.textContent = t(known ? 'contact.inContacts' : 'btn.addFriend');
+        label.textContent = t(relation ? ({ friends: 'friends.already', outgoing: 'friends.requestSent', incoming: 'friends.review', loading: 'friends.loading' }[relation.state] || 'btn.addFriend')
+            : known ? 'contact.inContacts' : 'btn.addFriend');
     }
 
     function profileCardAddFriend() {
         const webid = state.profileCardActive;
         hideProfileCard();
-        if (webid && !isSelf?.(webid) && !isBlocked?.(webid) && !isSavedContact?.(webid)) addFriend(webid);
+        const relation = getFriendship(webid);
+        const available = relation ? !['friends', 'outgoing', 'loading'].includes(relation.state) : !isSavedContact?.(webid);
+        if (webid && !isSelf?.(webid) && !isBlocked?.(webid) && available) addFriend(webid);
     }
 
     function hideProfileCard() {
@@ -222,7 +226,11 @@ export function createProfile({ getSocket, showToast, getUserPresence, getMessag
         if (dmBtn) { dmBtn.dataset.webid = d.did || ''; dmBtn.hidden = self; }
         updateFriendAction(document.getElementById('contact-profile-add-friend-btn'), d.did);
         const rmBtn = document.getElementById('contact-profile-remove-btn');
-        if (rmBtn) rmBtn.hidden = self || !(isContact?.(d.did) ?? true);
+        if (rmBtn) {
+            const relation = getFriendship(d.did);
+            rmBtn.hidden = self || (relation ? relation.state !== 'friends' : !(isContact?.(d.did) ?? true));
+            if (relation) rmBtn.textContent = t('friends.remove');
+        }
         const didEl = document.getElementById('contact-profile-did');
         if (didEl) {
             didEl.onclick = () => navigator.clipboard.writeText(d.did || '').then(() => showToast(t('profile.didCopied')));

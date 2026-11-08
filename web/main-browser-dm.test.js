@@ -51,11 +51,13 @@ it('resumes room requests and room watches when the browser session recovers', (
     const fn = body.slice(0, /^        }\r?$/m.exec(body).index + 9);
     const deps = { flushPodQueue: vi.fn(), sendStatus: { retryUndelivered: vi.fn() },
         solidSession: { info: { isLoggedIn: true } }, window: { proxionWebJoin: { resume: vi.fn(async () => {}) } },
+        _browserFriends: { resume: vi.fn(async () => {}) },
         _remoteRooms: { joined: { container: 'https://bob.example/room/' } }, roomCreatorOf: new Set(['owned']),
         _trackRoomSync: vi.fn(), webRoomAccess: { track: vi.fn(), checkAll: vi.fn(async () => {}) } };
     const resume = new Function(...Object.keys(deps), `${fn}; return _webResume;`)(...Object.values(deps));
     resume();
     expect(deps.window.proxionWebJoin.resume).toHaveBeenCalledOnce();
+    expect(deps._browserFriends.resume).toHaveBeenCalledOnce();
     expect(deps._trackRoomSync.mock.calls).toEqual([['joined'], ['owned']]);
     expect(deps.webRoomAccess.checkAll).toHaveBeenCalledOnce();
 });
@@ -77,10 +79,13 @@ describe('Add friend from a message or member menu', () => {
         const deps = { selfWebId: 'https://alice.example/#me', clientDid: 'did:key:self',
             blocks: { isBlocked: () => false }, peerDidToCertId: {}, transport: { mode: 'web' },
             localDmPeers: {}, isDmPeerWebId, showToast: vi.fn(), t: key => key,
-            document: { getElementById: id => id === 'add-peer-btn' ? opener : input }, ...overrides };
+            _browserFriends: { stateFor: () => ({ state: 'none' }) }, _browserFriendsUi: { review: vi.fn() },
+            document: { getElementById: id => id === 'add-peer-btn' ? opener : input }, _addPeerPurpose: 'contact', ...overrides };
         const body = source.slice(source.indexOf('function _openAddFriend('));
         const fn = body.slice(0, /^        }\r?$/m.exec(body).index + 9);
-        const add = new Function(...Object.keys(deps), `${fn}; return _openAddFriend;`)(...Object.values(deps));
+        const dialogBody = source.slice(source.indexOf('function _openFriendDialog('));
+        const dialogFn = dialogBody.slice(0, /^        }\r?$/m.exec(dialogBody).index + 9);
+        const add = new Function(...Object.keys(deps), `${fn}; ${dialogFn}; return _openAddFriend;`)(...Object.values(deps));
         return { add, input, opener, deps };
     }
     it('prefills the selected identity after the dialog opener clears its input', () => {
@@ -91,7 +96,7 @@ describe('Add friend from a message or member menu', () => {
     });
     it.each(['self', 'known', 'blocked'])('does not add a %s identity through a stale menu action', kind => {
         const h = addClient({ blocks: { isBlocked: () => kind === 'blocked' },
-            localDmPeers: kind === 'known' ? { [BOB]: { peer_webid: BOB } } : {} });
+            _browserFriends: { stateFor: () => ({ state: kind === 'known' ? 'friends' : 'none' }) } });
         h.add(kind === 'self' ? h.deps.selfWebId : BOB);
         expect(h.opener.click).not.toHaveBeenCalled();
     });
@@ -99,5 +104,13 @@ describe('Add friend from a message or member menu', () => {
         const h = addClient(); h.add('did:key:desktop-peer');
         expect(h.opener.click).not.toHaveBeenCalled();
         expect(h.deps.showToast).toHaveBeenCalledWith('contact.memberNeedsWebId');
+    });
+    it('lets a saved DM contact become a mutual friend and reviews incoming requests', () => {
+        const h = addClient({ localDmPeers: { [BOB]: { peer_webid: BOB } } });
+        h.add(BOB); expect(h.opener.click).toHaveBeenCalledOnce();
+        const incoming = addClient({ _browserFriends: { stateFor: () => ({ state: 'incoming' }) } });
+        incoming.add(BOB);
+        expect(incoming.opener.click).not.toHaveBeenCalled();
+        expect(incoming.deps._browserFriendsUi.review).toHaveBeenCalledWith(BOB);
     });
 });

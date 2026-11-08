@@ -278,6 +278,16 @@ export function verifyRoomPins(snapshot) {
     return _verifyProof(roomPinsBytes(snapshot), snapshot.proof);
 }
 
+function friendIntentBytes(snapshot) {
+    return _canonical(['domain', 'v', 'actor', 'peer', 'revision', 'updated', 'offer', 'decision'], {
+        ...snapshot, domain: 'proxion-friend-intent-v1',
+        offer: snapshot.offer ? JSON.stringify({ id: snapshot.offer.id, state: snapshot.offer.state }) : '',
+        decision: snapshot.decision ? JSON.stringify({ id: snapshot.decision.id, state: snapshot.decision.state }) : '',
+    });
+}
+export const signFriendIntent = (snapshot, key, did) => _signProof(friendIntentBytes(snapshot), key, did);
+export const verifyFriendIntent = snapshot => _verifyProof(friendIntentBytes(snapshot), snapshot.proof);
+
 // ── Authenticated reactions and un-reactions (#5 Part C) ──
 // A schema:LikeAction and its append-only un-react tombstone are otherwise
 // unauthenticated, so a member could forge a reaction as anyone or cancel

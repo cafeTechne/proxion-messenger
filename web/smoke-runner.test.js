@@ -23,7 +23,7 @@ describe('smoke prerequisite results', () => {
     const { exitCode } = await runGroups(['pod-required'], { run, write: (s) => output.push(s), required: false });
     expect(run.mock.calls).toEqual(GROUPS['pod-required'].map((file) => [file, { required: true }]));
     expect(exitCode).toBe(1);
-    expect(output.join('')).toContain('0 passed, 3 skipped, 0 failed.');
+    expect(output.join('')).toContain(`0 passed, ${GROUPS['pod-required'].length} skipped, 0 failed.`);
     expect(output.join('')).toContain('SKIP (required)');
   });
 

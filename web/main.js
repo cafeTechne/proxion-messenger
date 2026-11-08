@@ -129,6 +129,10 @@ import { createIdentityResolver } from './identity.js';
 import { initThemePicker, applyTheme, readThemePref } from './theme.js';
 import { createAccountSync } from './account-sync.js';
 import { createRoomApprovalNotice } from './room-approvals.js';
+import { createFriendIo, friendshipState } from './friendio.js';
+import { createWebFriends } from './webfriends.js';
+import { createBrowserFriendsUi } from './browser-friends-ui.js';
+import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFriendDrop } from './pod.js';
 
         // A public gateway's one-time claim link (#claim=CODE) leaves the address
         // bar before anything else runs; ownerclaim.js presents it after sign-in.
@@ -762,11 +766,13 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             openContactByDid: (did) => openContactByDid(did),
             openDirectMessage: (webid) => _openDirectMessage(webid),
             addFriend: (webid) => _openAddFriend(webid),
+            getFriendship: webid => transport.mode === 'web' ? _browserFriends?.stateFor(webid) || { state: 'loading' } : null,
         });
         // R66: optimistic-send failure tracking (mark unconfirmed messages failed + retry).
         // Browser build: the pod session and network state (podhealth.js), set
         // once the pod socket is installed. Null in gateway mode.
         let _podHealth = null;
+        let _browserFriends = null, _browserFriendsUi = null;
         // Browser build: our own DMs not yet confirmed delivered, by message id,
         // from this session's sends and the cached records a reload restores.
         const _undeliveredDms = new Map();
@@ -1407,6 +1413,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             _webRoomEpoch++;
             closePinPanel();
             window.proxionWebJoin?.stop();
+            _browserFriends?.stop();
             webRoomAccess?.stop();
             webRoomSync?.stop();
         }
@@ -1923,11 +1930,19 @@ import { createRoomApprovalNotice } from './room-approvals.js';
         };
         document.getElementById("settings-save-btn").onclick = _closeSettings;
 
+        let _addPeerPurpose = 'contact';
+        let _addPeerDialogGeneration = 0;
         document.getElementById("add-peer-btn").onclick = () => {
+            _addPeerDialogGeneration++;
+            _addPeerPurpose = 'contact';
+            document.getElementById('add-peer-submit-btn').disabled = false;
             document.getElementById("add-peer-input").value = "";
             document.getElementById("add-peer-error").textContent = "";
             document.getElementById("add-peer-modal").style.display = "flex";
             document.getElementById('add-peer-contact-hint').hidden = transport.mode !== 'web';
+            document.getElementById('add-peer-contact-hint').textContent = t('contact.browserAddHint');
+            document.getElementById('add-peer-title').textContent = t('heading.addPeer');
+            document.getElementById('add-peer-submit-btn').textContent = t('btn.add');
             setTimeout(() => document.getElementById("add-peer-input").focus(), 50);
         };
 
@@ -6012,6 +6027,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             flushPodQueue();
             sendStatus.retryUndelivered();
             if (solidSession.info.isLoggedIn) window.proxionWebJoin?.resume().catch(() => {});
+            if (solidSession.info.isLoggedIn) _browserFriends?.resume().catch(() => {});
             for (const roomId of new Set([...Object.keys(_remoteRooms), ...roomCreatorOf])) _trackRoomSync(roomId);
             for (const [roomId, room] of Object.entries(_remoteRooms)) webRoomAccess?.track({ roomId, ...room, owned: false });
             webRoomAccess?.checkAll().catch(() => {});
@@ -6619,12 +6635,28 @@ import { createRoomApprovalNotice } from './room-approvals.js';
 
         function _openAddFriend(webid) {
             if (!webid || webid === selfWebId || webid === clientDid || blocks.isBlocked(webid)) return;
-            if (peerDidToCertId[webid] || (transport.mode === 'web' && localDmPeers[webid])) return;
+            if (transport.mode === 'web') {
+                const state = _browserFriends?.stateFor(webid)?.state;
+                if (!state || state === 'loading') { showToast(t('friends.loading')); return; }
+                if (state === 'incoming') { _browserFriendsUi?.review(webid); return; }
+                if (state === 'friends' || state === 'outgoing') return;
+            } else if (peerDidToCertId[webid]) return;
             if (transport.mode === 'web' && !isDmPeerWebId(webid)) { showToast(t('contact.memberNeedsWebId')); return; }
+            if (transport.mode === 'web') { _openFriendDialog(webid); return; }
             document.getElementById('add-peer-btn').click();
             const input = document.getElementById('add-peer-input');
             input.value = webid;
             input.focus();
+        }
+
+        function _openFriendDialog(webid = '') {
+            document.getElementById('add-peer-btn').click();
+            _addPeerPurpose = 'friend';
+            document.getElementById('add-peer-title').textContent = t('friends.addTitle');
+            document.getElementById('add-peer-contact-hint').textContent = t('friends.requestHint');
+            document.getElementById('add-peer-submit-btn').textContent = t('friends.sendRequest');
+            const input = document.getElementById('add-peer-input');
+            input.value = webid; input.focus();
         }
 
         function _openDirectMessage(webid) {
@@ -6655,8 +6687,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             const errEl = document.getElementById("add-peer-error");
             const submitBtn = document.getElementById("add-peer-submit-btn");
             if (!raw) { errEl.textContent = t('contact.enterAddress'); return; }
-            // Web build: no gateway friend-request handshake. A peer is just a Solid
-            // WebID; discover their pod-published E2E key and open a DM directly.
+            // Browser friendships use two private, actor-owned pod intents.
             if (transport.mode === 'web') {
                 // A link may carry the WebID in ?from=.
                 if (raw.startsWith('http')) {
@@ -6666,19 +6697,27 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                 if (_kind === 'proxion') { errEl.textContent = t('contact.desktopAddressInWeb'); return; }
                 if (_kind !== 'webid') { errEl.textContent = t('contact.notAWebId'); return; }
                 const webid = raw;
-                if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = t('contact.lookingUp'); }
-                await fetchAndCachePeerPub(webid, peerPodRootFromWebId(webid)).catch(() => {});
-                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = t('btn.add'); }
-                // No name until the peer's profile or first message gives one; the
-                // row shows the account name from the WebID meanwhile.
-                if (!localDmPeers[webid]) localDmPeers[webid] = { display_name: null, peer_webid: webid };
-                const name = localDmPeers[webid].display_name || dmFallbackName(webid);
-                renderDmSidebar();
-                openLocalDmThread(webid, name, webid);
-                _podUpdateDmIndex(webid, true).catch(() => {});
-                window.proxionWebPresence?.subscribeContact(webid);   // watch their heartbeat
-                _adoptWebProfileName(webid);
-                document.getElementById("add-peer-modal").style.display = "none";
+                if (_addPeerPurpose !== 'friend') {
+                    submitBtn.disabled = true; submitBtn.textContent = t('contact.lookingUp');
+                    const session = _webRoomSessionId(), dialog = _addPeerDialogGeneration;
+                    await fetchAndCachePeerPub(webid, peerPodRootFromWebId(webid)).catch(() => {});
+                    if (session !== _webRoomSessionId() || dialog !== _addPeerDialogGeneration) return;
+                    submitBtn.disabled = false; submitBtn.textContent = t('btn.add');
+                    _openDirectMessage(webid);
+                    document.getElementById('add-peer-modal').style.display = 'none';
+                    return;
+                }
+                const controller = _browserFriends, session = _webRoomSessionId(), dialog = _addPeerDialogGeneration;
+                if (!controller || !controller.view().ready) { errEl.textContent = t('friends.loading'); return; }
+                if (submitBtn.disabled) return;
+                submitBtn.disabled = true; submitBtn.textContent = t('contact.sending');
+                let result;
+                try { result = await controller.request(webid); } catch { result = { ok: false }; }
+                if (session !== _webRoomSessionId() || controller !== _browserFriends || dialog !== _addPeerDialogGeneration) return;
+                submitBtn.disabled = false; submitBtn.textContent = t('friends.sendRequest');
+                if (!result?.ok) { errEl.textContent = t(result?.reason === 'blocked' ? 'contact.unblockToAdd' : 'friends.actionFailed'); return; }
+                document.getElementById('add-peer-modal').style.display = 'none';
+                showToast(t(controller.stateFor(webid).queued ? 'friends.savedForDelivery' : 'friends.requestSent'));
                 return;
             }
             if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -6775,6 +6814,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
         });
         document.getElementById("add-peer-cancel-btn").addEventListener("click", () => {
             document.getElementById("add-peer-modal").style.display = "none";
+            _addPeerPurpose = 'contact'; _addPeerDialogGeneration++;
         });
         document.getElementById("copy-modal-close-btn").addEventListener("click", () => {
             document.getElementById("copy-modal").style.display = "none";
@@ -6851,6 +6891,16 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             el.textContent = t(key);
         }
         function _confirmRemoveContact(webid, onRemoved) {
+            if (transport.mode === 'web' && _browserFriends?.stateFor(webid).state === 'friends') {
+                const controller = _browserFriends, session = _webRoomSessionId();
+                showConfirm(t('friends.removeConfirm'), async () => {
+                    if (session !== _webRoomSessionId()) return;
+                    const result = await controller.remove(webid);
+                    if (session !== _webRoomSessionId()) return;
+                    if (result.ok) onRemoved?.(); else showToast(t('friends.actionFailed'), 'error');
+                }, null, { title: t('friends.remove'), confirmLabel: t('friends.remove'), danger: true });
+                return;
+            }
             const certId = webid ? peerDidToCertId[webid] : null;
             if (!certId || !socket) { showToast(t('contact.removeUnavailable')); return; }
             showConfirm(t('confirm.removeContact'), () => {
@@ -7424,6 +7474,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
             // Profile card: Send DM button
             attachListener('#profile-dm-btn', 'click', profileCardOpenDM);
             attachListener('#profile-add-friend-btn', 'click', profileCardAddFriend);
+            attachListener('#browser-add-friend-btn', 'click', () => _openFriendDialog());
             attachListener('#contact-profile-add-friend-btn', 'click', () => {
                 const webid = document.getElementById('contact-profile-dm-btn')?.dataset.webid;
                 document.getElementById('contact-profile-panel').style.display = 'none';
@@ -8238,6 +8289,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                 const addModal = document.getElementById('add-peer-modal');
                 const input = document.getElementById('add-peer-input');
                 if (addModal && input && address) {
+                    document.getElementById('add-peer-btn').click();
                     input.value = address;
                     addModal.style.display = 'flex';
                     input.focus();
@@ -8548,7 +8600,7 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                         // Fallback if modal not in DOM
                         const modal = document.getElementById('add-peer-modal');
                         const input = document.getElementById('add-peer-input');
-                        if (modal && input) { input.value = address; modal.style.display = 'flex'; input.focus(); }
+                        if (modal && input) { document.getElementById('add-peer-btn').click(); input.value = address; modal.style.display = 'flex'; input.focus(); }
                     }
                 }
             } catch (_) {}
@@ -9035,8 +9087,37 @@ import { createRoomApprovalNotice } from './room-approvals.js';
                     window.proxionWebDm = webDm;      // for smokes / power users
                     window.proxionWebCalls = webCalls;
                     window.proxionWebJoin = webJoin;
+                    if (!_browserFriendsUi) _browserFriendsUi = createBrowserFriendsUi({
+                        getController: () => _browserFriends, openMessage: _openDirectMessage,
+                        resolveName: peer => localDmPeers[peer]?.display_name || dmFallbackName(peer), showToast,
+                        confirmRemove: () => new Promise(resolve => showConfirm(t('friends.removeConfirm'), () => resolve(true), () => resolve(false),
+                            { title: t('friends.remove'), confirmLabel: t('friends.remove'), danger: true })),
+                    });
+                    _browserFriends?.stop();
+                    const friendIo = createFriendIo({ fetch: (url, options) => solidSession.fetch(url, options),
+                        getSession: () => ({ webId: selfWebId, root: podStorageRoot(), id: _webRoomSessionId(), ready: !!solidSession.info.isLoggedIn }),
+                        getSigner: () => ({ privKey: _identityPrivKey, signerDid: clientDid }),
+                    });
+                    _browserFriends = createWebFriends({ io: friendIo,
+                        pod: { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFriendDrop, podFetchPeerSigner }, watchResource,
+                        isBlocked: peer => blocks.isBlocked(peer) || _webBlockStore.load().includes(peer),
+                        onChange: snapshot => {
+                            _browserFriendsUi.render(snapshot);
+                            for (const row of snapshot.rows) if (friendshipState(row.mine, row.theirs) === 'friends' && !localDmPeers[row.peer]) {
+                                localDmPeers[row.peer] = { peer_webid: row.peer, display_name: null };
+                                window.proxionWebPresence?.subscribeContact(row.peer);
+                                _adoptWebProfileName(row.peer);
+                            }
+                            renderDmSidebar();
+                            if (profileState.profileCardActive) updateFriendAction(document.getElementById('profile-add-friend-btn'), profileState.profileCardActive);
+                        },
+                    });
+                    window.proxionWebFriends = _browserFriends;
+                    _browserFriends.start().catch(() => {});
                     const resumeJoins = () => {
-                        if (document.visibilityState === 'visible' && solidSession.info.isLoggedIn) webJoin.resume().catch(() => {});
+                        if (document.visibilityState === 'visible' && solidSession.info.isLoggedIn) {
+                            webJoin.resume().catch(() => {}); _browserFriends?.resume().catch(() => {});
+                        }
                     };
                     window.addEventListener('focus', resumeJoins);
                     document.addEventListener('visibilitychange', resumeJoins);

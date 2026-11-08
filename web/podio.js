@@ -26,6 +26,7 @@ export const MAX_POD_LISTING_BYTES = 512 * 1024;
 export const DM_INBOX_PATH = 'proxion/dm-inbox/';
 export const CALL_INBOX_PATH = 'proxion/call-inbox/';
 export const JOIN_INBOX_PATH = 'proxion/join-inbox/';
+export const FRIEND_INBOX_PATH = 'proxion/friend-inbox/';
 export const PRESENCE_PATH = 'proxion/presence.json';
 export const SIGNER_PATH = 'proxion/identity/signer.json';
 export const X25519_PUB_PATH = 'proxion/identity/x25519-pub.json';
@@ -149,7 +150,7 @@ export function createPodIo({ fetch, isLoggedIn, storageRoot, webId }) {
     }
 
     /** Ensure OUR drop-box at `path` exists and is public-Append (owner full control). */
-    async function _ensureDropBox(path, label) {
+    async function _ensureDropBox(path, label, strict = false) {
         const root = _root();
         const me = webId();
         if (!root || !me || !_loggedIn()) return null;
@@ -166,9 +167,11 @@ export function createPodIo({ fetch, isLoggedIn, storageRoot, webId }) {
             if (!put || !(put.ok || put.status === 409 || put.status === 405)) return null;
             try {
                 const { url: aclUrl, model } = await discoverAccessControl(inboxUrl);
-                await putInboxAcl(aclUrl, inboxAclBody(model, inboxUrl, me, []), label);
+                const granted = await putInboxAcl(aclUrl, inboxAclBody(model, inboxUrl, me, []), label);
+                if (strict && !granted) return null;
             } catch (err) {
                 console.warn(`[pod] ${label} ACL failed:`, err);
+                if (strict) return null;
             }
             return inboxUrl;
         } catch (err) {
@@ -197,7 +200,7 @@ export function createPodIo({ fetch, isLoggedIn, storageRoot, webId }) {
     }
 
     /** Read our own drop-box at `path`: returns [{ url, item }] for each object. */
-    async function _readDropBox(path) {
+    async function _readDropBox(path, strict = false) {
         const root = _root();
         if (!root || !_loggedIn()) return [];
         const owner = webId();
@@ -205,10 +208,11 @@ export function createPodIo({ fetch, isLoggedIn, storageRoot, webId }) {
         const inbox = root.replace(/\/?$/, '/') + path;
         let urls = [];
         try {
-            const json = await fetchJsonCapped(inbox, { headers: { Accept: 'application/ld+json' } }, MAX_POD_LISTING_BYTES);
+            const json = await fetchJsonCapped(inbox, { headers: { Accept: 'application/ld+json' }, ...(strict ? { redirect: 'error' } : {}) }, MAX_POD_LISTING_BYTES);
             if (!json) return [];
             if (!current()) return [];
             urls = parseInboxListing(json, inbox);
+            if (strict) urls = urls.filter(url => url.startsWith(inbox) && /^[\w~-][\w.~-]{0,254}$/.test(url.slice(inbox.length)));
         } catch (err) {
             console.warn('[pod] drop-box listing failed:', err);
             return [];
@@ -220,7 +224,7 @@ export function createPodIo({ fetch, isLoggedIn, storageRoot, webId }) {
             try {
                 // Each dropped item is attacker-authored (the box is public-Append), so bound
                 // its body before parse the same way the listing above is bounded.
-                const item = await fetchJsonCapped(url, { headers: { Accept: 'application/json' } });
+                const item = await fetchJsonCapped(url, { headers: { Accept: 'application/json' }, ...(strict ? { redirect: 'error' } : {}) });
                 if (!current()) return [];
                 if (item != null) out.push({ url, item });
             } catch { /* skip one unreadable drop */ }
@@ -229,10 +233,10 @@ export function createPodIo({ fetch, isLoggedIn, storageRoot, webId }) {
     }
 
     /** Delete a consumed drop by URL. */
-    async function _deleteDrop(url) {
+    async function _deleteDrop(url, strict = false) {
         if (!url || !_loggedIn()) return false;
         try {
-            const res = await fetch(url, { method: 'DELETE' });
+            const res = await fetch(url, { method: 'DELETE', ...(strict ? { redirect: 'error' } : {}) });
             return !!(res && (res.ok || res.status === 404));
         } catch (err) {
             console.warn('[pod] delete drop failed:', err);
@@ -597,6 +601,14 @@ export function createPodIo({ fetch, isLoggedIn, storageRoot, webId }) {
             } catch { return null; }
         },
         podDeleteJoin: (url) => _deleteDrop(url),
+        podEnsureFriendInbox: () => _ensureDropBox(FRIEND_INBOX_PATH, 'friend inbox', true),
+        podDropFriend: (root, snapshot) => _dropTo(root, FRIEND_INBOX_PATH, snapshot),
+        podReadFriendDrops: async () => (await _readDropBox(FRIEND_INBOX_PATH, true)).map(({ url, item }) => ({ url, snapshot: item })),
+        podDeleteFriendDrop: url => {
+            const inbox = _dropBoxUrl(_root(), FRIEND_INBOX_PATH);
+            if (!inbox || typeof url !== 'string' || !url.startsWith(inbox) || !/^[\w~-][\w.~-]{0,254}$/.test(url.slice(inbox.length))) return Promise.resolve(false);
+            return _deleteDrop(url, true);
+        },
         podWritePendingJoin, podHasPendingJoin, podDeletePendingJoin,
         podReadJoinedRooms, podWriteJoinedRooms, podReadJoinedRoomsVersion, podWriteJoinedRoomsVersion,
         podWritePresence, podReadPresence,

@@ -119,6 +119,7 @@ try {
   await pageA.type('#add-peer-input', bob.webId);
   await pageA.click('#add-peer-submit-btn');
   await pageA.waitForFunction((w) => !!document.getElementById('nav-' + w), { timeout: 15000 }, bob.webId);
+  await openThread(pageA, bob.webId);
   const rowA = await navRow(pageA, bob.webId);
   const bobAccount = bob.podUrl.replace(/\/$/, '').split('/').pop();
   if (rowA && rowA.includes(bobAccount) && !rowA.includes(new URL(css.url).host)) ok(`contact is labelled "${bobAccount}", not the pod host`);

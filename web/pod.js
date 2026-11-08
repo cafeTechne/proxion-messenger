@@ -939,6 +939,10 @@ const _io = createPodIo({
     storageRoot: () => podStorageRoot(),
     webId: () => solidSession?.info?.webId,
 });
+export const podEnsureFriendInbox = () => _io.podEnsureFriendInbox();
+export const podDropFriend = (root, snapshot) => _io.podDropFriend(root, snapshot);
+export const podReadFriendDrops = () => _io.podReadFriendDrops();
+export const podDeleteFriendDrop = url => _io.podDeleteFriendDrop(url);
 
 // Pod rooms (Long Chat, descriptor, members, type index) live in podroomio.js
 // the same way; the desktop app builds another instance over its gateway
