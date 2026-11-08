@@ -196,3 +196,20 @@ server: failed writes, delayed delivery, reload recovery, acceptance, removal,
 decline, withdrawal, DM delivery, and recipient/anonymous access boundaries.
 `web/friendio.test.js` covers conflict merging, key changes, stale request IDs,
 forged notifications, failed writes, account switches, and competing decisions.
+
+## Desktop pod-request scheduling
+
+The desktop gateway processes socket commands serially. Its browser-side pod
+bridge therefore sends one pod fetch at a time in FIFO order. The execution
+timeout starts when the request is sent, so background history and inbox reads
+cannot consume a later request's execution budget while it is still queued.
+There are at most 256 pending requests, with a 60-second queue deadline and a
+20-second execution deadline (the gateway's own-pod deadline is 15 seconds).
+Overload and expired unsent work fail explicitly. Requests are not replayed on
+failure; callers still need confirmed writes and their normal retry handling.
+
+Disconnects, pod-account changes, and loss of pod readiness cancel active and
+queued requests. Unsent writes are discarded, and late acknowledgements cannot
+complete requests from a new connection. `web/gwpod.test.js` covers serial-server
+latency, FIFO ordering, overload, queue expiry, disconnect/account changes, and
+late responses. Room, DM, and call browser smokes exercise the shared transport.

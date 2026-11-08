@@ -36,11 +36,47 @@ export function responseFromResult(r) {
     };
 }
 
-export function createGwPodBridge({ send, timeoutMs = 15000, onInfo = null, onWatchRefused = null }) {
+// The gateway's own-pod request deadline is 15s. Leave time for its reply before
+// abandoning an in-flight request; a queued request has a separate bounded wait.
+export function createGwPodBridge({ send, timeoutMs = 20000, queueTimeoutMs = 60000, onInfo = null, onWatchRefused = null }) {
     let _info = { ready: false, reason: 'unknown' };
     let _seq = 0;
     const _pending = new Map();   // req_id -> { resolve, reject, timer }
+    const _queue = [];
+    let _active = null, _pumping = false;
     const _watches = new Map();   // url -> { cbs: Set, fast: boolean }
+
+    function finish(reqId, response, error) {
+        const pending = _pending.get(reqId);
+        if (!pending) return;
+        clearTimeout(pending.timer);
+        _pending.delete(reqId);
+        const queued = _queue.indexOf(reqId);
+        if (queued >= 0) _queue.splice(queued, 1);
+        if (_active === reqId) _active = null;
+        if (error) pending.reject(new TypeError(error));
+        else pending.resolve(response);
+        pump();
+    }
+
+    function pump() {
+        // The gateway awaits commands serially on this socket. Sending a burst
+        // starts timers for work it cannot yet execute, including writes whose
+        // acknowledgements then arrive after the client has abandoned them.
+        if (_pumping) return;
+        _pumping = true;
+        try {
+            while (_active === null && _queue.length) {
+                const reqId = _queue.shift(), pending = _pending.get(reqId);
+                if (!pending) continue;
+                clearTimeout(pending.timer);
+                _active = reqId;
+                pending.timer = setTimeout(() => finish(reqId, null, 'pod bridge request timed out'), timeoutMs);
+                try { send(pending.command); }
+                catch { finish(reqId, null, 'pod bridge unavailable'); }
+            }
+        } finally { _pumping = false; }
+    }
 
     function fetch(url, opts = {}) {
         const req_id = 'pf' + (++_seq) + '-' + Math.random().toString(36).slice(2, 8);
@@ -49,18 +85,12 @@ export function createGwPodBridge({ send, timeoutMs = 15000, onInfo = null, onWa
         for (const [k, v] of Object.entries(h)) if (typeof v === 'string') headers[k] = v;
         const body = typeof opts.body === 'string' ? opts.body : (opts.body == null ? null : String(opts.body));
         return new Promise((resolve, reject) => {
-            const timer = setTimeout(() => {
-                _pending.delete(req_id);
-                reject(new TypeError('pod bridge request timed out'));
-            }, timeoutMs);
-            _pending.set(req_id, { resolve, reject, timer });
-            try {
-                send({ cmd: 'pod_fetch', req_id, method: (opts.method || 'GET').toUpperCase(), url, headers, body });
-            } catch (err) {
-                clearTimeout(timer);
-                _pending.delete(req_id);
-                reject(new TypeError('pod bridge unavailable'));
-            }
+            if (_pending.size >= 256) { reject(new TypeError('pod bridge request queue full')); return; }
+            const timer = setTimeout(() => finish(req_id, null, 'pod bridge request expired before dispatch'), queueTimeoutMs);
+            const command = { cmd: 'pod_fetch', req_id, method: (opts.method || 'GET').toUpperCase(), url, headers, body };
+            _pending.set(req_id, { resolve, reject, timer, command });
+            _queue.push(req_id);
+            pump();
         });
     }
 
@@ -99,22 +129,24 @@ export function createGwPodBridge({ send, timeoutMs = 15000, onInfo = null, onWa
     }
 
     function reset() {
-        for (const [, p] of _pending) { clearTimeout(p.timer); p.reject(new TypeError('pod bridge connection lost')); }
+        const pending = [..._pending.values()];
         _pending.clear();
+        _queue.length = 0; _active = null;
         _info = { ready: false, reason: 'disconnected' };
+        for (const p of pending) { clearTimeout(p.timer); p.reject(new TypeError('pod bridge connection lost')); }
     }
 
     function handleEvent(ev) {
         if (!ev || !POD_BRIDGE_EVENTS.has(ev.type)) return false;
         if (ev.type === 'pod_bridge') {
+            if (_info.ready && (!ev.ready || ev.webid !== _info.webid || ev.pod_root !== _info.pod_root)) reset();
             _info = {
                 ready: !!ev.ready, webid: ev.webid || null, pod_root: ev.pod_root || null,
                 auth: ev.auth || null, reason: ev.reason || '', consumer: !!ev.consumer,
             };
             if (onInfo) { try { onInfo(_info); } catch { /* listener errors stay local */ } }
         } else if (ev.type === 'pod_fetch_result') {
-            const p = _pending.get(ev.req_id);
-            if (p) { clearTimeout(p.timer); _pending.delete(ev.req_id); p.resolve(responseFromResult(ev)); }
+            finish(ev.req_id, responseFromResult(ev));
         } else if (ev.type === 'pod_changed') {
             const w = _watches.get(ev.url);
             if (w) for (const cb of [...w.cbs]) { try { cb(ev.url); } catch { /* one watcher's error */ } }
