@@ -21,6 +21,7 @@ import { tmpdir } from 'os';
 import { resolve, join } from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
+import { parseInboxListing } from './ldn.js';
 import { skipSmoke } from './scripts/smoke-status.mjs';
 import { startCss, provisionAccount, makeAuthSession, freePort } from './scripts/css-harness.mjs';
 import { buildAndServeHttps, signIn } from './scripts/e2e-signin.mjs';
@@ -39,6 +40,7 @@ const CHROME = [
 if (!CHROME) skipSmoke('No Chrome/Edge found; set PROXION_CHROME.');
 
 let step = 'init';
+const bridgeFailures = [], bridgeRequests = new Map();
 const fail = (m) => { console.error(`  \u2717 [${step}] ${m}`); process.exitCode = 1; };
 const ok = (m) => console.log(`  \u2713 ${m}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -177,6 +179,26 @@ async function expectPoll(page, roomId, id, counts, own, refresh, question = nul
   throw Error('Poll did not reach expected counts/selection: ' + JSON.stringify({ id, counts, own, question, actual }));
 }
 
+async function transferAsset(sender, receiver, name) {
+  await sender.evaluate(name => {
+    const input = document.getElementById('file-input'), transfer = new DataTransfer();
+    transfer.items.add(new File(['cross-mode asset'.repeat(2500)], name, { type: 'text/plain' }));
+    input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, name);
+  await sender.waitForSelector('#file-confirm-modal', { visible: true }); await sender.click('#file-confirm-ok');
+  if (!(await waitFor(receiver, name => [...document.querySelectorAll('[data-room-asset]')].some(button => button.parentElement.textContent.includes(name)), name, 45000))) throw Error('Missing asset ' + name);
+  await receiver.evaluate(name => [...document.querySelectorAll('[data-room-asset]')].find(button => button.parentElement.textContent.includes(name)).click(), name);
+  if (!(await waitFor(receiver, name => document.querySelector(`a[download="${name}"]`)?.href === 'data:application/octet-stream;base64,' + btoa('cross-mode asset'.repeat(2500)), name, 45000))) throw Error('Asset bytes mismatch ' + name);
+}
+async function transferVoice(sender, receiver) {
+  await sender.click('#voice-record-btn');
+  await sender.waitForFunction(() => document.getElementById('voice-recording-bar').classList.contains('active'));
+  await sleep(800); await sender.click('#voice-record-btn');
+  if (!(await waitFor(receiver, () => [...document.querySelectorAll('[data-room-asset]')].some(button => button.parentElement.textContent.includes('voice.webm')), null, 45000))) throw Error('Voice note missing');
+  await receiver.evaluate(() => [...document.querySelectorAll('[data-room-asset]')].find(button => button.parentElement.textContent.includes('voice.webm')).click());
+  if (!(await waitFor(receiver, () => document.querySelector('.msg-audio-preview')?.readyState >= 1, null, 45000))) throw Error('Voice note did not decode');
+}
+
 async function openPins(page) {
   await page.locator('#pin-panel-btn').click();
   await page.waitForSelector('#pin-panel', { visible: true });
@@ -312,7 +334,7 @@ try {
   const A = await startGateway(css.url, alice);
   ok('Alice\'s gateway is up and connected to her pod');
 
-  browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--disable-gpu', '--ignore-certificate-errors'] });
+  browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--disable-gpu', '--ignore-certificate-errors'] });
   const pageA = await (await browser.createBrowserContext()).newPage();
   const pageB = await (await browser.createBrowserContext()).newPage();
   const errs = [];
@@ -343,6 +365,7 @@ try {
   cdp.on('Network.webSocketFrameSent', (e) => {
     try {
       const m = JSON.parse(e.response.payloadData);
+      if (m.cmd === 'pod_fetch') bridgeRequests.set(m.req_id, `${m.method} ${new URL(m.url).pathname}`);
       if (step.endsWith('-deletes') && ['delete_room', 'pod_room_unregister'].includes(m.cmd)) deleteOps.push('WS ' + JSON.stringify(m));
       if (step.endsWith('-deletes') && m.cmd === 'pod_fetch') deletionReqs.set(m.req_id, `${m.method} ${new URL(m.url).pathname}`);
       if (m.cmd === 'pod_fetch' && m.method === 'PATCH') patchReqs.set(m.req_id, m.url);
@@ -353,6 +376,10 @@ try {
   cdp.on('Network.webSocketFrameReceived', (e) => {
     try {
       const m = JSON.parse(e.response.payloadData);
+      if (m.type === 'pod_fetch_result' && bridgeRequests.has(m.req_id)) {
+        if (m.status >= 400 && m.status !== 404) bridgeFailures.push(`${step}: ${m.status} ${bridgeRequests.get(m.req_id)} ${m.error || ''}`);
+        bridgeRequests.delete(m.req_id);
+      }
       if (m.type === 'pod_fetch_result' && deletionReqs.has(m.req_id)) {
         deleteOps.push(`bridge ${m.status} ${deletionReqs.get(m.req_id)} ${m.error || ''}`);
         deletionReqs.delete(m.req_id);
@@ -441,6 +468,12 @@ try {
   else fail('Bob\'s message did not confirm');
   if (await seen(pageA, roomB, 'xr-b-1', refreshDesk) && await noUnverified(pageA)) ok('Alice reads Bob\'s reply, proof verified');
   else fail('Alice: ' + JSON.stringify((await feedText(pageA)).slice(0, 300)));
+
+  step = 'web-room-assets';
+  await transferAsset(pageA, pageB, 'desktop-member.txt');
+  await transferAsset(pageB, pageA, 'browser-owner.txt');
+  await transferVoice(pageA, pageB);
+  ok('browser-owned room shares verified multi-chunk files both ways and a desktop-recorded voice note');
 
   step = 'web-room-polls';
   const webPoll = await createPoll(pageB, 'xr-web-poll');
@@ -571,6 +604,12 @@ try {
   else fail('Alice\'s message did not confirm');
   if (await seen(pageB, roomA, 'xr-a-3', refreshWeb) && await noUnverified(pageB)) ok('Bob reads it, proof verified');
   else fail('Bob: ' + JSON.stringify((await feedText(pageB)).slice(0, 300)));
+
+  step = 'desktop-room-assets';
+  await transferAsset(pageA, pageB, 'desktop-owner.txt');
+  await transferAsset(pageB, pageA, 'browser-member.txt');
+  await transferVoice(pageB, pageA);
+  ok('desktop-owned room shares verified multi-chunk files both ways and a browser-recorded voice note');
 
   step = 'desktop-room-polls';
   const deskPoll = await createPoll(pageA, 'xr-desk-poll');
@@ -716,6 +755,12 @@ try {
       headers: { 'Content-Type': 'application/sparql-update' },
       body: 'INSERT DATA { <urn:proxion:deletion-probe> <urn:proxion:test> "denied" . }' });
     if (read.status !== 403 || write.status !== 403) throw new Error(`deleted participant access: GET ${read.status}, PATCH ${write.status}`);
+    const listing = await ownerSession.fetch(container, { headers: { Accept: 'application/ld+json' } });
+    const asset = parseInboxListing(await listing.json(), container).find(url => /\/asset-[\w-]+\.json$/.test(url));
+    if (!asset) throw Error('No retained attachment fixture');
+    if ((await peerSession.fetch(asset)).status !== 403) throw Error('Deleted participant retained attachment read access');
+    if ((await peerSession.fetch(container, { method: 'POST', headers: { 'Content-Type': 'application/json', Slug: 'asset-denied-0.json' }, body: '{}' })).status !== 403) throw Error('Deleted participant retained upload access');
+    if (!(await ownerSession.fetch(asset)).ok) throw Error('Owner lost retained attachment bytes');
     const history = await ownerSession.fetch(dayUrl);
     if (!history.ok) throw new Error('owner lost retained history: ' + history.status);
     const closed = await (await ownerSession.fetch(`${flow.owner.storageRoot}rooms/${flow.id}/room.json`)).json();
@@ -729,6 +774,7 @@ try {
   console.log(process.exitCode ? '\nSMOKE FAILED' : '\nSMOKE PASSED');
 } catch (e) {
   fail(e && e.stack ? e.stack : String(e));
+  if (bridgeFailures.length) console.error(bridgeFailures.slice(-25).join('\n'));
   console.log('\nSMOKE FAILED');
 } finally {
   await cleanup();

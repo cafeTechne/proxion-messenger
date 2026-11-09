@@ -94,7 +94,8 @@ _OWN_RULES = [
     (rf"rooms/({_ROOM_ID})/room\.json", {"GET", "HEAD", "PUT", "DELETE"}, "descriptor", MAX_SMALL_RESPONSE),
     (rf"rooms/({_ROOM_ID})/", {"HEAD"}, "room_meta", MAX_SMALL_RESPONSE),
     (rf"rooms/({_ROOM_ID})/{_ACL_SUFFIX}", {"GET", "HEAD", "PUT"}, "acl", MAX_LISTING_RESPONSE),
-    (rf"proxion/rooms/({_ROOM_ID})/", {"HEAD"}, "room_container", MAX_SMALL_RESPONSE),
+    (rf"proxion/rooms/({_ROOM_ID})/", {"HEAD", "POST"}, "room_container", MAX_SMALL_RESPONSE),
+    (rf"proxion/rooms/({_ROOM_ID})/asset-[A-Za-z0-9_-]{{1,160}}\.json", {"GET", "HEAD"}, "room_asset", MAX_SMALL_RESPONSE),
     (rf"proxion/rooms/({_ROOM_ID})/{_ACL_SUFFIX}", {"GET", "HEAD", "PUT"}, "acl", MAX_LISTING_RESPONSE),
     (rf"proxion/rooms/({_ROOM_ID})/index\.ttl", {"GET", "HEAD", "PUT"}, "room_index", MAX_SMALL_RESPONSE),
     (rf"proxion/rooms/({_ROOM_ID})/{_DAY}/chat\.ttl", {"GET", "HEAD", "PATCH"}, "room_day", MAX_LISTING_RESPONSE),
@@ -108,9 +109,12 @@ _OWN_RULES = [(re.compile(p + r"\Z"), m, k, cap) for p, m, k, cap in _OWN_RULES]
 
 # A room on someone else's pod that we joined: authenticated (DPoP) reads and
 # appends, only under a container the client registered after an approved join
-# (pod_room_register), on Long Chat files and the read-only signed pin index.
+# (pod_room_register), on Long Chat files, the read-only signed pin index, and
+# immutable room attachment chunks.
 # Relative to the container.
 _ROOM_RULES = [
+    (re.compile(r"\Z"), {"POST"}, "room_container", MAX_SMALL_RESPONSE),
+    (re.compile(r"asset-[A-Za-z0-9_-]{1,160}\.json\Z"), {"GET", "HEAD"}, "room_asset", MAX_SMALL_RESPONSE),
     (re.compile(r"index\.ttl\Z"), {"GET", "HEAD"}, "room_index", MAX_SMALL_RESPONSE),
     (re.compile(rf"{_DAY}/chat\.ttl\Z"), {"GET", "HEAD", "PATCH"}, "room_day", MAX_LISTING_RESPONSE),
     (re.compile(r"pins\.json\Z"), {"GET", "HEAD"}, "room_pins", MAX_SMALL_RESPONSE),
@@ -233,6 +237,9 @@ def filter_request_headers(headers, decision: Decision, method: str) -> dict:
             base = v.split(";", 1)[0].strip().lower()
             if base in _CONTENT_TYPES:
                 out["Content-Type"] = base
+        elif lk == "slug":
+            if decision.kind == "room_container" and method.upper() == "POST" and re.fullmatch(r"asset-[A-Za-z0-9_-]{1,160}\.json", v):
+                out["Slug"] = v
         elif lk == "accept":
             out["Accept"] = v[:200]
         elif lk == "link":

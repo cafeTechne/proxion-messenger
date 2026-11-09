@@ -30,8 +30,8 @@ export const FEATURES = ['rooms', 'history', 'invites', 'dm', 'presence', 'calls
 // signed edit/delete, reaction, pin and poll paths through the conversation
 // capability checks below; cross-mode DMs still lack those paths. Settings
 // data/federation panels depend on gateway-only HTTP endpoints.
-// Attachments, voice messages and disappearing messages ('files',
-// 'voice-messages', 'disappear') are gateway-only for the same reason.
+// Files and voice notes have explicit pod-room paths, enabled per conversation.
+// Disappearing messages remain gateway-only.
 //
 // Room administration is not in the set either ('room-admin': name and topic,
 // disappearing messages, bans, and the member moderation menu), nor is an owner
@@ -152,8 +152,7 @@ const _FEATURE_CONTROLS = {
     federation: ['settings-federation-section'],
     // A Proxion address names a gateway; in the web build you are your WebID.
     address: ['settings-address-row'],
-    // Attachments (send_file, also the GIF tray) and voice messages
-    // (send_voice_message) are gateway commands with no pod path yet.
+    // Hidden globally in web mode, then enabled for a supported pod room.
     files: ['attach-btn', 'gif-tray-btn'],
     schedule: ['schedule-btn'],
     polls: ['poll-btn'],
@@ -252,7 +251,7 @@ const _GATEWAY_MESSAGE_FEATURES = new Set([
 ]);
 
 export function supportsConversationFeature(transport, feature, { podRoom = false, crossMode = false } = {}) {
-    if (transport && podRoom && !crossMode && ['edit', 'delete', 'reactions', 'pins', 'polls'].includes(feature)) return true;
+    if (transport && podRoom && !crossMode && ['edit', 'delete', 'reactions', 'pins', 'polls', 'files', 'voice-messages'].includes(feature)) return true;
     if (!transport?.supports(feature)) return false;
     return !((podRoom || crossMode) && _GATEWAY_MESSAGE_FEATURES.has(feature));
 }
@@ -269,11 +268,11 @@ export function createTransport({ mode, connection } = {}) {
 export function applyConversationFeatureGating(transport, options = {}, doc) {
     const d = doc || (typeof document !== 'undefined' ? document : null);
     if (!d) return;
-    for (const feature of ['edit', 'reactions', 'pins', 'delete', 'polls']) {
+    for (const feature of ['edit', 'reactions', 'pins', 'delete', 'polls', 'files', 'voice-messages']) {
         const supported = supportsConversationFeature(transport, feature, options);
         d.documentElement?.classList.toggle('gate-no-' + feature, !supported);
-        if (feature === 'delete' || feature === 'pins' || feature === 'polls') {
-            const button = d.getElementById(feature === 'pins' ? 'pin-panel-btn' : feature === 'polls' ? 'poll-btn' : 'delete-for-everyone-btn');
+        for (const id of _FEATURE_CONTROLS[feature] || []) {
+            const button = d.getElementById(id);
             if (button) {
                 button.style.display = supported ? '' : 'none';
                 if (supported) button.removeAttribute?.('aria-hidden');
@@ -281,5 +280,6 @@ export function applyConversationFeatureGating(transport, options = {}, doc) {
             }
         }
     }
-    d.documentElement?.classList.toggle('gate-crossmode', !!(options.podRoom || options.crossMode));
+    d.documentElement?.classList.toggle('gate-crossmode', !!options.crossMode);
+    d.documentElement?.classList.toggle('gate-pod-room', !!options.podRoom);
 }

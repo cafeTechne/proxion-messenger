@@ -12,6 +12,7 @@ function fixture() {
     const readers = [];
     const deps = {
         activeView: { type: 'local_room', id: 'first' }, socket: { readyState: 1 },
+        _isPodRoomView: () => false, _roomMedia: { send: vi.fn() },
         _webRoomSessionId: () => session, _conversationSupports: () => true,
         captureMediaTarget, showToast: vi.fn(), t: key => key,
         needsDownscale: () => false, downscaleImage: vi.fn(), measureMedia: vi.fn(async () => null),

@@ -636,8 +636,8 @@ Attachment copy helpers return a URI only after a successful HTTP write in the
 same authenticated account and pod root. Rejected writes, redirects, and account
 changes return null. This acknowledgement does not verify readback or grant room
 participants access. The helpers neither upload into another owner's room nor
-provide browser/desktop pod-room transfers; those controls remain gated pending
-the shared upload, signed-reference, and authenticated-download implementation.
+provide browser/desktop pod-room transfers. Shared pod rooms use the separate
+chunked protocol described below.
 
 ## Access control
 
@@ -784,3 +784,62 @@ access checks from the old one. Legacy records without an ID remain readable and
 removable; a subsequent approval assigns an ID. Older clients that discard this
 field cannot provide the same protection, so all participating clients should
 load the updated application.
+
+## Shared pod-room attachments and voice notes
+
+Files up to 2 MiB and WebM voice notes (500–60,000 ms, also at most 2 MiB) are
+stored in the **room owner's** Long Chat container. All authorized room members
+can upload, read, and download them in browser and desktop pod rooms. These are
+plaintext shared-room resources, with the same confidentiality as room messages.
+They are separate from the optional legacy gateway copies above.
+
+Clients create `asset-{uploadId}-{chunkIndex}.json` resources with POST to the
+room container and a matching Slug. Each document is:
+
+```json
+{"v":1,"id":"upload-uuid","index":0,"data":"BASE64_BYTES"}
+```
+
+A chunk decodes to at most 32 KiB, with at most 64 chunks per file. The gateway
+accepts only this bounded JSON schema on a registered room's upload route and
+GET/HEAD on asset paths; it does not expose arbitrary binary fetch, resource
+replacement, ACL writes, or deletion through this protocol. Browser clients also
+refuse redirected or off-container POST Locations. Created chunks inherit the
+room's Read/Append ACL. Members cannot replace them with PUT. Clients verify
+changed or corrupted content using the digest below even if storage is modified.
+
+The message content is `[proxion-attachment:v1]` followed by JSON:
+
+```json
+{"v":1,"id":"upload-uuid","name":"photo.png","mime":"image/png","kind":"file","size":1234,"sha256":"64_lowercase_hex_digits","chunks":["asset-upload-uuid-0.json"],"spoiler":false}
+```
+
+`kind` is `file` or `voice`; voice notes use `audio/webm` and include integer
+`durationMs`. Filenames are bounded to 255 characters, MIME types use the app's
+file allowlist, and the complete manifest is bounded to 24 KiB. Relative chunk
+references resolve only against the actual conversation's vetted owner container;
+the reader refuses other paths and duplicate references. The existing Long Chat
+proof signs the entire content and its message IRI, binding metadata, chunk order,
+and SHA-256 digest to the author and room. Unverified messages cannot load assets.
+
+Uploads confirm each POST and read its bytes back before publishing the signed
+manifest. Downloads cap streamed JSON bodies, validate chunk identity/order and
+lengths, then verify the complete digest before offering a preview, player, or
+file download. Chunks are not loaded automatically from received messages.
+A failed download leaves an explicit Retry action.
+
+Failed uploads and unconfirmed manifest writes retain an account/room-scoped draft
+in IndexedDB (`proxion-room-media-v1`). At most ten drafts per account are stored.
+Drafts contain the original blob, metadata, stable message ID/timestamp/sender name,
+and confirmed chunk URLs. Retry after reload reuses verified chunks and the same
+message identity; other accounts and rooms do not send that draft. Publishing is
+acknowledged only after reading back the verified message from the expected author.
+Unsent drafts may be discarded. A changed conversation or session stops further
+upload work and keeps its draft in the original room.
+
+Room removal or closure revokes future asset reads and uploads through the
+inherited ACL; already downloaded bytes cannot be retracted. The owner retains
+messages and assets after room closure. Failed/cancelled uploads can leave
+unreferenced chunks in owner storage; the application does not automatically
+remove those resources. Message withdrawal removes the visible reference rather
+than erasing the owner's stored files.

@@ -919,6 +919,8 @@ main { background: var(--surface-0); }
 .gate-crossmode #voice-record-btn,
 .gate-crossmode #schedule-btn,
 .gate-crossmode #room-opt-disappear { display: none !important; }
+.gate-pod-room #schedule-btn,
+.gate-pod-room #room-opt-disappear { display: none !important; }
 
 /* Icon buttons inside the action bar. */
 .icon-btn {

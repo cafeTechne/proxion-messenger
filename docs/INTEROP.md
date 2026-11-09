@@ -49,12 +49,11 @@ connected to, with the gateway making the pod requests on its behalf
 
 In the browser, use **Send DM** from a room member's profile or add their Solid
 WebID as a contact. Both entry points use the same pod-backed DM conversation.
-**Add friend** in the message menu, member menu, and profile pre-fills the
-add-contact dialog. Saved people show **In contacts**; self-adds and blocked
-people cannot be added through these actions.
-The saved contact and local message history survive reload. Saved browser
-contacts do not imply a mutually accepted friendship; that browser workflow is
-tracked separately in the project plan.
+**Add friend** in the message menu, member menu, and profile pre-fills a mutual
+friend request. Recipients can accept or decline; confirmed people appear in
+Friends. DM contacts remain separate from friendship. Self-adds and blocked
+people cannot be added through these actions. Saved contacts, friendship state,
+and local message history survive reload.
 
 Room owners see a persistent notice while join requests await a decision.
 Requests retry after temporary inbox failures and listening resumes after
@@ -87,7 +86,9 @@ need the signed vote extension to display counts.
   registers the room's chat container with its gateway, and only then does the
   gateway send its pod credentials there: DPoP-signed `GET`, `HEAD` and `PATCH`
   on the chat files of that one container, plus read-only `GET`/`HEAD` on its
-  signed `pins.json` index, the host pinned after an SSRF check,
+  signed `pins.json` index. Attachments additionally permit scoped chunk POSTs
+  to that registered room container and GET/HEAD on its asset resources.
+  The host is pinned after an SSRF check,
   no redirects. A pod that signs in with a bearer token (JSS, NSS) never sends
   that token to another pod, so those desktops cannot join and are told why.
 - **Desktop hosts a room browser-build users can join:** Create a room, "Create it
@@ -230,6 +231,24 @@ real file selection, delayed reads, microphone recording, conversation switching
 and restored downloadable file bytes and playable audio. Backend voice-history
 tests also verify that nonparticipants cannot retrieve the restored notes.
 
-This does not enable browser/desktop pod-room attachments or voice notes. Their
-legacy own-pod copy helpers acknowledge only successful writes; a shared room
-transfer protocol remains required before those controls can be enabled.
+Browser/desktop pod rooms now use a separate shared attachment protocol (below);
+the legacy own-pod copy helpers are not used to deliver those transfers.
+
+## Shared room file and voice transfers
+
+Both builds now support shared pod-room files up to 2 MiB and WebM voice notes.
+Members upload into the owner's room container through immutable JSON chunks;
+the signed room message binds the file metadata and full-file SHA-256 digest.
+Load attachment performs an authenticated, bounded download and verifies bytes
+before preview, playback, or download. Failed uploads retain drafts for retry,
+including after reload. Participant removal and room closure revoke future reads
+and uploads; the owner retains stored history and files. Cross-mode DMs remain
+text-only and do not acquire these room capabilities.
+
+The format, access rules, and draft behavior are specified in
+[POD_DATA_MODEL.md](POD_DATA_MODEL.md#shared-pod-room-attachments-and-voice-notes).
+`smoke_room_attachments.mjs` tests 2 MiB/64-chunk transfers, exact bytes, member
+PUT denial, revoked reads/uploads and retained owner access. Browser room smokes
+exercise failed uploads, reload/retry and playback. Cross-mode room smokes exercise
+both host types, file transfer in both directions, recording from both builds,
+and attachment access after deletion.

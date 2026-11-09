@@ -263,7 +263,7 @@ describe('conversation capabilities', () => {
         }
     });
     it('withholds commands without a pod protocol from browser and desktop pod conversations', () => {
-        for (const feature of ['schedule', 'files']) {
+        for (const feature of ['schedule']) {
             expect(supportsConversationFeature(createPodTransport(), feature)).toBe(false);
             expect(supportsConversationFeature(gateway, feature, { podRoom: true })).toBe(false);
             expect(supportsConversationFeature(gateway, feature, { crossMode: true })).toBe(false);

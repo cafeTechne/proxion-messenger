@@ -93,7 +93,7 @@ try {
   const carol = await provisionAccount(css.url, { email: `carol-${stamp}@test.example`, password: 'pw-12345678', label: 'carol' });
   ok('CSS pod up + three accounts provisioned');
 
-  browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--disable-gpu', '--ignore-certificate-errors'] });
+  browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--disable-gpu', '--ignore-certificate-errors', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
   const pageA = await (await browser.createBrowserContext()).newPage();   // owner
   const pageB = await (await browser.createBrowserContext()).newPage();   // joiner
   const pageC = await (await browser.createBrowserContext()).newPage();   // joiner
@@ -219,6 +219,40 @@ try {
   await send(pageA, fromOwner);
   if (await waitFor(joiner, seesText, fromOwner, 15000)) ok('the joiner saw the owner\'s message within 15s');
   else fail('the joiner never saw the owner\'s message');
+
+  step = 'pod-room-file';
+  let rejectAsset = true;
+  await joiner.setRequestInterception(true);
+  joiner.on('request', request => {
+    if (rejectAsset && request.method() === 'POST' && request.url() === `${alice.storageRoot}proxion/rooms/${roomId}/`) {
+      rejectAsset = false; request.abort('failed').catch(() => {});
+    } else request.continue().catch(() => {});
+  });
+  await joiner.evaluate(() => {
+    const transfer = new DataTransfer(); transfer.items.add(new File(['shared room bytes'.repeat(2300)], 'shared.txt', { type: 'text/plain' }));
+    const input = document.getElementById('file-input'); input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await joiner.waitForSelector('#file-confirm-modal', { visible: true }); await joiner.click('#file-confirm-ok');
+  await joiner.waitForSelector('[data-room-media-retry]:not([disabled])', { timeout: 20000 });
+  await reload(joiner); await openRoom(joiner, roomId);
+  await joiner.waitForSelector('[data-room-media-retry]:not([disabled])', { timeout: 20000 });
+  await joiner.click('[data-room-media-retry]');
+  if (!(await waitFor(pageA, () => [...document.querySelectorAll('#message-feed [data-room-asset]')].some(button => button.parentElement.textContent.includes('shared.txt')), null, 30000))) throw Error('Shared attachment message did not arrive');
+  await pageA.evaluate(() => [...document.querySelectorAll('#message-feed [data-room-asset]')].find(button => button.parentElement.textContent.includes('shared.txt')).click());
+  if (!(await waitFor(pageA, () => document.querySelector('a[download="shared.txt"]')?.href === 'data:application/octet-stream;base64,' + btoa('shared room bytes'.repeat(2300)), null, 20000))) throw Error('Shared file bytes were not verified');
+  await reload(pageA); await openRoom(pageA, roomId);
+  await pageA.waitForSelector('[data-room-asset]', { timeout: 20000 });
+  await pageA.evaluate(() => [...document.querySelectorAll('#message-feed [data-room-asset]')].find(button => button.parentElement.textContent.includes('shared.txt')).click());
+  if (!(await waitFor(pageA, () => !!document.querySelector('a[download="shared.txt"]'), null, 20000))) throw Error('Attachment did not restore after reload');
+  ok('member uploads a shared attachment; owner verifies exact bytes before and after reload');
+  step = 'pod-room-voice';
+  await joiner.click('#voice-record-btn');
+  await joiner.waitForFunction(() => document.getElementById('voice-recording-bar').classList.contains('active'));
+  await sleep(800); await joiner.click('#voice-record-btn');
+  if (!(await waitFor(pageA, () => [...document.querySelectorAll('#message-feed [data-room-asset]')].some(button => button.parentElement.textContent.includes('voice.webm')), null, 30000))) throw Error('Pod voice note did not arrive');
+  await pageA.evaluate(() => [...document.querySelectorAll('#message-feed [data-room-asset]')].find(button => button.parentElement.textContent.includes('voice.webm')).click());
+  if (!(await waitFor(pageA, () => document.querySelector('.msg-audio-preview')?.readyState >= 1, null, 20000))) throw Error('Pod voice note did not decode');
+  ok('member records a pod-room voice note; owner verifies and plays it');
 
   // Search the messages this device loaded, and state that scope explicitly.
   step = 'local-search';

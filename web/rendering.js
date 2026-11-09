@@ -22,6 +22,7 @@
 
 import { didIdTag, dmFallbackName, escHtml, presenceLabel, webidColor, avatarInitial, renderMarkdown, expireLabel as _expireLabel, b64attr, formatFileSize, gatewayUrl } from './util.js';
 import { parsePoll } from './polls.js';
+import { parseRoomAttachment } from './room-attachments.js';
 import { applyRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { t, tn, getLocale } from './i18n.js';
 import { icon } from './icons.js';
@@ -34,7 +35,7 @@ import { isAnimatedImage, initialGifState, gifToggleHtml } from './gifmotion.js'
 // through to the generic download row.
 const _IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif']);
 const _VIDEO_TYPES = new Set(['video/mp4', 'video/webm', 'video/quicktime', 'video/ogg']);
-const _AUDIO_TYPES = new Set(['audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/mp4', 'audio/flac']);
+const _AUDIO_TYPES = new Set(['audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/mp4', 'audio/flac', 'audio/webm']);
 export function attachmentKind(mime) {
     const m = (mime || '').toLowerCase();
     if (_IMAGE_TYPES.has(m)) return 'image';
@@ -91,6 +92,8 @@ export function replySnippet(parent) {
     if (parent.deleted) return t('msg.replyDeleted');
     // A parent this device could not open: the notice, never its ciphertext.
     if (parent.e2e === true || isUndecryptable(parent.content)) return t('e2e.undecryptable');
+    const asset = parseRoomAttachment(parent.content);
+    if (asset) return asset.kind === "voice" ? t("msg.replyVoice") : asset.name;
     const text = String(parent.content || "").replace(/\s+/g, " ").trim();
     if (text) return text.length > 200 ? text.slice(0, 200) + "…" : text;
     if (parent.file) {
@@ -164,7 +167,7 @@ export function attachmentHtml(file) {
         .replace(/\.\./g, '')         // remove ..
         .trim() || 'file';
     const safeFilename = escHtml(_rawFilename);
-    if (!file.data_b64) {
+    if (typeof file.data_b64 !== 'string' || (!file.data_b64 && file.size !== 0)) {
         const loading = file.stored === true && file.unavailable !== true;
         const note = loading ? t('file.loading') : t('file.unavailable');
         return `<div class="attachment ${loading ? 'attachment-loading' : 'attachment-unavailable'}">${icon('paperclip', { size: 18 })} <span class="attachment-name">${safeFilename}</span> <span class="attachment-note"${loading ? '' : ' role="note"'}>${escHtml(note)}</span></div>`;
@@ -338,7 +341,7 @@ export function createRendering({
     // Re-applies send state (pending, not delivered, not saved) to a drawn row.
     decorateMessage = () => {},
     // Poll votes use the conversation's reaction protocol.
-    canVotePoll = () => true,
+    canVotePoll = () => true, isPodRoom = () => false,
 }) {
     const RENDER_WINDOW = renderWindow;
     const SCROLL_BATCH = scrollBatch;
@@ -732,9 +735,17 @@ export function createRendering({
         // map-driven — unknown names pass through untouched).
         renderedText = applyRoomEmoji(renderedText, getRoomEmoji(msg.thread_id || activeView?.id || ''));
 
+        const asset = isPodRoom(activeView) ? parseRoomAttachment(msg.content) : null;
+        if (asset) {
+            const prior = msg.file?._podHash === asset.sha256 ? msg.file : {};
+            msg.file = { ...prior, filename: asset.name, mime_type: asset.mime, size: asset.size, spoiler: asset.spoiler === true, _podHash: asset.sha256 };
+            renderedText = '';
+        }
         let fileHtml = "";
         if (msg.file) {
-            fileHtml = attachmentHtml(msg.file);
+            fileHtml = asset && typeof msg.file.data_b64 !== 'string'
+                ? `<div class="attachment"><span class="attachment-name">${escHtml(asset.name)}</span> <button type="button" class="btn btn--sm" data-room-asset="${msgIdEsc}"${msg.sender_verified ? '' : ' disabled'}>${escHtml(t(msg.file.unavailable ? 'btn.retry' : 'roomMedia.load'))}</button></div>`
+                : attachmentHtml(msg.file);
             // A stored room file arrives in history without its bytes: ask the
             // gateway for them (batched; the card fills in on file_data).
             if (msg.file.stored === true && !msg.file.data_b64 && msg.file.unavailable !== true) {
@@ -844,7 +855,7 @@ export function createRendering({
             bodyHtml += `<div id="msgc-${msgIdEsc}" class="msg-content"><div class="poll-card" dir="auto">
                 <div class="poll-q">${escHtml(_poll.question)}</div>${rows}
                 <div class="poll-foot"><span class="poll-hint">${t(voting ? 'poll.voteHint' : 'poll.unavailable')}</span>${editedHtml}${receiptHtml}</div></div></div>`;
-        } else if (isFileCaption(msg)) {
+        } else if (asset || isFileCaption(msg)) {
             // The card names the file; the "📎 name" caption would repeat it.
             bodyHtml += `<div id="msgc-${msgIdEsc}" class="msg-content msg-content--file"><span class="msg-text" dir="auto"></span>${editedHtml}${receiptHtml}</div>`;
         } else {

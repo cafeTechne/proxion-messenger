@@ -23,7 +23,7 @@ export function captureMediaTarget({ getSocket, getActiveView, getSessionId = ()
 }
 
 export function createMedia({ getSocket, getActiveView, showToast, getVoiceState, getVoice = () => null,
-    getSessionId = () => '', canRecord = () => true }) {
+    getSessionId = () => '', canRecord = () => true, sendRecording = () => null }) {
     const capture = () => captureMediaTarget({ getSocket, getActiveView, getSessionId, canSend: canRecord });
     const state = {
         mediaRecorder: null,
@@ -128,6 +128,8 @@ export function createMedia({ getSocket, getActiveView, showToast, getVoiceState
         if (!rec?._sendOnStop || !target) return;
         if (!target.current()) { showToast(t('media.conversationChanged'), 'error'); return; }
         const blob = new Blob(chunks, { type: 'audio/webm' });
+        const routed = sendRecording(blob, durationMs, target);
+        if (routed) { Promise.resolve(routed).catch(() => showToast(t('roomMedia.failed'), 'error')); return; }
         const voiceMsgId = crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36));
         const reader2 = new FileReader();
         reader2.onloadend = () => {

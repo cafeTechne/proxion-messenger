@@ -93,7 +93,7 @@ export function inviteJoinCommand(raw, ownOrigin, mode = 'gateway') {
     return { cmd: "join_remote_room", url: s };
 }
 
-export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoomInviteUrls, showConfirm, showCopyModal }) {
+export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoomInviteUrls, showConfirm, showCopyModal, isPodRoom = () => false }) {
 
     function requestRoomMembers(roomId) {
         const socket = getSocket();
@@ -115,7 +115,7 @@ export function createRooms({ getSocket, getActiveView, getRoomCreatorOf, getRoo
     function deleteRoom() {
         const activeView = getActiveView();
         if (!activeView || !getRoomCreatorOf().has(activeView.id)) return;
-        showConfirm(t('confirm.deleteRoom'), () => {
+        showConfirm(t(isPodRoom(activeView) ? 'confirm.deletePodRoom' : 'confirm.deleteRoom'), () => {
             getSocket().send(JSON.stringify({ cmd: "delete_room", room_id: activeView.id }));
         }, null, { title: t('confirm.deleteRoom.title'), confirmLabel: t('confirm.deleteRoom.verb'), danger: true });
     }

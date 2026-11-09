@@ -401,3 +401,30 @@ def test_pin_index_watch_requires_registration_and_negotiates_json(dpop):
     run(dpop._handle_pod_room_unregister(ws, {"container": CONTAINER}))
     run(dpop._pb_poll_watches(100.0))
     assert url not in dpop._pb()["watches"]
+
+
+def test_room_attachment_scope_and_immutable_paths():
+    own = ROOT + 'proxion/rooms/room-1/'
+    for container, registered in [(own, {}), (CONTAINER, {CONTAINER: ROOM})]:
+        assert pbp.classify('POST', container, ROOT, registered).allow
+        asset = container + 'asset-upload-0.json'
+        assert pbp.classify('GET', asset, ROOT, registered).allow
+        for method in ['PUT', 'PATCH', 'DELETE']:
+            assert not pbp.classify(method, asset, ROOT, registered).allow
+        for suffix in ['../asset-upload-0.json', 'asset-upload-0.json/child', 'asset-upload-0.json?x=1']:
+            assert not pbp.classify('GET', container + suffix, ROOT, registered).allow
+    assert not pbp.classify('POST', CONTAINER, ROOT, {}).allow
+
+
+def test_room_attachment_post_checks_chunk_and_slug(gw):
+    ws, did = make_ws()
+    register(gw, ws, did)
+    container = ROOT + 'proxion/rooms/room-1/'
+    headers = {'Content-Type': 'application/json', 'Slug': 'asset-upload-0.json'}
+    chunk = {'v': 1, 'id': 'upload', 'index': 0, 'data': base64.b64encode(b'hello').decode()}
+    gw._pod.routes[('POST', container)] = (201, {'location': container + headers['Slug']}, b'')
+    assert fetch(gw, ws, 'POST', container, json.dumps(chunk), headers)['status'] == 201
+    assert fetch(gw, ws, 'POST', container, json.dumps(chunk), {**headers, 'Slug': '../pins.json'})['error'] == 'bad_slug'
+    for invalid in [{**chunk, 'v': True}, {**chunk, 'index': -1}, {**chunk, 'index': 64}, {**chunk, 'index': True},
+                    {**chunk, 'data': 'not base64!'}, {**chunk, 'data': base64.b64encode(b'x' * 32769).decode()}]:
+        assert fetch(gw, ws, 'POST', container, json.dumps(invalid), headers)['error'] == 'bad_body'

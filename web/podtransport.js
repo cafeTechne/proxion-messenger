@@ -1,3 +1,4 @@
+import { parseRoomAttachment } from './room-attachments.js';
 // podtransport.js — the gateway-less "socket" for Proxion Web (R102 Phase 1).
 //
 // A PodSocket looks like a WebSocket to main.js (readyState OPEN, send, close,
@@ -103,11 +104,12 @@ export function searchLoadedRooms(query, snapshots, limit = 50) {
     const hits = [];
     for (const { room, message: m } of byId.values()) {
         if (m.deleted || isSealedCopy(m) || typeof m.content !== 'string' || isUndecryptable(m.content)) continue;
-        const text = m.content.toLowerCase();
+        const display = parseRoomAttachment(m.content)?.name || m.content;
+        const text = display.toLowerCase();
         if (!words.every((word) => text.includes(word))) continue;
         hits.push({
             message_id: m.message_id, thread_id: room.id, thread_name: room.name || '',
-            content: m.content, from_webid: m.from_webid || '',
+            content: display, from_webid: m.from_webid || '',
             from_display_name: m.from_display_name || '', timestamp: String(m.timestamp || ''),
         });
     }

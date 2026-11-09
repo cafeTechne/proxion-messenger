@@ -95,7 +95,7 @@ describe('main conversation capabilities', () => {
         expected.delete('gate-no-reactions');
         expected.delete('gate-no-pins');
         expected.delete('gate-no-polls');
-        expected.add('gate-crossmode');
+        expected.add('gate-pod-room');
         expect(h.classes).toEqual(expected);
         expect(h._conversationSupports('edit')).toBe(true);
         expect(h._conversationSupports('delete')).toBe(true);
@@ -105,7 +105,7 @@ describe('main conversation capabilities', () => {
         const h = harness({ desktopPod: true });
         h._applyCrossModeThreadGating();
         h._syncScheduleBtn();
-        expect(h.classes.has('gate-crossmode')).toBe(true);
+        expect(h.classes.has('gate-pod-room')).toBe(true);
         expect(h.button.attrs['aria-disabled']).toBe('true');
         expect(h.button.title).toBe('schedule.unavailable');
         expect(h.picker.style.display).toBe('none');

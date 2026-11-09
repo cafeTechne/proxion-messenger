@@ -54,6 +54,8 @@ import { createOnboarding, obReopenStep } from './onboarding.js';
 import { createReactions } from './reactions.js';
 import { createPins } from './pins.js';
 import { createMedia, captureMediaTarget } from './media.js';
+import { createRoomAttachments, parseRoomAttachment } from './room-attachments.js';
+import { createRoomMedia } from './room-media.js';
 import { createModals } from './modals.js';
 import { createProfile } from './profile.js';
 import { createEdit } from './edit.js';
@@ -79,7 +81,7 @@ import { createRoomAccessMonitor } from './room-access.js';
 import { createScheduledComposer } from './schedule.js';
 import { createPodSocket, searchLoadedRooms } from './podtransport.js';
 import { purgeWebAccount, adoptWebAccount, shouldPromptForName, markNamePrompted } from './web-account.js';
-import { createRendering, replyQuoteHtml } from './rendering.js';
+import { createRendering, replyQuoteHtml, replySnippet } from './rendering.js';
 import { createView, appendSidebarEmpty, mergeDmSnapshot, dropSupersededContactRows } from './view.js';
 import { createInvite, contactAddressFromInput, contactInputKind, isLoopbackUrl, addressIsOnHost, stashPendingJoin, readPendingJoin, PENDING_JOIN_KEY } from './invite.js';
 import { createPush, closedAppPushStatus } from './push.js';
@@ -541,12 +543,14 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // instance because voice's deps reference media.stopScreenShare and
         // media.state.isSharing; media's getVoiceState is a deferred getter, so the
         // forward reference to `voice` is only resolved at runtime (no TDZ).
+        let _roomMedia = null;
         const media = createMedia({
             getSocket: () => socket, getActiveView: () => activeView,
             showToast, getVoiceState: () => voice.state,
             getVoice: () => voice,   // R81: recap senders when screen share changes the profile
             getSessionId: () => _webRoomSessionId(),
             canRecord: () => _conversationSupports('voice-messages'),
+            sendRecording: (blob, durationMs, target) => _isPodRoomView(target.view) ? _roomMedia.send(blob, { name: 'voice.webm', mime: 'audio/webm', kind: 'voice', durationMs }, target) : null,
         });
         const { pressMic, releaseMic, stopVoiceRecording, sendVoiceMessage, startScreenShare, stopScreenShare } = media;
         // Message rendering (core slice 2). Created before voice/modals because they
@@ -556,6 +560,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // openCtxMenu / _sendUpdateLastRead are hoisted function declarations.
         const rendering = createRendering({
             getActiveView: () => activeView, getSocket: () => socket,
+            isPodRoom: view => _isPodRoomView(view),
             canVotePoll: () => _conversationSupports('polls'),
             getSelfWebId: () => selfWebId, getSelfPubHex: () => selfPubHex,
             getCurrentDisappearMs: () => currentDisappearMs,
@@ -966,6 +971,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             renewRoomInvite, applyRenewedInvite,
         } = createRooms({
             getSocket: () => socket, getActiveView: () => activeView,
+            isPodRoom: view => _isPodRoomView(view),
             getRoomCreatorOf: () => roomCreatorOf, getRoomInviteUrls: () => roomInviteUrls,
             showConfirm, showCopyModal,
         });
@@ -4327,7 +4333,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 // parent's date-partitioned IRI for sioc:has_reply.
                 ts: msg.timestamp || null,
                 name: msg.from_display_name || msg.from_webid.slice(0, 8),
-                content: msg.content.slice(0, 60) + (msg.content.length > 60 ? "..." : "")
+                content: replySnippet(msg).slice(0, 60)
             };
             const bar = document.getElementById("reply-bar");
             const text = document.getElementById("reply-text");
@@ -4676,7 +4682,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             if (last) {
                 roomLastMessages[roomId] = {
                     message_id: last.message_id,
-                    snippet: markdownToPlain(last.content || '').slice(0, 40),
+                    snippet: markdownToPlain(parseRoomAttachment(last.content)?.name || last.content || '').slice(0, 40),
                     senderName: (last.from_webid === selfWebId ? localStorage.getItem('proxion_display_name') : last.from_display_name)
                         || dmFallbackName(last.from_webid || ''),
                     timestamp: last.timestamp || new Date().toISOString(),
@@ -5664,6 +5670,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // Per-conversation placeholder ("Message #general" / "Message Alice")
         // and the header subtitle. Called by view.js whenever a thread opens.
         function _onViewOpened() {
+            _roomMedia?.refresh();
             const inp = document.getElementById("message-input");
             // The draft kept across signing in again goes back into its thread.
             if (_pendingDraft && inp && activeView?.id === _pendingDraft.thread) {
@@ -6392,6 +6399,58 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             },
         });
 
+        function _roomMediaContext(target = null) {
+            target ||= captureMediaTarget({ getSocket: () => socket, getActiveView: () => activeView,
+                getSessionId: _webRoomSessionId, canSend: () => _conversationSupports('files') });
+            if (!target || !_isPodRoomView(target.view)) return null;
+            const rec = crossRooms?.room(target.view.id) || _podPinRoom(target.view);
+            const actor = transport.mode === 'web' ? selfWebId : crossMode?.state().webid;
+            if (!rec?.container || !actor) return null;
+            return { actor, owner: rec.owner, roomId: target.view.id, container: rec.container,
+                senderName: localStorage.getItem('proxion_display_name') || '',
+                current: () => target.current() && actor === (transport.mode === 'web' ? selfWebId : crossMode?.state().webid),
+                fetch: (url, options) => transport.mode === 'web' ? solidSession.fetch(url, options) : crossMode.bridge.fetch(url, options) };
+        }
+        _roomMedia = createRoomMedia({ getContext: _roomMediaContext, showToast,
+            post: async (draft, ctx, current) => {
+                if (!_identityPrivKey || !clientDid) return { ok: false };
+                const io = crossRooms?.isPodRoom(ctx.roomId) ? crossRooms.io : null;
+                const read = () => io ? io.podReadChatDayAt(ctx.container, draft.timestamp, ctx.roomId, ctx.owner)
+                    : podReadChatDayAt(ctx.container, draft.timestamp, ctx.roomId, ctx.owner);
+                let message = (await read()).find(candidate => candidate.message_id === draft.id);
+                if (!current()) return { ok: false };
+                if (!message) {
+                    if (ctx.actor === ctx.owner) {
+                        const descriptor = io ? await io.podReadRoomDescriptor(ctx.roomId) : await podReadRoomDescriptor(ctx.roomId);
+                        if (!current() || !descriptor || descriptor.closed) return { ok: false };
+                    }
+                    const msg = { content: draft.content, timestamp: draft.timestamp, from_webid: ctx.actor,
+                        from_display_name: draft.senderName || '' };
+                    const saved = io ? await io.podWriteChatMessageAtResult(ctx.container, draft.id, msg)
+                        : await podWriteChatMessageAtResult(ctx.container, draft.id, msg);
+                    if (!current()) return { ok: false };
+                    // A lost response can still have committed the append.
+                    message = (await read()).find(candidate => candidate.message_id === draft.id);
+                    if (!saved.ok && !message) return { ok: false };
+                }
+                return { ok: !!(current() && message?.sender_verified && message.from_webid === ctx.actor && message.content === draft.content), message };
+            },
+            onMessage: (message, ctx) => renderMessage({ ...message, thread_id: ctx.roomId, local: true, own: true, from_webid: selfWebId }),
+        });
+        document.getElementById('message-feed').addEventListener('click', async event => {
+            const button = event.target.closest('[data-room-asset]');
+            if (!button || button.disabled) return;
+            const ctx = _roomMediaContext(), id = button.dataset.roomAsset, message = messageMap[id];
+            if (!ctx || !message?.sender_verified || !parseRoomAttachment(message.content, ctx.container)) return;
+            const content = message.content;
+            button.disabled = true;
+            const result = await createRoomAttachments({ fetch: ctx.fetch, current: ctx.current }).download(ctx.container, content);
+            if (!ctx.current() || messageMap[id]?.content !== content || messageMap[id]?.deleted) return;
+            if (result.ok) message.file = { ...message.file, data_b64: _u8ToB64(result.bytes), unavailable: false };
+            else { message.file = { ...message.file, unavailable: true }; showToast(t('roomMedia.downloadFailed'), 'error'); }
+            rendering.refreshMessage(id);
+        });
+
         const ROOM_FILE_MB = ROOM_FILE_BYTES / (1024 * 1024);
         // Size and destination limits, checked before the confirm dialog so the
         // user is not asked to confirm a file that is then refused.
@@ -6404,7 +6463,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             // file is sniffed by the gateway on the plain path, but a sealed one
             // goes out as application/octet-stream, which is not allowed.
             const mime = (file.type || '').toLowerCase().split(';')[0].trim();
-            if ((mime || sealFile) && !FILE_MIMES.has(mime)) return 'error.file_type_not_allowed';
+            if ((mime || sealFile || _isPodRoomView(view)) && !FILE_MIMES.has(mime)) return 'error.file_type_not_allowed';
             const inlineMax = inlineFileLimit(view.type, sealFile ? FILE_TAG_BYTES : 0);
             if (file.size <= inlineMax) return null;
             if (file.size > 25 * 1024 * 1024 - (sealFile ? FILE_TAG_BYTES : 0)) return 'file.tooLarge';
@@ -6438,6 +6497,10 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             if (!current()) return;
             // DM to a keyed peer: the file is encrypted end to end, which adds
             // the AES-GCM tag to what the inline cap has to hold.
+            if (_isPodRoomView(view)) {
+                await _roomMedia.send(file, { name: file.name, mime: (file.type || 'application/octet-stream').toLowerCase().split(';')[0].trim(), spoiler: opts.spoiler }, target);
+                return;
+            }
             const sealFile = secondary.mustSeal(view);
             const inlineMax = inlineFileLimit(view.type, sealFile ? FILE_TAG_BYTES : 0);
             if (file.size > inlineMax) {
@@ -6571,7 +6634,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
 
         // R58: paste an image into the composer → confirm → send as attachment.
         document.getElementById("message-input")?.addEventListener("paste", (e) => {
-            if (!transport.supports('files')) return;   // a pasted image stays unsent
+            if (!_conversationSupports('files')) return;
             const items = e.clipboardData?.items || [];
             for (const item of items) {
                 if (item.kind === "file" && item.type.startsWith("image/")) {
@@ -6587,9 +6650,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // R58: drag-drop onto the conversation → confirm → send. Document-level
         // guards stop the browser from navigating away on a stray drop.
         {
-            // No drop targets where files cannot be sent (the web build).
-            const _dropTargets = transport.supports('files')
-                ? ["message-feed", "message-form"].map(id => document.getElementById(id)).filter(Boolean) : [];
+            const _dropTargets = ["message-feed", "message-form"].map(id => document.getElementById(id)).filter(Boolean);
             document.addEventListener("dragover", (e) => e.preventDefault());
             document.addEventListener("drop", (e) => e.preventDefault());
             // Every dropped file goes through the shared confirm (R60C), one
@@ -7102,7 +7163,8 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         };
         document.getElementById("ctx-copy").onclick = () => {
             if (!_ctxTarget) return;
-            navigator.clipboard.writeText(_ctxTarget.content).catch(() => {});
+            const asset = parseRoomAttachment(_ctxTarget.content);
+            navigator.clipboard.writeText(asset ? asset.name : _ctxTarget.content).catch(() => {});
             closeCtxMenu();
         };
         document.getElementById("ctx-edit").onclick = () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
-  createRendering, captureScrollAnchor, restoreScrollAnchor, isFeedAtBottom,
+  createRendering, captureScrollAnchor, restoreScrollAnchor, isFeedAtBottom, attachmentHtml,
   replySnippet, replyQuoteHtml, highlightMentions, dateLabel, timeHtml, GROUP_WINDOW_MS,
 } from './rendering.js';
 
@@ -297,6 +297,7 @@ describe('attachmentKind (R59A pure)', () => {
     expect(attachmentKind('video/quicktime')).toBe('video');
     expect(attachmentKind('audio/mpeg')).toBe('audio');
     expect(attachmentKind('audio/flac')).toBe('audio');
+    expect(attachmentKind('audio/webm')).toBe('audio');
     expect(attachmentKind('application/pdf')).toBe('file');
     expect(attachmentKind('')).toBe('file');
     expect(attachmentKind(undefined)).toBe('file');
@@ -1005,5 +1006,30 @@ describe('structural message refresh', () => {
     const html = parent._children[1]._children.map(el => el.innerHTML).join('');
     expect(html.includes('poll-card')).toBe(content.startsWith('📊'));
     expect(r.state._lastRenderedDate).toBe('preserved');
+  });
+});
+
+describe('signed pod attachment cards', () => {
+  it('offers an empty verified file as a download instead of treating it as missing', () => {
+    const html = attachmentHtml({ filename: 'empty.txt', mime_type: 'text/plain', size: 0, data_b64: '' });
+    expect(html).toContain('href="data:application/octet-stream;base64,"');
+    expect(html).not.toContain('attachment-unavailable');
+  });
+  it.each([true, false])('requires a verified author before allowing a load (%s)', verified => {
+    els['message-feed'] = mkEl({ scrollHeight: 500, clientHeight: 500 });
+    const created = [], original = global.document.createElement;
+    global.document.createElement = () => { const element = mkEl(); created.push(element); return element; };
+    try {
+      const content = '[proxion-attachment:v1]' + JSON.stringify({ v: 1, id: 'upload', name: '<photo>.png', mime: 'image/png',
+        kind: 'file', size: 1, sha256: '0'.repeat(64), chunks: ['asset-upload-0.json'] });
+      make({ isPodRoom: () => true }).renderMessage({ message_id: 'asset-message', thread_id: 'room-1', from_webid: 'https://peer.example/#me',
+        content, sender_verified: verified, timestamp: new Date().toISOString() });
+      const html = created.map(element => element.innerHTML).join('');
+      expect(html).toContain('data-room-asset="asset-message"');
+      expect(html).toContain('&lt;photo&gt;.png');
+      expect(html).not.toContain('[proxion-attachment:v1]');
+      expect(/data-room-asset="asset-message" disabled/.test(html)).toBe(!verified);
+      expect(sent.some(message => message.cmd === 'get_files')).toBe(false);
+    } finally { global.document.createElement = original; }
   });
 });

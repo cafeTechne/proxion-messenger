@@ -1117,5 +1117,13 @@
   "friends.requestHint": "Send a friend request. They can accept or decline it. You can also send a DM without being friends.",
   "media.conversationChanged": "The conversation or connection changed. Select the file or record the message again.",
   "voiceMsg.readFailed": "Could not read the recording. Please record it again.",
-  "voiceMsg.recordFailed": "Could not start the recorder. Your microphone has been released."
+  "voiceMsg.recordFailed": "Could not start the recorder. Your microphone has been released.",
+  "roomMedia.uploading": "Uploading: {count}%",
+  "roomMedia.pending": "Not sent. Retry or cancel.",
+  "roomMedia.failed": "The file could not be confirmed. Your draft is saved in this room.",
+  "roomMedia.limit": "You have 10 saved media drafts. Retry or cancel a draft before adding another.",
+  "roomMedia.load": "Load attachment",
+  "roomMedia.downloadFailed": "The attachment could not be verified or downloaded. Retry when connected.",
+  "roomMedia.storageFailed": "Could not save the file draft on this device. Free some storage and try again.",
+  "confirm.deletePodRoom": "Close this room and remove member access? Your saved messages and files will remain in your pod."
 }

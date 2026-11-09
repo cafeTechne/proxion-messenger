@@ -18,7 +18,9 @@ A room on someone else's pod (a browser-build user's Long Chat) is the one
 place the pod credentials leave our own pod: after an approved join the client
 registers the room's container, and only then does pod_fetch make DPoP-signed
 GET/HEAD/PATCH requests on that container's chat files, plus GET/HEAD on its
-signed pin index. A bearer-token pod
+signed pin index. Registered rooms also permit bounded JSON chunk POSTs and
+GET/HEAD on asset resources; chunk writes cannot overwrite an existing resource.
+A bearer-token pod
 (JSS/NSS) never sends its token off its own pod; those rooms are refused.
 
 The gateway carries ciphertext only and never decides who a drop is from: the
@@ -231,6 +233,19 @@ class PodBridgeMixin:
             return "bad_body"
         if not isinstance(doc, dict):
             return "bad_body"
+        if decision.kind == "room_container":
+            import base64
+            import re
+            if (type(doc.get("v")) is not int or doc["v"] != 1 or not isinstance(doc.get("id"), str)
+                    or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", doc["id"])
+                    or type(doc.get("index")) is not int or not 0 <= doc["index"] < 64
+                    or not isinstance(doc.get("data"), str) or len(doc["data"]) > 43692):
+                return "bad_body"
+            try:
+                if len(base64.b64decode(doc["data"], validate=True)) > 32768:
+                    return "bad_body"
+            except ValueError:
+                return "bad_body"
         if decision.kind == "identity" and decision.url.endswith("/signer.json"):
             # The signer names THIS device's key and no account: the gateway's own
             # did must never be published as an account a browser key speaks for.
@@ -297,6 +312,11 @@ class PodBridgeMixin:
             await self._pod_fetch_reply(websocket, req_id, 403, error=reason)
             return
         headers = _pbp.filter_request_headers(data.get("headers"), decision, method)
+        if decision.kind == "room_container" and method == "POST":
+            chunk = json.loads(body)
+            if headers.get("Slug") != f"asset-{chunk['id']}-{chunk['index']}.json":
+                await self._pod_fetch_reply(websocket, req_id, 400, error="bad_slug")
+                return
         # One consuming device: only the device that signed our signer.json reads
         # and clears the drop boxes. Creating a box or dropping into it is open to
         # any owner connection.
@@ -356,7 +376,7 @@ class PodBridgeMixin:
             await websocket.send(json.dumps({"type": "pod_watch_refused", "url": url, "reason": status["reason"]}))
             return
         decision = _pbp.classify("GET", url, status["pod_root"], self._pb_rooms())
-        room_resource = decision.allow and decision.kind in ("room_day", "room_pins")
+        room_resource = decision.allow and decision.kind in ("room_day", "room_pins", "room_asset")
         if room_resource and decision.auth and status["auth"] != "dpop":
             await websocket.send(json.dumps({"type": "pod_watch_refused", "url": url, "reason": "bearer"}))
             return
