@@ -225,6 +225,14 @@ class PodBridgeMixin:
         Returns a refusal reason, or ''."""
         if method not in ("PUT", "POST") or decision.kind in ("acl", "marker", "joined", "room_index", "typeindex"):
             return ""
+        if decision.kind == "dm_assets":
+            return "" if not body else "bad_body"
+        if decision.kind == "dm_asset_acl":
+            container = decision.url.rsplit(".", 1)[0]
+            # The Link advertises the model; an ACP server can use an .acl URL.
+            grants = (_pbp.dm_asset_acl_turtle(container, getattr(self, "_pod_webid", ""), model).encode("utf-8")
+                      for model in ("wac", "acp"))
+            return "" if body in grants else "bad_body"
         if decision.kind == "box" and decision.own and method == "PUT":
             return ""   # container creation, empty body
         try:
@@ -233,12 +241,12 @@ class PodBridgeMixin:
             return "bad_body"
         if not isinstance(doc, dict):
             return "bad_body"
-        if decision.kind == "room_container":
+        if decision.kind in ("room_container", "dm_asset"):
             import base64
             import re
             if (type(doc.get("v")) is not int or doc["v"] != 1 or not isinstance(doc.get("id"), str)
                     or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", doc["id"])
-                    or type(doc.get("index")) is not int or not 0 <= doc["index"] < 64
+                    or type(doc.get("index")) is not int or not 0 <= doc["index"] < (65 if decision.kind == "dm_asset" else 64)
                     or not isinstance(doc.get("data"), str) or len(doc["data"]) > 43692):
                 return "bad_body"
             try:
@@ -246,6 +254,11 @@ class PodBridgeMixin:
                     return "bad_body"
             except ValueError:
                 return "bad_body"
+            if decision.kind == "dm_asset":
+                if (set(doc) != {"v", "id", "index", "data"}
+                        or not decision.url.endswith(f"/asset-{doc['id']}-{doc['index']}.json")
+                        or base64.b64encode(base64.b64decode(doc["data"])).decode("ascii") != doc["data"]):
+                    return "bad_body"
         if decision.kind == "identity" and decision.url.endswith("/signer.json"):
             # The signer names THIS device's key and no account: the gateway's own
             # did must never be published as an account a browser key speaks for.
@@ -312,6 +325,9 @@ class PodBridgeMixin:
             await self._pod_fetch_reply(websocket, req_id, 403, error=reason)
             return
         headers = _pbp.filter_request_headers(data.get("headers"), decision, method)
+        if decision.kind in ("dm_assets", "dm_asset") and method == "PUT" and headers.get("If-None-Match") != "*":
+            await self._pod_fetch_reply(websocket, req_id, 400, error="immutable_asset")
+            return
         if decision.kind == "room_container" and method == "POST":
             chunk = json.loads(body)
             if headers.get("Slug") != f"asset-{chunk['id']}-{chunk['index']}.json":

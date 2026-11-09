@@ -222,6 +222,41 @@ try {
   if (drained) ok('Alice\'s DM inbox is empty after the drain');
   else fail('Alice\'s DM inbox still holds drops');
 
+  // Exercise storage independently from the still-gated media chat controls.
+  step = 'encrypted-assets';
+  const desktopAsset = await pageA.evaluate(async () => {
+    const { createDmAttachments, prepareDmAttachment } = await import('./dm-attachments.js');
+    const cross = window.proxionCrossMode, owner = cross.state().webid;
+    const prepared = await prepareDmAttachment(new Blob([new Uint8Array(65539).map((_, index) => index % 251)]), { name: 'desktop-private.txt', mime: 'text/plain' });
+    const result = await createDmAttachments({ fetch: (url, options) => cross.bridge.fetch(url, options) }).upload(owner, prepared);
+    if (!result.ok) throw Error('desktop asset upload: ' + result.reason);
+    return { owner, content: result.content };
+  });
+  const browserRead = await pageB.evaluate(async asset => {
+    const { createDmAttachments } = await import('./dm-attachments.js');
+    const { solidSession } = await import('./auth.js');
+    const result = await createDmAttachments({ fetch: (url, options) => fetch(url, { ...options, credentials: 'omit' }), getSelfWebId: () => solidSession.info.webId }).download(asset.owner, asset.content);
+    return result.ok && result.bytes.length === 65539 && result.bytes.every((value, index) => value === index % 251);
+  }, desktopAsset);
+  if (browserRead) ok('browser decrypts exact bytes uploaded through the desktop bridge');
+  else fail('browser could not decrypt desktop asset');
+  const browserAsset = await pageB.evaluate(async () => {
+    const { createDmAttachments, prepareDmAttachment } = await import('./dm-attachments.js');
+    const { solidSession } = await import('./auth.js');
+    const owner = solidSession.info.webId;
+    const prepared = await prepareDmAttachment(new Blob([new Uint8Array(32771).fill(42)]), { name: 'voice.webm', mime: 'audio/webm', kind: 'voice', durationMs: 1500 });
+    const result = await createDmAttachments({ fetch: (url, options) => solidSession.fetch(url, options) }).upload(owner, prepared);
+    if (!result.ok) throw Error('browser asset upload: ' + result.reason);
+    return { owner, content: result.content };
+  });
+  const desktopRead = await pageA.evaluate(async asset => {
+    const { createDmAttachments } = await import('./dm-attachments.js');
+    const result = await createDmAttachments({ fetch: (url, options) => window.proxionCrossMode.bridge.fetch(url, options), getSelfWebId: () => window.proxionCrossMode.state().webid }).download(asset.owner, asset.content);
+    return result.ok && result.bytes.length === 32771 && result.bytes.every(value => value === 42) && result.manifest.kind === 'voice';
+  }, browserAsset);
+  if (desktopRead) ok('desktop bridge reads and decrypts browser-hosted encrypted audio payload');
+  else fail('desktop could not decrypt browser asset');
+
   step = 'presence';
   const presA = await waitFor(pageA, () => !!document.querySelector('#message-feed .avatar-presence.online'), undefined, 40000);
   if (presA) ok('Alice sees Bob online');

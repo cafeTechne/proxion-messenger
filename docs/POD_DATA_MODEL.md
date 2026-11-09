@@ -843,3 +843,63 @@ messages and assets after room closure. Failed/cancelled uploads can leave
 unreferenced chunks in owner storage; the application does not automatically
 remove those resources. Message withdrawal removes the visible reference rather
 than erasing the owner's stored files.
+
+### Encrypted DM asset storage protocol (UI integration pending)
+
+`web/dm-attachments.js` implements a separate ciphertext-only store at the
+sender's WebID-derived `proxion/dm-assets/`. It does not enable the DM attachment
+or recording controls. Unlike room assets, DM assets must never contain
+plaintext file bytes or a public manifest with a decryption key.
+
+Preparation encrypts the complete file with a fresh AES-256-GCM key and 12-byte
+nonce, using the same file crypto as gateway DMs. It produces a structured-clone
+compatible object with a ciphertext Blob and private manifest. The caller must
+persist this preparation before uploading and preserve it across retries. A new
+preparation requires a new random asset ID; it cannot replace the key for chunks
+already uploaded under an older ID. The plaintext limit is 2 MiB; the GCM tag
+adds 16 bytes, so a maximum-size file uses 65 chunks of at most 32 KiB.
+
+Each chunk lives at `asset-<v4-uuid>-<index>.json` and has exactly four fields:
+
+```json
+{"v":1,"id":"018f7291-4cc9-4acf-bdbc-7483881ca971","index":0,"data":"base64_ciphertext"}
+```
+
+Writes use `If-None-Match: *`. A 412 response is accepted only after reading back
+the existing chunk and verifying its exact ciphertext against the preparation.
+Failed or lost responses can therefore retry the same names without replacing
+resources. The caller receives completion only after all readbacks pass.
+
+The private manifest starts with `[proxion-dm-attachment:v1]` and includes v1,
+asset ID, filename, MIME, plaintext size, kind (`file`/`voice`), chunk count,
+ciphertext SHA-256, base64url file key and nonce, spoiler flag, and voice duration
+when applicable. It **must travel inside the authenticated encrypted DM body**.
+It is not uploaded as a resource. The manifest is capped at 4 KiB and accepts no
+URLs; readers derive each chunk path from the authenticated sender's WebID and
+validated UUID. Caller-provided `getSelfWebId` allows local pods only on the
+current account's pod origin; other private peer hosts are refused lexically.
+The desktop bridge also applies its existing DNS/SSRF checks.
+
+Downloads cap JSON streams, enforce the chunk schema, canonical base64, order
+and lengths, verify the complete ciphertext digest and GCM tag, and reject
+blocked executable signatures before returning plaintext bytes. Invalid content,
+failed reads or changed contexts never produce a partially usable file.
+
+The container grants the owner Read/Write/Control and public Read inherited by
+chunks. WAC and ACP grant bodies are implemented; WAC is tested against real CSS,
+while ACP grants currently have unit coverage. Public reads reveal ciphertext,
+random asset IDs, sizes and timing, including the container listing. Filename,
+MIME, duration, key and nonce remain in the encrypted DM. These resources are
+retained on the sender's pod; removing a contact or DM reference does not revoke
+someone who already holds its decryption key. Asset cleanup is still planned.
+
+The desktop bridge allows only this exact resource tree, bounded JSON chunk
+PUTs with create-only conditions, and GET/HEAD. Peer reads are unauthenticated;
+foreign listings, writes and ACL access are denied. Owner ACL writes are limited
+to the exact owner-write/public-read grants, with no public Append or Write.
+The existing 64 KiB request and response limits remain unchanged.
+
+Remaining app work: account/conversation-scoped durable draft storage, encrypted
+manifest delivery and delivery retries, attachment-card rendering, verified
+loads, history restoration and recording controls. Storage-protocol checks do
+not substitute for a full chat UI file/voice journey.

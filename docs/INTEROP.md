@@ -52,6 +52,13 @@ remains the durable record of received plaintext.
 - **Needs:** a pod connected to the desktop gateway, stored where its WebID points
   (`{root}profile/card#me` with storage at `{root}`). Share the WebID from
   Settings, Pod.
+- **Media storage groundwork:** `web/dm-attachments.js` can upload ciphertext-only
+  chunks and decrypt verified downloads through either browser fetch or the
+  desktop bridge. The required pod checks cover a 2 MiB file, deterministic
+  upload retry and denied peer writes; the cross-mode DM smoke checks the storage
+  protocol in both directions. These are protocol tests, not chat UI transfers.
+  DM attachment/recording controls remain disabled until durable sends, rendering
+  and history integration are complete. See [the data model](POD_DATA_MODEL.md#encrypted-dm-asset-storage-protocol-ui-integration-pending).
 - **Not yet:** group calls, edits, reactions, files, voice messages,
   disappearing and scheduled messages in these threads. One desktop device per
   WebID receives them: the one that signed in last.

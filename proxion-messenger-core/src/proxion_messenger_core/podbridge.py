@@ -74,9 +74,14 @@ _ACL_SUFFIX = r"\.(?:acl|acr)"
 # Room ids as the clients mint them (pod.js SAFE_ID_RE), and a Long Chat day path.
 _ROOM_ID = r"[A-Za-z0-9_-]{1,128}"
 _DAY = r"\d{4}/\d{2}/\d{2}"
+_DM_ASSET_ID = r"[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}"
+_DM_ASSET = rf"asset-{_DM_ASSET_ID}-(?:[0-9]|[1-5][0-9]|6[0-4])\.json"
 
 # (regex over the path relative to our pod root, allowed methods, kind, max response)
 _OWN_RULES = [
+    (r"proxion/dm-assets/", {"HEAD", "PUT"}, "dm_assets", MAX_SMALL_RESPONSE),
+    (rf"proxion/dm-assets/{_ACL_SUFFIX}", {"GET", "HEAD", "PUT"}, "dm_asset_acl", MAX_SMALL_RESPONSE),
+    (rf"proxion/dm-assets/{_DM_ASSET}", {"GET", "HEAD", "PUT"}, "dm_asset", MAX_SMALL_RESPONSE),
     (rf"proxion/({'|'.join(BOXES)})-inbox/", {"GET", "HEAD", "PUT", "POST"}, "box", MAX_LISTING_RESPONSE),
     (rf"proxion/({'|'.join(BOXES)})-inbox/{_DROP_NAME}", {"GET", "HEAD", "DELETE"}, "drop", MAX_SMALL_RESPONSE),
     (rf"proxion/({'|'.join(BOXES)})-inbox/{_ACL_SUFFIX}", {"GET", "HEAD", "PUT"}, "acl", MAX_LISTING_RESPONSE),
@@ -125,6 +130,7 @@ MAX_JOINED_ROOMS = 200
 # Foreign pods: unauthenticated, and only the public pieces of the protocol.
 # Matched against the END of the path, so any pod root works.
 _FOREIGN_RULES = [
+    (re.compile(rf"/proxion/dm-assets/{_DM_ASSET}\Z"), {"GET", "HEAD"}, "dm_asset", MAX_SMALL_RESPONSE),
     (re.compile(r"/proxion/identity/(signer|x25519-pub)\.json\Z"), {"GET", "HEAD"}, "identity", MAX_SMALL_RESPONSE),
     (re.compile(r"/proxion/presence\.json\Z"), {"GET", "HEAD"}, "presence", MAX_SMALL_RESPONSE),
     (re.compile(rf"/proxion/({'|'.join(BOXES)})-inbox/\Z"), {"POST"}, "box", MAX_SMALL_RESPONSE),
@@ -243,7 +249,7 @@ def filter_request_headers(headers, decision: Decision, method: str) -> dict:
         elif lk == "accept":
             out["Accept"] = v[:200]
         elif lk == "link":
-            if decision.own and decision.kind == "box" and method.upper() == "PUT" and v == _CONTAINER_LINK:
+            if decision.own and decision.kind in ("box", "dm_assets") and method.upper() == "PUT" and v == _CONTAINER_LINK:
                 out["Link"] = v
         elif lk in ("if-match", "if-none-match"):
             out[k.title()] = v
@@ -301,6 +307,28 @@ def inbox_acl_turtle(inbox_url: str, owner_webid: str) -> str:
         f"<#owner> a acl:Authorization; acl:agent <{owner_webid}>; acl:accessTo <{inbox_url}>; "
         f"acl:default <{inbox_url}>; acl:mode acl:Read, acl:Write, acl:Control.\n"
         f"<#public> a acl:Authorization; acl:agentClass foaf:Agent; acl:accessTo <{inbox_url}>; acl:mode acl:Append.\n"
+    )
+
+
+def dm_asset_acl_turtle(container: str, owner: str, model: str = "wac") -> str:
+    """Ciphertext-only asset ACL: owner writes, public reads, inherited by chunks.
+    Mirrors dmAssetAcl in web/dm-attachments.js; only these grants may be written
+    through the bridge. The file key and metadata never belong in this store."""
+    if model == "acp":
+        return (
+            "@prefix acp: <http://www.w3.org/ns/solid/acp#>.\n@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n"
+            f"<> a acp:AccessControlResource; acp:resource <{container}>; acp:accessControl <#owner-ac>, <#public-ac>; acp:memberAccessControl <#owner-ac>, <#public-ac>.\n"
+            "<#owner-ac> a acp:AccessControl; acp:apply <#owner-policy>.\n"
+            "<#owner-policy> a acp:Policy; acp:allow acl:Read, acl:Write, acl:Control; acp:anyOf <#owner-matcher>.\n"
+            f"<#owner-matcher> a acp:Matcher; acp:agent <{owner}>.\n"
+            "<#public-ac> a acp:AccessControl; acp:apply <#public-policy>.\n"
+            "<#public-policy> a acp:Policy; acp:allow acl:Read; acp:anyOf <#public-matcher>.\n"
+            "<#public-matcher> a acp:Matcher; acp:agent acp:PublicAgent.\n"
+        )
+    return (
+        "@prefix acl: <http://www.w3.org/ns/auth/acl#>.\n@prefix foaf: <http://xmlns.com/foaf/0.1/>.\n"
+        f"<#owner> a acl:Authorization; acl:agent <{owner}>; acl:accessTo <{container}>; acl:default <{container}>; acl:mode acl:Read, acl:Write, acl:Control.\n"
+        f"<#public> a acl:Authorization; acl:agentClass foaf:Agent; acl:accessTo <{container}>; acl:default <{container}>; acl:mode acl:Read.\n"
     )
 
 
