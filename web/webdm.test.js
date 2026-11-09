@@ -28,7 +28,7 @@ describe('envelopeFromDmPayload', () => {
     });
 });
 
-function harness({ drops = [], myDevice = 'dev-me', persistMessage, signEnvelope, verifySender, isBlocked } = {}) {
+function harness({ drops = [], myDevice = 'dev-me', persistMessage, signEnvelope, verifySender, isBlocked, handleEvent } = {}) {
     const events = [];
     const dropped = [];
     const deleted = [];
@@ -45,7 +45,7 @@ function harness({ drops = [], myDevice = 'dev-me', persistMessage, signEnvelope
     };
     const notify = { watchResource: vi.fn(() => () => {}) };
     const dm = createWebDm({
-        pod, e2e, notify, handleEvent: (e) => events.push(e),
+        pod, e2e, notify, handleEvent: handleEvent || ((e) => events.push(e)),
         getSelfWebId: () => 'https://me/profile/card#me', getDisplayName: () => 'Me',
         getMyDeviceId: () => myDevice,
         persistMessage: persistMessage && ((m) => { persisted.push(m); return persistMessage(m); }),
@@ -257,6 +257,164 @@ describe('createWebDm receive', () => {
         expect(pod.podEnsureDmInbox).toHaveBeenCalled();
         expect(pod.podReadDmDrops).toHaveBeenCalled();
         expect(notify.watchResource).toHaveBeenCalledWith('https://me/proxion/dm-inbox/', expect.any(Function));
+    });
+});
+
+function deferred() {
+    let resolve;
+    const promise = new Promise(r => { resolve = r; });
+    return { promise, resolve };
+}
+
+describe('createWebDm inbox concurrency and acknowledgement', () => {
+    const encryptedDrop = (id = 'm1') => ({ url: 'https://me/inbox/' + id, envelope: {
+        from_webid: 'https://bob', message_id: id, content: 'CT-' + id, e2e: true,
+        nonce: 'N', msg_num: 0, pn: 0, ratchet_pub: 'RP',
+    } });
+
+    it('serializes overlapping scans, rescans arrivals, and never decrypts a stale drop twice', async () => {
+        const firstDecrypt = deferred();
+        const entered = deferred();
+        const first = encryptedDrop(), second = encryptedDrop('m2');
+        const h = harness({ verifySender: async () => true });
+        h.pod.podReadDmDrops.mockResolvedValueOnce([first]).mockResolvedValue([first, second]);
+        h.e2e.ratchetDecrypt.mockImplementationOnce(async () => {
+            entered.resolve();
+            await firstDecrypt.promise;
+            return 'first';
+        });
+        const one = h.dm.drainOnce();
+        await entered.promise;
+        const two = h.dm.drainOnce(), three = h.dm.drainOnce();
+        expect(h.pod.podReadDmDrops).toHaveBeenCalledTimes(1);
+        firstDecrypt.resolve();
+        await Promise.all([one, two, three]);
+        expect(h.pod.podReadDmDrops).toHaveBeenCalledTimes(2);
+        expect(h.e2e.ratchetDecrypt).toHaveBeenCalledTimes(2);
+        expect(h.events.map(e => e.message_id)).toEqual(['m1', 'm2']);
+        await h.dm.drainOnce();
+        expect(h.e2e.ratchetDecrypt).toHaveBeenCalledTimes(2);
+        expect(h.pod.podDeleteDmDrop).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(['false', 'throw'])('retries a %s deletion without spending another ratchet key', async failure => {
+        const h = harness({ drops: [encryptedDrop()], verifySender: async () => true });
+        if (failure === 'throw') h.pod.podDeleteDmDrop.mockRejectedValueOnce(new Error('offline'));
+        else h.pod.podDeleteDmDrop.mockResolvedValueOnce(false);
+        await h.dm.drainOnce();
+        await h.dm.drainOnce();
+        expect(h.pod.podDeleteDmDrop).toHaveBeenCalledTimes(2);
+        expect(h.e2e.ratchetDecrypt).toHaveBeenCalledTimes(1);
+        expect(h.events).toHaveLength(1);
+    });
+
+    it('continues persistence and acknowledgement when the asynchronous UI handler rejects', async () => {
+        const h = harness({ drops: [encryptedDrop()], verifySender: async () => true,
+            handleEvent: async () => { throw new Error('UI failed'); }, persistMessage: async () => true });
+        await h.dm.drainOnce();
+        expect(h.persisted).toHaveLength(1);
+        expect(h.deleted).toEqual(['https://me/inbox/m1']);
+    });
+
+    it('can retry a failed scan and a failed decrypt', async () => {
+        const h = harness({ drops: [encryptedDrop()], verifySender: async () => true });
+        h.pod.podReadDmDrops.mockRejectedValueOnce(new Error('offline'));
+        await expect(h.dm.drainOnce()).rejects.toThrow('offline');
+        h.e2e.ratchetDecrypt.mockRejectedValueOnce(new Error('temporary'));
+        await h.dm.drainOnce();
+        expect(h.deleted).toEqual([]);
+        await h.dm.drainOnce();
+        expect(h.events).toHaveLength(1);
+        expect(h.deleted).toHaveLength(1);
+    });
+
+    it('watches before listing and shares concurrent startup', async () => {
+        const listing = deferred(), entered = deferred();
+        const h = harness({ verifySender: async () => true });
+        h.pod.podReadDmDrops.mockImplementationOnce(() => {
+            expect(h.notify.watchResource).toHaveBeenCalledTimes(1);
+            entered.resolve();
+            return listing.promise;
+        }).mockResolvedValue([encryptedDrop()]);
+        const one = h.dm.start(), two = h.dm.start();
+        await entered.promise;
+        h.notify.watchResource.mock.calls[0][1]();
+        listing.resolve([]);
+        await Promise.all([one, two]);
+        expect(h.pod.podEnsureDmInbox).toHaveBeenCalledTimes(1);
+        expect(h.notify.watchResource).toHaveBeenCalledTimes(1);
+        expect(h.events).toHaveLength(1);
+    });
+
+    it('does not install a late watcher after stop during startup', async () => {
+        const inbox = deferred();
+        const h = harness();
+        h.pod.podEnsureDmInbox.mockReturnValue(inbox.promise);
+        const start = h.dm.start();
+        await Promise.resolve();
+        h.dm.stop();
+        inbox.resolve('https://me/inbox/');
+        expect(await start).toBe(null);
+        expect(h.notify.watchResource).not.toHaveBeenCalled();
+        expect(h.pod.podReadDmDrops).not.toHaveBeenCalled();
+    });
+
+    it('ignores a previously queued notification after stop', async () => {
+        const h = harness();
+        await h.dm.start();
+        const callback = h.notify.watchResource.mock.calls[0][1];
+        h.dm.stop();
+        callback();
+        await Promise.resolve();
+        expect(h.pod.podReadDmDrops).toHaveBeenCalledTimes(1);
+    });
+
+    it('awaits fanout delivery and retries a failed acknowledgement without dispatching twice', async () => {
+        const delivery = deferred(), entered = deferred();
+        const handleEvent = vi.fn(async () => { entered.resolve(); await delivery.promise; });
+        const h = harness({ handleEvent, verifySender: async () => true, drops: [{
+            url: 'fanout', envelope: { kind: 'fanout', from_webid: 'https://bob',
+                message_id: 'm', to_device_id: 'dev-me', payload: { e2e: true } },
+        }] });
+        h.pod.podDeleteDmDrop.mockResolvedValueOnce(false);
+        const first = h.dm.drainOnce();
+        await entered.promise;
+        const next = h.dm.drainOnce();
+        expect(h.pod.podDeleteDmDrop).not.toHaveBeenCalled();
+        delivery.resolve();
+        await Promise.all([first, next]);
+        expect(handleEvent).toHaveBeenCalledTimes(1);
+        expect(h.pod.podDeleteDmDrop).toHaveBeenCalledTimes(2);
+    });
+
+    it('a restart waits out the stopped listing and then reads the inbox anew', async () => {
+        const listing = deferred(), entered = deferred();
+        const h = harness({ verifySender: async () => true });
+        h.pod.podReadDmDrops.mockImplementationOnce(() => {
+            entered.resolve();
+            return listing.promise;
+        }).mockResolvedValue([encryptedDrop()]);
+        const first = h.dm.start();
+        await entered.promise;
+        h.dm.stop();
+        const second = h.dm.start();
+        listing.resolve([encryptedDrop('old')]);
+        await Promise.all([first, second]);
+        expect(h.events.map(e => e.message_id)).toEqual(['m1']);
+        expect(h.pod.podReadDmDrops).toHaveBeenCalledTimes(2);
+        expect(h.notify.watchResource).toHaveBeenCalledTimes(2);
+    });
+
+    it('retains failed acknowledgements at the cap, leaving new ciphertext untouched until space frees', async () => {
+        const drops = Array.from({ length: 1025 }, (_, i) => encryptedDrop(String(i)));
+        const h = harness({ drops, verifySender: async () => true });
+        h.pod.podDeleteDmDrop.mockResolvedValue(false);
+        await h.dm.drainOnce();
+        expect(h.e2e.ratchetDecrypt).toHaveBeenCalledTimes(1024);
+        h.pod.podDeleteDmDrop.mockResolvedValue(true);
+        await h.dm.drainOnce();
+        expect(h.e2e.ratchetDecrypt).toHaveBeenCalledTimes(1025);
+        expect(h.events.at(-1).message_id).toBe('1024');
     });
 });
 

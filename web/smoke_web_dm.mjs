@@ -5,6 +5,7 @@
 //   - the contact is labelled with the account name, not the pod's host
 //   - a reply quote shows plaintext on both sides (never the ciphertext echo)
 //   - both sides keep the thread (and its history) across a reload
+//   - overlapping inbox scans and failed deletion preserve encrypted delivery
 //   - a block stops further DMs, and survives a reload
 //   - attach / voice message / disappearing messages are not offered
 //
@@ -47,7 +48,8 @@ async function cleanup() {
 // Pull pending drops now instead of waiting on pod-notification timing.
 async function drainUntil(page, check, arg, tries = 14) {
   for (let i = 0; i < tries; i++) {
-    try { await page.evaluate(() => window.proxionWebDm && window.proxionWebDm.drainOnce()); } catch { /**/ }
+    try { await page.evaluate(() => window.proxionWebDm && Promise.all(
+      Array.from({ length: 3 }, () => window.proxionWebDm.drainOnce()))); } catch { /**/ }
     if (await page.evaluate(check, arg).catch(() => false)) return true;
     await sleep(1200);
   }
@@ -171,6 +173,36 @@ try {
   if (qA && qA.includes('hello-1')) ok('Alice sees the reply quoting her message in plaintext');
   else fail(`Alice's reply quote reads ${JSON.stringify(qA)}`);
 
+  // Keep consumed ciphertext in the real pod while the UI receives another DM.
+  // Repeated scans must retry DELETE rather than trying the spent ratchet key.
+  step = 'delete-outage';
+  let denyDeletes = true, failedDeletes = 0;
+  const decryptErrors = [];
+  const onConsole = msg => { if (msg.text().includes('[webdm] decrypt failed')) decryptErrors.push(msg.text()); };
+  pageB.on('console', onConsole);
+  await pageB.setRequestInterception(true);
+  const intercept = req => {
+    if (denyDeletes && req.method() === 'DELETE' && req.url().includes('/proxion/dm-inbox/')) {
+      failedDeletes++;
+      req.respond({ status: 503, body: 'temporary deletion outage' }).catch(() => {});
+    } else req.continue().catch(() => {});
+  };
+  pageB.on('request', intercept);
+  for (const text of ['retry-delete-1', 'retry-delete-2']) {
+    if (!await send(pageA, text)) fail('send was not confirmed: ' + text);
+    if (!await drainUntil(pageB, value => (document.getElementById('message-feed')?.innerText || '').includes(value), text)) {
+      fail('message missing during deletion outage: ' + text);
+    }
+  }
+  await pageB.evaluate(() => Promise.all(Array.from({ length: 3 }, () => window.proxionWebDm.drainOnce())));
+  denyDeletes = false;
+  await pageB.evaluate(() => window.proxionWebDm.drainOnce());
+  if (failedDeletes && !decryptErrors.length) ok('overlapping scans survive failed inbox deletions without decrypting spent ciphertext');
+  else fail(`deletion outage did not recover: ${failedDeletes} rejected deletes, ${decryptErrors.length} decrypt errors`);
+  await pageB.setRequestInterception(false);
+  pageB.off('request', intercept);
+  pageB.off('console', onConsole);
+
   // ── Reload both: the thread and its history stay ──
   step = 'reload';
   await Promise.all([pageA.reload({ waitUntil: 'networkidle2', timeout: 30000 }), pageB.reload({ waitUntil: 'networkidle2', timeout: 30000 })]);
@@ -180,7 +212,7 @@ try {
   if (await kept(pageB, alice.webId)) ok('Bob keeps the thread after a reload');
   else fail('Bob lost the thread on reload');
   await openThread(pageB, alice.webId);
-  const hist = await pageB.waitForFunction(() => { const t = document.getElementById('message-feed')?.innerText || ''; return t.includes('hello-1') && t.includes('reply-1'); }, { timeout: 10000 })
+  const hist = await pageB.waitForFunction(() => { const t = document.getElementById('message-feed')?.innerText || ''; return ['hello-1', 'reply-1', 'retry-delete-1', 'retry-delete-2'].every(value => t.includes(value)); }, { timeout: 10000 })
     .then(() => true).catch(() => false);
   if (hist) ok('the reopened thread shows its history after a reload');
   else fail('history after reload: ' + JSON.stringify((await feedText(pageB)).slice(0, 200)));

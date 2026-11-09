@@ -28,6 +28,15 @@ client runs that same code (`web/webdm.js`) as the WebID of the pod its gateway 
 connected to, with the gateway making the pod requests on its behalf
 (`_gateway_podbridge.py`, an owner-only and path-allowlisted fetch).
 
+Inbox checks share one reader per DM engine. A notification during a read queues
+a fresh scan, and startup subscribes before listing the inbox. Consumed drops
+are remembered in memory so a failed DELETE retries acknowledgement without
+decrypting the same ciphertext again. The bounded receipt cache retains failed
+acknowledgements before successful ones; if all 1,024 slots await deletion, new
+drops stay untouched until acknowledgements recover. These receipts are local to
+the running engine, not durable across a reload. Existing local DM history
+remains the durable record of received plaintext.
+
 - **Works:** text DMs both ways, message requests for a first DM from a stranger,
   presence both ways, blocking. Test: `npm run smoke:cross-mode-dm`.
 - **Calls:** 1:1 voice and video both ways. Call signaling (offer, answer, ICE,

@@ -93,6 +93,32 @@ export function createSenderVerifier({ verifyDmSig, verifyFanoutSig, fetchSigner
 // showing it. The browser build passes none of these and behaves as before.
 export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDisplayName, getMyDeviceId, persistMessage, signEnvelope, verifySender, onUnverifiedDrop, isBlocked, isKnownSender, onMessageRequest, strictSender = false }) {
     let _unsub = null;
+    let _draining = null;
+    let _drainingGeneration = 0;
+    let _drainAgain = false;
+    let _starting = null;
+    let _generation = 0;
+    // A decrypt spends its ratchet key even if deleting the drop fails. Remember
+    // consumed URLs for this engine's lifetime so retries only acknowledge them.
+    // Retain failed acknowledgements; evict successful ones first at the cap.
+    const _consumed = new Map();
+    const MAX_CONSUMED = 1024;
+
+    async function _acknowledge(url) {
+        _consumed.set(url, false);
+        const ok = await pod.podDeleteDmDrop(url);
+        if (ok) _consumed.set(url, true);
+    }
+
+    function _hasReceiptSpace() {
+        if (_consumed.size < MAX_CONSUMED) return true;
+        for (const [url, acknowledged] of _consumed) {
+            if (acknowledged) { _consumed.delete(url); return true; }
+        }
+        // Apply backpressure rather than forgetting a spent key during a long
+        // deletion outage. The untouched inbox entries remain available later.
+        return false;
+    }
 
     // Drop an (already-encrypted) DM to the recipient's pod inbox.
     async function dropDm(payload) {
@@ -148,7 +174,7 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
     async function _rejectUnverified(url, env) {
         console.warn('[webdm] unverified first-contact drop from', env.from_webid, '- not opened');
         if (onUnverifiedDrop) { try { onUnverifiedDrop({ from_webid: env.from_webid, message_id: env.message_id }); } catch { /* notice is best effort */ } }
-        await pod.podDeleteDmDrop(url);
+        await _acknowledge(url);
     }
 
     function _messageRequest(env) {
@@ -167,7 +193,7 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
         // A blocked sender's drop is removed unread, before any verify or decrypt.
         if (isBlocked && isBlocked(from)) {
             if (env.kind !== 'fanout' || !getMyDeviceId || !env.to_device_id || env.to_device_id === getMyDeviceId()) {
-                await pod.podDeleteDmDrop(url);
+                await _acknowledge(url);
             }
             return;
         }
@@ -200,7 +226,7 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
                 // Only a verified envelope may start a new ratchet session.
                 allow_session_init: verified,
             });
-            await pod.podDeleteDmDrop(url);
+            await _acknowledge(url);
             return;
         }
         // R107: is this envelope really signed by from_webid's owner? Checked
@@ -267,33 +293,77 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
         // before the drop is deleted, but NEVER gate delivery or deletion on it: a
         // cache write failure (quota, private mode) must not hide the message or
         // leave an undeletable, undecryptable drop.
-        handleEvent(message);
+        // The UI handler may be asynchronous. A failure must not bypass the
+        // history write and acknowledgement after a successful decrypt.
+        try { await handleEvent(message); }
+        catch (err) { console.warn('[webdm] message handling failed:', err); }
         if (persistMessage) { try { await persistMessage(message); } catch { /* best-effort cache */ } }
-        await pod.podDeleteDmDrop(url);
+        await _acknowledge(url);
     }
 
-    // Read and process every pending drop once.
-    async function drainOnce() {
+    async function _drain(generation) {
         const drops = await pod.podReadDmDrops();
         for (const d of drops) {
-            if (!d || !d.envelope) continue;
+            if (generation !== _generation) return;
+            if (!d || !d.url || !d.envelope) continue;
             // Isolate per-drop failures so one bad envelope cannot block the rest.
-            try { await _handleEnvelope(d.url, d.envelope); }
+            try {
+                if (_consumed.has(d.url)) {
+                    if (!_consumed.get(d.url)) await _acknowledge(d.url);
+                    continue;
+                }
+                if (_hasReceiptSpace()) await _handleEnvelope(d.url, d.envelope);
+            }
             catch (err) { console.warn('[webdm] drop handling failed:', err); }
         }
     }
 
-    // Ensure our inbox exists, drain what is already there, then watch for more.
-    async function start() {
-        const inbox = await pod.podEnsureDmInbox();
-        await drainOnce();
-        if (inbox && notify && notify.watchResource) {
-            _unsub = notify.watchResource(inbox, () => { drainOnce().catch(() => {}); });
+    // Coalesce notifications/reconnect/manual refresh into a single reader.
+    // Requests during a read trigger a fresh scan, so a newly arrived drop isn't
+    // lost simply because the current listing was captured before it arrived.
+    function drainOnce() {
+        if (_draining && _drainingGeneration !== _generation) {
+            const generation = _generation;
+            return _draining.catch(() => {}).then(() => {
+                if (generation === _generation) return drainOnce();
+            });
         }
-        return inbox;
+        if (_draining) { _drainAgain = true; return _draining; }
+        const generation = _generation;
+        _drainingGeneration = generation;
+        _draining = Promise.resolve().then(async () => {
+            do {
+                _drainAgain = false;
+                await _drain(generation);
+            } while (_drainAgain && generation === _generation);
+        }).finally(() => { _draining = null; });
+        return _draining;
+    }
+
+    // Subscribe before the initial listing so arrivals during startup trigger
+    // another scan. Concurrent starts share initialization and one subscription.
+    function start() {
+        if (_starting) return _starting;
+        const generation = _generation;
+        const starting = Promise.resolve().then(async () => {
+            const inbox = await pod.podEnsureDmInbox();
+            if (generation !== _generation) return null;
+            if (!_unsub && inbox && notify && notify.watchResource) {
+                _unsub = notify.watchResource(inbox, () => {
+                    if (generation === _generation) drainOnce().catch(() => {});
+                });
+            }
+            await drainOnce();
+            return generation === _generation ? inbox : null;
+        }).finally(() => { if (_starting === starting) _starting = null; });
+        _starting = starting;
+        return starting;
     }
 
     function stop() {
+        _generation++;
+        _drainAgain = false;
+        _starting = null;
         if (_unsub) { try { _unsub(); } catch { /* ignore */ } _unsub = null; }
     }
 
