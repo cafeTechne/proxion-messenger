@@ -60,8 +60,8 @@ describe('service worker fetch handler', () => {
     let sw;
     beforeEach(() => { sw = loadSW(); });
 
-    it('bumps the cache name to v280 (evicts stale caches on upgrade)', () => {
-        expect(SRC).toContain('proxion-shell-v280');
+    it('bumps the cache name to v281 (evicts stale caches on upgrade)', () => {
+        expect(SRC).toContain('proxion-shell-v281');
         expect(SRC).not.toContain('proxion-shell-v242');
     });
 

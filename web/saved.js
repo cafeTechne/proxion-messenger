@@ -9,6 +9,7 @@
 
 import { t } from './i18n.js';
 import { parseRoomAttachment } from './room-attachments.js';
+import { parseDmAttachment } from './dm-attachments.js';
 import { inlineNotice } from './states.js';
 import { evictOverCap, sortByRecency } from './gifs.js';
 import { podSyncSavedMessage, podSyncRemoveSavedMessage, podReadSavedMessages } from './pod.js';
@@ -168,7 +169,7 @@ export async function syncSavedFromPod() {
 
 // Pure: message + view context → the stored snapshot row.
 export function snapshotFromMessage(msg, view) {
-    const content = (parseRoomAttachment(msg.content)?.name || msg.content || '').slice(0, 500);
+    const content = ((parseRoomAttachment(msg.content) || parseDmAttachment(msg.content))?.name || msg.content || '').slice(0, 500);
     return {
         id: msg.message_id,
         thread_id: view?.id || msg.thread_id || '',

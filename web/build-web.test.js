@@ -39,6 +39,7 @@ describe('injectWebHead', () => {
         expect(WEB_CSP).toContain("default-src 'self'");
         expect(WEB_CSP).toContain('connect-src');
         expect(WEB_CSP).toContain('wss:');
+        expect(WEB_CSP).toContain("media-src 'self' data: blob:");
     });
 
     it('injects the frame-bust guard and whitelists it by hash in the CSP', () => {

@@ -277,6 +277,12 @@ describe('conversation capabilities', () => {
             expect(supportsConversationFeature(transport, feature, { crossMode: true })).toBe(false);
         }
     });
+    it('supports files and voice messages in both pod rooms and pod DMs', () => {
+        for (const transport of [gateway, createPodTransport()]) for (const feature of ['files', 'voice-messages']) {
+            expect(supportsConversationFeature(transport, feature, { podRoom: true })).toBe(true);
+            expect(supportsConversationFeature(transport, feature, { crossMode: true })).toBe(true);
+        }
+    });
     it('retains supported history and messages when gateway commands are restricted', () => {
         for (const feature of ['history', 'rooms', 'dm']) {
             expect(supportsConversationFeature(gateway, feature, { podRoom: true })).toBe(true);

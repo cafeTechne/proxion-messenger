@@ -10,6 +10,8 @@ import { escHtml, formatTimestamp } from './util.js';
 import { icon } from './icons.js';
 import { inlineNotice } from './states.js';
 import { showPromptModal, closeButtonHtml } from './dialogs.js';
+import { parseDmAttachment } from './dm-attachments.js';
+import { previewText } from './dmtext.js';
 
 // Rooms to offer in the "Forward to…" picker. Each sidebar room row carries a
 // [data-room-id] control; the row itself (li[data-name]) holds the room's
@@ -44,6 +46,12 @@ export function createModals({ getSocket, getActiveView, sendCmd, showToast, get
     const state = { forwardingMsgId: null };
 
     function openForwardModal(msgId) {
+        // The gateway forward command is plaintext and cannot carry a private
+        // DM file key. A future media-forward path must re-encrypt for its target.
+        if (parseDmAttachment(getMessageContent?.(msgId))) {
+            showToast(t('error.transportUnsupported'), 'error');
+            return;
+        }
         state.forwardingMsgId = msgId;
         const socket = getSocket();
         const modal = document.getElementById('forward-modal');
@@ -262,7 +270,7 @@ export function createModals({ getSocket, getActiveView, sendCmd, showToast, get
             const where = res.thread_name || '';
             const when = res.timestamp ? formatTimestamp(res.timestamp) : '';
             const meta = [who, where, when].filter(Boolean).map(escHtml).join(' · ');
-            const text = String(res.content || '');
+            const text = previewText(res, t('e2e.undecryptable'));
             btn.innerHTML =
                 `<span class="search-result__meta">${meta}</span>` +
                 `<span class="search-result__text">${escHtml(text.length > 200 ? text.slice(0, 200) + '…' : text)}</span>`;

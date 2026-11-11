@@ -27,6 +27,20 @@ beforeEach(async () => {
 });
 
 describe('DM file history', () => {
+  it('restores verified asset references and cached byte identity, including empty files', async () => {
+    await dmHistorySave(msg('pod-file', '2026-11-09', {
+      sender_verified: true, file: { filename: 'empty.txt', mime_type: 'text/plain', size: 0, data_b64: '', _podHash: 'a'.repeat(64) },
+    }));
+    const [rec] = await dmHistoryLoad('t1');
+    expect(rec.sender_verified).toBe(true);
+    expect(rec.file).toMatchObject({ data_b64: '', _podHash: 'a'.repeat(64) });
+    const existing = { from_webid: rec.from_webid, content: rec.content };
+    applyLocalRecord(existing, rec);
+    expect(existing.sender_verified).toBe(true);
+    const other = { from_webid: 'someone else', content: rec.content };
+    applyLocalRecord(other, rec);
+    expect(other.sender_verified).not.toBe(true);
+  });
   it('keeps the file bytes so the file renders after a reload', async () => {
     await dmHistorySave(msg('file-1', '2026-01-01T00:00:00Z'));
     const [rec] = await dmHistoryLoad('t1');

@@ -41,14 +41,17 @@ export async function makeCert() {
 // Build the web app, inject an https-origin client-id doc (and drop the CSP so an
 // http test pod is reachable), and serve it over https. Returns
 // { origin, server, buildDir } or null if the cert/build fails.
-export async function buildAndServeHttps(webDir, buildWebScript) {
+export async function buildAndServeHttps(webDir, buildWebScript, { keepLocalPodCsp = false } = {}) {
   const tls = await makeCert();
   if (!tls) return null;
   const buildDir = mkdtempSync(join(tmpdir(), 'proxion-web-'));
   const built = await new Promise((res) => { const b = spawn(process.execPath, [buildWebScript, webDir, buildDir]); b.on('exit', (c) => res(c === 0)); b.on('error', () => res(false)); });
   if (!built) return null;
   const idxPath = join(buildDir, 'index.html');
-  writeFileSync(idxPath, readFileSync(idxPath, 'utf8').replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, ''));
+  const builtHtml = readFileSync(idxPath, 'utf8');
+  writeFileSync(idxPath, keepLocalPodCsp
+    ? builtHtml.replace("connect-src 'self' https: wss:", "connect-src 'self' https: wss: http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*")
+    : builtHtml.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, ''));
   const port = await freePort();
   const origin = `https://127.0.0.1:${port}/`;
   writeFileSync(join(buildDir, 'clientid.jsonld'), JSON.stringify({

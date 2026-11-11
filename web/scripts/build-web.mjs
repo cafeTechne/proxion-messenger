@@ -37,6 +37,7 @@ export const WEB_CSP = [
     "default-src 'self'",
     "connect-src 'self' https: wss:",
     "img-src 'self' data: https:",
+    "media-src 'self' data: blob:",
     "style-src 'self' 'unsafe-inline'",
     `script-src 'self' ${FRAME_BUST_HASH}`,
     "font-src 'self' data:",

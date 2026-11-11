@@ -53,7 +53,7 @@ function harness({ mode = 'gateway', view = { type: 'local_room', id: 'gateway-r
     const confirmStart = source.indexOf("            attachListener('#schedule-confirm-btn'");
     const confirmEnd = source.indexOf("            attachListener('#schedule-cancel-btn'", confirmStart);
     if (confirmStart < 0 || confirmEnd < 0) throw new Error('Missing scheduling listeners');
-    const helpers = ['_isPodRoomView', '_conversationSupports', '_applyCrossModeThreadGating', '_scheduleAllowed', '_scheduleUnavailableText', '_syncScheduleBtn'];
+    const helpers = ['_isPodRoomView', '_isPodDmView', '_conversationSupports', '_applyCrossModeThreadGating', '_scheduleAllowed', '_scheduleUnavailableText', '_syncScheduleBtn'];
     const compiled = `${helpers.map(declaration).join('\n')}\n${source.slice(confirmStart, confirmEnd)}\nreturn { ${helpers.join(', ')}, setView(v) { activeView = v; } };`;
     const app = new Function(...Object.keys(deps), compiled)(...Object.values(deps));
     return { ...app, deps, classes, button, picker, input, listeners, transport, doc };

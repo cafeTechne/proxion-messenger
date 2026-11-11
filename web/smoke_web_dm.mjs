@@ -7,7 +7,8 @@
 //   - both sides keep the thread (and its history) across a reload
 //   - overlapping inbox scans and failed deletion preserve encrypted delivery
 //   - a block stops further DMs, and survives a reload
-//   - attach / voice message / disappearing messages are not offered
+//   - files and real voice notes survive failures, retries and reload
+//   - disappearing messages are not offered
 //
 //   node web/smoke_web_dm.mjs
 // Needs Chrome (or PROXION_CHROME), openssl, and npx (for CSS). Self-skips if the
@@ -17,6 +18,7 @@ import { existsSync } from 'fs';
 import { resolve, join } from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
+import { dmMediaJourney } from './scripts/dm-media-journey.mjs';
 import { skipSmoke } from './scripts/smoke-status.mjs';
 import { startCss, provisionAccount } from './scripts/css-harness.mjs';
 import { buildAndServeHttps, signIn } from './scripts/e2e-signin.mjs';
@@ -82,7 +84,7 @@ async function send(page, text) {
 
 try {
   step = 'serve';
-  served = await buildAndServeHttps(HERE, join(HERE, 'scripts', 'build-web.mjs'));
+  served = await buildAndServeHttps(HERE, join(HERE, 'scripts', 'build-web.mjs'), { keepLocalPodCsp: true });
   if (!served) { await cleanup(); skipSmoke('could not build/serve over https (openssl?).'); }
   ok('built + serving the web app over https');
 
@@ -94,7 +96,7 @@ try {
   const bob = await provisionAccount(css.url, { email: `bob-${stamp}@test.example`, password: 'pw-12345678', label: 'bob' });
   ok('CSS pod up + two accounts provisioned');
 
-  browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--disable-gpu', '--ignore-certificate-errors'] });
+  browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--disable-gpu', '--ignore-certificate-errors', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
   const pageA = await (await browser.createBrowserContext()).newPage();
   const pageB = await (await browser.createBrowserContext()).newPage();
   const errs = [];
@@ -202,6 +204,9 @@ try {
   await pageB.setRequestInterception(false);
   pageB.off('request', intercept);
   pageB.off('console', onConsole);
+
+  step = 'dm-media-ui';
+  await dmMediaJourney({ sender: pageA, receiver: pageB, openSender: () => openThread(pageA, bob.webId), openReceiver: () => openThread(pageB, alice.webId), label: 'browser-dm' });
 
   // ── Reload both: the thread and its history stay ──
   step = 'reload';

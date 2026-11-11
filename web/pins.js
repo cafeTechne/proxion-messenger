@@ -10,6 +10,7 @@ import { escHtml, scrollBehavior, didIdTag } from './util.js';
 import { jumpToMessage } from './wayfinding.js';
 import { isUndecryptable } from './e2e-secondary.js';
 import { parseRoomAttachment } from './room-attachments.js';
+import { parseDmAttachment } from './dm-attachments.js';
 
 // send (optional): queues pin/unpin while offline (connection.js
 // socketSendOrQueue) instead of dropping them into a closed socket.
@@ -141,7 +142,7 @@ export function createPins({ getSocket, getActiveView, getMessages = () => [],
             // no plaintext for it (main.js resolves it through dmtext.js).
             const preview = isUndecryptable(pin.content)
                 ? `<span class="msg-undecryptable">${escHtml(t('e2e.undecryptable'))}</span>`
-                : escHtml((parseRoomAttachment(pin.content)?.name || pin.content || "").slice(0, 80));
+                : escHtml(((parseRoomAttachment(pin.content) || parseDmAttachment(pin.content))?.name || pin.content || "").slice(0, 80));
             // message_id is client-supplied and stored verbatim, so escape it before
             // it lands in these innerHTML attributes (stored XSS otherwise).
             const msgIdEsc = escHtml(pin.message_id);

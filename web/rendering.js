@@ -23,6 +23,8 @@
 import { didIdTag, dmFallbackName, escHtml, presenceLabel, webidColor, avatarInitial, renderMarkdown, expireLabel as _expireLabel, b64attr, formatFileSize, gatewayUrl } from './util.js';
 import { parsePoll } from './polls.js';
 import { parseRoomAttachment } from './room-attachments.js';
+import { parseDmAttachment } from './dm-attachments.js';
+import { isDmPeerWebId } from './webdm.js';
 import { applyRoomEmoji, getRoomEmoji } from './room-emoji.js';
 import { t, tn, getLocale } from './i18n.js';
 import { icon } from './icons.js';
@@ -92,7 +94,7 @@ export function replySnippet(parent) {
     if (parent.deleted) return t('msg.replyDeleted');
     // A parent this device could not open: the notice, never its ciphertext.
     if (parent.e2e === true || isUndecryptable(parent.content)) return t('e2e.undecryptable');
-    const asset = parseRoomAttachment(parent.content);
+    const asset = parseRoomAttachment(parent.content) || parseDmAttachment(parent.content);
     if (asset) return asset.kind === "voice" ? t("msg.replyVoice") : asset.name;
     const text = String(parent.content || "").replace(/\s+/g, " ").trim();
     if (text) return text.length > 200 ? text.slice(0, 200) + "…" : text;
@@ -735,27 +737,39 @@ export function createRendering({
         // map-driven — unknown names pass through untouched).
         renderedText = applyRoomEmoji(renderedText, getRoomEmoji(msg.thread_id || activeView?.id || ''));
 
+        const isOwn = (msg.own === true) ||
+            (selfWebId && msg.from_webid === selfWebId) ||
+            (selfPubHex && msg.from_pub_hex === selfPubHex);
+
         const asset = isPodRoom(activeView) ? parseRoomAttachment(msg.content) : null;
-        if (asset) {
-            const prior = msg.file?._podHash === asset.sha256 ? msg.file : {};
-            msg.file = { ...prior, filename: asset.name, mime_type: asset.mime, size: asset.size, spoiler: asset.spoiler === true, _podHash: asset.sha256 };
+        const dmAsset = ['local_dm', 'dm'].includes(activeView?.type)
+            && isDmPeerWebId(activeView.peerWebid || activeView.peerDid || activeView.id) ? parseDmAttachment(msg.content) : null;
+        const parsedAsset = asset || dmAsset;
+        if (parsedAsset) {
+            const prior = msg.file?._podHash === parsedAsset.sha256 ? msg.file : {};
+            msg.file = { ...prior, filename: parsedAsset.name, mime_type: parsedAsset.mime, size: parsedAsset.size, spoiler: parsedAsset.spoiler === true, _podHash: parsedAsset.sha256, kind: parsedAsset.kind, durationMs: parsedAsset.durationMs };
             renderedText = '';
         }
         let fileHtml = "";
         if (msg.file) {
-            fileHtml = asset && typeof msg.file.data_b64 !== 'string'
-                ? `<div class="attachment"><span class="attachment-name">${escHtml(asset.name)}</span> <button type="button" class="btn btn--sm" data-room-asset="${msgIdEsc}"${msg.sender_verified ? '' : ' disabled'}>${escHtml(t(msg.file.unavailable ? 'btn.retry' : 'roomMedia.load'))}</button></div>`
-                : attachmentHtml(msg.file);
+            const hasBytes = typeof msg.file.data_b64 === 'string';
+            if (dmAsset?.kind === 'voice' && hasBytes) {
+                msg.content_type = "audio";
+                msg.audio_b64 = msg.file.data_b64;
+                if (parsedAsset.durationMs) msg.duration_ms = parsedAsset.durationMs;
+            } else if (parsedAsset && !hasBytes) {
+                const attr = dmAsset ? `data-dm-asset="${msgIdEsc}"` : `data-room-asset="${msgIdEsc}"`;
+                const canLoad = dmAsset ? (msg.sender_verified || isOwn) : msg.sender_verified;
+                fileHtml = `<div class="attachment"><span class="attachment-name">${escHtml(parsedAsset.name)}</span> <button type="button" class="btn btn--sm" ${attr}${canLoad ? '' : ' disabled'}>${escHtml(t(msg.file.unavailable ? 'btn.retry' : 'roomMedia.load'))}</button></div>`;
+            } else {
+                fileHtml = attachmentHtml(msg.file);
+            }
             // A stored room file arrives in history without its bytes: ask the
             // gateway for them (batched; the card fills in on file_data).
             if (msg.file.stored === true && !msg.file.data_b64 && msg.file.unavailable !== true) {
                 _requestFile(msgId);
             }
         }
-
-        const isOwn = (msg.own === true) ||
-            (selfWebId && msg.from_webid === selfWebId) ||
-            (selfPubHex && msg.from_pub_hex === selfPubHex);
 
         // Hover bar keeps the frequent actions (react, reply, own-message edit)
         // and a More button that opens the message context menu, which holds
@@ -855,7 +869,7 @@ export function createRendering({
             bodyHtml += `<div id="msgc-${msgIdEsc}" class="msg-content"><div class="poll-card" dir="auto">
                 <div class="poll-q">${escHtml(_poll.question)}</div>${rows}
                 <div class="poll-foot"><span class="poll-hint">${t(voting ? 'poll.voteHint' : 'poll.unavailable')}</span>${editedHtml}${receiptHtml}</div></div></div>`;
-        } else if (asset || isFileCaption(msg)) {
+        } else if (parsedAsset || isFileCaption(msg)) {
             // The card names the file; the "📎 name" caption would repeat it.
             bodyHtml += `<div id="msgc-${msgIdEsc}" class="msg-content msg-content--file"><span class="msg-text" dir="auto"></span>${editedHtml}${receiptHtml}</div>`;
         } else {

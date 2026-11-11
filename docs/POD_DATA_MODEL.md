@@ -844,11 +844,12 @@ unreferenced chunks in owner storage; the application does not automatically
 remove those resources. Message withdrawal removes the visible reference rather
 than erasing the owner's stored files.
 
-### Encrypted DM asset storage protocol (UI integration pending)
+### Encrypted DM assets and durable media delivery
 
 `web/dm-attachments.js` implements a separate ciphertext-only store at the
-sender's WebID-derived `proxion/dm-assets/`. It does not enable the DM attachment
-or recording controls. Unlike room assets, DM assets must never contain
+sender's WebID-derived `proxion/dm-assets/`. Pod-backed DM conversations expose
+attachment and recording controls in both browser and desktop builds. Unlike
+room assets, DM assets must never contain
 plaintext file bytes or a public manifest with a decryption key.
 
 Preparation encrypts the complete file with a fresh AES-256-GCM key and 12-byte
@@ -899,7 +900,39 @@ foreign listings, writes and ACL access are denied. Owner ACL writes are limited
 to the exact owner-write/public-read grants, with no public Append or Write.
 The existing 64 KiB request and response limits remain unchanged.
 
-Remaining app work: account/conversation-scoped durable draft storage, encrypted
-manifest delivery and delivery retries, attachment-card rendering, verified
-loads, history restoration and recording controls. Storage-protocol checks do
-not substitute for a full chat UI file/voice journey.
+`web/dm-media.js` stores account/conversation-bound drafts in IndexedDB before
+network I/O, capped atomically at ten drafts per account. Drafts retain the
+source Blob, prepared ciphertext/key/manifest, message ID, sender name/time and
+upload state. Retry after reload reuses the preparation and skips uploads already
+confirmed. Cancel discards an idle draft. Conversation/session changes stop
+further sends and clear the previous account's panel.
+
+The private manifest is encrypted using the existing DM ratchet and signed
+drop-box delivery. Multi-device browser peers use recipient-device fanout;
+desktop WebID threads retain the existing single-consumer protocol. Plaintext
+opt-in never allows a media key to be sent unencrypted. A draft is removed only
+after recipient-pod acceptance and successful local history persistence (or the
+user's explicit history-off setting). A late delivery acknowledgement is retained
+in the original draft if navigation interrupted local completion; retry can then
+finish history without delivering again.
+
+Delivery retries preserve file encryption and message identity, but produce fresh
+ratchet ciphertext for a new inbox POST. Replaying spent ratchet ciphertext under
+a different drop URL would otherwise leave an undecryptable replay at the receiver.
+Duplicate logical messages deduplicate by message ID. Transactional, durable
+receive receipts across deletion outages/reloads remain a separate follow-up.
+
+Verified authors and locally sent messages expose an explicit Load/Retry button.
+Browser loads omit credentials; desktop peer reads use the scoped bridge. Only
+fully verified/decrypted bytes become previews, downloads or voice players.
+Local history preserves sender verification and loaded file identity/bytes so
+files and real recorded audio survive reload. Filename labels replace manifests
+in reply, copy, Saved, search and notification previews. The plaintext gateway
+forward command is refused for DM asset manifests because it would expose their
+file keys; media forwarding needs a dedicated encrypted path.
+
+The website CSP explicitly permits local data/blob media playback. Live browser
+DM tests retain that policy, adding only localhost connections for the test pod.
+Browser/browser and desktop/browser chat UI journeys exercise upload and delivery
+outages, draft reload/retry, exact-byte downloads and real recording/playback
+after history reload. Asset cleanup and live ACP compatibility remain planned.

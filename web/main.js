@@ -56,6 +56,8 @@ import { createPins } from './pins.js';
 import { createMedia, captureMediaTarget } from './media.js';
 import { createRoomAttachments, parseRoomAttachment } from './room-attachments.js';
 import { createRoomMedia } from './room-media.js';
+import { createDmAttachments, parseDmAttachment, DM_ASSET_MAX } from './dm-attachments.js';
+import { createDmMedia, deliverDmMedia } from './dm-media.js';
 import { createModals } from './modals.js';
 import { createProfile } from './profile.js';
 import { createEdit } from './edit.js';
@@ -543,14 +545,22 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // instance because voice's deps reference media.stopScreenShare and
         // media.state.isSharing; media's getVoiceState is a deferred getter, so the
         // forward reference to `voice` is only resolved at runtime (no TDZ).
-        let _roomMedia = null;
+        let _roomMedia = null, _dmMedia = null, _podDmEngine = null;
+        function _isPodDmView(view) {
+            return !!(view && (view.type === 'local_dm' || view.type === 'dm')
+                && isDmPeerWebId(view.peerWebid || view.peerDid || view.id));
+        }
         const media = createMedia({
             getSocket: () => socket, getActiveView: () => activeView,
             showToast, getVoiceState: () => voice.state,
             getVoice: () => voice,   // R81: recap senders when screen share changes the profile
             getSessionId: () => _webRoomSessionId(),
             canRecord: () => _conversationSupports('voice-messages'),
-            sendRecording: (blob, durationMs, target) => _isPodRoomView(target.view) ? _roomMedia.send(blob, { name: 'voice.webm', mime: 'audio/webm', kind: 'voice', durationMs }, target) : null,
+            sendRecording: (blob, durationMs, target) => {
+                if (_isPodRoomView(target.view)) return _roomMedia.send(blob, { name: 'voice.webm', mime: 'audio/webm', kind: 'voice', durationMs }, target);
+                if (_isPodDmView(target.view)) return _dmMedia.send(blob, { name: 'voice.webm', mime: 'audio/webm', kind: 'voice', durationMs }, target);
+                return null;
+            },
         });
         const { pressMic, releaseMic, stopVoiceRecording, sendVoiceMessage, startScreenShare, stopScreenShare } = media;
         // Message rendering (core slice 2). Created before voice/modals because they
@@ -1261,19 +1271,17 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             crossMode?.drainOnce().catch(() => {});   // the waiting drop is deleted unread
         }
         // Resolve capabilities against this conversation protocol. Pod rooms
-        // support signed changes; cross-mode DMs currently support text only.
+        // support signed changes; pod-backed DMs support encrypted media.
         function _conversationSupports(feature) {
             const view = activeView;
             const podRoom = _isPodRoomView(view);
-            const crossModeThread = (view?.type === 'local_dm' || view?.type === 'dm')
-                && isDmPeerWebId(view.peerWebid || view.peerDid || view.id);
+            const crossModeThread = _isPodDmView(view);
             return supportsConversationFeature(transport, feature, { podRoom, crossMode: crossModeThread });
         }
         function _applyCrossModeThreadGating() {
             const view = activeView;
             applyConversationFeatureGating(transport, { podRoom: _isPodRoomView(view),
-                crossMode: (view?.type === 'local_dm' || view?.type === 'dm')
-                    && isDmPeerWebId(view.peerWebid || view.peerDid || view.id) });
+                crossMode: _isPodDmView(view) });
         }
         function _showCrossModeState(st) {
             const el = document.getElementById('settings-crossmode-status');
@@ -2583,7 +2591,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                             message_id: msg.message_id,
                             snippet: msg.e2e ? t('dm.encryptedPreview')
                                 : isUndecryptable(msg.content) ? t('e2e.undecryptable')
-                                : markdownToPlain(msg.content).slice(0, 40),
+                                : markdownToPlain(previewText(msg, t('e2e.undecryptable'))).slice(0, 40),
                             timestamp: msg.timestamp || new Date().toISOString(),
                         };
                         if (hiddenDms.has(id)) { hiddenDms.delete(id); localStorage.setItem("proxion_hidden_dms", JSON.stringify([...hiddenDms])); }
@@ -2596,7 +2604,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                             || (msg.source === "relay" && msg.room_id && msg.room_id === id)) {
                         roomLastMessages[id] = {
                             message_id: msg.message_id,
-                            snippet: markdownToPlain(msg.content).slice(0, 40),
+                            snippet: markdownToPlain(previewText(msg, t('e2e.undecryptable'))).slice(0, 40),
                             senderName: msg.from_display_name || (msg.from_webid || "").slice(0, 8),
                             timestamp: msg.timestamp || new Date().toISOString(),
                         };
@@ -5671,6 +5679,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // and the header subtitle. Called by view.js whenever a thread opens.
         function _onViewOpened() {
             _roomMedia?.refresh();
+            _dmMedia?.refresh();
             const inp = document.getElementById("message-input");
             // The draft kept across signing in again goes back into its thread.
             if (_pendingDraft && inp && activeView?.id === _pendingDraft.thread) {
@@ -6437,18 +6446,87 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             },
             onMessage: (message, ctx) => renderMessage({ ...message, thread_id: ctx.roomId, local: true, own: true, from_webid: selfWebId }),
         });
+
+        function _dmMediaContext(target = null) {
+            target ||= captureMediaTarget({ getSocket: () => socket, getActiveView: () => activeView,
+                getSessionId: _webRoomSessionId, canSend: () => _conversationSupports('files') });
+            if (!target || !_isPodDmView(target.view)) return null;
+            const actor = transport.mode === 'web' ? selfWebId : crossMode?.state().webid;
+            const peerWebId = target.view.peerWebid || target.view.peerDid || (isDmPeerWebId(target.view.id) ? target.view.id : null);
+            if (!actor || !peerWebId) return null;
+            return {
+                actor, peerWebId, threadId: target.view.id, selfId: selfWebId,
+                senderName: localStorage.getItem('proxion_display_name') || '',
+                current: () => target.current() && actor === (transport.mode === 'web' ? selfWebId : crossMode?.state().webid),
+                fetch: (url, options) => transport.mode === 'web' ? solidSession.fetch(url, options) : crossMode.bridge.fetch(url, options),
+                readFetch: (url, options) => transport.mode === 'web' ? fetch(url, { ...options, credentials: 'omit' }) : crossMode.bridge.fetch(url, options),
+            };
+        }
+        _dmMedia = createDmMedia({
+            getContext: _dmMediaContext, showToast,
+            post: async (draft, ctx, current) => {
+                if (!clientDid || !current()) return { ok: false };
+                const engine = transport.mode === 'web' ? _podDmEngine : crossMode;
+                if (!engine) return { ok: false };
+                const accepted = draft.delivered || await deliverDmMedia(draft, ctx, {
+                    current, obtainKey: _obtainPeerKey, hasKey: isE2EEnabled, encrypt: ratchetEncrypt, cachePeerPub,
+                    getPeerDevices: () => transport.mode === 'web' ? identity.devicesForPeer(ctx.peerWebId) : [],
+                    getOwnDevices: () => transport.mode === 'web' ? identity.ownOtherDevices() : [],
+                    getDeviceId: () => clientDid, getPub: myX25519PubB64u,
+                    dropDm: payload => engine.dropDm(payload), dropFanout: payload => engine.dropFanout(payload),
+                });
+                if (!accepted) return { ok: false };
+                const message = draft.delivered || {
+                    message_id: draft.id, thread_id: ctx.threadId, from_webid: ctx.selfId,
+                    from_display_name: draft.senderName, content: draft.content, timestamp: draft.timestamp,
+                    sender_verified: true, own: true, local: true,
+                };
+                if (!current()) return { ok: true, message, historySaved: false };
+                const historySaved = await dmHistorySave(message);
+                if (transport.mode === 'web') _podUpdateDmIndex(ctx.threadId, true).catch(() => {});
+                return { ok: true, message, historySaved };
+            },
+            onMessage: (message, ctx) => _handleEventAsync({ ...message, type: 'message', source: 'local_dm', thread_id: ctx.threadId, local: true, own: true }, true),
+        });
+
         document.getElementById('message-feed').addEventListener('click', async event => {
             const button = event.target.closest('[data-room-asset]');
-            if (!button || button.disabled) return;
-            const ctx = _roomMediaContext(), id = button.dataset.roomAsset, message = messageMap[id];
-            if (!ctx || !message?.sender_verified || !parseRoomAttachment(message.content, ctx.container)) return;
-            const content = message.content;
-            button.disabled = true;
-            const result = await createRoomAttachments({ fetch: ctx.fetch, current: ctx.current }).download(ctx.container, content);
-            if (!ctx.current() || messageMap[id]?.content !== content || messageMap[id]?.deleted) return;
-            if (result.ok) message.file = { ...message.file, data_b64: _u8ToB64(result.bytes), unavailable: false };
-            else { message.file = { ...message.file, unavailable: true }; showToast(t('roomMedia.downloadFailed'), 'error'); }
-            rendering.refreshMessage(id);
+            if (button && !button.disabled) {
+                const ctx = _roomMediaContext(), id = button.dataset.roomAsset, message = messageMap[id];
+                if (!ctx || !message?.sender_verified || !parseRoomAttachment(message.content, ctx.container)) return;
+                const content = message.content;
+                button.disabled = true;
+                const result = await createRoomAttachments({ fetch: ctx.fetch, current: ctx.current }).download(ctx.container, content);
+                if (!ctx.current() || messageMap[id]?.content !== content || messageMap[id]?.deleted) return;
+                if (result.ok) message.file = { ...message.file, data_b64: _u8ToB64(result.bytes), unavailable: false };
+                else { message.file = { ...message.file, unavailable: true }; showToast(t('roomMedia.downloadFailed'), 'error'); }
+                rendering.refreshMessage(id);
+                return;
+            }
+            const dmBtn = event.target.closest('[data-dm-asset]');
+            if (dmBtn && !dmBtn.disabled) {
+                const ctx = _dmMediaContext(), id = dmBtn.dataset.dmAsset, message = messageMap[id];
+                if (!ctx || !message || (!message.sender_verified && message.from_webid !== selfWebId) || !parseDmAttachment(message.content)) return;
+                const content = message.content;
+                const manifest = parseDmAttachment(content);
+                dmBtn.disabled = true;
+                const senderWebId = message.from_webid === selfWebId ? ctx.actor : message.from_webid;
+                const result = await createDmAttachments({ fetch: ctx.readFetch, current: ctx.current, getSelfWebId: () => ctx.actor }).download(senderWebId, content);
+                if (!ctx.current() || messageMap[id]?.content !== content || messageMap[id]?.deleted) return;
+                if (result.ok) {
+                    message.file = { ...message.file, data_b64: _u8ToB64(result.bytes), unavailable: false };
+                    if (manifest?.kind === 'voice') {
+                        message.content_type = 'audio';
+                        message.audio_b64 = _u8ToB64(result.bytes);
+                        message.duration_ms = manifest.durationMs;
+                    }
+                } else {
+                    message.file = { ...message.file, unavailable: true };
+                    showToast(t('roomMedia.downloadFailed'), 'error');
+                }
+                if (result.ok) await dmHistorySave(message);
+                if (ctx.current()) rendering.refreshMessage(id);
+            }
         });
 
         const ROOM_FILE_MB = ROOM_FILE_BYTES / (1024 * 1024);
@@ -6463,6 +6541,11 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             // file is sniffed by the gateway on the plain path, but a sealed one
             // goes out as application/octet-stream, which is not allowed.
             const mime = (file.type || '').toLowerCase().split(';')[0].trim();
+            if (_isPodDmView(view)) {
+                if (file.size > DM_ASSET_MAX) return 'file.podDmTooLarge';
+                if (!FILE_MIMES.has(mime)) return 'error.file_type_not_allowed';
+                return null;
+            }
             if ((mime || sealFile || _isPodRoomView(view)) && !FILE_MIMES.has(mime)) return 'error.file_type_not_allowed';
             const inlineMax = inlineFileLimit(view.type, sealFile ? FILE_TAG_BYTES : 0);
             if (file.size <= inlineMax) return null;
@@ -6499,6 +6582,10 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             // the AES-GCM tag to what the inline cap has to hold.
             if (_isPodRoomView(view)) {
                 await _roomMedia.send(file, { name: file.name, mime: (file.type || 'application/octet-stream').toLowerCase().split(';')[0].trim(), spoiler: opts.spoiler }, target);
+                return;
+            }
+            if (_isPodDmView(view)) {
+                await _dmMedia.send(file, { name: file.name, mime: (file.type || 'application/octet-stream').toLowerCase().split(';')[0].trim(), spoiler: opts.spoiler }, target);
                 return;
             }
             const sealFile = secondary.mustSeal(view);
@@ -6596,8 +6683,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         }
 
         async function confirmAndSend(file, batch = null) {
-            // The web build has no file path (send_file is a gateway command), and
-            // its attach controls are hidden; paste and drop stop here too.
+            // Check this conversation's file protocol for picker, paste and drop.
             if (!_conversationSupports('files')) return;
             const target = captureMediaTarget({ getSocket: () => socket, getActiveView: () => activeView,
                 getSessionId: _webRoomSessionId, canSend: () => _conversationSupports('files') });
@@ -7108,6 +7194,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             updateFriendAction(friendButton, msg.from_webid);
             if (isOwn) friendButton.hidden = true;
             const isImage = _isImageAttachment(msg);
+            document.getElementById('ctx-forward').style.display = parseDmAttachment(msg.content) ? 'none' : '';
             document.getElementById("ctx-pin").style.display = (!_isPodRoomView(activeView) || roomCreatorOf.has(activeView.id)) ? "" : "none";
             document.getElementById("ctx-edit").style.display  = isOwn ? "" : "none";
             document.getElementById("ctx-delete").style.display = (isOwn || (_isPodRoomView(activeView) && roomCreatorOf.has(activeView.id))) ? "" : "none";
@@ -7163,7 +7250,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         };
         document.getElementById("ctx-copy").onclick = () => {
             if (!_ctxTarget) return;
-            const asset = parseRoomAttachment(_ctxTarget.content);
+            const asset = parseRoomAttachment(_ctxTarget.content) || parseDmAttachment(_ctxTarget.content);
             navigator.clipboard.writeText(asset ? asset.name : _ctxTarget.content).catch(() => {});
             closeCtxMenu();
         };
@@ -9166,6 +9253,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     // R107: publish this device's DM signer identity so peers can
                     // verify our DMs really came from us.
                     if (clientDid) podPublishSigner(clientDid, accountDid).catch(() => {});
+                    _podDmEngine = webDm;
                     window.proxionWebDm = webDm;      // for smokes / power users
                     window.proxionWebCalls = webCalls;
                     window.proxionWebJoin = webJoin;

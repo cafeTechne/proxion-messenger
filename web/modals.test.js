@@ -50,12 +50,23 @@ function make(over = {}) {
     getActiveView: () => (over.activeView === undefined ? { type: 'local_room', id: 'room-1' } : over.activeView),
     sendCmd: (cmd, payload) => sendCmdCalls.push({ cmd, payload }),
     showToast: () => {},
+    getMessageContent: over.getMessageContent,
     renderMessage: over.renderMessage ?? (() => {}),
   });
   return { modals, sent, sendCmdCalls };
 }
 
 describe('openForwardModal', () => {
+  it('does not forward an encrypted attachment manifest through the plaintext gateway command', () => {
+    const manifest = '[proxion-dm-attachment:v1]' + JSON.stringify({ v: 1, id: '12345678-1234-4123-8123-123456789abc',
+      name: 'secret.txt', mime: 'text/plain', size: 1, kind: 'file', chunks: 1,
+      key: 'A'.repeat(43), iv: 'B'.repeat(16), sha256: 'c'.repeat(64) });
+    const { modals, sent } = make({ getMessageContent: () => manifest });
+    modals.openForwardModal('private-file');
+    expect(modals.state.forwardingMsgId).toBe(null);
+    expect(els['forward-modal']).toBeUndefined();
+    expect(sent).toEqual([]);
+  });
   it('records the message id and opens the modal', () => {
     const { modals } = make();
     modals.openForwardModal('m1');

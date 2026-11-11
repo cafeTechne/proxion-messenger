@@ -30,7 +30,8 @@ export const FEATURES = ['rooms', 'history', 'invites', 'dm', 'presence', 'calls
 // signed edit/delete, reaction, pin and poll paths through the conversation
 // capability checks below; cross-mode DMs still lack those paths. Settings
 // data/federation panels depend on gateway-only HTTP endpoints.
-// Files and voice notes have explicit pod-room paths, enabled per conversation.
+// Files and voice notes have explicit pod-room and encrypted pod-DM paths,
+// enabled per conversation.
 // Disappearing messages remain gateway-only.
 //
 // Room administration is not in the set either ('room-admin': name and topic,
@@ -252,6 +253,7 @@ const _GATEWAY_MESSAGE_FEATURES = new Set([
 
 export function supportsConversationFeature(transport, feature, { podRoom = false, crossMode = false } = {}) {
     if (transport && podRoom && !crossMode && ['edit', 'delete', 'reactions', 'pins', 'polls', 'files', 'voice-messages'].includes(feature)) return true;
+    if (transport && crossMode && ['files', 'voice-messages'].includes(feature)) return true;
     if (!transport?.supports(feature)) return false;
     return !((podRoom || crossMode) && _GATEWAY_MESSAGE_FEATURES.has(feature));
 }

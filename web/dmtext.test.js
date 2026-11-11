@@ -9,6 +9,15 @@ import {
   looksLikeCiphertext, isSealedCopy, dmDisplayText, unsealCopy, unsealList,
   mergeSearchHits, previewText,
 } from './dmtext.js';
+
+it('uses a filename in previews instead of the private DM media manifest', () => {
+    const key = 'A'.repeat(43);
+    const content = '[proxion-dm-attachment:v1]' + JSON.stringify({ v: 1, id: '12345678-1234-4123-8123-123456789abc',
+        name: 'private.txt', mime: 'text/plain', size: 1, kind: 'file', chunks: 1,
+        key, iv: 'B'.repeat(16), sha256: 'c'.repeat(64) });
+    expect(previewText({ content }, 'unavailable')).toBe('private.txt');
+    expect(previewText({ content, e2e: true }, 'unavailable')).toBe('unavailable');
+});
 import { UNDECRYPTABLE } from './e2e-secondary.js';
 import {
   dmHistorySave, dmHistoryClearAll, dmHistorySetEnabled, dmHistoryGet,

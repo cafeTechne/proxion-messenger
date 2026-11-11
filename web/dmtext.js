@@ -7,6 +7,8 @@
 // UNDECRYPTABLE placeholder, which each surface renders as a localized notice.
 
 import { UNDECRYPTABLE, isUndecryptable } from './e2e-secondary.js';
+import { parseDmAttachment } from './dm-attachments.js';
+import { parseRoomAttachment } from './room-attachments.js';
 
 // Gateways before the content_type marker stored sealed rows with no flag.
 // Ratchet ciphertext is unpadded base64url of at least 17 bytes (tag + text):
@@ -90,5 +92,7 @@ export function mergeSearchHits(gatewayHits, localHits, { isDm = () => false } =
 export function previewText(m, notice, isDm = false) {
     if (!m) return '';
     if (isSealedCopy(m, isDm) || isUndecryptable(m.content)) return notice;
+    const asset = parseDmAttachment(m.content) || parseRoomAttachment(m.content);
+    if (asset) return asset.name;
     return m.content != null ? String(m.content) : '';
 }

@@ -1032,4 +1032,28 @@ describe('signed pod attachment cards', () => {
       expect(sent.some(message => message.cmd === 'get_files')).toBe(false);
     } finally { global.document.createElement = original; }
   });
+
+  it('renders encrypted DM attachment card with data-dm-asset and requires verified author', () => {
+    els['message-feed'] = mkEl({ scrollHeight: 500, clientHeight: 500 });
+    const created = [], original = global.document.createElement;
+    global.document.createElement = () => { const element = mkEl(); created.push(element); return element; };
+    try {
+      view = { type: 'local_dm', id: 'https://peer.example/profile/card#me' };
+      const id = '12345678-1234-4123-8123-123456789abc';
+      const content = '[proxion-dm-attachment:v1]' + JSON.stringify({
+        v: 1, id, name: 'secret.txt', mime: 'text/plain', kind: 'file', size: 12,
+        key: 'A'.repeat(43), iv: 'B'.repeat(16), sha256: 'c'.repeat(64), chunks: 1,
+      });
+      make({ isPodRoom: () => false }).renderMessage({
+        message_id: 'dm-asset-msg', thread_id: 'https://peer.example/profile/card#me',
+        from_webid: 'https://peer.example/profile/card#me', content, sender_verified: true,
+        timestamp: new Date().toISOString(),
+      });
+      const html = created.map(element => element.innerHTML).join('');
+      expect(html).toContain('data-dm-asset="dm-asset-msg"');
+      expect(html).toContain('secret.txt');
+      expect(html).not.toContain('[proxion-dm-attachment:v1]');
+      expect(html).not.toContain('data-dm-asset="dm-asset-msg" disabled');
+    } finally { global.document.createElement = original; }
+  });
 });

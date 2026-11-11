@@ -10,6 +10,8 @@
 //   - every drop either side wrote is ciphertext, and Alice's inbox is drained
 //   - a forged, unsigned drop "from Bob" is not opened
 //   - presence flows both ways
+//   - encrypted file and real recorded voice controls work both ways, including
+//     upload/delivery failures, durable draft retries and history reload
 //   - Alice blocks Bob; his next DM is deleted unread
 //
 //   node web/smoke_cross_mode_dm.mjs
@@ -22,6 +24,7 @@ import { tmpdir } from 'os';
 import { resolve, join } from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
+import { dmMediaJourney } from './scripts/dm-media-journey.mjs';
 import { skipSmoke } from './scripts/smoke-status.mjs';
 import { startCss, provisionAccount, makeAuthSession, freePort } from './scripts/css-harness.mjs';
 import { buildAndServeHttps, signIn } from './scripts/e2e-signin.mjs';
@@ -123,7 +126,7 @@ try {
   const A = await startGateway(css.url, alice);
   ok('Alice\'s gateway is up and connected to her pod');
 
-  browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--disable-gpu', '--ignore-certificate-errors'] });
+  browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--disable-gpu', '--ignore-certificate-errors', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
   const pageA = await (await browser.createBrowserContext()).newPage();
   const pageB = await (await browser.createBrowserContext()).newPage();
   const errs = [];
@@ -187,9 +190,9 @@ try {
   else fail('Bob\'s message is marked unverified');
 
   step = 'gating';
-  const shown = await pageA.evaluate(() => ['attach-btn', 'voice-record-btn', 'schedule-btn']
+  const shown = await pageA.evaluate(() => ['schedule-btn']
     .filter((id) => { const el = document.getElementById(id); return el && getComputedStyle(el).display !== 'none'; }));
-  if (!shown.length) ok('files, voice messages and scheduling are not offered in the WebID thread');
+  if (!shown.length) ok('scheduling remains unavailable in the WebID thread');
   else fail('still offered: ' + shown.join(', '));
 
   step = 'reply';
@@ -256,6 +259,10 @@ try {
   }, browserAsset);
   if (desktopRead) ok('desktop bridge reads and decrypts browser-hosted encrypted audio payload');
   else fail('desktop could not decrypt browser asset');
+
+  step = 'dm-media-ui';
+  await dmMediaJourney({ sender: pageA, receiver: pageB, openSender: () => openThread(pageA, bob.webId), openReceiver: () => openThread(pageB, alice.webId), label: 'desktop-to-browser' });
+  await dmMediaJourney({ sender: pageB, receiver: pageA, openSender: () => openThread(pageB, alice.webId), openReceiver: () => openThread(pageA, bob.webId), label: 'browser-to-desktop' });
 
   step = 'presence';
   const presA = await waitFor(pageA, () => !!document.querySelector('#message-feed .avatar-presence.online'), undefined, 40000);

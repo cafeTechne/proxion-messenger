@@ -75,7 +75,8 @@ export function fileForRecord(file) {
     };
     if (Number.isInteger(file.width) && Number.isInteger(file.height)) { out.width = file.width; out.height = file.height; }
     if (file.spoiler === true) out.spoiler = true;
-    if (typeof file.data_b64 === 'string' && file.data_b64 && file.data_b64.length <= MAX_FILE_B64) {
+    if (typeof file._podHash === 'string' && /^[a-f0-9]{64}$/.test(file._podHash)) out._podHash = file._podHash;
+    if (typeof file.data_b64 === 'string' && (file.data_b64 || out.size === 0) && file.data_b64.length <= MAX_FILE_B64) {
         out.data_b64 = file.data_b64;
     } else {
         out.unavailable = true;
@@ -95,6 +96,10 @@ export function stripFileBytes(rec) {
 export function applyLocalRecord(existing, rec) {
     if (!existing || !rec) return false;
     let changed = false;
+    if (rec.sender_verified === true && existing.from_webid === rec.from_webid && !existing.sender_verified) {
+        existing.sender_verified = true;
+        changed = true;
+    }
     if (existing.content !== rec.content) {
         // Local plaintext is authoritative: the server copy of an E2E DM
         // is ciphertext (stored as a plain string with no e2e flag), so
@@ -148,6 +153,7 @@ export async function dmHistorySave(msg, opts = {}) {
                 content: msg.content != null ? String(msg.content) : '',
                 timestamp: msg.timestamp || new Date().toISOString(),
                 reply_to_id: msg.reply_to_id || null,
+                ...(msg.sender_verified === true ? { sender_verified: true } : {}),
                 ...(msg.edited_at ? { edited_at: msg.edited_at } : {}),
                 ...(Array.isArray(msg.edits) && msg.edits.length ? { edits: msg.edits.slice(-MAX_EDITS) } : {}),
                 ...(msg.file ? { file: fileForRecord(msg.file) } : {}),

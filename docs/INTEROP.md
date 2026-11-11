@@ -52,14 +52,13 @@ remains the durable record of received plaintext.
 - **Needs:** a pod connected to the desktop gateway, stored where its WebID points
   (`{root}profile/card#me` with storage at `{root}`). Share the WebID from
   Settings, Pod.
-- **Media storage groundwork:** `web/dm-attachments.js` can upload ciphertext-only
-  chunks and decrypt verified downloads through either browser fetch or the
-  desktop bridge. The required pod checks cover a 2 MiB file, deterministic
-  upload retry and denied peer writes; the cross-mode DM smoke checks the storage
-  protocol in both directions. These are protocol tests, not chat UI transfers.
-  DM attachment/recording controls remain disabled until durable sends, rendering
-  and history integration are complete. See [the data model](POD_DATA_MODEL.md#encrypted-dm-asset-storage-protocol-ui-integration-pending).
-- **Not yet:** group calls, edits, reactions, files, voice messages,
+- **Files and voice messages:** encrypted pod-backed attachments up to 2 MiB and
+  recorded voice notes work through the browser and desktop chat controls. Source
+  drafts survive upload/delivery failures and reload, with explicit Retry/Cancel.
+  Confirmed sends and verified downloads restore from local history. Browser and
+  cross-mode DM smokes exercise exact file bytes and real recorded playback in
+  both directions. See [the data model](POD_DATA_MODEL.md#encrypted-dm-assets-and-durable-media-delivery).
+- **Not yet:** group calls, edits, reactions, media forwarding,
   disappearing and scheduled messages in these threads. One desktop device per
   WebID receives them: the one that signed in last.
 
@@ -258,8 +257,8 @@ the signed room message binds the file metadata and full-file SHA-256 digest.
 Load attachment performs an authenticated, bounded download and verifies bytes
 before preview, playback, or download. Failed uploads retain drafts for retry,
 including after reload. Participant removal and room closure revoke future reads
-and uploads; the owner retains stored history and files. Cross-mode DMs remain
-text-only and do not acquire these room capabilities.
+and uploads; the owner retains stored history and files. Pod-backed DMs use the
+separate encrypted asset protocol described above.
 
 The format, access rules, and draft behavior are specified in
 [POD_DATA_MODEL.md](POD_DATA_MODEL.md#shared-pod-room-attachments-and-voice-notes).

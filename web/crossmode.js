@@ -198,6 +198,8 @@ export function createCrossMode({
         setCallActive: (active) => { _callActive = !!active; if (_calls) _calls.setActive(_callActive); },
         expectedCallSigner: (view, event) => callSigners.expectedFor(view, event),
         drainOnce: () => (_dm ? _dm.drainOnce() : Promise.resolve()),
+        dropDm: payload => (_state.ready && _dm ? _dm.dropDm(payload) : Promise.resolve(false)),
+        dropFanout: payload => (_state.ready && _dm ? _dm.dropFanout(payload) : Promise.resolve(false)),
         drainCalls: () => (_calls ? _calls.drainOnce() : Promise.resolve()),
         bridge,
     };
