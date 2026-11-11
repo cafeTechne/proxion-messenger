@@ -11,7 +11,11 @@ try {
     const a = await makeAuthSession(owner), b = await makeAuthSession(peer);
     const bytes = new Uint8Array(DM_ASSET_MAX).map((_, index) => index % 251);
     const prepared = await prepareDmAttachment(new Blob([bytes]), { name: 'private-full.txt', mime: 'text/plain' });
-    const sender = createDmAttachments({ fetch: (url, options) => a.fetch(url, options) });
+    const sender = createDmAttachments({ fetch: async (url, options) => {
+        const response = await a.fetch(url, options);
+        if (options?.method === 'DELETE' && ![200, 204, 205, 404, 410].includes(response.status)) console.error('cleanup DELETE status:', response.status);
+        return response;
+    }, getSelfWebId: () => owner.webId });
     let progress = 0;
     const result = await sender.upload(owner.webId, prepared, count => { progress = count; });
     if (!result.ok || progress !== 65) throw Error('2 MiB upload: ' + JSON.stringify(result));
@@ -36,5 +40,9 @@ try {
     if ((await reader.download(owner.webId, prepared.content.replace(manifest.key, 'A'.repeat(43)))).ok) throw Error('wrong key decrypted file');
     const voice = await prepareDmAttachment(new Blob(['voice-bytes']), { name: 'voice.webm', mime: 'audio/webm', kind: 'voice', durationMs: 1500 });
     if (!(await sender.upload(owner.webId, voice)).ok || !(await reader.download(owner.webId, voice.content)).ok) throw Error('voice storage roundtrip');
-    console.log('SMOKE PASSED: 2 MiB/65 ciphertext chunks, exact decryption, persisted-preparation retry, no public metadata/key, denied peer writes, conditional immutability and voice metadata');
+    const removed = await sender.discardUnused(owner.webId, structuredClone(prepared));
+    if (!removed.ok) throw Error('conditional cleanup failed: ' + removed.reason);
+    if ((await reader.download(owner.webId, prepared.content)).ok) throw Error('cleaned ciphertext remained downloadable');
+    if (!(await reader.download(owner.webId, voice.content)).ok) throw Error('cleanup affected another upload');
+    console.log('SMOKE PASSED: 2 MiB/65 ciphertext chunks, exact decryption, persisted-preparation retry, no public metadata/key, denied peer writes, conditional cleanup preserving another upload and voice metadata');
 } finally { css.stop(); }

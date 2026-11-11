@@ -21,7 +21,7 @@ HEADERS = {"Content-Type": "application/json", "If-None-Match": "*"}
 
 def test_asset_policy_is_tightly_scoped():
     foreign = PEER_ROOT + "proxion/dm-assets/"
-    for method in ("GET", "HEAD", "PUT"):
+    for method in ("GET", "HEAD", "PUT", "DELETE"):
         assert pbp.classify(method, ASSET, ROOT).allow
     for method in ("GET", "HEAD"):
         decision = pbp.classify(method, foreign + ASSET.rsplit("/", 1)[1], ROOT)
@@ -31,8 +31,9 @@ def test_asset_policy_is_tightly_scoped():
         for suffix in ("asset-secret-0.json", f"asset-{ASSET_ID}-65.json", f"asset-{ASSET_ID}-00.json",
                        f"asset-{ASSET_ID}-0.json/child", f"asset-{ASSET_ID}-0.json?token=x", "../private.json"):
             assert not pbp.classify("GET", base + suffix, ROOT).allow
-        for method in ("PATCH", "DELETE", "POST"):
+        for method in ("PATCH", "POST"):
             assert not pbp.classify(method, base + ASSET.rsplit("/", 1)[1], ROOT).allow
+    assert not pbp.classify("DELETE", foreign + ASSET.rsplit("/", 1)[1], ROOT).allow
     for method in ("PUT", "DELETE", "POST", "GET"):
         assert not pbp.classify(method, foreign, ROOT).allow
         assert not pbp.classify(method, foreign + ".acl", ROOT).allow
@@ -109,3 +110,17 @@ def test_non_owner_cannot_read_or_write_assets(gw):
     assert fetch(gw, ws, "GET", ASSET)["error"] == "not_owner"
     assert fetch(gw, ws, "PUT", ASSET, json.dumps(CHUNK), HEADERS)["error"] == "not_owner"
     assert gw._pod.calls == []
+
+
+def test_owner_asset_delete_requires_one_strong_etag_and_stays_scoped(gw):
+    ws, did = make_ws()
+    register(gw, ws, did)
+    for value in (None, "*", 'W/"weak"', '"one", "two"', '"bad\r\nheader"'):
+        assert fetch(gw, ws, "DELETE", ASSET, headers={"If-Match": value} if value is not None else {})["error"] == "asset_version_required"
+    assert gw._pod.calls == []
+    gw._pod.routes[("DELETE", ASSET)] = (204, {}, b"")
+    assert fetch(gw, ws, "DELETE", ASSET, headers={"If-Match": '"version"'})["status"] == 204
+    assert gw._pod.calls[-1][3] == {"If-Match": '"version"'}
+    for url in (CONTAINER, CONTAINER + '.acl', ROOT + 'proxion/rooms/room1/asset-other-0.json',
+                PEER_ROOT + 'proxion/dm-assets/' + ASSET.rsplit('/', 1)[1]):
+        assert fetch(gw, ws, "DELETE", url, headers={"If-Match": '"version"'})["status"] == 403

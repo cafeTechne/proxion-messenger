@@ -26,6 +26,33 @@ export function createNotifications({ getSoundEnabled, getDesktopNotifEnabled, n
         return type === "error" || type === "success" || type === "warning" ? type : "info";
     }
 
+    const anchorIds = ['reply-bar', 'voice-recording-bar', 'message-form', 'room-media-drafts', 'dm-media-drafts'];
+    function positionToasts() {
+        const container = document.getElementById('toast-container');
+        if (!container) return;
+        // Include reply, recording and media-draft panels so a failure toast
+        // cannot cover Retry or cleanup. Measure the topmost visible
+        // part rather than trusting the CSS fallback offset. With no
+        // conversation open the composer is hidden and the CSS offset holds.
+        const tops = anchorIds
+            .map(id => document.getElementById(id)?.getBoundingClientRect?.())
+            .filter(r => r && r.height > 0)
+            .map(r => r.top);
+        if (tops.length && typeof window !== "undefined" && window.innerHeight) {
+            container.style.bottom = `${Math.round(window.innerHeight - Math.min(...tops) + 8)}px`;
+        } else {
+            container.style.bottom = "";
+        }
+    }
+    if (typeof ResizeObserver === 'function') {
+        const observer = new ResizeObserver(() => { if (_toasts.length) positionToasts(); });
+        for (const id of anchorIds) {
+            const element = document.getElementById(id);
+            if (element) observer.observe(element);
+        }
+    }
+    if (typeof window !== 'undefined') window.addEventListener?.('resize', () => { if (_toasts.length) positionToasts(); });
+
     // showToast(message, type?, { action?: { label, onClick } })
     function showToast(message, type, opts = {}) {
         const container = document.getElementById("toast-container");
@@ -36,6 +63,7 @@ export function createNotifications({ getSoundEnabled, getDesktopNotifEnabled, n
         // Screen readers: the toast is a visual popup, so mirror it to a live
         // region (assertive for errors so they interrupt, polite otherwise).
         announce(text, kind === "error");
+        positionToasts();
 
         const dup = _toasts.find(e => e.text === text && e.kind === kind);
         if (dup) {
@@ -46,19 +74,6 @@ export function createNotifications({ getSoundEnabled, getDesktopNotifEnabled, n
             return;
         }
         while (_toasts.length >= MAX_TOASTS) _toasts[0].remove(true);
-        // Sit just above the composer. Its height changes (reply bar, voice
-        // recording bar, a multi-line draft), so measure the topmost visible
-        // part rather than trusting the CSS fallback offset. With no
-        // conversation open the composer is hidden and the CSS offset holds.
-        const tops = ["reply-bar", "voice-recording-bar", "message-form"]
-            .map(id => document.getElementById(id)?.getBoundingClientRect?.())
-            .filter(r => r && r.height > 0)
-            .map(r => r.top);
-        if (tops.length && typeof window !== "undefined" && window.innerHeight) {
-            container.style.bottom = `${Math.round(window.innerHeight - Math.min(...tops) + 8)}px`;
-        } else {
-            container.style.bottom = "";
-        }
 
         const el = document.createElement("div");
         el.className = `toast toast--${kind}`;
@@ -106,6 +121,8 @@ export function createNotifications({ getSoundEnabled, getDesktopNotifEnabled, n
             remove(immediate = false) {
                 if (entry.removed) return;
                 entry.removed = true;
+                el.inert = true;
+                el.setAttribute('aria-hidden', 'true');
                 disarm();
                 const i = _toasts.indexOf(entry);
                 if (i >= 0) _toasts.splice(i, 1);

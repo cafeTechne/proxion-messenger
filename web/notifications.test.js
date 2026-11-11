@@ -86,6 +86,22 @@ describe('showToast', () => {
     expect(container.style.bottom).toBe('');
   });
 
+  it('keeps toasts above media draft controls as pending panels change height', () => {
+    let resize, top = 650;
+    vi.stubGlobal('ResizeObserver', class { constructor(callback) { resize = callback; } observe() {} });
+    try {
+      const byId = { 'toast-container': container,
+        'message-form': { getBoundingClientRect: () => ({ top: 740, height: 60 }) },
+        'dm-media-drafts': { getBoundingClientRect: () => ({ top, height: 740 - top }) } };
+      global.document.getElementById = id => byId[id] || null;
+      global.window = { innerHeight: 800 };
+      make().showToast('upload failed', 'error');
+      expect(container.style.bottom).toBe('158px');
+      top = 600; resize();
+      expect(container.style.bottom).toBe('208px');
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('is a no-op when the container is missing', () => {
     global.document.getElementById = () => null;
     const { showToast } = make();
@@ -136,6 +152,8 @@ describe('showToast', () => {
     expect(close.attrs['aria-label']).toBe('toast.dismiss');
     expect(close.innerHTML).toContain('<svg');
     close.fire('click');
+    expect(toast.inert).toBe(true);
+    expect(toast.attrs['aria-hidden']).toBe('true');
     vi.advanceTimersByTime(400);
     expect(container.children).toHaveLength(0);
   });

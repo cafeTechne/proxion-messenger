@@ -180,5 +180,38 @@ export function createDmAttachments({ fetch, current = () => true, getSelfWebId 
             return current() && bytes.length === manifest.size ? { ok: true, bytes, manifest } : failure('integrity');
         } catch { return failure('unavailable'); }
     }
-    return { upload, download };
+
+    // Only the draft controller can establish that delivery was never attempted.
+    // Verify the original ciphertext and the current resource version before
+    // deleting; this API never lists a container or guesses unused resources.
+    async function discardUnused(owner, prepared, progress = () => {}) {
+        const container = dmAssetContainer(owner), manifest = parseDmAttachment(prepared?.content);
+        if (getSelfWebId() !== owner || !container || !manifest || !current()
+            || prepared?.ciphertext?.size !== manifest.size + 16) return failure('invalid');
+        try {
+            const bytes = new Uint8Array(await prepared.ciphertext.arrayBuffer());
+            if (bytes.length !== manifest.size + 16 || await digest(bytes) !== manifest.sha256) return failure('integrity');
+            for (let index = 0; index < manifest.chunks; index++) {
+                if (!current()) return failure('context_changed');
+                const url = container + chunkName(manifest.id, index);
+                const response = await fetch(url, { headers: { Accept: 'application/json' }, redirect: 'error', cache: 'no-store' });
+                if (!current()) return failure('context_changed');
+                if (![404, 410].includes(response.status)) {
+                    const etag = response.headers?.get('etag');
+                    if (typeof etag !== 'string' || !/^"[\x21\x23-\x7e\x80-\xff]{0,256}"$/.test(etag)) return failure('version_unavailable');
+                    const doc = await cappedJson(response, current);
+                    const part = bytes.slice(index * DM_ASSET_CHUNK, (index + 1) * DM_ASSET_CHUNK);
+                    if (!doc || doc.v !== 1 || doc.id !== manifest.id || doc.index !== index
+                        || Object.keys(doc).sort().join(',') !== 'data,id,index,v' || doc.data !== u8ToB64(part)) return failure('integrity');
+                    if (!current()) return failure('context_changed');
+                    const deleted = await fetch(url, { method: 'DELETE', headers: { 'If-Match': etag }, redirect: 'error' });
+                    if (![200, 204, 205, 404, 410].includes(deleted.status)) return failure('delete_failed');
+                }
+                if (!current()) return failure('context_changed');
+                await progress(index + 1, manifest.chunks);
+            }
+            return { ok: true };
+        } catch { return failure('unavailable'); }
+    }
+    return { upload, download, discardUnused };
 }

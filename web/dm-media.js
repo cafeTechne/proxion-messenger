@@ -9,9 +9,27 @@ import { sanitizeFilename } from './e2e-secondary.js';
 export function createDmMediaStore(dbApi = globalThis.indexedDB) {
     async function operation(mode, work) {
         const db = await new Promise((resolve, reject) => {
-            const request = dbApi.open('proxion-dm-media-v1', 1);
-            request.onupgradeneeded = () => request.result.createObjectStore('drafts', { keyPath: 'key' });
-            request.onsuccess = () => resolve(request.result);
+            let blocked = false;
+            const request = dbApi.open('proxion-dm-media-v1', 2);
+            request.onupgradeneeded = event => {
+                if (event.oldVersion === 0) request.result.createObjectStore('drafts', { keyPath: 'key' });
+                else {
+                    // Old writers did not commit a delivery boundary. Existing
+                    // drafts can still retry/cancel, but cannot prove safe cleanup.
+                    const cursor = request.transaction.objectStore('drafts').openCursor();
+                    cursor.onsuccess = () => {
+                        if (!cursor.result) return;
+                        cursor.result.update({ ...cursor.result.value, deliveryState: 'unknown' });
+                        cursor.result.continue();
+                    };
+                }
+            };
+            request.onblocked = () => { blocked = true; reject(Error('close older tabs before updating media drafts')); };
+            request.onsuccess = () => {
+                if (blocked) { request.result.close(); return; }
+                request.result.onversionchange = () => request.result.close();
+                resolve(request.result);
+            };
             request.onerror = () => reject(request.error);
         });
         try {
@@ -84,7 +102,7 @@ export async function deliverDmMedia(draft, ctx, { current, obtainKey, hasKey, e
     return !!accepted;
 }
 
-export function createDmMedia({ getContext, post, onMessage, showToast, store = createDmMediaStore(), doc = document }) {
+export function createDmMedia({ getContext, post, onMessage, showToast, confirmCleanup = async () => false, store = createDmMediaStore(), doc = document }) {
     const busy = new Set(), cancelled = new Set(), progress = new Map();
     let generation = 0, displayed = null;
     const panel = () => doc.getElementById('dm-media-drafts');
@@ -111,15 +129,52 @@ export function createDmMedia({ getContext, post, onMessage, showToast, store = 
         }
         if (token !== generation || !ctx.current()) return;
         element.hidden = !rows.length;
-        element.innerHTML = rows.map(row => `<div data-dm-media-draft="${escHtml(row.key)}"><span>${escHtml(row.name)} — ${escHtml(busy.has(row.key)
-            ? t('roomMedia.uploading', { count: progress.get(row.key) || 0 }) : t('roomMedia.pending'))}</span> `
-            + `<button type="button" class="btn btn--sm" data-dm-media-retry="${escHtml(row.key)}"${busy.has(row.key) ? ' disabled' : ''}>${escHtml(t('btn.retry'))}</button> `
-            + `<button type="button" class="btn btn--sm" data-dm-media-cancel="${escHtml(row.key)}"${busy.has(row.key) ? ' disabled' : ''}>${escHtml(t('btn.cancel'))}</button></div>`).join('');
+        element.innerHTML = rows.map(row => {
+            const cleaning = row.cleanup === true, active = busy.has(row.key);
+            const status = active ? (cleaning ? t('dmMedia.cleaning') : t('roomMedia.uploading', { count: progress.get(row.key) || 0 }))
+                : (cleaning ? t('dmMedia.cleanupPending') : t('roomMedia.pending'));
+            const disabled = active ? ' disabled' : '';
+            return `<div data-dm-media-draft="${escHtml(row.key)}"><span>${escHtml(row.name)} — ${escHtml(status)}</span> `
+                + (cleaning ? '' : `<button type="button" class="btn btn--sm" data-dm-media-retry="${escHtml(row.key)}"${disabled}>${escHtml(t('btn.retry'))}</button> `)
+                + (row.deliveryState === 'never' && !row.delivered
+                    ? `<button type="button" class="btn btn--sm" data-dm-media-cleanup="${escHtml(row.key)}"${disabled}>${escHtml(t(cleaning ? 'dmMedia.retryCleanup' : 'dmMedia.removeUnused'))}</button> ` : '')
+                + `<button type="button" class="btn btn--sm" title="${escHtml(t('dmMedia.discardHint'))}" data-dm-media-cancel="${escHtml(row.key)}"${disabled}>${escHtml(t('btn.cancel'))}</button></div>`;
+        }).join('');
+    }
+
+    function matches(row, ctx) {
+        const prepared = row.cleanup ? row.cleanupPrepared : row.prepared;
+        const manifest = parseDmAttachment(prepared?.content);
+        return ctx && manifest && row.actor === ctx.actor && row.peerWebId === ctx.peerWebId && row.threadId === ctx.threadId
+            && row.key === ctx.actor + '\n' + row.id && row.id === manifest.id
+            && (row.cleanup ? row.content === '' && row.uploaded === false : row.content === prepared.content);
+    }
+    async function cleanup(row, ctx) {
+        if (busy.has(row.key) || !ctx?.current() || !matches(row, ctx) || row.deliveryState !== 'never' || row.delivered) return;
+        // Lock the draft while the confirmation is open as well as during I/O.
+        busy.add(row.key); refresh();
+        const current = () => ctx.current();
+        try {
+            if (!row.cleanup && !await confirmCleanup()) return;
+            if (!current()) return;
+            if (!row.cleanup) {
+                row.cleanupPrepared = row.prepared;
+                row.prepared = null; row.content = ''; row.uploaded = false; row.blob = null;
+            }
+            row.cleanup = true;
+            await store.put(row); // persist intent before the first deletion
+            if (!current()) return;
+            const result = await createDmAttachments({ fetch: ctx.fetch, current, getSelfWebId: () => ctx.actor })
+                .discardUnused(ctx.actor, row.cleanupPrepared);
+            if (!result.ok || !current()) throw Error('cleanup unconfirmed');
+            await store.remove(row.key);
+            if (current()) showToast(t('dmMedia.cleaned'));
+        } catch { if (current()) showToast(t('dmMedia.cleanupFailed'), 'error'); }
+        finally { busy.delete(row.key); refresh(); }
     }
 
     async function attempt(row, ctx) {
-        if (busy.has(row.key) || !ctx?.current() || row.actor !== ctx.actor || row.peerWebId !== ctx.peerWebId
-            || row.threadId !== ctx.threadId || !parseDmAttachment(row.prepared?.content) || row.content !== row.prepared.content) return;
+        if (busy.has(row.key) || row.cleanup || !ctx?.current() || !matches(row, ctx)) return;
         busy.add(row.key);
         cancelled.delete(row.key);
         refresh();
@@ -137,6 +192,13 @@ export function createDmMedia({ getContext, post, onMessage, showToast, store = 
                 if (!result.ok || !current()) throw Error(result.reason || 'upload_failed');
                 row.uploaded = true;
                 row.content = result.content;
+                await store.put(row);
+            }
+            if (!current()) return;
+            // Once this is committed, even a lost delivery response cannot make
+            // this upload eligible for deletion. Older unmarked drafts stay unknown.
+            if (row.deliveryState === 'never') {
+                row.deliveryState = 'attempted';
                 await store.put(row);
             }
             if (!current()) return;
@@ -160,8 +222,8 @@ export function createDmMedia({ getContext, post, onMessage, showToast, store = 
     }
 
     panel()?.addEventListener('click', async event => {
-        const retry = event.target.closest('[data-dm-media-retry]'), cancel = event.target.closest('[data-dm-media-cancel]');
-        const key = retry?.dataset.dmMediaRetry || cancel?.dataset.dmMediaCancel, ctx = getContext();
+        const retry = event.target.closest('[data-dm-media-retry]'), cancel = event.target.closest('[data-dm-media-cancel]'), clean = event.target.closest('[data-dm-media-cleanup]');
+        const key = retry?.dataset.dmMediaRetry || cancel?.dataset.dmMediaCancel || clean?.dataset.dmMediaCleanup, ctx = getContext();
         if (!key || !ctx) return;
         try {
             const row = (await store.list(ctx.actor)).find(candidate => candidate.key === key && candidate.peerWebId === ctx.peerWebId && candidate.threadId === ctx.threadId);
@@ -171,6 +233,8 @@ export function createDmMedia({ getContext, post, onMessage, showToast, store = 
                 await store.remove(key);
                 cancelled.delete(key);
                 refresh();
+            } else if (clean) {
+                await cleanup(row, ctx);
             } else if (retry) {
                 await attempt(row, ctx);
             }
@@ -224,6 +288,7 @@ export function createDmMedia({ getContext, post, onMessage, showToast, store = 
             prepared: { ciphertext: prep.ciphertext, content: prep.content },
             content: prep.content,
             uploaded: false,
+            deliveryState: 'never',
         };
         if (!ctx.current()) return;
         try {

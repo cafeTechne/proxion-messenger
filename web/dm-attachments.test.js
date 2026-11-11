@@ -8,14 +8,18 @@ function fixture() {
     const resources = new Map(); let active = true;
     const fetch = vi.fn(async (url, opts = {}) => {
         if (opts.method === 'HEAD') return new Response(null, { status: resources.has(url) ? 200 : 404 });
+        if (opts.method === 'DELETE') {
+            if (opts.headers?.['If-Match'] !== '"version"') return new Response(null, { status: 412 });
+            resources.delete(url); return new Response(null, { status: 205 });
+        }
         if (opts.method === 'PUT') {
             if (opts.headers['If-None-Match'] === '*' && resources.has(url)) return new Response(null, { status: 412 });
             resources.set(url, opts.body);
             return new Response(null, { status: 201 });
         }
-        return resources.has(url) ? new Response(resources.get(url)) : new Response(null, { status: 404 });
+        return resources.has(url) ? new Response(resources.get(url), { headers: { ETag: '"version"' } }) : new Response(null, { status: 404 });
     });
-    return { resources, fetch, io: createDmAttachments({ fetch, current: () => active }), stop: () => { active = false; } };
+    return { resources, fetch, io: createDmAttachments({ fetch, current: () => active, getSelfWebId: () => owner }), stop: () => { active = false; } };
 }
 const serialize = manifest => DM_ASSET_PREFIX + JSON.stringify(manifest);
 describe('encrypted pod DM attachment storage', () => {
@@ -165,5 +169,55 @@ describe('encrypted pod DM attachment storage', () => {
         expect(cancel).toHaveBeenCalledTimes(1);
         fetch.mockResolvedValue(new Response(JSON.stringify({ v: 1, id: manifest.id, index: 0, data: 'eA==', name: 'leaked.txt' })));
         expect((await createDmAttachments({ fetch }).download(owner, prepared.content)).ok).toBe(false);
+    });
+});
+
+describe('conditional owner cleanup of known ciphertext chunks', () => {
+    it('removes only the prepared upload and safely resumes after a lost delete acknowledgement', async () => {
+        const h = fixture(), prepared = await prepareDmAttachment(new Blob([new Uint8Array(DM_ASSET_CHUNK + 7)]), meta);
+        const other = await prepareDmAttachment(new Blob(['keep me']), meta);
+        await h.io.upload(owner, prepared); await h.io.upload(owner, other);
+        const original = h.fetch.getMockImplementation(); let lose = true;
+        h.fetch.mockImplementation(async (url, options) => {
+            const response = await original(url, options);
+            if (lose && options.method === 'DELETE') { lose = false; throw Error('ack lost'); }
+            return response;
+        });
+        expect((await h.io.discardUnused(owner, prepared)).ok).toBe(false);
+        expect((await h.io.discardUnused(owner, prepared)).ok).toBe(true);
+        expect((await h.io.download(owner, prepared.content)).ok).toBe(false);
+        expect((await h.io.download(owner, other.content)).ok).toBe(true);
+        expect(h.fetch.mock.calls.filter(([, options]) => options.method === 'DELETE')
+            .every(([, options]) => options.headers['If-Match'] === '"version"')).toBe(true);
+    });
+    it('refuses missing/weak versions, changed bytes and a racing replacement', async () => {
+        for (const mode of ['missing', 'weak', 'bytes', 'race']) {
+            const h = fixture(), prepared = await prepareDmAttachment(new Blob(['private']), meta);
+            await h.io.upload(owner, prepared);
+            const original = h.fetch.getMockImplementation();
+            h.fetch.mockImplementation(async (url, options) => {
+                if (options.method === 'DELETE' && mode === 'race') return new Response(null, { status: 412 });
+                const response = await original(url, options);
+                if ((!options.method || options.method === 'GET') && url.endsWith('.json')) {
+                    if (mode === 'missing') response.headers.delete('etag');
+                    if (mode === 'weak') response.headers.set('etag', 'W/"weak"');
+                    if (mode === 'bytes') return new Response('{}', { headers: { ETag: '"version"' } });
+                }
+                return response;
+            });
+            expect((await h.io.discardUnused(owner, prepared)).ok).toBe(false);
+            expect([...h.resources.keys()].some(url => url.endsWith('.json'))).toBe(true);
+            if (mode !== 'race') expect(h.fetch.mock.calls.some(([, options]) => options.method === 'DELETE')).toBe(false);
+        }
+    });
+    it('binds cleanup to the account, manifest, bytes and current context before any deletion', async () => {
+        const h = fixture(), prepared = await prepareDmAttachment(new Blob(['private']), meta);
+        await h.io.upload(owner, prepared); h.fetch.mockClear();
+        expect((await h.io.discardUnused('https://other.example/profile/card#me', prepared)).ok).toBe(false);
+        expect((await h.io.discardUnused(owner, { ...prepared, ciphertext: new Blob(['bad']) })).ok).toBe(false);
+        expect(h.fetch).not.toHaveBeenCalled();
+        h.stop();
+        expect((await h.io.discardUnused(owner, prepared)).ok).toBe(false);
+        expect(h.fetch).not.toHaveBeenCalled();
     });
 });

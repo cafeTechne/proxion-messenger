@@ -892,10 +892,12 @@ while ACP grants currently have unit coverage. Public reads reveal ciphertext,
 random asset IDs, sizes and timing, including the container listing. Filename,
 MIME, duration, key and nonce remain in the encrypted DM. These resources are
 retained on the sender's pod; removing a contact or DM reference does not revoke
-someone who already holds its decryption key. Asset cleanup is still planned.
+someone who already holds its decryption key. Confirmed and possibly delivered
+assets remain protected from the abandoned-upload cleanup described below.
 
 The desktop bridge allows only this exact resource tree, bounded JSON chunk
-PUTs with create-only conditions, and GET/HEAD. Peer reads are unauthenticated;
+PUTs with create-only conditions, GET/HEAD, and owner-only DELETE with one strong
+If-Match ETag. Peer reads are unauthenticated;
 foreign listings, writes and ACL access are denied. Owner ACL writes are limited
 to the exact owner-write/public-read grants, with no public Append or Write.
 The existing 64 KiB request and response limits remain unchanged.
@@ -936,7 +938,8 @@ The website CSP explicitly permits local data/blob media playback. Live browser
 DM tests retain that policy, adding only localhost connections for the test pod.
 Browser/browser and desktop/browser chat UI journeys exercise upload and delivery
 outages, draft reload/retry, exact-byte downloads and real recording/playback
-after history reload. Asset cleanup and live ACP compatibility remain planned.
+after history reload. Room-wide asset management and live ACP compatibility remain
+planned.
 
 ### Durable DM receive receipts
 
@@ -969,3 +972,50 @@ history/receipt writes. Those live in separate stores and are not transactional;
 a crash or storage failure in that window can still lose a message. Receipt
 reconciliation for external inbox deletions and transactional ratchet/history
 commit remain future work.
+
+### Abandoned DM upload cleanup
+
+New DM drafts record `deliveryState: never`. Before the first manifest delivery
+attempt, the controller commits `deliveryState: attempted` to IndexedDB and waits
+for that write. Failure to commit prevents delivery. An unsuccessful response can
+still represent a delivered message, so attempted, acknowledged and legacy drafts
+are never offered pod cleanup. Cancel still discards only the local draft.
+
+An eligible pending draft offers **Remove unused upload**, with confirmation that
+cleanup also discards the draft. The controller persists cleanup intent before any
+DELETE, moves the prepared ciphertext into a cleanup-only field, clears the
+sendable manifest/source fields and disables ordinary send retries. A failed or
+interrupted cleanup remains available as **Retry cleanup**, including after reload.
+Users can still cancel locally and leave any remaining pod data in place.
+
+The media draft database retains the name `proxion-dm-media-v1` and advances to
+IndexedDB version 2. Upgrade preserves old drafts and marks their delivery state
+unknown. They can retry or cancel, but cannot prove eligibility for cleanup.
+Version-1 writers must reload into the updated client; otherwise they could send
+a new draft without recording its delivery boundary. A blocked upgrade fails
+without starting a transfer, rather than bypassing durable state.
+
+Cleanup derives only the original UUID's chunk paths under the current account's
+DM asset container. It checks the saved ciphertext's size/digest, reads each
+existing chunk with a bounded request, verifies its exact schema, identity, index
+and ciphertext, then uses its strong ETag as If-Match for DELETE. A missing/weak
+version, changed bytes or a 412 conflict keeps the cleanup pending. Missing chunks
+are already complete; successful DELETE statuses include CSS's HTTP 205. Cleanup
+can resume after a lost acknowledgement or partial deletion. The draft is removed
+only when every expected chunk is accounted for.
+
+No container listing is used to infer that an upload is unused. The desktop
+bridge permits only owner DM chunk deletion with one strong ETag; foreign assets,
+room assets, containers, and ACLs cannot be deleted through this path. The backend
+authorizes owner scope and the version condition; eligibility is established by
+the durable local draft boundary, not by scanning encrypted conversation history.
+Published files and older unknown uploads are retained. Room-wide inventories,
+sent-file management and external/manual changes remain separate follow-up work.
+
+Draft panels wrap controls and scroll when many drafts are present. Error toasts
+measure both media-draft panels and reposition on resize so they do not intercept
+Retry, Cancel or cleanup clicks. Dismissed toasts become inert immediately while
+their fade animation finishes, releasing the controls underneath. Live browser
+and desktop tests use actual pointer
+clicks, interrupt deletion, reload, finish cleanup, and download a different
+previously delivered file again to prove it was preserved.

@@ -59,6 +59,10 @@ so an abrupt crash before those writes commit can still lose a received message.
 - **Files and voice messages:** encrypted pod-backed attachments up to 2 MiB and
   recorded voice notes work through the browser and desktop chat controls. Source
   drafts survive upload/delivery failures and reload, with explicit Retry/Cancel.
+  New drafts whose delivery was never attempted also offer confirmed cleanup of
+  their unused pod chunks. Interrupted cleanup can retry after reload; possibly
+  delivered and legacy uploads are retained. Cleanup is owner-only and uses
+  exact ciphertext readback plus conditional deletion.
   Confirmed sends and verified downloads restore from local history. Browser and
   cross-mode DM smokes exercise exact file bytes and real recorded playback in
   both directions. See [the data model](POD_DATA_MODEL.md#encrypted-dm-assets-and-durable-media-delivery).

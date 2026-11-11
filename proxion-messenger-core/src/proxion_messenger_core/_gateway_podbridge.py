@@ -325,6 +325,11 @@ class PodBridgeMixin:
             await self._pod_fetch_reply(websocket, req_id, 403, error=reason)
             return
         headers = _pbp.filter_request_headers(data.get("headers"), decision, method)
+        if decision.kind == "dm_asset" and method == "DELETE":
+            import re
+            if not re.fullmatch(r'"[\x21\x23-\x7e\x80-\xff]{0,256}"', headers.get("If-Match", "")):
+                await self._pod_fetch_reply(websocket, req_id, 400, error="asset_version_required")
+                return
         if decision.kind in ("dm_assets", "dm_asset") and method == "PUT" and headers.get("If-None-Match") != "*":
             await self._pod_fetch_reply(websocket, req_id, 400, error="immutable_asset")
             return

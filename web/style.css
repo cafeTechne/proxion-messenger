@@ -1015,6 +1015,23 @@ main { background: var(--surface-0); }
     align-items: center;
     background: var(--surface-0);
 }
+:is(#room-media-drafts, #dm-media-drafts) {
+    flex-shrink: 0;
+    max-height: 30vh;
+    overflow-y: auto;
+    padding-inline: var(--space-3);
+}
+:is(#room-media-drafts, #dm-media-drafts) > div {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    padding-block: var(--space-1);
+}
+:is(#room-media-drafts, #dm-media-drafts) > div > span {
+    flex: 1 1 100%;
+    overflow-wrap: anywhere;
+}
 } /* layout */
 @layer utilities {
 /* No conversation open: there is nowhere to send to and nothing to pin, so the
@@ -3160,6 +3177,7 @@ img.avatar { object-fit: cover; aspect-ratio: 1; }
    Leaving is quicker than the 300ms removal timer in notifications.js. */
 @starting-style { .toast { opacity: 0; transform: translateY(8px); } }
 .toast--leaving {
+    pointer-events: none;
     opacity: 0; transform: translateY(4px);
     transition-duration: var(--dur-2); transition-timing-function: var(--ease-in);
 }

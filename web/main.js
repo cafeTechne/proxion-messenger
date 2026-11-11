@@ -6475,6 +6475,8 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         }
         _dmMedia = createDmMedia({
             getContext: _dmMediaContext, showToast,
+            confirmCleanup: () => new Promise(resolve => showConfirm(t('dmMedia.cleanupConfirm'), () => resolve(true), () => resolve(false),
+                { title: t('dmMedia.removeUnused'), confirmLabel: t('dmMedia.removeUnused'), danger: true })),
             post: async (draft, ctx, current) => {
                 if (!clientDid || !current()) return { ok: false };
                 const engine = transport.mode === 'web' ? _podDmEngine : crossMode;

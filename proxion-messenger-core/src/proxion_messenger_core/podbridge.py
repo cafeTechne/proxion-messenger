@@ -81,7 +81,7 @@ _DM_ASSET = rf"asset-{_DM_ASSET_ID}-(?:[0-9]|[1-5][0-9]|6[0-4])\.json"
 _OWN_RULES = [
     (r"proxion/dm-assets/", {"HEAD", "PUT"}, "dm_assets", MAX_SMALL_RESPONSE),
     (rf"proxion/dm-assets/{_ACL_SUFFIX}", {"GET", "HEAD", "PUT"}, "dm_asset_acl", MAX_SMALL_RESPONSE),
-    (rf"proxion/dm-assets/{_DM_ASSET}", {"GET", "HEAD", "PUT"}, "dm_asset", MAX_SMALL_RESPONSE),
+    (rf"proxion/dm-assets/{_DM_ASSET}", {"GET", "HEAD", "PUT", "DELETE"}, "dm_asset", MAX_SMALL_RESPONSE),
     (rf"proxion/({'|'.join(BOXES)})-inbox/", {"GET", "HEAD", "PUT", "POST"}, "box", MAX_LISTING_RESPONSE),
     (rf"proxion/({'|'.join(BOXES)})-inbox/{_DROP_NAME}", {"GET", "HEAD", "DELETE"}, "drop", MAX_SMALL_RESPONSE),
     (rf"proxion/({'|'.join(BOXES)})-inbox/{_ACL_SUFFIX}", {"GET", "HEAD", "PUT"}, "acl", MAX_LISTING_RESPONSE),

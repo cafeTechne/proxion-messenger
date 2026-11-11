@@ -4,6 +4,26 @@ import { createDmMedia, createDmMediaStore, deliverDmMedia } from './dm-media.js
 import { parseDmAttachment } from './dm-attachments.js';
 
 describe('createDmMediaStore', () => {
+    it('preserves legacy drafts as unknown and prevents older writers reopening the upgraded database', async () => {
+        const db = new IDBFactory();
+        const legacy = await new Promise(resolve => {
+            const req = db.open('proxion-dm-media-v1', 1);
+            req.onupgradeneeded = () => req.result.createObjectStore('drafts', { keyPath: 'key' });
+            req.onsuccess = () => resolve(req.result);
+        });
+        await new Promise(resolve => {
+            const tx = legacy.transaction('drafts', 'readwrite');
+            tx.objectStore('drafts').put({ key: 'legacy', actor: 'alice', deliveryState: 'never', blob: new Blob(['source']) });
+            tx.oncomplete = resolve;
+        }); legacy.close();
+        const rows = await createDmMediaStore(db).list('alice');
+        expect(rows[0].deliveryState).toBe('unknown');
+        expect(await rows[0].blob.text()).toBe('source');
+        const oldWriter = await new Promise(resolve => {
+            const req = db.open('proxion-dm-media-v1', 1); req.onerror = () => resolve(req.error.name);
+        });
+        expect(oldWriter).toBe('VersionError');
+    });
     it('atomically caps each account at ten drafts and retains prepared blobs across reopen', async () => {
         const db = new IDBFactory(), store = createDmMediaStore(db);
         const results = await Promise.allSettled(Array.from({ length: 12 }, (_, i) => store.put({ key: 'a' + i, actor: 'alice', prepared: new Blob(['cipher']) })));
@@ -19,7 +39,7 @@ describe('createDmMediaStore', () => {
     });
 });
 
-function fixture({ postFails = false, uploadFails = false } = {}) {
+function fixture({ postFails = false, uploadFails = false, partialFailure = false, deleteFails = false } = {}) {
     const rows = new Map(), resources = new Map(), calls = [], onMessage = vi.fn(), showToast = vi.fn();
     let active = true, handler;
     const panel = { hidden: true, innerHTML: '', replaceChildren() { this.innerHTML = ''; }, addEventListener(_, fn) { handler = fn; } };
@@ -31,8 +51,12 @@ function fixture({ postFails = false, uploadFails = false } = {}) {
         current: () => active,
         fetch: async (url, options = {}) => {
             calls.push({ method: options.method || 'GET', url });
-            if (uploadFails && options.method === 'PUT' && url.includes('asset-')) {
+            if (uploadFails && options.method === 'PUT' && url.includes('asset-') && (!partialFailure || !url.endsWith('-0.json'))) {
                 return new Response('fail', { status: 500 });
+            }
+            if (options.method === 'DELETE') {
+                if (deleteFails) return new Response(null, { status: 503 });
+                resources.delete(url); return new Response(null, { status: 204 });
             }
             if (options.method === 'HEAD') {
                 return new Response('', { status: 200, headers: { Link: '<.acl>; rel="acl"' } });
@@ -43,7 +67,7 @@ function fixture({ postFails = false, uploadFails = false } = {}) {
             }
             if (options.method === 'GET' || !options.method) {
                 const body = resources.get(url);
-                return body ? new Response(body, { status: 200, headers: { 'Content-Type': 'application/json' } }) : new Response('', { status: 404 });
+                return body ? new Response(body, { status: 200, headers: { 'Content-Type': 'application/json', ETag: '"chunk"' } }) : new Response('', { status: 404 });
             }
             return new Response('', { status: 200 });
         },
@@ -54,13 +78,15 @@ function fixture({ postFails = false, uploadFails = false } = {}) {
         remove: async key => rows.delete(key),
     };
     const post = vi.fn(async row => ({ ok: !postFails, message: { content: row.content, message_id: row.id } }));
-    const options = { getContext: () => ctx, post, store, onMessage, showToast, doc: { getElementById: () => panel } };
+    const options = { getContext: () => ctx, post, store, onMessage, showToast, confirmCleanup: async () => true, doc: { getElementById: () => panel } };
     const controller = createDmMedia(options);
     return {
-        controller, rows, calls, options, panel, post, onMessage, showToast, ctx,
+        controller, rows, calls, resources, options, panel, post, onMessage, showToast, ctx,
         offline: () => { active = false; },
         restorePost: () => { postFails = false; },
         restoreUpload: () => { uploadFails = false; },
+        restoreCleanup: () => { deleteFails = false; },
+        cleanup: key => handler({ target: { closest: selector => selector.includes('cleanup') ? { dataset: { dmMediaCleanup: key } } : null } }),
         retry: key => handler({ target: { closest: selector => selector.includes('retry') ? { dataset: { dmMediaRetry: key } } : null } }),
         cancel: key => handler({ target: { closest: selector => selector.includes('cancel') ? { dataset: { dmMediaCancel: key } } : null } }),
     };
@@ -225,5 +251,77 @@ describe('encrypted media delivery confirmation', () => {
         h.deps.encrypt.mockImplementation(async () => { current = false; return { ciphertext: 'opaque' }; });
         expect(await deliverDmMedia(h.draft, h.ctx, h.deps)).toBe(false);
         expect(h.deps.dropDm).not.toHaveBeenCalled();
+    });
+});
+
+describe('unused DM upload cleanup eligibility and recovery', () => {
+    it('removes a partial never-published upload after confirmation and leaves sent data alone', async () => {
+        const h = fixture({ uploadFails: true, partialFailure: true });
+        await h.controller.send(new Blob([new Uint8Array(33000)]), { name: 'partial.txt', mime: 'text/plain' });
+        const [key, row] = [...h.rows][0];
+        expect(row.deliveryState).toBe('never');
+        expect([...h.resources.keys()].filter(url => url.endsWith('.json'))).toHaveLength(1);
+        await h.controller.refresh();
+        expect(h.panel.innerHTML).toContain('data-dm-media-cleanup');
+        await h.cleanup(key);
+        expect(h.rows.size).toBe(0);
+        expect([...h.resources.keys()].filter(url => url.endsWith('.json'))).toHaveLength(0);
+        expect(h.post).not.toHaveBeenCalled();
+    });
+    it('persists cleanup intent and resumes after failure/recreation without ever posting', async () => {
+        const h = fixture({ uploadFails: true, partialFailure: true, deleteFails: true });
+        await h.controller.send(new Blob([new Uint8Array(33000)]), { name: 'partial.txt', mime: 'text/plain' });
+        const key = [...h.rows.keys()][0];
+        await h.cleanup(key);
+        expect(h.rows.get(key).cleanup).toBe(true);
+        expect(h.rows.get(key).prepared).toBe(null);
+        expect(h.rows.get(key).uploaded).toBe(false);
+        expect(h.rows.get(key).content).toBe('');
+        expect(h.rows.get(key).cleanupPrepared.ciphertext).toBeInstanceOf(Blob);
+        await h.retry(key);
+        expect(h.post).not.toHaveBeenCalled();
+        h.restoreCleanup(); createDmMedia(h.options);
+        await h.cleanup(key);
+        expect(h.rows.size).toBe(0);
+        expect(h.post).not.toHaveBeenCalled();
+    });
+    it('records attempted delivery before post and never offers cleanup for uncertain or legacy drafts', async () => {
+        const h = fixture({ postFails: true });
+        await h.controller.send(new Blob(['file']), { name: 'test.txt', mime: 'text/plain' });
+        const [key, row] = [...h.rows][0];
+        expect(h.post.mock.calls[0][0].deliveryState).toBe('attempted');
+        expect(row.deliveryState).toBe('attempted');
+        await h.controller.refresh();
+        expect(h.panel.innerHTML).not.toContain('data-dm-media-cleanup');
+        await h.cleanup(key);
+        expect(h.calls.some(call => call.method === 'DELETE')).toBe(false);
+        delete row.deliveryState; h.rows.set(key, row);
+        await h.cleanup(key);
+        expect(h.calls.some(call => call.method === 'DELETE')).toBe(false);
+        await h.cancel(key);
+        expect(h.rows.size).toBe(0);
+        expect([...h.resources.keys()].some(url => url.endsWith('.json'))).toBe(true);
+    });
+    it('does no cleanup when confirmation is cancelled or the view changes', async () => {
+        const h = fixture({ uploadFails: true, partialFailure: true });
+        await h.controller.send(new Blob([new Uint8Array(33000)]), { name: 'partial.txt', mime: 'text/plain' });
+        const key = [...h.rows.keys()][0];
+        h.options.confirmCleanup = async () => false; createDmMedia(h.options);
+        await h.cleanup(key);
+        expect(h.rows.get(key).cleanup).not.toBe(true);
+        h.options.confirmCleanup = async () => { h.offline(); return true; }; createDmMedia(h.options);
+        await h.cleanup(key);
+        expect(h.calls.some(call => call.method === 'DELETE')).toBe(false);
+        expect(h.rows.size).toBe(1);
+    });
+    it('retains an ineligible draft when the delivery-state write fails before post', async () => {
+        const h = fixture({ uploadFails: true });
+        await h.controller.send(new Blob(['file']), { name: 'test.txt', mime: 'text/plain' });
+        const key = [...h.rows.keys()][0]; h.restoreUpload();
+        const original = h.options.store.put;
+        h.options.store.put = async row => { if (row.deliveryState === 'attempted') throw Error('quota'); return original(row); };
+        await h.retry(key);
+        expect(h.post).not.toHaveBeenCalled();
+        expect(h.rows.get(key).deliveryState).toBe('never');
     });
 });
