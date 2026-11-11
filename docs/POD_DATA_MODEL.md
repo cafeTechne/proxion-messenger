@@ -1019,3 +1019,34 @@ their fade animation finishes, releasing the controls underneath. Live browser
 and desktop tests use actual pointer
 clicks, interrupt deletion, reload, finish cleanup, and download a different
 previously delivered file again to prove it was preserved.
+
+### Stored room and legacy file review
+
+Settings → Pod & sync → Stored room files reads the current account's physical
+`proxion/rooms/` directory. Discovery does not depend on the active room index,
+so retained storage from closed rooms can still appear. Supported entries are
+shared `asset-*.json` chunks, legacy `files/<messageId>.webm` voice copies, and
+legacy `files/<messageId>/<filename>` file copies. Folder buttons navigate one
+level at a time; unrelated history, ACLs, and arbitrary paths are excluded.
+
+Directory GETs request JSON-LD and require the requested container's own subject
+and LDP container type. Listings are capped at 512 KiB and 5,000 entries; room
+choices are capped at 500. File metadata is fetched with HEAD, at most 50 entries
+per page. Content-Length represents stored bytes (including JSON encoding for
+chunks), and missing lengths are displayed as unknown. Server pagination and
+unavailable metadata are explicitly marked incomplete. File bodies are never
+downloaded by this browser. No pod resources are created, updated or deleted.
+
+An exact chunk URL present in a loaded, verified, undeleted room attachment
+manifest is labeled referenced. Every other resource is labeled **Reference not
+verified**. This is not an orphan determination: older messages, other devices,
+and legacy references may be missing from the current view. Review provides no
+deletion control. Cross-account, disconnected or closed-settings results are
+discarded; browser requests are aborted when the review is reset.
+
+The desktop pod bridge adds only owner directory GET/HEAD and safe legacy-file
+HEAD paths. It does not grant legacy binary GET, foreign/joined-room directory
+access, or new mutation permissions. Shared room chunk reads retain their
+existing authorization. Tests cover bounded listings, scoped paths, unavailable
+metadata and stale contexts; `smoke_asset_inventory.mjs` exercises the browser
+and desktop bridge against a real throwaway Solid pod.

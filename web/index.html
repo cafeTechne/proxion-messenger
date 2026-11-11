@@ -773,6 +773,21 @@
                   <button id="settings-solid-custom-btn" class="btn btn--slate" data-i18n="btn.sign">Sign in</button>
                 </div>
               </div>
+              <h5 class="settings-subhead" data-i18n="inventory.title">Stored room files</h5>
+              <p class="settings-hint" data-i18n="inventory.hint">Review shared room chunks and legacy copies on your own pod. A missing verified reference does not mean a file is unused.</p>
+              <div class="settings-actions"><button type="button" id="asset-inventory-refresh" class="btn btn--slate" data-i18n="inventory.refresh">Refresh stored rooms</button></div>
+              <p id="asset-inventory-status" class="settings-hint" role="status" aria-live="polite"></p>
+              <div id="asset-inventory-browser" hidden>
+                <label for="asset-inventory-rooms" class="settings-field-label" data-i18n="inventory.room">Room storage</label>
+                <select id="asset-inventory-rooms" class="settings-input"></select>
+                <p id="asset-inventory-path" class="settings-readout settings-readout--small"></p>
+                <div class="settings-actions">
+                  <button type="button" id="asset-inventory-up" class="btn btn--sm" disabled data-i18n="inventory.up">Up one folder</button>
+                  <button type="button" id="asset-inventory-previous" class="btn btn--sm" disabled data-i18n="inventory.previous">Previous files</button>
+                  <button type="button" id="asset-inventory-next" class="btn btn--sm" disabled data-i18n="inventory.next">Next files</button>
+                </div>
+                <div id="asset-inventory-results" class="asset-inventory-results"></div>
+              </div>
               <!-- R14.3: Data section -->
               <h5 class="settings-subhead" data-i18n="section.data">Data</h5>
               <div class="settings-actions">

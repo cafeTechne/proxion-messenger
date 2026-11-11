@@ -25,7 +25,6 @@ def test_own_room_listing_is_bounded_and_read_only(method):
     ("GET", ROOT + "rooms/../private/"),
     ("GET", ROOT + "rooms/%2e%2e/private/"),
     ("GET", ROOT + "private/"),
-    ("GET", ROOT + "proxion/rooms/"),
     ("GET", ROOT + "rooms/unrelated/"),
     ("GET", "https://other.example/bob/rooms/"),
 ])

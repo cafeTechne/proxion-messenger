@@ -275,3 +275,20 @@ PUT denial, revoked reads/uploads and retained owner access. Browser room smokes
 exercise failed uploads, reload/retry and playback. Cross-mode room smokes exercise
 both host types, file transfer in both directions, recording from both builds,
 and attachment access after deletion.
+
+## Reviewing retained room files
+
+Both builds expose Settings → Pod & sync → Stored room files for the connected
+account's own pod. It lists physical room storage, including retained folders
+without an active room descriptor, and navigates shared chunks and legacy file
+or voice-copy folders. Directory listings use bounded JSON-LD GETs; files use
+HEAD metadata only, with 50 entries per page. This requires no new resource
+format, migration, or pod writes. Desktop access uses the owner-only pod bridge;
+foreign directory and legacy-content access remain refused.
+
+References are checked only against loaded, verified room attachment messages.
+**Reference not verified** does not establish that a file is unused, and this
+review has no deletion action. Missing metadata and incomplete listings remain
+visible as uncertainty. `npm run smoke:asset-inventory` checks actual browser and
+desktop controls with a throwaway Solid pod, including retained storage, folder
+navigation, pagination, close/reset, and metadata-only reads.

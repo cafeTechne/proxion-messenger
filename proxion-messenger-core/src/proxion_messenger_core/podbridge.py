@@ -76,9 +76,14 @@ _ROOM_ID = r"[A-Za-z0-9_-]{1,128}"
 _DAY = r"\d{4}/\d{2}/\d{2}"
 _DM_ASSET_ID = r"[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}"
 _DM_ASSET = rf"asset-{_DM_ASSET_ID}-(?:[0-9]|[1-5][0-9]|6[0-4])\.json"
+_LEGACY_NAME = r"(?!\.\.?\Z)(?![^/]*\.(?i:acl|acr)\Z)[A-Za-z0-9._-]{1,255}"
 
 # (regex over the path relative to our pod root, allowed methods, kind, max response)
 _OWN_RULES = [
+    (r"proxion/rooms/", {"GET", "HEAD"}, "asset_inventory_root", MAX_LISTING_RESPONSE),
+    (rf"proxion/rooms/{_ROOM_ID}/files/", {"GET", "HEAD"}, "asset_inventory", MAX_LISTING_RESPONSE),
+    (rf"proxion/rooms/{_ROOM_ID}/files/{_ROOM_ID}/", {"GET", "HEAD"}, "asset_inventory", MAX_LISTING_RESPONSE),
+    (rf"proxion/rooms/{_ROOM_ID}/files/(?:{_ROOM_ID}\.webm|{_ROOM_ID}/{_LEGACY_NAME})", {"HEAD"}, "asset_metadata", MAX_SMALL_RESPONSE),
     (r"proxion/dm-assets/", {"HEAD", "PUT"}, "dm_assets", MAX_SMALL_RESPONSE),
     (rf"proxion/dm-assets/{_ACL_SUFFIX}", {"GET", "HEAD", "PUT"}, "dm_asset_acl", MAX_SMALL_RESPONSE),
     (rf"proxion/dm-assets/{_DM_ASSET}", {"GET", "HEAD", "PUT", "DELETE"}, "dm_asset", MAX_SMALL_RESPONSE),
@@ -99,7 +104,7 @@ _OWN_RULES = [
     (rf"rooms/({_ROOM_ID})/room\.json", {"GET", "HEAD", "PUT", "DELETE"}, "descriptor", MAX_SMALL_RESPONSE),
     (rf"rooms/({_ROOM_ID})/", {"HEAD"}, "room_meta", MAX_SMALL_RESPONSE),
     (rf"rooms/({_ROOM_ID})/{_ACL_SUFFIX}", {"GET", "HEAD", "PUT"}, "acl", MAX_LISTING_RESPONSE),
-    (rf"proxion/rooms/({_ROOM_ID})/", {"HEAD", "POST"}, "room_container", MAX_SMALL_RESPONSE),
+    (rf"proxion/rooms/({_ROOM_ID})/", {"GET", "HEAD", "POST"}, "room_container", MAX_LISTING_RESPONSE),
     (rf"proxion/rooms/({_ROOM_ID})/asset-[A-Za-z0-9_-]{{1,160}}\.json", {"GET", "HEAD"}, "room_asset", MAX_SMALL_RESPONSE),
     (rf"proxion/rooms/({_ROOM_ID})/{_ACL_SUFFIX}", {"GET", "HEAD", "PUT"}, "acl", MAX_LISTING_RESPONSE),
     (rf"proxion/rooms/({_ROOM_ID})/index\.ttl", {"GET", "HEAD", "PUT"}, "room_index", MAX_SMALL_RESPONSE),

@@ -2803,6 +2803,10 @@ button:is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; opacity: 0.5
 .settings-inline { display: flex; gap: var(--space-2); align-items: flex-start; }
 .settings-inline > .settings-input { flex: 1; min-width: 0; }
 .settings-inline > .btn { flex-shrink: 0; white-space: nowrap; height: 36px; padding-block: 0; font-size: var(--text-md); }
+.asset-inventory-results { overflow-x: auto; max-height: 40vh; overflow-y: auto; }
+.asset-inventory-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.asset-inventory-table :is(th, td) { padding: var(--space-2); text-align: start; vertical-align: top; overflow-wrap: anywhere; }
+.asset-inventory-table th { border-bottom: 1px solid var(--border-strong); }
 .settings-readout {
     margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-2); min-height: 1.5em;
     font-size: var(--text-xs); color: var(--text-secondary); word-break: break-all;

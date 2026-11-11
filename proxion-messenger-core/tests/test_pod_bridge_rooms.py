@@ -321,7 +321,7 @@ def test_own_room_paths_for_hosting(dpop):
     assert fetch(dpop, ws, "GET", ROOT + "profile/card")["status"] == 205
     for method, url in [("PUT", ROOT + "profile/card"), ("DELETE", ROOT + "proxion/rooms/r9/index.ttl"),
                         ("GET", ROOT + "rooms/r9/secret.json"), ("PUT", ROOT + "proxion/rooms/r9/notes.ttl"),
-                        ("DELETE", own_day), ("GET", ROOT + "proxion/rooms/")]:
+                        ("DELETE", own_day), ("DELETE", ROOT + "proxion/rooms/")]:
         assert fetch(dpop, ws, method, url)["status"] == 403, (method, url)
 
 

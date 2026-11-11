@@ -25,7 +25,7 @@ export const GROUPS = {
                     'smoke_multidevice_dm.mjs', 'smoke_call.mjs', 'smoke_pairing.mjs', 'smoke_tabs.mjs'],
   // The gateway-less web build against a local Solid server (fetched with npx).
   pod: ['smoke_web_nogw.mjs', 'smoke_web_signedin.mjs', 'smoke_web_join.mjs', 'smoke_web_join_link.mjs',
-        'smoke_room_attachments.mjs', 'smoke_dm_attachments.mjs', 'smoke_web_dm.mjs', 'smoke_web_friends.mjs', 'smoke_web_account.mjs', 'smoke_web_rooms.mjs', 'smoke_web_session.mjs',
+        'smoke_room_attachments.mjs', 'smoke_dm_attachments.mjs', 'smoke_asset_inventory.mjs', 'smoke_web_dm.mjs', 'smoke_web_friends.mjs', 'smoke_web_account.mjs', 'smoke_web_rooms.mjs', 'smoke_web_session.mjs',
         'smoke_cross_mode_dm.mjs', 'smoke_cross_mode_rooms.mjs', 'smoke_cross_mode_call.mjs'],
   // A required subset: never pass CI without exercising real pod membership.
   'pod-required': ['smoke_room_attachments.mjs', 'smoke_dm_attachments.mjs', 'smoke_web_rooms.mjs', 'smoke_web_friends.mjs', 'smoke_cross_mode_rooms.mjs', 'smoke_web_join_link.mjs'],

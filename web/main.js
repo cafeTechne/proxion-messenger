@@ -59,6 +59,7 @@ import { createRoomMedia } from './room-media.js';
 import { createDmAttachments, parseDmAttachment, DM_ASSET_MAX } from './dm-attachments.js';
 import { createDmMedia, deliverDmMedia } from './dm-media.js';
 import { createDmReceiptStore } from './dm-receipts.js';
+import { createAssetInventoryUi } from './asset-inventory-ui.js';
 import { createModals } from './modals.js';
 import { createProfile } from './profile.js';
 import { createEdit } from './edit.js';
@@ -547,7 +548,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // media.state.isSharing; media's getVoiceState is a deferred getter, so the
         // forward reference to `voice` is only resolved at runtime (no TDZ).
         const _dmReceipts = createDmReceiptStore();
-        let _roomMedia = null, _dmMedia = null, _podDmEngine = null;
+        let _roomMedia = null, _dmMedia = null, _podDmEngine = null, _assetInventory = null;
         function _isPodDmView(view) {
             return !!(view && (view.type === 'local_dm' || view.type === 'dm')
                 && isDmPeerWebId(view.peerWebid || view.peerDid || view.id));
@@ -1287,6 +1288,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 crossMode: _isPodDmView(view) });
         }
         function _showCrossModeState(st) {
+            _assetInventory?.sync();
             const el = document.getElementById('settings-crossmode-status');
             if (!el) return;
             if (st.ready) el.textContent = st.conflict ? t('crossmode.conflict') : t('crossmode.ready');
@@ -1801,6 +1803,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 if (_res) _res.style.display = "none";
             } catch (_) {}
             document.getElementById("settings-modal").style.display = "flex";
+            _assetInventory?.reset(); _assetInventory?.sync();
             // G1: always open with Advanced collapsed (openSettingsToPod re-expands it).
             document.getElementById("settings-advanced").style.display = "none";
             document.getElementById("settings-advanced-toggle").setAttribute("aria-expanded", "false");
@@ -1918,6 +1921,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             el.addEventListener("blur", () => saver.flush());
         }
         function _closeSettings() {
+            _assetInventory?.reset();
             _nameSaver.flush();
             _statusSaver.flush();
             document.getElementById("settings-modal").style.display = "none";
@@ -6502,6 +6506,31 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             onMessage: (message, ctx) => _handleEventAsync({ ...message, type: 'message', source: 'local_dm', thread_id: ctx.threadId, local: true, own: true }, true),
         });
 
+        function _inventoryIdentity() {
+            if (transport.mode === 'web') return solidSession.info.isLoggedIn && podStorageRoot()
+                ? { actor: solidSession.info.webId, root: podStorageRoot() } : null;
+            const state = crossMode?.state();
+            return crossMode?.isReady() && state.webid && state.pod_root ? { actor: state.webid, root: state.pod_root } : null;
+        }
+        _assetInventory = createAssetInventoryUi({
+            getContext: () => {
+                const inventoryAccount = _inventoryIdentity(), capturedSocket = socket, session = _webRoomSessionId();
+                if (!inventoryAccount || document.getElementById('settings-modal').style.display !== 'flex') return null;
+                return { ...inventoryAccount,
+                    fetch: (url, options) => transport.mode === 'web' ? solidSession.fetch(url, options) : crossMode.bridge.fetch(url, options),
+                    current: () => {
+                        const now = _inventoryIdentity();
+                        return now?.actor === inventoryAccount.actor && now.root === inventoryAccount.root && socket === capturedSocket
+                            && session === _webRoomSessionId() && document.getElementById('settings-modal').style.display === 'flex';
+                    },
+                };
+            },
+            getRoomName: id => _threadNames[id] || crossRooms?.room(id)?.title || id,
+            getReferences: id => allMessages.filter(message => message.thread_id === id && message.sender_verified && !message.deleted)
+                .flatMap(message => parseRoomAttachment(message.content)?.chunks || [])
+                .map(url => url.startsWith('asset-') ? (_inventoryIdentity()?.root || '') + 'proxion/rooms/' + id + '/' + url : url),
+        });
+
         document.getElementById('message-feed').addEventListener('click', async event => {
             const button = event.target.closest('[data-room-asset]');
             if (button && !button.disabled) {
@@ -8249,6 +8278,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
             // Disconnect from the CSS/Solid pod without touching the local identity key or
             // room/message history. The user's DID, display name, and all rooms are preserved.
             async function _signOutOfPod() {
+                _assetInventory?.reset();
                 // Browser build: there is no gateway holding pod credentials. End
                 // the Solid session, forget this account here, and reload to the
                 // sign-in screen.
