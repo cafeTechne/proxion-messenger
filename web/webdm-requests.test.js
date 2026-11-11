@@ -76,3 +76,12 @@ describe('createWebDm message requests', () => {
         expect(h.deleted).toEqual(['u1']);
     });
 });
+
+it.each(['rejected', 'unavailable'])('strict desktop policy protects unencrypted fanout (%s)', async verify => {
+    const h = harness({ drops: [{ url: 'fanout', envelope: { kind: 'fanout', from_webid: BOB,
+        message_id: 'm', payload: { content: 'unsigned plaintext', e2e: false } } }],
+        verify, known: () => true, strictSender: true });
+    await h.dm.drainOnce();
+    expect(h.events).toEqual([]);
+    expect(h.deleted).toEqual(verify === 'rejected' ? ['fanout'] : []);
+});

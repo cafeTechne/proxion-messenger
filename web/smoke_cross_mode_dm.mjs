@@ -225,7 +225,27 @@ try {
   if (drained) ok('Alice\'s DM inbox is empty after the drain');
   else fail('Alice\'s DM inbox still holds drops');
 
-  // Exercise storage independently from the still-gated media chat controls.
+  step = 'durable-receipt';
+  const receiptErrors = [];
+  const receiptConsole = message => { if (message.text().includes('[webdm] decrypt failed')) receiptErrors.push(message.text()); };
+  pageA.on('console', receiptConsole);
+  await pageA.evaluate(() => { window.proxionCrossMode.bridge.io.podDeleteDmDrop = async () => false; });
+  if (await send(pageB, 'receipt-reload') !== true) throw Error('receipt probe was not sent');
+  for (let attempt = 0; attempt < 15; attempt++) {
+    await pageA.evaluate(() => window.proxionCrossMode.drainOnce());
+    if ((await feedText(pageA)).includes('receipt-reload')) break;
+    await sleep(500);
+  }
+  await pageA.reload({ waitUntil: 'networkidle2' });
+  await pageA.waitForFunction(() => window.proxionCrossMode?.isReady(), { timeout: 30000 });
+  await openThread(pageA, bob.webId);
+  await pageA.waitForFunction(() => document.getElementById('message-feed').textContent.includes('receipt-reload'), { timeout: 20000 });
+  await pageA.evaluate(() => window.proxionCrossMode.drainOnce());
+  if (receiptErrors.length || !await inboxEmpty()) throw Error('desktop receipt did not recover after reload');
+  pageA.off('console', receiptConsole);
+  ok('desktop durable receipts keep history and clear undeleted inbox ciphertext after reload');
+
+  // Exercise the shared encrypted asset storage protocol in both directions.
   step = 'encrypted-assets';
   const desktopAsset = await pageA.evaluate(async () => {
     const { createDmAttachments, prepareDmAttachment } = await import('./dm-attachments.js');

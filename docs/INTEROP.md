@@ -30,12 +30,16 @@ connected to, with the gateway making the pod requests on its behalf
 
 Inbox checks share one reader per DM engine. A notification during a read queues
 a fresh scan, and startup subscribes before listing the inbox. Consumed drops
-are remembered in memory so a failed DELETE retries acknowledgement without
-decrypting the same ciphertext again. The bounded receipt cache retains failed
-acknowledgements before successful ones; if all 1,024 slots await deletion, new
-drops stay untouched until acknowledgements recover. These receipts are local to
-the running engine, not durable across a reload. Existing local DM history
-remains the durable record of received plaintext.
+are remembered by canonical envelope SHA-256, scoped to the account and receiving
+device. A failed DELETE retries acknowledgement without decrypting the same
+ciphertext again, including after reload or an exact replay at another inbox URL.
+IndexedDB retains at most 4,096 content-free receipts per account/device, evicting
+acknowledged entries first. Pending receipts are protected; if the cap is full,
+new ciphertext waits until deletions recover. The in-memory cache keeps its
+1,024-entry bound. Local DM history holds plaintext separately; receipt storage
+contains no message text or media keys. Storage failures fall back to live-only
+behavior. Ratchet advancement and history/receipt writes are not one transaction,
+so an abrupt crash before those writes commit can still lose a received message.
 
 - **Works:** text DMs both ways, message requests for a first DM from a stranger,
   presence both ways, blocking. Test: `npm run smoke:cross-mode-dm`.

@@ -1,3 +1,5 @@
+import { dmEnvelopeFingerprint } from './dm-receipts.js';
+
 // webdm.js — gateway-free direct messages (R103).
 //
 // Delivery and receipt for DMs when there is no gateway. Sending: main.js has
@@ -91,7 +93,7 @@ export function createSenderVerifier({ verifyDmSig, verifyFanoutSig, fetchSigner
 // as a message request (left in the inbox, not decrypted) until the user
 // accepts; strictSender also refuses an unverified unencrypted drop instead of
 // showing it. The browser build passes none of these and behaves as before.
-export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDisplayName, getMyDeviceId, persistMessage, signEnvelope, verifySender, onUnverifiedDrop, isBlocked, isKnownSender, onMessageRequest, strictSender = false }) {
+export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDisplayName, getMyDeviceId, persistMessage, signEnvelope, verifySender, onUnverifiedDrop, isBlocked, isKnownSender, onMessageRequest, strictSender = false, receipts = null }) {
     let _unsub = null;
     let _draining = null;
     let _drainingGeneration = 0;
@@ -99,20 +101,36 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
     let _starting = null;
     let _generation = 0;
     // A decrypt spends its ratchet key even if deleting the drop fails. Remember
-    // consumed URLs for this engine's lifetime so retries only acknowledge them.
+    // exact envelopes in memory and, when available, in device-scoped receipts.
     // Retain failed acknowledgements; evict successful ones first at the cap.
     const _consumed = new Map();
     const MAX_CONSUMED = 1024;
 
-    async function _acknowledge(url) {
-        _consumed.set(url, false);
+    const scope = () => JSON.stringify([getSelfWebId() || '', getMyDeviceId ? getMyDeviceId() || '' : '']);
+    async function _remember(context) {
+        if (!receipts || !context.current()) return;
+        try { context.durable = await receipts.remember(context.scope, context.fingerprint); context.pending = context.durable; }
+        catch { /* preserve live delivery if local storage is unavailable */ }
+    }
+    async function _acknowledge(url, context) {
+        if (!context.current()) return;
+        _consumed.set(context.key, { acknowledged: false, url });
+        if (receipts && context.durable && !context.pending) {
+            try { await receipts.remember(context.scope, context.fingerprint); } catch { /* memory fallback */ }
+        }
+        if (!context.current()) return;
         const ok = await pod.podDeleteDmDrop(url);
-        if (ok) _consumed.set(url, true);
+        if (ok) {
+            _consumed.set(context.key, { acknowledged: true, url });
+            if (receipts && context.durable) {
+                try { await receipts.acknowledge(context.scope, context.fingerprint); } catch { /* retry remains safe */ }
+            }
+        }
     }
 
     function _hasReceiptSpace() {
         if (_consumed.size < MAX_CONSUMED) return true;
-        for (const [url, acknowledged] of _consumed) {
+        for (const [url, { acknowledged }] of _consumed) {
             if (acknowledged) { _consumed.delete(url); return true; }
         }
         // Apply backpressure rather than forgetting a spent key during a long
@@ -171,10 +189,10 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
     // decrypt under: it must not start one (the inbox is public-Append, so anyone
     // can drop an envelope naming any WebID). Tell the user it arrived without
     // opening it, and remove it.
-    async function _rejectUnverified(url, env) {
+    async function _rejectUnverified(url, env, context) {
         console.warn('[webdm] unverified first-contact drop from', env.from_webid, '- not opened');
         if (onUnverifiedDrop) { try { onUnverifiedDrop({ from_webid: env.from_webid, message_id: env.message_id }); } catch { /* notice is best effort */ } }
-        await _acknowledge(url);
+        await _acknowledge(url, context);
     }
 
     function _messageRequest(env) {
@@ -187,13 +205,13 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
         } catch { /* the request UI is best effort; the drop stays */ }
     }
 
-    async function _handleEnvelope(url, env) {
+    async function _handleEnvelope(url, env, context) {
         const from = env && env.from_webid;
         if (!from) return;
         // A blocked sender's drop is removed unread, before any verify or decrypt.
         if (isBlocked && isBlocked(from)) {
             if (env.kind !== 'fanout' || !getMyDeviceId || !env.to_device_id || env.to_device_id === getMyDeviceId()) {
-                await _acknowledge(url);
+                await _acknowledge(url, context);
             }
             return;
         }
@@ -206,38 +224,48 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
         if (env.kind === 'fanout') {
             if (getMyDeviceId && env.to_device_id && env.to_device_id !== getMyDeviceId()) return;
             const status = await _senderStatus(env);
+            if (!context.current()) return;
             if (_unknown && status === 'verified') { _messageRequest(env); return; }
             const verified = status === 'verified';
             const p = env.payload || {};
+            if (strictSender && !verified && !p.e2e) {
+                if (status === 'unavailable') return;
+                await _rejectUnverified(url, env, context);
+                return;
+            }
             if (!verified && p.e2e) {
                 // Same session id main.js uses for a fanout copy.
                 const pid = from + '#' + (p.from_device_id || from);
                 const known = e2e.hasSession ? await e2e.hasSession(pid) : false;
                 if (!known) {
                     if (status === 'unavailable') return;   // retry once the signer is reachable
-                    await _rejectUnverified(url, env);
+                    await _rejectUnverified(url, env, context);
                     return;
                 }
             }
-            await handleEvent({
+            const handled = await handleEvent({
                 type: 'dm_fanout', to_device_id: env.to_device_id,
                 from_webid: env.from_webid, message_id: env.message_id, payload: env.payload,
                 sender_verified: verified,
                 // Only a verified envelope may start a new ratchet session.
                 allow_session_init: verified,
+                _dmCurrent: context.current,
             });
-            await _acknowledge(url);
+            if (handled === false) return;
+            if (handled?.persisted !== false) await _remember(context);
+            await _acknowledge(url, context);
             return;
         }
         // R107: is this envelope really signed by from_webid's owner? Checked
         // BEFORE decrypting, because decrypting with no session would create one
         // from the envelope's ratchet_pub.
         const status = await _senderStatus(env);
+        if (!context.current()) return;
         const sender_verified = status === 'verified';
         if (_unknown && sender_verified) { _messageRequest(env); return; }
         if (strictSender && !sender_verified && !env.e2e) {
             if (status === 'unavailable') return;   // retry once the signer is reachable
-            await _rejectUnverified(url, env);
+            await _rejectUnverified(url, env, context);
             return;
         }
         let content = env.content;
@@ -260,7 +288,7 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
                     console.warn('[webdm] sender identity unreachable, leaving first-contact drop for retry');
                     return;
                 }
-                await _rejectUnverified(url, env);
+                await _rejectUnverified(url, env, context);
                 return;
             }
             // Leave an undecryptable drop in place for a later retry (bounded by
@@ -268,6 +296,7 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
             console.warn('[webdm] decrypt failed, leaving drop for retry:', err);
             return;
         }
+        if (!context.current()) return;
         // Only now cache the sender's long-term x25519_pub (a signed field), and only
         // for a verified envelope: the send path (isE2EEnabled) trusts this cache to
         // skip the authenticated pod-key fetch, so an unverified key must never land.
@@ -297,24 +326,43 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
         // history write and acknowledgement after a successful decrypt.
         try { await handleEvent(message); }
         catch (err) { console.warn('[webdm] message handling failed:', err); }
-        if (persistMessage) { try { await persistMessage(message); } catch { /* best-effort cache */ } }
-        await _acknowledge(url);
+        if (!context.current()) return;
+        let persisted = true;
+        if (persistMessage) { try { persisted = await persistMessage(message) !== false; } catch { persisted = false; } }
+        if (persisted) await _remember(context);
+        await _acknowledge(url, context);
     }
 
     async function _drain(generation) {
+        const accountScope = scope();
+        const current = () => generation === _generation && accountScope === scope();
         const drops = await pod.podReadDmDrops();
         for (const d of drops) {
-            if (generation !== _generation) return;
+            if (!current()) return;
             if (!d || !d.url || !d.envelope) continue;
-            // Isolate per-drop failures so one bad envelope cannot block the rest.
             try {
-                if (_consumed.has(d.url)) {
-                    if (!_consumed.get(d.url)) await _acknowledge(d.url);
+                const fingerprint = await dmEnvelopeFingerprint(d.envelope);
+                if (!current()) return;
+                const context = { scope: accountScope, fingerprint, key: accountScope + '\n' + fingerprint, current, durable: false };
+                const consumed = _consumed.get(context.key);
+                if (consumed) {
+                    if (!consumed.acknowledged || consumed.url !== d.url) {
+                        if (receipts) { try { context.durable = await receipts.has(accountScope, fingerprint); } catch { /* memory fallback */ } }
+                        await _acknowledge(d.url, context);
+                    }
                     continue;
                 }
-                if (_hasReceiptSpace()) await _handleEnvelope(d.url, d.envelope);
-            }
-            catch (err) { console.warn('[webdm] drop handling failed:', err); }
+                if (!_hasReceiptSpace()) continue;
+                if (receipts) {
+                    try {
+                        context.durable = await receipts.has(accountScope, fingerprint);
+                        if (!current()) return;
+                        if (context.durable) { await _acknowledge(d.url, context); continue; }
+                        if (!await receipts.hasSpace(accountScope)) continue;
+                    } catch { /* live-only fallback during local storage failure */ }
+                }
+                if (current() && _hasReceiptSpace()) await _handleEnvelope(d.url, d.envelope, context);
+            } catch (err) { console.warn('[webdm] drop handling failed:', err); }
         }
     }
 

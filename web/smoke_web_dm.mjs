@@ -197,9 +197,16 @@ try {
     }
   }
   await pageB.evaluate(() => Promise.all(Array.from({ length: 3 }, () => window.proxionWebDm.drainOnce())));
+  await pageB.reload({ waitUntil: 'networkidle2' });
+  await pageB.waitForFunction(w => !!window.proxionWebDm && !!document.getElementById('nav-' + w), { timeout: 25000 }, alice.webId);
+  await openThread(pageB, alice.webId);
+  await pageB.evaluate(() => Promise.all(Array.from({ length: 3 }, () => window.proxionWebDm.drainOnce())));
+  const recovered = await pageB.evaluate(() => ['retry-delete-1', 'retry-delete-2'].every(text => document.getElementById('message-feed').textContent.includes(text)));
+  if (!recovered) fail('received history did not survive reload during the deletion outage');
   denyDeletes = false;
   await pageB.evaluate(() => window.proxionWebDm.drainOnce());
-  if (failedDeletes && !decryptErrors.length) ok('overlapping scans survive failed inbox deletions without decrypting spent ciphertext');
+  const pending = await pageB.evaluate(async () => (await (await import('./pod.js')).podReadDmDrops()).length);
+  if (failedDeletes && !decryptErrors.length && !pending) ok('durable receipts survive reload during deletion failure; history stays visible and the inbox clears without decrypting spent ciphertext');
   else fail(`deletion outage did not recover: ${failedDeletes} rejected deletes, ${decryptErrors.length} decrypt errors`);
   await pageB.setRequestInterception(false);
   pageB.off('request', intercept);

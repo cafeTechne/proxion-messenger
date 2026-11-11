@@ -34,7 +34,7 @@ export function callWebIdTarget(cmd) {
 
 export function createCrossMode({
     send, handleEvent, getClientDid, getDisplayName, signEnvelope,
-    verifyDmSig, verifyFanoutSig, verifyDeviceCert, e2e, persistMessage,
+    verifyDmSig, verifyFanoutSig, verifyDeviceCert, e2e, persistMessage, receipts,
     isBlocked, isKnownSender, onMessageRequest, onUnverifiedDrop,
     getContacts, getMyPub, fetchAndCachePeerPub, onStateChange = () => {}, getSelfId = () => getClientDid(),
     isAllowedCaller = isKnownSender,
@@ -100,7 +100,7 @@ export function createCrossMode({
             getSelfWebId: () => _state.webid,
             getDisplayName,
             getMyDeviceId: () => getClientDid(),
-            persistMessage, signEnvelope,
+            persistMessage, receipts, signEnvelope,
             verifySender: createSenderVerifier({
                 verifyDmSig, verifyFanoutSig, verifyDeviceCert,
                 fetchSigner: (root) => bridge.io.podFetchPeerSigner(root),

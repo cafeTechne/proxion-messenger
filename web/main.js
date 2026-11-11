@@ -58,6 +58,7 @@ import { createRoomAttachments, parseRoomAttachment } from './room-attachments.j
 import { createRoomMedia } from './room-media.js';
 import { createDmAttachments, parseDmAttachment, DM_ASSET_MAX } from './dm-attachments.js';
 import { createDmMedia, deliverDmMedia } from './dm-media.js';
+import { createDmReceiptStore } from './dm-receipts.js';
 import { createModals } from './modals.js';
 import { createProfile } from './profile.js';
 import { createEdit } from './edit.js';
@@ -545,6 +546,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // instance because voice's deps reference media.stopScreenShare and
         // media.state.isSharing; media's getVoiceState is a deferred getter, so the
         // forward reference to `voice` is only resolved at runtime (no TDZ).
+        const _dmReceipts = createDmReceiptStore();
         let _roomMedia = null, _dmMedia = null, _podDmEngine = null;
         function _isPodDmView(view) {
             return !!(view && (view.type === 'local_dm' || view.type === 'dm')
@@ -1165,6 +1167,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 verifyDmSig, verifyFanoutSig, verifyDeviceCert,
                 e2e: { cachePeerPub, ratchetDecrypt, hasSession: hasRatchetSession },
                 persistMessage: (m) => dmHistorySave({ ...m, thread_id: m.thread_id }),
+                receipts: _dmReceipts,
                 isBlocked: (w) => blocks.isBlocked(w),
                 isKnownSender: (w) => !!localDmPeers[w],
                 onMessageRequest: (req) => messageRequests.add(req),
@@ -2336,11 +2339,13 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 // Self-sync copy (sent from another of our own devices): the thread
                 // is keyed by the PEER, carried in the payload — from_webid would
                 // resolve to ourselves. Peer messages use our own cert mapping.
+                if (fromPod && typeof event._dmCurrent === 'function' && !event._dmCurrent()) return false;
                 const isSelfCopy = fromAcct === selfWebId;
                 const threadId = isSelfCopy
                     ? (p.thread_id || peerDidToCertId[p.thread_peer] || p.thread_peer)
                     : (peerDidToCertId[fromAcct] || fromAcct);
-                handleEvent({
+                if (fromPod && isUndecryptable(text)) return false;
+                const message = {
                     type: "message",
                     message_id: event.message_id,
                     from_webid: fromAcct,
@@ -2355,7 +2360,13 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     sender_verified: isSelfCopy ? undefined : !!event.sender_verified,
                     // Persist plaintext locally unless decryption failed.
                     _persistDm: text !== '[could not decrypt]' && text !== '[decryption error]',
-                });
+                };
+                try { handleEvent(message); } catch (err) {
+                    if (!fromPod) throw err;
+                    console.warn('[webdm] fanout UI failed:', err);
+                }
+                if (fromPod) return { persisted: await dmHistorySave(message) };
+
                 return;
             }
             handleEvent(event);
@@ -9119,6 +9130,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                         // Durable local persist before the pod drop is deleted, so a
                         // received DM is never lost if the write fails after decrypt.
                         persistMessage: (m) => dmHistorySave({ ...m, thread_id: m.thread_id }),
+                        receipts: _dmReceipts,
                         // R107: sign our DM envelopes with this device's identity key,
                         // attaching the account cert (if linked) for multi-device auth.
                         signEnvelope: async (env) => {

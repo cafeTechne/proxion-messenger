@@ -919,8 +919,9 @@ finish history without delivering again.
 Delivery retries preserve file encryption and message identity, but produce fresh
 ratchet ciphertext for a new inbox POST. Replaying spent ratchet ciphertext under
 a different drop URL would otherwise leave an undecryptable replay at the receiver.
-Duplicate logical messages deduplicate by message ID. Transactional, durable
-receive receipts across deletion outages/reloads remain a separate follow-up.
+Duplicate logical messages deduplicate by message ID. Durable receive receipts
+also cover exact envelope replays across deletion outages and reloads (below);
+ratchet and local storage commits are not transactional.
 
 Verified authors and locally sent messages expose an explicit Load/Retry button.
 Browser loads omit credentials; desktop peer reads use the scoped bridge. Only
@@ -936,3 +937,35 @@ DM tests retain that policy, adding only localhost connections for the test pod.
 Browser/browser and desktop/browser chat UI journeys exercise upload and delivery
 outages, draft reload/retry, exact-byte downloads and real recording/playback
 after history reload. Asset cleanup and live ACP compatibility remain planned.
+
+### Durable DM receive receipts
+
+`proxion-dm-receipts-v1` in IndexedDB stores canonical envelope SHA-256 digests,
+account/device scope, acknowledgement state and a local timestamp. It stores no
+plaintext, filename, file key, ciphertext body or inbox URL. Receipt lookup binds
+the complete parsed envelope, including nested fanout payload and device target;
+a new ciphertext using an old message ID or URL is not treated as consumed.
+An exact replay at another URL can be deleted without spending a ratchet key.
+
+After successful consumption, ordinary DMs await local history persistence before
+remembering a receipt and attempting DELETE. Fanout handlers report whether
+decryption and history persistence succeeded; undecryptable fanout stays in the
+inbox for retry. Strict desktop sender policy also refuses unverified plaintext
+fanout, matching ordinary messages. Pending receipts remain retryable even if
+the peer's signer is temporarily unavailable later.
+
+The receipt cap is 4,096 per account/device. Write transactions evict only
+acknowledged rows; when all slots await acknowledgement, new messages wait before
+decryption. Successful deletion marks the receipt acknowledged. The existing
+1,024-entry in-memory limit remains in place. Receipt storage failures preserve
+live delivery and its existing in-memory fallback. A real failed history write
+does not claim durable consumption; intentionally disabled history is a user
+choice to retain no plaintext while keeping content-free receipts.
+
+Receipts survive reload and history clearing/logout because they contain no
+message content and prevent deleted history from being resurrected by old drops.
+This does not close the crash window between a ratchet advance and committing
+history/receipt writes. Those live in separate stores and are not transactional;
+a crash or storage failure in that window can still lose a message. Receipt
+reconciliation for external inbox deletions and transactional ratchet/history
+commit remain future work.
