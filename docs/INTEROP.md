@@ -65,7 +65,15 @@ so an abrupt crash before those writes commit can still lose a received message.
   different gateway VAPID key. Concurrent setup attempts share one registration;
   disabling notifications or changing the socket prevents late registration and
   removes a newly created unused subscription. Re-enabling waits for teardown.
-  Provider-side expiry responses and gateway restart recovery remain separate checks.
+  Provider HTTP 404/410 responses retire that exact owner/endpoint/key combination;
+  authentication, rate-limit, and temporary failures retain it. Local expiry tombstones
+  survive database reopen and prevent stale pod copies from being restored. A late
+  response cannot delete a replacement using different keys. On reconnect the gateway
+  asks the browser to renew an expired registration; stale responses after opt-out or
+  connection/key changes are ignored. Repeated rejection of the same token triggers
+  at most one automatic renewal per connection. Existing expired pod files are ignored,
+  rather than deleted; these tombstones require the original local database. Durable
+  missed-call scan recovery across gateway restarts remains a separate audit.
 - **Needs:** a pod connected to the desktop gateway, stored where its WebID points
   (`{root}profile/card#me` with storage at `{root}`). Share the WebID from
   Settings, Pod.

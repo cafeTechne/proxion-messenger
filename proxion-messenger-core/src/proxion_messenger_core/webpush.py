@@ -88,6 +88,7 @@ def send_web_push(
     vapid_private_pem: str,
     vapid_subject: str,
     ttl: int = 86400,
+    on_expired=None,
 ) -> bool:
     """Send an encrypted Web Push notification.
 
@@ -106,7 +107,8 @@ def send_web_push(
 
     Returns
     -------
-    True on successful delivery, False on any error.
+    True on successful delivery, False on any error. ``on_expired`` is called
+    only for provider HTTP 404/410 responses, including exception responses.
     """
     # Defense in depth: reject a subscription whose endpoint fails the SSRF check
     # even if it was somehow stored without validation.
@@ -119,6 +121,13 @@ def send_web_push(
     except ImportError:
         logger.warning("pywebpush not installed — WebPush notification skipped")
         return False
+
+    def retire(response):
+        if getattr(response, "status_code", None) in (404, 410) and on_expired:
+            try:
+                on_expired()
+            except Exception:
+                logger.warning("WebPush expired subscription cleanup failed", exc_info=True)
 
     try:
         payload_bytes = json.dumps(payload).encode("utf-8")
@@ -133,9 +142,11 @@ def send_web_push(
         )
         if resp and resp.status_code < 300:
             return True
+        retire(resp)
         logger.warning("WebPush delivery failed: status %s", getattr(resp, "status_code", "?"))
         return False
     except Exception as exc:
+        retire(getattr(exc, "response", None))
         logger.warning("WebPush error: %s", exc)
         return False
 

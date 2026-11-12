@@ -341,6 +341,7 @@ class VoiceHandlerMixin:
                                   "keys": {"p256dh": sub["p256dh_b64"], "auth": sub["auth_b64"]}},
                     payload={"type": "missed_call", "thread_id": ""},
                     vapid_private_pem=vpk, vapid_subject=vsub,
+                    on_expired=lambda sub=sub: self._store.expire_push_subscription(sub),
                 )
                 sent = sent or bool(ok)
             except Exception:

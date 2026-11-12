@@ -197,6 +197,28 @@ class DeviceStoreMixin(object):
                 return dict(row) if row else None
             except Exception:
                 return None
+    @staticmethod
+    def _push_fingerprint(owner, endpoint, p256dh, auth):
+        import hashlib
+        import json
+        return hashlib.sha256(json.dumps([owner, endpoint, p256dh, auth], separators=(",", ":")).encode()).hexdigest()
+
+    def push_subscription_expired(self, owner, endpoint, p256dh, auth) -> bool:
+        fingerprint = self._push_fingerprint(owner, endpoint, p256dh, auth)
+        with self._conn() as conn:
+            return bool(conn.execute("SELECT 1 FROM expired_push_subscriptions WHERE fingerprint=?", (fingerprint,)).fetchone())
+
+    def expire_push_subscription(self, subscription: dict) -> None:
+        """Retire exactly the failed delivery snapshot, preserving replacements."""
+        owner, endpoint = subscription['owner_webid'], subscription['endpoint']
+        p256dh, auth = subscription['p256dh_b64'], subscription['auth_b64']
+        fingerprint = self._push_fingerprint(owner, endpoint, p256dh, auth)
+        with self._conn() as conn:
+            conn.execute("INSERT OR IGNORE INTO expired_push_subscriptions VALUES (?)", (fingerprint,))
+            conn.execute("DELETE FROM push_subscriptions WHERE owner_webid=? "
+                         "AND endpoint=? AND p256dh_b64=? AND auth_b64=?",
+                         (owner, endpoint, p256dh, auth))
+
     def save_push_subscription(
         self,
         subscription_id: str,
@@ -210,6 +232,8 @@ class DeviceStoreMixin(object):
         id per reconnect would otherwise pile up duplicates that each get every
         push). An id that belongs to another owner is never overwritten."""
         with self._conn() as conn:
+            if self.push_subscription_expired(owner_webid, endpoint, p256dh_b64, auth_b64):
+                return []
             other = conn.execute(
                 "SELECT owner_webid FROM push_subscriptions WHERE subscription_id=?",
                 (subscription_id,)).fetchone()

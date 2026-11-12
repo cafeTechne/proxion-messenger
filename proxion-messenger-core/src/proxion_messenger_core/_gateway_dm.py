@@ -1221,6 +1221,7 @@ class DmHandlerMixin:
                         payload=payload,
                         vapid_private_pem=vpk,
                         vapid_subject=vsub,
+                        on_expired=lambda s=s: self._store.expire_push_subscription(s),
                     )
                 except Exception:
                     pass

@@ -4213,6 +4213,9 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                 case "pod_disconnected":
                     _podDisconnectWaiter?.(true);
                     break;
+                case "push_subscription_expired":
+                    push.recoverExpiredSubscription(event).catch(() => {});
+                    break;
                 case "push_subscribed":
                     push.rememberSubscription(event.subscription_id);
                     break;

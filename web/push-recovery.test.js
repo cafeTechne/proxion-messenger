@@ -57,4 +57,30 @@ describe('push subscription recovery', () => {
         await h.push.disablePush(); const next = h.push.enablePush(); late.resolve(h.fresh);
         expect(await old).toBe(false); expect(await next).toBe(true); expect(h.sent).toHaveLength(1);
     });
+    it('renews a provider-expired subscription even without a local expiry time', async () => {
+        const old = oldSub(), h = setup(old); await h.push.enablePush();
+        const event = { endpoint: old.endpoint, p256dh_b64: 'p', auth_b64: 'a' };
+        expect(await h.push.recoverExpiredSubscription(event)).toBe(true);
+        expect(old.unsubscribe).toHaveBeenCalledOnce(); expect(h.manager.subscribe).toHaveBeenCalledOnce();
+        expect(h.sent[1].endpoint).toBe(h.fresh.endpoint);
+        expect(await h.push.recoverExpiredSubscription(event)).toBe(false);
+    });
+    it.each(['disabled', 'changed_keys', 'changed_socket'])('ignores a stale provider expiry after %s', async reason => {
+        const old = oldSub(), h = setup(old); await h.push.enablePush();
+        const event = { endpoint: old.endpoint, p256dh_b64: reason === 'changed_keys' ? 'different' : 'p', auth_b64: 'a' };
+        if (reason === 'disabled') await h.push.disablePush();
+        if (reason === 'changed_socket') h.switchSocket();
+        expect(await h.push.recoverExpiredSubscription(event)).toBe(false);
+        expect(h.manager.subscribe).not.toHaveBeenCalled();
+    });
+
+    it('does not loop if renewal returns the same provider-rejected token', async () => {
+        const old = oldSub(), h = setup(old); h.fresh.endpoint = old.endpoint;
+        await h.push.enablePush();
+        const event = { endpoint: old.endpoint, p256dh_b64: 'p', auth_b64: 'a' };
+        expect(await h.push.recoverExpiredSubscription(event)).toBe(true);
+        expect(await h.push.recoverExpiredSubscription(event)).toBe(false);
+        expect(h.manager.subscribe).toHaveBeenCalledOnce();
+    });
+
 });

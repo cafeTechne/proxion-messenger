@@ -322,6 +322,9 @@ class _StoreBase(object):
                     status         TEXT NOT NULL DEFAULT 'pending'
                 );
 
+                CREATE TABLE IF NOT EXISTS expired_push_subscriptions (
+                    fingerprint TEXT PRIMARY KEY
+                );
                 CREATE TABLE IF NOT EXISTS friend_acceptances (
                     invitation_id TEXT PRIMARY KEY,
                     payload_json TEXT NOT NULL,

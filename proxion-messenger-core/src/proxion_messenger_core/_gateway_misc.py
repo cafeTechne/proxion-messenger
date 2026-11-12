@@ -1995,6 +1995,10 @@ class MiscHandlerMixin:
         if not is_safe_push_endpoint(endpoint):
             await websocket.send(json.dumps({"type": "error", "message": "invalid_push_endpoint"}))
             return
+        if self._store.push_subscription_expired(owner_webid, endpoint, p256dh_b64, auth_b64):
+            await websocket.send(json.dumps({"type": "push_subscription_expired", "endpoint": endpoint,
+                                             "p256dh_b64": p256dh_b64, "auth_b64": auth_b64}))
+            return
         for _old in self._store.save_push_subscription(subscription_id, owner_webid, endpoint, p256dh_b64, auth_b64) or []:
             asyncio.create_task(self._delete_push_subscription_from_pod(_old))
         asyncio.create_task(self._sync_push_subscription_to_pod(subscription_id, owner_webid, endpoint, p256dh_b64, auth_b64))
@@ -2101,6 +2105,7 @@ class MiscHandlerMixin:
                     payload={"type": "invite", "thread_id": ""},
                     vapid_private_pem=vpk,
                     vapid_subject=vsub,
+                    on_expired=lambda sub=sub: self._store.expire_push_subscription(sub),
                 )
                 sent = sent or bool(ok)
             except Exception:

@@ -48,6 +48,7 @@ export function closedAppPushStatus({ origin, permission } = {}) {
 
 export function createPush({ getSocket }) {
     let generation = 0, enabling = null, enablingGeneration = null, disabling = null;
+    let expired = null, lastRegistration = null, lastRecovery = null;
     // VAPID public key is base64url; PushManager wants a Uint8Array.
     function _urlB64ToUint8Array(b64) {
         const padding = "=".repeat((4 - (b64.length % 4)) % 4);
@@ -104,8 +105,11 @@ export function createPush({ getSocket }) {
             if (!current()) return false;
             const existing = sub?.options?.applicationServerKey;
             const bytes = existing ? new Uint8Array(existing.buffer || existing, existing.byteOffset || 0, existing.byteLength) : null;
+            const subKeys = sub?.toJSON().keys || {};
+            const providerExpired = expired && sub?.endpoint === expired.endpoint
+                && subKeys.p256dh === expired.p256dh_b64 && subKeys.auth === expired.auth_b64;
             const keyChanged = bytes && (bytes.length !== key.length || bytes.some((b, i) => b !== key[i]));
-            if (sub && ((sub.expirationTime != null && sub.expirationTime <= Date.now()) || keyChanged)) {
+            if (sub && ((sub.expirationTime != null && sub.expirationTime <= Date.now()) || keyChanged || providerExpired)) {
                 if (!await sub.unsubscribe()) return false;
                 sub = null;
             }
@@ -121,6 +125,7 @@ export function createPush({ getSocket }) {
             const json = sub.toJSON();
             const keys = json.keys || {};
             if (current() && keys.p256dh && keys.auth) {
+                lastRegistration = { endpoint: sub.endpoint, p256dh_b64: keys.p256dh, auth_b64: keys.auth, socket, generation: requested };
                 socket.send(JSON.stringify({
                     cmd: "subscribe_push",
                     endpoint: sub.endpoint,
@@ -136,6 +141,23 @@ export function createPush({ getSocket }) {
         } finally {
             if (created && !registered) { try { await created.unsubscribe(); } catch { /* retry on next connect */ } }
         }
+    }
+
+    // Only renew the exact registration the current connection just rejected.
+    async function recoverExpiredSubscription(event) {
+        const last = lastRegistration;
+        if (!last || last.generation !== generation || last.socket !== getSocket()
+            || event.endpoint !== last.endpoint || event.p256dh_b64 !== last.p256dh_b64
+            || event.auth_b64 !== last.auth_b64) return false;
+        const key = JSON.stringify([event.endpoint, event.p256dh_b64, event.auth_b64]);
+        if (!lastRecovery || lastRecovery.socket !== last.socket || lastRecovery.generation !== generation)
+            lastRecovery = { keys: new Set(), socket: last.socket, generation };
+        if (lastRecovery.keys.has(key)) return false;
+        lastRecovery.keys.add(key);
+        expired = event;
+        if (enabling) await enabling;
+        if (last.generation !== generation || last.socket !== getSocket() || lastRegistration !== last) return false;
+        return enablePush();
     }
 
     // The gateway's id for this browser's subscription (push_subscribed), so
@@ -171,5 +193,5 @@ export function createPush({ getSocket }) {
         } catch { /* nothing to undo */ }
     }
 
-    return { enablePush, disablePush, rememberSubscription, _urlB64ToUint8Array };
+    return { enablePush, disablePush, rememberSubscription, recoverExpiredSubscription, _urlB64ToUint8Array };
 }
