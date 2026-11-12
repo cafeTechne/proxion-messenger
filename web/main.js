@@ -6066,7 +6066,10 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // delivered are tracked again and, with the pod reachable, resent.
         async function _restoreUndeliveredDms() {
             for (const rec of await dmHistoryUndelivered()) {
-                if (rec.from_webid !== selfWebId || sendStatus.isUndelivered(rec.message_id)) continue;
+                // A cached bubble can already have a visual sendStatus entry with
+                // no retry closure. Only a restored durable record proves retry
+                // registration happened; do not let render order suppress it.
+                if (rec.from_webid !== selfWebId || _undeliveredDms.has(rec.message_id)) continue;
                 _undeliveredDms.set(rec.message_id, rec);
                 sendStatus.track(rec.message_id, () => _resendStoredDm(rec));
                 if (_podHealth && _podHealth.state() === 'ok') _resendStoredDm(rec);

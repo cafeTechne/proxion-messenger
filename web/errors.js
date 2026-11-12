@@ -15,6 +15,7 @@ const EXACT = {
     "invalid_sequence": "error.invalid_sequence",
     "file_too_large": "error.file_too_large",
     "chunk_too_large": "error.chunk_too_large",
+    "device_revocation_failed": "device.revokeFailed",
     "not_a_room_member": "error.not_a_room_member",
     "banned_from_room": "error.banned_from_room",
     "you_are_muted": "error.you_are_muted",

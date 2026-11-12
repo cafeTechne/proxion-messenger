@@ -229,9 +229,9 @@ export function applyTransportGating(transport, doc) {
 }
 
 // Desktop (gateway mode) DM threads with a browser-build WebID contact go
-// through the pod drop boxes (crossmode.js), which carry text only: no edits,
-// reactions, pins, delete for everyone, files, voice messages, disappearing or
-// scheduled messages yet. Toggled per thread on the document root; the classes
+// through the pod drop boxes (crossmode.js). Encrypted files and voice notes
+// have explicit per-conversation paths; edits, reactions, pins, deletion for
+// everyone, disappearing messages, and scheduling remain gated. Toggled per thread on the document root; the classes
 // are the same ones the browser build sets once (style.css), plus
 // gate-crossmode for the composer controls.
 export const CROSS_MODE_ROOT_CLASSES = ['gate-no-edit', 'gate-no-reactions', 'gate-no-pins', 'gate-no-delete', 'gate-crossmode'];

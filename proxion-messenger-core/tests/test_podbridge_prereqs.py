@@ -150,7 +150,7 @@ async def test_async_safe_get_refuses_redirect_with_zero(redirect_server):
 def _gw(auth_enforced, owner="did:key:zOwner", proxied=False, public=False):
     from proxion_messenger_core.gateway import ProxionGateway
     gw = SimpleNamespace(
-        _client_webids={}, _session_meta={},
+        _client_webids={}, _session_meta={}, _session_device_did={}, _revoked_dids=set(),
         _own_gateway_did=lambda: owner,
         _auth_enforced=lambda: auth_enforced,
         _ws_is_proxied=lambda ws: proxied,
@@ -191,3 +191,12 @@ def test_owner_socket_under_auth_needs_the_gateway_did():
     assert fn(gw, ws) is False
     gw._client_webids[ws] = "did:key:zOwner"
     assert fn(gw, ws) is True
+
+
+def test_owner_socket_refuses_a_revoked_delegated_session():
+    gw, fn = _gw(True)
+    ws = object()
+    gw._client_webids[ws] = 'did:key:zOwner'
+    gw._session_device_did[ws] = 'did:key:zDevice'
+    gw._revoked_dids.add('did:key:zDevice')
+    assert fn(gw, ws) is False

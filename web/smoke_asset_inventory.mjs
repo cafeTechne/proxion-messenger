@@ -51,19 +51,19 @@ async function review(page, label) {
   await page.click('#settings-btn');
   await page.click('[data-settings-target="settings-sec-pod"]');
   await page.click('#asset-inventory-refresh');
-  await page.waitForFunction(() => [...document.querySelectorAll('#asset-inventory-rooms option')].some(o => o.value === 'retained'));
+  await page.waitForFunction(() => [...document.querySelectorAll('#asset-inventory-rooms option')].some(o => o.value === 'retained'), { polling: 100 });
   await page.select('#asset-inventory-rooms', 'retained');
-  await page.waitForFunction(() => document.querySelectorAll('#asset-inventory-results tbody tr').length === 50);
+  await page.waitForFunction(() => document.querySelectorAll('#asset-inventory-results tbody tr').length === 50, { polling: 100 });
   assert.match(await page.$eval('#asset-inventory-results', el => el.textContent), /Reference not verified/);
   await page.click('#asset-inventory-next');
-  await page.waitForFunction(() => document.querySelectorAll('#asset-inventory-results tbody tr').length === 2);
+  await page.waitForFunction(() => document.querySelectorAll('#asset-inventory-results tbody tr').length === 2, { polling: 100 });
   await page.click('[data-asset-inventory-path="files/"]');
-  await page.waitForFunction(() => document.querySelector('#asset-inventory-results')?.textContent.includes('Legacy voice copy'));
+  await page.waitForFunction(() => document.querySelector('#asset-inventory-results')?.textContent.includes('Legacy voice copy'), { polling: 100 });
   await page.click('[data-asset-inventory-path="files/message/"]');
-  await page.waitForFunction(() => document.querySelector('#asset-inventory-results')?.textContent.includes('old.txt'));
+  await page.waitForFunction(() => document.querySelector('#asset-inventory-results')?.textContent.includes('old.txt'), { polling: 100 });
   assert.match(await page.$eval('#asset-inventory-results', el => el.textContent), /14 bytes/);
   await page.click('#asset-inventory-up');
-  await page.waitForFunction(() => document.getElementById('asset-inventory-path').textContent === 'retained/files/');
+  await page.waitForFunction(() => document.getElementById('asset-inventory-path').textContent === 'retained/files/', { polling: 100 });
   // Escape closes Settings, and reopening must clear any old inventory results.
   await page.keyboard.press('Escape');
   await page.click('#settings-btn');

@@ -1,5 +1,9 @@
 # Proxion Web: beta gaps and bugs
 
+Current capability and verification record: [Round 130 closeout](ROUND_130_CLOSEOUT.md)
+(2026-11-12, local checkout). Historical status and remaining-work statements below
+must be read against that record; they do not establish current bugs or deployment state.
+
 A comprehensive audit of what stands between the deployed browser build
 (`https://cafetechne.github.io/proxion-messenger/app/`) and a smooth beta. Written
 after tracing the real signed-in flows and checking the live deploy. Grouped by

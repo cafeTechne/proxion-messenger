@@ -1,5 +1,9 @@
 # Proxion Messenger Master Roadmap
 
+Current capability and verification record: [Round 130 closeout](ROUND_130_CLOSEOUT.md)
+(2026-11-12, local checkout). Historical status and remaining-work statements below
+must be read against that record; they do not establish current bugs or deployment state.
+
 Strategic north star for architecture and development. Written June 2026
 after a full codebase review. This sits above the thematic roadmaps:
 - `docs/E2E_ENCRYPTION.md`: DM encryption protocol as implemented

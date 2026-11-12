@@ -68,16 +68,24 @@ export function createPodHealth({
         }, retryDelay);
     }
 
-    function _origin(u) {
-        try { return new URL(typeof u === 'string' ? u : (u && u.url) || '').origin; } catch { return null; }
+    function _url(value) {
+        try { return new URL(typeof value === 'string' ? value : value?.url || ''); } catch { return null; }
     }
 
     function _isOwn(url) {
-        const o = _origin(url);
-        if (!o) return false;
-        let mine = [];
-        try { mine = (ownOrigins() || []).map(_origin).filter(Boolean); } catch { mine = []; }
-        return mine.includes(o);
+        const target = _url(url);
+        if (!target) return false;
+        let mine;
+        try { mine = ownOrigins() || []; } catch { return false; }
+        return mine.some(value => {
+            const own = _url(value);
+            if (!own || own.origin !== target.origin) return false;
+            // Different accounts commonly share a Solid server origin. Only
+            // our storage subtree (or an explicitly named resource) reports
+            // our session's health; a peer failure cannot trigger resend loops.
+            return own.pathname.endsWith('/') ? target.pathname.startsWith(own.pathname)
+                : target.pathname === own.pathname;
+        });
     }
 
     function _recovered() {

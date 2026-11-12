@@ -771,10 +771,14 @@ try {
   if (errs.length) fail('page errors:\n    ' + errs.slice(0, 6).join('\n    '));
   else ok('no uncaught page errors on either side');
 
+  const transportErrors = gw?._log?.().split('\n').filter(line => line.includes('Pod bridge request failed:'));
+  if (transportErrors?.length) console.error('Gateway transport diagnostics:\n' + transportErrors.slice(-15).join('\n'));
   console.log(process.exitCode ? '\nSMOKE FAILED' : '\nSMOKE PASSED');
 } catch (e) {
   fail(e && e.stack ? e.stack : String(e));
   if (bridgeFailures.length) console.error(bridgeFailures.slice(-25).join('\n'));
+  const transportErrors = gw?._log?.().split('\n').filter(line => line.includes('Pod bridge request failed:'));
+  if (transportErrors?.length) console.error('Gateway transport diagnostics:\n' + transportErrors.slice(-15).join('\n'));
   console.log('\nSMOKE FAILED');
 } finally {
   await cleanup();

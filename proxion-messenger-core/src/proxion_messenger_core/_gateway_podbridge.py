@@ -65,6 +65,7 @@ class PodBridgeMixin:
         if st is None:
             st = self._pod_bridge_state = {
                 "watches": {},          # url -> {"sockets": {ws: fast}, "own": bool, "sig": str|None, "next": float}
+                "consumer_read_failed": False,
                 "consumer": None,       # signer did named by our signer.json
                 "consumer_for": None,   # the webid that consumer was read for
                 "consumer_identity": None,  # the socket identity that published it (push target)
@@ -187,8 +188,12 @@ class PodBridgeMixin:
         status = self._pod_bridge_status()
         if not status["ready"]:
             return None
+        st["consumer_read_failed"] = False
         try:
             code, _h, raw = await self._pb_request_own("GET", status["pod_root"] + "proxion/identity/signer.json")
+            if code not in (200, 404):
+                st["consumer_read_failed"] = True
+                return None
             signer = None
             if code == 200:
                 doc = json.loads(raw.decode("utf-8", "replace") or "null")
@@ -206,6 +211,7 @@ class PodBridgeMixin:
                     st["consumer_identity"] = identity
             return signer
         except Exception as exc:
+            st["consumer_read_failed"] = True
             logger.debug("pod bridge: signer read failed: %s", exc)
             return None  # Never authorize from a stale signer after a failed refresh.
 
@@ -355,7 +361,9 @@ class PodBridgeMixin:
         # any owner connection.
         if decision.own and decision.kind in ("box", "drop") and method in ("GET", "HEAD", "DELETE"):
             if (await self._pb_consumer(refresh=True)) != self._pb_signing_did(websocket):
-                await self._pod_fetch_reply(websocket, req_id, 409, error="not_consumer")
+                unavailable = self._pb().get("consumer_read_failed", False)
+                await self._pod_fetch_reply(websocket, req_id, 503 if unavailable else 409,
+                                            error="consumer_unavailable" if unavailable else "not_consumer")
                 return
         try:
             if decision.own:
@@ -369,6 +377,7 @@ class PodBridgeMixin:
                     timeout=self._POD_REQUEST_TIMEOUT, max_bytes=decision.max_bytes)
         except Exception as exc:
             msg = str(exc)
+            logger.warning("Pod bridge request failed: %s", type(exc.__cause__ or exc).__name__)
             await self._pod_fetch_reply(websocket, req_id, 502,
                                         error="too_large" if "too large" in msg or "exceeds" in msg else "upstream")
             return
@@ -425,9 +434,12 @@ class PodBridgeMixin:
             return
         allowed = decision.allow and ((decision.own and decision.kind == "box") or room_resource
                                       or (not decision.own and decision.kind == "presence"))
+        deferred_consumer = False
         if allowed and decision.own and not room_resource and (await self._pb_consumer(refresh=True)) != self._pb_signing_did(websocket):
-            await websocket.send(json.dumps({"type": "pod_watch_refused", "url": url, "reason": "not_consumer"}))
-            return
+            deferred_consumer = self._pb().get("consumer_read_failed", False)
+            if not deferred_consumer:
+                await websocket.send(json.dumps({"type": "pod_watch_refused", "url": url, "reason": "not_consumer"}))
+                return
         if not allowed:
             await websocket.send(json.dumps({"type": "pod_watch_refused", "url": url, "reason": decision.reason or "path_not_allowed"}))
             return
@@ -441,6 +453,8 @@ class PodBridgeMixin:
             w = st["watches"][url] = {"sockets": {}, "own": decision.own, "auth": decision.auth,
                                       "room": room_resource, "sig": None, "next": 0.0}
         w["sockets"][websocket] = bool(data.get("fast"))
+        if deferred_consumer:
+            w["consumer_pending"] = True
         w["next"] = 0.0
 
     async def _handle_pod_unwatch(self, websocket, data: dict) -> None:
@@ -636,7 +650,7 @@ class PodBridgeMixin:
 
     async def _pb_poll_watches(self, now: float) -> None:
         st = self._pb()
-        consumer_checked, consumer = False, None
+        consumer_checked, consumer, consumer_failed = False, None, False
         for url, w in list(st["watches"].items()):
             if not w["sockets"]:
                 st["watches"].pop(url, None)
@@ -646,7 +660,12 @@ class PodBridgeMixin:
             if w["own"] and not w.get("room"):
                 if not consumer_checked:
                     consumer = await self._pb_consumer(refresh=True)
+                    consumer_failed = st.get("consumer_read_failed", False)
                     consumer_checked = True
+                if consumer_failed:
+                    w["consumer_pending"] = True
+                    w["next"] = now + self._POD_WATCH_OWN_S
+                    continue
                 status = self._pod_bridge_status()
                 decision = _pbp.classify("GET", url, status.get("pod_root") or "", self._pb_rooms())
                 current_box = status["ready"] and decision.allow and decision.own and decision.kind == "box"
@@ -675,7 +694,8 @@ class PodBridgeMixin:
             if sig is None:
                 continue
             prev, w["sig"] = w["sig"], sig
-            if prev is not None and prev != sig:
+            recovering = w.pop("consumer_pending", False)
+            if recovering or (prev is not None and prev != sig):
                 msg = json.dumps({"type": "pod_changed", "url": url})
                 for ws in list(w["sockets"]):
                     try:

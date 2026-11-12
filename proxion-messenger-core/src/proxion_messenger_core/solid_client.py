@@ -433,7 +433,8 @@ class SolidClient:
         gets ``(status, headers, body)`` with *headers* lower-cased and limited to
         RESPONSE_HEADERS. Redirects are not followed. The body is streamed and
         capped at *max_bytes* (SolidError past it). Retries once on 401 after
-        refreshing auth, like the other verbs. Credentials come from
+        refreshing auth, and once on a transport failure for reads/conditional
+        PUTs. Each attempt regenerates authentication headers. Credentials come from
         _dynamic_headers, so a DPoP client withholds them off the pod's origin.
         """
         method = (method or "").upper()
@@ -441,36 +442,54 @@ class SolidClient:
             raise SolidError(f"unsupported method {method!r}")
         if not (isinstance(url, str) and (url.startswith("http://") or url.startswith("https://"))):
             raise SolidError("request() needs an absolute http(s) URL")
+        # A stale keep-alive connection can fail before its response arrives.
+        # Reads are replayable; PUT requires a strong validator so a lost reply
+        # cannot turn the retry into an overwrite of another writer's change.
+        import re
+        conditions = {str(k).lower(): v for k, v in (headers or {}).items()}
+        match = conditions.get("if-match", "")
+        conditional_put = method == "PUT" and (
+            conditions.get("if-none-match") == "*"
+            or (isinstance(match, str) and len(match) <= 512
+                and re.fullmatch(r'"[\x21\x23-\x7e\x80-\xff]*"', match)))
+        replayable = method in ("GET", "HEAD") or bool(conditional_put)
+        auth_retried = transport_retried = False
         try:
-            for _attempt in range(2):
+            for _attempt in range(3):
                 req_headers = {
                     **(headers or {}),
                     **self._auth_headers,
                     **self._dynamic_headers(method, url),
                 }
-                with self._session.stream(
-                    method, url, headers=req_headers, content=body,
-                    follow_redirects=False,
-                ) as response:
-                    if response.status_code == 401 and _attempt == 0:
-                        response.read()  # drain before the connection is reused
-                        self._refresh_auth(response)
-                        continue
-                    out_headers = {
-                        k.lower(): v for k, v in response.headers.items()
-                        if k.lower() in self.RESPONSE_HEADERS
-                    }
-                    chunks: list[bytes] = []
-                    received = 0
-                    if method != "HEAD":
-                        for chunk in response.iter_bytes(chunk_size=65_536):
-                            received += len(chunk)
-                            if received > max_bytes:
-                                raise SolidError(
-                                    f"{method} {url}: response too large (>{max_bytes // 1024} KB)"
-                                )
-                            chunks.append(chunk)
-                    return response.status_code, out_headers, b"".join(chunks)
+                try:
+                    with self._session.stream(
+                        method, url, headers=req_headers, content=body,
+                        follow_redirects=False,
+                    ) as response:
+                        if response.status_code == 401 and not auth_retried:
+                            response.read()
+                            self._refresh_auth(response)
+                            auth_retried = True
+                            continue
+                        out_headers = {
+                            k.lower(): v for k, v in response.headers.items()
+                            if k.lower() in self.RESPONSE_HEADERS
+                        }
+                        chunks: list[bytes] = []
+                        received = 0
+                        if method != "HEAD":
+                            for chunk in response.iter_bytes(chunk_size=65_536):
+                                received += len(chunk)
+                                if received > max_bytes:
+                                    raise SolidError(
+                                        f"{method} {url}: response too large (>{max_bytes // 1024} KB)"
+                                    )
+                                chunks.append(chunk)
+                        return response.status_code, out_headers, b"".join(chunks)
+                except httpx.TransportError:
+                    if not replayable or transport_retried:
+                        raise
+                    transport_retried = True
             return 401, {}, b""
         except SolidError:
             raise

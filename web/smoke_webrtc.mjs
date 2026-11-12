@@ -76,6 +76,9 @@ async function loopback() {
       };
       pcA.oniceconnectionstatechange = check(pcA, 'A');
       pcB.oniceconnectionstatechange = check(pcB, 'B');
+      // A fast peer can connect while SDP promises are still settling.
+      // Observe the current states as well as future events.
+      check(pcA, 'A')(); check(pcB, 'B')();
     });
 
     await Promise.race([

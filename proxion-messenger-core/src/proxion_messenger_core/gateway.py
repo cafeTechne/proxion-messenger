@@ -1330,6 +1330,12 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
 
     async def process_command(self, websocket, data: dict):
         """Process inbound commands from clients."""
+        if self._session_device_did.get(websocket) in self._revoked_dids:
+            try:
+                await websocket.close(1008, "device_revoked")
+            except Exception:
+                pass
+            return
         cmd = data.get("cmd", "")
         _RATE_EXEMPT = {"ping", "pong"}
         # pair_submit / pair_cancel are sent by a NOT-yet-registered new device
@@ -2943,7 +2949,8 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         enforced (the desktop app on loopback, where the browser registers under
         its own session DID), a genuine non-proxied loopback connection. A public
         deployment or a live tunnel never takes the loopback branch."""
-        if not self._client_webids.get(websocket, ""):
+        if (not self._client_webids.get(websocket, "")
+                or self._session_device_did.get(websocket) in self._revoked_dids):
             return False
         return self._owner_by_did_or_local(websocket)
 

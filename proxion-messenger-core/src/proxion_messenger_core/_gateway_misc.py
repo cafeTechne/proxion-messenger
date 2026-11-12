@@ -2550,21 +2550,16 @@ class MiscHandlerMixin:
         if not existing or existing.get("owner_webid") != owner_webid:
             await websocket.send(json.dumps({"type": "error", "message": "device_not_found"}))
             return
-        self._store.unregister_device(device_id)
-        # Delegation-linked devices use their did:key as device_id. Deleting the
-        # registry row is NOT revocation — the delegation cert stays valid for its
-        # TTL, so persist the device DID as revoked (checked in the register path)
-        # and drop its fanout key so peers stop encrypting copies to it.
+        try:
+            if not self._store.revoke_registered_device(owner_webid, device_id):
+                await websocket.send(json.dumps({"type": "error", "message": "device_not_found"}))
+                return
+        except Exception:
+            logger.warning("Could not persist device revocation", exc_info=True)
+            await websocket.send(json.dumps({"type": "error", "message": "device_revocation_failed"}))
+            return
         if device_id.startswith("did:key:"):
             self._revoked_dids.add(device_id)
-            try:
-                self._store.mark_revoked(f"device:{device_id}", device_id)
-            except Exception:
-                logger.warning("could not persist device revocation for %s", device_id[:24])
-            try:
-                self._store.delete_device_e2e_key(owner_webid, device_id)
-            except Exception:
-                pass
         revoke_event = json.dumps({
             "type": "device_revoked",
             "device_id": device_id,
@@ -2572,26 +2567,35 @@ class MiscHandlerMixin:
         })
         revoked_sockets = []
         for ws in self._sockets_for(owner_webid):
-            if ws is websocket:
-                continue
-            # The revoked device's own live session gets cut, not just notified.
             if self._session_device_did.get(ws) == device_id:
                 revoked_sockets.append(ws)
+                continue
+            if ws is websocket:
                 continue
             try:
                 await ws.send(revoke_event)
             except Exception:
                 pass
+        try:
+            await websocket.send(json.dumps({"type": "device_revoked_ack", "device_id": device_id}))
+        except Exception:
+            pass  # A lost acknowledgement cannot prevent cutting revoked sessions.
         for ws in revoked_sockets:
+            # Stop outbound delivery even when the transport refuses to close.
+            self.clients.discard(ws)
+            self._detach_socket_identity(ws, owner_webid)
+            self._pb_forget_socket(ws)
+            for room in self._local_rooms.values():
+                room["members"].discard(ws)
+            try:
+                await self._cleanup_voice_sessions(ws, owner_webid)
+            except Exception:
+                logger.debug("Voice cleanup after device revocation failed", exc_info=True)
             try:
                 await ws.send(json.dumps({"type": "session_revoked", "reason": "device_revoked"}))
                 await ws.close(1008, "device_revoked")
             except Exception:
                 pass
-        await websocket.send(json.dumps({
-            "type": "device_revoked_ack",
-            "device_id": device_id,
-        }))
 
     # ---- Multi-device pairing relay (delegation cert distribution) -----------
     # A primary starts a pairing session and shows a QR carrying the pairing_code

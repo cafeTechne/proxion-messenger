@@ -500,7 +500,7 @@ def test_signer_refresh_failure_never_uses_old_inbox_authorization(gw):
     def unavailable():
         raise OSError('pod unavailable')
     gw._pod.routes[('GET', ROOT + 'proxion/identity/signer.json')] = unavailable
-    assert fetch(gw, ws, 'GET', ROOT + 'proxion/dm-inbox/')['error'] == 'not_consumer'
+    assert fetch(gw, ws, 'GET', ROOT + 'proxion/dm-inbox/')['error'] == 'consumer_unavailable'
     be_consumer(gw, did)
     gw._pod.routes[('GET', ROOT + 'proxion/dm-inbox/')] = (200, {}, b'')
     assert fetch(gw, ws, 'GET', ROOT + 'proxion/dm-inbox/')['status'] == 200
@@ -622,3 +622,22 @@ def test_simultaneous_missed_call_does_not_discard_the_dm_notification(gw):
         assert push.call_args.args == ('did:key:z6MkConsumer',)
         run(gw._pb_closed_app_check())
         assert push.call_count == 2
+
+
+@pytest.mark.parametrize('existing_watch', [False, True])
+def test_temporary_signer_failure_retains_watch_and_drains_when_recovered(gw, existing_watch):
+    ws, did = make_ws(); register(gw, ws, did); be_consumer(gw, did)
+    box = ROOT + 'proxion/dm-inbox/'
+    if existing_watch:
+        run(gw._handle_pod_watch(ws, {'url': box}))
+    gw._pod.routes[('GET', ROOT + 'proxion/identity/signer.json')] = (503, {}, b'')
+    if not existing_watch:
+        run(gw._handle_pod_watch(ws, {'url': box}))
+    with patch.object(gw, '_pb_signature', AsyncMock(return_value='ready')) as read:
+        run(gw._pb_poll_watches(100.0))
+        read.assert_not_called()
+        assert box in gw._pb()['watches']
+        assert not any(m.get('type') == 'pod_watch_refused' for m in sent(ws))
+        be_consumer(gw, did)
+        run(gw._pb_poll_watches(106.0))
+    assert {'type': 'pod_changed', 'url': box} in sent(ws)

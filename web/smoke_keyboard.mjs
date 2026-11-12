@@ -168,7 +168,14 @@ try {
   await sleep(200);
 
   // 2. Skip link is the first tab stop, and activating it focuses the composer.
-  await page.evaluate(() => document.body.focus());
+  await page.evaluate(() => {
+    // Reset Chromium's sequential-navigation start after the onboarding dialog
+    // closes. body.focus() alone does nothing on a non-focusable body.
+    const before = document.body.getAttribute('tabindex');
+    document.body.tabIndex = -1; document.body.focus();
+    if (before === null) document.body.removeAttribute('tabindex');
+    else document.body.setAttribute('tabindex', before);
+  });
   await page.keyboard.press('Tab');
   const firstStop = await active(page);
   check('skip link is the first Tab stop', !!firstStop && /skip-nav/.test(firstStop.cls));

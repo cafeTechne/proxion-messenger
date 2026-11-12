@@ -136,3 +136,24 @@ describe('createPodHealth', () => {
         expect(changes).toEqual(['offline', 'ok']);
     });
 });
+
+
+describe('account-scoped health on a shared Solid origin', () => {
+    it('does not turn peer write failures into our own recovery/resend events', async () => {
+        status = 503;
+        await session.fetch('https://pod.example/bob/proxion/dm-inbox/');
+        await session.fetch('https://pod.example/alice-other/proxion/dm-inbox/');
+        status = 200;
+        await session.fetch(POD + 'proxion/identity/signer.json');
+        expect(recovered).toBe(0); expect(changes).toEqual([]);
+    });
+    it('does not expire our session because another account refuses access', async () => {
+        status = 401;
+        await session.fetch('https://pod.example/bob/private');
+        await session.fetch('https://pod.example/bob/private');
+        expect(health.state()).toBe('ok');
+        await session.fetch(new Request(POD + 'private'));
+        await session.fetch(new Request(POD + 'private'));
+        expect(health.state()).toBe('expired');
+    });
+});

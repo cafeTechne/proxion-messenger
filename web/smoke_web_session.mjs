@@ -106,7 +106,10 @@ try {
   browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--disable-gpu', '--ignore-certificate-errors'] });
   const pageA = await (await browser.createBrowserContext()).newPage();
   const pageB = await (await browser.createBrowserContext()).newPage();
-  const errs = [];
+  const errs = [], retryConsole = [];
+  for (const [tag, page] of [['A', pageA], ['B', pageB]]) page.on('console', msg => {
+    if (/resend|decrypt|ratchet|encrypt failed/.test(msg.text())) retryConsole.push(tag + ': ' + msg.text());
+  });
   for (const [tag, p] of [['A', pageA], ['B', pageB]]) p.on('pageerror', (e) => errs.push(`${tag}: ${e.message}`));
 
   // ── Cancelling consent at the identity provider says so on the sign-in screen ──
@@ -189,7 +192,16 @@ try {
   await pageA.reload({ waitUntil: 'networkidle2' });
   await pageA.waitForFunction(() => typeof window.proxionWebDm === 'object', { timeout: 30000 });
   if (await bobHas(pageB, alice.webId, 'drop-fail-dm')) ok('after a reload the undelivered DM was resent and reached Bob');
-  else fail('the undelivered DM was not resent after a reload');
+  else {
+    fail('the undelivered DM was not resent after a reload');
+    console.error('retry diagnostic', JSON.stringify(await pageA.evaluate(async () => ({
+      health: window.proxionPodHealth?.state(),
+      pending: (await (await import('./dmhistory.js')).dmHistoryUndelivered()).map(r => ({ id: r.message_id, from: r.from_webid, thread: r.thread_id, delivery: r.delivery })),
+      peerKeyCount: Object.keys(localStorage).filter(k => k.includes('e2e_peer_pub')).length,
+    }))));
+    console.error('receiver feed', (await pageB.evaluate(() => document.getElementById('message-feed')?.innerText)).slice(-800));
+    console.error('retry console', retryConsole.slice(-10));
+  }
 
   // ── Pod answers 401: banner, room write queued, flushed when it works again ──
   step = 'pod-401';

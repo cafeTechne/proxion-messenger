@@ -1,5 +1,9 @@
 # Proxion Messenger Roadmap 2: From Functional to Delightful
 
+Current capability and verification record: [Round 130 closeout](ROUND_130_CLOSEOUT.md)
+(2026-11-12, local checkout). Historical status and remaining-work statements below
+must be read against that record; they do not establish current bugs or deployment state.
+
 `docs/ROADMAP.md` (Phases A–E) got the product **feature-complete and
 architecturally sound**: download-and-go distribution, relay reachability, the
 three monoliths decomposed, federation completeness, and most of social parity.

@@ -401,6 +401,18 @@ class DeviceStoreMixin(object):
                 return [dict(r) for r in rows]
             except Exception:
                 return []
+    def revoke_registered_device(self, owner_webid: str, device_id: str) -> bool:
+        """Commit registry removal, delegation revocation, and fanout-key removal together."""
+        with self._conn() as conn:
+            row = conn.execute("SELECT owner_webid FROM device_registrations WHERE device_id=?", (device_id,)).fetchone()
+            if not row or row['owner_webid'] != owner_webid:
+                return False
+            if device_id.startswith('did:key:'):
+                self.mark_revoked(f'device:{device_id}', device_id)
+                self.delete_device_e2e_key(owner_webid, device_id)
+            conn.execute("DELETE FROM device_registrations WHERE device_id=? AND owner_webid=?", (device_id, owner_webid))
+        return True
+
     def unregister_device(self, device_id: str) -> None:
         with self._conn() as conn:
             try:

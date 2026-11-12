@@ -17,18 +17,15 @@ open.
 
 ## Status
 
-All four phases are implemented and the build is published at
-https://cafetechne.github.io/proxion-messenger/app/ (`.github/workflows/pages.yml`
-runs `web/scripts/build-web.mjs`): the transport seam and static Pages build,
-gateway-free DMs over a pod drop box, heartbeat presence, and 1:1 call signaling
-over the pod. The web build reports the full feature set. Verification is layered:
-unit tests for every engine, an automated live-CSS integration suite
-(`npm run test:integration`) covering rooms, DM delivery, presence, and call
-signaling against a real pod, and a browser smoke (`npm run smoke:web`) that
-boots the built site with no gateway. The one gap is a two-party browser
-end-to-end (real OIDC + ratchet + media), deferred because it needs OIDC-UI
-automation; the crypto itself is covered by `e2e.test.js` and delivery by the
-live integration suite.
+The four original transport phases are implemented. The browser build supports pod
+rooms, encrypted DMs, heartbeat presence, and one-to-one calls. Capability varies by
+conversation; it does not imply full gateway feature parity. Real two-account OIDC,
+ratchet messaging, media, reload/session recovery, and browser/desktop journeys are
+automated. CSS 7.3.0 WAC and ACP have live suites; other providers remain unverified.
+
+Use [the Round 130 closeout](ROUND_130_CLOSEOUT.md) for current capabilities,
+remaining gated features, and final verification. The architecture/phases below
+preserve this roadmap's original proposal and are not a current implementation backlog.
 
 ---
 

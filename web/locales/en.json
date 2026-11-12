@@ -246,6 +246,7 @@
   "error.recipient_blocked": "You blocked this person. Unblock them to send a message.",
   "error.device_not_found": "That device is no longer linked to your account.",
   "error.cannot_revoke_primary": "This is your main identity, so it can't be revoked.",
+  "device.revokeFailed": "Could not save the device revocation. The device remains linked; try again.",
   "device.revoked": "Device revoked. It has been signed out.",
   "pod.signOutFailed": "Couldn't sign this gateway out of your pod. Check your connection and try again.",
   "identity.restoredReload": "Your identity was restored from a backup. Reloading…",

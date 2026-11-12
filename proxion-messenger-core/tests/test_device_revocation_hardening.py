@@ -136,3 +136,58 @@ async def test_primary_identity_cannot_be_revoked_as_device(gateway, noauth_env)
     err = _last(ws_primary, "error")
     assert err is not None and err["message"] == "cannot_revoke_primary"
     assert account_did not in gateway._revoked_dids
+
+
+@pytest.mark.asyncio
+async def test_revocation_storage_failure_keeps_device_linked_for_retry(gateway, noauth_env, monkeypatch):
+    _, _, account, device, cert = _paired_account()
+    primary, linked = _mock_ws(), _mock_ws()
+    await _register(gateway, primary, account, x25519='KP')
+    await _register(gateway, linked, device, x25519='KD', cert=cert)
+    original = gateway._store.delete_device_e2e_key
+    monkeypatch.setattr(gateway._store, 'delete_device_e2e_key', lambda *a: (_ for _ in ()).throw(OSError('disk full')))
+    await gateway.process_command(primary, {'cmd': 'revoke_device_and_rekey', 'device_id': device})
+    assert _last(primary, 'error')['message'] == 'device_revocation_failed'
+    assert _last(primary, 'device_revoked_ack') is None
+    assert gateway._store.get_device(device) is not None
+    assert device not in gateway._revoked_dids and device not in gateway._store.get_revoked_dids()
+    assert device in {row['device_id'] for row in gateway._store.list_device_e2e_keys(account)}
+    linked.close.assert_not_called()
+    monkeypatch.setattr(gateway._store, 'delete_device_e2e_key', original)
+    await gateway.process_command(primary, {'cmd': 'revoke_device_and_rekey', 'device_id': device})
+    assert _last(primary, 'device_revoked_ack') is not None
+
+
+@pytest.mark.asyncio
+async def test_device_can_revoke_itself_and_cannot_use_a_failed_close(gateway, noauth_env):
+    _, _, account, device, cert = _paired_account()
+    primary, linked = _mock_ws(), _mock_ws()
+    await _register(gateway, primary, account, x25519='KP')
+    await _register(gateway, linked, device, x25519='KD', cert=cert)
+    linked.close.side_effect = OSError('socket close failed')
+    await gateway.process_command(linked, {'cmd': 'revoke_device_and_rekey', 'device_id': device})
+    assert _last(linked, 'device_revoked_ack') is not None
+    assert _last(linked, 'session_revoked') is not None
+    assert not gateway._is_pod_owner_socket(linked)
+    assert linked not in gateway.clients
+    assert linked not in gateway._sockets_for_exact(account)
+    assert linked not in gateway._sockets_for(gateway._own_gateway_did())
+    linked.send.reset_mock()
+    await gateway.process_command(linked, {'cmd': 'list_devices'})
+    linked.send.assert_not_called()
+    reopened = ProxionGateway(agent=gateway.agent, dm_clients={}, room_memberships={}, config=gateway.config)
+    again = _mock_ws()
+    await _register(reopened, again, device, x25519='KD', cert=cert)
+    assert again not in reopened._client_webids
+
+
+@pytest.mark.asyncio
+async def test_lost_revocation_ack_does_not_keep_revoked_device_connected(gateway, noauth_env):
+    _, _, account, device, cert = _paired_account()
+    primary, linked = _mock_ws(), _mock_ws()
+    await _register(gateway, primary, account, x25519='KP')
+    await _register(gateway, linked, device, x25519='KD', cert=cert)
+    primary.send.side_effect = OSError('caller disconnected')
+    await gateway.process_command(primary, {'cmd': 'revoke_device_and_rekey', 'device_id': device})
+    linked.close.assert_called_once()
+    assert device in gateway._store.get_revoked_dids()

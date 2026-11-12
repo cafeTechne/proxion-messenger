@@ -4,6 +4,9 @@ This is the specific picture of what Proxion interoperates with, how, and
 where the edges are. Every capability listed here is backed by a test in the repo,
 named so you can run it yourself.
 
+The current conversation capability matrix and Round 130 verification record are in
+[ROUND_130_CLOSEOUT.md](ROUND_130_CLOSEOUT.md).
+
 For a per-requirement audit against the full Solid specification suite (Compliant /
 Partial / Missing / N-A by design, with citations), see
 [SOLID_COMPLIANCE.md](SOLID_COMPLIANCE.md).
