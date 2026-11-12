@@ -23,7 +23,7 @@ import { podWriteMessageWithIndex, podWriteRoomMeta, podReadMessages, podSetCont
          reconcileRoomHistory, podWriteRoomDescriptor, podReadRoomDescriptor,
          podReadRoomDescriptorVersion, podWriteRoomDescriptorVersion,
          podListOwnedRoomDescriptors, podEnsureProfileName,
-         podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop,
+         podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop, podDmDropExists,
          podWritePresence, podReadPresence, presenceUrlFor,
          podEnsureCallInbox, podDropSignal, podReadSignals, podDeleteSignal,
          podEnsureJoinInbox, podDropJoin, podReadJoins, podDeleteJoin,
@@ -9187,7 +9187,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                     // R103: gateway-free DM engine — drops encrypted envelopes into
                     // the peer's pod on send, and watches our own drop box to receive.
                     const webDm = createWebDm({
-                        pod: { podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop },
+                        pod: { podEnsureDmInbox, podDropDm, podReadDmDrops, podDeleteDmDrop, podDmDropExists },
                         e2e: { cachePeerPub, ratchetDecrypt, hasSession: hasRatchetSession },
                         notify: { watchResource },
                         handleEvent: (ev) => _handleEventAsync(ev, true),

@@ -105,18 +105,20 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
     // Retain failed acknowledgements; evict successful ones first at the cap.
     const _consumed = new Map();
     const MAX_CONSUMED = 1024;
+    let reconciliationScope = '', durableCursor = '', memoryCursor = '';
+    let durableFirst = false;
 
     const scope = () => JSON.stringify([getSelfWebId() || '', getMyDeviceId ? getMyDeviceId() || '' : '']);
     async function _remember(context) {
         if (!receipts || !context.current()) return;
-        try { context.durable = await receipts.remember(context.scope, context.fingerprint); context.pending = context.durable; }
+        try { context.durable = await receipts.remember(context.scope, context.fingerprint, context.url); context.pending = context.durable; }
         catch { /* preserve live delivery if local storage is unavailable */ }
     }
     async function _acknowledge(url, context) {
         if (!context.current()) return;
         _consumed.set(context.key, { acknowledged: false, url });
         if (receipts && context.durable && !context.pending) {
-            try { await receipts.remember(context.scope, context.fingerprint); } catch { /* memory fallback */ }
+            try { await receipts.remember(context.scope, context.fingerprint, url); } catch { /* memory fallback */ }
         }
         if (!context.current()) return;
         const ok = await pod.podDeleteDmDrop(url);
@@ -125,6 +127,45 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
             if (receipts && context.durable) {
                 try { await receipts.acknowledge(context.scope, context.fingerprint); } catch { /* retry remains safe */ }
             }
+        }
+    }
+
+    async function _reconcile(accountScope, current) {
+        if (typeof pod.podDmDropExists !== 'function' || !current()) return;
+        if (reconciliationScope !== accountScope) {
+            reconciliationScope = accountScope; durableCursor = ''; memoryCursor = '';
+            durableFirst = false;
+        }
+        // Alternate bounded pages so an unavailable resource in live memory
+        // cannot starve receipts restored from storage (or the reverse).
+        const prefix = accountScope + '\n';
+        const memory = [..._consumed].filter(([key, row]) => key.startsWith(prefix) && !row.acknowledged)
+            .map(([key, row]) => ({ fingerprint: key.slice(prefix.length), url: row.url })).sort((a, b) => a.fingerprint.localeCompare(b.fingerprint));
+        let memoryStart = memory.findIndex(row => row.fingerprint > memoryCursor); if (memoryStart < 0) memoryStart = 0;
+        const page = memory.slice(memoryStart, memoryStart + 8);
+        let durable = [];
+        if (receipts?.pending && receipts?.acknowledgeMissing) {
+            try {
+                durable = await receipts.pending(accountScope, { after: durableCursor, limit: 8 });
+                if (!current()) return;
+            } catch { /* live memory still reconciles during storage failures */ }
+        }
+        const useDurable = durable.length && (durableFirst || !page.length);
+        durableFirst = !durableFirst;
+        for (const row of useDurable ? durable : page) {
+            if (!current()) return;
+            if (useDurable) durableCursor = row.fingerprint;
+            else memoryCursor = row.fingerprint;
+            let exists;
+            try { exists = await pod.podDmDropExists(row.url); } catch { return; }
+            if (!current() || exists === null || exists === undefined) return;
+            if (exists !== false) continue;
+            if (receipts?.acknowledgeMissing) {
+                try { await receipts.acknowledgeMissing(accountScope, row.fingerprint, row.url); } catch { /* retain pending storage */ }
+            }
+            if (!current()) return;
+            const key = prefix + row.fingerprint, remembered = _consumed.get(key);
+            if (remembered?.url === row.url) _consumed.set(key, { ...remembered, acknowledged: true });
         }
     }
 
@@ -336,6 +377,8 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
     async function _drain(generation) {
         const accountScope = scope();
         const current = () => generation === _generation && accountScope === scope();
+        await _reconcile(accountScope, current);
+        if (!current()) return;
         const drops = await pod.podReadDmDrops();
         for (const d of drops) {
             if (!current()) return;
@@ -343,7 +386,7 @@ export function createWebDm({ pod, e2e, notify, handleEvent, getSelfWebId, getDi
             try {
                 const fingerprint = await dmEnvelopeFingerprint(d.envelope);
                 if (!current()) return;
-                const context = { scope: accountScope, fingerprint, key: accountScope + '\n' + fingerprint, current, durable: false };
+                const context = { scope: accountScope, fingerprint, url: d.url, key: accountScope + '\n' + fingerprint, current, durable: false };
                 const consumed = _consumed.get(context.key);
                 if (consumed) {
                     if (!consumed.acknowledged || consumed.url !== d.url) {

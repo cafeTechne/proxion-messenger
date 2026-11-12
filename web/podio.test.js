@@ -23,6 +23,17 @@ function io(fetch, { loggedIn = true, root = ROOT } = {}) {
 }
 
 describe('createPodIo', () => {
+    it.each([[200, true], [404, false], [410, false], [302, null], [401, null], [403, null], [429, null], [503, null]])('checks own DM metadata without treating status %s as an empty inbox', async (status, exists) => {
+        const fetch = vi.fn(async () => res(status)), p = io(fetch);
+        const url = ROOT + 'proxion/dm-inbox/drop';
+        expect(await p.podDmDropExists(url)).toBe(exists);
+        expect(fetch).toHaveBeenCalledWith(url, { method: 'HEAD', cache: 'no-store', redirect: 'error' });
+        fetch.mockClear();
+        for (const bad of ['https://foreign.example/proxion/dm-inbox/drop', ROOT + 'private/drop', url + '?x=1', url + '#x', url + '/child', url + '/..', ROOT + 'proxion/dm-inbox/%2e%2e']) {
+            expect(await p.podDmDropExists(bad)).toBe(null);
+        }
+        expect(fetch).not.toHaveBeenCalled();
+    });
     it.each([[200, true], [404, false], [403, null], [503, null]])('distinguishes join-drop existence from denied/unavailable reads (%s)', async (status, exists) => {
         const fetch = vi.fn(async () => res(status));
         expect(await io(fetch).podJoinExists(ROOT + 'proxion/join-inbox/request')).toBe(exists);

@@ -35,7 +35,8 @@ device. A failed DELETE retries acknowledgement without decrypting the same
 ciphertext again, including after reload or an exact replay at another inbox URL.
 IndexedDB retains at most 4,096 content-free receipts per account/device, evicting
 acknowledged entries first. Pending receipts are protected; if the cap is full,
-new ciphertext waits until deletions recover. The in-memory cache keeps its
+new ciphertext waits until acknowledgement or confirmed external deletion frees
+capacity. The in-memory cache keeps its
 1,024-entry bound. Local DM history holds plaintext separately; receipt storage
 contains no message text or media keys. Storage failures fall back to live-only
 behavior. Ratchet advancement and history/receipt writes are not one transaction,
@@ -342,3 +343,21 @@ authorization into an ACP resource, leaving contacts unable to read heartbeats.
 The ACP grant now provides public Read while preserving owner updates; policy
 publication failures remain retryable. Live checks cover public reads, denied
 peer writes, and presence displayed by both browser and desktop clients.
+
+## Consumed DM drop reconciliation
+
+Both builds now reconcile pending receive receipts when another client or a pod
+tool removes the consumed inbox resource. Receipts can retain its validated URL;
+the engine probes bounded, rotating pages through the existing owner-scoped HEAD
+route. Confirmed 404/410 responses release pending capacity without decrypting
+spent ciphertext or redelivering history. Other responses preserve pending state.
+No new pod resource format, gateway permission or remote write is introduced.
+
+Missing-resource acknowledgements conditionally match the currently stored URL,
+and account/device/engine changes discard stale results. Exact envelope digests
+remain available for replay suppression until normal bounded eviction. Legacy
+receipts without a locator remain conservative until their envelope is observed
+again. This does not make ratchet advancement and local history/receipt writes
+transactional. Browser and cross-mode DM smokes retain a consumed drop, delete it
+using an independent authenticated owner client, reload the receiver, verify
+metadata-only reconciliation and retained history, then receive another DM.

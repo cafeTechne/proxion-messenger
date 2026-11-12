@@ -19,8 +19,9 @@ import { resolve, join } from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
 import { dmMediaJourney } from './scripts/dm-media-journey.mjs';
+import { dmReceiptReconciliationJourney } from './scripts/dm-receipt-journey.mjs';
 import { skipSmoke } from './scripts/smoke-status.mjs';
-import { startCss, provisionAccount } from './scripts/css-harness.mjs';
+import { startCss, provisionAccount, makeAuthSession } from './scripts/css-harness.mjs';
 import { buildAndServeHttps, signIn } from './scripts/e2e-signin.mjs';
 
 const HERE = resolve(fileURLToPath(new URL('.', import.meta.url)));
@@ -211,6 +212,11 @@ try {
   await pageB.setRequestInterception(false);
   pageB.off('request', intercept);
   pageB.off('console', onConsole);
+
+  step = 'external-delete';
+  const bobSession = await makeAuthSession(bob);
+  await dmReceiptReconciliationJourney({ sender: pageA, receiver: pageB, send,
+    openReceiver: () => openThread(pageB, alice.webId), externalFetch: bobSession.fetch, label: 'browser receipt' });
 
   step = 'dm-media-ui';
   await dmMediaJourney({ sender: pageA, receiver: pageB, openSender: () => openThread(pageA, bob.webId), openReceiver: () => openThread(pageB, alice.webId), label: 'browser-dm' });

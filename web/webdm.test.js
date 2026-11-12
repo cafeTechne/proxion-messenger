@@ -416,6 +416,19 @@ describe('createWebDm inbox concurrency and acknowledgement', () => {
         expect(h.e2e.ratchetDecrypt).toHaveBeenCalledTimes(1025);
         expect(h.events.at(-1).message_id).toBe('1024');
     });
+    it('reconciles live-only receipts after external removal without holding the memory cap forever', async () => {
+        const drops = Array.from({ length: 1025 }, (_, index) => encryptedDrop(String(index)));
+        const h = harness({ drops, verifySender: async () => true });
+        h.pod.podDeleteDmDrop.mockResolvedValue(false);
+        await h.dm.drainOnce();
+        expect(h.events).toHaveLength(1024);
+        h.pod.podDmDropExists = vi.fn(async () => false);
+        h.pod.podReadDmDrops.mockResolvedValue([drops.at(-1)]);
+        await h.dm.drainOnce();
+        expect(h.pod.podDmDropExists).toHaveBeenCalledTimes(8);
+        expect(h.events).toHaveLength(1025);
+        expect(h.e2e.ratchetDecrypt).toHaveBeenCalledTimes(1025);
+    });
 });
 
 describe('isDmPeerWebId', () => {

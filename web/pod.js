@@ -971,6 +971,7 @@ export function podDropDm(recipientPodRoot, envelope) { return _io.podDropDm(rec
 /** Read our DM inbox: returns [{ url, envelope }]. */
 export function podReadDmDrops() { return _io.podReadDmDrops(); }
 export function podDeleteDmDrop(url) { return _io.podDeleteDmDrop(url); }
+export function podDmDropExists(url) { return _io.podDmDropExists(url); }
 
 // ── Call signaling drop-box (R105) ──
 export function podEnsureCallInbox() { return _io.podEnsureCallInbox(); }

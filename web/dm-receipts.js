@@ -1,6 +1,15 @@
 // Durable, content-free evidence that this account/device consumed an exact DM
 // envelope. Never deduplicate by a sender-controlled message id or URL alone.
 export const MAX_DM_RECEIPTS = 4096;
+function receiptUrl(value) {
+    if (typeof value !== 'string' || value.length > 2048) return null;
+    try {
+        const url = new URL(value), name = url.pathname.split('/').at(-1);
+        return value === url.href && ['https:', 'http:'].includes(url.protocol)
+            && !url.username && !url.password && !url.search && !url.hash && !/[%\\\s?#]/.test(value)
+            && url.pathname.endsWith('/proxion/dm-inbox/' + name) && /^[\w~-][\w.~-]{0,254}$/.test(name) ? value : null;
+    } catch { return null; }
+}
 export async function dmEnvelopeFingerprint(envelope) {
     const canonical = value => {
         if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -47,7 +56,18 @@ export function createDmReceiptStore(dbApi = globalThis.indexedDB, { max = MAX_D
             const request = store.index('scope').getAll(scope);
             request.onsuccess = () => done(request.result.filter(row => !row.acknowledged).length < max);
         }),
-        remember: (scope, fingerprint) => operation(scope, 'readwrite', (store, done) => {
+        pending: (scope, { after = '', limit = 8 } = {}) => operation(scope, 'readonly', (store, done) => {
+            if (!Number.isInteger(limit) || limit < 1 || limit > 16) throw Error('invalid reconciliation limit');
+            const request = store.index('scope').getAll(scope);
+            request.onsuccess = () => {
+                const rows = request.result.filter(row => !row.acknowledged && receiptUrl(row.url))
+                    .sort((a, b) => a.fingerprint.localeCompare(b.fingerprint));
+                const start = rows.findIndex(row => row.fingerprint > after);
+                done(rows.slice(start < 0 ? 0 : start, (start < 0 ? 0 : start) + limit)
+                    .map(({ fingerprint, url }) => ({ fingerprint, url })));
+            };
+        }),
+        remember: (scope, fingerprint, url = null) => operation(scope, 'readwrite', (store, done) => {
             const rowKey = key(scope, fingerprint);
             const request = store.index('scope').getAll(scope);
             request.onsuccess = () => {
@@ -57,7 +77,8 @@ export function createDmReceiptStore(dbApi = globalThis.indexedDB, { max = MAX_D
                     if (!oldest) { done(false); return; }
                     store.delete(oldest.key);
                 }
-                store.put({ key: rowKey, scope, fingerprint, acknowledged: false, at: Date.now() }); done(true);
+                const knownUrl = receiptUrl(url) || receiptUrl(rows.find(row => row.key === rowKey)?.url);
+                store.put({ key: rowKey, scope, fingerprint, acknowledged: false, at: Date.now(), ...(knownUrl ? { url: knownUrl } : {}) }); done(true);
             };
         }),
         acknowledge: (scope, fingerprint) => operation(scope, 'readwrite', (store, done) => {
@@ -65,6 +86,15 @@ export function createDmReceiptStore(dbApi = globalThis.indexedDB, { max = MAX_D
             request.onsuccess = () => {
                 if (request.result) store.put({ ...request.result, acknowledged: true, at: Date.now() });
                 done(true);
+            };
+        }),
+        acknowledgeMissing: (scope, fingerprint, url) => operation(scope, 'readwrite', (store, done) => {
+            const request = store.get(key(scope, fingerprint));
+            request.onsuccess = () => {
+                const row = request.result;
+                const matches = !!(row && !row.acknowledged && receiptUrl(url) && row.url === url);
+                if (matches) store.put({ ...row, acknowledged: true, at: Date.now() });
+                done(matches);
             };
         }),
     };

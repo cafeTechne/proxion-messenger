@@ -25,6 +25,7 @@ import { resolve, join } from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
 import { dmMediaJourney } from './scripts/dm-media-journey.mjs';
+import { dmReceiptReconciliationJourney } from './scripts/dm-receipt-journey.mjs';
 import { skipSmoke } from './scripts/smoke-status.mjs';
 import { startCss, provisionAccount, makeAuthSession, freePort } from './scripts/css-harness.mjs';
 import { buildAndServeHttps, signIn } from './scripts/e2e-signin.mjs';
@@ -258,6 +259,10 @@ try {
   if (receiptErrors.length || !await inboxEmpty()) throw Error('desktop receipt did not recover after reload');
   pageA.off('console', receiptConsole);
   ok('desktop durable receipts keep history and clear undeleted inbox ciphertext after reload');
+
+  step = 'external-delete';
+  await dmReceiptReconciliationJourney({ sender: pageB, receiver: pageA, send,
+    openReceiver: () => openThread(pageA, bob.webId), externalFetch: aliceSession.fetch, label: 'desktop receipt' });
 
   // Exercise the shared encrypted asset storage protocol in both directions.
   step = 'encrypted-assets';

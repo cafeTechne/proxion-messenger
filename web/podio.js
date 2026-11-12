@@ -578,6 +578,15 @@ export function createPodIo({ fetch, isLoggedIn, storageRoot, webId }) {
         /** Read our DM inbox: returns [{ url, envelope }]. */
         podReadDmDrops: async () => (await _readDropBox(DM_INBOX_PATH)).map(({ url, item }) => ({ url, envelope: item })),
         podDeleteDmDrop: (url) => _deleteDrop(url),
+        podDmDropExists: async url => {
+            const inbox = _dropBoxUrl(_root(), DM_INBOX_PATH);
+            if (!_loggedIn() || !inbox || typeof url !== 'string' || !url.startsWith(inbox)
+                || !/^[\w~-][\w.~-]{0,254}$/.test(url.slice(inbox.length))) return null;
+            try {
+                const res = await fetch(url, { method: 'HEAD', cache: 'no-store', redirect: 'error' });
+                return res?.status === 404 || res?.status === 410 ? false : res?.ok ? true : null;
+            } catch { return null; }
+        },
         podEnsureCallInbox: () => _ensureDropBox(CALL_INBOX_PATH, 'call inbox'),
         /** Drop a WebRTC signaling message (offer/answer/ICE/hangup) into a peer's call inbox. */
         podDropSignal: (peerPodRoot, signal) => _dropTo(peerPodRoot, CALL_INBOX_PATH, signal),

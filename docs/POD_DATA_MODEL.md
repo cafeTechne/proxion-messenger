@@ -944,8 +944,9 @@ planned.
 ### Durable DM receive receipts
 
 `proxion-dm-receipts-v1` in IndexedDB stores canonical envelope SHA-256 digests,
-account/device scope, acknowledgement state and a local timestamp. It stores no
-plaintext, filename, file key, ciphertext body or inbox URL. Receipt lookup binds
+account/device scope, acknowledgement state and a local timestamp. New receipts
+also retain a validated inbox-resource URL for missing-drop reconciliation. It
+stores no plaintext, filename, file key or ciphertext body. Receipt lookup binds
 the complete parsed envelope, including nested fanout payload and device target;
 a new ciphertext using an old message ID or URL is not treated as consumed.
 An exact replay at another URL can be deleted without spending a ratchet key.
@@ -969,9 +970,31 @@ Receipts survive reload and history clearing/logout because they contain no
 message content and prevent deleted history from being resurrected by old drops.
 This does not close the crash window between a ratchet advance and committing
 history/receipt writes. Those live in separate stores and are not transactional;
-a crash or storage failure in that window can still lose a message. Receipt
-reconciliation for external inbox deletions and transactional ratchet/history
-commit remain future work.
+a crash or storage failure in that window can still lose a message. Transactional
+ratchet/history commit remains future work.
+
+Before scanning incoming drops, each drain checks up to eight pending resources,
+alternating between rotating live-memory and durable receipt pages. Checks use
+authenticated HEAD through the account's own
+DM inbox scope, with no redirects or cached responses. Only 404/410 establishes
+absence; existing resources, denied reads, service failures and exceptions do
+not free a slot. An uncertain result ends that batch, and cursors advance only
+through visited records so a persistently denied resource cannot starve later
+ones. Absence from a container listing is never evidence of deletion.
+
+Confirmed missing resources mark receipts acknowledged, preserving their
+fingerprints until normal bounded eviction. A transactional URL comparison
+prevents a late result from acknowledging a receipt relocated to another drop.
+Account/device changes and stopped engine generations discard stale results.
+Reconciliation performs no DELETE and does not decrypt or deliver a message.
+New messages can then use released receipt capacity. The same rule releases
+live-only memory backpressure when durable storage is unavailable.
+
+The IndexedDB store remains version 1 with optional locator metadata. Existing
+rows without a resource URL are retained conservatively and cannot be reconciled
+from an empty listing. Observing the exact envelope again attaches its current
+URL through the ordinary acknowledgement path. The receipt scope and storage
+caps are unchanged. Shell v287 distributes the updated engine and pod helper.
 
 ### Abandoned DM upload cleanup
 
