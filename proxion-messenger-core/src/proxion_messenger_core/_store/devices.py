@@ -197,6 +197,34 @@ class DeviceStoreMixin(object):
                 return dict(row) if row else None
             except Exception:
                 return None
+    def save_pod_push_receiver(self, pod_webid, pod_root, consumer, identity) -> None:
+        with self._conn() as conn:
+            conn.execute("INSERT OR REPLACE INTO pod_push_receivers VALUES (?,?,?,?)",
+                         (pod_webid, pod_root, consumer, identity))
+
+    def get_pod_push_receiver(self, pod_webid, pod_root, consumer) -> str | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT identity FROM pod_push_receivers WHERE pod_webid=? AND pod_root=? AND consumer=?",
+                               (pod_webid, pod_root, consumer)).fetchone()
+        return row['identity'] if row else None
+
+    def load_pod_push_scan(self, pod_webid, pod_root, consumer, identity, box_url) -> set | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT seen_json FROM pod_push_scans WHERE pod_webid=? AND pod_root=? "
+                               "AND consumer=? AND identity=? AND box_url=?",
+                               (pod_webid, pod_root, consumer, identity, box_url)).fetchone()
+        return set(json.loads(row['seen_json'])) if row else None
+
+    def save_pod_push_scan(self, pod_webid, pod_root, consumer, identity, box_url, seen) -> None:
+        with self._conn() as conn:
+            conn.execute("INSERT OR REPLACE INTO pod_push_scans VALUES (?,?,?,?,?,?)",
+                         (pod_webid, pod_root, consumer, identity, box_url, json.dumps(sorted(seen))))
+
+    def clear_pod_push_scans(self, pod_webid, pod_root, consumer, identity) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM pod_push_scans WHERE pod_webid=? AND pod_root=? AND consumer=? AND identity=?",
+                         (pod_webid, pod_root, consumer, identity))
+
     @staticmethod
     def _push_fingerprint(owner, endpoint, p256dh, auth):
         import hashlib

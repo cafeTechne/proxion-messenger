@@ -58,9 +58,14 @@ so an abrupt crash before those writes commit can still lose a received message.
   retain notification candidates for a later poll. A missed-call alert takes priority
   over a simultaneous DM alert; the DM remains eligible for the next poll. The gateway
   refreshes the receiving-device identity before deciding whether that device is online.
-  Push delivery remains best-effort once queued. Scan progress is in memory, and the
-  first scan after gateway restart establishes a baseline rather than alerting for old
-  inbox items. Test: `npm run smoke:cross-mode-call`.
+  Closed-app scan progress is saved in the gateway's SQLite database by pod, receiving
+  device, and account. Restarts resume an existing checkpoint, including failed reads,
+  throttled alerts, and items beyond the scan batch. A new context's first offline scan
+  establishes a baseline rather than alerting for old inbox items. When the actual
+  receiver is online, checkpoints are cleared and the next offline scan rebaselines;
+  another device on the same account does not count as that receiver. Push dispatch
+  and checkpoint writes are not atomic: a crash around dispatch can lose or repeat an
+  alert, and queued pushes remain best-effort. Test: `npm run smoke:cross-mode-call`.
   Browser push setup renews subscriptions that report local expiry or use a
   different gateway VAPID key. Concurrent setup attempts share one registration;
   disabling notifications or changing the socket prevents late registration and
@@ -72,8 +77,9 @@ so an abrupt crash before those writes commit can still lose a received message.
   asks the browser to renew an expired registration; stale responses after opt-out or
   connection/key changes are ignored. Repeated rejection of the same token triggers
   at most one automatic renewal per connection. Existing expired pod files are ignored,
-  rather than deleted; these tombstones require the original local database. Durable
-  missed-call scan recovery across gateway restarts remains a separate audit.
+  rather than deleted; these tombstones require the original local database. Notification
+  scan checkpoints and receiving-account mappings also require the original local
+  database; they do not reconstruct scan progress after losing that database.
 - **Needs:** a pod connected to the desktop gateway, stored where its WebID points
   (`{root}profile/card#me` with storage at `{root}`). Share the WebID from
   Settings, Pod.

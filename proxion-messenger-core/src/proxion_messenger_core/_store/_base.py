@@ -322,6 +322,22 @@ class _StoreBase(object):
                     status         TEXT NOT NULL DEFAULT 'pending'
                 );
 
+                CREATE TABLE IF NOT EXISTS pod_push_receivers (
+                    pod_webid TEXT NOT NULL,
+                    pod_root TEXT NOT NULL,
+                    consumer TEXT NOT NULL,
+                    identity TEXT NOT NULL,
+                    PRIMARY KEY (pod_webid, pod_root, consumer)
+                );
+                CREATE TABLE IF NOT EXISTS pod_push_scans (
+                    pod_webid TEXT NOT NULL,
+                    pod_root TEXT NOT NULL,
+                    consumer TEXT NOT NULL,
+                    identity TEXT NOT NULL,
+                    box_url TEXT NOT NULL,
+                    seen_json TEXT NOT NULL,
+                    PRIMARY KEY (pod_webid, pod_root, consumer, identity, box_url)
+                );
                 CREATE TABLE IF NOT EXISTS expired_push_subscriptions (
                     fingerprint TEXT PRIMARY KEY
                 );

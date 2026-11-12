@@ -1156,3 +1156,18 @@ certificate and the requester's relationship ID. Recording this receipt, the rel
 accepted invitation state, and replay nonce shares a transaction. Receipts permit an
 idempotent confirmation retry only for an active relationship; they cannot restore a
 removed contact. Both tables are additive and initialized when existing databases open.
+
+## Gateway notification scan checkpoints
+
+`pod_push_receivers` records the account identity associated with an owner-authorized
+signer publication, keyed by pod WebID, root, and receiving device DID. It restores
+routing for a delegated device after restart; a different pod or signer cannot inherit
+that mapping. `pod_push_scans` persists examined inbox URLs by the same pod/device
+context plus account and inbox URL. Deferred candidates are saved before dispatch;
+queued alerts are then marked examined. These tables are local SQLite metadata and
+are initialized additively for existing databases. They store no message plaintext.
+
+The receiver being online clears its scan checkpoints. Initial baselines suppress old
+inbox items. Push service delivery and SQLite checkpoints do not share a transaction,
+so a crash during dispatch can lose or repeat an alert. This is scan recovery, not a
+guaranteed-delivery push outbox; see [the interoperability notes](INTEROP.md).

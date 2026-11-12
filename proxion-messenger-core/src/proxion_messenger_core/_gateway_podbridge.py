@@ -69,6 +69,7 @@ class PodBridgeMixin:
                 "consumer_for": None,   # the webid that consumer was read for
                 "consumer_identity": None,  # the socket identity that published it (push target)
                 "boxes_for": None,      # webid the drop boxes were ensured for
+                "seen_for": None,
                 "seen": {},             # box url -> set(member urls), closed-app push baseline
                 "closed_next": 0.0,
                 "rate": {},             # ws -> [count, window_start]
@@ -199,6 +200,10 @@ class PodBridgeMixin:
             if signer != st["consumer"]:
                 st["consumer_identity"] = None
             st["consumer"], st["consumer_for"] = signer, webid
+            if signer and not st["consumer_identity"] and self._store:
+                identity = self._store.get_pod_push_receiver(webid, status["pod_root"], signer)
+                if isinstance(identity, str):
+                    st["consumer_identity"] = identity
             return signer
         except Exception as exc:
             logger.debug("pod bridge: signer read failed: %s", exc)
@@ -306,6 +311,8 @@ class PodBridgeMixin:
         if not status["ready"]:
             await self._pod_fetch_reply(websocket, req_id, 503, error=status["reason"] or "not_ready")
             return
+        acting_identity = self._client_webids.get(websocket, "") or None
+        acting_signer = self._pb_signing_did(websocket)
         method = str(data.get("method") or "GET").upper()
         url = data.get("url")
         decision = _pbp.classify(method, url, status["pod_root"], self._pb_rooms())
@@ -376,10 +383,20 @@ class PodBridgeMixin:
                 await self._pod_fetch_reply(websocket, req_id, 404, error="blocked")
                 return
         if decision.own and decision.kind == "identity" and method == "PUT" and url.endswith("/signer.json") and 200 <= code < 300:
+            current_status = self._pod_bridge_status()
+            if current_status.get("webid") != status["webid"] or current_status.get("pod_root") != status["pod_root"]:
+                await self._pod_fetch_reply(websocket, req_id, 409, error="pod_changed")
+                return
             st = self._pb()
             prev = st["consumer"]
-            st["consumer"], st["consumer_for"] = self._pb_signing_did(websocket), getattr(self, "_pod_webid", None)
-            st["consumer_identity"] = self._client_webids.get(websocket, "") or None
+            st["consumer"], st["consumer_for"] = acting_signer, status["webid"]
+            st["consumer_identity"] = acting_identity
+            if self._store and st["consumer_identity"]:
+                try:
+                    self._store.save_pod_push_receiver(status["webid"], status["pod_root"],
+                                                      st["consumer"], st["consumer_identity"])
+                except Exception:
+                    logger.warning("Could not persist pod push receiver", exc_info=True)
             if prev and prev != st["consumer"]:
                 rh = {**rh, "x-proxion-previous-signer": "1"}
         await self._pod_fetch_reply(websocket, req_id, code, rh, rbody)
@@ -669,9 +686,17 @@ class PodBridgeMixin:
     def _pb_consumer_online(self) -> bool:
         st = self._pb()
         ident = st.get("consumer_identity") or st.get("consumer")
-        return bool(ident and self._webid_sockets.get(ident))
+        return bool(ident and any(self._pb_signing_did(ws) == st.get("consumer")
+                                  and self._is_pod_owner_socket(ws)
+                                  for ws in self._webid_sockets.get(ident, ())))
 
     async def _pb_closed_app_check(self) -> None:
+        try:
+            await self._pb_scan_closed_app()
+        except Exception:
+            logger.warning("Closed-app notification scan failed; will retry", exc_info=True)
+
+    async def _pb_scan_closed_app(self) -> None:
         """While no consuming device is connected, look at our DM and call boxes
         and send a content-free push when a new drop from an unblocked sender
         lands: "missed call" for a call invite (this look runs once a minute, so
@@ -682,31 +707,58 @@ class PodBridgeMixin:
         consumer = await self._pb_consumer(refresh=True)
         if not status["ready"] or not consumer:
             return
-        if self._pb_consumer_online():
-            st["seen"].clear()
-            return  # Recheck the current signer before deciding a device is online.
         ident = st.get("consumer_identity") or consumer
+        context = (status["webid"], status["pod_root"], consumer, ident)
+        if st["seen_for"] != context:
+            st["seen"], st["seen_for"] = {}, context
+        if self._pb_consumer_online():
+            if self._store:
+                self._store.clear_pod_push_scans(*context)
+            st["seen"].clear()
+            return
+
+        def current():
+            now = self._pod_bridge_status()
+            return (now["ready"] and now["webid"] == status["webid"]
+                    and now["pod_root"] == status["pod_root"] and st["consumer"] == consumer
+                    and st["seen_for"] == context)
+
+        def checkpoint(url, seen):
+            if self._store:
+                self._store.save_pod_push_scan(*context, url, seen)
+
         notices = {"dm": [], "missed_call": []}
         for box in ("dm", "call"):
+            if not current():
+                return
             url = f"{status['pod_root']}proxion/{box}-inbox/"
             try:
                 code, _h, listing = await self._pb_request_own("GET", url, None, {"Accept": "text/turtle"},
                                                               _pbp.MAX_LISTING_RESPONSE)
             except Exception:
                 continue
+            if not current():
+                return
             if code != 200:
                 continue
             members = [m for m in _pbp.container_members(listing, url) if m.startswith(url)]
             seen = st["seen"].get(url)
+            if seen is None and self._store:
+                seen = self._store.load_pod_push_scan(*context, url)
             if seen is None:
+                checkpoint(url, set(members))
                 st["seen"][url] = set(members)
                 continue   # first look sets the baseline
             examined = st["seen"][url] = seen.intersection(members)
             for m in [m for m in members if m not in examined][:20]:
+                if not current():
+                    return
                 try:
                     code, _h, raw = await self._pb_request_own("GET", m)
                 except Exception:
                     continue
+                if not current():
+                    return
                 if code != 200:
                     if code == 404:
                         examined.add(m)
@@ -730,6 +782,12 @@ class PodBridgeMixin:
                 elif box == "dm":
                     notices["dm"].append((examined, m))
                     examined.discard(m)
+        if not current():
+            return
+        # Persist deferred work before queuing a push. A crash after queuing may
+        # still duplicate an alert: the external push service is not transactional.
+        for url, seen in st["seen"].items():
+            checkpoint(url, seen)
         if notices["missed_call"]:
             if self._pb_push(ident, "missed_call"):
                 for examined, member in notices["missed_call"]:
@@ -738,6 +796,9 @@ class PodBridgeMixin:
             if self._pb_push(ident):
                 for examined, member in notices["dm"]:
                     examined.add(member)
+
+        for url, seen in st["seen"].items():
+            checkpoint(url, seen)
 
     def _pb_push(self, identity: str, kind: str = "dm") -> bool:
         """A content-free 'new message' (or 'missed_call') push to *identity*'s
