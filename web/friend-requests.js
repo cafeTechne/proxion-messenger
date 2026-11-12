@@ -9,6 +9,17 @@ import { escHtml } from './util.js';
 import { t } from './i18n.js';
 
 export function createFriendRequests({ getSocket }) {
+    function markAcceptancePending(invitationId, retryable = true) {
+        const row = document.getElementById('fri-' + invitationId);
+        if (!row) return;
+        row.dataset.accepting = "true";
+        const status = row.querySelector?.('[data-fr-acceptance]');
+        if (status) { status.hidden = false; status.textContent = t('fr.acceptancePending'); }
+        const accept = row.querySelector?.('[data-fr-action="accept"]');
+        if (accept) { accept.textContent = t('btn.retry'); accept.disabled = !retryable; }
+        const dismiss = row.querySelector?.('[data-fr-action="dismiss"]');
+        if (dismiss) dismiss.disabled = true;
+    }
     function refreshFriendRequestsBadge() {
         const section = document.getElementById("friend-requests-section");
         const list = document.getElementById("friend-request-list");
@@ -17,7 +28,11 @@ export function createFriendRequests({ getSocket }) {
 
     function renderPendingInvite(req) {
         const list = document.getElementById("friend-request-list");
-        if (!list || document.getElementById("fri-" + req.invitation_id)) return;
+        if (!list) return;
+        if (document.getElementById("fri-" + req.invitation_id)) {
+            if (req.status === 'accepting') markAcceptancePending(req.invitation_id);
+            return;
+        }
         // The display name is requester-chosen and self-signed, so it can copy a
         // trusted contact's name. Accepting binds a certificate to the sender's
         // key, so surface the stable identifier (from_did) inline and mark the
@@ -27,6 +42,7 @@ export function createFriendRequests({ getSocket }) {
         const li = document.createElement("li");
         li.id = "fri-" + req.invitation_id;
         li.dataset.peerDid = req.from_did || "";
+        if (req.status === "accepting") li.dataset.accepting = "true";
         li.className = "fr-card";
         // "From {name}" is translated as one phrase (word order differs by
         // language); the bold name is spliced in at the placeholder, and <bdi>
@@ -38,11 +54,12 @@ export function createFriendRequests({ getSocket }) {
         li.innerHTML =
             nameLine +
             `<div class="fr-card__did" title="${escHtml(fromDid)}">${escHtml(fromDid)}</div>` +
+            `<div class="fr-card__status" data-fr-acceptance role="status"${req.status === 'accepting' ? '' : ' hidden'}>${req.status === 'accepting' ? escHtml(t('fr.acceptancePending')) : ''}</div>` +
             `<div class="fr-card__actions">` +
             `<button data-fr-action="accept" data-inv-id="${escHtml(req.invitation_id)}" ` +
-            `class="btn btn--sm btn--accent">${escHtml(t('btn.accept'))}</button>` +
+            `class="btn btn--sm btn--accent">${escHtml(t(req.status === 'accepting' ? 'btn.retry' : 'btn.accept'))}</button>` +
             `<button data-fr-action="dismiss" data-inv-id="${escHtml(req.invitation_id)}" ` +
-            `class="btn btn--sm btn--slate">${escHtml(t('fr.ignore'))}</button>` +
+            `class="btn btn--sm btn--slate"${req.status === 'accepting' ? ' disabled' : ''}>${escHtml(t('fr.ignore'))}</button>` +
             `</div>`;
         list.appendChild(li);
         refreshFriendRequestsBadge();
@@ -57,6 +74,8 @@ export function createFriendRequests({ getSocket }) {
         if (!socket || socket.readyState !== WebSocket.OPEN) return false;
         socket.send(JSON.stringify({ cmd: "accept_friend_request", invitation_id: invitationId }));
         if (button) button.disabled = true;
+        const dismiss = button?.closest?.('li')?.querySelector('[data-fr-action="dismiss"]');
+        if (dismiss) dismiss.disabled = true;
         return true;
     }
 
@@ -138,11 +157,13 @@ export function createFriendRequests({ getSocket }) {
         if (!socket || socket.readyState !== WebSocket.OPEN) return false;
         socket.send(JSON.stringify({ cmd: "withdraw_friend_request", invitation_id: invitationId }));
         if (button) button.disabled = true;
+        const dismiss = button?.closest?.('li')?.querySelector('[data-fr-action="dismiss"]');
+        if (dismiss) dismiss.disabled = true;
         return true;
     }
 
     return {
-        renderPendingInvite, acceptFriendRequest, refreshFriendRequestsBadge,
+        renderPendingInvite, acceptFriendRequest, refreshFriendRequestsBadge, markAcceptancePending,
         renderSentRequest, setSentRequests, markSentDelivered, removeSentRequest,
         hasSentRequest, withdrawFriendRequest,
     };

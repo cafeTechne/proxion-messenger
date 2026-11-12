@@ -361,3 +361,22 @@ again. This does not make ratchet advancement and local history/receipt writes
 transactional. Browser and cross-mode DM smokes retain a consumed drop, delete it
 using an independent authenticated owner client, reload the receiver, verify
 metadata-only reconciliation and retained history, then receive another DM.
+
+## Gateway acceptance while a requester is offline
+
+Gateway friend acceptance is stored as `accepting` before contacting the requester's
+`/invite/accept` endpoint. The accepting gateway creates its contact only after a
+successful HTTP confirmation. Its normal retry worker resumes the saved acceptance
+across restarts; the request card survives reload and offers Retry. Ignore is disabled
+while that acceptance is pending. Transient failures retry with exponential backoff
+from 30 seconds to one hour. A signed withdrawal or HTTP 410 clears the pending
+acceptance without adding a local contact; other terminal client errors also stop it.
+
+The requester atomically records its relationship and the exact accepted certificate.
+A replay of that same certificate returns success only while the recorded relationship
+is active, without rewriting names, keys, or routing metadata. This handles a lost
+confirmation response. A different certificate or a removed/expired relationship is
+refused. Older requester gateways without acceptance receipts may refuse a retry after
+losing the first response; the accepting side then reports failure rather than claiming
+a confirmed contact. `web/smoke_federation.mjs` covers the offline/reload/restart path
+before exchanging encrypted DMs and joining a federated room.

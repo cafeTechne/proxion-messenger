@@ -29,6 +29,14 @@ function make() {
 }
 
 describe('renderPendingInvite', () => {
+  it('restores accepting requests with pending status and Retry instead of reporting a contact', () => {
+    els['friend-request-list'] = mkListEl();
+    make().renderPendingInvite({ invitation_id: 'pending', from_did: 'did:key:zAlice', status: 'accepting' });
+    const html = els['friend-request-list'].children[0].innerHTML;
+    expect(html).toContain('fr.acceptancePending');
+    expect(html).toContain('btn.retry');
+    expect(html).toContain('btn--slate" disabled');
+  });
   it('appends an invite row and reveals the section', () => {
     els['friend-request-list'] = mkListEl();
     els['friend-requests-section'] = { style: { display: 'none' } };
@@ -84,6 +92,12 @@ describe('acceptFriendRequest', () => {
     expect(btn.disabled).toBe(true);
     expect(fr.acceptFriendRequest('inv9', btn)).toBe(false);
     expect(sent).toHaveLength(1);
+  });
+  it('disables Ignore immediately while acceptance is in flight', () => {
+    const dismiss = { disabled: false };
+    const btn = { disabled: false, closest: () => ({ querySelector: () => dismiss }) };
+    expect(make().acceptFriendRequest('inv9', btn)).toBe(true);
+    expect(dismiss.disabled).toBe(true);
   });
   it('leaves the button usable when nothing was sent', () => {
     socket.readyState = 3;

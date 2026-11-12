@@ -1006,7 +1006,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
         // Friend requests (no host state).
         const { renderPendingInvite, acceptFriendRequest, refreshFriendRequestsBadge,
                 renderSentRequest, setSentRequests, markSentDelivered, removeSentRequest,
-                hasSentRequest, withdrawFriendRequest } =
+                hasSentRequest, withdrawFriendRequest, markAcceptancePending } =
             createFriendRequests({ getSocket: () => socket });
         // E2E status UI (header badge + fingerprint bar + verify modal). No host
         // deps; owns _fingerprintBarDid in e2eStatus.state (read by the verify
@@ -3635,6 +3635,9 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                         podWriteInvite(event.invitation_id, event).catch(() => {});
                     }
                     break;
+                case "friend_request_acceptance_pending":
+                    markAcceptancePending(event.invitation_id, event.retryable === true);
+                    break;
                 case "friend_request_accepted": {
                     const el = document.getElementById("fri-" + event.invitation_id);
                     if (el) el.remove();
@@ -3755,6 +3758,7 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                         _clearUnread(event.thread_id);
                     break;
                 case "friend_request_dismissed":
+                    if (event.acceptance_failed) showToast(t('fr.acceptanceFailed'), 'error');
                     // Ignored here or on another device, or the person we asked
                     // ignored it, or the sender withdrew it: the request is over on
                     // both sides.
@@ -3887,6 +3891,8 @@ import { podEnsureFriendInbox, podDropFriend, podReadFriendDrops, podDeleteFrien
                         } else if (_card) {
                             const _ab = _card.querySelector('[data-fr-action="accept"]');
                             if (_ab) _ab.disabled = false;
+                            const _db = _card.querySelector('[data-fr-action="dismiss"]');
+                            if (_db && _card.dataset.accepting !== "true") _db.disabled = false;
                         }
                     }
                     if (_pendingFriendRequest && (event.message in _friendRequestErrors || event.message === "delivery_failed" || event.message === "invalid_address")) {

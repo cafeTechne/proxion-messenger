@@ -643,13 +643,14 @@ class AuthHandlerMixin:
                 from .gateway import invite_issuer_did
                 _own_did = self._own_gateway_did()
                 pending_list = []
-                for inv in self._store.list_pending_invites("pending"):
+                for inv in self._store.list_pending_invites("pending") + self._store.list_pending_invites("accepting"):
                     from_did = invite_issuer_did(inv)
                     if not from_did or from_did == _own_did:
                         continue
                     # An expired request can no longer be accepted; do not offer it.
+                    invite_status = (self._store.get_pending_invite_row(inv.get("invitation_id")) or {}).get("status", "pending")
                     try:
-                        if float(inv.get("expires_at") or 0) < time.time():
+                        if invite_status == "pending" and float(inv.get("expires_at") or 0) < time.time():
                             continue
                     except (TypeError, ValueError):
                         pass
@@ -659,6 +660,7 @@ class AuthHandlerMixin:
                         "from_did": from_did,
                         "display_name": issuer.get("display_name"),
                         "endpoint_hints": inv.get("endpoint_hints", []),
+                        "status": invite_status,
                     })
                 await websocket.send(json.dumps({
                     "type": "friend_requests",

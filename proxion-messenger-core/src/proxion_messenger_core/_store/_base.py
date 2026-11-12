@@ -322,6 +322,18 @@ class _StoreBase(object):
                     status         TEXT NOT NULL DEFAULT 'pending'
                 );
 
+                CREATE TABLE IF NOT EXISTS friend_acceptances (
+                    invitation_id TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL,
+                    next_attempt REAL NOT NULL DEFAULT 0,
+                    attempts INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS invite_accept_receipts (
+                    invitation_id TEXT PRIMARY KEY,
+                    acceptor_certificate TEXT NOT NULL,
+                    relationship_id TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS reactions (
                     id          INTEGER PRIMARY KEY AUTOINCREMENT,
                     room_id     TEXT NOT NULL,

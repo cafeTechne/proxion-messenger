@@ -2137,6 +2137,10 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             return
         row = self._store.get_pending_invite_row(invitation_id)
         invite = (row or {}).get("invite") or {}
+        if row and row.get("status") == "accepting":
+            await websocket.send(json.dumps({"type": "error", "message": "acceptance_in_progress",
+                                             "invitation_id": invitation_id}))
+            return
         # Inbound only: a request this gateway issued is withdrawn, not declined.
         if (not row or row.get("status") != "pending"
                 or invite_issuer_did(invite) == self._own_gateway_did()):
@@ -2231,6 +2235,12 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         # stale card cannot add a second, one-sided contact.
         _row = self._store.get_pending_invite_row(str(invitation_id or ""))
         invite_dict = (_row or {}).get("invite") or {}
+        if _row and _row.get("status") == "accepting":
+            queued = self._store.get_friend_acceptance(str(invitation_id))
+            if queued:
+                async with self._relay_queue_lock():
+                    await self._attempt_friend_acceptance(queued, websocket)
+                return
         if (not _row or _row.get("status") != "pending" or not invite_dict
                 or invite_issuer_did(invite_dict) == self._own_gateway_did()):
             await websocket.send(json.dumps({"type": "error", "message": "invite_not_found",
@@ -2276,10 +2286,6 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             await websocket.send(json.dumps({"type": "error", "message": "invite_not_found",
                                              "invitation_id": invitation_id}))
             return
-        # Taken now, before anything that yields, so a second accept of the same
-        # request finds it no longer pending.
-        self._store.mark_invite_status(invitation_id, "accepted")
-
         # Build RelationshipCertificate (Bob is issuer, Alice is subject)
         # R86: mark that we (issuer) bind calls, and mark the subject too when their
         # invite advertised it, so the single shared cert tells BOTH parties whether the
@@ -2294,87 +2300,115 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
         )
         cert.sign(self.agent.identity_key)
 
-        # The requester's gateway decides whether the request still stands, so
-        # ask it before adding them: if they withdrew it meanwhile (410) they
-        # will not add us, and adding them here would leave a one-sided contact.
         requester_gw_ws = (invite.endpoint_hints or [None])[0]
-        if requester_gw_ws:
-            http_base = requester_gw_ws.replace("wss://", "https://").replace("ws://", "http://")
-            if _is_safe_gateway_url(http_base):
-                accept_url = http_base.rstrip("/") + "/invite/accept"
-                accept_payload = {
-                    "@type": "InviteAcceptance",
-                    "invitation_id": invitation_id,
-                    "certificate": cert.to_dict(),
-                    "from_did": bob_did,
-                    "from_pub_hex": bob_pub_hex,
-                    "from_gateway_http_url": self._gateway_http_url(),
-                    # Browser-level E2E key (NOT the gateway store key used for sealing):
-                    # carry the acceptor's client x25519 so the requester can encrypt the
-                    # first DM to the right key. See federation-status memory.
-                    "from_e2e_key": self._store.get_peer_browser_e2e_key(self._client_webids.get(websocket, "")) or "",
-                    # So the requester's contacts list can name us.
-                    "from_display_name": (self._display_names.get(websocket)
-                                          or self._store.get_display_name(self._client_webids.get(websocket, ""))
-                                          or ""),
-                }
-                if await self._post_invite_accept(accept_url, accept_payload) == 410:
-                    self._store.mark_invite_status(invitation_id, "withdrawn")
-                    _caller = self._client_webids.get(websocket, "")
-                    _evt = json.dumps({"type": "friend_request_dismissed",
-                                       "invitation_id": invitation_id, "withdrawn": True})
-                    if _caller:
-                        await self._send_to_identity(_caller, _evt)
-                    else:
-                        await websocket.send(_evt)
-                    await websocket.send(json.dumps({"type": "error", "message": "request_withdrawn",
-                                                     "invitation_id": invitation_id}))
-                    return
-            else:
-                logger.warning("Skipping invite accept POST, peer endpoint_hint is a private URL: %s", http_base)
+        http_base = (requester_gw_ws or "").replace("wss://", "https://").replace("ws://", "http://").rstrip("/")
+        if not http_base or not _is_safe_gateway_url(http_base):
+            await websocket.send(json.dumps({"type": "error", "message": "requester_unreachable", "invitation_id": invitation_id}))
+            return
+        owner = self._client_webids.get(websocket, "") or self._own_gateway_did()
+        payload = {
+            "owner": owner, "peer_did": alice_did, "gateway": http_base,
+            "certificate": cert.to_dict(), "invite": invite_dict,
+            "acceptance": {
+                "@type": "InviteAcceptance", "invitation_id": invitation_id,
+                "certificate": cert.to_dict(), "from_did": bob_did, "from_pub_hex": bob_pub_hex,
+                "from_gateway_http_url": self._gateway_http_url(),
+                "from_e2e_key": self._store.get_peer_browser_e2e_key(owner) or "",
+                "from_display_name": self._display_names.get(websocket) or self._store.get_display_name(owner) or "",
+            },
+        }
+        try:
+            if not self._store.queue_friend_acceptance(invitation_id, payload):
+                return
+        except Exception:
+            logger.warning("Could not persist friend acceptance", exc_info=True)
+            await websocket.send(json.dumps({"type": "error", "message": "friend_acceptance_store_failed", "invitation_id": invitation_id}))
+            return
+        await websocket.send(json.dumps({"type": "friend_request_acceptance_pending", "invitation_id": invitation_id}))
+        async with self._relay_queue_lock():
+            queued = self._store.get_friend_acceptance(invitation_id)
+            if queued:
+                await self._attempt_friend_acceptance(queued, websocket)
 
-        # Persist to SQLite and pod
-        self._store.save_relationship(cert.to_dict(), peer_did=alice_did,
-                                      owner_webid=self._client_webids.get(websocket, ""))
-        # Accepting is the owner re-adding this person: a revocation left from an
-        # earlier "Remove contact" would otherwise drop the new friendship's traffic.
-        self._lift_revocation_on_readd(alice_did)
-        # Store the requester's browser E2E key (from the invite) so we can encrypt
-        # the first DM to the right key even if we message before receiving one.
-        _alice_e2e = invite.issuer.get("e2e_key")
-        if _alice_e2e and alice_did:
-            self._store.save_e2e_key(alice_did, _alice_e2e)
-        # Name the new contact by the name their request carried (shown with its
-        # id tag in the contacts list), unless we already know them by one.
-        self._save_peer_name_if_unknown(alice_did, invite.issuer.get("display_name"))
-        asyncio.create_task(self._sync_cert_to_pod(cert.to_dict()))
+    async def _attempt_friend_acceptance(self, queued: dict, websocket=None) -> bool:
+        try:
+            return await self._deliver_friend_acceptance(queued, websocket)
+        except Exception:
+            logger.warning("Friend acceptance completion failed", exc_info=True)
+            current = self._store.get_friend_acceptance(queued['invitation_id'])
+            if current:
+                self._store.retry_friend_acceptance(queued['invitation_id'])
+                event = json.dumps({"type": "friend_request_acceptance_pending", "invitation_id": queued['invitation_id'], "retryable": True})
+                if websocket is not None:
+                    await websocket.send(event)
+                else:
+                    await self._send_to_identity(json.loads(current['payload_json'])['owner'], event)
+            return False
 
-        # Register Alice's endpoint so relay routing works immediately — validate
-        # first (peer-supplied endpoint_hint) to prevent SSRF pinning to a
-        # private/loopback host, mirroring the accept-POST check above.
-        if requester_gw_ws and alice_did:
-            _req_http = requester_gw_ws.replace("wss://", "https://").replace("ws://", "http://")
-            if _is_safe_gateway_url(_req_http):
-                self._record_peer_gateway(alice_did, requester_gw_ws)
-            else:
-                logger.warning("Skipping peer gateway record — invite endpoint_hint is a private URL: %s", requester_gw_ws)
+    async def _deliver_friend_acceptance(self, queued: dict, websocket=None) -> bool:
+        """Retry the exact durable acceptance; only peer confirmation creates a contact."""
+        invitation_id = queued['invitation_id']
+        current = self._store.get_friend_acceptance(invitation_id)
+        if not current:
+            return True
+        payload = json.loads(current['payload_json'])
+        if (payload['certificate']['issuer'] != self.agent.identity_pub_bytes.hex()
+                or payload['acceptance']['from_did'] != self._own_gateway_did()
+                or self._is_blocked_for(payload['owner'], payload['peer_did'])):
+            status = 403
+        else:
+            try:
+                status = await self._post_invite_accept(payload['gateway'] + '/invite/accept', payload['acceptance'])
+            except Exception:
+                status = None
+        if not self._store.get_friend_acceptance(invitation_id):
+            return True  # withdrawn, revoked, or settled while the POST was in flight
+        if self._is_blocked_for(payload['owner'], payload['peer_did']):
+            status = 403
+        if status is not None and 400 <= status < 500 and status not in (408, 425, 429):
+            self._store.mark_invite_status(invitation_id, 'withdrawn' if status == 410 else 'declined')
+            event = {"type": "friend_request_dismissed", "invitation_id": invitation_id,
+                     "withdrawn": status == 410, "acceptance_failed": websocket is None or status != 410}
+        elif status is not None and 200 <= status < 300:
+            cert_dict, peer_did, owner = payload['certificate'], payload['peer_did'], payload['owner']
+            if not self._store.complete_friend_acceptance(invitation_id, cert_dict, peer_did, owner):
+                return True
+            from .federation import RelationshipCertificate
+            cert = RelationshipCertificate.from_dict(cert_dict)
+            self._lift_revocation_on_readd(peer_did)
+            issuer = payload['invite'].get('issuer') or {}
+            if issuer.get('e2e_key'):
+                self._store.save_e2e_key(peer_did, issuer['e2e_key'])
+            self._save_peer_name_if_unknown(peer_did, issuer.get('display_name'))
+            self._record_peer_gateway(peer_did, payload['gateway'])
+            asyncio.create_task(self._sync_cert_to_pod(cert_dict))
+            pod_client = self._pod_client()
+            if pod_client:
+                self.dm_clients[cert.certificate_id] = (cert, pod_client)
+            await self._settle_other_invites_for_peer(peer_did, invitation_id)
+            event = {"type": "friend_request_accepted", "invitation_id": invitation_id,
+                     "certificate": cert_dict, "peer_did": peer_did}
+        else:
+            self._store.retry_friend_acceptance(invitation_id)
+            event = {"type": "friend_request_acceptance_pending", "invitation_id": invitation_id, "retryable": True}
+        if websocket is not None:
+            try:
+                await websocket.send(json.dumps(event))
+                if status == 410:
+                    await websocket.send(json.dumps({"type": "error", "message": "request_withdrawn", "invitation_id": invitation_id}))
+            except Exception:
+                pass
+        else:
+            await self._send_to_identity(payload['owner'], json.dumps(event))
+        return event['type'] != 'friend_request_acceptance_pending'
 
-        # Populate dm_clients so pod-backed DMs can use the relationship
-        pod_client = self._pod_client()
-        if pod_client:
-            self.dm_clients[cert.certificate_id] = (cert, pod_client)
-
-        # Any other request between us and this person (they asked twice, or we
-        # asked each other) is settled by this relationship.
-        await self._settle_other_invites_for_peer(alice_did, invitation_id)
-
-        # Emit cert to browser so it writes the contact to the pod
-        await websocket.send(json.dumps({
-            "type": "friend_request_accepted",
-            "invitation_id": invitation_id,
-            "certificate": cert.to_dict(),
-            "peer_did": alice_did,
-        }))
+    async def _flush_friend_acceptances(self) -> None:
+        for queued in self._store.pending_friend_acceptances():
+            try:
+                await self._attempt_friend_acceptance(queued)
+            except Exception:
+                self._store.retry_friend_acceptance(queued['invitation_id'])
+                logger.warning("Friend acceptance retry failed", exc_info=True)
 
     def _signed_invite_decline(self, invitation_id: str) -> dict:
         """The signed body of a POST /invite/decline, stamped now."""
@@ -2584,7 +2618,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
             # Without enforced auth the local user registers under a session did,
             # as accept and decline allow (_auth_enforced).
             if caller_did == owner_did or not self._auth_enforced():
-                pending_invites = self._store.list_pending_invites("pending")
+                pending_invites = self._store.list_pending_invites("pending") + self._store.list_pending_invites("accepting")
                 for inv_dict in pending_invites:
                     _iid = inv_dict.get("invitation_id")
                     _from = invite_issuer_did(inv_dict)
@@ -2612,7 +2646,7 @@ class ProxionGateway(VoiceHandlerMixin, FileTransferMixin, MailboxMixin, PodSync
                             "invitation_id": _iid,
                             "from_did": _from,
                             "display_name": (inv_dict.get("issuer") or {}).get("display_name"),
-                            "status": "pending",
+                            "status": (self._store.get_pending_invite_row(_iid) or {}).get("status", "pending"),
                         })
 
             # Scope relationships to the calling identity

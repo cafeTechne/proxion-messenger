@@ -58,10 +58,10 @@ function filesContaining(dir, text) {
 }
 
 const procs = [], dirs = [];
-async function startGateway(name) {
-  const httpPort = await freePort(), wsPort = await freePort();
-  const dataDir = mkdtempSync(join(tmpdir(), `proxion-fed-${name}-`));
-  dirs.push(dataDir);
+async function startGateway(name, previous = null) {
+  const httpPort = previous?.httpPort || await freePort(), wsPort = previous?.wsPort || await freePort();
+  const dataDir = previous?.dataDir || mkdtempSync(join(tmpdir(), `proxion-fed-${name}-`));
+  if (!previous) dirs.push(dataDir);
   const env = {
     ...process.env,
     PROXION_DATA_DIR: dataDir, PROXION_HTTP_PORT: String(httpPort), PROXION_WS_PORT: String(wsPort),
@@ -85,7 +85,7 @@ async function startGateway(name) {
   }
   if (!/PROXION_GATEWAY_READY/.test(log)) throw new Error(`${name} not ready:\n${log.slice(-600)}`);
   await waitForPort(httpPort, 15000);
-  return { url: `http://127.0.0.1:${httpPort}/`, httpPort, wsPort };
+  return { url: `http://127.0.0.1:${httpPort}/`, httpPort, wsPort, dataDir, process: p };
 }
 
 async function openClient(browser, url, label) {
@@ -184,7 +184,22 @@ try {
       console.error(`  · Bob GW invite/friend:\n${pick2(procs[1]._log())}`);
     });
   if (process.exitCode) throw new Error('stop');
+  // Acceptance must stay pending while the requester is offline. Reopening
+  // Bob restores the durable intent, and Retry confirms it after Alice returns.
+  const stopped = new Promise(resolve => A.process.once('exit', resolve));
+  A.process.kill(); await stopped;
   await bob.evaluate(() => document.querySelector('#friend-request-list li [data-fr-action="accept"]').click());
+  await bob.waitForFunction(() => document.querySelector('#friend-request-list [data-fr-acceptance]:not([hidden])')
+    && document.querySelector('#friend-request-list [data-fr-action="accept"]')?.textContent === 'Retry', { timeout: 20000 });
+  if (await bob.$('#dm-list li.dm-item')) throw Error('Offline acceptance falsely created a contact');
+  await bob.reload({ waitUntil: 'networkidle2' });
+  await bob.waitForFunction(() => document.querySelector('#friend-request-list [data-fr-acceptance]:not([hidden])')
+    && !document.querySelector('#friend-request-list [data-fr-action="accept"]')?.disabled, { timeout: 20000 });
+  if (await bob.$('#dm-list li.dm-item')) throw Error('Reload falsely completed an unconfirmed contact');
+  Object.assign(A, await startGateway('alice', A));
+  const retry = await bob.$('#friend-request-list [data-fr-action="accept"]');
+  if (retry) await retry.click();
+  console.log('  ✓ offline acceptance remains pending across reload; requester restart and Retry confirm it');
 
   step = 'bob-open-dm';
   // Bob must be *viewing* the DM thread, else an incoming relay DM is just an
@@ -202,7 +217,7 @@ try {
   step = 'alice-open-dm';
   // After acceptance + cert exchange, Bob shows up as a contact/DM on Alice's side.
   await alice.waitForFunction(() => document.querySelector('#dm-list li.dm-item'),
-    { timeout: 20000 }).catch(() => fail('Bob never appeared as a contact/DM on Alice after acceptance'));
+    { timeout: 20000, polling: 100 }).catch(() => fail('Bob never appeared as a contact/DM on Alice after acceptance'));
   if (process.exitCode) throw new Error('stop');
   await sleep(500);
   await alice.evaluate(() => (document.querySelector('#dm-list li.dm-item')).click());

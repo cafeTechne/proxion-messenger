@@ -74,7 +74,14 @@ def _web_source() -> str:
 
 
 def _known_to_web(event: str, web: str) -> bool:
+    # IndexedDB store labels (notably "receipts") are not event handlers.
+    web = re.sub(r'\b(?:createObjectStore|objectStore|transaction)\(\s*([\"\'])[^\"\']*\1', '', web)
     return re.search(r"[\"'`]" + re.escape(event) + r"[\"'`]", web) is not None
+
+
+def test_storage_names_do_not_count_as_event_handlers():
+    assert not _known_to_web('receipts', "db.transaction('receipts').objectStore('receipts')")
+    assert _known_to_web('receipts', 'switch(event.type) { case "receipts": break; }')
 
 
 def test_every_gateway_event_is_handled_or_listed():

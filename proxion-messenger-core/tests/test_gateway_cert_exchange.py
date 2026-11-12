@@ -185,6 +185,14 @@ class TestSendFriendRequest:
 
 class TestAcceptFriendRequest:
     """Tests for accept_friend_request command."""
+    @pytest.fixture(autouse=True)
+    def confirmed_requester(self, gateway):
+        gateway._client_webids = {}
+        # Successful certificate tests need an authoritative peer confirmation;
+        # an unreachable fake example host must no longer create a contact.
+        with patch('proxion_messenger_core.gateway._is_safe_gateway_url', return_value=True), \
+                patch.object(gateway, '_post_invite_accept', AsyncMock(return_value=200)):
+            yield
     
     @pytest.mark.asyncio
     async def test_accept_friend_request_not_found_returns_error(self, gateway, mock_websocket):
@@ -346,6 +354,7 @@ class TestAcceptFriendRequest:
         gateway._store.save_pending_invite(invite.to_dict(), other_did)
         await gateway._handle_accept_friend_request(mock_websocket, {"invitation_id": invite.invitation_id})
         mock_websocket.send.reset_mock()
+        gateway._client_webids[mock_websocket] = gateway._own_gateway_did()
         await gateway._handle_get_relationships(mock_websocket, {})
         contacts = json.loads(mock_websocket.send.call_args[0][0])["contacts"]
         assert [c["display_name"] for c in contacts if c["peer_did"] == other_did] == ["Alice"]
@@ -385,6 +394,7 @@ class TestAcceptFriendRequest:
             gateway._store.save_relationship(
                 {"certificate_id": cert_id, "subject": "ab" * 32, "created_at": created,
                  "expires_at": 2**31 - 1}, peer_did="did:key:zFriend")
+        gateway._client_webids[mock_websocket] = gateway._own_gateway_did()
         await gateway._handle_get_relationships(mock_websocket, {})
         contacts = json.loads(mock_websocket.send.call_args[0][0])["contacts"]
         assert [c["certificate_id"] for c in contacts if c["peer_did"] == "did:key:zFriend"] == ["cert-new"]

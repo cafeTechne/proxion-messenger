@@ -1140,3 +1140,19 @@ The owner retains Read+Write+Control. A failed policy publication is retried on
 later heartbeats; a successful grant is latched for the current I/O instance.
 This fixes WAC policy bodies previously written into ACP resources. Shell cache
 v286 distributes the updated presence writer to existing browser clients.
+
+## Gateway pending friend acceptances
+
+These are local gateway SQLite records, separate from browser pod friendship records.
+`pending_invites.status = accepting` represents saved owner consent awaiting requester
+confirmation. `friend_acceptances` stores the invitation ID, exact signed acceptance
+payload, owner identity, peer route, retry deadline, and attempt count. Preparing the
+queue entry and changing the invitation state share a transaction. Confirming a local
+relationship and completing the invitation also share a transaction. Withdrawal,
+decline, or peer settlement removes the queued entry with the state change.
+
+`invite_accept_receipts` binds a requester's accepted invitation to the exact acceptor
+certificate and the requester's relationship ID. Recording this receipt, the relationship,
+accepted invitation state, and replay nonce shares a transaction. Receipts permit an
+idempotent confirmation retry only for an active relationship; they cannot restore a
+removed contact. Both tables are additive and initialized when existing databases open.

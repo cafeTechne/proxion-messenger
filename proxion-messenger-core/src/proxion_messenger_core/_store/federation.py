@@ -224,14 +224,17 @@ class FederationStoreMixin(object):
         if not peer_did:
             return 0
         sql = ("UPDATE pending_invites SET status = 'revoked' "
-               "WHERE target_did = ? AND status = 'pending'")
+               "WHERE target_did = ? AND status IN ('pending','accepting')")
         args: list = [peer_did]
         if created_before is not None:
             sql += " AND created_at <= ?"
             args.append(created_before)
         with self._conn() as conn:
             cur = conn.execute(sql, args)
-            return cur.rowcount or 0
+            changed = cur.rowcount or 0
+            conn.execute("DELETE FROM friend_acceptances WHERE invitation_id IN "
+                         "(SELECT invitation_id FROM pending_invites WHERE target_did=? AND status='revoked')", (peer_did,))
+            return changed
     def settle_pending_invites_for_peer(self, peer_did: str, status: str,
                                         exclude_id: str = "") -> list[str]:
         """Set every still-pending invite to or from peer_did (target_did holds
@@ -242,16 +245,68 @@ class FederationStoreMixin(object):
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT invitation_id FROM pending_invites "
-                "WHERE target_did = ? AND status = 'pending' AND invitation_id != ?",
+                "WHERE target_did = ? AND status IN ('pending','accepting') AND invitation_id != ?",
                 (peer_did, exclude_id or ""),
             ).fetchall()
             ids = [r["invitation_id"] for r in rows]
             for iid in ids:
-                conn.execute(
-                    "UPDATE pending_invites SET status = ? WHERE invitation_id = ?",
-                    (status, iid),
-                )
+                self.mark_invite_status(iid, status)
         return ids
+    def queue_friend_acceptance(self, invitation_id: str, payload: dict) -> bool:
+        """Commit owner intent and its exact signed certificate before any POST."""
+        with self._conn() as conn:
+            changed = conn.execute("UPDATE pending_invites SET status='accepting' WHERE invitation_id=? AND status='pending'",
+                                   (invitation_id,)).rowcount
+            if not changed:
+                return False
+            conn.execute("INSERT INTO friend_acceptances(invitation_id,payload_json) VALUES (?,?)",
+                         (invitation_id, json.dumps(payload)))
+        return True
+
+    def get_friend_acceptance(self, invitation_id: str) -> Optional[dict]:
+        with self._conn() as conn:
+            row = conn.execute("SELECT a.* FROM friend_acceptances a JOIN pending_invites p USING(invitation_id) "
+                               "WHERE a.invitation_id=? AND p.status='accepting'", (invitation_id,)).fetchone()
+        return dict(row) if row else None
+
+    def pending_friend_acceptances(self, limit: int = 8) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT a.* FROM friend_acceptances a JOIN pending_invites p USING(invitation_id) "
+                                "WHERE p.status='accepting' AND next_attempt<=? ORDER BY next_attempt,invitation_id LIMIT ?",
+                                (time.time(), limit)).fetchall()
+        return [dict(row) for row in rows]
+
+    def retry_friend_acceptance(self, invitation_id: str) -> None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT attempts FROM friend_acceptances WHERE invitation_id=?", (invitation_id,)).fetchone()
+            if row:
+                delay = min(30 * 2 ** min(row[0], 7), 3600)
+                conn.execute("UPDATE friend_acceptances SET attempts=attempts+1,next_attempt=? WHERE invitation_id=?",
+                             (time.time() + delay, invitation_id))
+
+    def complete_friend_acceptance(self, invitation_id: str, certificate: dict, peer_did: str, owner: str) -> bool:
+        with self._conn() as conn:
+            if not conn.execute("SELECT 1 FROM pending_invites WHERE invitation_id=? AND status='accepting'",
+                                (invitation_id,)).fetchone():
+                return False
+            self.save_relationship(certificate, peer_did=peer_did, owner_webid=owner)
+            self.mark_invite_status(invitation_id, 'accepted')
+        return True
+
+    def save_invite_accept_receipt(self, invitation_id: str, acceptor: dict, certificate: dict, peer_did: str, owner: str) -> None:
+        with self._conn() as conn:
+            self.save_relationship(certificate, peer_did=peer_did, owner_webid=owner)
+            self.mark_invite_status(invitation_id, 'accepted')
+            self.record_invite_nonce(invitation_id)
+            conn.execute("INSERT INTO invite_accept_receipts VALUES (?,?,?)",
+                         (invitation_id, json.dumps(acceptor, sort_keys=True), certificate['certificate_id']))
+
+    def matches_invite_accept_receipt(self, invitation_id: str, acceptor: dict) -> bool:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM invite_accept_receipts WHERE invitation_id=?", (invitation_id,)).fetchone()
+        return bool(row and row['acceptor_certificate'] == json.dumps(acceptor, sort_keys=True)
+                    and self.get_relationship_by_cert_id(row['relationship_id']))
+
     def mark_invite_status(self, invitation_id: str, status: str) -> None:
         """UPDATE status."""
         with self._conn() as conn:
@@ -259,6 +314,8 @@ class FederationStoreMixin(object):
                 "UPDATE pending_invites SET status = ? WHERE invitation_id = ?",
                 (status, invitation_id),
             )
+            if status != 'accepting':
+                conn.execute("DELETE FROM friend_acceptances WHERE invitation_id=?", (invitation_id,))
     def mark_relay_delivered(self, msg_id: str) -> None:
         """Remove a successfully delivered message from the queue."""
         with self._conn() as conn:

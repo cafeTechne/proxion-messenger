@@ -961,6 +961,7 @@ class PodSyncMixin:
         import random as _random
         SEVEN_DAYS = 7 * 24 * 3600
         async with self._relay_queue_lock():
+            await self._flush_friend_acceptances()
             await self._expire_stale_relays()
             self._store.prune_finished_relays()
             pending = self._store.get_pending_relays(limit=50)

@@ -547,7 +547,7 @@ class HttpEndpointsMixin:
         row = self._store.get_pending_invite_row(invitation_id)
         invite = (row or {}).get("invite") or {}
         # Theirs (they issued it, not us), and still waiting for an answer.
-        if (not row or row.get("status") != "pending"
+        if (not row or row.get("status") not in ("pending", "accepting")
                 or invite_issuer_did(invite) != from_did
                 or from_did == self._own_gateway_did()):
             return "200 OK", '{"status":"received"}'
@@ -556,6 +556,7 @@ class HttpEndpointsMixin:
             "type": "friend_request_dismissed",
             "invitation_id": invitation_id,
             "withdrawn": True,
+            "acceptance_failed": row.get("status") == "accepting",
         }))
         return "200 OK", '{"status":"ok"}'
 
@@ -628,6 +629,7 @@ class HttpEndpointsMixin:
             return "400 Bad Request", '{"error":"from_did/from_pub_hex mismatch"}'
 
         # R11: trust revocation check for acceptor
+        acceptor_did = expected_did
         if self._store and acceptor_did:
             if self._store.is_subject_revoked("peer_did", acceptor_did):
                 self._store.save_security_event(
@@ -654,6 +656,17 @@ class HttpEndpointsMixin:
         # 410 tells the acceptor's gateway not to add us either.
         if _inv_row["status"] == "withdrawn":
             return "410 Gone", '{"error":"invite_withdrawn"}'
+        if _inv_row["status"] == "accepted" and self._store.matches_invite_accept_receipt(invitation_id, acceptor_cert):
+            # Lost responses can be retried, but a removed/expired relationship
+            # or a different certificate never recreates contact authorization.
+            from .handshake import _ed25519_verify
+            try:
+                replay_cert = RelationshipCertificate.from_dict(acceptor_cert)
+                if (replay_cert.issuer == acceptor_pub_hex and replay_cert.subject == self.agent.identity_pub_bytes.hex()
+                        and replay_cert.verify(_ed25519_verify)):
+                    return "200 OK", '{"status":"already_accepted"}'
+            except Exception:
+                pass
         if _inv_row["status"] != "pending":
             self._store.save_security_event(
                 "invite_accept_not_pending", "warning",
@@ -716,8 +729,6 @@ class HttpEndpointsMixin:
         if invitation_id and self._store:
             if self._store.has_seen_invite_nonce(str(invitation_id), ttl_seconds=86400):
                 return "409 Conflict", '{"error":"replay_detected"}'
-            self._store.record_invite_nonce(str(invitation_id))
-            self._store.prune_invite_nonces(time.time() - 86400)
 
         # Build requester's symmetric cert (Alice is issuer, Bob is subject)
         # R86: advertise our own call binding, and mark the subject (Bob) too when his
@@ -734,8 +745,8 @@ class HttpEndpointsMixin:
 
         if self._store:
             _owner = self._store.get_pending_invite_sender(invitation_id) if invitation_id else ""
-            self._store.save_relationship(cert.to_dict(), peer_did=acceptor_did,
-                                          owner_webid=_owner)
+            self._store.save_invite_accept_receipt(invitation_id, acceptor_cert, cert.to_dict(), acceptor_did, _owner)
+            self._store.prune_invite_nonces(time.time() - 86400)
             # Our own live request was accepted. Removing a contact cancels the
             # requests pending to them, so this one was sent after the removal:
             # the owner chose to add this person again, so lift the revocation.
